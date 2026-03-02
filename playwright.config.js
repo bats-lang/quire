@@ -19,7 +19,7 @@ export default defineConfig({
     headless: true,
   },
   webServer: {
-    command: 'npx serve . -l 3737 --no-clipboard',
+    command: 'npx serve dist/pwa -l 3737 --no-clipboard',
     port: 3737,
     reuseExistingServer: !process.env.CI,
   },
