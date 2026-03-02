@@ -1,0 +1,14 @@
+[package]
+name = "quire"
+kind = "bin"
+unsafe = false
+
+[dependencies]
+"array" = ""
+"arith" = ""
+"builder" = ""
+"result" = ""
+"str" = ""
+"wasm.bats-packages.dev/bridge" = ""
+"promise" = ""
+"file" = ""

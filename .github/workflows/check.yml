@@ -1,0 +1,67 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ATS2
+        run: |
+          curl -sL "https://raw.githubusercontent.com/ats-lang/ats-lang.github.io/master/FROZEN000/ATS-Postiats/ATS2-Postiats-int-0.4.2.tgz" -o /tmp/ats2.tgz
+          mkdir -p ~/.ats2
+          tar -xzf /tmp/ats2.tgz -C ~/.ats2
+          cd ~/.ats2/ATS2-Postiats-int-0.4.2
+          make -j$(nproc) -C src/CBOOT patsopt
+          mkdir -p bin
+          cp src/CBOOT/patsopt bin/patsopt
+          mkdir -p ~/.bats
+          ln -sf ~/.ats2/ATS2-Postiats-int-0.4.2 ~/.bats/ats2
+
+      - name: Cache bats compiler
+        id: cache-bats
+        uses: actions/cache@v4
+        with:
+          path: ~/bats-bin
+          key: bats-from-c-v2-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
+
+      - name: Build bats from C
+        if: steps.cache-bats.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list --repo bats-lang/bats --branch main --status success --workflow check --limit 1 --json databaseId --jq '.[0].databaseId')
+          gh run download "$RUN_ID" --repo bats-lang/bats --name bats-c --dir ~/bats-c
+          cd ~/bats-c
+          make PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2
+          mkdir -p ~/bats-bin
+          cp debug/bats ~/bats-bin/bats
+
+      - name: Setup
+        run: |
+          sudo cp $HOME/bats-bin/bats /bin/bats
+          git clone https://github.com/bats-lang/repository-prototype.git $HOME/repository
+
+      - name: bats check
+        run: |
+          bats lock --repository $HOME/repository
+          bats check --repository $HOME/repository
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright
+        run: |
+          npm install
+          npx playwright install chromium
+
+      - name: Run e2e tests
+        run: npx playwright test
