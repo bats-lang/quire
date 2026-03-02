@@ -24,12 +24,15 @@ jobs:
           mkdir -p ~/.bats
           ln -sf ~/.ats2/ATS2-Postiats-int-0.4.2 ~/.bats/ats2
 
+      - name: Install WASM tools
+        run: sudo apt-get install -y -q lld
+
       - name: Cache bats compiler
         id: cache-bats
         uses: actions/cache@v4
         with:
           path: ~/bats-bin
-          key: bats-from-c-v2-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
+          key: bats-from-c-v3-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
 
       - name: Build bats from C
         if: steps.cache-bats.outputs.cache-hit != 'true'
@@ -52,6 +55,26 @@ jobs:
         run: |
           bats lock --repository $HOME/repository
           bats check --repository $HOME/repository
+
+      - name: Build WASM
+        run: |
+          bats build --only wasm --repository $HOME/repository || true
+          test -f dist/wasm/app.wasm
+
+      - name: Build and run PWA generator
+        run: |
+          cd tools/gen-pwa
+          bats lock --dev --repository $HOME/repository
+          bats build --repository $HOME/repository
+          bats run --bin gen-pwa --repository $HOME/repository
+
+      - name: Verify PWA output
+        run: |
+          test -f dist/pwa/index.html
+          test -f dist/pwa/bridge.js
+          test -f dist/pwa/app.js
+          test -f dist/pwa/app.wasm
+          echo "PWA verification passed"
 
       - name: Install Node.js
         uses: actions/setup-node@v4
