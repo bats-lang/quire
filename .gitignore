@@ -1,0 +1,8 @@
+build/
+dist/
+bats_modules/
+bats.lock
+node_modules/
+e2e/screenshots/
+test-results/
+playwright-report/
