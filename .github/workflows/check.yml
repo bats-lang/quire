@@ -60,7 +60,7 @@ jobs:
 
       - name: Install Playwright
         run: |
-          npm ci
+          npm install
           npx playwright install chromium
 
       - name: Run e2e tests
