@@ -68,7 +68,9 @@ jobs:
           bats build --repository $HOME/repository
 
       - name: Generate PWA
-        run: tools/gen-pwa/dist/debug/gen-pwa
+        run: |
+          mkdir -p dist/pwa
+          tools/gen-pwa/dist/debug/gen-pwa
 
       - name: Verify PWA output
         run: |
