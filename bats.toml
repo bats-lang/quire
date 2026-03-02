@@ -9,6 +9,3 @@ unsafe = false
 "builder" = ""
 "result" = ""
 "str" = ""
-"wasm.bats-packages.dev/bridge" = ""
-"promise" = ""
-"file" = ""
