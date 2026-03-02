@@ -5,7 +5,6 @@
 #use array as A
 #use arith as AR
 #use builder as B
-#use wasm.bats-packages.dev/bridge as BR
 
 (* ============================================================
    Library view: empty state with import button
@@ -14,7 +13,9 @@
 (* Render the library view into the DOM diff buffer.
    For Phase 1, this just renders the empty library message
    and import button. *)
-#pub fn render_library_empty(buf: !$A.arr(byte, l, 524288)): void
+#pub fn render_library_empty
+  {l:agz}
+  (buf: !$A.arr(byte, l, 524288)): void
 
 (* ============================================================
    Implementations
