@@ -76,7 +76,7 @@ jobs:
         run: |
           test -f dist/pwa/index.html
           test -f dist/pwa/bridge.js
-          test -f dist/pwa/app.js
+          test ! -f dist/pwa/app.js
           test -f dist/pwa/app.wasm
           echo "PWA verification passed"
 
