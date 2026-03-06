@@ -8,7 +8,7 @@
    Base CSS for the application
    ============================================================ *)
 
-#pub fn emit_base_css(b: !$B.builder): void
+#pub fn emit_base_css(b: !$B.builder_v >> $B.builder_v): void
 
 (* ============================================================
    Implementations
