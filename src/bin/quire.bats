@@ -1,6 +1,6 @@
 (* quire -- EPUB e-reader *)
 
-#target wasm
+#target wasm binary
 #include "share/atspre_staload.hats"
 #use str as S
 #use widget as W
