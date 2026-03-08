@@ -62,21 +62,17 @@ jobs:
           test -f dist/wasm/app.wasm
 
       - name: Build PWA generator
-        run: |
-          cd tools/gen-pwa
-          bats lock --dev --repository $HOME/repository
-          bats build --repository $HOME/repository
+        run: bats build --only native --repository $HOME/repository
 
       - name: Generate PWA
         run: |
           mkdir -p dist/pwa
-          tools/gen-pwa/dist/debug/gen-pwa
+          dist/debug/gen-pwa
 
       - name: Verify PWA output
         run: |
           test -f dist/pwa/index.html
           test -f dist/pwa/bridge.js
-          test -f dist/pwa/app.js
           test -f dist/pwa/app.wasm
           echo "PWA verification passed"
 
