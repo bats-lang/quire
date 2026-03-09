@@ -14,11 +14,18 @@ import { test, expect } from '@playwright/test';
 // mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 test.describe('Smoke', () => {
-  test.skip('WASM loads and EPUB import works', async ({ page }) => {
-    // ALL COMMENTED OUT — uncomment progressively as features land
-    //
-    // const errors = [];
-    // page.on('pageerror', err => errors.push(err.message));
+  test('WASM loads and entry screen renders', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForSelector('.library-list', { timeout: 15000 });
+
+    expect(errors.length).toBe(0);
+  });
+
+  test.skip('EPUB import works', async ({ page }) => {
+    // Uncomment progressively as features land
     //
     // const epubBuffer = createEpub({
     //   title: 'Smoke Test',

@@ -1,0 +1,44 @@
+Phase 1 Success Criteria
+========================
+
+NO WORKAROUNDS. Every issue must be fixed at its root cause.
+If a dependency has a bug, fix it there. If an API changed, update the caller.
+Do not use `|| true`, do not skip checks, do not paper over errors.
+
+1. CI is green on main
+   - All CI steps pass, including "Verify PWA output"
+   - The e2e smoke test runs (even if all tests are still skipped)
+
+2. tools/ directory is removed
+   - gen-pwa is a sister binary in the quire package (src/bin/gen-pwa.bats)
+   - Follows the pwa/example/ pattern: #target native, #target wasm binary
+   - CI builds both targets and runs gen-pwa to produce the PWA shell
+
+3. WASM app loads and renders the empty library view
+   - main0 creates a DOM document at bats-root
+   - Renders a .library-list container
+   - Shows an .empty-lib message ("Your library is empty")
+   - Shows an .import-btn with a hidden file input (accept=".epub")
+   - Base CSS is injected
+
+4. Smoke test verifies the entry screen
+   - Uncomment smoke test lines that verify:
+     a. page.goto('/') loads without JS errors
+     b. .library-list is visible within 15 seconds
+   - Playwright e2e passes locally and in CI
+
+5. bats check passes locally with no warnings
+   - All source files type-check cleanly
+   - No unsafe constructs ($UNSAFE, $extfcall, castfn)
+
+6. Dependencies are correct
+   - bats.toml lists all needed WASM packages (dom, widget, css, event, etc.)
+   - All dependencies resolve from repository-prototype
+   - bats lock succeeds
+
+Verification command sequence:
+  bats lock --repository ../repository-prototype
+  bats check --repository ../repository-prototype
+  bats build --only wasm --repository ../repository-prototype
+  bats build --only native --repository ../repository-prototype  (for gen-pwa)
+  # run gen-pwa, then playwright test
