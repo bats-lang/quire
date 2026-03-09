@@ -19,7 +19,7 @@ test.describe('Smoke', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await page.goto('/');
-    await page.waitForSelector('.library-list', { timeout: 15000 });
+    await page.waitForSelector('#qllc', { timeout: 15000 });
 
     expect(errors.length).toBe(0);
   });
