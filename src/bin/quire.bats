@@ -16,6 +16,7 @@
 
 staload "state.sats"
 staload "theme.sats"
+staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 
 (* ============================================================
    EPUB import helpers
@@ -458,6 +459,42 @@ in
     val fi = $W.Element($W.ElementNode(fi_id, $W.Void($W.HtmlInput($W.InputFile(), $W.NoneStr(), $W.NoneStr(), 0, 0, 0)), ~1, 1, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
     val @(_, diff) = $W.add_child(ib, fi)
     val () = $D.apply(doc, diff)
+
+    (* Wire file input change event to epub import *)
+    val fi_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(fi_narr, 0, int2byte0(113))
+    val () = $A.set<byte>(fi_narr, 1, int2byte0(102))
+    val () = $A.set<byte>(fi_narr, 2, int2byte0(105))
+    val () = $A.set<byte>(fi_narr, 3, int2byte0(110))
+    val @(fi_nf, fi_nb) = $A.freeze<byte>(fi_narr)
+    val ch_arr = $A.alloc<byte>(6)
+    val () = $A.set<byte>(ch_arr, 0, int2byte0(99))
+    val () = $A.set<byte>(ch_arr, 1, int2byte0(104))
+    val () = $A.set<byte>(ch_arr, 2, int2byte0(97))
+    val () = $A.set<byte>(ch_arr, 3, int2byte0(110))
+    val () = $A.set<byte>(ch_arr, 4, int2byte0(103))
+    val () = $A.set<byte>(ch_arr, 5, int2byte0(101))
+    val @(ch_f, ch_b) = $A.freeze<byte>(ch_arr)
+    val () = $EV.listen(fi_nb, 4, ch_b, 6, 1,
+      lam(_payload_len: int): int => let
+        val fa = $A.alloc<byte>(4)
+        val () = $A.set<byte>(fa, 0, int2byte0(113))
+        val () = $A.set<byte>(fa, 1, int2byte0(102))
+        val () = $A.set<byte>(fa, 2, int2byte0(105))
+        val () = $A.set<byte>(fa, 3, int2byte0(110))
+        val @(ff, fb) = $A.freeze<byte>(fa)
+        val p = _import_epub(fb, 4)
+        val () = $P.discard<int>(p)
+        val () = $A.drop<byte>(ff, fb)
+        val tmp = $A.thaw<byte>(ff)
+        val () = $A.free<byte>(tmp)
+      in 0 end)
+    val () = $A.drop<byte>(fi_nf, fi_nb)
+    val fi_ntmp = $A.thaw<byte>(fi_nf)
+    val () = $A.free<byte>(fi_ntmp)
+    val () = $A.drop<byte>(ch_f, ch_b)
+    val ch_tmp = $A.thaw<byte>(ch_f)
+    val () = $A.free<byte>(ch_tmp)
 
     val () = $D.destroy(doc)
   in end
