@@ -23,4 +23,3 @@ unsafe = false
 "wasm.bats-packages.dev/decompress" = ""
 "wasm.bats-packages.dev/dom" = ""
 "wasm.bats-packages.dev/file-input" = ""
-"wasm.bats-packages.dev/idb" = ""
