@@ -39,11 +39,8 @@ test.describe('Smoke', () => {
     await page.goto('/');
     await page.waitForSelector('#qllc', { timeout: 15000 });
 
-    // The DOM module creates <input id="qfin"> without type="file".
-    // Set the type attribute so Playwright's setInputFiles works.
-    const fileInput = page.locator('#qfin');
+    const fileInput = page.locator('input[type="file"]');
     await expect(fileInput).toBeAttached();
-    await fileInput.evaluate(el => el.setAttribute('type', 'file'));
 
     // Upload the EPUB via the file input
     const epubPath = join(SCREENSHOT_DIR, 'smoke-test.epub');
