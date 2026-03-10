@@ -209,14 +209,14 @@ in
     else let
       val file_size_s = $AR.checked_arr_size(file_size)
       val file_buf = $A.alloc<byte>(file_size_s)
-      val _ = $FI.file_read(file_handle, 0, file_buf, file_size_s)
-      val () = $FI.close(file_handle)
+      val () = $R.discard($FI.file_read(file_handle, 0, file_buf, file_size_s))
 
       val eocd_opt = $Z.find_eocd(file_buf, file_size_s)
       val eocd_off = $R.option_unwrap_or<int>(eocd_opt, ~1)
     in
       if eocd_off < 0 then let
         val () = $A.free<byte>(file_buf)
+        val () = $FI.close(file_handle)
       in $P.ret<int>(~2) end
       else let
         val @(cd_off, cd_count) = $Z.parse_eocd(file_buf, file_size_s, eocd_off)
@@ -226,6 +226,7 @@ in
       in
         if cont.name_offset < 0 then let
           val () = $A.free<byte>(file_buf)
+          val () = $FI.close(file_handle)
         in $P.ret<int>(~3) end
         else let
           val doff_opt = $Z.get_data_offset(file_buf, file_size_s,
@@ -234,18 +235,23 @@ in
         in
           if doff < 0 then let
             val () = $A.free<byte>(file_buf)
+            val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
           else if cont.compressed_size <= 0 then let
             val () = $A.free<byte>(file_buf)
+            val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
           else if cont.compressed_size > 1048576 then let
             val () = $A.free<byte>(file_buf)
+            val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
           else let
             val csz = $AR.checked_arr_size(cont.compressed_size)
             val comp_buf = $A.alloc<byte>(csz)
             val file_buf = _copy_arr_region(file_buf, doff, file_size_s,
                                       comp_buf, csz, csz)
+            (* Free file_buf now — we will re-read in stage 2 *)
+            val () = $A.free<byte>(file_buf)
 
             val @(cf, cb) = $A.freeze<byte>(comp_buf)
             val dc_p = $DC.decompress(cb, csz, cont.compression)
@@ -255,21 +261,22 @@ in
 
             val dc_p = $P.vow(dc_p)
           in
+            (* Stage 2: parse container.xml, re-read file for OPF lookup *)
             $P.and_then<int><int>(dc_p, lam(dc_handle) => let
               val dc_len = $DC.get_len()
             in
               if dc_len <= 0 then let
                 val () = $DC.blob_free(dc_handle)
-                val () = $A.free<byte>(file_buf)
+                val () = $FI.close(file_handle)
               in $P.ret<int>(~5) end
               else if dc_len > 1048576 then let
                 val () = $DC.blob_free(dc_handle)
-                val () = $A.free<byte>(file_buf)
+                val () = $FI.close(file_handle)
               in $P.ret<int>(~5) end
               else let
                 val dc_sz = $AR.checked_arr_size(dc_len)
                 val dc_buf = $A.alloc<byte>(dc_sz)
-                val _ = $DC.blob_read(dc_handle, 0, dc_buf, dc_sz)
+                val () = $R.discard($DC.blob_read(dc_handle, 0, dc_buf, dc_sz))
                 val () = $DC.blob_free(dc_handle)
 
                 val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
@@ -283,21 +290,21 @@ in
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
                   val () = $A.free<byte>(dc_buf2)
-                  val () = $A.free<byte>(file_buf)
+                  val () = $FI.close(file_handle)
                 in $P.ret<int>(~6) end
                 else if opf_len <= 0 then let
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
                   val () = $A.free<byte>(dc_buf2)
-                  val () = $A.free<byte>(file_buf)
+                  val () = $FI.close(file_handle)
                 in $P.ret<int>(~6) end
                 else if opf_len > 1048576 then let
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
                   val () = $A.free<byte>(dc_buf2)
-                  val () = $A.free<byte>(file_buf)
+                  val () = $FI.close(file_handle)
                 in $P.ret<int>(~6) end
                 else let
                   val opf_path_sz = $AR.checked_arr_size(opf_len)
@@ -311,9 +318,15 @@ in
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
                   val () = $A.free<byte>(dc_buf2)
 
+                  (* Re-read file for OPF entry lookup *)
+                  val file_size_s2 = $AR.checked_arr_size(file_size)
+                  val file_buf2 = $A.alloc<byte>(file_size_s2)
+                  val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
+                  val () = $FI.close(file_handle)
+
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
                   val opf_entry = _find_zip_entry_borrow(
-                    file_buf, file_size_s, cd_off,
+                    file_buf2, file_size_s2, cd_off,
                     $AR.checked_nat(cd_count),
                     opf_borrow, opf_path_sz)
                   val () = $A.drop<byte>(opf_frozen, opf_borrow)
@@ -321,28 +334,28 @@ in
                   val () = $A.free<byte>(opf_path_buf2)
                 in
                   if opf_entry.name_offset < 0 then let
-                    val () = $A.free<byte>(file_buf)
+                    val () = $A.free<byte>(file_buf2)
                   in $P.ret<int>(~7) end
                   else let
-                    val opf_doff_opt = $Z.get_data_offset(file_buf, file_size_s,
+                    val opf_doff_opt = $Z.get_data_offset(file_buf2, file_size_s2,
                                         opf_entry.local_header_offset)
                     val opf_doff = $R.option_unwrap_or<int>(opf_doff_opt, ~1)
                   in
                     if opf_doff < 0 then let
-                      val () = $A.free<byte>(file_buf)
+                      val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
                     else if opf_entry.compressed_size <= 0 then let
-                      val () = $A.free<byte>(file_buf)
+                      val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
                     else if opf_entry.compressed_size > 1048576 then let
-                      val () = $A.free<byte>(file_buf)
+                      val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
                     else let
                       val opf_csz = $AR.checked_arr_size(opf_entry.compressed_size)
                       val opf_comp = $A.alloc<byte>(opf_csz)
-                      val file_buf = _copy_arr_region(file_buf, opf_doff, file_size_s,
+                      val file_buf2 = _copy_arr_region(file_buf2, opf_doff, file_size_s2,
                                                 opf_comp, opf_csz, opf_csz)
-                      val () = $A.free<byte>(file_buf)
+                      val () = $A.free<byte>(file_buf2)
 
                       val @(ocf, ocb) = $A.freeze<byte>(opf_comp)
                       val dc2_p = $DC.decompress(ocb, opf_csz, opf_entry.compression)
@@ -352,6 +365,7 @@ in
 
                       val dc2_p = $P.vow(dc2_p)
                     in
+                      (* Stage 3: parse OPF metadata *)
                       $P.and_then<int><int>(dc2_p, lam(dc2_handle) => let
                         val dc2_len = $DC.get_len()
                       in
@@ -364,7 +378,7 @@ in
                         else let
                           val dc2_sz = $AR.checked_arr_size(dc2_len)
                           val opf_buf = $A.alloc<byte>(dc2_sz)
-                          val _ = $DC.blob_read(dc2_handle, 0, opf_buf, dc2_sz)
+                          val () = $R.discard($DC.blob_read(dc2_handle, 0, opf_buf, dc2_sz))
                           val () = $DC.blob_free(dc2_handle)
 
                           val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
