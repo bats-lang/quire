@@ -22,10 +22,10 @@ staload "theme.sats"
    ============================================================ *)
 
 fn _xml_name_eq
-  {lb:agz}{n:pos}
+  {lb:agz}{n:pos}{sn:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    name_off: int, name_len: int,
-   pat: string, plen: int): bool =
+   pat: string sn, plen: int sn): bool =
   if name_len != plen then false
   else if name_off < 0 then false
   else if name_off + name_len > len then false
@@ -143,10 +143,10 @@ fun _copy_from_borrow
   end
 
 fun _find_zip_entry
-  {l:agz}{n:pos}{fuel:nat} .<fuel>.
+  {l:agz}{n:pos}{fuel:nat}{sn:nat} .<fuel>.
   (data: !$A.arr(byte, l, n), len: int n,
    cd_offset: int, remaining: int fuel,
-   target: string, target_len: int): $Z.zip_entry =
+   target: string sn, target_len: int sn): $Z.zip_entry =
   if remaining <= 0 then
     @{name_offset= ~1, name_len= 0, compression= 0,
       compressed_size= 0, uncompressed_size= 0,
