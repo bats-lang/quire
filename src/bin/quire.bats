@@ -209,7 +209,8 @@ in
     else let
       val file_size_s = $AR.checked_arr_size(file_size)
       val file_buf = $A.alloc<byte>(file_size_s)
-      val () = $R.discard($FI.file_read(file_handle, 0, file_buf, file_size_s))
+      val rd_res = $FI.file_read(file_handle, 0, file_buf, file_size_s)
+      val () = $R.discard<int><int>(rd_res)
 
       val eocd_opt = $Z.find_eocd(file_buf, file_size_s)
       val eocd_off = $R.option_unwrap_or<int>(eocd_opt, ~1)
@@ -276,7 +277,8 @@ in
               else let
                 val dc_sz = $AR.checked_arr_size(dc_len)
                 val dc_buf = $A.alloc<byte>(dc_sz)
-                val () = $R.discard($DC.blob_read(dc_handle, 0, dc_buf, dc_sz))
+                val br_res = $DC.blob_read(dc_handle, 0, dc_buf, dc_sz)
+                val () = $R.discard<int><int>(br_res)
                 val () = $DC.blob_free(dc_handle)
 
                 val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
