@@ -193,8 +193,10 @@ fn _copy_arr_region
 in $A.thaw<byte>(frozen) end
 
 fn _import_epub
-  (node_id: int): $P.promise(int, $P.Chained) = let
-  val p = $FI.open(node_id)
+  {li:agz}{ni:pos}
+  (node_id: !$A.borrow(byte, li, ni), id_len: int ni
+  ): $P.promise(int, $P.Chained) = let
+  val p = $FI.open(node_id, id_len)
   val p = $P.vow(p)
 in
   $P.and_then<int><int>(p, lam(file_handle) => let
@@ -223,7 +225,7 @@ in
         val @(cd_off, cd_count) = $Z.parse_eocd(file_buf, file_size_s, eocd_off)
         val cont = _find_zip_entry(file_buf, file_size_s, cd_off,
                     $AR.checked_nat(cd_count),
-                    "META-INF/container.xml", 26)
+                    "META-INF/container.xml", 22)
       in
         if cont.name_offset < 0 then let
           val () = $A.free<byte>(file_buf)
