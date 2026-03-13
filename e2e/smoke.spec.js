@@ -27,23 +27,29 @@ test.describe('Smoke', () => {
     page.on('pageerror', err => errors.push(err.message));
     page.on('console', msg => logs.push(`[${msg.type()}] ${msg.text()}`));
 
-    // Intercept bridge.js to trace key functions
+    // Intercept bridge.js to trace key functions and catch WASM traps
     await page.route('**/bridge.js', async (route) => {
       const response = await route.fetch();
       let body = await response.text();
+
+      // Wrap bats_on_file_open to catch WASM traps
+      body = body.replace(
+        'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
+        'try { instance.exports.bats_on_file_open(resolverId, handle, data.length); } catch(e) { console.log("TRAP in bats_on_file_open: " + e.message + " " + e.stack); }'
+      );
+      // Also wrap the no-file case
+      body = body.replace(
+        /instance\.exports\.bats_on_file_open\(resolverId, 0, 0\)/g,
+        'try { instance.exports.bats_on_file_open(resolverId, 0, 0); } catch(e) { console.log("TRAP in bats_on_file_open(0,0): " + e.message); }'
+      );
+
       body = body.replace(
         'function batsJsFileOpen(idPtr, idLen, resolverId) {',
         'function batsJsFileOpen(idPtr, idLen, resolverId) { console.log("TRACE: batsJsFileOpen resolverId=" + resolverId);'
       );
-      // Trace file_open callback
       body = body.replace(
-        'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
-        '(console.log("TRACE: bats_on_file_open handle=" + handle + " len=" + data.length), instance.exports.bats_on_file_open(resolverId, handle, data.length))'
-      );
-      // Trace file read
-      body = body.replace(
-        'function batsJsFileRead(handle, offset, len, outPtr) {',
-        'function batsJsFileRead(handle, offset, len, outPtr) { console.log("TRACE: batsJsFileRead handle=" + handle + " offset=" + offset + " len=" + len);'
+        'function batsJsFileRead(handle, fileOffset, len, outPtr) {',
+        'function batsJsFileRead(handle, fileOffset, len, outPtr) { console.log("TRACE: batsJsFileRead handle=" + handle + " offset=" + fileOffset + " len=" + len);'
       );
       body = body.replace(
         'function batsJsDecompress(dataPtr, dataLen, method, resolverId) {',
@@ -52,11 +58,6 @@ test.describe('Smoke', () => {
       body = body.replace(
         'function batsDomFlush(bufPtr, len) {',
         'function batsDomFlush(bufPtr, len) { console.log("TRACE: batsDomFlush len=" + len);'
-      );
-      // Trace stash_int (file size is stored here)
-      body = body.replace(
-        'function batsJsStashInt(slot, value) {',
-        'function batsJsStashInt(slot, value) { console.log("TRACE: batsJsStashInt slot=" + slot + " value=" + value);'
       );
       await route.fulfill({ response, body });
     });
