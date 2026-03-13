@@ -779,7 +779,8 @@ in
                   if parse_len <= 0 then let
                     var cnt_c = @[char][4]('q', 'c', 'n', 't')
                     val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    val () = _apply_diff($W.SetTextContent(cnt_id, "Failed to parse chapter"))
+                    var fpc_c = @[char][23]('F', 'a', 'i', 'l', 'e', 'd', ' ', 't', 'o', ' ', 'p', 'a', 'r', 's', 'e', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r')
+                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(fpc_c, 23), 23))
                   in $P.ret<int>(~7) end
                   else if parse_len > 1048576 then $P.ret<int>(~7)
                   else let
@@ -789,7 +790,8 @@ in
                     (* TODO: render chapter content — needs safe borrow→string *)
                     var cnt_c = @[char][4]('q', 'c', 'n', 't')
                     val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    val () = _apply_diff($W.SetTextContent(cnt_id, "Chapter loaded"))
+                    var cl_c = @[char][14]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', 'l', 'o', 'a', 'd', 'e', 'd')
+                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(cl_c, 14), 14))
                   in $P.ret<int>(0) end
                 end
               end)
@@ -816,7 +818,8 @@ implement main0 () = let
 
   var si_c = @[char][4]('q', 'c', 's', 's')
   val si_id = $W.Generated($S.text_of_chars(si_c, 4), 4)
-  val @(root, css_diffs) = $W.inject_css(root, si_id, theme_css())
+  val @(css_t, css_l) = theme_css()
+  val @(root, css_diffs) = $W.inject_css(root, si_id, css_t, css_l)
   val () = $D.apply_list(doc, css_diffs)
 
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
@@ -846,7 +849,8 @@ implement main0 () = let
   val () = $D.apply(doc, diff)
   val @(_, diff) = $W.set_class(bb, cls_back_btn())
   val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(bb_id, "Back"))
+  var back_c = @[char][4]('B', 'a', 'c', 'k')
+  val () = $D.apply(doc, $W.set_text_content(bb_id, $S.text_of_chars(back_c, 4), 4))
 
   (* Content area inside reader view *)
   var ca_c = @[char][4]('q', 'c', 'n', 't')
@@ -865,7 +869,8 @@ in
     val () = $D.apply(doc, diff)
     val @(_, diff) = $W.set_class(el, cls_empty_lib())
     val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(el_id, "Your library is empty"))
+    var yle_c = @[char][21]('Y', 'o', 'u', 'r', ' ', 'l', 'i', 'b', 'r', 'a', 'r', 'y', ' ', 'i', 's', ' ', 'e', 'm', 'p', 't', 'y')
+    val () = $D.apply(doc, $W.set_text_content(el_id, $S.text_of_chars(yle_c, 21), 21))
 
     var ib_c = @[char][4]('q', 'i', 'b', 'n')
     val ib_id = $W.Generated($S.text_of_chars(ib_c, 4), 4)
@@ -874,7 +879,8 @@ in
     val () = $D.apply(doc, diff)
     val @(_, diff) = $W.set_class(ib, cls_import_btn())
     val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(ib_id, "Import EPUB"))
+    var ie_c = @[char][11]('I', 'm', 'p', 'o', 'r', 't', ' ', 'E', 'P', 'U', 'B')
+    val () = $D.apply(doc, $W.set_text_content(ib_id, $S.text_of_chars(ie_c, 11), 11))
 
     var fi_c = @[char][4]('q', 'f', 'i', 'n')
     val fi_id = $W.Generated($S.text_of_chars(fi_c, 4), 4)
@@ -918,7 +924,8 @@ in
             (* Set loading text and load first chapter *)
             var cnt_c = @[char][4]('q', 'c', 'n', 't')
             val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-            val () = _apply_diff($W.SetTextContent(cnt_id, "Loading chapter..."))
+            var lc_c = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
+            val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc_c, 18), 18))
             val ch_p = _load_first_chapter()
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end

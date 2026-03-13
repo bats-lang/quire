@@ -2,6 +2,9 @@
 
 #include "share/atspre_staload.hats"
 
+#use array as A
+#use str as S
+
 (* Class indices — css.class_text maps: 0->caa, 1->cab, 2->cac *)
 
 #pub fun cls_library_list(): int
@@ -32,6 +35,36 @@ implement cls_content_area() = 5
    Stylesheet
    ============================================================ *)
 
-#pub fun theme_css(): string
+#pub fun theme_css(): @($A.text(418), int(418))
 
-implement theme_css() = "[hidden]{display:none!important}.caa{display:flex;flex-direction:column;padding:16px}.cab{text-align:center;color:#888;padding:32px}.cac{display:inline-block;padding:8px 16px;background:#4a90d9;color:#fff;border-radius:4px;cursor:pointer}.cad{display:flex;flex-direction:column;height:100vh}.cae{padding:8px 16px;background:#333;color:#fff;cursor:pointer;align-self:flex-start}.caf{flex:1;padding:16px;overflow-y:auto}"
+implement theme_css() = let
+  var c = @[char][418](
+    '\x5B', 'h', 'i', 'd', 'd', 'e', 'n', '\x5D', '\x7B', 'd', 'i', 's', 'p', 'l', 'a',
+    'y', ':', 'n', 'o', 'n', 'e', '!', 'i', 'm', 'p', 'o', 'r', 't', 'a', 'n',
+    't', '\x7D', '.', 'c', 'a', 'a', '\x7B', 'd', 'i', 's', 'p', 'l', 'a', 'y', ':',
+    'f', 'l', 'e', 'x', ';', 'f', 'l', 'e', 'x', '-', 'd', 'i', 'r', 'e', 'c',
+    't', 'i', 'o', 'n', ':', 'c', 'o', 'l', 'u', 'm', 'n', ';', 'p', 'a', 'd',
+    'd', 'i', 'n', 'g', ':', '1', '6', 'p', 'x', '\x7D', '.', 'c', 'a', 'b', '\x7B',
+    't', 'e', 'x', 't', '-', 'a', 'l', 'i', 'g', 'n', ':', 'c', 'e', 'n', 't',
+    'e', 'r', ';', 'c', 'o', 'l', 'o', 'r', ':', '\x23', '8', '8', '8', ';', 'p',
+    'a', 'd', 'd', 'i', 'n', 'g', ':', '3', '2', 'p', 'x', '\x7D', '.', 'c', 'a',
+    'c', '\x7B', 'd', 'i', 's', 'p', 'l', 'a', 'y', ':', 'i', 'n', 'l', 'i', 'n',
+    'e', '-', 'b', 'l', 'o', 'c', 'k', ';', 'p', 'a', 'd', 'd', 'i', 'n', 'g',
+    ':', '8', 'p', 'x', ' ', '1', '6', 'p', 'x', ';', 'b', 'a', 'c', 'k', 'g',
+    'r', 'o', 'u', 'n', 'd', ':', '\x23', '4', 'a', '9', '0', 'd', '9', ';', 'c',
+    'o', 'l', 'o', 'r', ':', '\x23', 'f', 'f', 'f', ';', 'b', 'o', 'r', 'd', 'e',
+    'r', '-', 'r', 'a', 'd', 'i', 'u', 's', ':', '4', 'p', 'x', ';', 'c', 'u',
+    'r', 's', 'o', 'r', ':', 'p', 'o', 'i', 'n', 't', 'e', 'r', '\x7D', '.', 'c',
+    'a', 'd', '\x7B', 'd', 'i', 's', 'p', 'l', 'a', 'y', ':', 'f', 'l', 'e', 'x',
+    ';', 'f', 'l', 'e', 'x', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n',
+    ':', 'c', 'o', 'l', 'u', 'm', 'n', ';', 'h', 'e', 'i', 'g', 'h', 't', ':',
+    '1', '0', '0', 'v', 'h', '\x7D', '.', 'c', 'a', 'e', '\x7B', 'p', 'a', 'd', 'd',
+    'i', 'n', 'g', ':', '8', 'p', 'x', ' ', '1', '6', 'p', 'x', ';', 'b', 'a',
+    'c', 'k', 'g', 'r', 'o', 'u', 'n', 'd', ':', '\x23', '3', '3', '3', ';', 'c',
+    'o', 'l', 'o', 'r', ':', '\x23', 'f', 'f', 'f', ';', 'c', 'u', 'r', 's', 'o',
+    'r', ':', 'p', 'o', 'i', 'n', 't', 'e', 'r', ';', 'a', 'l', 'i', 'g', 'n',
+    '-', 's', 'e', 'l', 'f', ':', 'f', 'l', 'e', 'x', '-', 's', 't', 'a', 'r',
+    't', '\x7D', '.', 'c', 'a', 'f', '\x7B', 'f', 'l', 'e', 'x', ':', '1', ';', 'p',
+    'a', 'd', 'd', 'i', 'n', 'g', ':', '1', '6', 'p', 'x', ';', 'o', 'v', 'e',
+    'r', 'f', 'l', 'o', 'w', '-', 'y', ':', 'a', 'u', 't', 'o', '\x7D')
+in @($S.text_of_chars(c, 418), 418) end
