@@ -42,3 +42,30 @@ Verification command sequence:
   bats build --only wasm --repository ../repository-prototype
   bats build --only native --repository ../repository-prototype  (for gen-pwa)
   # run gen-pwa, then playwright test
+
+Phase 3 Success Criteria (completed)
+=====================================
+
+1. EPUB import switches to reader view
+   - File input change handler reads EPUB, parses ZIP/OPF metadata
+   - Shows reader view (qrvw), hides library view (qllc)
+   - Sets "Loading chapter..." text in content area (qcnt)
+   - E2E test: "import epub switches to reader view" passes
+
+2. Back button returns to library view
+   - Click handler on back button (qbbk) unhides library, hides reader
+   - Fixed: SetHidden(wid, 0) was a no-op — added REMOVE_ATTR opcode 7
+     to both dom and bridge packages
+   - Fixed: _bridge_stash_int[4] buffer overflow into _bridge_listener_table
+     corrupted event callback pointers — expanded to 32 slots with bounds checks
+   - E2E test: "back button returns to library view" passes
+
+3. Content area shows loading state
+   - After import, content area displays "Loading chapter..."
+   - E2E test: "chapter loading shows content in reader" passes
+
+4. All E2E tests green (6 passed, 5 skipped future phases)
+
+Dependency fixes:
+  - bridge PR #43: stash_int overflow fix + REMOVE_ATTR opcode 7
+  - dom PR #37: _emit_remove_attr_wid + SetHidden unhide fix
