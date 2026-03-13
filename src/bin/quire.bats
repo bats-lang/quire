@@ -922,47 +922,7 @@ in
             val ch_p = _load_first_chapter()
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
-          else let
-            var cnt_c2 = @[char][4]('q', 'c', 'n', 't')
-            val cnt_id2 = $W.Generated($S.text_of_chars(cnt_c2, 4), 4)
-            var rv3_c2 = @[char][4]('q', 'r', 'v', 'w')
-            val rv3_id2 = $W.Generated($S.text_of_chars(rv3_c2, 4), 4)
-            val () = _apply_diff($W.SetHidden(rv3_id2, 0))
-            var ll3_c2 = @[char][4]('q', 'l', 'l', 'c')
-            val ll3_id2 = $W.Generated($S.text_of_chars(ll3_c2, 4), 4)
-            val () = _apply_diff($W.SetHidden(ll3_id2, 1))
-          in
-            if result = ~1 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -1"))
-            in $P.ret<int>(result) end
-            else if result = ~2 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -2"))
-            in $P.ret<int>(result) end
-            else if result = ~3 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -3"))
-            in $P.ret<int>(result) end
-            else if result = ~4 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -4"))
-            in $P.ret<int>(result) end
-            else if result = ~5 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -5"))
-            in $P.ret<int>(result) end
-            else if result = ~6 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -6"))
-            in $P.ret<int>(result) end
-            else if result = ~7 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -7"))
-            in $P.ret<int>(result) end
-            else if result = ~8 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -8"))
-            in $P.ret<int>(result) end
-            else if result = ~9 then let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: -9"))
-            in $P.ret<int>(result) end
-            else let
-              val () = _apply_diff($W.SetTextContent(cnt_id2, "Import error: unknown"))
-            in $P.ret<int>(result) end
-          end)
+          else $P.ret<int>(result))
         val () = $P.discard<int>(p2)
         val () = $A.drop<byte>(ff, fb)
         val tmp = $A.thaw<byte>(ff)
