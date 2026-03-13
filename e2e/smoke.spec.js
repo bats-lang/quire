@@ -46,10 +46,35 @@ test.describe('Smoke', () => {
         'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
         '(console.log("TRACE: bats_on_file_open handle=" + handle + " len=" + data.length), instance.exports.bats_on_file_open(resolverId, handle, data.length))'
       );
+      // Instrument batsJsFileRead
+      body = body.replace(
+        'function batsJsFileRead(handle, fileOffset, len, outPtr) {',
+        'function batsJsFileRead(handle, fileOffset, len, outPtr) { console.log("TRACE: batsJsFileRead handle=" + handle + " offset=" + fileOffset + " len=" + len);'
+      );
+      // Instrument batsJsDecompress
+      body = body.replace(
+        'function batsJsDecompress(dataPtr, dataLen, method, resolverId) {',
+        'function batsJsDecompress(dataPtr, dataLen, method, resolverId) { console.log("TRACE: batsJsDecompress len=" + dataLen + " method=" + method + " resolverId=" + resolverId);'
+      );
+      // Instrument bats_on_decompress_complete
+      body = body.replace(
+        'instance.exports.bats_on_decompress_complete(resolverId, handle, compressed.length)',
+        '(console.log("TRACE: bats_on_decompress_complete (stored) resolverId=" + resolverId + " handle=" + handle + " len=" + compressed.length), instance.exports.bats_on_decompress_complete(resolverId, handle, compressed.length))'
+      );
       // Instrument batsDomFlush
       body = body.replace(
         'function batsDomFlush(bufPtr, len) {',
         'function batsDomFlush(bufPtr, len) { console.log("TRACE: batsDomFlush len=" + len);'
+      );
+      // Instrument batsJsBlobRead
+      body = body.replace(
+        'function batsJsBlobRead(handle, offset, len, outPtr) {',
+        'function batsJsBlobRead(handle, offset, len, outPtr) { console.log("TRACE: batsJsBlobRead handle=" + handle + " offset=" + offset + " len=" + len);'
+      );
+      // Add error catching wrapper for all WASM export calls
+      body = body.replace(
+        'instance.exports.bats_on_event(listenerId, payload ? payload.length : 0)',
+        '(function() { try { instance.exports.bats_on_event(listenerId, payload ? payload.length : 0); } catch(e) { console.log("TRACE ERROR in bats_on_event: " + e.message); } })()'
       );
       await route.fulfill({ response, body });
     });
