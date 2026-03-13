@@ -114,7 +114,7 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
-  // Phase 3: content area shows loading state
+  // Phase 3: chapter loads successfully
   test('chapter loading shows content in reader', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
@@ -129,10 +129,10 @@ test.describe('EPUB Reader E2E', () => {
     // Wait for reader view
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
 
-    // Content area should be visible with loading text
+    // Content area should show loaded chapter
     const content = page.locator('#qcnt');
     await expect(content).toBeVisible();
-    await expect(content).toHaveText('Loading chapter...', { timeout: 15000 });
+    await expect(content).toHaveText('Chapter loaded', { timeout: 15000 });
 
     expect(errors.length).toBe(0);
   });

@@ -519,6 +519,9 @@ in
                           val () = $ST.stash_set_int(14, opf_doff)
                           val () = $ST.stash_set_int(15, opf_entry.compressed_size)
                           val () = $ST.stash_set_int(16, opf_entry.compression)
+                          (* Stash OPF name in central directory for path prefix *)
+                          val () = $ST.stash_set_int(17, opf_entry.name_offset)
+                          val () = $ST.stash_set_int(18, opf_entry.name_len)
                         in $P.ret<int>(0) end
                       end)
                     end
@@ -640,27 +643,78 @@ in
           val () = $A.free<byte>(t)
         in $P.ret<int>(~3) end
         else let
-          (* Copy chapter href to buffer for ZIP lookup *)
-          val ch_len_s = $AR.checked_arr_size(ch_len)
-          val ch_buf = $A.alloc<byte>(ch_len_s)
+          (* Re-read file now so we can access the OPF name
+             in the central directory for path prefix resolution *)
+          val fsz_s3 = $AR.checked_arr_size(fsz)
+          val fbuf3 = $A.alloc<byte>(fsz_s3)
+          val () = $R.discard($FI.file_read(fh, 0, fbuf3, fsz_s3))
+
+          (* Find directory prefix from OPF name in central directory.
+             The OPF path e.g. "OEBPS/content.opf" tells us the
+             directory prefix "OEBPS/" to prepend to chapter hrefs. *)
+          val opf_name_off = $ST.stash_get_int(17)
+          val opf_name_len = $ST.stash_get_int(18)
+          fun _find_last_slash
+            {l:agz}{n:pos}{k:int}{e:int}{la:int}{fuel:nat} .<fuel>.
+            (buf: !$A.arr(byte, l, n), max: int n,
+             pos: int k, endp: int e, last_after: int la,
+             fuel: int fuel): int =
+            if fuel <= 0 then last_after
+            else if pos < 0 then last_after
+            else if pos >= max then last_after
+            else if pos >= endp then last_after
+            else let
+              val b = byte2int0($A.get<byte>(buf, pos))
+            in
+              if b = 47 then
+                _find_last_slash(buf, max, pos + 1, endp, pos + 1, fuel - 1)
+              else
+                _find_last_slash(buf, max, pos + 1, endp, last_after, fuel - 1)
+            end
+          val opf_off_g1 = g1ofg0_int(opf_name_off)
+          val opf_len_g1 = g1ofg0_int(opf_name_len)
+          val prefix_end = _find_last_slash(fbuf3, fsz_s3,
+            opf_off_g1, opf_off_g1 + opf_len_g1, opf_off_g1,
+            $AR.checked_nat(opf_name_len))
+          val prefix_len = prefix_end - opf_name_off
+
+          (* Build full path: prefix + href *)
+          val full_len = prefix_len + ch_len
+          val full_len_s = $AR.checked_arr_size(full_len)
+          val ch_buf = $A.alloc<byte>(full_len_s)
+          (* Copy prefix from file buffer *)
+          fun _copy_arr_region
+            {la:agz}{na:pos}{lb:agz}{nb:pos}{i:int}{j:int}{fuel:nat} .<fuel>.
+            (src: !$A.arr(byte, la, na), s_off: int i, s_max: int na,
+             dst: !$A.arr(byte, lb, nb), d_off: int j, d_max: int nb,
+             fuel: int fuel): void =
+            if fuel <= 0 then ()
+            else if s_off < 0 then ()
+            else if d_off < 0 then ()
+            else if s_off >= s_max then ()
+            else if d_off >= d_max then ()
+            else let
+              val b = $A.get<byte>(src, s_off)
+              val () = $A.set<byte>(dst, d_off, b)
+            in _copy_arr_region(src, s_off + 1, s_max, dst, d_off + 1, d_max, fuel - 1) end
+          val () = _copy_arr_region(fbuf3, opf_off_g1, fsz_s3,
+                    ch_buf, 0, full_len_s,
+                    $AR.checked_nat(prefix_len))
+          (* Copy chapter href from OPF borrow *)
           val () = _copy_from_borrow(opf_b, ch_off, dc_sz,
-                    ch_buf, 0, ch_len_s, $AR.checked_nat(ch_len))
+                    ch_buf, prefix_len, full_len_s,
+                    $AR.checked_nat(ch_len))
 
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)
           val () = $A.free<byte>(t)
 
-          (* Re-read file to find chapter in ZIP *)
-          val fsz_s3 = $AR.checked_arr_size(fsz)
-          val fbuf3 = $A.alloc<byte>(fsz_s3)
-          val () = $R.discard($FI.file_read(fh, 0, fbuf3, fsz_s3))
-
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
           val ch_entry = _find_zip_entry_borrow(
             fbuf3, fsz_s3, cd_off,
             $AR.checked_nat(cd_cnt),
-            chb, ch_len_s)
+            chb, full_len_s)
           val () = $A.drop<byte>(chf, chb)
           val ch_buf2 = $A.thaw<byte>(chf)
           val () = $A.free<byte>(ch_buf2)
@@ -685,8 +739,8 @@ in
             else let
               val ch_csz = $AR.checked_arr_size(ch_entry.compressed_size)
               val ch_comp = $A.alloc<byte>(ch_csz)
-              val fbuf3 = _copy_arr_region(fbuf3, ch_doff, fsz_s3,
-                                            ch_comp, ch_csz, ch_csz)
+              val () = _copy_arr_region(fbuf3, g1ofg0_int(ch_doff), fsz_s3,
+                                        ch_comp, 0, ch_csz, ch_csz)
               val () = $A.free<byte>(fbuf3)
 
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
