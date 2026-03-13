@@ -929,7 +929,13 @@ in
             val ch_p = _load_first_chapter()
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
-          else $P.ret<int>(result))
+          else let
+            (* Import failed — show error code in content area for debugging *)
+            var cnt2_c = @[char][4]('q', 'c', 'n', 't')
+            val cnt2_id = $W.Generated($S.text_of_chars(cnt2_c, 4), 4)
+            var err_c = @[char][12]('I', 'm', 'p', 'o', 'r', 't', ' ', 'e', 'r', 'r', ':', ' ')
+            val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(err_c, 12), 12))
+          in $P.ret<int>(result) end)
         val () = $P.discard<int>(p2)
         val () = $A.drop<byte>(ff, fb)
         val tmp = $A.thaw<byte>(ff)

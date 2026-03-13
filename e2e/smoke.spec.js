@@ -46,10 +46,10 @@ test.describe('Smoke', () => {
         'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
         '(console.log("TRACE: bats_on_file_open handle=" + handle + " len=" + data.length), instance.exports.bats_on_file_open(resolverId, handle, data.length))'
       );
-      // Instrument batsJsFileRead
+      // Instrument batsJsFileRead to log return value
       body = body.replace(
-        'function batsJsFileRead(handle, fileOffset, len, outPtr) {',
-        'function batsJsFileRead(handle, fileOffset, len, outPtr) { console.log("TRACE: batsJsFileRead handle=" + handle + " offset=" + fileOffset + " len=" + len);'
+        'return copyLen;\n  }',
+        'console.log("TRACE: batsJsFileRead returned=" + copyLen + " outPtr=" + outPtr); return copyLen;\n  }'
       );
       // Instrument batsJsDecompress
       body = body.replace(
@@ -114,7 +114,7 @@ test.describe('Smoke', () => {
     await fileInput.setInputFiles(epubPath);
 
     // Wait a bit for the async import pipeline
-    await page.waitForTimeout(3000);
+    await page.waitForTimeout(5000);
 
     // Debug: print console logs
     console.log('Browser logs (' + logs.length + '):', logs.join('\n'));
