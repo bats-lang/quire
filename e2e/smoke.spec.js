@@ -35,6 +35,16 @@ test.describe('Smoke', () => {
         'function batsJsFileOpen(idPtr, idLen, resolverId) {',
         'function batsJsFileOpen(idPtr, idLen, resolverId) { console.log("TRACE: batsJsFileOpen resolverId=" + resolverId);'
       );
+      // Trace file_open callback
+      body = body.replace(
+        'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
+        '(console.log("TRACE: bats_on_file_open handle=" + handle + " len=" + data.length), instance.exports.bats_on_file_open(resolverId, handle, data.length))'
+      );
+      // Trace file read
+      body = body.replace(
+        'function batsJsFileRead(handle, offset, len, outPtr) {',
+        'function batsJsFileRead(handle, offset, len, outPtr) { console.log("TRACE: batsJsFileRead handle=" + handle + " offset=" + offset + " len=" + len);'
+      );
       body = body.replace(
         'function batsJsDecompress(dataPtr, dataLen, method, resolverId) {',
         'function batsJsDecompress(dataPtr, dataLen, method, resolverId) { console.log("TRACE: batsJsDecompress len=" + dataLen + " method=" + method);'
@@ -42,6 +52,11 @@ test.describe('Smoke', () => {
       body = body.replace(
         'function batsDomFlush(bufPtr, len) {',
         'function batsDomFlush(bufPtr, len) { console.log("TRACE: batsDomFlush len=" + len);'
+      );
+      // Trace stash_int (file size is stored here)
+      body = body.replace(
+        'function batsJsStashInt(slot, value) {',
+        'function batsJsStashInt(slot, value) { console.log("TRACE: batsJsStashInt slot=" + slot + " value=" + value);'
       );
       await route.fulfill({ response, body });
     });
@@ -78,7 +93,6 @@ test.describe('Smoke', () => {
       const cnt = document.getElementById('qcnt');
       return {
         rvHidden: rv?.hidden,
-        rvDisplay: rv?.style?.display,
         llHidden: ll?.hidden,
         cntText: cnt?.textContent?.substring(0, 100),
       };
