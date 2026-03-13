@@ -21,6 +21,49 @@ test.describe('Smoke', () => {
     expect(errors.length).toBe(0);
   });
 
+  test('Generated EPUB is valid ZIP', async () => {
+    const epubBuffer = createEpub({
+      title: 'Smoke Test',
+      author: 'Bot',
+      chapters: 1,
+      paragraphsPerChapter: 2,
+      storeChapters: true,
+    });
+
+    const buf = new Uint8Array(epubBuffer);
+    console.log('EPUB size:', buf.length);
+
+    // Check EOCD signature at end
+    const len = buf.length;
+    let eocdOff = -1;
+    for (let i = len - 22; i >= 0; i--) {
+      const sig = buf[i] | (buf[i+1] << 8) | (buf[i+2] << 16) | (buf[i+3] << 24);
+      if (sig === 0x06054B50) { eocdOff = i; break; }
+    }
+    console.log('EOCD offset:', eocdOff);
+    expect(eocdOff).toBeGreaterThanOrEqual(0);
+
+    // Parse EOCD
+    const cdOffset = buf[eocdOff+16] | (buf[eocdOff+17] << 8) | (buf[eocdOff+18] << 16) | (buf[eocdOff+19] << 24);
+    const cdCount = buf[eocdOff+10] | (buf[eocdOff+11] << 8);
+    console.log('CD offset:', cdOffset, 'CD count:', cdCount);
+
+    // Parse central directory entries
+    let pos = cdOffset;
+    for (let i = 0; i < cdCount; i++) {
+      const sig = buf[pos] | (buf[pos+1] << 8) | (buf[pos+2] << 16) | (buf[pos+3] << 24);
+      expect(sig).toBe(0x02014B50);
+      const nameLen = buf[pos+28] | (buf[pos+29] << 8);
+      const extraLen = buf[pos+30] | (buf[pos+31] << 8);
+      const commentLen = buf[pos+32] | (buf[pos+33] << 8);
+      const compression = buf[pos+10] | (buf[pos+11] << 8);
+      const compSize = buf[pos+20] | (buf[pos+21] << 8) | (buf[pos+22] << 16) | (buf[pos+23] << 24);
+      const name = new TextDecoder().decode(buf.slice(pos+46, pos+46+nameLen));
+      console.log(`Entry ${i}: "${name}" compression=${compression} compSize=${compSize} nameLen=${nameLen}`);
+      pos += 46 + nameLen + extraLen + commentLen;
+    }
+  });
+
   test('EPUB import opens reader view', async ({ page }) => {
     const errors = [];
     const logs = [];
@@ -35,12 +78,11 @@ test.describe('Smoke', () => {
       // Wrap bats_on_file_open to catch WASM traps
       body = body.replace(
         'instance.exports.bats_on_file_open(resolverId, handle, data.length)',
-        'try { instance.exports.bats_on_file_open(resolverId, handle, data.length); } catch(e) { console.log("TRAP in bats_on_file_open: " + e.message + " " + e.stack); }'
+        'try { console.log("TRACE: bats_on_file_open handle=" + handle + " len=" + data.length); instance.exports.bats_on_file_open(resolverId, handle, data.length); console.log("TRACE: bats_on_file_open returned OK"); } catch(e) { console.log("TRAP in bats_on_file_open: " + e.message); }'
       );
-      // Also wrap the no-file case
       body = body.replace(
         /instance\.exports\.bats_on_file_open\(resolverId, 0, 0\)/g,
-        'try { instance.exports.bats_on_file_open(resolverId, 0, 0); } catch(e) { console.log("TRAP in bats_on_file_open(0,0): " + e.message); }'
+        '(console.log("TRACE: bats_on_file_open(0,0) no-file case"), instance.exports.bats_on_file_open(resolverId, 0, 0))'
       );
 
       body = body.replace(
@@ -54,10 +96,6 @@ test.describe('Smoke', () => {
       body = body.replace(
         'function batsJsDecompress(dataPtr, dataLen, method, resolverId) {',
         'function batsJsDecompress(dataPtr, dataLen, method, resolverId) { console.log("TRACE: batsJsDecompress len=" + dataLen + " method=" + method);'
-      );
-      body = body.replace(
-        'function batsDomFlush(bufPtr, len) {',
-        'function batsDomFlush(bufPtr, len) { console.log("TRACE: batsDomFlush len=" + len);'
       );
       await route.fulfill({ response, body });
     });
