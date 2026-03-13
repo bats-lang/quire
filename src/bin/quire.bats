@@ -929,7 +929,35 @@ in
             val ch_p = _load_first_chapter()
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
-          else $P.ret<int>(result))
+          else let
+            var cnt2_c = @[char][4]('q', 'c', 'n', 't')
+            val cnt2_id = $W.Generated($S.text_of_chars(cnt2_c, 4), 4)
+          in
+            if result = ~1 then let
+              var e1 = @[char][4]('E', 'R', 'R', '1')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(e1, 4), 4))
+            in $P.ret<int>(result) end
+            else if result = ~2 then let
+              var e2 = @[char][4]('E', 'R', 'R', '2')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(e2, 4), 4))
+            in $P.ret<int>(result) end
+            else if result = ~3 then let
+              var e3 = @[char][4]('E', 'R', 'R', '3')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(e3, 4), 4))
+            in $P.ret<int>(result) end
+            else if result = ~4 then let
+              var e4 = @[char][4]('E', 'R', 'R', '4')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(e4, 4), 4))
+            in $P.ret<int>(result) end
+            else if result = ~5 then let
+              var e5 = @[char][4]('E', 'R', 'R', '5')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(e5, 4), 4))
+            in $P.ret<int>(result) end
+            else let
+              var eu = @[char][4]('E', 'R', 'R', 'X')
+              val () = _apply_diff($W.SetTextContent(cnt2_id, $S.text_of_chars(eu, 4), 4))
+            in $P.ret<int>(result) end
+          end)
         val () = $P.discard<int>(p2)
         val () = $A.drop<byte>(ff, fb)
         val tmp = $A.thaw<byte>(ff)

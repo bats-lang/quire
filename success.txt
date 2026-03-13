@@ -69,3 +69,25 @@ Phase 3 Success Criteria (completed)
 Dependency fixes:
   - bridge PR #43: stash_int overflow fix + REMOVE_ATTR opcode 7
   - dom PR #37: _emit_remove_attr_wid + SetHidden unhide fix
+
+Bug Fix Tracking
+================
+
+DONE:
+  - bridge#44 — Lift stash/measure bounds checks into ATS2 (PR #45 merged, published)
+  - css#24 — class_text returns "000" in WASM (PR #25 merged, published)
+  - widget#15 — Replace string with text in datatypes (PR #16 merged, published)
+  - dom#38 — Wire emitters accept text instead of string (PR #39 created)
+  - bats#111 — Self-build binary overwrite (PR #115 merged)
+  - quire#18 — Chapter loading stuck (PR #22 merged)
+  - quire#20 — html dep restored (verified, closed)
+  - quire#21 — Remove debug error-display code (PR #23 merged)
+  - bats#109 — Lock resolver 0 deps (PR #113 merged)
+
+DONE (cont.):
+  - zip#8 — parse_cd_entry returned header_size instead of cd_offset + header_size (PR #8 merged, published)
+  - quire — Clean up e2e test debug instrumentation, use standard createEpub()
+
+TODO:
+  - quire#19 — Fragile build process (native stubs, manual WASM copy, bats clean)
+  - bats#110 — bats build should use cache buster instead of rm -rf
