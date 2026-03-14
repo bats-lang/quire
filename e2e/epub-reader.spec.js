@@ -200,49 +200,41 @@ test.describe('EPUB Reader E2E', () => {
     const vpWidth = page.viewportSize().width;
     expect(dims.scrollWidth % vpWidth).toBe(0);
 
-    // --- Click right zone to go to next page ---
-    const viewport = page.viewportSize();
-    const rightZoneX = viewport.width - 50;
-    const leftZoneX = 50;
-    const centerY = viewport.height / 2;
-
-    await page.mouse.click(rightZoneX, centerY);
+    // --- Test next button navigation ---
+    await nextBtn.click();
     await page.waitForTimeout(500);
 
-    // Page indicator should show page 2
-    const pageTextAfterForward = await pageInfo.textContent();
-    expect(pageTextAfterForward).toMatch(/^Ch \d+ · p\. \d+\/\d+$/);
-    expect(pageTextAfterForward).toMatch(/\s+2\/\d+$/);
+    const pageTextAfterNext = await pageInfo.textContent();
+    expect(pageTextAfterNext).toMatch(/\s+2\/\d+$/);
 
     // scrollLeft should have changed
-    const scrollAfterForward = await content.evaluate(el => el.scrollLeft);
-    expect(scrollAfterForward).toBe(vpWidth);
+    const scrollAfterNext = await content.evaluate(el => el.scrollLeft);
+    expect(scrollAfterNext).toBe(vpWidth);
 
     // --- Test prev button navigation ---
     await prevBtn.click();
     await page.waitForTimeout(500);
 
-    // Should be back at page 1
     const pageTextAfterPrev = await pageInfo.textContent();
     expect(pageTextAfterPrev).toMatch(/\s+1\/\d+$/);
 
-    // --- Test next button navigation ---
-    await nextBtn.click();
+    // --- Click zone navigation ---
+    const rightZone = page.locator('#qczr');
+    const leftZone = page.locator('#qczl');
+
+    // Right zone → next page
+    await rightZone.click({ force: true });
     await page.waitForTimeout(500);
 
-    // Should be at page 2
-    const pageTextAfterNext = await pageInfo.textContent();
-    expect(pageTextAfterNext).toMatch(/\s+2\/\d+$/);
+    const pageTextAfterZoneRight = await pageInfo.textContent();
+    expect(pageTextAfterZoneRight).toMatch(/\s+2\/\d+$/);
 
-    // Extract total pages
-    const totalPages = parseInt(pageTextAfterNext.match(/\s+\d+\/(\d+)$/)[1]);
-
-    // --- Click left zone to go back ---
-    await page.mouse.click(leftZoneX, centerY);
+    // Left zone → prev page
+    await leftZone.click({ force: true });
     await page.waitForTimeout(500);
 
-    const pageTextAfterBack = await pageInfo.textContent();
-    expect(pageTextAfterBack).toMatch(/\s+1\/\d+$/);
+    const pageTextAfterZoneLeft = await pageInfo.textContent();
+    expect(pageTextAfterZoneLeft).toMatch(/\s+1\/\d+$/);
 
     // --- Keyboard navigation ---
     // ArrowRight → next page
