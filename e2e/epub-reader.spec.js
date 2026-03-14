@@ -356,6 +356,100 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // Phase 6: real-world EPUB
+  test('real-world EPUB import and reading', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    const fixturePath = join(process.cwd(), 'test', 'fixtures', 'conan-stories.epub');
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles(fixturePath);
+
+    // Reader view should become visible
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+
+    // Wait for chapter content to load
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    const pageInfo = page.locator('#qpgi');
+    await expect(pageInfo).toBeVisible();
+
+    // Page indicator shows valid format
+    const text = await pageInfo.textContent();
+    expect(text).toMatch(/^Ch \d+ · p\. \d+\/\d+$/);
+
+    // Content area has rendered HTML
+    const content = page.locator('#qcnt');
+    const textLen = await content.evaluate(el => el.textContent.length);
+    expect(textLen).toBeGreaterThan(100);
+
+    expect(errors.length).toBe(0);
+  });
+
+  test('large chapter pagination works', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    const fixturePath = join(process.cwd(), 'test', 'fixtures', 'conan-stories.epub');
+    const fileInput = page.locator('input[type="file"]');
+    await fileInput.setInputFiles(fixturePath);
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    const pageInfo = page.locator('#qpgi');
+    const nextBtn = page.locator('#qnxt');
+
+    // First chapter is the cover page — navigate to chapter 2 (story content)
+    // Click next to advance past the cover
+    await nextBtn.click();
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qpgi');
+        return el && /^Ch 2 /.test(el.textContent);
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Chapter 2 should span multiple pages
+    const content = page.locator('#qcnt');
+    const dims = await content.evaluate(el => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    expect(dims.scrollWidth).toBeGreaterThan(dims.clientWidth);
+
+    // Navigate forward within chapter 2
+    await nextBtn.click();
+    await page.waitForTimeout(500);
+
+    const text2 = await pageInfo.textContent();
+    expect(text2).toMatch(/^Ch 2 · p\. 2\/\d+$/);
+
+    expect(errors.length).toBe(0);
+  });
+
   // Future phases
   test.skip('library persists across page reload', async ({ page }) => {});
   test.skip('reading position is restored', async ({ page }) => {});
