@@ -236,24 +236,6 @@ and _check_manifest_item
   end
   | $X.xml_text(_, _) => @(~1, 0)
 
-fun _arr_borrow_eq
-  {l:agz}{n:pos}{lb:agz}{nb:pos}{fuel:nat} .<fuel>.
-  (arr: !$A.arr(byte, l, n), a_off: int, a_max: int n,
-   bv: !$A.borrow(byte, lb, nb), b_off: int, b_max: int nb,
-   count: int fuel): bool =
-  if count <= 0 then true
-  else if a_off < 0 then false
-  else if b_off < 0 then false
-  else if a_off >= a_max then false
-  else if b_off >= b_max then false
-  else let
-    val ab = byte2int0($A.get<byte>(arr, $AR.checked_idx(a_off, a_max)))
-    val bb = byte2int0($A.read<byte>(bv, $AR.checked_idx(b_off, b_max)))
-  in
-    if ab != bb then false
-    else _arr_borrow_eq(arr, a_off + 1, a_max, bv, b_off + 1, b_max, count - 1)
-  end
-
 fun _copy_from_borrow
   {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
@@ -269,26 +251,6 @@ fun _copy_from_borrow
     val () = $A.set<byte>(dst, $AR.checked_idx(dst_off, dst_max), b)
   in
     _copy_from_borrow(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1)
-  end
-
-fun _find_zip_entry_borrow
-  {l:agz}{n:pos}{lb:agz}{nb:pos}{fuel:nat} .<fuel>.
-  (data: !$A.arr(byte, l, n), len: int n,
-   cd_offset: int, remaining: int fuel,
-   name_buf: !$A.borrow(byte, lb, nb), name_len: int nb): $Z.zip_entry =
-  if remaining <= 0 then
-    @{name_offset= ~1, name_len= 0, compression= 0,
-      compressed_size= 0, uncompressed_size= 0,
-      local_header_offset= 0}
-  else let
-    val @(entry, next_off) = $Z.parse_cd_entry(data, len, cd_offset)
-  in
-    if entry.name_len = name_len then
-      if _arr_borrow_eq(data, entry.name_offset, len,
-                        name_buf, 0, name_len, name_len) then
-        entry
-      else _find_zip_entry_borrow(data, len, next_off, remaining - 1, name_buf, name_len)
-    else _find_zip_entry_borrow(data, len, next_off, remaining - 1, name_buf, name_len)
   end
 
 fn _copy_arr_region
@@ -336,7 +298,7 @@ in
         var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
         val _cont_arr = $S.from_char_array(_cont_chars, 22)
         val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-        val cont = _find_zip_entry_borrow(file_buf, file_size_s, cd_off,
+        val cont = $Z.find_entry_by_name(file_buf, file_size_s, cd_off,
                     $AR.checked_nat(cd_count),
                     _cont_b, 22)
         val () = $A.drop<byte>(_cont_f, _cont_b)
@@ -444,7 +406,7 @@ in
                   val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
 
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
-                  val opf_entry = _find_zip_entry_borrow(
+                  val opf_entry = $Z.find_entry_by_name(
                     file_buf2, file_size_s2, cd_off,
                     $AR.checked_nat(cd_count),
                     opf_borrow, opf_path_sz)
@@ -711,7 +673,7 @@ in
           val () = $A.free<byte>(t)
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = _find_zip_entry_borrow(
+          val ch_entry = $Z.find_entry_by_name(
             fbuf3, fsz_s3, cd_off,
             $AR.checked_nat(cd_cnt),
             chb, full_len_s)
