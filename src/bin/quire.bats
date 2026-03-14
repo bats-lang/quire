@@ -18,6 +18,7 @@
 staload "state.sats"
 staload "theme.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
+staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
@@ -586,6 +587,101 @@ fn _apply_diff(d: $W.diff): void = let
 in end
 
 (* ============================================================
+   Persistence helpers (IDB)
+   ============================================================ *)
+
+(* Save reading position to IDB: 4 bytes = u16 chapter + u16 page *)
+fn _save_position(): void = let
+  val ch = $ST.stash_get_int(23)
+  val pg = $ST.stash_get_int(21)
+  val buf = $A.alloc<byte>(4)
+  val () = $A.set<byte>(buf, 0, int2byte0(ch mod 256))
+  val () = $A.set<byte>(buf, 1, int2byte0(ch / 256))
+  val () = $A.set<byte>(buf, 2, int2byte0(pg mod 256))
+  val () = $A.set<byte>(buf, 3, int2byte0(pg / 256))
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  var k = @[char][3]('p', 'o', 's')
+  val ka = $A.alloc<byte>(3)
+  val () = $A.set<byte>(ka, 0, int2byte0(112))
+  val () = $A.set<byte>(ka, 1, int2byte0(111))
+  val () = $A.set<byte>(ka, 2, int2byte0(115))
+  val @(kf, kb) = $A.freeze<byte>(ka)
+  val p = $IDB.idb_put(kb, 3, bb, 4)
+  val () = $P.discard<int>(p)
+  val () = $A.drop<byte>(kf, kb)
+  val kt = $A.thaw<byte>(kf)
+  val () = $A.free<byte>(kt)
+  val () = $A.drop<byte>(bf, bb)
+  val bt = $A.thaw<byte>(bf)
+  val () = $A.free<byte>(bt)
+in end
+
+(* Save EPUB file bytes to IDB *)
+fn _save_epub_to_idb(): void = let
+  val fh = $ST.stash_get_int(10)
+  val fsz = $ST.stash_get_int(11)
+in
+  if fsz > 0 then
+    if fsz <= 1048576 then let
+      val fsz_s = $AR.checked_arr_size(fsz)
+      val fbuf = $A.alloc<byte>(fsz_s)
+      val () = $R.discard($FI.file_read(fh, 0, fbuf, fsz_s))
+      val @(ff, fb) = $A.freeze<byte>(fbuf)
+      val ka = $A.alloc<byte>(4)
+      val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
+      val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
+      val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
+      val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
+      val @(kf, kb) = $A.freeze<byte>(ka)
+      val p = $IDB.idb_put(kb, 4, fb, fsz_s)
+      val () = $P.discard<int>(p)
+      val () = $A.drop<byte>(kf, kb)
+      val kt = $A.thaw<byte>(kf)
+      val () = $A.free<byte>(kt)
+      val () = $A.drop<byte>(ff, fb)
+      val ft = $A.thaw<byte>(ff)
+      val () = $A.free<byte>(ft)
+    in end
+    else ()
+  else ()
+end
+
+(* Save stash metadata to IDB: slots 10-18 as 9 x 4-byte ints *)
+fn _save_metadata_to_idb(): void = let
+  val buf = $A.alloc<byte>(36)
+  fun _write_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
+    (buf: !$A.arr(byte, l, n), max: int n,
+     slot: int s, off: int, fuel: int fuel): void =
+    if fuel <= 0 then ()
+    else if slot >= 32 then ()
+    else if off < 0 then ()
+    else if off + 3 >= max then ()
+    else let
+      val v = $ST.stash_get_int(slot)
+      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(v mod 256))
+      val () = $A.set<byte>(buf, $AR.checked_idx(off + 1, max), int2byte0((v / 256) mod 256))
+      val () = $A.set<byte>(buf, $AR.checked_idx(off + 2, max), int2byte0((v / 65536) mod 256))
+      val () = $A.set<byte>(buf, $AR.checked_idx(off + 3, max), int2byte0((v / 16777216) mod 256))
+    in _write_slot(buf, max, slot + 1, off + 4, fuel - 1) end
+  val () = _write_slot(buf, 36, 10, 0, 9)
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  val ka = $A.alloc<byte>(4)
+  val () = $A.set<byte>(ka, 0, int2byte0(109)) (* m *)
+  val () = $A.set<byte>(ka, 1, int2byte0(101)) (* e *)
+  val () = $A.set<byte>(ka, 2, int2byte0(116)) (* t *)
+  val () = $A.set<byte>(ka, 3, int2byte0(97))  (* a *)
+  val @(kf, kb) = $A.freeze<byte>(ka)
+  val p = $IDB.idb_put(kb, 4, bb, 36)
+  val () = $P.discard<int>(p)
+  val () = $A.drop<byte>(kf, kb)
+  val kt = $A.thaw<byte>(kf)
+  val () = $A.free<byte>(kt)
+  val () = $A.drop<byte>(bf, bb)
+  val bt = $A.thaw<byte>(bf)
+  val () = $A.free<byte>(bt)
+in end
+
+(* ============================================================
    Pagination helpers
    ============================================================ *)
 
@@ -723,6 +819,7 @@ fn _scroll_to_page(page: int): void = let
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val () = _update_page_indicator()
+  val () = _save_position()
 in end
 
 fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
@@ -964,6 +1061,7 @@ in
                     val () = _apply_diff($W.SetInnerHtml(cnt_id, html_text, tsz))
                     val () = $ST.stash_set_int(23, chapter_idx + 1)
                     val () = _measure_pagination()
+                    val () = _save_position()
                   in $P.ret<int>(0) end
                 end
               end)
@@ -994,6 +1092,131 @@ in
     else _scroll_to_page(0)
   else _scroll_to_page(page)
 end
+
+(* Restore reading state from IDB on startup *)
+fn _restore_from_idb(): void = let
+  (* Step 1: get "book" from IDB *)
+  val ka = $A.alloc<byte>(4)
+  val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
+  val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
+  val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
+  val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
+  val @(kf, kb) = $A.freeze<byte>(ka)
+  val book_p = $IDB.idb_get(kb, 4)
+  val () = $A.drop<byte>(kf, kb)
+  val ktmp = $A.thaw<byte>(kf)
+  val () = $A.free<byte>(ktmp)
+  val book_p = $P.vow(book_p)
+  val p2 = $P.and_then<int><int>(book_p, lam(book_len) =>
+    if book_len <= 0 then $P.ret<int>(~1)
+    else if book_len > 1048576 then $P.ret<int>(~1)
+    else let
+      (* Read EPUB bytes from IDB result *)
+      val bsz = $AR.checked_arr_size(book_len)
+      val book_data = $IDB.idb_get_result(bsz)
+      (* Store into file cache *)
+      val @(bf, bb) = $A.freeze<byte>(book_data)
+      val fh = $FI.file_store(bb, bsz)
+      val () = $A.drop<byte>(bf, bb)
+      val btmp = $A.thaw<byte>(bf)
+      val () = $A.free<byte>(btmp)
+      val () = $ST.stash_set_int(10, fh)
+      val () = $ST.stash_set_int(11, book_len)
+
+      (* Step 2: get "meta" from IDB *)
+      val ma = $A.alloc<byte>(4)
+      val () = $A.set<byte>(ma, 0, int2byte0(109)) (* m *)
+      val () = $A.set<byte>(ma, 1, int2byte0(101)) (* e *)
+      val () = $A.set<byte>(ma, 2, int2byte0(116)) (* t *)
+      val () = $A.set<byte>(ma, 3, int2byte0(97))  (* a *)
+      val @(mf, mb) = $A.freeze<byte>(ma)
+      val meta_p = $IDB.idb_get(mb, 4)
+      val () = $A.drop<byte>(mf, mb)
+      val mtmp = $A.thaw<byte>(mf)
+      val () = $A.free<byte>(mtmp)
+      val meta_p = $P.vow(meta_p)
+    in
+      $P.and_then<int><int>(meta_p, lam(meta_len) =>
+        if meta_len <> 36 then $P.ret<int>(~2)
+        else let
+          (* Read 9 x 4-byte ints = stash slots 10-18 *)
+          val meta_data = $IDB.idb_get_result(36)
+          fun _read_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
+            (buf: !$A.arr(byte, l, n), max: int n,
+             slot: int s, off: int, fuel: int fuel): void =
+            if fuel <= 0 then ()
+            else if slot >= 32 then ()
+            else if off < 0 then ()
+            else if off + 3 >= max then ()
+            else let
+              val b0 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off, max)))
+              val b1 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 1, max)))
+              val b2 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 2, max)))
+              val b3 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 3, max)))
+              val v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+              val () = $ST.stash_set_int(slot, v)
+            in _read_slot(buf, max, slot + 1, off + 4, fuel - 1) end
+          val () = _read_slot(meta_data, 36, 10, 0, 9)
+          val () = $A.free<byte>(meta_data)
+          (* Override slot 10 with the new file handle from file_store *)
+          val () = $ST.stash_set_int(10, fh)
+
+          (* Step 3: get "pos" from IDB *)
+          val pa = $A.alloc<byte>(3)
+          val () = $A.set<byte>(pa, 0, int2byte0(112)) (* p *)
+          val () = $A.set<byte>(pa, 1, int2byte0(111)) (* o *)
+          val () = $A.set<byte>(pa, 2, int2byte0(115)) (* s *)
+          val @(pf, pb) = $A.freeze<byte>(pa)
+          val pos_p = $IDB.idb_get(pb, 3)
+          val () = $A.drop<byte>(pf, pb)
+          val ptmp = $A.thaw<byte>(pf)
+          val () = $A.free<byte>(ptmp)
+          val pos_p = $P.vow(pos_p)
+        in
+          $P.and_then<int><int>(pos_p, lam(pos_len) =>
+            if pos_len <> 4 then let
+              (* No saved position — just load chapter 0 *)
+              (* Show reader, hide library *)
+              var ll_c = @[char][4]('q', 'l', 'l', 'c')
+              val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
+              var rv_c = @[char][4]('q', 'r', 'v', 'w')
+              val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+              val () = _apply_diff($W.SetHidden(ll_id, 1))
+              val () = _apply_diff($W.SetHidden(rv_id, 0))
+              val ch_p = _load_chapter(0)
+              val () = $P.discard<int>(ch_p)
+            in $P.ret<int>(0) end
+            else let
+              val pos_data = $IDB.idb_get_result(4)
+              val ch_lo = byte2int0($A.get<byte>(pos_data, 0))
+              val ch_hi = byte2int0($A.get<byte>(pos_data, 1))
+              val pg_lo = byte2int0($A.get<byte>(pos_data, 2))
+              val pg_hi = byte2int0($A.get<byte>(pos_data, 3))
+              val () = $A.free<byte>(pos_data)
+              val saved_ch = ch_lo + ch_hi * 256
+              val saved_pg = pg_lo + pg_hi * 256
+              (* Show reader, hide library *)
+              var ll_c = @[char][4]('q', 'l', 'l', 'c')
+              val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
+              var rv_c = @[char][4]('q', 'r', 'v', 'w')
+              val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+              val () = _apply_diff($W.SetHidden(ll_id, 1))
+              val () = _apply_diff($W.SetHidden(rv_id, 0))
+              (* Load the saved chapter (1-indexed → 0-indexed) *)
+              val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): int
+              val ch_p = _load_chapter(ch_idx)
+              (* After chapter loads, scroll to saved page *)
+              val ch_p2 = $P.and_then<int><int>(ch_p, lam(result) =>
+                if result = 0 then let
+                  val () = _scroll_to_page(saved_pg)
+                in $P.ret<int>(0) end
+                else $P.ret<int>(result))
+              val () = $P.discard<int>(ch_p2)
+            in $P.ret<int>(0) end)
+        end)
+    end)
+  val () = $P.discard<int>(p2)
+in end
 
 (* ============================================================
    App entry point
@@ -1195,6 +1418,8 @@ in
             val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
             var lc_c = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
             val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc_c, 18), 18))
+            val () = _save_epub_to_idb()
+            val () = _save_metadata_to_idb()
             val ch_p = _load_chapter(0)
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
@@ -1437,6 +1662,8 @@ in
     val nid = $D.get_next_id(doc)
     val () = $ST.stash_set_int(20, nid)
     val () = $D.destroy(doc)
+    (* Try to restore saved book from IDB *)
+    val () = _restore_from_idb()
   in end
   else let
     val nid = $D.get_next_id(doc)

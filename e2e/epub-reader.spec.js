@@ -450,7 +450,108 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
-  // Future phases
-  test.skip('library persists across page reload', async ({ page }) => {});
-  test.skip('reading position is restored', async ({ page }) => {});
+  // Phase 7: persistence
+  test('library persists across page reload', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Persist Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 8,
+    });
+
+    // Wait for reader view and content
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Reload the page
+    await page.reload();
+    await page.waitForTimeout(2000);
+
+    // After reload, reader view should be visible (restored from IDB)
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    // Library should be hidden
+    await expect(page.locator('#qllc')).toBeHidden();
+
+    // Content should be loaded
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+
+    expect(errors.length).toBe(0);
+  });
+
+  test('reading position is restored', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Position Test',
+      author: 'Bot',
+      chapters: 3,
+      paragraphsPerChapter: 40,
+    });
+
+    // Wait for reader view and content
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 200;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Navigate to page 2
+    const nextBtn = page.locator('#qnxt');
+    await nextBtn.click();
+    await page.waitForTimeout(500);
+
+    const pageInfo = page.locator('#qpgi');
+    const textBefore = await pageInfo.textContent();
+    expect(textBefore).toMatch(/\s+2\/\d+$/);
+
+    // Wait for IDB save to complete
+    await page.waitForTimeout(1000);
+
+    // Reload the page
+    await page.reload();
+    await page.waitForTimeout(2000);
+
+    // Reader view should be visible
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+
+    // Wait for content to load
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Page indicator should show the saved position
+    const pageInfoAfter = page.locator('#qpgi');
+    await expect(pageInfoAfter).toBeVisible();
+    const textAfter = await pageInfoAfter.textContent();
+    // Should be on page 2 of chapter 1
+    expect(textAfter).toMatch(/^Ch 1 · p\. 2\/\d+$/);
+
+    expect(errors.length).toBe(0);
+  });
 });
