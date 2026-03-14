@@ -554,4 +554,135 @@ test.describe('EPUB Reader E2E', () => {
 
     expect(errors.length).toBe(0);
   });
+
+  // Phase 8: settings
+  test('font size settings panel works', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Settings Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 20,
+    });
+
+    // Wait for reader view and content
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 100;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Settings panel should be hidden initially
+    await expect(page.locator('#qspn')).toBeHidden();
+
+    // Click settings gear button
+    await page.locator('#qset').click();
+    await page.waitForTimeout(500);
+
+    // Settings panel should be visible
+    await expect(page.locator('#qspn')).toBeVisible();
+
+    // A- and A+ buttons should be visible
+    await expect(page.locator('#qfsm')).toBeVisible();
+    await expect(page.locator('#qfsp')).toBeVisible();
+
+    // Get initial font size from computed style
+    const initialFontSize = await page.locator('#qcnt').evaluate(el => {
+      return parseFloat(getComputedStyle(el).fontSize);
+    });
+
+    // Click A+ to increase font size
+    await page.locator('#qfsp').click();
+    await page.waitForTimeout(500);
+
+    const largerFontSize = await page.locator('#qcnt').evaluate(el => {
+      return parseFloat(getComputedStyle(el).fontSize);
+    });
+    expect(largerFontSize).toBeGreaterThan(initialFontSize);
+
+    // Click A- to decrease font size back
+    await page.locator('#qfsm').click();
+    await page.waitForTimeout(500);
+
+    const restoredFontSize = await page.locator('#qcnt').evaluate(el => {
+      return parseFloat(getComputedStyle(el).fontSize);
+    });
+    expect(restoredFontSize).toBe(initialFontSize);
+
+    // Close settings panel
+    await page.locator('#qscl').click();
+    await page.waitForTimeout(500);
+
+    // Settings panel should be hidden
+    await expect(page.locator('#qspn')).toBeHidden();
+
+    expect(errors.length).toBe(0);
+  });
+
+  test('font size persists across reload', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Font Persist Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 20,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 100;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Open settings and increase font size
+    await page.locator('#qset').click();
+    await page.waitForTimeout(300);
+    await page.locator('#qfsp').click();
+    await page.waitForTimeout(300);
+    await page.locator('#qfsp').click();
+    await page.waitForTimeout(300);
+
+    const largerFontSize = await page.locator('#qcnt').evaluate(el => {
+      return parseFloat(getComputedStyle(el).fontSize);
+    });
+
+    // Close settings
+    await page.locator('#qscl').click();
+    await page.waitForTimeout(1000);
+
+    // Reload
+    await page.reload();
+    await page.waitForTimeout(2000);
+
+    // Wait for reader to restore
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Font size should be preserved
+    const restoredFontSize = await page.locator('#qcnt').evaluate(el => {
+      return parseFloat(getComputedStyle(el).fontSize);
+    });
+    expect(restoredFontSize).toBe(largerFontSize);
+
+    expect(errors.length).toBe(0);
+  });
 });
