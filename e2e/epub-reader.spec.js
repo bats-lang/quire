@@ -153,7 +153,7 @@ test.describe('EPUB Reader E2E', () => {
       title: 'Nav Test',
       author: 'Bot',
       chapters: 3,
-      paragraphsPerChapter: 12,
+      paragraphsPerChapter: 40,
     });
 
     // Wait for reader view and content
