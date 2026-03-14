@@ -19,6 +19,8 @@ staload "state.sats"
 staload "theme.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
+staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 
 (* ============================================================
    EPUB import helpers
@@ -235,6 +237,24 @@ and _check_manifest_item
     else _find_manifest_href(data, len, children, idref_off, idref_len)
   end
   | $X.xml_text(_, _) => @(~1, 0)
+
+(* Convert arr(byte) to text for SetInnerHtml *)
+fun _arr_to_text_loop
+  {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
+  (src: !$A.arr(byte, l, n), len: int n,
+   tb: $A.text_builder(n, i), pos: int i): $A.text_builder(n, n) =
+  if pos >= len then tb
+  else let
+    val b = byte2int0($A.get<byte>(src, $AR.checked_idx(pos, len)))
+    val tb = $A.text_putc(tb, pos, $AR.checked_byte(b))
+  in _arr_to_text_loop(src, len, tb, pos + 1) end
+
+fn _arr_to_text
+  {l:agz}{n:pos}
+  (src: !$A.arr(byte, l, n), len: int n): $A.text(n) = let
+  val tb = $A.text_build(len)
+  val tb = _arr_to_text_loop(src, len, tb, 0)
+in $A.text_done(tb) end
 
 fun _copy_from_borrow
   {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
@@ -529,6 +549,151 @@ fn _apply_diff(d: $W.diff): void = let
   val () = $D.destroy(doc)
 in end
 
+(* ============================================================
+   Pagination helpers
+   ============================================================ *)
+
+(* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter *)
+
+(* Write an integer into a byte buffer at offset, return new offset *)
+fun _write_int_digits
+  {l:agz}{n:pos}{v:nat}{fuel:nat} .<fuel>.
+  (buf: !$A.arr(byte, l, n), max: int n,
+   off: int, value: int v, fuel: int fuel): int =
+  if fuel <= 0 then off
+  else if value < 10 then
+    if off >= 0 then
+      if off < max then let
+        val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(48 + value))
+      in off + 1 end
+      else off
+    else off
+  else let
+    val new_off = _write_int_digits(buf, max, off, value / 10, fuel - 1)
+  in
+    if new_off >= 0 then
+      if new_off < max then let
+        val () = $A.set<byte>(buf, $AR.checked_idx(new_off, max),
+          int2byte0(48 + (value - (value / 10) * 10)))
+      in new_off + 1 end
+      else new_off
+    else new_off
+  end
+
+fn _set_byte
+  {l:agz}{n:pos}
+  (buf: !$A.arr(byte, l, n), max: int n, off: int, b: int): int =
+  if off >= 0 then
+    if off < max then let
+      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(b))
+    in off + 1 end
+    else off
+  else off
+
+fn _update_page_indicator(): void = let
+  val cur_page = $ST.stash_get_int(21)
+  val total = $ST.stash_get_int(22)
+  val chapter = $ST.stash_get_int(23)
+  (* Build "Ch N · p. M/T" in a 24-byte buffer *)
+  val tbuf = $A.alloc<byte>(24)
+  val off = _set_byte(tbuf, 24, 0, 67)  (* C *)
+  val off = _set_byte(tbuf, 24, off, 104) (* h *)
+  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
+  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(chapter), 3)
+  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
+  val off = _set_byte(tbuf, 24, off, 194) (* 0xC2 = first byte of · *)
+  val off = _set_byte(tbuf, 24, off, 183) (* 0xB7 = second byte of · *)
+  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
+  val off = _set_byte(tbuf, 24, off, 112) (* p *)
+  val off = _set_byte(tbuf, 24, off, 46)  (* . *)
+  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
+  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(cur_page + 1), 3)
+  val off = _set_byte(tbuf, 24, off, 47)  (* / *)
+  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(total), 3)
+in
+  if off > 0 then
+    if off < 24 then let
+      (* Copy to exact-size buffer for text conversion *)
+      val tsz = $AR.checked_text_size(off)
+      val exact = $A.alloc<byte>(tsz)
+      fun _copy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
+        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
+         max_s: int na, max_d: int nb, i: int i): void =
+        if i >= max_s then ()
+        else if i >= max_d then ()
+        else let
+          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
+          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+        in _copy(src, dst, max_s, max_d, i + 1) end
+      val () = _copy(tbuf, exact, 24, tsz, 0)
+      val () = $A.free<byte>(tbuf)
+      val txt = _arr_to_text(exact, tsz)
+      val () = $A.free<byte>(exact)
+      var pi_c = @[char][4]('q', 'p', 'g', 'i')
+      val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
+      val () = _apply_diff($W.SetTextContent(pi_id, txt, tsz))
+    in end
+    else let
+      val () = $A.free<byte>(tbuf)
+    in end
+  else let
+    val () = $A.free<byte>(tbuf)
+  in end
+end
+
+fn _measure_pagination(): void = let
+  val cnt_narr = $A.alloc<byte>(4)
+  val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
+  val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
+  val () = $A.set<byte>(cnt_narr, 2, int2byte0(110))
+  val () = $A.set<byte>(cnt_narr, 3, int2byte0(116))
+  val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
+  val mr = $DR.measure(cnt_b, 4)
+  val () = $A.drop<byte>(cnt_f, cnt_b)
+  val cnt_tmp = $A.thaw<byte>(cnt_f)
+  val () = $A.free<byte>(cnt_tmp)
+  val _ = $R.discard<int><int>(mr)
+  val cw = $DR.get_measure_w()
+  val sw = $DR.get_measure_scroll_w()
+in
+  if cw > 0 then let
+    val total = sw / cw
+    val total_p = (if total < 1 then 1 else total): int
+    val () = $ST.stash_set_int(21, 0)
+    val () = $ST.stash_set_int(22, total_p)
+    val () = _update_page_indicator()
+  in end
+  else let
+    val () = $ST.stash_set_int(21, 0)
+    val () = $ST.stash_set_int(22, 1)
+    val () = _update_page_indicator()
+  in end
+end
+
+fn _go_to_page(page: int): void = let
+  val total = $ST.stash_get_int(22)
+  val p = (if page < 0 then 0
+           else if page >= total then total - 1
+           else page): int
+  val () = $ST.stash_set_int(21, p)
+  (* Scroll content area *)
+  val cnt_narr = $A.alloc<byte>(4)
+  val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
+  val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
+  val () = $A.set<byte>(cnt_narr, 2, int2byte0(110))
+  val () = $A.set<byte>(cnt_narr, 3, int2byte0(116))
+  val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
+  val mr = $DR.measure(cnt_b, 4)
+  val _ = $R.discard<int><int>(mr)
+  val cw = $DR.get_measure_w()
+  val scroll_x = p * cw
+  val () = $SC.set_scroll_left(cnt_b, 4, scroll_x)
+  val () = $A.drop<byte>(cnt_f, cnt_b)
+  val cnt_tmp = $A.thaw<byte>(cnt_f)
+  val () = $A.free<byte>(cnt_tmp)
+  val () = _update_page_indicator()
+in end
+
 fn _load_first_chapter(): $P.promise(int, $P.Chained) = let
   val fh = $ST.stash_get_int(10)
   val fsz = $ST.stash_get_int(11)
@@ -744,16 +909,26 @@ in
                     var fpc_c = @[char][23]('F', 'a', 'i', 'l', 'e', 'd', ' ', 't', 'o', ' ', 'p', 'a', 'r', 's', 'e', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r')
                     val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(fpc_c, 23), 23))
                   in $P.ret<int>(~7) end
-                  else if parse_len > 1048576 then $P.ret<int>(~7)
-                  else let
+                  else if parse_len > 65535 then let
                     val psz = $AR.checked_arr_size(parse_len)
                     val pbuf = $H.get_result(psz)
                     val () = $A.free<byte>(pbuf)
-                    (* TODO: render chapter content — needs safe borrow→string *)
                     var cnt_c = @[char][4]('q', 'c', 'n', 't')
                     val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    var cl_c = @[char][14]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', 'l', 'o', 'a', 'd', 'e', 'd')
-                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(cl_c, 14), 14))
+                    var tc = @[char][17]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', 't', 'o', 'o', ' ', 'l', 'a', 'r', 'g', 'e')
+                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(tc, 17), 17))
+                  in $P.ret<int>(~7) end
+                  else let
+                    val tsz = $AR.checked_text_size(parse_len)
+                    val pbuf = $H.get_result(tsz)
+                    (* Render chapter HTML into content area *)
+                    val html_text = _arr_to_text(pbuf, tsz)
+                    val () = $A.free<byte>(pbuf)
+                    var cnt_c = @[char][4]('q', 'c', 'n', 't')
+                    val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
+                    val () = _apply_diff($W.SetInnerHtml(cnt_id, html_text, tsz))
+                    val () = $ST.stash_set_int(23, 1)
+                    val () = _measure_pagination()
                   in $P.ret<int>(0) end
                 end
               end)
@@ -803,24 +978,101 @@ implement main0 () = let
   val @(rv, diff) = $W.set_hidden(rv, 1)
   val () = $D.apply(doc, diff)
 
-  (* Back button inside reader view *)
+  (* Nav bar inside reader view *)
+  var nv_c = @[char][4]('q', 'r', 'n', 'v')
+  val nv_id = $W.Generated($S.text_of_chars(nv_c, 4), 4)
+  val nv = $W.Element($W.ElementNode(nv_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(rv, diff) = $W.add_child(rv, nv)
+  val () = $D.apply(doc, diff)
+  val @(nv, diff) = $W.set_class(nv, cls_nav_bar())
+  val () = $D.apply(doc, diff)
+
+  (* Back button inside nav bar *)
   var bb_c = @[char][4]('q', 'b', 'b', 'k')
   val bb_id = $W.Generated($S.text_of_chars(bb_c, 4), 4)
   val bb = $W.Element($W.ElementNode(bb_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(rv, diff) = $W.add_child(rv, bb)
+  val @(nv, diff) = $W.add_child(nv, bb)
   val () = $D.apply(doc, diff)
   val @(_, diff) = $W.set_class(bb, cls_back_btn())
   val () = $D.apply(doc, diff)
-  var back_c = @[char][4]('B', 'a', 'c', 'k')
-  val () = $D.apply(doc, $W.set_text_content(bb_id, $S.text_of_chars(back_c, 4), 4))
+  (* U+2190 = ← = 0xE2 0x86 0x90 *)
+  var back_c = @[char][3]('\xE2', '\x86', '\x90')
+  val () = $D.apply(doc, $W.set_text_content(bb_id, $S.text_of_chars(back_c, 3), 3))
+
+  (* Chapter title *)
+  var ct_c = @[char][4]('q', 'c', 'h', 't')
+  val ct_id = $W.Generated($S.text_of_chars(ct_c, 4), 4)
+  val ct = $W.Element($W.ElementNode(ct_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(nv, diff) = $W.add_child(nv, ct)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(ct, cls_chapter_title())
+  val () = $D.apply(doc, diff)
+  var cht_txt = @[char][9]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', '1')
+  val () = $D.apply(doc, $W.set_text_content(ct_id, $S.text_of_chars(cht_txt, 9), 9))
+
+  (* Page info *)
+  var pi_c = @[char][4]('q', 'p', 'g', 'i')
+  val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
+  val pi = $W.Element($W.ElementNode(pi_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(nv, diff) = $W.add_child(nv, pi)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(pi, cls_page_info())
+  val () = $D.apply(doc, diff)
+
+  (* Prev button — U+2039 = ‹ = 0xE2 0x80 0xB9 *)
+  var pv_c = @[char][4]('q', 'p', 'r', 'v')
+  val pv_id = $W.Generated($S.text_of_chars(pv_c, 4), 4)
+  val pv = $W.Element($W.ElementNode(pv_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(nv, diff) = $W.add_child(nv, pv)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(pv, cls_nav_button())
+  val () = $D.apply(doc, diff)
+  var prev_c = @[char][3]('\xE2', '\x80', '\xB9')
+  val () = $D.apply(doc, $W.set_text_content(pv_id, $S.text_of_chars(prev_c, 3), 3))
+
+  (* Next button — U+203A = › = 0xE2 0x80 0xBA *)
+  var nx_c = @[char][4]('q', 'n', 'x', 't')
+  val nx_id = $W.Generated($S.text_of_chars(nx_c, 4), 4)
+  val nx = $W.Element($W.ElementNode(nx_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(_, diff) = $W.add_child(nv, nx)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(nx, cls_nav_button())
+  val () = $D.apply(doc, diff)
+  var next_c = @[char][3]('\xE2', '\x80', '\xBA')
+  val () = $D.apply(doc, $W.set_text_content(nx_id, $S.text_of_chars(next_c, 3), 3))
 
   (* Content area inside reader view *)
   var ca_c = @[char][4]('q', 'c', 'n', 't')
   val ca_id = $W.Generated($S.text_of_chars(ca_c, 4), 4)
   val ca = $W.Element($W.ElementNode(ca_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(rv, ca)
+  val @(rv, diff) = $W.add_child(rv, ca)
   val () = $D.apply(doc, diff)
   val @(_, diff) = $W.set_class(ca, cls_content_area())
+  val () = $D.apply(doc, diff)
+
+  (* Click zones — transparent overlays for page navigation *)
+  var zl_c = @[char][4]('q', 'c', 'z', 'l')
+  val zl_id = $W.Generated($S.text_of_chars(zl_c, 4), 4)
+  val zl = $W.Element($W.ElementNode(zl_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(rv, diff) = $W.add_child(rv, zl)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(zl, cls_zone_left())
+  val () = $D.apply(doc, diff)
+
+  var zr_c = @[char][4]('q', 'c', 'z', 'r')
+  val zr_id = $W.Generated($S.text_of_chars(zr_c, 4), 4)
+  val zr = $W.Element($W.ElementNode(zr_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(rv, diff) = $W.add_child(rv, zr)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(zr, cls_zone_right())
+  val () = $D.apply(doc, diff)
+
+  var zc_c = @[char][4]('q', 'c', 'z', 'c')
+  val zc_id = $W.Generated($S.text_of_chars(zc_c, 4), 4)
+  val zc = $W.Element($W.ElementNode(zc_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(_, diff) = $W.add_child(rv, zc)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(zc, cls_zone_center())
   val () = $D.apply(doc, diff)
 in
   if is_library_empty(st) then let
@@ -962,6 +1214,170 @@ in
     val () = $A.drop<byte>(ck_f, ck_b)
     val ck_tmp = $A.thaw<byte>(ck_f)
     val () = $A.free<byte>(ck_tmp)
+
+    (* Wire prev button click — listener 3 *)
+    val pv_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(pv_narr, 0, int2byte0(113))
+    val () = $A.set<byte>(pv_narr, 1, int2byte0(112))
+    val () = $A.set<byte>(pv_narr, 2, int2byte0(114))
+    val () = $A.set<byte>(pv_narr, 3, int2byte0(118))
+    val @(pv_nf, pv_nb) = $A.freeze<byte>(pv_narr)
+    val ck2_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck2_arr, 0, int2byte0(99))
+    val () = $A.set<byte>(ck2_arr, 1, int2byte0(108))
+    val () = $A.set<byte>(ck2_arr, 2, int2byte0(105))
+    val () = $A.set<byte>(ck2_arr, 3, int2byte0(99))
+    val () = $A.set<byte>(ck2_arr, 4, int2byte0(107))
+    val @(ck2_f, ck2_b) = $A.freeze<byte>(ck2_arr)
+    val () = $EV.listen(pv_nb, 4, ck2_b, 5, 3,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(21)
+      in _go_to_page(cur - 1); 0 end)
+    val () = $A.drop<byte>(pv_nf, pv_nb)
+    val pv_ntmp = $A.thaw<byte>(pv_nf)
+    val () = $A.free<byte>(pv_ntmp)
+    val () = $A.drop<byte>(ck2_f, ck2_b)
+    val ck2_tmp = $A.thaw<byte>(ck2_f)
+    val () = $A.free<byte>(ck2_tmp)
+
+    (* Wire next button click — listener 4 *)
+    val nx_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(nx_narr, 0, int2byte0(113))
+    val () = $A.set<byte>(nx_narr, 1, int2byte0(110))
+    val () = $A.set<byte>(nx_narr, 2, int2byte0(120))
+    val () = $A.set<byte>(nx_narr, 3, int2byte0(116))
+    val @(nx_nf, nx_nb) = $A.freeze<byte>(nx_narr)
+    val ck3_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck3_arr, 0, int2byte0(99))
+    val () = $A.set<byte>(ck3_arr, 1, int2byte0(108))
+    val () = $A.set<byte>(ck3_arr, 2, int2byte0(105))
+    val () = $A.set<byte>(ck3_arr, 3, int2byte0(99))
+    val () = $A.set<byte>(ck3_arr, 4, int2byte0(107))
+    val @(ck3_f, ck3_b) = $A.freeze<byte>(ck3_arr)
+    val () = $EV.listen(nx_nb, 4, ck3_b, 5, 4,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(21)
+      in _go_to_page(cur + 1); 0 end)
+    val () = $A.drop<byte>(nx_nf, nx_nb)
+    val nx_ntmp = $A.thaw<byte>(nx_nf)
+    val () = $A.free<byte>(nx_ntmp)
+    val () = $A.drop<byte>(ck3_f, ck3_b)
+    val ck3_tmp = $A.thaw<byte>(ck3_f)
+    val () = $A.free<byte>(ck3_tmp)
+
+    (* Wire left click zone — listener 5: prev page *)
+    val zl_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(zl_narr, 0, int2byte0(113))
+    val () = $A.set<byte>(zl_narr, 1, int2byte0(99))
+    val () = $A.set<byte>(zl_narr, 2, int2byte0(122))
+    val () = $A.set<byte>(zl_narr, 3, int2byte0(108))
+    val @(zl_nf, zl_nb) = $A.freeze<byte>(zl_narr)
+    val ck4_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck4_arr, 0, int2byte0(99))
+    val () = $A.set<byte>(ck4_arr, 1, int2byte0(108))
+    val () = $A.set<byte>(ck4_arr, 2, int2byte0(105))
+    val () = $A.set<byte>(ck4_arr, 3, int2byte0(99))
+    val () = $A.set<byte>(ck4_arr, 4, int2byte0(107))
+    val @(ck4_f, ck4_b) = $A.freeze<byte>(ck4_arr)
+    val () = $EV.listen(zl_nb, 4, ck4_b, 5, 5,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(21)
+      in _go_to_page(cur - 1); 0 end)
+    val () = $A.drop<byte>(zl_nf, zl_nb)
+    val zl_ntmp = $A.thaw<byte>(zl_nf)
+    val () = $A.free<byte>(zl_ntmp)
+    val () = $A.drop<byte>(ck4_f, ck4_b)
+    val ck4_tmp = $A.thaw<byte>(ck4_f)
+    val () = $A.free<byte>(ck4_tmp)
+
+    (* Wire right click zone — listener 6: next page *)
+    val zr_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(zr_narr, 0, int2byte0(113))
+    val () = $A.set<byte>(zr_narr, 1, int2byte0(99))
+    val () = $A.set<byte>(zr_narr, 2, int2byte0(122))
+    val () = $A.set<byte>(zr_narr, 3, int2byte0(114))
+    val @(zr_nf, zr_nb) = $A.freeze<byte>(zr_narr)
+    val ck5_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck5_arr, 0, int2byte0(99))
+    val () = $A.set<byte>(ck5_arr, 1, int2byte0(108))
+    val () = $A.set<byte>(ck5_arr, 2, int2byte0(105))
+    val () = $A.set<byte>(ck5_arr, 3, int2byte0(99))
+    val () = $A.set<byte>(ck5_arr, 4, int2byte0(107))
+    val @(ck5_f, ck5_b) = $A.freeze<byte>(ck5_arr)
+    val () = $EV.listen(zr_nb, 4, ck5_b, 5, 6,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(21)
+      in _go_to_page(cur + 1); 0 end)
+    val () = $A.drop<byte>(zr_nf, zr_nb)
+    val zr_ntmp = $A.thaw<byte>(zr_nf)
+    val () = $A.free<byte>(zr_ntmp)
+    val () = $A.drop<byte>(ck5_f, ck5_b)
+    val ck5_tmp = $A.thaw<byte>(ck5_f)
+    val () = $A.free<byte>(ck5_tmp)
+
+    (* Wire keyboard navigation — listener 7: document keydown *)
+    val kd_arr = $A.alloc<byte>(7)
+    val () = $A.set<byte>(kd_arr, 0, int2byte0(107)) (* k *)
+    val () = $A.set<byte>(kd_arr, 1, int2byte0(101)) (* e *)
+    val () = $A.set<byte>(kd_arr, 2, int2byte0(121)) (* y *)
+    val () = $A.set<byte>(kd_arr, 3, int2byte0(100)) (* d *)
+    val () = $A.set<byte>(kd_arr, 4, int2byte0(111)) (* o *)
+    val () = $A.set<byte>(kd_arr, 5, int2byte0(119)) (* w *)
+    val () = $A.set<byte>(kd_arr, 6, int2byte0(110)) (* n *)
+    val @(kd_f, kd_b) = $A.freeze<byte>(kd_arr)
+    val () = $EV.listen_document(kd_b, 7, 7,
+      lam(payload_len: int): int =>
+        if payload_len <= 0 then 0
+        else let
+          (* Keydown payload: 1 byte key_len, key bytes, 1 byte flags *)
+          val payload_sz = $AR.checked_arr_size(payload_len)
+          val payload = $EV.get_payload(payload_sz)
+          val key_len = byte2int0($A.get<byte>(payload, 0))
+        in
+          (* ArrowRight = 10 bytes, ArrowLeft = 9 bytes, Space = 1 byte " " *)
+          if key_len = 10 then let
+            (* Check for "ArrowRight" *)
+            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
+            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
+          in
+            if b1 = 65 then
+              if b2 = 114 then let
+                (* ArrowRight → next page *)
+                val () = $A.free<byte>(payload)
+                val cur = $ST.stash_get_int(21)
+              in _go_to_page(cur + 1); 0 end
+              else let val () = $A.free<byte>(payload) in 0 end
+            else let val () = $A.free<byte>(payload) in 0 end
+          end
+          else if key_len = 9 then let
+            (* Check for "ArrowLeft" *)
+            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
+            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
+          in
+            if b1 = 65 then
+              if b2 = 114 then let
+                (* ArrowLeft → prev page *)
+                val () = $A.free<byte>(payload)
+                val cur = $ST.stash_get_int(21)
+              in _go_to_page(cur - 1); 0 end
+              else let val () = $A.free<byte>(payload) in 0 end
+            else let val () = $A.free<byte>(payload) in 0 end
+          end
+          else if key_len = 1 then let
+            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
+          in
+            if b1 = 32 then let
+              (* Space → next page *)
+              val () = $A.free<byte>(payload)
+              val cur = $ST.stash_get_int(21)
+            in _go_to_page(cur + 1); 0 end
+            else let val () = $A.free<byte>(payload) in 0 end
+          end
+          else let val () = $A.free<byte>(payload) in 0 end
+        end)
+    val () = $A.drop<byte>(kd_f, kd_b)
+    val kd_tmp = $A.thaw<byte>(kd_f)
+    val () = $A.free<byte>(kd_tmp)
 
     val nid = $D.get_next_id(doc)
     val () = $ST.stash_set_int(20, nid)
