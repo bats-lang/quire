@@ -123,22 +123,145 @@ test.describe('EPUB Reader E2E', () => {
       title: 'Content Test',
       author: 'Bot',
       chapters: 2,
-      paragraphsPerChapter: 2,
+      paragraphsPerChapter: 4,
     });
 
     // Wait for reader view
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
 
-    // Content area should show loaded chapter
+    // Content area should show rendered chapter HTML
     const content = page.locator('#qcnt');
     await expect(content).toBeVisible();
-    await expect(content).toHaveText('Chapter loaded', { timeout: 15000 });
+    // Wait for chapter content (paragraph text from create-epub)
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Phase 4: page navigation
+  test('page navigation with buttons and click zones', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Nav Test',
+      author: 'Bot',
+      chapters: 3,
+      paragraphsPerChapter: 40,
+    });
+
+    // Wait for reader view and content
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 200;
+      },
+      { timeout: 15000 }
+    );
+    // Let CSS column layout settle
+    await page.waitForTimeout(1000);
+
+    // Verify nav bar elements
+    const navBar = page.locator('#qrnv');
+    await expect(navBar).toBeVisible();
+
+    const backBtn = page.locator('#qbbk');
+    await expect(backBtn).toBeVisible();
+
+    const pageInfo = page.locator('#qpgi');
+    await expect(pageInfo).toBeVisible();
+
+    const prevBtn = page.locator('#qprv');
+    const nextBtn = page.locator('#qnxt');
+    await expect(prevBtn).toBeVisible();
+    await expect(nextBtn).toBeVisible();
+
+    // Page indicator shows "Ch N · p. N/M" format
+    const pageText = await pageInfo.textContent();
+    expect(pageText).toMatch(/^Ch \d+ · p\. \d+\/\d+$/);
+    expect(pageText).toMatch(/^Ch 1 /);
+
+    // Content area has multi-page content (scrollWidth > clientWidth)
+    const content = page.locator('#qcnt');
+    const dims = await content.evaluate(el => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+    }));
+    expect(dims.scrollWidth).toBeGreaterThan(dims.clientWidth);
+
+    // Column width matches viewport width
+    const vpWidth = page.viewportSize().width;
+    expect(dims.scrollWidth % vpWidth).toBe(0);
+
+    // --- Test next button navigation ---
+    await nextBtn.click();
+    await page.waitForTimeout(500);
+
+    const pageTextAfterNext = await pageInfo.textContent();
+    expect(pageTextAfterNext).toMatch(/\s+2\/\d+$/);
+
+    // scrollLeft should have changed
+    const scrollAfterNext = await content.evaluate(el => el.scrollLeft);
+    expect(scrollAfterNext).toBe(vpWidth);
+
+    // --- Test prev button navigation ---
+    await prevBtn.click();
+    await page.waitForTimeout(500);
+
+    const pageTextAfterPrev = await pageInfo.textContent();
+    expect(pageTextAfterPrev).toMatch(/\s+1\/\d+$/);
+
+    // --- Click zone navigation ---
+    const rightZone = page.locator('#qczr');
+    const leftZone = page.locator('#qczl');
+
+    // Right zone → next page
+    await rightZone.click({ force: true });
+    await page.waitForTimeout(500);
+
+    const pageTextAfterZoneRight = await pageInfo.textContent();
+    expect(pageTextAfterZoneRight).toMatch(/\s+2\/\d+$/);
+
+    // Left zone → prev page
+    await leftZone.click({ force: true });
+    await page.waitForTimeout(500);
+
+    const pageTextAfterZoneLeft = await pageInfo.textContent();
+    expect(pageTextAfterZoneLeft).toMatch(/\s+1\/\d+$/);
+
+    // --- Keyboard navigation ---
+    // ArrowRight → next page
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(500);
+
+    const pageTextAfterArrowRight = await pageInfo.textContent();
+    expect(pageTextAfterArrowRight).toMatch(/\s+2\/\d+$/);
+
+    // ArrowLeft → prev page
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(500);
+
+    const pageTextAfterArrowLeft = await pageInfo.textContent();
+    expect(pageTextAfterArrowLeft).toMatch(/\s+1\/\d+$/);
+
+    // Space → next page
+    await page.keyboard.press('Space');
+    await page.waitForTimeout(500);
+
+    const pageTextAfterSpace = await pageInfo.textContent();
+    expect(pageTextAfterSpace).toMatch(/\s+2\/\d+$/);
 
     expect(errors.length).toBe(0);
   });
 
   // Future phases
-  test.skip('chapter content renders HTML elements', async ({ page }) => {});
   test.skip('next chapter navigation', async ({ page }) => {});
   test.skip('chapter progress display', async ({ page }) => {});
   test.skip('library persists across page reload', async ({ page }) => {});
