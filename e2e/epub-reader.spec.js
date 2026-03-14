@@ -261,9 +261,102 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // Phase 5: chapter navigation
+  test('next chapter navigation', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Chapter Nav Test',
+      author: 'Bot',
+      chapters: 3,
+      paragraphsPerChapter: 8,
+    });
+
+    // Wait for reader view and content
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    const pageInfo = page.locator('#qpgi');
+    await expect(pageInfo).toBeVisible();
+
+    // Should start at chapter 1
+    const initialText = await pageInfo.textContent();
+    expect(initialText).toMatch(/^Ch 1 /);
+
+    // Get total pages in chapter 1
+    const totalMatch = initialText.match(/(\d+)\/(\d+)$/);
+    const totalPages = parseInt(totalMatch[2]);
+
+    // Navigate to the last page of chapter 1
+    const nextBtn = page.locator('#qnxt');
+    for (let i = 1; i < totalPages; i++) {
+      await nextBtn.click();
+      await page.waitForTimeout(300);
+    }
+
+    // Verify we're on the last page
+    const lastPageText = await pageInfo.textContent();
+    expect(lastPageText).toMatch(new RegExp(`${totalPages}/${totalPages}$`));
+
+    // Click next to advance to chapter 2
+    await nextBtn.click();
+    await page.waitForTimeout(2000); // wait for async chapter load
+
+    // Wait for chapter 2 content to load
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qpgi');
+        return el && /^Ch 2 /.test(el.textContent);
+      },
+      { timeout: 15000 }
+    );
+
+    const ch2Text = await pageInfo.textContent();
+    expect(ch2Text).toMatch(/^Ch 2 · p\. 1\/\d+$/);
+
+    expect(errors.length).toBe(0);
+  });
+
+  test('chapter progress display', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Progress Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 8,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    const pageInfo = page.locator('#qpgi');
+    await expect(pageInfo).toBeVisible();
+
+    // Chapter 1 displays correctly
+    const ch1Text = await pageInfo.textContent();
+    expect(ch1Text).toMatch(/^Ch 1 · p\. 1\/\d+$/);
+
+    expect(errors.length).toBe(0);
+  });
+
   // Future phases
-  test.skip('next chapter navigation', async ({ page }) => {});
-  test.skip('chapter progress display', async ({ page }) => {});
   test.skip('library persists across page reload', async ({ page }) => {});
   test.skip('reading position is restored', async ({ page }) => {});
 });

@@ -153,39 +153,7 @@ fun _borrow_region_eq
     else _borrow_region_eq(data, len, off_a + 1, off_b + 1, count - 1)
   end
 
-(* Find first <itemref idref="..."> in <spine> *)
-fun _find_first_idref
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz)): @(int, int) =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val r = _check_itemref(data, len, node)
-    in
-      if r.0 >= 0 then r
-      else _find_first_idref(data, len, rest)
-    end
-  | $X.xml_nodes_nil() => @(~1, 0)
-
-and _check_itemref
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz)): @(int, int) =
-  case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
-    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
-    var _c_idref = @[char][5]('i', 'd', 'r', 'e', 'f')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_itemref, 7) then
-      _find_attr_val(data, len, attrs, _c_idref, 5)
-    else if _xml_name_eq(data, len, name_off, name_len, _c_spine, 5) then
-      _find_first_idref(data, len, children)
-    else _find_first_idref(data, len, children)
-  end
-  | $X.xml_text(_, _) => @(~1, 0)
-
-and _find_attr_val
+fun _find_attr_val
   {lb:agz}{n:pos}{sa:nat}{np:pos} .<sa, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    attrs: !$X.xml_attr_list(sa),
@@ -196,6 +164,73 @@ and _find_attr_val
       @(val_off, val_len)
     else _find_attr_val(data, len, rest, aname, alen)
   | $X.xml_attrs_nil() => @(~1, 0)
+
+(* Find Nth <itemref idref="..."> in <spine> (0-indexed) *)
+fun _find_nth_idref
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   nodes: !$X.xml_node_list(sz),
+   skip: int): @(int, int, int) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val r = _check_itemref_nth(data, len, node, skip)
+    in
+      if r.0 >= 0 then r
+      else _find_nth_idref(data, len, rest, r.2)
+    end
+  | $X.xml_nodes_nil() => @(~1, 0, skip)
+
+and _check_itemref_nth
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   node: !$X.xml_node(sz),
+   skip: int): @(int, int, int) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+    var _c_idref = @[char][5]('i', 'd', 'r', 'e', 'f')
+  in
+    if _xml_name_eq(data, len, name_off, name_len, _c_itemref, 7) then
+      if skip <= 0 then let
+        val av = _find_attr_val(data, len, attrs, _c_idref, 5)
+      in @(av.0, av.1, 0) end
+      else @(~1, 0, skip - 1)
+    else if _xml_name_eq(data, len, name_off, name_len, _c_spine, 5) then
+      _find_nth_idref(data, len, children, skip)
+    else _find_nth_idref(data, len, children, skip)
+  end
+  | $X.xml_text(_, _) => @(~1, 0, skip)
+
+(* Count <itemref> elements in <spine> *)
+fun _count_spine_items
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   nodes: !$X.xml_node_list(sz),
+   acc: int): int =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val c = _count_itemref(data, len, node, acc)
+    in _count_spine_items(data, len, rest, c) end
+  | $X.xml_nodes_nil() => acc
+
+and _count_itemref
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   node: !$X.xml_node(sz),
+   acc: int): int =
+  case+ node of
+  | $X.xml_element(name_off, name_len, _, children) => let
+    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  in
+    if _xml_name_eq(data, len, name_off, name_len, _c_itemref, 7) then
+      acc + 1
+    else if _xml_name_eq(data, len, name_off, name_len, _c_spine, 5) then
+      _count_spine_items(data, len, children, acc)
+    else _count_spine_items(data, len, children, acc)
+  end
+  | $X.xml_text(_, _) => acc
 
 (* Find <item id="idref_val" href="..."> in <manifest> *)
 fun _find_manifest_href
@@ -518,11 +553,12 @@ in
   end)
 end
 
-fn _find_chapter_href
+fn _find_chapter_href_n
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz)): @(int, int) = let
-  val idref = _find_first_idref(data, len, nodes)
+   nodes: !$X.xml_node_list(sz),
+   chapter_idx: int): @(int, int) = let
+  val idref = _find_nth_idref(data, len, nodes, chapter_idx)
 in
   if idref.0 >= 0 then
     _find_manifest_href(data, len, nodes, idref.0, idref.1)
@@ -553,7 +589,7 @@ in end
    Pagination helpers
    ============================================================ *)
 
-(* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter *)
+(* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter (1-indexed), 24=total_chapters *)
 
 (* Write an integer into a byte buffer at offset, return new offset *)
 fun _write_int_digits
@@ -670,13 +706,8 @@ in
   in end
 end
 
-fn _go_to_page(page: int): void = let
-  val total = $ST.stash_get_int(22)
-  val p = (if page < 0 then 0
-           else if page >= total then total - 1
-           else page): int
-  val () = $ST.stash_set_int(21, p)
-  (* Scroll content area *)
+fn _scroll_to_page(page: int): void = let
+  val () = $ST.stash_set_int(21, page)
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
   val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
@@ -686,7 +717,7 @@ fn _go_to_page(page: int): void = let
   val mr = $DR.measure(cnt_b, 4)
   val _ = $R.discard<int><int>(mr)
   val cw = $DR.get_measure_w()
-  val scroll_x = p * cw
+  val scroll_x = page * cw
   val () = $SC.set_scroll_left(cnt_b, 4, scroll_x)
   val () = $A.drop<byte>(cnt_f, cnt_b)
   val cnt_tmp = $A.thaw<byte>(cnt_f)
@@ -694,7 +725,7 @@ fn _go_to_page(page: int): void = let
   val () = _update_page_indicator()
 in end
 
-fn _load_first_chapter(): $P.promise(int, $P.Chained) = let
+fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
   val fh = $ST.stash_get_int(10)
   val fsz = $ST.stash_get_int(11)
   val cd_off = $ST.stash_get_int(12)
@@ -746,8 +777,12 @@ in
         val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
 
-        (* Find first spine itemref → manifest item href *)
-        val ch_href = _find_chapter_href(opf_b, dc_sz, opf_nodes)
+        (* Count spine items and store total chapters *)
+        val total_ch = _count_spine_items(opf_b, dc_sz, opf_nodes, 0)
+        val () = $ST.stash_set_int(24, total_ch)
+
+        (* Find Nth spine itemref → manifest item href *)
+        val ch_href = _find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
         val ch_off = ch_href.0
         val ch_len = ch_href.1
       in
@@ -927,7 +962,7 @@ in
                     var cnt_c = @[char][4]('q', 'c', 'n', 't')
                     val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
                     val () = _apply_diff($W.SetInnerHtml(cnt_id, html_text, tsz))
-                    val () = $ST.stash_set_int(23, 1)
+                    val () = $ST.stash_set_int(23, chapter_idx + 1)
                     val () = _measure_pagination()
                   in $P.ret<int>(0) end
                 end
@@ -938,6 +973,26 @@ in
       end
     end)
   end
+end
+
+fn _go_to_page(page: int): void = let
+  val total = $ST.stash_get_int(22)
+  val cur_ch = $ST.stash_get_int(23)
+  val total_ch = $ST.stash_get_int(24)
+in
+  if page >= total then
+    if cur_ch < total_ch then let
+      val ch_p = _load_chapter(cur_ch)
+      val () = $P.discard<int>(ch_p)
+    in end
+    else _scroll_to_page(total - 1)
+  else if page < 0 then
+    if cur_ch > 1 then let
+      val ch_p = _load_chapter(cur_ch - 2)
+      val () = $P.discard<int>(ch_p)
+    in end
+    else _scroll_to_page(0)
+  else _scroll_to_page(page)
 end
 
 (* ============================================================
@@ -1140,7 +1195,7 @@ in
             val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
             var lc_c = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
             val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc_c, 18), 18))
-            val ch_p = _load_first_chapter()
+            val ch_p = _load_chapter(0)
             val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
           else let
