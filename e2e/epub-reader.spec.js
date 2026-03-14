@@ -698,4 +698,269 @@ test.describe('EPUB Reader E2E', () => {
 
     expect(errors.length).toBe(0);
   });
+
+  // Semantic HTML: headings render as actual h1/h2/h3 elements
+  test('headings render as proper HTML elements', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Heading Test',
+      author: 'Bot',
+      chapters: 1,
+      rawChapters: [{
+        body: '<h1>Main Title</h1><h2>Subtitle</h2><h3>Section</h3><p>Body text here.</p>',
+      }],
+      storeChapters: true,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.childElementCount > 0;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // h1, h2, h3 should be actual heading elements, not divs
+    const h1 = page.locator('#qcnt h1');
+    await expect(h1).toHaveCount(1);
+    await expect(h1).toContainText('Main Title');
+
+    const h2 = page.locator('#qcnt h2');
+    await expect(h2).toHaveCount(1);
+    await expect(h2).toContainText('Subtitle');
+
+    const h3 = page.locator('#qcnt h3');
+    await expect(h3).toHaveCount(1);
+    await expect(h3).toContainText('Section');
+
+    const p = page.locator('#qcnt p');
+    await expect(p).toHaveCount(1);
+    await expect(p).toContainText('Body text here.');
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Semantic HTML: strong/em render inline, not as block divs
+  test('inline elements render inline not as blocks', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Inline Test',
+      author: 'Bot',
+      chapters: 1,
+      rawChapters: [{
+        body: '<p>This has <strong>bold</strong> and <em>italic</em> text.</p>',
+      }],
+      storeChapters: true,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.childElementCount > 0;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // strong and em should be actual inline elements, not divs
+    const strong = page.locator('#qcnt strong');
+    await expect(strong).toHaveCount(1);
+    await expect(strong).toContainText('bold');
+
+    const em = page.locator('#qcnt em');
+    await expect(em).toHaveCount(1);
+    await expect(em).toContainText('italic');
+
+    // The whole paragraph should read as one continuous line
+    const pText = await page.locator('#qcnt p').textContent();
+    expect(pText).toContain('This has bold and italic text.');
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Semantic HTML: hr renders as visible horizontal rule
+  test('hr renders as visible horizontal line', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'HR Test',
+      author: 'Bot',
+      chapters: 1,
+      rawChapters: [{
+        body: '<p>Before the rule.</p><hr/><p>After the rule.</p>',
+      }],
+      storeChapters: true,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.childElementCount > 0;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // hr element should exist and be visible
+    const hr = page.locator('#qcnt hr');
+    await expect(hr).toHaveCount(1);
+    // hr should have non-zero height (visible)
+    const hrHeight = await hr.evaluate(el => el.getBoundingClientRect().height);
+    expect(hrHeight).toBeGreaterThan(0);
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Navigation buttons should show arrow icons, not "000"
+  test('navigation buttons show arrow icons not 000', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Button Icon Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 20,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // Navigation buttons should not contain "000"
+    const prevText = await page.locator('#qprv').textContent();
+    const nextText = await page.locator('#qnxt').textContent();
+    expect(prevText).not.toBe('000');
+    expect(nextText).not.toBe('000');
+    // They should contain arrow characters
+    expect(prevText.trim().length).toBeGreaterThan(0);
+    expect(nextText.trim().length).toBeGreaterThan(0);
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Content area should use full available height
+  test('content area uses full available height', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Layout Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 20,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 100;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // Content area should take up most of the viewport height
+    const vpHeight = page.viewportSize().height;
+    const contentRect = await page.locator('#qcnt').evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, height: r.height };
+    });
+
+    // Content should start near the top (after nav bar, which is ~40-50px)
+    expect(contentRect.top).toBeLessThan(vpHeight * 0.25);
+    // Content should use at least 60% of the viewport
+    expect(contentRect.height).toBeGreaterThan(vpHeight * 0.6);
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Chapter label should be readable on mobile-portrait (not completely truncated)
+  test('chapter label visible on mobile-portrait nav bar', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Label Test',
+      author: 'Bot',
+      chapters: 3,
+      paragraphsPerChapter: 10,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // Chapter label should be visible and have non-zero width
+    const label = page.locator('#qcht');
+    await expect(label).toBeVisible();
+    const labelRect = await label.evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { width: r.width, text: el.textContent };
+    });
+    // Label should have some visible width (at least 30px)
+    expect(labelRect.width).toBeGreaterThan(30);
+    // Label should contain chapter text
+    expect(labelRect.text.length).toBeGreaterThan(0);
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Mobile-landscape should use available vertical space efficiently
+  test('mobile-landscape content uses vertical space', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Landscape Test',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 20,
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 100;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    const vpHeight = page.viewportSize().height;
+    const contentRect = await page.locator('#qcnt').evaluate(el => {
+      const r = el.getBoundingClientRect();
+      return { top: r.top, height: r.height };
+    });
+
+    // In landscape mode (shorter viewport), content should still start
+    // within the top 30% and use at least 50% of the viewport
+    expect(contentRect.top).toBeLessThan(vpHeight * 0.3);
+    expect(contentRect.height).toBeGreaterThan(vpHeight * 0.5);
+
+    expect(errors.length).toBe(0);
+  });
 });
