@@ -418,22 +418,34 @@ test.describe('EPUB Reader E2E', () => {
     await page.waitForTimeout(1000);
 
     const pageInfo = page.locator('#qpgi');
-    const content = page.locator('#qcnt');
+    const nextBtn = page.locator('#qnxt');
 
-    // Content should span multiple pages
+    // First chapter is the cover page — navigate to chapter 2 (story content)
+    // Click next to advance past the cover
+    await nextBtn.click();
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qpgi');
+        return el && /^Ch 2 /.test(el.textContent);
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Chapter 2 should span multiple pages
+    const content = page.locator('#qcnt');
     const dims = await content.evaluate(el => ({
       scrollWidth: el.scrollWidth,
       clientWidth: el.clientWidth,
     }));
     expect(dims.scrollWidth).toBeGreaterThan(dims.clientWidth);
 
-    // Navigate forward and verify page changes
-    const nextBtn = page.locator('#qnxt');
+    // Navigate forward within chapter 2
     await nextBtn.click();
     await page.waitForTimeout(500);
 
     const text2 = await pageInfo.textContent();
-    expect(text2).toMatch(/p\. 2\/\d+$/);
+    expect(text2).toMatch(/^Ch 2 · p\. 2\/\d+$/);
 
     expect(errors.length).toBe(0);
   });
