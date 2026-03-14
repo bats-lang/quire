@@ -371,11 +371,11 @@ test.describe('EPUB Reader E2E', () => {
     // Reader view should become visible
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
 
-    // Wait for chapter content to load
+    // Wait for chapter content to load (chapter 1 is the cover — may have no text)
     await page.waitForFunction(
       () => {
         const el = document.getElementById('qcnt');
-        return el && el.textContent.length > 50;
+        return el && el.childElementCount > 0;
       },
       { timeout: 15000 }
     );
@@ -388,7 +388,19 @@ test.describe('EPUB Reader E2E', () => {
     const text = await pageInfo.textContent();
     expect(text).toMatch(/^Ch \d+ · p\. \d+\/\d+$/);
 
-    // Content area has rendered HTML
+    // Navigate to chapter 2 (actual content with text)
+    const nextBtn = page.locator('#qnxt');
+    await nextBtn.click();
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(1000);
+
+    // Content area has rendered HTML with text
     const content = page.locator('#qcnt');
     const textLen = await content.evaluate(el => el.textContent.length);
     expect(textLen).toBeGreaterThan(100);
@@ -408,10 +420,11 @@ test.describe('EPUB Reader E2E', () => {
     await fileInput.setInputFiles(fixturePath);
 
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    // Chapter 1 is the cover page — wait for DOM to be created
     await page.waitForFunction(
       () => {
         const el = document.getElementById('qcnt');
-        return el && el.textContent.length > 50;
+        return el && el.childElementCount > 0;
       },
       { timeout: 15000 }
     );

@@ -12,7 +12,6 @@
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/dom as D
 #use wasm.bats-packages.dev/file-input as FI
-#use wasm.bats-packages.dev/html as H
 #use widget as W
 
 staload "state.sats"
@@ -274,7 +273,7 @@ and _check_manifest_item
   end
   | $X.xml_text(_, _) => @(~1, 0)
 
-(* Convert arr(byte) to text for SetInnerHtml *)
+(* Convert arr(byte) to text *)
 fun _arr_to_text_loop
   {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
   (src: !$A.arr(byte, l, n), len: int n,
@@ -897,6 +896,212 @@ fn _scroll_to_page(page: int): void = let
   val () = _save_position()
 in end
 
+(* ============================================================
+   Content tree rendering (XHTML → DOM nodes)
+   ============================================================ *)
+
+(* Stash slot 28: content node counter *)
+
+(* Generate widget_id for content node at index *)
+fn _content_wid(idx: int): $W.widget_id = let
+  val n = idx - (idx / 1000) * 1000
+  val d2 = n / 100
+  val r2 = n - d2 * 100
+  val d1 = r2 / 10
+  val d0 = r2 - d1 * 10
+  val buf = $A.alloc<byte>(4)
+  val () = $A.set<byte>(buf, 0, int2byte0(99))
+  val () = $A.set<byte>(buf, 1, int2byte0(48 + d2))
+  val () = $A.set<byte>(buf, 2, int2byte0(48 + d1))
+  val () = $A.set<byte>(buf, 3, int2byte0(48 + d0))
+  val txt = _arr_to_text(buf, 4)
+  val () = $A.free<byte>(buf)
+in $W.Generated(txt, 4) end
+
+(* Generate widget_id for parent: -1 = qcnt, >= 0 = content node *)
+fn _parent_wid(pidx: int): $W.widget_id =
+  if pidx < 0 then let
+    var c = @[char][4]('q', 'c', 'n', 't')
+  in $W.Generated($S.text_of_chars(c, 4), 4) end
+  else _content_wid(pidx)
+
+(* Get next content node index and increment counter *)
+fn _next_content_idx(): int = let
+  val n = $ST.stash_get_int(28)
+  val () = $ST.stash_set_int(28, n + 1)
+in n end
+
+(* Match XHTML tag name to widget html_normal type *)
+fn _match_tag_to_normal
+  {lb:agz}{n:pos}
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   name_off: int, name_len: int): $W.html_normal = let
+  var _t_p = @[char][1]('p')
+  var _t_h1 = @[char][2]('h', '1')
+  var _t_h2 = @[char][2]('h', '2')
+  var _t_h3 = @[char][2]('h', '3')
+  var _t_h4 = @[char][2]('h', '4')
+  var _t_h5 = @[char][2]('h', '5')
+  var _t_h6 = @[char][2]('h', '6')
+  var _t_div = @[char][3]('d', 'i', 'v')
+  var _t_span = @[char][4]('s', 'p', 'a', 'n')
+  var _t_em = @[char][2]('e', 'm')
+  var _t_strong = @[char][6]('s', 't', 'r', 'o', 'n', 'g')
+  var _t_bq = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var _t_pre = @[char][3]('p', 'r', 'e')
+  var _t_code = @[char][4]('c', 'o', 'd', 'e')
+  var _t_ul = @[char][2]('u', 'l')
+  var _t_ol = @[char][2]('o', 'l')
+  var _t_li = @[char][2]('l', 'i')
+  var _t_section = @[char][7]('s', 'e', 'c', 't', 'i', 'o', 'n')
+  var _t_article = @[char][7]('a', 'r', 't', 'i', 'c', 'l', 'e')
+  var _t_small = @[char][5]('s', 'm', 'a', 'l', 'l')
+  var _t_mark = @[char][4]('m', 'a', 'r', 'k')
+  var _t_del = @[char][3]('d', 'e', 'l')
+  var _t_ins = @[char][3]('i', 'n', 's')
+  var _t_sub = @[char][3]('s', 'u', 'b')
+  var _t_sup = @[char][3]('s', 'u', 'p')
+  var _t_a = @[char][1]('a')
+  var _t_b = @[char][1]('b')
+  var _t_i = @[char][1]('i')
+  var _t_u = @[char][1]('u')
+  var _t_s = @[char][1]('s')
+  var _t_figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
+  var _t_figcap = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var _t_table = @[char][5]('t', 'a', 'b', 'l', 'e')
+  var _t_tr = @[char][2]('t', 'r')
+  var _t_td = @[char][2]('t', 'd')
+  var _t_th = @[char][2]('t', 'h')
+  var _t_thead = @[char][5]('t', 'h', 'e', 'a', 'd')
+  var _t_tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
+in
+  if _xml_name_eq(data, len, name_off, name_len, _t_p, 1) then $W.P()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h1, 2) then $W.H1()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h2, 2) then $W.H2()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h3, 2) then $W.H3()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h4, 2) then $W.H4()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h5, 2) then $W.H5()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_h6, 2) then $W.H6()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_div, 3) then $W.Div()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_span, 4) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_em, 2) then $W.Em()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_strong, 6) then $W.Strong()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_bq, 10) then $W.Blockquote()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_pre, 3) then $W.Pre()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_code, 4) then $W.HtmlCode()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_ul, 2) then $W.Ul()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
+  else if _xml_name_eq(data, len, name_off, name_len, _t_li, 2) then $W.Li()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_section, 7) then $W.Section()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_article, 7) then $W.Article()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_small, 5) then $W.Small()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_mark, 4) then $W.Mark()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_del, 3) then $W.Del()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_ins, 3) then $W.Ins()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_sup, 3) then $W.Sup()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_a, 1) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_b, 1) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_i, 1) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_u, 1) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_s, 1) then $W.Span()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_figure, 6) then $W.Figure()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_table, 5) then $W.Table()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_tr, 2) then $W.Tr()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
+  else if _xml_name_eq(data, len, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
+  else if _xml_name_eq(data, len, name_off, name_len, _t_thead, 5) then $W.Thead()
+  else if _xml_name_eq(data, len, name_off, name_len, _t_tbody, 5) then $W.Tbody()
+  else $W.Div()
+end
+
+(* Walk xml_node_list, rendering each node into parent *)
+fun _render_nodes
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   pidx: int, nodes: !$X.xml_node_list(sz)): void =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val () = _render_node(data, len, pidx, node)
+    in _render_nodes(data, len, pidx, rest) end
+  | $X.xml_nodes_nil() => ()
+
+and _render_node
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   pidx: int, node: !$X.xml_node(sz)): void =
+  case+ node of
+  | $X.xml_text(off, tlen) =>
+    if tlen > 0 then
+      if tlen < 65536 then let
+        val tsz = $AR.checked_text_size(tlen)
+        val tbuf = $A.alloc<byte>(tsz)
+        val () = _copy_from_borrow(data, off, len, tbuf, 0, tsz, $AR.checked_nat(tlen))
+        val txt = _arr_to_text(tbuf, tsz)
+        val () = $A.free<byte>(tbuf)
+        val idx = _next_content_idx()
+        val w = $W.Element($W.ElementNode(_content_wid(idx),
+          $W.Normal($W.Span()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+        val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
+        val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
+      in end
+      else ()
+    else ()
+  | $X.xml_element(name_off, name_len, _, children) => let
+    (* Skip tags: head, title, meta, link, style, script *)
+    var _t_head = @[char][4]('h', 'e', 'a', 'd')
+    var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
+    var _t_meta = @[char][4]('m', 'e', 't', 'a')
+    var _t_link = @[char][4]('l', 'i', 'n', 'k')
+    var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
+    var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+  in
+    if _xml_name_eq(data, len, name_off, name_len, _t_head, 4) then ()
+    else if _xml_name_eq(data, len, name_off, name_len, _t_title, 5) then ()
+    else if _xml_name_eq(data, len, name_off, name_len, _t_meta, 4) then ()
+    else if _xml_name_eq(data, len, name_off, name_len, _t_link, 4) then ()
+    else if _xml_name_eq(data, len, name_off, name_len, _t_style, 5) then ()
+    else if _xml_name_eq(data, len, name_off, name_len, _t_script, 6) then ()
+    else let
+      (* Transparent tags: html, body — render children with same parent *)
+      var _t_html = @[char][4]('h', 't', 'm', 'l')
+      var _t_body = @[char][4]('b', 'o', 'd', 'y')
+    in
+      if _xml_name_eq(data, len, name_off, name_len, _t_html, 4) then
+        _render_nodes(data, len, pidx, children)
+      else if _xml_name_eq(data, len, name_off, name_len, _t_body, 4) then
+        _render_nodes(data, len, pidx, children)
+      else let
+        (* Void tags: br, hr *)
+        var _t_br = @[char][2]('b', 'r')
+        var _t_hr = @[char][2]('h', 'r')
+      in
+        if _xml_name_eq(data, len, name_off, name_len, _t_br, 2) then let
+          val idx = _next_content_idx()
+          val w = $W.Element($W.ElementNode(_content_wid(idx),
+            $W.Void($W.Br()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
+        in end
+        else if _xml_name_eq(data, len, name_off, name_len, _t_hr, 2) then let
+          val idx = _next_content_idx()
+          val w = $W.Element($W.ElementNode(_content_wid(idx),
+            $W.Void($W.Hr()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
+        in end
+        else let
+          (* Normal element: match tag name, create element, recurse *)
+          val idx = _next_content_idx()
+          val tag = _match_tag_to_normal(data, len, name_off, name_len)
+          val w = $W.Element($W.ElementNode(_content_wid(idx),
+            $W.Normal(tag), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
+          val () = _render_nodes(data, len, idx, children)
+        in end
+      end
+    end
+  end
+
 fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
   val fh = $ST.stash_get_int(10)
   val fsz = $ST.stash_get_int(11)
@@ -1097,48 +1302,31 @@ in
                 in $P.ret<int>(~6) end
                 else let
                   val ch_dc_sz = $AR.checked_arr_size(ch_dc_len)
-                  val ch_html = $A.alloc<byte>(ch_dc_sz)
-                  val () = $R.discard($DC.blob_read(ch_dc_handle, 0, ch_html, ch_dc_sz))
+                  val ch_xhtml = $A.alloc<byte>(ch_dc_sz)
+                  val () = $R.discard($DC.blob_read(ch_dc_handle, 0, ch_xhtml, ch_dc_sz))
                   val () = $DC.blob_free(ch_dc_handle)
 
-                  (* Parse HTML *)
-                  val @(hf, hb) = $A.freeze<byte>(ch_html)
-                  val parse_res = $H.parse_html(hb, ch_dc_sz)
-                  val () = $A.drop<byte>(hf, hb)
-                  val ch_html2 = $A.thaw<byte>(hf)
-                  val () = $A.free<byte>(ch_html2)
+                  (* Parse XHTML with xml-tree *)
+                  val @(xf, xb) = $A.freeze<byte>(ch_xhtml)
+                  val nodes = $X.parse_document(xb, ch_dc_sz)
 
-                  val parse_len = $R.unwrap_or<int><int>(parse_res, ~1)
-                in
-                  if parse_len <= 0 then let
-                    var cnt_c = @[char][4]('q', 'c', 'n', 't')
-                    val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    var fpc_c = @[char][23]('F', 'a', 'i', 'l', 'e', 'd', ' ', 't', 'o', ' ', 'p', 'a', 'r', 's', 'e', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r')
-                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(fpc_c, 23), 23))
-                  in $P.ret<int>(~7) end
-                  else if parse_len > 65535 then let
-                    val psz = $AR.checked_arr_size(parse_len)
-                    val pbuf = $H.get_result(psz)
-                    val () = $A.free<byte>(pbuf)
-                    var cnt_c = @[char][4]('q', 'c', 'n', 't')
-                    val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    var tc = @[char][17]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', 't', 'o', 'o', ' ', 'l', 'a', 'r', 'g', 'e')
-                    val () = _apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(tc, 17), 17))
-                  in $P.ret<int>(~7) end
-                  else let
-                    val tsz = $AR.checked_text_size(parse_len)
-                    val pbuf = $H.get_result(tsz)
-                    (* Render chapter HTML into content area *)
-                    val html_text = _arr_to_text(pbuf, tsz)
-                    val () = $A.free<byte>(pbuf)
-                    var cnt_c = @[char][4]('q', 'c', 'n', 't')
-                    val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                    val () = _apply_diff($W.SetInnerHtml(cnt_id, html_text, tsz))
-                    val () = $ST.stash_set_int(23, chapter_idx + 1)
-                    val () = _measure_pagination()
-                    val () = _save_position()
-                  in $P.ret<int>(0) end
-                end
+                  (* Clear content area *)
+                  var cnt_c = @[char][4]('q', 'c', 'n', 't')
+                  val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
+                  val () = _apply_diff($W.RemoveAllChildren(cnt_id))
+                  val () = $ST.stash_set_int(28, 0)
+
+                  (* Render XHTML tree into content area *)
+                  val () = _render_nodes(xb, ch_dc_sz, ~1, nodes)
+                  val () = $X.free_nodes(nodes)
+                  val () = $A.drop<byte>(xf, xb)
+                  val ch_xhtml2 = $A.thaw<byte>(xf)
+                  val () = $A.free<byte>(ch_xhtml2)
+
+                  val () = $ST.stash_set_int(23, chapter_idx + 1)
+                  val () = _measure_pagination()
+                  val () = _save_position()
+                in $P.ret<int>(0) end
               end)
             end
           end
