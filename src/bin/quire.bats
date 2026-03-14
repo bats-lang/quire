@@ -722,6 +722,81 @@ fn _set_byte
     else off
   else off
 
+(* Apply font size to content area via dynamic style element *)
+(* Writes ".caf{font-size:NNpx}" to style element qfss *)
+fn _apply_font_size(size: int): void = let
+  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): int
+  val () = $ST.stash_set_int(25, sz)
+  (* Build CSS string ".caf{font-size:NNpx}" — max 22 bytes *)
+  val buf = $A.alloc<byte>(22)
+  val off = _set_byte(buf, 22, 0, 46)   (* . *)
+  val off = _set_byte(buf, 22, off, 99)  (* c *)
+  val off = _set_byte(buf, 22, off, 97)  (* a *)
+  val off = _set_byte(buf, 22, off, 102) (* f *)
+  val off = _set_byte(buf, 22, off, 123) (* { *)
+  val off = _set_byte(buf, 22, off, 102) (* f *)
+  val off = _set_byte(buf, 22, off, 111) (* o *)
+  val off = _set_byte(buf, 22, off, 110) (* n *)
+  val off = _set_byte(buf, 22, off, 116) (* t *)
+  val off = _set_byte(buf, 22, off, 45)  (* - *)
+  val off = _set_byte(buf, 22, off, 115) (* s *)
+  val off = _set_byte(buf, 22, off, 105) (* i *)
+  val off = _set_byte(buf, 22, off, 122) (* z *)
+  val off = _set_byte(buf, 22, off, 101) (* e *)
+  val off = _set_byte(buf, 22, off, 58)  (* : *)
+  val off = _write_int_digits(buf, 22, off, $AR.checked_nat(sz), 3)
+  val off = _set_byte(buf, 22, off, 112) (* p *)
+  val off = _set_byte(buf, 22, off, 120) (* x *)
+  val off = _set_byte(buf, 22, off, 125) (* } *)
+in
+  if off > 0 then
+    if off <= 22 then let
+      val tsz = $AR.checked_text_size(off)
+      val exact = $A.alloc<byte>(tsz)
+      fun _fcopy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
+        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
+         max_s: int na, max_d: int nb, i: int i): void =
+        if i >= max_s then ()
+        else if i >= max_d then ()
+        else let
+          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
+          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+        in _fcopy(src, dst, max_s, max_d, i + 1) end
+      val () = _fcopy(buf, exact, 22, tsz, 0)
+      val () = $A.free<byte>(buf)
+      val txt = _arr_to_text(exact, tsz)
+      val () = $A.free<byte>(exact)
+      var fs_c = @[char][4]('q', 'f', 's', 's')
+      val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+      val () = _apply_diff($W.SetTextContent(fs_id, txt, tsz))
+    in end
+    else $A.free<byte>(buf)
+  else $A.free<byte>(buf)
+end
+
+(* Save font size to IDB *)
+fn _save_font_size(): void = let
+  val sz = $ST.stash_get_int(25)
+  val buf = $A.alloc<byte>(2)
+  val () = $A.set<byte>(buf, 0, int2byte0(sz mod 256))
+  val () = $A.set<byte>(buf, 1, int2byte0(sz / 256))
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  val ka = $A.alloc<byte>(4)
+  val () = $A.set<byte>(ka, 0, int2byte0(102)) (* f *)
+  val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
+  val () = $A.set<byte>(ka, 2, int2byte0(110)) (* n *)
+  val () = $A.set<byte>(ka, 3, int2byte0(116)) (* t *)
+  val @(kf, kb) = $A.freeze<byte>(ka)
+  val p = $IDB.idb_put(kb, 4, bb, 2)
+  val () = $P.discard<int>(p)
+  val () = $A.drop<byte>(kf, kb)
+  val kt = $A.thaw<byte>(kf)
+  val () = $A.free<byte>(kt)
+  val () = $A.drop<byte>(bf, bb)
+  val bt = $A.thaw<byte>(bf)
+  val () = $A.free<byte>(bt)
+in end
+
 fn _update_page_indicator(): void = let
   val cur_page = $ST.stash_get_int(21)
   val total = $ST.stash_get_int(22)
@@ -1093,6 +1168,38 @@ in
   else _scroll_to_page(page)
 end
 
+(* Restore font size from IDB on startup *)
+fn _restore_font_size(): void = let
+  val ka = $A.alloc<byte>(4)
+  val () = $A.set<byte>(ka, 0, int2byte0(102)) (* f *)
+  val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
+  val () = $A.set<byte>(ka, 2, int2byte0(110)) (* n *)
+  val () = $A.set<byte>(ka, 3, int2byte0(116)) (* t *)
+  val @(kf, kb) = $A.freeze<byte>(ka)
+  val font_p = $IDB.idb_get(kb, 4)
+  val () = $A.drop<byte>(kf, kb)
+  val ktmp = $A.thaw<byte>(kf)
+  val () = $A.free<byte>(ktmp)
+  val font_p = $P.vow(font_p)
+  val p2 = $P.and_then<int><int>(font_p, lam(font_len) =>
+    if font_len <> 2 then $P.ret<int>(~1)
+    else let
+      val fdata = $IDB.idb_get_result(2)
+      val lo = byte2int0($A.get<byte>(fdata, 0))
+      val hi = byte2int0($A.get<byte>(fdata, 1))
+      val () = $A.free<byte>(fdata)
+      val sz = lo + hi * 256
+    in
+      if sz >= 8 then
+        if sz <= 48 then let
+          val () = _apply_font_size(sz)
+        in $P.ret<int>(0) end
+        else $P.ret<int>(~1)
+      else $P.ret<int>(~1)
+    end)
+  val () = $P.discard<int>(p2)
+in end
+
 (* Restore reading state from IDB on startup *)
 fn _restore_from_idb(): void = let
   (* Step 1: get "book" from IDB *)
@@ -1237,6 +1344,14 @@ implement main0 () = let
   val @(root, css_diffs) = $W.inject_css(root, si_id, css_t, css_l)
   val () = $D.apply_list(doc, css_diffs)
 
+  (* Font size style element — dynamic CSS for font size override *)
+  var fs_c = @[char][4]('q', 'f', 's', 's')
+  val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+  var fs_init = @[char][20]('\x2E', 'c', 'a', 'f', '\x7B', 'f', 'o', 'n', 't', '-', 's', 'i', 'z', 'e', ':', '1', '6', 'p', 'x', '\x7D')
+  val @(root, fs_diffs) = $W.inject_css(root, fs_id, $S.text_of_chars(fs_init, 20), 20)
+  val () = $D.apply_list(doc, fs_diffs)
+  val () = $ST.stash_set_int(25, 16)
+
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
   val ll = $W.Element($W.ElementNode(ll_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -1319,6 +1434,17 @@ implement main0 () = let
   var next_c = @[char][3]('\xE2', '\x80', '\xBA')
   val () = $D.apply(doc, $W.set_text_content(nx_id, $S.text_of_chars(next_c, 3), 3))
 
+  (* Settings gear button — U+2699 = ⚙ = 0xE2 0x9A 0x99 *)
+  var sg_c = @[char][4]('q', 's', 'e', 't')
+  val sg_id = $W.Generated($S.text_of_chars(sg_c, 4), 4)
+  val sg = $W.Element($W.ElementNode(sg_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(_, diff) = $W.add_child(nv, sg)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(sg, cls_nav_button())
+  val () = $D.apply(doc, diff)
+  var gear_c = @[char][3]('\xE2', '\x9A', '\x99')
+  val () = $D.apply(doc, $W.set_text_content(sg_id, $S.text_of_chars(gear_c, 3), 3))
+
   (* Content area inside reader view *)
   var ca_c = @[char][4]('q', 'c', 'n', 't')
   val ca_id = $W.Generated($S.text_of_chars(ca_c, 4), 4)
@@ -1352,6 +1478,60 @@ implement main0 () = let
   val () = $D.apply(doc, diff)
   val @(_, diff) = $W.set_class(zc, cls_zone_center())
   val () = $D.apply(doc, diff)
+
+  (* Settings panel — hidden overlay *)
+  var sp_c = @[char][4]('q', 's', 'p', 'n')
+  val sp_id = $W.Generated($S.text_of_chars(sp_c, 4), 4)
+  val sp = $W.Element($W.ElementNode(sp_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(root, diff) = $W.add_child(root, sp)
+  val () = $D.apply(doc, diff)
+  val @(sp, diff) = $W.set_class(sp, cls_settings_panel())
+  val () = $D.apply(doc, diff)
+  val @(sp, diff) = $W.set_hidden(sp, 1)
+  val () = $D.apply(doc, diff)
+
+  (* "Font Size" label *)
+  var fl_c = @[char][4]('q', 's', 'f', 'l')
+  val fl_id = $W.Generated($S.text_of_chars(fl_c, 4), 4)
+  val fl = $W.Element($W.ElementNode(fl_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(sp, diff) = $W.add_child(sp, fl)
+  val () = $D.apply(doc, diff)
+  var fsz_c = @[char][9]('F', 'o', 'n', 't', ' ', 'S', 'i', 'z', 'e')
+  val () = $D.apply(doc, $W.set_text_content(fl_id, $S.text_of_chars(fsz_c, 9), 9))
+
+  (* A- button (decrease font) *)
+  var am_c = @[char][4]('q', 'f', 's', 'm')
+  val am_id = $W.Generated($S.text_of_chars(am_c, 4), 4)
+  val am = $W.Element($W.ElementNode(am_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(sp, diff) = $W.add_child(sp, am)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(am, cls_settings_btn())
+  val () = $D.apply(doc, diff)
+  var amin_c = @[char][2]('A', '-')
+  val () = $D.apply(doc, $W.set_text_content(am_id, $S.text_of_chars(amin_c, 2), 2))
+
+  (* A+ button (increase font) *)
+  var ap_c = @[char][4]('q', 'f', 's', 'p')
+  val ap_id = $W.Generated($S.text_of_chars(ap_c, 4), 4)
+  val ap = $W.Element($W.ElementNode(ap_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(sp, diff) = $W.add_child(sp, ap)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(ap, cls_settings_btn())
+  val () = $D.apply(doc, diff)
+  var aplus_c = @[char][2]('A', '+')
+  val () = $D.apply(doc, $W.set_text_content(ap_id, $S.text_of_chars(aplus_c, 2), 2))
+
+  (* Close button *)
+  var sc_c = @[char][4]('q', 's', 'c', 'l')
+  val sc_id = $W.Generated($S.text_of_chars(sc_c, 4), 4)
+  val scl = $W.Element($W.ElementNode(sc_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(_, diff) = $W.add_child(sp, scl)
+  val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(scl, cls_settings_btn())
+  val () = $D.apply(doc, diff)
+  var close_c = @[char][5]('C', 'l', 'o', 's', 'e')
+  val () = $D.apply(doc, $W.set_text_content(sc_id, $S.text_of_chars(close_c, 5), 5))
+
 in
   if is_library_empty(st) then let
     var el_c = @[char][4]('q', 'e', 'l', 'b')
@@ -1659,10 +1839,131 @@ in
     val kd_tmp = $A.thaw<byte>(kd_f)
     val () = $A.free<byte>(kd_tmp)
 
+    (* Wire settings gear button click — listener 8: toggle settings panel *)
+    val sg_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(sg_narr, 0, int2byte0(113)) (* q *)
+    val () = $A.set<byte>(sg_narr, 1, int2byte0(115)) (* s *)
+    val () = $A.set<byte>(sg_narr, 2, int2byte0(101)) (* e *)
+    val () = $A.set<byte>(sg_narr, 3, int2byte0(116)) (* t *)
+    val @(sg_nf, sg_nb) = $A.freeze<byte>(sg_narr)
+    val ck8_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck8_arr, 0, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck8_arr, 1, int2byte0(108)) (* l *)
+    val () = $A.set<byte>(ck8_arr, 2, int2byte0(105)) (* i *)
+    val () = $A.set<byte>(ck8_arr, 3, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck8_arr, 4, int2byte0(107)) (* k *)
+    val @(ck8_f, ck8_b) = $A.freeze<byte>(ck8_arr)
+    val () = $EV.listen(sg_nb, 4, ck8_b, 5, 8,
+      lam(_payload_len: int): int => let
+        var sp_c = @[char][4]('q', 's', 'p', 'n')
+        val sp_id = $W.Generated($S.text_of_chars(sp_c, 4), 4)
+        val () = _apply_diff($W.SetHidden(sp_id, 0))
+      in 0 end)
+    val () = $A.drop<byte>(sg_nf, sg_nb)
+    val sg_ntmp = $A.thaw<byte>(sg_nf)
+    val () = $A.free<byte>(sg_ntmp)
+    val () = $A.drop<byte>(ck8_f, ck8_b)
+    val ck8_tmp = $A.thaw<byte>(ck8_f)
+    val () = $A.free<byte>(ck8_tmp)
+
+    (* Wire A- button click — listener 9: decrease font size *)
+    val am_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(am_narr, 0, int2byte0(113)) (* q *)
+    val () = $A.set<byte>(am_narr, 1, int2byte0(102)) (* f *)
+    val () = $A.set<byte>(am_narr, 2, int2byte0(115)) (* s *)
+    val () = $A.set<byte>(am_narr, 3, int2byte0(109)) (* m *)
+    val @(am_nf, am_nb) = $A.freeze<byte>(am_narr)
+    val ck9_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck9_arr, 0, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck9_arr, 1, int2byte0(108)) (* l *)
+    val () = $A.set<byte>(ck9_arr, 2, int2byte0(105)) (* i *)
+    val () = $A.set<byte>(ck9_arr, 3, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck9_arr, 4, int2byte0(107)) (* k *)
+    val @(ck9_f, ck9_b) = $A.freeze<byte>(ck9_arr)
+    val () = $EV.listen(am_nb, 4, ck9_b, 5, 9,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(25)
+        val next = cur - 2
+      in
+        if next >= 8 then let
+          val () = _apply_font_size(next)
+          val () = _save_font_size()
+          val () = _measure_pagination()
+        in 0 end
+        else 0
+      end)
+    val () = $A.drop<byte>(am_nf, am_nb)
+    val am_ntmp = $A.thaw<byte>(am_nf)
+    val () = $A.free<byte>(am_ntmp)
+    val () = $A.drop<byte>(ck9_f, ck9_b)
+    val ck9_tmp = $A.thaw<byte>(ck9_f)
+    val () = $A.free<byte>(ck9_tmp)
+
+    (* Wire A+ button click — listener 10: increase font size *)
+    val ap_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(ap_narr, 0, int2byte0(113)) (* q *)
+    val () = $A.set<byte>(ap_narr, 1, int2byte0(102)) (* f *)
+    val () = $A.set<byte>(ap_narr, 2, int2byte0(115)) (* s *)
+    val () = $A.set<byte>(ap_narr, 3, int2byte0(112)) (* p *)
+    val @(ap_nf, ap_nb) = $A.freeze<byte>(ap_narr)
+    val ck10_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck10_arr, 0, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck10_arr, 1, int2byte0(108)) (* l *)
+    val () = $A.set<byte>(ck10_arr, 2, int2byte0(105)) (* i *)
+    val () = $A.set<byte>(ck10_arr, 3, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck10_arr, 4, int2byte0(107)) (* k *)
+    val @(ck10_f, ck10_b) = $A.freeze<byte>(ck10_arr)
+    val () = $EV.listen(ap_nb, 4, ck10_b, 5, 10,
+      lam(_payload_len: int): int => let
+        val cur = $ST.stash_get_int(25)
+        val next = cur + 2
+      in
+        if next <= 48 then let
+          val () = _apply_font_size(next)
+          val () = _save_font_size()
+          val () = _measure_pagination()
+        in 0 end
+        else 0
+      end)
+    val () = $A.drop<byte>(ap_nf, ap_nb)
+    val ap_ntmp = $A.thaw<byte>(ap_nf)
+    val () = $A.free<byte>(ap_ntmp)
+    val () = $A.drop<byte>(ck10_f, ck10_b)
+    val ck10_tmp = $A.thaw<byte>(ck10_f)
+    val () = $A.free<byte>(ck10_tmp)
+
+    (* Wire close button click — listener 11: hide settings panel *)
+    val sc_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(sc_narr, 0, int2byte0(113)) (* q *)
+    val () = $A.set<byte>(sc_narr, 1, int2byte0(115)) (* s *)
+    val () = $A.set<byte>(sc_narr, 2, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(sc_narr, 3, int2byte0(108)) (* l *)
+    val @(sc_nf, sc_nb) = $A.freeze<byte>(sc_narr)
+    val ck11_arr = $A.alloc<byte>(5)
+    val () = $A.set<byte>(ck11_arr, 0, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck11_arr, 1, int2byte0(108)) (* l *)
+    val () = $A.set<byte>(ck11_arr, 2, int2byte0(105)) (* i *)
+    val () = $A.set<byte>(ck11_arr, 3, int2byte0(99))  (* c *)
+    val () = $A.set<byte>(ck11_arr, 4, int2byte0(107)) (* k *)
+    val @(ck11_f, ck11_b) = $A.freeze<byte>(ck11_arr)
+    val () = $EV.listen(sc_nb, 4, ck11_b, 5, 11,
+      lam(_payload_len: int): int => let
+        var sp_c = @[char][4]('q', 's', 'p', 'n')
+        val sp_id = $W.Generated($S.text_of_chars(sp_c, 4), 4)
+        val () = _apply_diff($W.SetHidden(sp_id, 1))
+      in 0 end)
+    val () = $A.drop<byte>(sc_nf, sc_nb)
+    val sc_ntmp = $A.thaw<byte>(sc_nf)
+    val () = $A.free<byte>(sc_ntmp)
+    val () = $A.drop<byte>(ck11_f, ck11_b)
+    val ck11_tmp = $A.thaw<byte>(ck11_f)
+    val () = $A.free<byte>(ck11_tmp)
+
     val nid = $D.get_next_id(doc)
     val () = $ST.stash_set_int(20, nid)
     val () = $D.destroy(doc)
-    (* Try to restore saved book from IDB *)
+    (* Restore font size and saved book from IDB *)
+    val () = _restore_font_size()
     val () = _restore_from_idb()
   in end
   else let
