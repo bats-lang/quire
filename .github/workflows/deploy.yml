@@ -62,8 +62,7 @@ jobs:
       - name: Build WASM
         run: |
           bats lock --repository $HOME/repository
-          bats build --only wasm --repository $HOME/repository || true
-          test -f dist/wasm/app.wasm
+          bats build --only wasm --repository $HOME/repository
 
       - name: Build PWA generator
         run: bats build --only native --repository $HOME/repository
