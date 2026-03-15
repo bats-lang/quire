@@ -60,12 +60,15 @@ jobs:
         run: bats build --only wasm --repository $HOME/repository
 
       - name: Build PWA generator
-        run: bats build --only native --repository $HOME/repository
+        run: |
+          cd tools/gen-pwa
+          bats lock --repository $HOME/repository
+          bats build --repository $HOME/repository
 
       - name: Generate PWA
         run: |
           mkdir -p dist/pwa
-          dist/debug/gen-pwa
+          tools/gen-pwa/dist/debug/gen-pwa
 
       - name: Verify PWA output
         run: |
