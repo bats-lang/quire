@@ -24,36 +24,41 @@ staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
    Book card helper — generates a card widget ID from index
    ============================================================ *)
 
-fn _idx_to_chars(prefix_a: char, prefix_b: char, idx: int):
-  @[char][5] = let
+fn _digit_char(d: int): char = let
   val zero = char2int0('0')
-  val tens = idx / 10
-  val ones = idx - tens * 10
-in @[char][5]('q', prefix_a, prefix_b, int2char0(zero + tens), int2char0(zero + ones)) end
+in int2char0(zero + d) end
 
 fn _card_wid(idx: int): $W.widget_id = let
-  var c = _idx_to_chars('b', 'c', idx)
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var c = @[char][5]('q', 'b', 'c', _digit_char(tens), _digit_char(ones))
   val buf = $S.from_char_array(c, 5)
   val txt = arr_to_text(buf, 5)
   val () = $A.free<byte>(buf)
 in $W.Generated(txt, 5) end
 
 fn _card_title_wid(idx: int): $W.widget_id = let
-  var c = _idx_to_chars('t', 'c', idx)
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var c = @[char][5]('q', 't', 'c', _digit_char(tens), _digit_char(ones))
   val buf = $S.from_char_array(c, 5)
   val txt = arr_to_text(buf, 5)
   val () = $A.free<byte>(buf)
 in $W.Generated(txt, 5) end
 
 fn _card_author_wid(idx: int): $W.widget_id = let
-  var c = _idx_to_chars('a', 'c', idx)
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var c = @[char][5]('q', 'a', 'c', _digit_char(tens), _digit_char(ones))
   val buf = $S.from_char_array(c, 5)
   val txt = arr_to_text(buf, 5)
   val () = $A.free<byte>(buf)
 in $W.Generated(txt, 5) end
 
 fn _card_id_arr(idx: int): [l:agz] $A.arr(byte, l, 5) = let
-  var c = _idx_to_chars('b', 'c', idx)
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var c = @[char][5]('q', 'b', 'c', _digit_char(tens), _digit_char(ones))
 in $S.from_char_array(c, 5) end
 
 (* Add a book card to the library list *)
