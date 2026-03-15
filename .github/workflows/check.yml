@@ -68,7 +68,7 @@ jobs:
       - name: Generate PWA
         run: |
           mkdir -p dist/pwa
-          tools/gen-pwa/dist/debug/gen-pwa
+          tools/gen-pwa/dist/release/gen-pwa
 
       - name: Verify PWA output
         run: |
