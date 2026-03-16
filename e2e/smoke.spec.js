@@ -73,13 +73,18 @@ test.describe('Smoke', () => {
     await page.waitForSelector('#qllc', { timeout: 15000 });
 
     const fileInput = page.locator('input[type="file"]');
-    await expect(fileInput).toBeAttached();
 
     const epubPath = join(SCREENSHOT_DIR, 'smoke-test.epub');
     writeFileSync(epubPath, epubBuffer);
     await fileInput.setInputFiles(epubPath);
 
-    // After import, reader view should appear
+    // Wait for book card to appear in library
+    await page.waitForSelector('.cap', { timeout: 30000 });
+
+    // Click book card to open reader
+    await page.locator('.cap').click();
+
+    // Reader view should appear
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
     // Library should be hidden
     await expect(page.locator('#qllc')).toBeHidden();
