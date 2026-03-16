@@ -1,5 +1,7 @@
 (* reader -- Chapter rendering, pagination, navigation *)
 
+#target wasm begin
+
 #include "share/atspre_staload.hats"
 #use array as A
 #use arith as AR
@@ -19,6 +21,15 @@ staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
+
+#pub fun apply_diff_list(dl: $W.diff_list): void
+#pub fun apply_diff(d: $W.diff): void
+#pub fun apply_font_size(size: int): void
+#pub fun measure_pagination(): void
+#pub fun go_to_page(page: int): void
+#pub fun load_chapter(chapter_idx: int): $P.promise(int, $P.Chained)
+#pub fun scroll_to_page(page: int): void
+#pub fun save_position(): void
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
@@ -714,26 +725,13 @@ end
 
 (* Public API *)
 
-#pub fun apply_diff_list(dl: $W.diff_list): void
 implement apply_diff_list(dl) = _apply_diff_list(dl)
-
-#pub fun apply_diff(d: $W.diff): void
 implement apply_diff(d) = _apply_diff(d)
-
-#pub fun apply_font_size(size: int): void
 implement apply_font_size(size) = _apply_font_size(size)
-
-#pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
-
-#pub fun go_to_page(page: int): void
 implement go_to_page(page) = _go_to_page(page)
-
-#pub fun load_chapter(chapter_idx: int): $P.promise(int, $P.Chained)
 implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
-
-#pub fun scroll_to_page(page: int): void
 implement scroll_to_page(page) = _scroll_to_page(page)
-
-#pub fun save_position(): void
 implement save_position() = _save_position()
+
+end (* #target wasm *)

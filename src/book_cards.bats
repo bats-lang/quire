@@ -1,5 +1,7 @@
 (* book_cards -- Book card UI, EPUB import, IDB persistence *)
 
+#target wasm begin
+
 #include "share/atspre_staload.hats"
 #use array as A
 #use arith as AR
@@ -19,6 +21,16 @@ staload "reader.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
+
+#pub fun import_epub
+  {li:agz}{ni:pos}
+  (node_id: !$A.borrow(byte, li, ni), id_len: int ni
+  ): $P.promise(int, $P.Chained)
+#pub fun save_epub_to_idb(): void
+#pub fun save_metadata_to_idb(): void
+#pub fun save_font_size(): void
+#pub fun restore_font_size(): void
+#pub fun restore_from_idb(): void
 
 (* ============================================================
    Book card helper — generates a card widget ID from index
@@ -727,26 +739,12 @@ fn _restore_from_idb(): void = let
 in end
 
 
-(* Public API *)
-
-#pub fun import_epub
-  {li:agz}{ni:pos}
-  (node_id: !$A.borrow(byte, li, ni), id_len: int ni
-  ): $P.promise(int, $P.Chained)
-
+(* Implementations *)
 implement import_epub(node_id, id_len) = _import_epub(node_id, id_len)
-
-#pub fun save_epub_to_idb(): void
 implement save_epub_to_idb() = _save_epub_to_idb()
-
-#pub fun save_metadata_to_idb(): void
 implement save_metadata_to_idb() = _save_metadata_to_idb()
-
-#pub fun save_font_size(): void
 implement save_font_size() = _save_font_size()
-
-#pub fun restore_font_size(): void
 implement restore_font_size() = _restore_font_size()
-
-#pub fun restore_from_idb(): void
 implement restore_from_idb() = _restore_from_idb()
+
+end (* #target wasm *)

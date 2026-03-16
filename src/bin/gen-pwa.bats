@@ -1,5 +1,5 @@
+#target native
 (* gen-pwa -- generate PWA shell for quire *)
-(* Identical pattern to pwa/example *)
 
 #include "share/atspre_staload.hats"
 
