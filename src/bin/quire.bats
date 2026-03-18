@@ -23,286 +23,7 @@ staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 
-(* ============================================================
-   EPUB import helpers
-   ============================================================ *)
-
-fun _match_chars {lb:agz}{n:pos}{np:pos}{k:nat | k <= np} .<np - k>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   off: int, pat: &(@[char][np]), plen: int np,
-   i: int k): bool =
-  if i >= plen then true
-  else let
-    val db = $S.borrow_byte(data, off + i, len)
-    val pb = char2int0(pat.[i])
-  in
-    if db != pb then false
-    else _match_chars(data, len, off, pat, plen, i + 1)
-  end
-
-fn _xml_name_eq
-  {lb:agz}{n:pos}{np:pos}
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   name_off: int, name_len: int,
-   pat: &(@[char][np]), plen: int np): bool =
-  if name_len != plen then false
-  else if name_off < 0 then false
-  else if name_off + name_len > len then false
-  else _match_chars(data, len, name_off, pat, plen, 0)
-
-fun _walk_rootfile_nodes
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz)): @(int, int) =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val r = _walk_rootfile_node(data, len, node)
-    in
-      if r.0 >= 0 then r
-      else _walk_rootfile_nodes(data, len, rest)
-    end
-  | $X.xml_nodes_nil() => @(~1, 0)
-
-and _walk_rootfile_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz)): @(int, int) =
-  case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_rootfile = @[char][8]('r', 'o', 'o', 't', 'f', 'i', 'l', 'e')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_rootfile, 8) then
-      _find_full_path(data, len, attrs)
-    else _walk_rootfile_nodes(data, len, children)
-  end
-  | $X.xml_text(_, _) => @(~1, 0)
-
-and _find_full_path
-  {lb:agz}{n:pos}{sa:nat} .<sa, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   attrs: !$X.xml_attr_list(sa)): @(int, int) =
-  case+ attrs of
-  | $X.xml_attrs_cons(aname_off, aname_len, val_off, val_len, rest) => let
-    var _c_fp = @[char][9]('f', 'u', 'l', 'l', '-', 'p', 'a', 't', 'h')
-  in
-    if _xml_name_eq(data, len, aname_off, aname_len, _c_fp, 9) then
-      @(val_off, val_len)
-    else _find_full_path(data, len, rest)
-  end
-  | $X.xml_attrs_nil() => @(~1, 0)
-
-fun _walk_opf_metadata
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz),
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): @(int, int, int, int) =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val r = _walk_opf_node(data, len, node, t_off, t_len, a_off, a_len)
-    in
-      _walk_opf_metadata(data, len, rest, r.0, r.1, r.2, r.3)
-    end
-  | $X.xml_nodes_nil() => @(t_off, t_len, a_off, a_len)
-
-and _walk_opf_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz),
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): @(int, int, int, int) =
-  case+ node of
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _c_title = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
-    var _c_creator = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_title, 8) then
-      let val txt = _get_first_text(children)
-      in @(txt.0, txt.1, a_off, a_len) end
-    else if _xml_name_eq(data, len, name_off, name_len, _c_creator, 10) then
-      let val txt = _get_first_text(children)
-      in @(t_off, t_len, txt.0, txt.1) end
-    else _walk_opf_metadata(data, len, children, t_off, t_len, a_off, a_len)
-  end
-  | $X.xml_text(_, _) => @(t_off, t_len, a_off, a_len)
-
-and _get_first_text
-  {sz:nat} .<sz, 0>.
-  (children: !$X.xml_node_list(sz)): @(int, int) =
-  case+ children of
-  | $X.xml_nodes_cons(node, _) =>
-    (case+ node of
-     | $X.xml_text(off, tlen) => @(off, tlen)
-     | $X.xml_element(_, _, _, _) => @(~1, 0))
-  | $X.xml_nodes_nil() => @(~1, 0)
-
-(* Compare two regions within the same borrow *)
-fun _borrow_region_eq
-  {lb:agz}{n:pos}{fuel:nat} .<fuel>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   off_a: int, off_b: int, count: int fuel): bool =
-  if count <= 0 then true
-  else if off_a < 0 then false
-  else if off_b < 0 then false
-  else if off_a >= len then false
-  else if off_b >= len then false
-  else let
-    val a = byte2int0($A.read<byte>(data, $AR.checked_idx(off_a, len)))
-    val b = byte2int0($A.read<byte>(data, $AR.checked_idx(off_b, len)))
-  in
-    if a != b then false
-    else _borrow_region_eq(data, len, off_a + 1, off_b + 1, count - 1)
-  end
-
-fun _find_attr_val
-  {lb:agz}{n:pos}{sa:nat}{np:pos} .<sa, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   attrs: !$X.xml_attr_list(sa),
-   aname: &(@[char][np]), alen: int np): @(int, int) =
-  case+ attrs of
-  | $X.xml_attrs_cons(aname_off, aname_len, val_off, val_len, rest) =>
-    if _xml_name_eq(data, len, aname_off, aname_len, aname, alen) then
-      @(val_off, val_len)
-    else _find_attr_val(data, len, rest, aname, alen)
-  | $X.xml_attrs_nil() => @(~1, 0)
-
-(* Find Nth <itemref idref="..."> in <spine> (0-indexed) *)
-fun _find_nth_idref
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz),
-   skip: int): @(int, int, int) =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val r = _check_itemref_nth(data, len, node, skip)
-    in
-      if r.0 >= 0 then r
-      else _find_nth_idref(data, len, rest, r.2)
-    end
-  | $X.xml_nodes_nil() => @(~1, 0, skip)
-
-and _check_itemref_nth
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz),
-   skip: int): @(int, int, int) =
-  case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
-    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
-    var _c_idref = @[char][5]('i', 'd', 'r', 'e', 'f')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_itemref, 7) then
-      if skip <= 0 then let
-        val av = _find_attr_val(data, len, attrs, _c_idref, 5)
-      in @(av.0, av.1, 0) end
-      else @(~1, 0, skip - 1)
-    else if _xml_name_eq(data, len, name_off, name_len, _c_spine, 5) then
-      _find_nth_idref(data, len, children, skip)
-    else _find_nth_idref(data, len, children, skip)
-  end
-  | $X.xml_text(_, _) => @(~1, 0, skip)
-
-(* Count <itemref> elements in <spine> *)
-fun _count_spine_items
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz),
-   acc: int): int =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val c = _count_itemref(data, len, node, acc)
-    in _count_spine_items(data, len, rest, c) end
-  | $X.xml_nodes_nil() => acc
-
-and _count_itemref
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz),
-   acc: int): int =
-  case+ node of
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
-    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_itemref, 7) then
-      acc + 1
-    else if _xml_name_eq(data, len, name_off, name_len, _c_spine, 5) then
-      _count_spine_items(data, len, children, acc)
-    else _count_spine_items(data, len, children, acc)
-  end
-  | $X.xml_text(_, _) => acc
-
-(* Find <item id="idref_val" href="..."> in <manifest> *)
-fun _find_manifest_href
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz),
-   idref_off: int, idref_len: int): @(int, int) =
-  case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val r = _check_manifest_item(data, len, node, idref_off, idref_len)
-    in
-      if r.0 >= 0 then r
-      else _find_manifest_href(data, len, rest, idref_off, idref_len)
-    end
-  | $X.xml_nodes_nil() => @(~1, 0)
-
-and _check_manifest_item
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz),
-   idref_off: int, idref_len: int): @(int, int) =
-  case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_item = @[char][4]('i', 't', 'e', 'm')
-  in
-    if _xml_name_eq(data, len, name_off, name_len, _c_item, 4) then let
-      var _c_id = @[char][2]('i', 'd')
-      val id_r = _find_attr_val(data, len, attrs, _c_id, 2)
-    in
-      if id_r.0 >= 0 then
-        if id_r.1 = idref_len then
-          if _borrow_region_eq(data, len, id_r.0, idref_off, $AR.checked_nat(idref_len)) then let
-            var _c_href = @[char][4]('h', 'r', 'e', 'f')
-          in _find_attr_val(data, len, attrs, _c_href, 4) end
-          else @(~1, 0)
-        else @(~1, 0)
-      else @(~1, 0)
-    end
-    else _find_manifest_href(data, len, children, idref_off, idref_len)
-  end
-  | $X.xml_text(_, _) => @(~1, 0)
-
-(* arr_to_text is now in epub_xml module *)
-
-fun _copy_from_borrow
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
-  (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
-   count: int fuel): void =
-  if count <= 0 then ()
-  else if src_off < 0 then ()
-  else if dst_off < 0 then ()
-  else if src_off >= src_max then ()
-  else if dst_off >= dst_max then ()
-  else let
-    val b = $A.read<byte>(src, $AR.checked_idx(src_off, src_max))
-    val () = $A.set<byte>(dst, $AR.checked_idx(dst_off, dst_max), b)
-  in
-    _copy_from_borrow(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1)
-  end
-
-fn _copy_arr_region
-  {ls:agz}{ns:pos}{ld:agz}{nd:pos}
-  (src: $A.arr(byte, ls, ns), src_off: int, src_max: int ns,
-   dst: !$A.arr(byte, ld, nd), dst_max: int nd,
-   count: int): $A.arr(byte, ls, ns) = let
-  val @(frozen, borrow) = $A.freeze<byte>(src)
-  val () = _copy_from_borrow(borrow, src_off, src_max,
-                             dst, 0, dst_max, $AR.checked_nat(count))
-  val () = $A.drop<byte>(frozen, borrow)
-in $A.thaw<byte>(frozen) end
+(* EPUB XML helpers are in epub_xml module *)
 
 fn _import_epub
   {li:agz}{ni:pos}
@@ -369,7 +90,7 @@ in
           else let
             val csz = $AR.checked_arr_size(cont.compressed_size)
             val comp_buf = $A.alloc<byte>(csz)
-            val file_buf = _copy_arr_region(file_buf, doff, file_size_s,
+            val file_buf = copy_arr_region(file_buf, doff, file_size_s,
                                       comp_buf, csz, csz)
             (* Free file_buf now — we will re-read in stage 2 *)
             val () = $A.free<byte>(file_buf)
@@ -403,7 +124,7 @@ in
 
                 val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
                 val nodes = $X.parse_document(dc_borrow, dc_sz)
-                val opf_path = _walk_rootfile_nodes(dc_borrow, dc_sz, nodes)
+                val opf_path = walk_rootfile_nodes(dc_borrow, dc_sz, nodes)
                 val opf_off = opf_path.0
                 val opf_len = opf_path.1
               in
@@ -431,7 +152,7 @@ in
                 else let
                   val opf_path_sz = $AR.checked_arr_size(opf_len)
                   val opf_path_buf = $A.alloc<byte>(opf_path_sz)
-                  val () = _copy_from_borrow(dc_borrow, opf_off, dc_sz,
+                  val () = copy_from_borrow(dc_borrow, opf_off, dc_sz,
                             opf_path_buf, 0, opf_path_sz,
                             $AR.checked_nat(opf_len))
 
@@ -474,7 +195,7 @@ in
                     else let
                       val opf_csz = $AR.checked_arr_size(opf_entry.compressed_size)
                       val opf_comp = $A.alloc<byte>(opf_csz)
-                      val file_buf2 = _copy_arr_region(file_buf2, opf_doff, file_size_s2,
+                      val file_buf2 = copy_arr_region(file_buf2, opf_doff, file_size_s2,
                                                 opf_comp, opf_csz, opf_csz)
                       val () = $A.free<byte>(file_buf2)
 
@@ -504,7 +225,7 @@ in
 
                           val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
                           val opf_nodes = $X.parse_document(opf_b, dc2_sz)
-                          val meta = _walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
+                          val meta = walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
                                       ~1, 0, ~1, 0)
 
                           val () = $X.free_nodes(opf_nodes)
@@ -543,10 +264,10 @@ fn _find_chapter_href_n
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
    chapter_idx: int): @(int, int) = let
-  val idref = _find_nth_idref(data, len, nodes, chapter_idx)
+  val idref = find_nth_idref(data, len, nodes, chapter_idx)
 in
   if idref.0 >= 0 then
-    _find_manifest_href(data, len, nodes, idref.0, idref.1)
+    find_manifest_href(data, len, nodes, idref.0, idref.1)
   else @(~1, 0)
 end
 
@@ -960,44 +681,44 @@ fn _match_tag_to_normal
   var _t_thead = @[char][5]('t', 'h', 'e', 'a', 'd')
   var _t_tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
 in
-  if _xml_name_eq(data, len, name_off, name_len, _t_p, 1) then $W.P()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h1, 2) then $W.H1()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h2, 2) then $W.H2()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h3, 2) then $W.H3()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h4, 2) then $W.H4()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h5, 2) then $W.H5()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_h6, 2) then $W.H6()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_div, 3) then $W.Div()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_span, 4) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_em, 2) then $W.Em()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_strong, 6) then $W.Strong()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_bq, 10) then $W.Blockquote()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_pre, 3) then $W.Pre()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_code, 4) then $W.HtmlCode()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_ul, 2) then $W.Ul()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
-  else if _xml_name_eq(data, len, name_off, name_len, _t_li, 2) then $W.Li()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_section, 7) then $W.Section()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_article, 7) then $W.Article()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_small, 5) then $W.Small()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_mark, 4) then $W.Mark()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_del, 3) then $W.Del()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_ins, 3) then $W.Ins()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_sup, 3) then $W.Sup()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_a, 1) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_b, 1) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_i, 1) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_u, 1) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_s, 1) then $W.Span()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_figure, 6) then $W.Figure()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_table, 5) then $W.Table()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_tr, 2) then $W.Tr()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
-  else if _xml_name_eq(data, len, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
-  else if _xml_name_eq(data, len, name_off, name_len, _t_thead, 5) then $W.Thead()
-  else if _xml_name_eq(data, len, name_off, name_len, _t_tbody, 5) then $W.Tbody()
+  if xml_name_eq(data, len, name_off, name_len, _t_p, 1) then $W.P()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h1, 2) then $W.H1()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h2, 2) then $W.H2()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h3, 2) then $W.H3()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h4, 2) then $W.H4()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h5, 2) then $W.H5()
+  else if xml_name_eq(data, len, name_off, name_len, _t_h6, 2) then $W.H6()
+  else if xml_name_eq(data, len, name_off, name_len, _t_div, 3) then $W.Div()
+  else if xml_name_eq(data, len, name_off, name_len, _t_span, 4) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_em, 2) then $W.Em()
+  else if xml_name_eq(data, len, name_off, name_len, _t_strong, 6) then $W.Strong()
+  else if xml_name_eq(data, len, name_off, name_len, _t_bq, 10) then $W.Blockquote()
+  else if xml_name_eq(data, len, name_off, name_len, _t_pre, 3) then $W.Pre()
+  else if xml_name_eq(data, len, name_off, name_len, _t_code, 4) then $W.HtmlCode()
+  else if xml_name_eq(data, len, name_off, name_len, _t_ul, 2) then $W.Ul()
+  else if xml_name_eq(data, len, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
+  else if xml_name_eq(data, len, name_off, name_len, _t_li, 2) then $W.Li()
+  else if xml_name_eq(data, len, name_off, name_len, _t_section, 7) then $W.Section()
+  else if xml_name_eq(data, len, name_off, name_len, _t_article, 7) then $W.Article()
+  else if xml_name_eq(data, len, name_off, name_len, _t_small, 5) then $W.Small()
+  else if xml_name_eq(data, len, name_off, name_len, _t_mark, 4) then $W.Mark()
+  else if xml_name_eq(data, len, name_off, name_len, _t_del, 3) then $W.Del()
+  else if xml_name_eq(data, len, name_off, name_len, _t_ins, 3) then $W.Ins()
+  else if xml_name_eq(data, len, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
+  else if xml_name_eq(data, len, name_off, name_len, _t_sup, 3) then $W.Sup()
+  else if xml_name_eq(data, len, name_off, name_len, _t_a, 1) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_b, 1) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_i, 1) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_u, 1) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_s, 1) then $W.Span()
+  else if xml_name_eq(data, len, name_off, name_len, _t_figure, 6) then $W.Figure()
+  else if xml_name_eq(data, len, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
+  else if xml_name_eq(data, len, name_off, name_len, _t_table, 5) then $W.Table()
+  else if xml_name_eq(data, len, name_off, name_len, _t_tr, 2) then $W.Tr()
+  else if xml_name_eq(data, len, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
+  else if xml_name_eq(data, len, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
+  else if xml_name_eq(data, len, name_off, name_len, _t_thead, 5) then $W.Thead()
+  else if xml_name_eq(data, len, name_off, name_len, _t_tbody, 5) then $W.Tbody()
   else $W.Div()
 end
 
@@ -1022,7 +743,7 @@ and _render_node
       if tlen < 65536 then let
         val tsz = $AR.checked_text_size(tlen)
         val tbuf = $A.alloc<byte>(tsz)
-        val () = _copy_from_borrow(data, off, len, tbuf, 0, tsz, $AR.checked_nat(tlen))
+        val () = copy_from_borrow(data, off, len, tbuf, 0, tsz, $AR.checked_nat(tlen))
         val txt = arr_to_text(tbuf, tsz)
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
@@ -1042,33 +763,33 @@ and _render_node
     var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
     var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
   in
-    if _xml_name_eq(data, len, name_off, name_len, _t_head, 4) then ()
-    else if _xml_name_eq(data, len, name_off, name_len, _t_title, 5) then ()
-    else if _xml_name_eq(data, len, name_off, name_len, _t_meta, 4) then ()
-    else if _xml_name_eq(data, len, name_off, name_len, _t_link, 4) then ()
-    else if _xml_name_eq(data, len, name_off, name_len, _t_style, 5) then ()
-    else if _xml_name_eq(data, len, name_off, name_len, _t_script, 6) then ()
+    if xml_name_eq(data, len, name_off, name_len, _t_head, 4) then ()
+    else if xml_name_eq(data, len, name_off, name_len, _t_title, 5) then ()
+    else if xml_name_eq(data, len, name_off, name_len, _t_meta, 4) then ()
+    else if xml_name_eq(data, len, name_off, name_len, _t_link, 4) then ()
+    else if xml_name_eq(data, len, name_off, name_len, _t_style, 5) then ()
+    else if xml_name_eq(data, len, name_off, name_len, _t_script, 6) then ()
     else let
       (* Transparent tags: html, body — render children with same parent *)
       var _t_html = @[char][4]('h', 't', 'm', 'l')
       var _t_body = @[char][4]('b', 'o', 'd', 'y')
     in
-      if _xml_name_eq(data, len, name_off, name_len, _t_html, 4) then
+      if xml_name_eq(data, len, name_off, name_len, _t_html, 4) then
         _render_nodes(data, len, pidx, children)
-      else if _xml_name_eq(data, len, name_off, name_len, _t_body, 4) then
+      else if xml_name_eq(data, len, name_off, name_len, _t_body, 4) then
         _render_nodes(data, len, pidx, children)
       else let
         (* Void tags: br, hr *)
         var _t_br = @[char][2]('b', 'r')
         var _t_hr = @[char][2]('h', 'r')
       in
-        if _xml_name_eq(data, len, name_off, name_len, _t_br, 2) then let
+        if xml_name_eq(data, len, name_off, name_len, _t_br, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Br()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         in end
-        else if _xml_name_eq(data, len, name_off, name_len, _t_hr, 2) then let
+        else if xml_name_eq(data, len, name_off, name_len, _t_hr, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Hr()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -1108,7 +829,7 @@ in
 
     val opf_csz_s = $AR.checked_arr_size(opf_csz)
     val opf_cbuf = $A.alloc<byte>(opf_csz_s)
-    val fbuf2 = _copy_arr_region(fbuf2, opf_doff, fsz_s,
+    val fbuf2 = copy_arr_region(fbuf2, opf_doff, fsz_s,
                                   opf_cbuf, opf_csz_s, opf_csz_s)
     val () = $A.free<byte>(fbuf2)
 
@@ -1140,7 +861,7 @@ in
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
 
         (* Count spine items and store total chapters *)
-        val total_ch = _count_spine_items(opf_b, dc_sz, opf_nodes, 0)
+        val total_ch = count_spine_items(opf_b, dc_sz, opf_nodes, 0)
         val () = $ST.stash_set_int(24, total_ch)
 
         (* Find Nth spine itemref → manifest item href *)
@@ -1225,7 +946,7 @@ in
                     ch_buf, 0, full_len_s,
                     $AR.checked_nat(prefix_len))
           (* Copy chapter href from OPF borrow *)
-          val () = _copy_from_borrow(opf_b, ch_off, dc_sz,
+          val () = copy_from_borrow(opf_b, ch_off, dc_sz,
                     ch_buf, prefix_len, full_len_s,
                     $AR.checked_nat(ch_len))
 
