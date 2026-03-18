@@ -8,21 +8,6 @@
  *   3 -> cad = reader_view
  *   4 -> cae = back_btn
  *   5 -> caf = content_area
- *   6 -> cag = nav_bar
- *   7 -> cah = page_info
- *   8 -> cai = nav_button
- *   9 -> caj = chapter_title
- *  10 -> cak = zone_left
- *  11 -> cal = zone_right
- *  12 -> cam = zone_center
- *  13 -> can = settings_panel
- *  14 -> cao = settings_btn
- *  15 -> cap = book_card
- *  16 -> caq = book_title
- *  17 -> car = book_author
- *  18 -> cas = lib_toolbar
- *  19 -> cat = ctx_overlay
- *  20 -> cau = ctx_menu
  *
  * Widget IDs (from quire.bats):
  *   qllc = library list container
@@ -32,7 +17,6 @@
  *   qelb = empty library message
  *   qibn = import button
  *   qfin = file input
- *   qltb = library toolbar
  */
 
 import { test, expect } from '@playwright/test';
@@ -43,8 +27,8 @@ import { join } from 'node:path';
 const SCREENSHOT_DIR = join(process.cwd(), 'e2e', 'screenshots');
 mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-/** Helper: import an EPUB into the library (stays on library view) */
-async function importEpubToLibrary(page, opts = {}) {
+/** Helper: import an EPUB file into quire */
+async function importEpub(page, opts = {}) {
   const epubBuffer = createEpub({
     title: opts.title || 'Test Book',
     author: opts.author || 'Test Author',
@@ -54,24 +38,13 @@ async function importEpubToLibrary(page, opts = {}) {
     ...opts,
   });
 
+  await page.goto('/');
+  await page.waitForSelector('#qllc', { timeout: 15000 });
+
   const epubPath = join(SCREENSHOT_DIR, `test-${Date.now()}.epub`);
   writeFileSync(epubPath, epubBuffer);
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles(epubPath);
-
-  // Wait for book card to appear in library
-  await page.waitForSelector('.cap', { timeout: 30000 });
-}
-
-/** Helper: import an EPUB and open it in reader (navigates to library first if needed) */
-async function importEpub(page, opts = {}) {
-  await page.goto('/');
-  await page.waitForSelector('#qllc', { timeout: 15000 });
-
-  await importEpubToLibrary(page, opts);
-
-  // Click the book card to open reader
-  await page.locator('.cap').last().click();
 }
 
 test.describe('EPUB Reader E2E', () => {
@@ -517,13 +490,10 @@ test.describe('EPUB Reader E2E', () => {
     await page.reload();
     await page.waitForTimeout(2000);
 
-    // After reload, library should show a book card (Phase 9 flow)
-    await page.waitForSelector('.cap', { timeout: 15000 });
-    await expect(page.locator('#qllc')).toBeVisible();
-
-    // Click card to open reader
-    await page.locator('.cap').click();
+    // After reload, reader view should be visible (restored from IDB)
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    // Library should be hidden
+    await expect(page.locator('#qllc')).toBeHidden();
 
     // Content should be loaded
     await page.waitForFunction(
@@ -575,11 +545,7 @@ test.describe('EPUB Reader E2E', () => {
     await page.reload();
     await page.waitForTimeout(2000);
 
-    // Library should show a book card
-    await page.waitForSelector('.cap', { timeout: 15000 });
-
-    // Click card to open reader
-    await page.locator('.cap').click();
+    // Reader view should be visible
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
 
     // Wait for content to load
@@ -590,6 +556,14 @@ test.describe('EPUB Reader E2E', () => {
       },
       { timeout: 15000 }
     );
+    await page.waitForTimeout(1000);
+
+    // Page indicator should show the saved position
+    const pageInfoAfter = page.locator('#qpgi');
+    await expect(pageInfoAfter).toBeVisible();
+    const textAfter = await pageInfoAfter.textContent();
+    // Should be on page 2 of chapter 1
+    expect(textAfter).toMatch(/^Ch 1 · p\. 2\/\d+$/);
 
     expect(errors.length).toBe(0);
   });
@@ -705,11 +679,7 @@ test.describe('EPUB Reader E2E', () => {
     await page.reload();
     await page.waitForTimeout(2000);
 
-    // Library should show a book card
-    await page.waitForSelector('.cap', { timeout: 15000 });
-
-    // Click card to open reader
-    await page.locator('.cap').click();
+    // Wait for reader to restore
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
     await page.waitForFunction(
       () => {
@@ -992,254 +962,5 @@ test.describe('EPUB Reader E2E', () => {
     expect(contentRect.height).toBeGreaterThan(vpHeight * 0.5);
 
     expect(errors.length).toBe(0);
-  });
-
-  // Phase 9: import shows book card in library (not reader)
-  test('import shows book card with title and author in library', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'Card Test Book',
-      author: 'Card Author',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-
-    // Library should still be visible (not reader)
-    await expect(page.locator('#qllc')).toBeVisible();
-    await expect(page.locator('#qrvw')).toBeHidden();
-
-    // Book card should be visible with correct title and author
-    const card = page.locator('.cap');
-    await expect(card).toBeVisible();
-    await expect(page.locator('.caq')).toContainText('Card Test Book');
-    await expect(page.locator('.car')).toContainText('Card Author');
-
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: clicking book card opens reader
-  test('clicking book card opens reader', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'Click Test',
-      author: 'Bot',
-      chapters: 2,
-      paragraphsPerChapter: 3,
-    });
-
-    // Click the book card
-    await page.locator('.cap').click();
-
-    // Reader should become visible
-    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('#qllc')).toBeHidden();
-
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: multiple books show multiple cards
-  test('importing two books shows two cards', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'First Book',
-      author: 'Alice',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-
-    await importEpubToLibrary(page, {
-      title: 'Second Book',
-      author: 'Bob',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-
-    // Should have two book cards
-    await page.waitForFunction(
-      () => document.querySelectorAll('.cap').length >= 2,
-      { timeout: 30000 }
-    );
-    const cards = page.locator('.cap');
-    await expect(cards).toHaveCount(2);
-
-    // Both titles should be present
-    const titles = await page.evaluate(() =>
-      [...document.querySelectorAll('.caq')].map(el => el.textContent)
-    );
-    expect(titles).toContain('First Book');
-    expect(titles).toContain('Second Book');
-
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: library toolbar with shelf button
-  test('library toolbar shows shelf button', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    // Library toolbar should be visible
-    await expect(page.locator('.cas')).toBeVisible();
-
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: archive and restore a book
-  test('archive and restore a book', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'Archive Test Book',
-      author: 'Archive Bot',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-
-    // Archive via context menu
-    await page.evaluate(() => {
-      const card = document.querySelector('.cap');
-      if (card) card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
-    await page.waitForSelector('.cat', { timeout: 10000 });
-    await page.locator('.cau button', { hasText: 'Archive' }).click();
-    await page.waitForTimeout(500);
-
-    // Book should disappear from library view
-    // Cycle shelf: Library → Hidden → Archived
-    const shelfBtn = page.locator('.cas button').first();
-    await shelfBtn.click(); // → Hidden
-    await page.waitForTimeout(300);
-    await shelfBtn.click(); // → Archived
-    await page.waitForTimeout(500);
-    await page.waitForSelector('.cap', { timeout: 10000 });
-    await expect(page.locator('.caq')).toContainText('Archive Test Book');
-
-    // Restore via context menu
-    await page.evaluate(() => {
-      const card = document.querySelector('.cap');
-      if (card) card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
-    await page.waitForSelector('.cat', { timeout: 10000 });
-    await page.locator('.cau button', { hasText: 'Restore' }).click();
-    await page.waitForTimeout(500);
-
-    // Cycle back to Library
-    await shelfBtn.click(); // → Library
-    await page.waitForTimeout(500);
-    await page.waitForSelector('.cap', { timeout: 10000 });
-    await expect(page.locator('.caq')).toContainText('Archive Test Book');
-
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: sort books by cycling sort button
-  test('sort books by cycling sort button', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'Zebra Book',
-      author: 'Alice',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-    await importEpubToLibrary(page, {
-      title: 'Apple Book',
-      author: 'Zara',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-    await page.waitForFunction(
-      () => document.querySelectorAll('.cap').length >= 2,
-      { timeout: 30000 }
-    );
-    await page.waitForTimeout(1000);
-
-    const sortBtn = page.locator('.cas button').nth(1);
-    const titlesBefore = await page.evaluate(() =>
-      [...document.querySelectorAll('.caq')].map(el => el.textContent)
-    );
-    await sortBtn.click();
-    await page.waitForTimeout(1000);
-    const titlesAfter = await page.evaluate(() =>
-      [...document.querySelectorAll('.caq')].map(el => el.textContent)
-    );
-    // At least verify no errors (order change depends on sort mode)
-    expect(errors).toEqual([]);
-  });
-
-  // Phase 9: hide and unhide a book via context menu
-  test('hide and unhide a book via context menu', async ({ page }) => {
-    const errors = [];
-    page.on('pageerror', err => errors.push(err.message));
-
-    await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    await importEpubToLibrary(page, {
-      title: 'Hide Test Book',
-      author: 'Hide Bot',
-      chapters: 1,
-      paragraphsPerChapter: 1,
-    });
-
-    // Hide via context menu
-    await page.evaluate(() => {
-      const card = document.querySelector('.cap');
-      if (card) card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
-    await page.waitForSelector('.cat', { timeout: 10000 });
-    await page.locator('.cau button', { hasText: 'Hide' }).click();
-    await page.waitForTimeout(500);
-
-    // Cycle to Hidden view
-    const shelfBtn = page.locator('.cas button').first();
-    await shelfBtn.click(); // → Hidden
-    await page.waitForTimeout(500);
-    await page.waitForSelector('.cap', { timeout: 10000 });
-    await expect(page.locator('.caq')).toContainText('Hide Test Book');
-
-    // Unhide via context menu
-    await page.evaluate(() => {
-      const card = document.querySelector('.cap');
-      if (card) card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
-    });
-    await page.waitForSelector('.cat', { timeout: 10000 });
-    await page.locator('.cau button', { hasText: 'Unhide' }).click();
-    await page.waitForTimeout(500);
-
-    // Cycle back to Library
-    await shelfBtn.click(); // Hidden → Archived
-    await page.waitForTimeout(300);
-    await shelfBtn.click(); // Archived → Library
-    await page.waitForTimeout(500);
-    await page.waitForSelector('.cap', { timeout: 10000 });
-    await expect(page.locator('.caq')).toContainText('Hide Test Book');
-
-    expect(errors).toEqual([]);
   });
 });
