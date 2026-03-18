@@ -16,6 +16,7 @@
 
 staload "state.sats"
 staload "theme.sats"
+staload "epub_xml.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
@@ -273,23 +274,7 @@ and _check_manifest_item
   end
   | $X.xml_text(_, _) => @(~1, 0)
 
-(* Convert arr(byte) to text *)
-fun _arr_to_text_loop
-  {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
-  (src: !$A.arr(byte, l, n), len: int n,
-   tb: $A.text_builder(n, i), pos: int i): $A.text_builder(n, n) =
-  if pos >= len then tb
-  else let
-    val b = byte2int0($A.get<byte>(src, $AR.checked_idx(pos, len)))
-    val tb = $A.text_putc(tb, pos, $AR.checked_byte(b))
-  in _arr_to_text_loop(src, len, tb, pos + 1) end
-
-fn _arr_to_text
-  {l:agz}{n:pos}
-  (src: !$A.arr(byte, l, n), len: int n): $A.text(n) = let
-  val tb = $A.text_build(len)
-  val tb = _arr_to_text_loop(src, len, tb, 0)
-in $A.text_done(tb) end
+(* arr_to_text is now in epub_xml module *)
 
 fun _copy_from_borrow
   {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
@@ -763,7 +748,7 @@ in
         in _fcopy(src, dst, max_s, max_d, i + 1) end
       val () = _fcopy(buf, exact, 22, tsz, 0)
       val () = $A.free<byte>(buf)
-      val txt = _arr_to_text(exact, tsz)
+      val txt = arr_to_text(exact, tsz)
       val () = $A.free<byte>(exact)
       var fs_c = @[char][4]('q', 'f', 's', 's')
       val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
@@ -833,7 +818,7 @@ in
         in _copy(src, dst, max_s, max_d, i + 1) end
       val () = _copy(tbuf, exact, 24, tsz, 0)
       val () = $A.free<byte>(tbuf)
-      val txt = _arr_to_text(exact, tsz)
+      val txt = arr_to_text(exact, tsz)
       val () = $A.free<byte>(exact)
       var pi_c = @[char][4]('q', 'p', 'g', 'i')
       val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
@@ -914,7 +899,7 @@ fn _content_wid(idx: int): $W.widget_id = let
   val () = $A.set<byte>(buf, 1, int2byte0(48 + d2))
   val () = $A.set<byte>(buf, 2, int2byte0(48 + d1))
   val () = $A.set<byte>(buf, 3, int2byte0(48 + d0))
-  val txt = _arr_to_text(buf, 4)
+  val txt = arr_to_text(buf, 4)
   val () = $A.free<byte>(buf)
 in $W.Generated(txt, 4) end
 
@@ -1038,7 +1023,7 @@ and _render_node
         val tsz = $AR.checked_text_size(tlen)
         val tbuf = $A.alloc<byte>(tsz)
         val () = _copy_from_borrow(data, off, len, tbuf, 0, tsz, $AR.checked_nat(tlen))
-        val txt = _arr_to_text(tbuf, tsz)
+        val txt = arr_to_text(tbuf, tsz)
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
         val w = $W.Element($W.ElementNode(_content_wid(idx),
