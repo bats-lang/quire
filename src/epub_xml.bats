@@ -401,3 +401,18 @@ and _check_manifest_item
 
 implement find_manifest_href{lb}{n}{sz}(data, len, nodes, idref_off, idref_len) =
   _find_manifest_href_r(data, len, nodes, idref_off, idref_len)
+
+(* Find chapter href by index *)
+#pub fn find_chapter_href_n
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), len: int n,
+   nodes: !$X.xml_node_list(sz),
+   chapter_idx: int): @(int, int)
+
+implement find_chapter_href_n(data, len, nodes, chapter_idx) = let
+  val idref = find_nth_idref(data, len, nodes, chapter_idx)
+in
+  if idref.0 >= 0 then
+    find_manifest_href(data, len, nodes, idref.0, idref.1)
+  else @(~1, 0)
+end
