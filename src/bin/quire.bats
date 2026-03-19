@@ -268,7 +268,7 @@ in
 
     var fi_c = @[char][4]('q', 'f', 'i', 'n')
     val fi_id = $W.Generated($S.text_of_chars(fi_c, 4), 4)
-    val fi = $W.Element($W.ElementNode(fi_id, $W.Void($W.HtmlInput($W.InputFile(), $W.NoneStr(), $W.NoneStr(), 0, 0, 0)), ~1, 1, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    val fi = $W.Element($W.ElementNode(fi_id, $W.Void($W.HtmlInput($W.InputFile(), $W.NoneStr(), $W.NoneStr(), 0, 0, 0)), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
     val @(_, diff) = $W.add_child(ib, fi)
     val () = $D.apply(doc, diff)
 
