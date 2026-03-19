@@ -160,6 +160,47 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // Phase 12: card click opens book (L3)
+  test('L3: card click opens book, no inline Read/Hide/Archive buttons', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpubToLibrary(page, { title: 'L3 Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 1 });
+
+    // Card should not have inline action buttons (Read/Hide/Archive)
+    const cardButtons = await page.locator('#qbc00 button').count();
+    expect(cardButtons).toBe(0);
+
+    // Clicking card opens reader
+    await page.locator('#qbc00').click();
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Phase 12: toolbar has shelf and sort buttons (L1+L2)
+  test('L1+L2: toolbar has single shelf and sort cycling buttons', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    await expect(page.locator('#qltb')).toBeAttached();
+    await expect(page.locator('#qsrt')).toBeAttached();
+    await expect(page.locator('#qibn')).toBeAttached();
+  });
+
+  // Phase 12: Import button is reasonably sized (L6)
+  test('L6: Import button is reasonably sized in toolbar', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    const box = await page.locator('#qibn').boundingBox();
+    expect(box).not.toBeNull();
+    expect(box.width).toBeGreaterThan(50);
+    expect(box.width).toBeLessThan(400);
+    expect(box.height).toBeGreaterThan(20);
+    expect(box.height).toBeLessThan(100);
+  });
+
   // Phase 3: import opens reader view
   test('import epub switches to reader view', async ({ page }) => {
     const errors = [];
