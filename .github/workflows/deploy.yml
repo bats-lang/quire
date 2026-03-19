@@ -40,7 +40,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bats-bin
-          key: bats-from-c-v3-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
+          key: bats-from-c-v5-${{ runner.os }}-${{ hashFiles('.github/workflows/deploy.yml') }}
 
       - name: Build bats from C
         if: steps.cache-bats.outputs.cache-hit != 'true'
