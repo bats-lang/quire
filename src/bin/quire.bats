@@ -288,14 +288,14 @@ in
         val p = import_epub(fb, 4)
         val p2 = $P.and_then<int><int>(p, lam(result) =>
           if result = 0 then let
-            (* Import succeeded — show reader, hide library *)
+            (* Import succeeded — book card added by _add_book_card *)
+            (* Also auto-open reader for now *)
             var ll3_c = @[char][4]('q', 'l', 'l', 'c')
             val ll3_id = $W.Generated($S.text_of_chars(ll3_c, 4), 4)
             var rv3_c = @[char][4]('q', 'r', 'v', 'w')
             val rv3_id = $W.Generated($S.text_of_chars(rv3_c, 4), 4)
             val () = apply_diff($W.SetHidden(ll3_id, 1))
             val () = apply_diff($W.SetHidden(rv3_id, 0))
-            (* Set loading text and load first chapter *)
             var cnt_c = @[char][4]('q', 'c', 'n', 't')
             val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
             var lc_c = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
