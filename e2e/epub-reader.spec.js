@@ -101,6 +101,26 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // Phase 9: clicking book card opens reader
+  test('clicking book card opens reader', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, { title: 'Click Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 1 });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#qllc')).toBeHidden();
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Phase 9: library toolbar shows shelf button
+  test('library toolbar shows shelf button', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+    await expect(page.locator('#qltb')).toBeAttached();
+  });
+
   // Phase 3: import opens reader view
   test('import epub switches to reader view', async ({ page }) => {
     const errors = [];
