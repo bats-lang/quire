@@ -107,6 +107,26 @@ fn _add_book_card
   val () = $A.free<byte>($A.thaw<byte>(ci_f))
   val () = $A.drop<byte>(ck_f, ck_b)
   val () = $A.free<byte>($A.thaw<byte>(ck_f))
+
+  (* Wire contextmenu handler: right-click shows context menu *)
+  var cm_c = @[char][5]('q', 'b', 'c', '0', '0')
+  val cm_arr = $S.from_char_array(cm_c, 5)
+  val @(cm_f, cm_b) = $A.freeze<byte>(cm_arr)
+  var ct_c = @[char][11]('c', 'o', 'n', 't', 'e', 'x', 't', 'm', 'e', 'n', 'u')
+  val ct_arr = $S.from_char_array(ct_c, 11)
+  val @(ct_f, ct_b) = $A.freeze<byte>(ct_arr)
+  val () = $EV.listen(cm_b, 5, ct_b, 11, 200,
+    lam(_pl: int): int => let
+      val () = $EV.prevent_default()
+      (* Show context menu overlay *)
+      var ctx_c = @[char][4]('q', 'c', 't', 'x')
+      val ctx_id = $W.Generated($S.text_of_chars(ctx_c, 4), 4)
+      val () = apply_diff($W.SetHidden(ctx_id, 0))
+    in 0 end)
+  val () = $A.drop<byte>(cm_f, cm_b)
+  val () = $A.free<byte>($A.thaw<byte>(cm_f))
+  val () = $A.drop<byte>(ct_f, ct_b)
+  val () = $A.free<byte>($A.thaw<byte>(ct_f))
 in end
 
 fn _import_epub

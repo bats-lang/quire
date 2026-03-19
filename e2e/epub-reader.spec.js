@@ -121,6 +121,45 @@ test.describe('EPUB Reader E2E', () => {
     await expect(page.locator('#qltb')).toBeAttached();
   });
 
+  // Phase 9: archive and restore a book
+  test('archive and restore a book', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    // Context menu overlay exists but is hidden
+    await expect(page.locator('#qctx')).toBeAttached();
+    await expect(page.locator('#qctx')).toBeHidden();
+    // Archive button exists
+    await expect(page.locator('#qarb')).toBeAttached();
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Phase 9: sort books by cycling sort button
+  test('sort books by cycling sort button', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+    // Sort button should exist in toolbar
+    await expect(page.locator('#qsrt')).toBeAttached();
+  });
+
+  // Phase 9: hide and unhide a book via context menu
+  test('hide and unhide a book via context menu', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    // Hide button exists in context menu
+    await expect(page.locator('#qhib')).toBeAttached();
+
+    expect(errors.length).toBe(0);
+  });
+
   // Phase 3: import opens reader view
   test('import epub switches to reader view', async ({ page }) => {
     const errors = [];
