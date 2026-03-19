@@ -86,3 +86,11 @@ jobs:
 
       - name: Run e2e tests
         run: npx playwright test
+
+      - name: Upload test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: test-results/
+          retention-days: 14
