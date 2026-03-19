@@ -28,7 +28,7 @@ const SCREENSHOT_DIR = join(process.cwd(), 'e2e', 'screenshots');
 mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 /** Helper: import an EPUB file into quire */
-async function importEpub(page, opts = {}) {
+async function importEpubToLibrary(page, opts = {}) {
   const epubBuffer = createEpub({
     title: opts.title || 'Test Book',
     author: opts.author || 'Test Author',
@@ -45,6 +45,15 @@ async function importEpub(page, opts = {}) {
   writeFileSync(epubPath, epubBuffer);
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles(epubPath);
+
+  // Wait for book card to appear
+  await page.waitForSelector('#qbc00', { timeout: 30000 });
+}
+
+/** Import EPUB and open in reader by clicking card */
+async function importEpub(page, opts = {}) {
+  await importEpubToLibrary(page, opts);
+  await page.locator('#qbc00').click();
 }
 
 test.describe('EPUB Reader E2E', () => {
@@ -392,6 +401,10 @@ test.describe('EPUB Reader E2E', () => {
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(fixturePath);
 
+    // Wait for book card, then click to open reader
+    await page.waitForSelector('#qbc00', { timeout: 30000 });
+    await page.locator('#qbc00').click();
+
     // Reader view should become visible
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
 
@@ -442,6 +455,10 @@ test.describe('EPUB Reader E2E', () => {
     const fixturePath = join(process.cwd(), 'test', 'fixtures', 'conan-stories.epub');
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(fixturePath);
+
+    // Click card to open reader
+    await page.waitForSelector('#qbc00', { timeout: 30000 });
+    await page.locator('#qbc00').click();
 
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
     // Chapter 1 is the cover page — wait for DOM to be created
