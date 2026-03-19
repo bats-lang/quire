@@ -42,8 +42,45 @@ fn _add_book_card
   val @(card, cls_diff) = $W.set_class(card, cls_book_card())
   val () = apply_diff($W.AddChild(ll_id, card))
   val () = apply_diff(cls_diff)
-  var card_txt = @[char][9]('B', 'o', 'o', 'k', ' ', 'C', 'a', 'r', 'd')
-  val () = apply_diff($W.SetTextContent(card_id, $S.text_of_chars(card_txt, 9), 9))
+  (* Title div *)
+  var tc = @[char][5]('q', 't', 'c', '0', '0')
+  val tc_id = $W.Generated($S.text_of_chars(tc, 5), 5)
+  val td = $W.Element($W.ElementNode(tc_id,
+    $W.Normal($W.Div()), cls_book_title(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(td, cls_d) = $W.set_class(td, cls_book_title())
+  val () = apply_diff($W.AddChild(card_id, td))
+  val () = apply_diff(cls_d)
+  (* Set title text — bounds check: t_off + t_len must be <= len *)
+  val () = (if t_off >= 0 then
+    if t_len > 0 then
+      if t_off + t_len <= len then let
+        val tbuf = $A.alloc<byte>(t_len)
+        val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
+        val txt = arr_to_text(tbuf, t_len)
+        val () = $A.free<byte>(tbuf)
+      in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
+      else ()
+    else ()
+  else ())
+  (* Author div *)
+  var ac = @[char][5]('q', 'a', 'c', '0', '0')
+  val ac_id = $W.Generated($S.text_of_chars(ac, 5), 5)
+  val ad = $W.Element($W.ElementNode(ac_id,
+    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
+  val () = apply_diff($W.AddChild(card_id, ad))
+  val () = apply_diff(cls_a)
+  val () = (if a_off >= 0 then
+    if a_len > 0 then
+      if a_off + a_len <= len then let
+        val abuf = $A.alloc<byte>(a_len)
+        val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
+        val txt = arr_to_text(abuf, a_len)
+        val () = $A.free<byte>(abuf)
+      in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
+      else ()
+    else ()
+  else ())
 in end
 
 fn _import_epub
