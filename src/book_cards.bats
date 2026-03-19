@@ -81,6 +81,32 @@ fn _add_book_card
       else ()
     else ()
   else ())
+  (* Wire click handler: card click opens reader *)
+  var ci_c = @[char][5]('q', 'b', 'c', '0', '0')
+  val ci_arr = $S.from_char_array(ci_c, 5)
+  val @(ci_f, ci_b) = $A.freeze<byte>(ci_arr)
+  var ck_c = @[char][5]('c', 'l', 'i', 'c', 'k')
+  val ck_arr = $S.from_char_array(ck_c, 5)
+  val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
+  val () = $EV.listen(ci_b, 5, ck_b, 5, 100,
+    lam(_pl: int): int => let
+      var ll_c = @[char][4]('q', 'l', 'l', 'c')
+      val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
+      var rv_c = @[char][4]('q', 'r', 'v', 'w')
+      val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+      val () = apply_diff($W.SetHidden(ll_id, 1))
+      val () = apply_diff($W.SetHidden(rv_id, 0))
+      var cnt_c = @[char][4]('q', 'c', 'n', 't')
+      val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
+      var lc = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
+      val () = apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc, 18), 18))
+      val ch_p = load_chapter(0)
+      val () = $P.discard<int>(ch_p)
+    in 0 end)
+  val () = $A.drop<byte>(ci_f, ci_b)
+  val () = $A.free<byte>($A.thaw<byte>(ci_f))
+  val () = $A.drop<byte>(ck_f, ck_b)
+  val () = $A.free<byte>($A.thaw<byte>(ck_f))
 in end
 
 fn _import_epub
