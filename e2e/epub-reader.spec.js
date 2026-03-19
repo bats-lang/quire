@@ -28,7 +28,7 @@ const SCREENSHOT_DIR = join(process.cwd(), 'e2e', 'screenshots');
 mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
 /** Helper: import an EPUB file into quire */
-async function importEpub(page, opts = {}) {
+async function importEpubToLibrary(page, opts = {}) {
   const epubBuffer = createEpub({
     title: opts.title || 'Test Book',
     author: opts.author || 'Test Author',
@@ -45,6 +45,16 @@ async function importEpub(page, opts = {}) {
   writeFileSync(epubPath, epubBuffer);
   const fileInput = page.locator('input[type="file"]');
   await fileInput.setInputFiles(epubPath);
+
+  // Wait for book card to appear in library
+  await page.waitForSelector('.cap', { timeout: 30000 });
+}
+
+async function importEpub(page, opts = {}) {
+  await importEpubToLibrary(page, opts);
+
+  // Click the book card to open reader
+  await page.locator('.cap').last().click();
 }
 
 test.describe('EPUB Reader E2E', () => {
