@@ -288,10 +288,22 @@ in
         val p = import_epub(fb, 4)
         val p2 = $P.and_then<int><int>(p, lam(result) =>
           if result = 0 then let
-            (* Import succeeded — book card already added by _add_book_card *)
-            (* Save to IDB for persistence *)
+            (* Import succeeded — show reader, hide library *)
+            var ll3_c = @[char][4]('q', 'l', 'l', 'c')
+            val ll3_id = $W.Generated($S.text_of_chars(ll3_c, 4), 4)
+            var rv3_c = @[char][4]('q', 'r', 'v', 'w')
+            val rv3_id = $W.Generated($S.text_of_chars(rv3_c, 4), 4)
+            val () = apply_diff($W.SetHidden(ll3_id, 1))
+            val () = apply_diff($W.SetHidden(rv3_id, 0))
+            (* Set loading text and load first chapter *)
+            var cnt_c = @[char][4]('q', 'c', 'n', 't')
+            val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
+            var lc_c = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
+            val () = apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc_c, 18), 18))
             val () = save_epub_to_idb()
             val () = save_metadata_to_idb()
+            val ch_p = load_chapter(0)
+            val () = $P.discard<int>(ch_p)
           in $P.ret<int>(0) end
           else let
             var cnt2_c = @[char][4]('q', 'c', 'n', 't')

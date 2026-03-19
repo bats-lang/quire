@@ -22,111 +22,6 @@ staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 
-(* Book card counter — stash slot 29 *)
-fn _add_book_card
-  {lb:agz}{nb:pos}{nt:nat | nt < 256}{na:nat | na < 256}
-  (data: !$A.borrow(byte, lb, nb), len: int nb,
-   t_off: int, t_len: int nt,
-   a_off: int, a_len: int na): void = let
-  val idx = $ST.stash_get_int(29)
-  val () = $ST.stash_set_int(29, idx + 1)
-
-  (* Hide empty library message *)
-  var elb_c = @[char][4]('q', 'e', 'l', 'b')
-  val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
-  val () = apply_diff($W.SetHidden(elb_id, 1))
-
-  (* Create book card div with class *)
-  val tens = idx / 10
-  val ones = idx - tens * 10
-  var card_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
-  val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
-  var ll_c = @[char][4]('q', 'l', 'l', 'c')
-  val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-  val card = $W.Element($W.ElementNode(card_id,
-    $W.Normal($W.Div()), cls_book_card(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(card, diff) = $W.set_class(card, cls_book_card())
-  val () = apply_diff($W.AddChild(ll_id, card))
-  val () = apply_diff(diff)
-
-  (* Create title div with class *)
-  var tc = @[char][5]('q', 't', 'c', int2char0(48 + tens), int2char0(48 + ones))
-  val tc_id = $W.Generated($S.text_of_chars(tc, 5), 5)
-  val td = $W.Element($W.ElementNode(tc_id,
-    $W.Normal($W.Div()), cls_book_title(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(td, diff) = $W.set_class(td, cls_book_title())
-  val () = apply_diff($W.AddChild(card_id, td))
-  val () = apply_diff(diff)
-  (* Set title text — nested ifs so constraint solver tracks t_len > 0 => pos *)
-  val () = (if t_off >= 0 then
-    if t_len > 0 then let
-      val tbuf = $A.alloc<byte>(t_len)
-      val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
-      val txt = arr_to_text(tbuf, t_len)
-      val () = $A.free<byte>(tbuf)
-    in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
-    else let
-      var unk = @[char][7]('U', 'n', 'k', 'n', 'o', 'w', 'n')
-    in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(unk, 7), 7)) end
-  else let
-    var unk = @[char][7]('U', 'n', 'k', 'n', 'o', 'w', 'n')
-  in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(unk, 7), 7)) end)
-
-  (* Create author div with class *)
-  var ac = @[char][5]('q', 'a', 'c', int2char0(48 + tens), int2char0(48 + ones))
-  val ac_id = $W.Generated($S.text_of_chars(ac, 5), 5)
-  val ad = $W.Element($W.ElementNode(ac_id,
-    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(ad, diff) = $W.set_class(ad, cls_book_author())
-  val () = apply_diff($W.AddChild(card_id, ad))
-  val () = apply_diff(diff)
-  val () = (if a_off >= 0 then
-    if a_len > 0 then let
-      val abuf = $A.alloc<byte>(a_len)
-      val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
-      val txt = arr_to_text(abuf, a_len)
-      val () = $A.free<byte>(abuf)
-    in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
-    else let
-      var unk = @[char][7]('U', 'n', 'k', 'n', 'o', 'w', 'n')
-    in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(unk, 7), 7)) end
-  else let
-    var unk = @[char][7]('U', 'n', 'k', 'n', 'o', 'w', 'n')
-  in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(unk, 7), 7)) end)
-
-  (* Wire click handler: clicking card opens reader *)
-  val card_id_arr = $A.alloc<byte>(5)
-  val () = $A.set<byte>(card_id_arr, 0, int2byte0(113))
-  val () = $A.set<byte>(card_id_arr, 1, int2byte0(98))
-  val () = $A.set<byte>(card_id_arr, 2, int2byte0(99))
-  val () = $A.set<byte>(card_id_arr, 3, int2byte0(48 + tens))
-  val () = $A.set<byte>(card_id_arr, 4, int2byte0(48 + ones))
-  val @(ci_f, ci_b) = $A.freeze<byte>(card_id_arr)
-  var ck_c = @[char][5]('c', 'l', 'i', 'c', 'k')
-  val ck_arr = $S.from_char_array(ck_c, 5)
-  val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
-  val listener_id = 100 + idx
-  val () = $EV.listen(ci_b, 5, ck_b, 5, listener_id,
-    lam(_payload_len: int): int => let
-      var ll_c = @[char][4]('q', 'l', 'l', 'c')
-      val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-      var rv_c = @[char][4]('q', 'r', 'v', 'w')
-      val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
-      val () = apply_diff($W.SetHidden(ll_id, 1))
-      val () = apply_diff($W.SetHidden(rv_id, 0))
-      var cnt_c = @[char][4]('q', 'c', 'n', 't')
-      val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-      var lc = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
-      val () = apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc, 18), 18))
-      val ch_p = load_chapter(0)
-      val () = $P.discard<int>(ch_p)
-    in 0 end)
-  val () = $A.drop<byte>(ci_f, ci_b)
-  val () = $A.free<byte>($A.thaw<byte>(ci_f))
-  val () = $A.drop<byte>(ck_f, ck_b)
-  val () = $A.free<byte>($A.thaw<byte>(ck_f))
-in end
-
 fn _import_epub
   {li:agz}{ni:pos}
   (node_id: !$A.borrow(byte, li, ni), id_len: int ni
@@ -329,12 +224,6 @@ in
                           val opf_nodes = $X.parse_document(opf_b, dc2_sz)
                           val meta = walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
                                       ~1, 0, ~1, 0)
-
-                          (* Add book card to library before freeing OPF *)
-                          val t_len = $AR.checked_idx(meta.1, 256)
-                          val a_len = $AR.checked_idx(meta.3, 256)
-                          val () = _add_book_card(opf_b, dc2_sz,
-                                    meta.0, t_len, meta.2, a_len)
 
                           val () = $X.free_nodes(opf_nodes)
                           val () = $A.drop<byte>(opf_f, opf_b)
