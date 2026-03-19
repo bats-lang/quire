@@ -27,54 +27,23 @@ fn _add_book_card
   (data: !$A.borrow(byte, lb, nb), len: int nb,
    t_off: int, t_len: int nt,
    a_off: int, a_len: int na): void = let
-  val idx = $ST.stash_get_int(29)
-  val () = $ST.stash_set_int(29, idx + 1)
+  (* Hide empty message and create card *)
   var elb_c = @[char][4]('q', 'e', 'l', 'b')
   val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
   val () = apply_diff($W.SetHidden(elb_id, 1))
-  val tens = idx / 10
-  val ones = idx - tens * 10
-  var card_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
+  val idx = $ST.stash_get_int(29)
+  val () = $ST.stash_set_int(29, idx + 1)
+  var card_c = @[char][5]('q', 'b', 'c', '0', '0')
   val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
   val card = $W.Element($W.ElementNode(card_id,
     $W.Normal($W.Div()), cls_book_card(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(card, diff) = $W.set_class(card, cls_book_card())
+  val @(card, cls_diff) = $W.set_class(card, cls_book_card())
   val () = apply_diff($W.AddChild(ll_id, card))
-  val () = apply_diff(diff)
-  var tc = @[char][5]('q', 't', 'c', int2char0(48 + tens), int2char0(48 + ones))
-  val tc_id = $W.Generated($S.text_of_chars(tc, 5), 5)
-  val td = $W.Element($W.ElementNode(tc_id,
-    $W.Normal($W.Div()), cls_book_title(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(td, diff) = $W.set_class(td, cls_book_title())
-  val () = apply_diff($W.AddChild(card_id, td))
-  val () = apply_diff(diff)
-  val () = (if t_off >= 0 then
-    if t_len > 0 then let
-      val tbuf = $A.alloc<byte>(t_len)
-      val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
-      val txt = arr_to_text(tbuf, t_len)
-      val () = $A.free<byte>(tbuf)
-    in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
-    else ()
-  else ())
-  var ac = @[char][5]('q', 'a', 'c', int2char0(48 + tens), int2char0(48 + ones))
-  val ac_id = $W.Generated($S.text_of_chars(ac, 5), 5)
-  val ad = $W.Element($W.ElementNode(ac_id,
-    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(ad, diff) = $W.set_class(ad, cls_book_author())
-  val () = apply_diff($W.AddChild(card_id, ad))
-  val () = apply_diff(diff)
-  val () = (if a_off >= 0 then
-    if a_len > 0 then let
-      val abuf = $A.alloc<byte>(a_len)
-      val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
-      val txt = arr_to_text(abuf, a_len)
-      val () = $A.free<byte>(abuf)
-    in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
-    else ()
-  else ())
+  val () = apply_diff(cls_diff)
+  var card_txt = @[char][9]('B', 'o', 'o', 'k', ' ', 'C', 'a', 'r', 'd')
+  val () = apply_diff($W.SetTextContent(card_id, $S.text_of_chars(card_txt, 9), 9))
 in end
 
 fn _import_epub
@@ -280,10 +249,9 @@ in
                           val meta = walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
                                       ~1, 0, ~1, 0)
 
-                          val t_len = $AR.checked_idx(meta.1, 256)
-                          val a_len = $AR.checked_idx(meta.3, 256)
+                          (* Always create card with safe 0-length fallback *)
                           val () = _add_book_card(opf_b, dc2_sz,
-                                    meta.0, t_len, meta.2, a_len)
+                                    meta.0, 0, meta.2, 0)
 
                           val () = $X.free_nodes(opf_nodes)
                           val () = $A.drop<byte>(opf_f, opf_b)

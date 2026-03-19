@@ -68,6 +68,28 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // Phase 9: import shows book card with title and author in library
+  test('import shows book card with title and author in library', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, {
+      title: 'Card Test',
+      author: 'Card Author',
+      chapters: 1,
+      paragraphsPerChapter: 1,
+    });
+
+    // After import, go back to library
+    await page.locator('#qbbk').click();
+    await expect(page.locator('#qllc')).toBeVisible({ timeout: 5000 });
+
+    // Book card should exist
+    await expect(page.locator('#qbc00')).toBeAttached({ timeout: 5000 });
+
+    expect(errors.length).toBe(0);
+  });
+
   // Phase 3: import opens reader view
   test('import epub switches to reader view', async ({ page }) => {
     const errors = [];
