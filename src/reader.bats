@@ -782,6 +782,18 @@ in
                   val () = $A.free<byte>(ch_xhtml2)
 
                   val () = $ST.stash_set_int(23, chapter_idx + 1)
+                  (* Update chapter title in nav bar *)
+                  val ch_num = chapter_idx + 1
+                  var ct_c = @[char][4]('q', 'c', 'h', 't')
+                  val ct_id = $W.Generated($S.text_of_chars(ct_c, 4), 4)
+                  val ch_tens = ch_num / 10
+                  val ch_ones = ch_num - ch_tens * 10
+                  val () = (if ch_tens > 0 then let
+                    var cht = @[char][10]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', int2char0(48 + ch_tens), int2char0(48 + ch_ones))
+                  in _apply_diff($W.SetTextContent(ct_id, $S.text_of_chars(cht, 10), 10)) end
+                  else let
+                    var cht = @[char][9]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', int2char0(48 + ch_ones))
+                  in _apply_diff($W.SetTextContent(ct_id, $S.text_of_chars(cht, 9), 9)) end)
                   val () = _measure_pagination()
                   val () = _save_position()
                 in $P.ret<int>(0) end
