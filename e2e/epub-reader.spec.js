@@ -93,10 +93,11 @@ test.describe('EPUB Reader E2E', () => {
     await page.locator('#qbbk').click();
     await expect(page.locator('#qllc')).toBeVisible({ timeout: 5000 });
 
-    // Book card should exist with title and author divs
+    // Book card should exist with title and author
     await expect(page.locator('#qbc00')).toBeAttached({ timeout: 5000 });
     await expect(page.locator('#qtc00')).toBeAttached({ timeout: 2000 });
     await expect(page.locator('#qac00')).toBeAttached({ timeout: 2000 });
+    // Title text extraction is WIP — metadata offsets need investigation
 
     expect(errors.length).toBe(0);
   });
