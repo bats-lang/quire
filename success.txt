@@ -1,21 +1,10 @@
-All design issues from screenshot review are fixed:
+Fix competitor comparison gaps (Quire vs Apple Books / Kindle / Google Play Books / reference quire):
 
-DONE P0: Native file input chrome exposed (PR #48)
-DONE P0: No max-width on reader text (PR #48)
-DONE P1: Sort button has no styling (PR #50)
-DONE P1: No app header/branding (PR #49)
-DONE P1: Book card fallback text "Imported Book" / "Unknown Author" (PR #59)
-DONE P2: Toolbar has no visual containment (PR #49)
-DONE P2: No reading font (PR #50)
-DONE P2: Card is full-width on wide screens (PR #49)
-DONE P2: Excessive paragraph spacing in reader (PR #50)
-DONE P2: Massive wasted space on wide viewports (PR #49)
-DONE P2: Chapter title "Chapter 1" unstyled (PR #51)
-DONE P2: Navigation bar text cramped on wide screens (PR #51)
-DONE P2: Empty state doesn't guide user (PR #54)
-DONE P2: No page turn animation or visual feedback (PR #55)
-DONE P2: No safe-area handling on notched phones (PR #55)
-DONE P2: No visible chapter break separator between chapters (PR #55)
-DONE P2: No loading indicator during import (PR #59)
-DONE P2: Nav bar chapter label updates with current chapter (PR #59)
-DONE P2: Swipe hint not needed — click zones work on mobile (by design)
+TODO: Pure white background (#fff) is harsh — change to warm off-white #fafaf8 matching reference quire and Apple Books
+TODO: Text color is pure black — change to soft #2a2a2a matching reference quire and Kindle
+TODO: Georgia font only applied to reader (.caf) — apply globally to body so library also uses reading font
+TODO: Reader text is left-aligned (ragged right) — justify paragraphs like Apple Books, Kindle, and reference quire
+TODO: Import button is blue (#4a90d9) — change to green #4a7c59 matching reference quire
+TODO: Nav bar shows "Chapter []" with broken rendering — fix int2char0 issue producing empty brackets
+TODO: Settings panel (font size) not visually confirmed — verify ⚙ panel appearance in screenshot
+TODO: No reading progress indicator on book cards — competitors show dots/percentage
