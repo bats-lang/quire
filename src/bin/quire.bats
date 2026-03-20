@@ -62,6 +62,15 @@ implement main0 () = let
   val @(ll, diff) = $W.set_class(ll, cls_library_list())
   val () = $D.apply(doc, diff)
 
+  (* App title *)
+  var at_c = @[char][4]('q', 'a', 't', 'l')
+  val at_id = $W.Generated($S.text_of_chars(at_c, 4), 4)
+  val at = $W.Element($W.ElementNode(at_id, $W.Normal($W.H1()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(_, diff) = $W.add_child(ll, at)
+  val () = $D.apply(doc, diff)
+  var qt = @[char][5]('Q', 'u', 'i', 'r', 'e')
+  val () = $D.apply(doc, $W.set_text_content(at_id, $S.text_of_chars(qt, 5), 5))
+
   (* Reader view — hidden initially *)
   var rv_c = @[char][4]('q', 'r', 'v', 'w')
   val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
