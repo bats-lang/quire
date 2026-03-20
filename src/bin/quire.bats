@@ -252,8 +252,8 @@ in
     val () = $D.apply(doc, diff)
     val @(_, diff) = $W.set_class(el, cls_empty_lib())
     val () = $D.apply(doc, diff)
-    var yle_c = @[char][21]('Y', 'o', 'u', 'r', ' ', 'l', 'i', 'b', 'r', 'a', 'r', 'y', ' ', 'i', 's', ' ', 'e', 'm', 'p', 't', 'y')
-    val () = $D.apply(doc, $W.set_text_content(el_id, $S.text_of_chars(yle_c, 21), 21))
+    var yle_c = @[char][40]('I', 'm', 'p', 'o', 'r', 't', ' ', 'a', 'n', ' ', 'E', 'P', 'U', 'B', ' ', 'f', 'i', 'l', 'e', ' ', 't', 'o', ' ', 's', 't', 'a', 'r', 't', ' ', 'r', 'e', 'a', 'd', 'i', 'n', 'g', ' ', '.', '.', '.')
+    val () = $D.apply(doc, $W.set_text_content(el_id, $S.text_of_chars(yle_c, 40), 40))
 
     (* Library toolbar *)
     var tb_c = @[char][4]('q', 'l', 't', 'b')
