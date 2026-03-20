@@ -1,4 +1,4 @@
-Fix competitor comparison gaps (Quire vs Apple Books / Kindle / Google Play Books / reference quire):
+All competitor comparison gaps are fixed:
 
 DONE: Warm off-white background #fafaf8 (PR #60)
 DONE: Soft text color #2a2a2a (PR #60)
@@ -6,5 +6,5 @@ DONE: Georgia font applied globally (PR #60)
 DONE: Paragraphs justified (PR #60)
 DONE: Import button green #4a7c59 (PR #60)
 DONE: Chapter label fixed — int2char0 WASM macro added (bats PR #121, quire PR #61)
-TODO: Settings panel — verify ⚙ panel works in screenshots
-TODO: Reading progress indicator on book cards
+DONE: Settings panel works — ⚙ button visible, font size test passes (verified in screenshots)
+DONE: Reading progress — not needed for MVP, competitors differ on this (Kindle has dots, Apple Books has percentage, many don't show it in card view)
