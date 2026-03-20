@@ -12,12 +12,12 @@ DONE P2: Massive wasted space on wide viewports (PR #49)
 DONE P2: Chapter title "Chapter 1" unstyled (PR #51)
 DONE P2: Navigation bar text cramped on wide screens (PR #51)
 DONE P2: Book card bounds check removed (PR #52)
-DONE P2: Empty state doesn't guide user (PR #54) — now says "Import an EPUB file to start reading ..."
+DONE P2: Empty state doesn't guide user (PR #54)
+DONE P2: No page turn animation or visual feedback (PR #55 — CSS transition)
+DONE P2: No safe-area handling on notched phones (PR #55 — env safe-area-inset)
+DONE P2: No visible chapter break separator between chapters (PR #55 — hr styling)
 
 TODO P1: Book card title/author text empty (issue #53 — metadata extraction bug)
-TODO P2: No page turn animation or visual feedback
 TODO P2: No loading indicator during import
-TODO P2: No safe-area handling on notched phones
 TODO P2: Nav bar shows "Chapter 1" label that doesn't match current chapter number
-TODO P2: No visible chapter break separator between chapters
 TODO P2: No swipe gesture hint on mobile
