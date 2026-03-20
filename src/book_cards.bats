@@ -23,10 +23,10 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 
 fn _add_book_card
-  {lb:agz}{nb:pos}{nt:nat | nt < 256}{na:nat | na < 256}
+  {lb:agz}{nb:pos}
   (data: !$A.borrow(byte, lb, nb), len: int nb,
-   t_off: int, t_len: int nt,
-   a_off: int, a_len: int na): void = let
+   t_off: int, t_len: int,
+   a_off: int, a_len: int): void = let
   (* Hide empty message and create card *)
   var elb_c = @[char][4]('q', 'e', 'l', 'b')
   val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
@@ -51,16 +51,13 @@ fn _add_book_card
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
   (* Set title — try metadata, fall back to "Imported Book" *)
-  val () = (if t_off >= 0 then
-    if t_len > 0 then let
-      val tbuf = $A.alloc<byte>(t_len)
-      val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
-      val txt = arr_to_text(tbuf, t_len)
-      val () = $A.free<byte>(tbuf)
-    in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
-    else let
-      var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
-    in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end
+  val () = (if t_off >= 0 && t_len > 0 && t_len < 256 then let
+    val tsz = $AR.checked_text_size(t_len)
+    val tbuf = $A.alloc<byte>(tsz)
+    val () = copy_from_borrow(data, t_off, len, tbuf, 0, tsz, tsz)
+    val txt = arr_to_text(tbuf, tsz)
+    val () = $A.free<byte>(tbuf)
+  in apply_diff($W.SetTextContent(tc_id, txt, tsz)) end
   else let
     var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
   in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
@@ -72,16 +69,13 @@ fn _add_book_card
   val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, ad))
   val () = apply_diff(cls_a)
-  val () = (if a_off >= 0 then
-    if a_len > 0 then let
-      val abuf = $A.alloc<byte>(a_len)
-      val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
-      val txt = arr_to_text(abuf, a_len)
-      val () = $A.free<byte>(abuf)
-    in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
-    else let
-      var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
-    in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end
+  val () = (if a_off >= 0 && a_len > 0 && a_len < 256 then let
+    val asz = $AR.checked_text_size(a_len)
+    val abuf = $A.alloc<byte>(asz)
+    val () = copy_from_borrow(data, a_off, len, abuf, 0, asz, asz)
+    val txt = arr_to_text(abuf, asz)
+    val () = $A.free<byte>(abuf)
+  in apply_diff($W.SetTextContent(ac_id, txt, asz)) end
   else let
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
@@ -336,9 +330,9 @@ in
                           val meta = walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
                                       ~1, 0, ~1, 0)
 
-                          (* Always create card with safe 0-length fallback *)
+                          (* Create card with metadata *)
                           val () = _add_book_card(opf_b, dc2_sz,
-                                    meta.0, 0, meta.2, 0)
+                                    meta.0, meta.1, meta.2, meta.3)
 
                           val () = $X.free_nodes(opf_nodes)
                           val () = $A.drop<byte>(opf_f, opf_b)
