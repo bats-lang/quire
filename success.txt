@@ -4,7 +4,7 @@ DONE: Warm off-white background #fafaf8 (PR #60)
 DONE: Soft text color #2a2a2a (PR #60)
 DONE: Georgia font applied globally (PR #60)
 DONE: Paragraphs justified (PR #60)
-DONE: Import button green #4a7c59 matching reference quire (PR #60)
-TODO: Nav bar shows "Chapter" with truncated/missing number — fix chapter title update
-TODO: Settings panel (font size) — verify ⚙ panel works correctly
-TODO: No reading progress indicator on book cards — competitors show dots/percentage
+DONE: Import button green #4a7c59 (PR #60)
+DONE: Chapter label fixed — int2char0 WASM macro added (bats PR #121, quire PR #61)
+TODO: Settings panel — verify ⚙ panel works in screenshots
+TODO: Reading progress indicator on book cards
