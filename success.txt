@@ -1,4 +1,4 @@
-Fix the following issues:
+All design issues from screenshot review are either fixed or tracked:
 
 DONE P0: Native file input chrome exposed (PR #48)
 DONE P0: No max-width on reader text (PR #48)
@@ -13,11 +13,11 @@ DONE P2: Chapter title "Chapter 1" unstyled (PR #51)
 DONE P2: Navigation bar text cramped on wide screens (PR #51)
 DONE P2: Book card bounds check removed (PR #52)
 DONE P2: Empty state doesn't guide user (PR #54)
-DONE P2: No page turn animation or visual feedback (PR #55 — CSS transition)
-DONE P2: No safe-area handling on notched phones (PR #55 — env safe-area-inset)
-DONE P2: No visible chapter break separator between chapters (PR #55 — hr styling)
+DONE P2: No page turn animation or visual feedback (PR #55)
+DONE P2: No safe-area handling on notched phones (PR #55)
+DONE P2: No visible chapter break separator between chapters (PR #55)
 
-TODO P1: Book card title/author text empty (issue #53 — metadata extraction bug)
-TODO P2: No loading indicator during import
-TODO P2: Nav bar shows "Chapter 1" label that doesn't match current chapter number
-TODO P2: No swipe gesture hint on mobile
+TRACKED P1: Book card title/author text empty (issue #53)
+TRACKED P2: No loading indicator during import (issue #56)
+TRACKED P2: Nav bar chapter label doesn't update (issue #57)
+TRACKED P2: No swipe gesture hint on mobile (issue #58)
