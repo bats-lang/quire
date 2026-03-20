@@ -1,10 +1,10 @@
 Fix competitor comparison gaps (Quire vs Apple Books / Kindle / Google Play Books / reference quire):
 
-TODO: Pure white background (#fff) is harsh — change to warm off-white #fafaf8 matching reference quire and Apple Books
-TODO: Text color is pure black — change to soft #2a2a2a matching reference quire and Kindle
-TODO: Georgia font only applied to reader (.caf) — apply globally to body so library also uses reading font
-TODO: Reader text is left-aligned (ragged right) — justify paragraphs like Apple Books, Kindle, and reference quire
-TODO: Import button is blue (#4a90d9) — change to green #4a7c59 matching reference quire
-TODO: Nav bar shows "Chapter []" with broken rendering — fix int2char0 issue producing empty brackets
-TODO: Settings panel (font size) not visually confirmed — verify ⚙ panel appearance in screenshot
+DONE: Warm off-white background #fafaf8 (PR #60)
+DONE: Soft text color #2a2a2a (PR #60)
+DONE: Georgia font applied globally (PR #60)
+DONE: Paragraphs justified (PR #60)
+DONE: Import button green #4a7c59 matching reference quire (PR #60)
+TODO: Nav bar shows "Chapter" with truncated/missing number — fix chapter title update
+TODO: Settings panel (font size) — verify ⚙ panel works correctly
 TODO: No reading progress indicator on book cards — competitors show dots/percentage
