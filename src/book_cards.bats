@@ -50,16 +50,14 @@ fn _add_book_card
   val @(td, cls_d) = $W.set_class(td, cls_book_title())
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
-  (* Set title text — bounds check: t_off + t_len must be <= len *)
+  (* Set title text *)
   val () = (if t_off >= 0 then
-    if t_len > 0 then
-      if t_off + t_len <= len then let
-        val tbuf = $A.alloc<byte>(t_len)
-        val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
-        val txt = arr_to_text(tbuf, t_len)
-        val () = $A.free<byte>(tbuf)
-      in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
-      else ()
+    if t_len > 0 then let
+      val tbuf = $A.alloc<byte>(t_len)
+      val () = copy_from_borrow(data, t_off, len, tbuf, 0, t_len, t_len)
+      val txt = arr_to_text(tbuf, t_len)
+      val () = $A.free<byte>(tbuf)
+    in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
     else ()
   else ())
   (* Author div *)
@@ -71,14 +69,12 @@ fn _add_book_card
   val () = apply_diff($W.AddChild(card_id, ad))
   val () = apply_diff(cls_a)
   val () = (if a_off >= 0 then
-    if a_len > 0 then
-      if a_off + a_len <= len then let
-        val abuf = $A.alloc<byte>(a_len)
-        val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
-        val txt = arr_to_text(abuf, a_len)
-        val () = $A.free<byte>(abuf)
-      in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
-      else ()
+    if a_len > 0 then let
+      val abuf = $A.alloc<byte>(a_len)
+      val () = copy_from_borrow(data, a_off, len, abuf, 0, a_len, a_len)
+      val txt = arr_to_text(abuf, a_len)
+      val () = $A.free<byte>(abuf)
+    in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
     else ()
   else ())
   (* Wire click handler: card click opens reader *)
