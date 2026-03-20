@@ -50,7 +50,7 @@ fn _add_book_card
   val @(td, cls_d) = $W.set_class(td, cls_book_title())
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
-  (* Set title text *)
+  (* Set title — try metadata, fall back to "Imported Book" *)
   val () = (if t_off >= 0 then
     if t_len > 0 then let
       val tbuf = $A.alloc<byte>(t_len)
@@ -58,8 +58,12 @@ fn _add_book_card
       val txt = arr_to_text(tbuf, t_len)
       val () = $A.free<byte>(tbuf)
     in apply_diff($W.SetTextContent(tc_id, txt, t_len)) end
-    else ()
-  else ())
+    else let
+      var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
+    in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end
+  else let
+    var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
+  in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
   (* Author div *)
   var ac = @[char][5]('q', 'a', 'c', '0', '0')
   val ac_id = $W.Generated($S.text_of_chars(ac, 5), 5)
@@ -75,8 +79,12 @@ fn _add_book_card
       val txt = arr_to_text(abuf, a_len)
       val () = $A.free<byte>(abuf)
     in apply_diff($W.SetTextContent(ac_id, txt, a_len)) end
-    else ()
-  else ())
+    else let
+      var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
+    in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end
+  else let
+    var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
+  in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
   (* Wire click handler: card click opens reader *)
   var ci_c = @[char][5]('q', 'b', 'c', '0', '0')
   val ci_arr = $S.from_char_array(ci_c, 5)

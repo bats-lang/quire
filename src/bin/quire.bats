@@ -340,6 +340,12 @@ in
     val @(ch_f, ch_b) = $A.freeze<byte>(ch_arr)
     val () = $EV.listen(fi_nb, 4, ch_b, 6, 1,
       lam(_payload_len: int): int => let
+        (* Show importing indicator *)
+        var elb_c = @[char][4]('q', 'e', 'l', 'b')
+        val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
+        val () = apply_diff($W.SetHidden(elb_id, 0))
+        var imp_c = @[char][14]('I', 'm', 'p', 'o', 'r', 't', 'i', 'n', 'g', ' ', 'E', 'P', 'U', 'B')
+        val () = apply_diff($W.SetTextContent(elb_id, $S.text_of_chars(imp_c, 14), 14))
         val fa = $A.alloc<byte>(4)
         val () = $A.set<byte>(fa, 0, int2byte0(113))
         val () = $A.set<byte>(fa, 1, int2byte0(102))
