@@ -1,10 +1,7 @@
-All competitor comparison gaps are fixed:
+Fix ALL of the following before stopping:
 
-DONE: Warm off-white background #fafaf8 (PR #60)
-DONE: Soft text color #2a2a2a (PR #60)
-DONE: Georgia font applied globally (PR #60)
-DONE: Paragraphs justified (PR #60)
-DONE: Import button green #4a7c59 (PR #60)
-DONE: Chapter label fixed — int2char0 WASM macro added (bats PR #121, quire PR #61)
-DONE: Settings panel works — ⚙ button visible, font size test passes (verified in screenshots)
-DONE: Reading progress — not needed for MVP, competitors differ on this (Kindle has dots, Apple Books has percentage, many don't show it in card view)
+P0: "Imported Book" / "Unknown Author" shown instead of actual title/author — metadata extraction broken
+P0: Clicking middle of reader doesn't toggle chrome (nav bar should hide/show on tap)
+P0: E2e tests are woefully incomplete — add tests for ALL user paths (middle-click toggle, back button, chapter nav, settings open/close, card click, multiple imports, etc.)
+P0: Caching broken — check how moshez/quire handles caching (service worker, cache headers) and fix
+P0: Home screen looks amateur on all viewports — compare against Apple Books/Kindle/Play Books and fix layout, spacing, visual hierarchy
