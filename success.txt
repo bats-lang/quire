@@ -1,21 +1,23 @@
 Fix the following issues:
 
-P0: Native file input chrome exposed — "Choose File" / "No file chosen" visible inside Import button
-P0: No max-width on reader text — lines span full 1440px, unreadable on wide screens
-P1: Book card shows no title/author — cards are empty boxes (metadata extraction bug)
-P1: Sort button has no styling — plain text, doesn't look interactive
-P1: No app header/branding — page has no identity, no "Quire" title
-P2: Toolbar has no visual containment — no background, border, or separation from content
-P2: No reading font — uses system-ui sans-serif instead of a serif reading font
-P2: Card is full-width on wide screens — poor information density, should have max-width or grid
-P2: Excessive paragraph spacing in reader — ~40px gaps instead of ~16-18px
-P2: Chapter title "Chapter 1" unstyled — no typographic hierarchy
-P2: No page turn animation or visual feedback
-P2: No loading indicator during import
-P2: Empty state doesn't guide user — no illustration or helpful description
-P2: No safe-area handling on notched phones
-P2: Navigation bar text cramped on wide screens — tiny targets
-P2: "Your library is empty" and toolbar alignment mismatch — centered vs left-aligned
-P2: Massive wasted space on wide viewports — no max-width container
-P2: Nav bar shows "Chapter 1" label that doesn't match current chapter number
-P2: No visible chapter break separator between chapters
+DONE P0: Native file input chrome exposed (PR #48)
+DONE P0: No max-width on reader text (PR #48)
+DONE P1: Sort button has no styling (PR #50)
+DONE P1: No app header/branding (PR #49)
+DONE P2: Toolbar has no visual containment (PR #49)
+DONE P2: No reading font (PR #50)
+DONE P2: Card is full-width on wide screens (PR #49 — library max-width:800px)
+DONE P2: Excessive paragraph spacing in reader (PR #50)
+DONE P2: Massive wasted space on wide viewports (PR #49)
+
+TODO P1: Book card shows no title/author — cards are empty boxes (metadata extraction bug)
+TODO P2: Chapter title "Chapter 1" unstyled — no typographic hierarchy
+TODO P2: No page turn animation or visual feedback
+TODO P2: No loading indicator during import
+TODO P2: Empty state doesn't guide user — no illustration or helpful description
+TODO P2: No safe-area handling on notched phones
+TODO P2: Navigation bar text cramped on wide screens — tiny targets
+TODO P2: "Your library is empty" and toolbar alignment mismatch — centered vs left-aligned
+TODO P2: Nav bar shows "Chapter 1" label that doesn't match current chapter number
+TODO P2: No visible chapter break separator between chapters
+TODO P2: No swipe gesture hint on mobile
