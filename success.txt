@@ -15,7 +15,6 @@ P2: No loading indicator during import
 P2: Empty state doesn't guide user — no illustration or helpful description
 P2: No safe-area handling on notched phones
 P2: Navigation bar text cramped on wide screens — tiny targets
-P2: No swipe gesture hint on mobile
 P2: "Your library is empty" and toolbar alignment mismatch — centered vs left-aligned
 P2: Massive wasted space on wide viewports — no max-width container
 P2: Nav bar shows "Chapter 1" label that doesn't match current chapter number
