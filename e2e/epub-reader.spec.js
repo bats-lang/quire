@@ -31,7 +31,7 @@ async function waitForContent(page, minLength = 50) {
       const els = document.querySelectorAll('div');
       for (const el of els) {
         const style = getComputedStyle(el);
-        if (style.columnWidth === '100vw' || style.overflow === 'hidden') {
+        if (style.columnFill === 'auto' && style.overflow === 'hidden') {
           if (el.textContent.length > min) return true;
         }
       }
@@ -348,12 +348,7 @@ test.describe('EPUB Reader E2E', () => {
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(fixturePath);
 
-    // Wait for a book card, then click it
-    await page.waitForTimeout(5000);
-    // Find any card that appeared and click it
-    const cards = page.locator('div:has(> div)').filter({ hasText: /\w{3,}/ });
-    await cards.first().click({ timeout: 30000 });
-
+    // Wait for the book card — the imported card auto-opens reader
     await waitForReader(page);
     await page.waitForTimeout(1000);
 
@@ -374,9 +369,8 @@ test.describe('EPUB Reader E2E', () => {
     const fileInput = page.locator('input[type="file"]');
     await fileInput.setInputFiles(fixturePath);
 
-    await page.waitForTimeout(5000);
-    const cards = page.locator('div:has(> div)').filter({ hasText: /\w{3,}/ });
-    await cards.first().click({ timeout: 30000 });
+    // Import auto-opens reader
+    await waitForReader(page);
 
     await waitForReader(page);
     await page.waitForTimeout(1000);
@@ -474,7 +468,7 @@ test.describe('EPUB Reader E2E', () => {
     const initialFontSize = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           return parseFloat(getComputedStyle(el).fontSize);
         }
       }
@@ -488,7 +482,7 @@ test.describe('EPUB Reader E2E', () => {
     const largerFontSize = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           return parseFloat(getComputedStyle(el).fontSize);
         }
       }
@@ -503,7 +497,7 @@ test.describe('EPUB Reader E2E', () => {
     const restoredFontSize = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           return parseFloat(getComputedStyle(el).fontSize);
         }
       }
@@ -538,7 +532,7 @@ test.describe('EPUB Reader E2E', () => {
     const largerFontSize = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           return parseFloat(getComputedStyle(el).fontSize);
         }
       }
@@ -556,7 +550,7 @@ test.describe('EPUB Reader E2E', () => {
     const restoredFontSize = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           return parseFloat(getComputedStyle(el).fontSize);
         }
       }
@@ -670,7 +664,7 @@ test.describe('EPUB Reader E2E', () => {
     const contentRect = await page.evaluate(() => {
       const els = document.querySelectorAll('div');
       for (const el of els) {
-        if (getComputedStyle(el).columnWidth === '100vw') {
+        if (getComputedStyle(el).columnFill === 'auto' && getComputedStyle(el).overflow === 'hidden') {
           const r = el.getBoundingClientRect();
           return { top: r.top, height: r.height };
         }
@@ -754,18 +748,28 @@ test.describe('EPUB Reader E2E', () => {
     await page.goto('/');
     await waitForLibrary(page);
 
+    // Import first book — auto-opens reader
     const path1 = join(SCREENSHOT_DIR, `two1-${Date.now()}.epub`);
     writeFileSync(path1, epub1);
     await page.locator('input[type="file"]').setInputFiles(path1);
-    await page.getByText('First Book').waitFor({ timeout: 30000 });
+    await waitForReader(page);
 
+    // Go back to library
+    await page.getByText('←').click();
+    await waitForLibrary(page);
+    await expect(page.getByText('First Book')).toBeVisible({ timeout: 5000 });
+
+    // Import second book — auto-opens reader again
     const path2 = join(SCREENSHOT_DIR, `two2-${Date.now()}.epub`);
     writeFileSync(path2, epub2);
     await page.locator('input[type="file"]').setInputFiles(path2);
-    await page.getByText('Second Book').waitFor({ timeout: 30000 });
+    await waitForReader(page);
 
-    await expect(page.getByText('First Book')).toBeVisible();
-    await expect(page.getByText('Second Book')).toBeVisible();
+    // Go back to library — both cards should be visible
+    await page.getByText('←').click();
+    await waitForLibrary(page);
+    await expect(page.getByText('First Book')).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText('Second Book')).toBeVisible({ timeout: 5000 });
 
     expect(errors.length).toBe(0);
   });
@@ -905,7 +909,7 @@ test.describe('EPUB Reader E2E', () => {
 
     await expect(page.getByText('Title Check')).toBeVisible({ timeout: 5000 });
     await expect(page.getByText('Author Check')).toBeVisible({ timeout: 2000 });
-    await expect(page.getByText('New')).toBeVisible({ timeout: 2000 });
+    await expect(page.getByText('New', { exact: true }).first()).toBeVisible({ timeout: 2000 });
 
     expect(errors.length).toBe(0);
   });
