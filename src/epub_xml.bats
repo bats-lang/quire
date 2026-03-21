@@ -17,8 +17,7 @@ fun _arr_to_text_loop
   if pos >= len then tb
   else let
     val b = byte2int0($A.get<byte>(src, pos))
-    val bv = $AR.byte_of_char(int2char0(b))
-    val tb = $A.text_putc(tb, pos, bv)
+    val tb = $A.text_putc(tb, pos, $AR.byte_of_char(int2char0(b)))
   in _arr_to_text_loop(src, len, tb, pos + 1) end
 
 #pub fn arr_to_text
@@ -35,8 +34,8 @@ in $A.text_done(tb) end
    ============================================================ *)
 
 fun _copy_from_borrow_r
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{so:int}{do_:int} .<fuel>.
-  (src: !$A.borrow(byte, lb, nb), src_off: int so, src_max: int nb,
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int} .<fuel>.
+  (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
    dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int fuel): void =
   if count <= 0 then ()
@@ -45,16 +44,16 @@ fun _copy_from_borrow_r
   else if src_off >= src_max then ()
   else if dst_off >= dst_max then ()
   else let
-    val b = $A.read<byte>(src, src_off)
-    val () = $A.set<byte>(dst, dst_off, b)
+    val b = $S.borrow_byte(src, src_off, src_max)
+    val () = $A.set<byte>(dst, dst_off, int2byte0(b))
   in
     _copy_from_borrow_r(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1)
   end
 
 #pub fn copy_from_borrow
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int}
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
+   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int fuel): void
 
 implement copy_from_borrow(src, src_off, src_max, dst, dst_off, dst_max, count) =
@@ -107,17 +106,17 @@ implement xml_name_eq(data, len, name_off, name_len, pat, plen) =
    ============================================================ *)
 
 fun _borrow_region_eq_r
-  {lb:agz}{n:pos}{fuel:nat}{oa:int}{ob:int} .<fuel>.
+  {lb:agz}{n:pos}{fuel:nat} .<fuel>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   off_a: int oa, off_b: int ob, count: int fuel): bool =
+   off_a: int, off_b: int, count: int fuel): bool =
   if count <= 0 then true
   else if off_a < 0 then false
   else if off_b < 0 then false
   else if off_a >= len then false
   else if off_b >= len then false
   else let
-    val a = byte2int0($A.read<byte>(data, off_a))
-    val b = byte2int0($A.read<byte>(data, off_b))
+    val a = $S.borrow_byte(data, off_a, len)
+    val b = $S.borrow_byte(data, off_b, len)
   in
     if a != b then false
     else _borrow_region_eq_r(data, len, off_a + 1, off_b + 1, count - 1)
@@ -355,10 +354,10 @@ implement count_spine_items{lb}{n}{sz}(data, len, nodes, acc) =
    ============================================================ *)
 
 fun _find_manifest_href_r
-  {lb:agz}{n:pos}{sz:nat}{il:int} .<sz, 1>.
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   idref_off: int, idref_len: int il): @(int, int) =
+   idref_off: int, idref_len: int): @(int, int) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val r = _check_manifest_item(data, len, node, idref_off, idref_len)
@@ -369,10 +368,10 @@ fun _find_manifest_href_r
   | $X.xml_nodes_nil() => @(~1, 0)
 
 and _check_manifest_item
-  {lb:agz}{n:pos}{sz:pos}{il:int} .<sz, 0>.
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    node: !$X.xml_node(sz),
-   idref_off: int, idref_len: int il): @(int, int) =
+   idref_off: int, idref_len: int): @(int, int) =
   case+ node of
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _c_item = @[char][4]('i', 't', 'e', 'm')
@@ -380,11 +379,16 @@ and _check_manifest_item
     if xml_name_eq(data, len, name_off, name_len, _c_item, 4) then let
       var _c_id = @[char][2]('i', 'd')
       val id_r = _find_attr_val(data, len, attrs, _c_id, 2)
+      fun _cmp_bytes {lb:agz}{n:pos}{k:nat} .<k>.
+        (d: !$A.borrow(byte, lb, n), mx: int n,
+         a: int, b: int, fuel: int k): bool =
+        if fuel <= 0 then true
+        else if $S.borrow_byte(d, a, mx) != $S.borrow_byte(d, b, mx) then false
+        else _cmp_bytes(d, mx, a + 1, b + 1, fuel - 1)
     in
       if id_r.0 >= 0 then
         if id_r.1 = idref_len then
-          if idref_len < 0 then @(~1, 0)
-          else if borrow_region_eq(data, len, id_r.0, idref_off, idref_len) then let
+          if _cmp_bytes(data, len, id_r.0, idref_off, len) then let
             var _c_href = @[char][4]('h', 'r', 'e', 'f')
           in _find_attr_val(data, len, attrs, _c_href, 4) end
           else @(~1, 0)
@@ -396,12 +400,12 @@ and _check_manifest_item
   | $X.xml_text(_, _) => @(~1, 0)
 
 #pub fn find_manifest_href
-  {lb:agz}{n:pos}{sz:nat}{il:int}
+  {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   idref_off: int, idref_len: int il): @(int, int)
+   idref_off: int, idref_len: int): @(int, int)
 
-implement find_manifest_href{lb}{n}{sz}{il}(data, len, nodes, idref_off, idref_len) =
+implement find_manifest_href{lb}{n}{sz}(data, len, nodes, idref_off, idref_len) =
   _find_manifest_href_r(data, len, nodes, idref_off, idref_len)
 
 (* Find chapter href by index *)

@@ -106,19 +106,19 @@ end
 (* Save stash metadata to IDB: slots 10-18 as 9 x 4-byte ints *)
 fn _save_metadata_to_idb(): void = let
   val buf = $A.alloc<byte>(36)
-  fun _write_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
+  fun _write_slot {l:agz}{n:pos}{s:nat}{fuel:nat}{o:int} .<fuel>.
     (buf: !$A.arr(byte, l, n), max: int n,
-     slot: int s, off: int, fuel: int fuel): void =
+     slot: int s, off: int o, fuel: int fuel): void =
     if fuel <= 0 then ()
     else if slot >= 32 then ()
     else if off < 0 then ()
     else if off + 3 >= max then ()
     else let
       val v = $ST.stash_get_int(slot)
-      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(v mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 1, max), int2byte0((v / 256) mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 2, max), int2byte0((v / 65536) mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 3, max), int2byte0((v / 16777216) mod 256))
+      val () = $A.set<byte>(buf, off, int2byte0(v mod 256))
+      val () = $A.set<byte>(buf, off + 1, int2byte0((v / 256) mod 256))
+      val () = $A.set<byte>(buf, off + 2, int2byte0((v / 65536) mod 256))
+      val () = $A.set<byte>(buf, off + 3, int2byte0((v / 16777216) mod 256))
     in _write_slot(buf, max, slot + 1, off + 4, fuel - 1) end
   val () = _write_slot(buf, 36, 10, 0, 9)
   val @(bf, bb) = $A.freeze<byte>(buf)
@@ -146,14 +146,14 @@ in end
 
 (* Write an integer into a byte buffer at offset, return new offset *)
 fun _write_int_digits
-  {l:agz}{n:pos}{v:nat}{fuel:nat} .<fuel>.
+  {l:agz}{n:pos}{v:nat}{fuel:nat}{o:int} .<fuel>.
   (buf: !$A.arr(byte, l, n), max: int n,
-   off: int, value: int v, fuel: int fuel): int =
+   off: int o, value: int v, fuel: int fuel): [r:int] int r =
   if fuel <= 0 then off
   else if value < 10 then
     if off >= 0 then
       if off < max then let
-        val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(48 + value))
+        val () = $A.set<byte>(buf, off, int2byte0(48 + value))
       in off + 1 end
       else off
     else off
@@ -162,7 +162,7 @@ fun _write_int_digits
   in
     if new_off >= 0 then
       if new_off < max then let
-        val () = $A.set<byte>(buf, $AR.checked_idx(new_off, max),
+        val () = $A.set<byte>(buf, new_off,
           int2byte0(48 + (value - (value / 10) * 10)))
       in new_off + 1 end
       else new_off
@@ -170,19 +170,19 @@ fun _write_int_digits
   end
 
 fn _set_byte
-  {l:agz}{n:pos}
-  (buf: !$A.arr(byte, l, n), max: int n, off: int, b: int): int =
+  {l:agz}{n:pos}{o:int}
+  (buf: !$A.arr(byte, l, n), max: int n, off: int o, b: int): [r:int] int r =
   if off >= 0 then
     if off < max then let
-      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(b))
+      val () = $A.set<byte>(buf, off, int2byte0(b))
     in off + 1 end
     else off
   else off
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
-fn _apply_font_size(size: int): void = let
-  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): int
+fn _apply_font_size {s:int} (size: int s): void = let
+  val sz = (if size < 8 then 8 else if size > 48 then 48 else size)
   val () = $ST.stash_set_int(25, sz)
   (* Build CSS string ".caf{font-size:NNpx}" — max 22 bytes *)
   val buf = $A.alloc<byte>(22)
@@ -201,14 +201,14 @@ fn _apply_font_size(size: int): void = let
   val off = _set_byte(buf, 22, off, 122) (* z *)
   val off = _set_byte(buf, 22, off, 101) (* e *)
   val off = _set_byte(buf, 22, off, 58)  (* : *)
-  val off = _write_int_digits(buf, 22, off, $AR.checked_nat(sz), 3)
+  val off = _write_int_digits(buf, 22, off, sz, 3)
   val off = _set_byte(buf, 22, off, 112) (* p *)
   val off = _set_byte(buf, 22, off, 120) (* x *)
   val off = _set_byte(buf, 22, off, 125) (* } *)
 in
   if off > 0 then
     if off <= 22 then let
-      val tsz = $AR.checked_text_size(off)
+      val tsz = off
       val exact = $A.alloc<byte>(tsz)
       fun _fcopy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
         (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
@@ -216,8 +216,8 @@ in
         if i >= max_s then ()
         else if i >= max_d then ()
         else let
-          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
-          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+          val b = $A.get<byte>(src, i)
+          val () = $A.set<byte>(dst, i, b)
         in _fcopy(src, dst, max_s, max_d, i + 1) end
       val () = _fcopy(buf, exact, 22, tsz, 0)
       val () = $A.free<byte>(buf)
@@ -258,12 +258,16 @@ fn _update_page_indicator(): void = let
   val cur_page = $ST.stash_get_int(21)
   val total = $ST.stash_get_int(22)
   val chapter = $ST.stash_get_int(23)
+in
+  if chapter < 0 then () else
+  if cur_page < 0 then () else
+  if total < 0 then () else let
   (* Build "Ch N · p. M/T" in a 24-byte buffer *)
   val tbuf = $A.alloc<byte>(24)
   val off = _set_byte(tbuf, 24, 0, 67)  (* C *)
   val off = _set_byte(tbuf, 24, off, 104) (* h *)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(chapter), 3)
+  val off = _write_int_digits(tbuf, 24, off, chapter, 3)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
   val off = _set_byte(tbuf, 24, off, 194) (* 0xC2 = first byte of · *)
   val off = _set_byte(tbuf, 24, off, 183) (* 0xB7 = second byte of · *)
@@ -271,14 +275,14 @@ fn _update_page_indicator(): void = let
   val off = _set_byte(tbuf, 24, off, 112) (* p *)
   val off = _set_byte(tbuf, 24, off, 46)  (* . *)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(cur_page + 1), 3)
+  val off = _write_int_digits(tbuf, 24, off, cur_page + 1, 3)
   val off = _set_byte(tbuf, 24, off, 47)  (* / *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(total), 3)
+  val off = _write_int_digits(tbuf, 24, off, total, 3)
 in
   if off > 0 then
     if off < 24 then let
       (* Copy to exact-size buffer for text conversion *)
-      val tsz = $AR.checked_text_size(off)
+      val tsz = off
       val exact = $A.alloc<byte>(tsz)
       fun _copy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
         (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
@@ -286,8 +290,8 @@ in
         if i >= max_s then ()
         else if i >= max_d then ()
         else let
-          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
-          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+          val b = $A.get<byte>(src, i)
+          val () = $A.set<byte>(dst, i, b)
         in _copy(src, dst, max_s, max_d, i + 1) end
       val () = _copy(tbuf, exact, 24, tsz, 0)
       val () = $A.free<byte>(tbuf)
@@ -493,16 +497,15 @@ and _render_node
   | $X.xml_text(off, tlen) =>
     if tlen > 0 then
       if tlen < 65536 then let
-        val tsz = $AR.checked_text_size(tlen)
-        val tbuf = $A.alloc<byte>(tsz)
-        val () = copy_from_borrow(data, off, len, tbuf, 0, tsz, $AR.checked_nat(tlen))
-        val txt = arr_to_text(tbuf, tsz)
+        val tbuf = $A.alloc<byte>(tlen)
+        val () = copy_from_borrow(data, off, len, tbuf, 0, tlen, tlen)
+        val txt = arr_to_text(tbuf, tlen)
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
         val w = $W.Element($W.ElementNode(_content_wid(idx),
           $W.Normal($W.Span()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
         val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
+        val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tlen))
       in end
       else ()
     else ()
@@ -674,11 +677,33 @@ in
               opf_name_off, opf_name_off + opf_name_len, opf_name_off,
               opf_name_len)
           val prefix_len = prefix_end - opf_name_off
-
+        in
+          if prefix_len < 0 then let
+            val () = $A.free<byte>(fbuf3)
+            val () = $X.free_nodes(opf_nodes)
+            val () = $A.drop<byte>(opf_f, opf_b)
+            val t = $A.thaw<byte>(opf_f)
+            val () = $A.free<byte>(t)
+          in $P.ret<int>(~5) end
+          else if ch_len < 0 then let
+            val () = $A.free<byte>(fbuf3)
+            val () = $X.free_nodes(opf_nodes)
+            val () = $A.drop<byte>(opf_f, opf_b)
+            val t = $A.thaw<byte>(opf_f)
+            val () = $A.free<byte>(t)
+          in $P.ret<int>(~5) end
+          else let
           (* Build full path: prefix + href *)
           val full_len = prefix_len + ch_len
-          val full_len_s = full_len
-          val ch_buf = $A.alloc<byte>(full_len_s)
+        in if full_len <= 0 then let
+            val () = $A.free<byte>(fbuf3)
+            val () = $X.free_nodes(opf_nodes)
+            val () = $A.drop<byte>(opf_f, opf_b)
+            val t = $A.thaw<byte>(opf_f)
+            val () = $A.free<byte>(t)
+          in $P.ret<int>(~5) end
+          else let
+          val ch_buf = $A.alloc<byte>(full_len)
           (* Copy prefix from file buffer *)
           fun _copy_arr_region
             {la:agz}{na:pos}{lb:agz}{nb:pos}{i:int}{j:int}{fuel:nat} .<fuel>.
@@ -694,13 +719,13 @@ in
               val b = $A.get<byte>(src, s_off)
               val () = $A.set<byte>(dst, d_off, b)
             in _copy_arr_region(src, s_off + 1, s_max, dst, d_off + 1, d_max, fuel - 1) end
-          val () = _copy_arr_region(fbuf3, opf_off_g1, fsz_s3,
-                    ch_buf, 0, full_len_s,
-                    $AR.checked_nat(prefix_len))
+          val () = _copy_arr_region(fbuf3, opf_name_off, fsz_s3,
+                    ch_buf, 0, full_len,
+                    prefix_len)
           (* Copy chapter href from OPF borrow *)
           val () = copy_from_borrow(opf_b, ch_off, dc_sz,
-                    ch_buf, prefix_len, full_len_s,
-                    $AR.checked_nat(ch_len))
+                    ch_buf, prefix_len, full_len,
+                    ch_len)
 
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
@@ -710,7 +735,7 @@ in
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
           val ch_entry = $Z.find_entry_by_name(
             fbuf3, fsz_s3, cd_off,
-            $AR.checked_nat(cd_cnt),
+            cd_cnt,
             chb, full_len_s)
           val () = $A.drop<byte>(chf, chb)
           val ch_buf2 = $A.thaw<byte>(chf)
@@ -722,8 +747,12 @@ in
           else let
             val ch_doff_opt = $Z.get_data_offset(fbuf3, fsz_s3,
                                 ch_entry.local_header_offset)
-            val ch_doff = $R.option_unwrap_or<int>(ch_doff_opt, ~1)
           in
+            case+ ch_doff_opt of
+            | ~$R.none() => let
+              val () = $A.free<byte>(fbuf3)
+            in $P.ret<int>(~5) end
+            | ~$R.some(ch_doff) =>
             if ch_doff < 0 then let
               val () = $A.free<byte>(fbuf3)
             in $P.ret<int>(~5) end
@@ -736,7 +765,7 @@ in
             else let
               val ch_csz = ch_entry.compressed_size
               val ch_comp = $A.alloc<byte>(ch_csz)
-              val () = _copy_arr_region(fbuf3, g1ofg0_int(ch_doff), fsz_s3,
+              val () = _copy_arr_region(fbuf3, ch_doff, fsz_s3,
                                         ch_comp, 0, ch_csz, ch_csz)
               val () = $A.free<byte>(fbuf3)
 
@@ -906,18 +935,18 @@ fn _restore_from_idb(): void = let
         else let
           (* Read 9 x 4-byte ints = stash slots 10-18 *)
           val meta_data = $IDB.idb_get_result(36)
-          fun _read_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
+          fun _read_slot {l:agz}{n:pos}{s:nat}{fuel:nat}{o:int} .<fuel>.
             (buf: !$A.arr(byte, l, n), max: int n,
-             slot: int s, off: int, fuel: int fuel): void =
+             slot: int s, off: int o, fuel: int fuel): void =
             if fuel <= 0 then ()
             else if slot >= 32 then ()
             else if off < 0 then ()
             else if off + 3 >= max then ()
             else let
-              val b0 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off, max)))
-              val b1 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 1, max)))
-              val b2 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 2, max)))
-              val b3 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 3, max)))
+              val b0 = byte2int0($A.get<byte>(buf, off))
+              val b1 = byte2int0($A.get<byte>(buf, off + 1))
+              val b2 = byte2int0($A.get<byte>(buf, off + 2))
+              val b3 = byte2int0($A.get<byte>(buf, off + 3))
               val v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
               val () = $ST.stash_set_int(slot, v)
             in _read_slot(buf, max, slot + 1, off + 4, fuel - 1) end
