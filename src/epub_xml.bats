@@ -381,14 +381,15 @@ and _check_manifest_item
       val id_r = _find_attr_val(data, len, attrs, _c_id, 2)
       fun _cmp_bytes {lb:agz}{n:pos}{k:nat} .<k>.
         (d: !$A.borrow(byte, lb, n), mx: int n,
-         a: int, b: int, fuel: int k): bool =
+         a: int, b: int, rem: int, fuel: int k): bool =
         if fuel <= 0 then true
+        else if rem <= 0 then true
         else if $S.borrow_byte(d, a, mx) != $S.borrow_byte(d, b, mx) then false
-        else _cmp_bytes(d, mx, a + 1, b + 1, fuel - 1)
+        else _cmp_bytes(d, mx, a + 1, b + 1, rem - 1, fuel - 1)
     in
       if id_r.0 >= 0 then
         if id_r.1 = idref_len then
-          if _cmp_bytes(data, len, id_r.0, idref_off, len) then let
+          if _cmp_bytes(data, len, id_r.0, idref_off, idref_len, len) then let
             var _c_href = @[char][4]('h', 'r', 'e', 'f')
           in _find_attr_val(data, len, attrs, _c_href, 4) end
           else @(~1, 0)

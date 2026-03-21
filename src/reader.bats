@@ -736,7 +736,7 @@ in
           val ch_entry = $Z.find_entry_by_name(
             fbuf3, fsz_s3, cd_off,
             cd_cnt,
-            chb, full_len_s)
+            chb, full_len)
           val () = $A.drop<byte>(chf, chb)
           val ch_buf2 = $A.thaw<byte>(chf)
           val () = $A.free<byte>(ch_buf2)

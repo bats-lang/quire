@@ -186,7 +186,7 @@ in
         var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
         val _cont_arr = $S.from_char_array(_cont_chars, 22)
         val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-        val cont = $Z.find_entry_by_name(file_buf, file_size_s, cd_off,
+        val cont = $Z.find_entry_by_name(file_buf, file_size, cd_off,
                     cd_count,
                     _cont_b, 22)
         val () = $A.drop<byte>(_cont_f, _cont_b)
@@ -198,7 +198,7 @@ in
           val () = $FI.close(file_handle)
         in $P.ret<int>(~3) end
         else let
-          val doff_opt = $Z.get_data_offset(file_buf, file_size_s,
+          val doff_opt = $Z.get_data_offset(file_buf, file_size,
                           cont.local_header_offset)
           val doff = $R.option_unwrap_or<int>(doff_opt, ~1)
         in
@@ -217,7 +217,7 @@ in
           else let
             val csz = cont.compressed_size
             val comp_buf = $A.alloc<byte>(csz)
-            val file_buf = copy_arr_region(file_buf, doff, file_size_s,
+            val file_buf = copy_arr_region(file_buf, doff, file_size,
                                       comp_buf, csz, csz)
             (* Free file_buf now — we will re-read in stage 2 *)
             val () = $A.free<byte>(file_buf)
@@ -289,13 +289,13 @@ in
                   val () = $A.free<byte>(dc_buf2)
 
                   (* Re-read file for OPF entry lookup *)
-                  val file_size_s2 = file_size
-                  val file_buf2 = $A.alloc<byte>(file_size_s2)
-                  val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
+                  val file_size2 = file_size
+                  val file_buf2 = $A.alloc<byte>(file_size2)
+                  val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size2))
 
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
                   val opf_entry = $Z.find_entry_by_name(
-                    file_buf2, file_size_s2, cd_off,
+                    file_buf2, file_size2, cd_off,
                     cd_count,
                     opf_borrow, opf_path_sz)
                   val () = $A.drop<byte>(opf_frozen, opf_borrow)
@@ -306,7 +306,7 @@ in
                     val () = $A.free<byte>(file_buf2)
                   in $P.ret<int>(~7) end
                   else let
-                    val opf_doff_opt = $Z.get_data_offset(file_buf2, file_size_s2,
+                    val opf_doff_opt = $Z.get_data_offset(file_buf2, file_size2,
                                         opf_entry.local_header_offset)
                     val opf_doff = $R.option_unwrap_or<int>(opf_doff_opt, ~1)
                   in
@@ -322,7 +322,7 @@ in
                     else let
                       val opf_csz = opf_entry.compressed_size
                       val opf_comp = $A.alloc<byte>(opf_csz)
-                      val file_buf2 = copy_arr_region(file_buf2, opf_doff, file_size_s2,
+                      val file_buf2 = copy_arr_region(file_buf2, opf_doff, file_size2,
                                                 opf_comp, opf_csz, opf_csz)
                       val () = $A.free<byte>(file_buf2)
 
