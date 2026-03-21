@@ -1,7 +1,7 @@
 Fix ALL of the following before stopping:
 
-DONE P0: Metadata extraction — pass actual title/author lengths (PR #62, uses checked_text_size)
-DONE P0: Center-click chrome toggle — clicking center zone hides/shows nav bar (PR #62)
+DONE P0: Metadata extraction — pass actual title/author lengths (PR #62)
+DONE P0: Center-click chrome toggle (PR #62)
+DONE P0: Service worker caching — bridge.js added to SW shell (bridge PR #52, quire PR #63)
 TODO P0: E2e tests incomplete — add tests for all user paths
-TODO P0: Caching broken — add bridge.js to service worker shell
 TODO P0: Home screen looks amateur — improve visual design on all viewports
