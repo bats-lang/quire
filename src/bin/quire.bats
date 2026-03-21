@@ -581,6 +581,37 @@ in
     val ck5_tmp = $A.thaw<byte>(ck5_f)
     val () = $A.free<byte>(ck5_tmp)
 
+    (* Wire center click zone — listener 14: toggle chrome *)
+    val zc_narr = $A.alloc<byte>(4)
+    val () = $A.set<byte>(zc_narr, 0, int2byte0(113))  (* q *)
+    val () = $A.set<byte>(zc_narr, 1, int2byte0(99))   (* c *)
+    val () = $A.set<byte>(zc_narr, 2, int2byte0(122))  (* z *)
+    val () = $A.set<byte>(zc_narr, 3, int2byte0(99))   (* c *)
+    val @(zc_nf, zc_nb) = $A.freeze<byte>(zc_narr)
+    var zcck_c = @[char][5]('c', 'l', 'i', 'c', 'k')
+    val zcck_arr = $S.from_char_array(zcck_c, 5)
+    val @(zcck_f, zcck_b) = $A.freeze<byte>(zcck_arr)
+    val () = $EV.listen(zc_nb, 4, zcck_b, 5, 14,
+      lam(_pl: int): int => let
+        (* Toggle nav bar visibility *)
+        var nv_c = @[char][4]('q', 'r', 'n', 'v')
+        val nv_id = $W.Generated($S.text_of_chars(nv_c, 4), 4)
+        val hidden = $ST.stash_get_int(30)
+      in
+        if hidden > 0 then let
+          val () = $ST.stash_set_int(30, 0)
+          val () = apply_diff($W.SetHidden(nv_id, 0))
+        in 0 end
+        else let
+          val () = $ST.stash_set_int(30, 1)
+          val () = apply_diff($W.SetHidden(nv_id, 1))
+        in 0 end
+      end)
+    val () = $A.drop<byte>(zc_nf, zc_nb)
+    val () = $A.free<byte>($A.thaw<byte>(zc_nf))
+    val () = $A.drop<byte>(zcck_f, zcck_b)
+    val () = $A.free<byte>($A.thaw<byte>(zcck_f))
+
     (* Wire keyboard navigation — listener 7: document keydown *)
     val kd_arr = $A.alloc<byte>(7)
     val () = $A.set<byte>(kd_arr, 0, int2byte0(107)) (* k *)

@@ -202,6 +202,30 @@ test.describe('EPUB Reader E2E', () => {
     expect(box.height).toBeLessThan(100);
   });
 
+  // Center click toggles chrome (nav bar)
+  test('center click toggles reader chrome', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, { title: 'Chrome Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 4 });
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+
+    // Nav bar should be visible initially
+    await expect(page.locator('#qrnv')).toBeVisible();
+
+    // Click center zone to hide chrome
+    await page.locator('#qczc').click();
+    await page.waitForTimeout(300);
+    await expect(page.locator('#qrnv')).toBeHidden();
+
+    // Click again to show chrome
+    await page.locator('#qczc').click();
+    await page.waitForTimeout(300);
+    await expect(page.locator('#qrnv')).toBeVisible();
+
+    expect(errors.length).toBe(0);
+  });
+
   // Phase 3: import opens reader view
   test('import epub switches to reader view', async ({ page }) => {
     const errors = [];
