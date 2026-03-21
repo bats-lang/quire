@@ -1,7 +1,7 @@
 Fix ALL of the following before stopping:
 
-P0: "Imported Book" / "Unknown Author" shown instead of actual title/author — metadata extraction broken
-P0: Clicking middle of reader doesn't toggle chrome (nav bar should hide/show on tap)
-P0: E2e tests are woefully incomplete — add tests for ALL user paths (middle-click toggle, back button, chapter nav, settings open/close, card click, multiple imports, etc.)
-P0: Caching broken — check how moshez/quire handles caching (service worker, cache headers) and fix
-P0: Home screen looks amateur on all viewports — compare against Apple Books/Kindle/Play Books and fix layout, spacing, visual hierarchy
+DONE P0: Metadata extraction — pass actual title/author lengths (PR #62, uses checked_text_size)
+DONE P0: Center-click chrome toggle — clicking center zone hides/shows nav bar (PR #62)
+TODO P0: E2e tests incomplete — add tests for all user paths
+TODO P0: Caching broken — add bridge.js to service worker shell
+TODO P0: Home screen looks amateur — improve visual design on all viewports
