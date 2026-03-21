@@ -5,37 +5,37 @@ DONE: Center-click chrome toggle — nav bar hides/shows on center tap (PR #62)
 DONE: Service worker caching — bridge.js cached (bridge PR #52, quire PR #63)
 
 === E2E TESTS (must cover ALL user paths) ===
-TODO: Import a non-EPUB file → verify error handling (no crash)
-TODO: Import two books sequentially → both cards appear with different titles
-TODO: Back button from reader → library visible, card still there
-TODO: Page forward via right click zone
-TODO: Page backward via left click zone
-TODO: Keyboard navigation (ArrowRight = next page, ArrowLeft = prev)
-TODO: Settings: increase font size → text gets visually bigger
-TODO: Settings: decrease font size → text gets visually smaller
-TODO: Settings: close panel after changing
-TODO: Reload page → library persists via IDB
-TODO: Reload page in reader → reading position restored
-TODO: Chapter navigation forward (next chapter)
-TODO: Chapter navigation backward (prev chapter)
-TODO: Real-world EPUB with deflated metadata (conan stories)
-TODO: Large chapter pagination (verify page count > 1)
-TODO: Context menu right-click on card → overlay appears
-TODO: Settings gear click → panel visible
-TODO: Back to library after reading → card shows title
+DONE: Import a non-EPUB file → verify error handling (no crash)
+DONE: Import two books sequentially → both cards appear with different titles
+DONE: Back button from reader → library visible, card still there
+DONE: Page forward via right click zone
+DONE: Page backward via left click zone
+DONE: Keyboard navigation (ArrowRight = next page, ArrowLeft = prev)
+DONE: Settings: increase font size → text gets visually bigger
+DONE: Settings: decrease font size → text gets visually smaller
+DONE: Settings: close panel after changing
+DONE: Reload page → library persists via IDB
+DONE: Reload page in reader → reading position restored
+DONE: Chapter navigation forward (next chapter)
+DONE: Chapter navigation backward (prev chapter)
+DONE: Real-world EPUB with deflated metadata (conan stories)
+DONE: Large chapter pagination (verify page count > 1)
+DONE: Context menu right-click on card → overlay appears
+DONE: Settings gear click → panel visible
+DONE: Back to library after reading → card shows title
 
 === HOME SCREEN DESIGN ===
-TODO: Toolbar should be ABOVE empty state message, not below it
-TODO: Sort button should have clear visual hierarchy vs Import (right-aligned or smaller)
-TODO: Empty state should be vertically centered in available space
-TODO: On mobile, toolbar buttons should be clearly tappable (sufficient touch target)
-TODO: "Quire" title needs proper app header styling (not just bold serif text)
-TODO: Card should show reading progress indicator (even if just "New" vs "In Progress")
+DONE: Toolbar should be ABOVE empty state message, not below it
+DONE: Sort button should have clear visual hierarchy vs Import (right-aligned or smaller)
+DONE: Empty state should be vertically centered in available space
+DONE: On mobile, toolbar buttons should be clearly tappable (min-height:44px touch targets)
+DONE: "Quire" title needs proper app header styling (24px, 700 weight, letter-spacing)
+DONE: Card should show reading progress indicator ("New" badge on imported books)
 
 === CODE QUALITY ===
-TODO: Element IDs in tests are fragile — migrate to CSS class selectors
+DONE: Element IDs in tests are fragile — migrated to content-based selectors
 TODO: Service worker version should auto-increment (not hardcoded v2)
-TODO: int2char0 in bats compiler is a castfn — should be a proper macro
-TODO: Dynamic card IDs broken (int2char0 was the issue — now fixed, need to re-enable)
-TODO: Book card title extraction still uses checked_text_size castfn — verify it's correct
+DONE: int2char0 in bats compiler is a castfn — proper macro added (PR #121)
+DONE: Dynamic card IDs fixed (int2char0 re-enabled for unique per-book IDs)
+DONE: Book card title extraction uses checked_text_size castfn — verified correct
 TODO: Remove all rm -rf build/ workarounds — fix caching logic if needed

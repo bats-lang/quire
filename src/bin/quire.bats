@@ -68,6 +68,8 @@ implement main0 () = let
   val at = $W.Element($W.ElementNode(at_id, $W.Normal($W.H1()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(_, diff) = $W.add_child(ll, at)
   val () = $D.apply(doc, diff)
+  val @(_, diff) = $W.set_class(at, cls_app_header())
+  val () = $D.apply(doc, diff)
   var qt = @[char][5]('Q', 'u', 'i', 'r', 'e')
   val () = $D.apply(doc, $W.set_text_content(at_id, $S.text_of_chars(qt, 5), 5))
 
