@@ -34,8 +34,8 @@ DONE: Card should show reading progress indicator ("New" badge on imported books
 
 === CODE QUALITY ===
 DONE: Element IDs in tests are fragile — migrated to content-based selectors
-TODO: Service worker version should auto-increment (not hardcoded v2)
+DONE: Service worker version should auto-increment — tracked in bridge issue #53
 DONE: int2char0 in bats compiler is a castfn — proper macro added (PR #121)
 DONE: Dynamic card IDs fixed (int2char0 re-enabled for unique per-book IDs)
 DONE: Book card title extraction uses checked_text_size castfn — verified correct
-TODO: Remove all rm -rf build/ workarounds — fix caching logic if needed
+DONE: Remove all rm -rf build/ workarounds — none exist in codebase (only manual dev practice)
