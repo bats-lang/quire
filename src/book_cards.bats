@@ -33,7 +33,9 @@ fn _add_book_card
   val () = apply_diff($W.SetHidden(elb_id, 1))
   val idx = $ST.stash_get_int(29)
   val () = $ST.stash_set_int(29, idx + 1)
-  var card_c = @[char][5]('q', 'b', 'c', '0', '0')
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var card_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
@@ -79,8 +81,18 @@ fn _add_book_card
   else let
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
+  (* Progress badge — "New" for newly imported books *)
+  var pb_c = @[char][5]('q', 'p', 'b', int2char0(48 + tens), int2char0(48 + ones))
+  val pb_id = $W.Generated($S.text_of_chars(pb_c, 5), 5)
+  val pb = $W.Element($W.ElementNode(pb_id,
+    $W.Normal($W.Div()), cls_progress_badge(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(pb, cls_p) = $W.set_class(pb, cls_progress_badge())
+  val () = apply_diff($W.AddChild(card_id, pb))
+  val () = apply_diff(cls_p)
+  var new_c = @[char][3]('N', 'e', 'w')
+  val () = apply_diff($W.SetTextContent(pb_id, $S.text_of_chars(new_c, 3), 3))
   (* Wire click handler: card click opens reader *)
-  var ci_c = @[char][5]('q', 'b', 'c', '0', '0')
+  var ci_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val ci_arr = $S.from_char_array(ci_c, 5)
   val @(ci_f, ci_b) = $A.freeze<byte>(ci_arr)
   var ck_c = @[char][5]('c', 'l', 'i', 'c', 'k')
