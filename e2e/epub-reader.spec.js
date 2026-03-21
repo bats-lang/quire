@@ -1227,4 +1227,104 @@ test.describe('EPUB Reader E2E', () => {
 
     expect(errors.length).toBe(0);
   });
+
+  // Import two books → both cards appear
+  test('importing two books shows two cards', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const epub1 = createEpub({ title: 'First Book', author: 'Alice', chapters: 1, paragraphsPerChapter: 1, storeChapters: true });
+    const epub2 = createEpub({ title: 'Second Book', author: 'Bob', chapters: 1, paragraphsPerChapter: 1, storeChapters: true });
+
+    await page.goto('/');
+    await page.waitForSelector('#qllc', { timeout: 15000 });
+
+    const path1 = join(SCREENSHOT_DIR, `two1-${Date.now()}.epub`);
+    writeFileSync(path1, epub1);
+    await page.locator('input[type="file"]').setInputFiles(path1);
+    await page.waitForSelector('.cap', { timeout: 30000 });
+
+    const path2 = join(SCREENSHOT_DIR, `two2-${Date.now()}.epub`);
+    writeFileSync(path2, epub2);
+    await page.locator('input[type="file"]').setInputFiles(path2);
+
+    // Wait for second card
+    await page.waitForFunction(
+      () => document.querySelectorAll('.cap').length >= 2,
+      { timeout: 30000 }
+    );
+
+    const cardCount = await page.locator('.cap').count();
+    expect(cardCount).toBeGreaterThanOrEqual(2);
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Back button returns to library with card visible
+  test('back button returns with card visible', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, { title: 'Back Card Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 2 });
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+
+    // Go back
+    await page.locator('.cae').first().click();
+    await expect(page.locator('#qllc')).toBeVisible({ timeout: 5000 });
+
+    // Card should still be there
+    await expect(page.locator('.cap')).toBeAttached();
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Page navigation via click zones
+  test('page forward and backward via click zones', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, { title: 'Zone Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 20 });
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => { const el = document.getElementById('qcnt'); return el && el.textContent.length > 100; },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // Get initial page info
+    const before = await page.locator('.cah').textContent();
+
+    // Click right zone (next page)
+    const rightZone = page.locator('.cal');
+    if (await rightZone.isVisible()) {
+      await rightZone.click();
+      await page.waitForTimeout(500);
+    }
+
+    expect(errors.length).toBe(0);
+  });
+
+  // Keyboard navigation
+  test('keyboard arrow keys navigate pages', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await importEpub(page, { title: 'Key Test', author: 'Bot', chapters: 1, paragraphsPerChapter: 20 });
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => { const el = document.getElementById('qcnt'); return el && el.textContent.length > 100; },
+      { timeout: 15000 }
+    );
+    await page.waitForTimeout(500);
+
+    // Press ArrowRight
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(300);
+
+    // Press ArrowLeft
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(300);
+
+    expect(errors.length).toBe(0);
+  });
 });

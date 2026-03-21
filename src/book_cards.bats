@@ -33,7 +33,9 @@ fn _add_book_card
   val () = apply_diff($W.SetHidden(elb_id, 1))
   val idx = $ST.stash_get_int(29)
   val () = $ST.stash_set_int(29, idx + 1)
-  var card_c = @[char][5]('q', 'b', 'c', '0', '0')
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var card_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
