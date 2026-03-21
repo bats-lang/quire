@@ -627,23 +627,22 @@ in
     val () = $A.set<byte>(kd_arr, 6, int2byte0(110)) (* n *)
     val @(kd_f, kd_b) = $A.freeze<byte>(kd_arr)
     val () = $EV.listen_document(kd_b, 7, 7,
-      lam(payload_len: int): int =>
+      lam(payload_len): int =>
         if payload_len <= 0 then 0
         else let
           (* Keydown payload: 1 byte key_len, key bytes, 1 byte flags *)
-          val payload_sz = $AR.checked_arr_size(payload_len)
-          val payload = $EV.get_payload(payload_sz)
+          val payload = $EV.get_payload(payload_len)
           val key_len = byte2int0($A.get<byte>(payload, 0))
         in
+          if payload_len <= 2 then let val () = $A.free<byte>(payload) in 0 end
+          else
           (* ArrowRight = 10 bytes, ArrowLeft = 9 bytes, Space = 1 byte " " *)
           if key_len = 10 then let
-            (* Check for "ArrowRight" *)
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
-            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
+            val b1 = byte2int0($A.get<byte>(payload, 1))
+            val b2 = byte2int0($A.get<byte>(payload, 2))
           in
             if b1 = 65 then
               if b2 = 114 then let
-                (* ArrowRight → next page *)
                 val () = $A.free<byte>(payload)
                 val cur = $ST.stash_get_int(21)
               in go_to_page(cur + 1); 0 end
@@ -651,13 +650,11 @@ in
             else let val () = $A.free<byte>(payload) in 0 end
           end
           else if key_len = 9 then let
-            (* Check for "ArrowLeft" *)
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
-            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
+            val b1 = byte2int0($A.get<byte>(payload, 1))
+            val b2 = byte2int0($A.get<byte>(payload, 2))
           in
             if b1 = 65 then
               if b2 = 114 then let
-                (* ArrowLeft → prev page *)
                 val () = $A.free<byte>(payload)
                 val cur = $ST.stash_get_int(21)
               in go_to_page(cur - 1); 0 end
@@ -665,10 +662,9 @@ in
             else let val () = $A.free<byte>(payload) in 0 end
           end
           else if key_len = 1 then let
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
+            val b1 = byte2int0($A.get<byte>(payload, 1))
           in
             if b1 = 32 then let
-              (* Space → next page *)
               val () = $A.free<byte>(payload)
               val cur = $ST.stash_get_int(21)
             in go_to_page(cur + 1); 0 end

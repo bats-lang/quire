@@ -80,7 +80,7 @@ fn _save_epub_to_idb(): void = let
 in
   if fsz > 0 then
     if fsz <= 1048576 then let
-      val fsz_s = $AR.checked_arr_size(fsz)
+      val fsz_s = fsz
       val fbuf = $A.alloc<byte>(fsz_s)
       val () = $R.discard($FI.file_read(fh, 0, fbuf, fsz_s))
       val @(ff, fb) = $A.freeze<byte>(fbuf)
@@ -570,16 +570,16 @@ fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
   val opf_comp = $ST.stash_get_int(16)
 in
   if fsz <= 0 then $P.ret<int>(~1)
-  else if fsz > 1048576 then $P.ret<int>(~1)
+  else if fsz > 31457280 then $P.ret<int>(~1)
   else if opf_csz <= 0 then $P.ret<int>(~1)
-  else if opf_csz > 1048576 then $P.ret<int>(~1)
+  else if opf_csz > 31457280 then $P.ret<int>(~1)
   else let
     (* Read full file *)
-    val fsz_s = $AR.checked_arr_size(fsz)
+    val fsz_s = fsz
     val fbuf2 = $A.alloc<byte>(fsz_s)
     val () = $R.discard($FI.file_read(fh, 0, fbuf2, fsz_s))
 
-    val opf_csz_s = $AR.checked_arr_size(opf_csz)
+    val opf_csz_s = opf_csz
     val opf_cbuf = $A.alloc<byte>(opf_csz_s)
     val fbuf2 = copy_arr_region(fbuf2, opf_doff, fsz_s,
                                   opf_cbuf, opf_csz_s, opf_csz_s)
@@ -600,11 +600,11 @@ in
       if dc_len <= 0 then let
         val () = $DC.blob_free(dc_handle)
       in $P.ret<int>(~2) end
-      else if dc_len > 1048576 then let
+      else if dc_len > 31457280 then let
         val () = $DC.blob_free(dc_handle)
       in $P.ret<int>(~2) end
       else let
-        val dc_sz = $AR.checked_arr_size(dc_len)
+        val dc_sz = dc_len
         val opf_buf = $A.alloc<byte>(dc_sz)
         val () = $R.discard($DC.blob_read(dc_handle, 0, opf_buf, dc_sz))
         val () = $DC.blob_free(dc_handle)
@@ -633,7 +633,7 @@ in
           val t = $A.thaw<byte>(opf_f)
           val () = $A.free<byte>(t)
         in $P.ret<int>(~3) end
-        else if ch_len > 1048576 then let
+        else if ch_len > 31457280 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)
@@ -642,7 +642,7 @@ in
         else let
           (* Re-read file now so we can access the OPF name
              in the central directory for path prefix resolution *)
-          val fsz_s3 = $AR.checked_arr_size(fsz)
+          val fsz_s3 = fsz
           val fbuf3 = $A.alloc<byte>(fsz_s3)
           val () = $R.discard($FI.file_read(fh, 0, fbuf3, fsz_s3))
 
@@ -668,16 +668,16 @@ in
               else
                 _find_last_slash(buf, max, pos + 1, endp, last_after, fuel - 1)
             end
-          val opf_off_g1 = g1ofg0_int(opf_name_off)
-          val opf_len_g1 = g1ofg0_int(opf_name_len)
-          val prefix_end = _find_last_slash(fbuf3, fsz_s3,
-            opf_off_g1, opf_off_g1 + opf_len_g1, opf_off_g1,
-            $AR.checked_nat(opf_name_len))
+          val prefix_end =
+            if opf_name_len < 0 then opf_name_off
+            else _find_last_slash(fbuf3, fsz_s3,
+              opf_name_off, opf_name_off + opf_name_len, opf_name_off,
+              opf_name_len)
           val prefix_len = prefix_end - opf_name_off
 
           (* Build full path: prefix + href *)
           val full_len = prefix_len + ch_len
-          val full_len_s = $AR.checked_arr_size(full_len)
+          val full_len_s = full_len
           val ch_buf = $A.alloc<byte>(full_len_s)
           (* Copy prefix from file buffer *)
           fun _copy_arr_region
@@ -730,11 +730,11 @@ in
             else if ch_entry.compressed_size <= 0 then let
               val () = $A.free<byte>(fbuf3)
             in $P.ret<int>(~5) end
-            else if ch_entry.compressed_size > 1048576 then let
+            else if ch_entry.compressed_size > 31457280 then let
               val () = $A.free<byte>(fbuf3)
             in $P.ret<int>(~5) end
             else let
-              val ch_csz = $AR.checked_arr_size(ch_entry.compressed_size)
+              val ch_csz = ch_entry.compressed_size
               val ch_comp = $A.alloc<byte>(ch_csz)
               val () = _copy_arr_region(fbuf3, g1ofg0_int(ch_doff), fsz_s3,
                                         ch_comp, 0, ch_csz, ch_csz)
@@ -755,11 +755,11 @@ in
                 if ch_dc_len <= 0 then let
                   val () = $DC.blob_free(ch_dc_handle)
                 in $P.ret<int>(~6) end
-                else if ch_dc_len > 1048576 then let
+                else if ch_dc_len > 31457280 then let
                   val () = $DC.blob_free(ch_dc_handle)
                 in $P.ret<int>(~6) end
                 else let
-                  val ch_dc_sz = $AR.checked_arr_size(ch_dc_len)
+                  val ch_dc_sz = ch_dc_len
                   val ch_xhtml = $A.alloc<byte>(ch_dc_sz)
                   val () = $R.discard($DC.blob_read(ch_dc_handle, 0, ch_xhtml, ch_dc_sz))
                   val () = $DC.blob_free(ch_dc_handle)
@@ -874,10 +874,10 @@ fn _restore_from_idb(): void = let
   val book_p = $P.vow(book_p)
   val p2 = $P.and_then<int><int>(book_p, lam(book_len) =>
     if book_len <= 0 then $P.ret<int>(~1)
-    else if book_len > 1048576 then $P.ret<int>(~1)
+    else if book_len > 31457280 then $P.ret<int>(~1)
     else let
       (* Read EPUB bytes from IDB result *)
-      val bsz = $AR.checked_arr_size(book_len)
+      val bsz = book_len
       val book_data = $IDB.idb_get_result(bsz)
       (* Store into file cache *)
       val @(bf, bb) = $A.freeze<byte>(book_data)
