@@ -631,12 +631,14 @@ in
           val payload = $EV.get_payload(payload_sz)
           val key_len = byte2int0($A.get<byte>(payload, 0))
         in
+          if payload_sz <= 2 then let val () = $A.free<byte>(payload) in 0 end
+          else let
           (* ArrowRight = 10 bytes, ArrowLeft = 9 bytes, Space = 1 byte " " *)
-          if key_len = 10 then let
+          val b1 = byte2int0($A.get<byte>(payload, 1))
+          val b2 = byte2int0($A.get<byte>(payload, 2))
+        in
+          if key_len = 10 then
             (* Check for "ArrowRight" *)
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
-            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
-          in
             if b1 = 65 then
               if b2 = 114 then let
                 (* ArrowRight → next page *)
@@ -645,12 +647,8 @@ in
               in go_to_page(cur + 1); 0 end
               else let val () = $A.free<byte>(payload) in 0 end
             else let val () = $A.free<byte>(payload) in 0 end
-          end
-          else if key_len = 9 then let
+          else if key_len = 9 then
             (* Check for "ArrowLeft" *)
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
-            val b2 = byte2int0($A.get<byte>(payload, $AR.checked_idx(2, payload_sz)))
-          in
             if b1 = 65 then
               if b2 = 114 then let
                 (* ArrowLeft → prev page *)
@@ -659,18 +657,15 @@ in
               in go_to_page(cur - 1); 0 end
               else let val () = $A.free<byte>(payload) in 0 end
             else let val () = $A.free<byte>(payload) in 0 end
-          end
-          else if key_len = 1 then let
-            val b1 = byte2int0($A.get<byte>(payload, $AR.checked_idx(1, payload_sz)))
-          in
+          else if key_len = 1 then
             if b1 = 32 then let
               (* Space → next page *)
               val () = $A.free<byte>(payload)
               val cur = $ST.stash_get_int(21)
             in go_to_page(cur + 1); 0 end
             else let val () = $A.free<byte>(payload) in 0 end
-          end
           else let val () = $A.free<byte>(payload) in 0 end
+          end
         end)
     val () = $A.drop<byte>(kd_f, kd_b)
     val kd_tmp = $A.thaw<byte>(kd_f)
