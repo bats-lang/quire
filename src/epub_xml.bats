@@ -115,8 +115,8 @@ fun _borrow_region_eq_r
   else if off_a >= len then false
   else if off_b >= len then false
   else let
-    val a = $S.borrow_byte(data, off_a, len)
-    val b = $S.borrow_byte(data, off_b, len)
+    val a = byte2int0($A.read<byte>(data, $AR.checked_idx(off_a, len)))
+    val b = byte2int0($A.read<byte>(data, $AR.checked_idx(off_b, len)))
   in
     if a != b then false
     else _borrow_region_eq_r(data, len, off_a + 1, off_b + 1, count - 1)
@@ -379,17 +379,10 @@ and _check_manifest_item
     if xml_name_eq(data, len, name_off, name_len, _c_item, 4) then let
       var _c_id = @[char][2]('i', 'd')
       val id_r = _find_attr_val(data, len, attrs, _c_id, 2)
-      fun _cmp_bytes {lb:agz}{n:pos}{k:nat} .<k>.
-        (d: !$A.borrow(byte, lb, n), mx: int n,
-         a: int, b: int, rem: int, fuel: int k): bool =
-        if fuel <= 0 then true
-        else if rem <= 0 then true
-        else if $S.borrow_byte(d, a, mx) != $S.borrow_byte(d, b, mx) then false
-        else _cmp_bytes(d, mx, a + 1, b + 1, rem - 1, fuel - 1)
     in
       if id_r.0 >= 0 then
         if id_r.1 = idref_len then
-          if _cmp_bytes(data, len, id_r.0, idref_off, idref_len, len) then let
+          if borrow_region_eq(data, len, id_r.0, idref_off, $AR.checked_nat(idref_len)) then let
             var _c_href = @[char][4]('h', 'r', 'e', 'f')
           in _find_attr_val(data, len, attrs, _c_href, 4) end
           else @(~1, 0)
