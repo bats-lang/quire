@@ -34,9 +34,9 @@ in $A.text_done(tb) end
    ============================================================ *)
 
 fun _copy_from_borrow_r
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int} .<fuel>.
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
+   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
    count: int fuel): void =
   if count <= 0 then ()
   else if src_off < 0 then ()
@@ -44,31 +44,31 @@ fun _copy_from_borrow_r
   else if src_off >= src_max then ()
   else if dst_off >= dst_max then ()
   else let
-    val b = $S.borrow_byte(src, src_off, src_max)
-    val () = $A.set<byte>(dst, dst_off, int2byte0(b))
+    val b = $A.read<byte>(src, $AR.checked_idx(src_off, src_max))
+    val () = $A.set<byte>(dst, $AR.checked_idx(dst_off, dst_max), b)
   in
     _copy_from_borrow_r(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1)
   end
 
 #pub fn copy_from_borrow
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int}
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
+   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
    count: int fuel): void
 
 implement copy_from_borrow(src, src_off, src_max, dst, dst_off, dst_max, count) =
   _copy_from_borrow_r(src, src_off, src_max, dst, dst_off, dst_max, count)
 
 #pub fn copy_arr_region
-  {ls:agz}{ns:pos}{ld:agz}{nd:pos}{c:nat}
+  {ls:agz}{ns:pos}{ld:agz}{nd:pos}
   (src: $A.arr(byte, ls, ns), src_off: int, src_max: int ns,
    dst: !$A.arr(byte, ld, nd), dst_max: int nd,
-   count: int c): $A.arr(byte, ls, ns)
+   count: int): $A.arr(byte, ls, ns)
 
 implement copy_arr_region(src, src_off, src_max, dst, dst_max, count) = let
   val @(frozen, borrow) = $A.freeze<byte>(src)
   val () = copy_from_borrow(borrow, src_off, src_max,
-                             dst, 0, dst_max, count)
+                             dst, 0, dst_max, $AR.checked_nat(count))
   val () = $A.drop<byte>(frozen, borrow)
 in $A.thaw<byte>(frozen) end
 
