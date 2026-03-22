@@ -1,0 +1,162 @@
+Remove all checked_* castfn and g1ofg0 from quire — Execution Plan
+
+=== PHASE 1: Stabilize non-stash fixes ===
+
+Goal: Land the 8 epub_xml.bats fixes that don't touch stash.
+These techniques are proven to compile and don't need library changes.
+
+Changes:
+  epub_xml.bats:19  checked_idx(pos, len) → pos directly (already g1 from {i:nat | i <= n})
+  epub_xml.bats:20  checked_byte(b) → $AR.byte_of_char(int2char0(b))
+  epub_xml.bats:47  $A.read<byte>(src, checked_idx(src_off, ...)) → $S.borrow_byte(src, src_off, src_max)
+  epub_xml.bats:48  $A.set<byte>(dst, checked_idx(dst_off, ...)) → dependent dst_off: int do_ in signature
+  epub_xml.bats:71  checked_nat(count) in copy_arr_region → make count param {c:nat}
+  epub_xml.bats:118 checked_idx(off_a, len) → $S.borrow_byte(data, off_a, len)
+  epub_xml.bats:119 checked_idx(off_b, len) → $S.borrow_byte(data, off_b, len)
+  epub_xml.bats:385 checked_nat(idref_len) → dual-fuel _cmp_bytes with len as g1 fuel, idref_len as g0 counter
+
+Also fix quire.bats keyboard handler (6 sites):
+  quire.bats:630  checked_arr_size(payload_len) → use payload_len directly after guard
+  quire.bats:637-664  checked_idx(1/2, payload_sz) → add guard if payload_len <= 2, use literal indices
+
+Verification:
+  - grep -rn 'checked_\|g1ofg0' src/epub_xml.bats src/bin/quire.bats returns 0
+  - bats check passes locally
+  - CI green
+  - Merge to main
+
+Remaining after Phase 1: ~51 sites in reader.bats and book_cards.bats (all stash-related)
+
+
+=== PHASE 2: Review stash usage ===
+
+Goal: Map every stash slot, what it stores, what type it should be.
+
+Current known slots (from MEMORY.md):
+  10 = file_handle (int, opaque handle)
+  11 = file_size (should be pos — validated at file open)
+  12 = cd_offset (should be nat — from ZIP parse)
+  13 = cd_count (should be nat — from ZIP parse)
+  14 = opf_data_offset (should be nat — from ZIP get_data_offset)
+  15 = opf_compressed_size (should be pos — from ZIP entry)
+  16 = opf_compression (int, method flag 0 or 8)
+  17 = opf_name_offset (should be nat — from ZIP entry)
+  18 = opf_name_length (should be nat — from ZIP entry)
+  20 = dom_next_id (should be nat — monotonically increasing)
+  21 = current_page (should be nat — 0-indexed)
+  22 = total_pages (should be nat)
+  23 = current_chapter (should be pos — 1-indexed)
+  24 = total_chapters (should be nat)
+  25 = font_size (should be pos, 8-48 range)
+  29 = book_card_index (should be nat — counter)
+  30 = chrome_hidden (0 or 1)
+
+Action: grep all stash_set_int/stash_get_int calls across quire AND bridge sub-modules
+to find any slots not listed above.
+
+Deliverable: Complete slot map with actual types.
+
+
+=== PHASE 3: Typed state object in bridge ===
+
+Goal: Replace int[32] stash with a typed record in bridge.
+
+Create a new bridge sub-module (e.g., src/app_state.bats) with:
+
+  typedef epub_state = @{
+    file_handle = int,
+    file_size = [n:pos] int n,
+    cd_offset = [n:nat] int n,
+    cd_count = [n:nat] int n,
+    opf_data_offset = [n:nat] int n,
+    opf_compressed_size = [n:pos] int n,
+    opf_compression = int,
+    opf_name_offset = [n:nat] int n,
+    opf_name_length = [n:nat] int n,
+    dom_next_id = [n:nat] int n,
+    current_page = [n:nat] int n,
+    total_pages = [n:nat] int n,
+    current_chapter = [n:pos] int n,
+    total_chapters = [n:nat] int n,
+    font_size = [n:pos | n >= 8; n <= 48] int n,
+    book_card_index = [n:nat] int n,
+    chrome_hidden = [n:nat | n <= 1] int n
+  }
+
+Provide typed getters: get_file_size(): [n:pos] int n, etc.
+Provide typed setters that validate: set_file_size(x: [n:pos] int n): void
+
+
+=== PHASE 4: Backwards compatibility shim ===
+
+Goal: Old stash_set_int/stash_get_int still work.
+
+In bridge's stash module, keep the old API but route through the typed state:
+
+  (* for backwards compat — will be removed when callers migrate *)
+  implement stash_set_int(slot, v) =
+    if slot = 11 then set_file_size(pos_of_int(v))
+    else if slot = 12 then set_cd_offset(nat_of_int(v))
+    ...
+
+  implement stash_get_int(slot) =
+    if slot = 11 then g0ofg1_int(get_file_size())
+    else if slot = 12 then g0ofg1_int(get_cd_offset())
+    ...
+
+The runtime checks (pos_of_int, nat_of_int) are in the UNSAFE bridge package
+where g1ofg0 is allowed. They validate on write, so reads are always correct.
+
+
+=== PHASE 5: Verify quire builds unchanged ===
+
+Goal: Publish new bridge, verify quire compiles and CI green with NO quire changes.
+
+The backwards compat shim means quire's existing stash_get_int/stash_set_int
+calls work identically. The only difference is that writes now validate.
+
+Iterate bridge until quire CI is green.
+
+
+=== PHASE 6: Migrate quire one site at a time ===
+
+Goal: Replace stash_get_int(N) with typed getter, removing checked_*.
+
+Example migration for reader.bats:83:
+  BEFORE: val fsz = $ST.stash_get_int(11)
+          val fsz_s = $AR.checked_arr_size(fsz)
+          val buf = $A.alloc<byte>(fsz_s)
+  AFTER:  val fsz = $APP.get_file_size()   (* returns [n:pos] int n *)
+          val buf = $A.alloc<byte>(fsz)
+
+Each migration:
+  1. Change one call site
+  2. Remove the checked_* call
+  3. Build locally
+  4. Commit
+  5. Continue to next site
+
+Order: start with the simplest (single stash_get_int → getter),
+then handle the complex cases (stash_set_int in closures, etc.).
+
+
+=== PHASE 7: Remove backwards compat ===
+
+Goal: Delete the stash_set_int/stash_get_int shim from bridge.
+
+First check: are there any remaining callers of stash_set_int/stash_get_int
+in quire or other libraries?
+
+If libraries stash directly:
+  - DON'T fix the library's internals
+  - Fix the library's API: it should take typed parameters instead of stashing
+  - Restore backwards compat for that library
+  - Fix the library in a separate PR
+  - Then remove backwards compat
+
+Final verification:
+  - grep -rn 'checked_\|g1ofg0' src/ --include='*.bats' returns 0
+  - bats check passes locally
+  - CI green with all e2e tests passing
+  - No $UNSAFE, castfn, or $extfcall in quire
+  - arith package unchanged
