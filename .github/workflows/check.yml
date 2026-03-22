@@ -32,7 +32,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/bats-bin
-          key: bats-from-c-v7-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
+          key: bats-from-c-v6-${{ runner.os }}-${{ hashFiles('.github/workflows/check.yml') }}
 
       - name: Build bats from C
         if: steps.cache-bats.outputs.cache-hit != 'true'
@@ -57,14 +57,10 @@ jobs:
           bats check --repository $HOME/repository
 
       - name: Build WASM
-        run: |
-          rm -rf build
-          bats build --only wasm --repository $HOME/repository
+        run: bats build --only wasm --repository $HOME/repository
 
       - name: Build PWA generator
-        run: |
-          rm -rf build
-          bats build --only native --repository $HOME/repository
+        run: bats build --only native --repository $HOME/repository
 
       - name: Generate PWA
         run: |
