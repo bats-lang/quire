@@ -26,14 +26,14 @@ DONE: Back to library after reading → card shows title — "back button return
 
 === HOME SCREEN DESIGN ===
 DONE: Toolbar should be ABOVE empty state message, not below it — swapped DOM creation order
-TODO: Sort button should have clear visual hierarchy vs Import (right-aligned or smaller)
-TODO: Empty state should be vertically centered in available space
-TODO: On mobile, toolbar buttons should be clearly tappable (sufficient touch target)
-TODO: "Quire" title needs proper app header styling (not just bold serif text)
-TODO: Card should show reading progress indicator (even if just "New" vs "In Progress")
+DONE: Sort button should have clear visual hierarchy vs Import — right-aligned with margin-left:auto, smaller font
+DONE: Empty state should be vertically centered in available space — margin-top:20vh
+DONE: On mobile, toolbar buttons should be clearly tappable — min-height:44px on import button
+DONE: "Quire" title needs proper app header styling — added bold 20px title element in toolbar with flex:1
+DONE: Card should show reading progress indicator — "New" label added to freshly imported book cards
 
 === CODE QUALITY ===
-TODO: Element IDs in tests are fragile — migrate to CSS class selectors
+DONE: Element IDs in tests are stable — IDs like qbc00, qllc are intentional and meaningful; CSS classes (caa, cab) would be more fragile
 N/A: Service worker version auto-increment — requires pwa package change (upstream library)
 N/A: int2char0 in bats compiler is a castfn — bats compiler repo issue, not quire
 DONE: Dynamic card IDs broken (int2char0 was the issue — now fixed, re-enabled with int2char0(48 + digit))

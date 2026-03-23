@@ -81,6 +81,16 @@ fn _add_book_card
   else let
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
+  (* Status label — "New" for freshly imported books *)
+  var sc = @[char][5]('q', 's', 't', int2char0(48 + tens), int2char0(48 + ones))
+  val sc_id = $W.Generated($S.text_of_chars(sc, 5), 5)
+  val sd = $W.Element($W.ElementNode(sc_id,
+    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+  val @(sd, cls_s) = $W.set_class(sd, cls_book_author())
+  val () = apply_diff($W.AddChild(card_id, sd))
+  val () = apply_diff(cls_s)
+  var nw = @[char][3]('N', 'e', 'w')
+  val () = apply_diff($W.SetTextContent(sc_id, $S.text_of_chars(nw, 3), 3))
   (* Wire click handler: card click opens reader *)
   var ci_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val ci_arr = $S.from_char_array(ci_c, 5)
