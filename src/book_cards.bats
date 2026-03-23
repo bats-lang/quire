@@ -33,7 +33,9 @@ fn _add_book_card
   val () = apply_diff($W.SetHidden(elb_id, 1))
   val idx = $ST.stash_get_int(29)
   val () = $ST.stash_set_int(29, idx + 1)
-  var card_c = @[char][5]('q', 'b', 'c', '0', '0')
+  val tens = idx / 10
+  val ones = idx - tens * 10
+  var card_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
@@ -43,7 +45,7 @@ fn _add_book_card
   val () = apply_diff($W.AddChild(ll_id, card))
   val () = apply_diff(cls_diff)
   (* Title div *)
-  var tc = @[char][5]('q', 't', 'c', '0', '0')
+  var tc = @[char][5]('q', 't', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val tc_id = $W.Generated($S.text_of_chars(tc, 5), 5)
   val td = $W.Element($W.ElementNode(tc_id,
     $W.Normal($W.Div()), cls_book_title(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -62,7 +64,7 @@ fn _add_book_card
     var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
   in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
   (* Author div *)
-  var ac = @[char][5]('q', 'a', 'c', '0', '0')
+  var ac = @[char][5]('q', 'a', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val ac_id = $W.Generated($S.text_of_chars(ac, 5), 5)
   val ad = $W.Element($W.ElementNode(ac_id,
     $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -80,7 +82,7 @@ fn _add_book_card
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
   (* Wire click handler: card click opens reader *)
-  var ci_c = @[char][5]('q', 'b', 'c', '0', '0')
+  var ci_c = @[char][5]('q', 'b', 'c', int2char0(48 + tens), int2char0(48 + ones))
   val ci_arr = $S.from_char_array(ci_c, 5)
   val @(ci_f, ci_b) = $A.freeze<byte>(ci_arr)
   var ck_c = @[char][5]('c', 'l', 'i', 'c', 'k')
