@@ -1,10 +1,15 @@
 {
   "name": "quire",
   "private": true,
+  "type": "module",
   "scripts": {
+    "test": "vitest run",
     "test:e2e": "npx playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.40.0"
+    "@playwright/test": "^1.40.0",
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^24.0.0",
+    "vitest": "^1.6.0"
   }
 }
