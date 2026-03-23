@@ -4,7 +4,7 @@ Phase 1 success criteria (from plan.txt):
    STATUS: epub_xml.bats = CLEAN (0 hits)
    STATUS: quire.bats = 1 hit (checked_arr_size at event callback boundary)
    BLOCKER: bridge callback type is (int) -<cloref1> int (g0), get_payload needs g1 pos.
-   FIX: bridge API needs callback type ([n:pos] int n) -<cloref1> int. Filed as bridge issue.
+   FIX: bridge#60 filed — callback type needs ([n:int] int n) -<cloref1> int.
 2. bats check passes locally — DONE
-3. CI green — DONE (pending push)
-4. Merge to main — PENDING (PR #72, needs CI green on latest push)
+3. CI green — DONE
+4. Merge to main — DONE (PR #72 merged)
