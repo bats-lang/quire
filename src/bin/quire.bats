@@ -637,7 +637,9 @@ in
       lam(payload_len: int): int =>
         if payload_len <= 0 then 0
         else let
-          (* Keydown payload: 1 byte key_len, key bytes, 1 byte flags *)
+          (* Event boundary: bridge callback gives g0 int, get_payload needs g1 pos.
+             checked_arr_size is the only g0→g1 bridge available here.
+             Requires bridge API change to callback: ([n:pos] int n) to eliminate. *)
           val payload_sz = $AR.checked_arr_size(payload_len)
           val payload = $EV.get_payload(payload_sz)
           val key_len = byte2int0($A.get<byte>(payload, 0))

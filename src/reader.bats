@@ -699,7 +699,7 @@ in
                     $AR.checked_nat(prefix_len))
           (* Copy chapter href from OPF borrow *)
           val () = copy_from_borrow(opf_b, ch_off, dc_sz,
-                    ch_buf, prefix_len, full_len_s,
+                    ch_buf, $AR.checked_idx(prefix_len, full_len_s), full_len_s,
                     $AR.checked_nat(ch_len))
 
           val () = $X.free_nodes(opf_nodes)

@@ -34,9 +34,9 @@ in $A.text_done(tb) end
    ============================================================ *)
 
 fun _copy_from_borrow_r
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat} .<fuel>.
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int} .<fuel>.
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
+   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int, fuel: int fuel): void =
   if fuel <= 0 then ()
   else if count <= 0 then ()
@@ -46,15 +46,15 @@ fun _copy_from_borrow_r
   else if dst_off >= dst_max then ()
   else let
     val b = $S.borrow_byte(src, src_off, src_max)
-    val () = $A.set<byte>(dst, $AR.checked_idx(dst_off, dst_max), int2byte0(b))
+    val () = $A.set<byte>(dst, dst_off, int2byte0(b))
   in
     _copy_from_borrow_r(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1, fuel - 1)
   end
 
 #pub fn copy_from_borrow
-  {lb:agz}{nb:pos}{la:agz}{na:pos}
+  {lb:agz}{nb:pos}{la:agz}{na:pos}{do_:int}
   (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int, dst_max: int na,
+   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int): void
 
 implement copy_from_borrow(src, src_off, src_max, dst, dst_off, dst_max, count) =
