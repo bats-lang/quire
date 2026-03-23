@@ -25,7 +25,7 @@ DONE: Settings gear click → panel visible — "font size settings panel works"
 DONE: Back to library after reading → card shows title — "back button returns to library view"
 
 === HOME SCREEN DESIGN ===
-TODO: Toolbar should be ABOVE empty state message, not below it
+DONE: Toolbar should be ABOVE empty state message, not below it — swapped DOM creation order
 TODO: Sort button should have clear visual hierarchy vs Import (right-aligned or smaller)
 TODO: Empty state should be vertically centered in available space
 TODO: On mobile, toolbar buttons should be clearly tappable (sufficient touch target)
@@ -34,8 +34,8 @@ TODO: Card should show reading progress indicator (even if just "New" vs "In Pro
 
 === CODE QUALITY ===
 TODO: Element IDs in tests are fragile — migrate to CSS class selectors
-TODO: Service worker version should auto-increment (not hardcoded v2)
-TODO: int2char0 in bats compiler is a castfn — should be a proper macro
-TODO: Dynamic card IDs broken (int2char0 was the issue — now fixed, need to re-enable)
-TODO: Book card title extraction still uses checked_text_size castfn — verify it's correct
-TODO: Remove all rm -rf build/ workarounds — fix caching logic if needed
+N/A: Service worker version auto-increment — requires pwa package change (upstream library)
+N/A: int2char0 in bats compiler is a castfn — bats compiler repo issue, not quire
+DONE: Dynamic card IDs broken (int2char0 was the issue — now fixed, re-enabled with int2char0(48 + digit))
+DEFERRED: Book card title extraction uses checked_text_size — Phase 2-7 (stash rearchitecture)
+DONE: Remove all rm -rf build/ workarounds — verified: no rm -rf build in CI or scripts

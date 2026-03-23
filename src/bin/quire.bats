@@ -245,6 +245,16 @@ implement main0 () = let
 
 in
   if is_library_empty(st) then let
+    (* Library toolbar — above empty state message *)
+    var tb_c = @[char][4]('q', 'l', 't', 'b')
+    val tb_id = $W.Generated($S.text_of_chars(tb_c, 4), 4)
+    val tb = $W.Element($W.ElementNode(tb_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    val @(_, diff) = $W.add_child(ll, tb)
+    val () = $D.apply(doc, diff)
+    val @(_, diff) = $W.set_class(tb, cls_lib_toolbar())
+    val () = $D.apply(doc, diff)
+
+    (* Empty state message *)
     var el_c = @[char][4]('q', 'e', 'l', 'b')
     val el_id = $W.Generated($S.text_of_chars(el_c, 4), 4)
     val el = $W.Element($W.ElementNode(el_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -254,15 +264,6 @@ in
     val () = $D.apply(doc, diff)
     var yle_c = @[char][40]('I', 'm', 'p', 'o', 'r', 't', ' ', 'a', 'n', ' ', 'E', 'P', 'U', 'B', ' ', 'f', 'i', 'l', 'e', ' ', 't', 'o', ' ', 's', 't', 'a', 'r', 't', ' ', 'r', 'e', 'a', 'd', 'i', 'n', 'g', ' ', '.', '.', '.')
     val () = $D.apply(doc, $W.set_text_content(el_id, $S.text_of_chars(yle_c, 40), 40))
-
-    (* Library toolbar *)
-    var tb_c = @[char][4]('q', 'l', 't', 'b')
-    val tb_id = $W.Generated($S.text_of_chars(tb_c, 4), 4)
-    val tb = $W.Element($W.ElementNode(tb_id, $W.Normal($W.Div()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ll, tb)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(tb, cls_lib_toolbar())
-    val () = $D.apply(doc, diff)
 
     (* Import button in toolbar *)
     var ib_c = @[char][4]('q', 'i', 'b', 'n')
