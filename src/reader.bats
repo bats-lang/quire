@@ -114,11 +114,12 @@ fn _save_metadata_to_idb(): void = let
     else if off < 0 then ()
     else if off + 3 >= max then ()
     else let
+      (* Little-endian two's complement: byte k is (v >> 8k) & 255. *)
       val v = $ST.stash_get_int(slot)
-      val () = $A.set<byte>(buf, off, int2byte0(v mod 256))
-      val () = $A.set<byte>(buf, off + 1, int2byte0((v / 256) mod 256))
-      val () = $A.set<byte>(buf, off + 2, int2byte0((v / 65536) mod 256))
-      val () = $A.set<byte>(buf, off + 3, int2byte0((v / 16777216) mod 256))
+      val () = $A.set<byte>(buf, off, int2byte0($AR.band_int_int(v, 255)))
+      val () = $A.set<byte>(buf, off + 1, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 8), 255)))
+      val () = $A.set<byte>(buf, off + 2, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 16), 255)))
+      val () = $A.set<byte>(buf, off + 3, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 24), 255)))
     in _write_slot(buf, max, slot + 1, off + 4, fuel - 1) end
   val () = _write_slot(buf, 36, 10, 0, 9)
   val @(bf, bb) = $A.freeze<byte>(buf)
@@ -932,7 +933,9 @@ fn _restore_from_idb(): void = let
               val b1 = byte2int0($A.get<byte>(buf, off + 1))
               val b2 = byte2int0($A.get<byte>(buf, off + 2))
               val b3 = byte2int0($A.get<byte>(buf, off + 3))
-              val v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+              (* The top byte carries the sign, so no term overflows. *)
+              val hi = (if b3 < 128 then b3 else b3 - 256): int
+              val v = b0 + b1 * 256 + b2 * 65536 + hi * 16777216
               val () = $ST.stash_set_int(slot, v)
             in _read_slot(buf, max, slot + 1, off + 4, fuel - 1) end
           val () = _read_slot(meta_data, 36, 10, 0, 9)
