@@ -104,7 +104,7 @@ fn _add_book_card
   val ck_arr = $S.from_char_array(ck_c, 5)
   val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
   val () = $EV.listen(ci_b, 5, ck_b, 5, 100,
-    lam(_pl: int): int => let
+    lam(_pl: $EV.event_len): int => let
       var ll_c = @[char][4]('q', 'l', 'l', 'c')
       val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
       var rv_c = @[char][4]('q', 'r', 'v', 'w')
@@ -131,7 +131,7 @@ fn _add_book_card
   val ct_arr = $S.from_char_array(ct_c, 11)
   val @(ct_f, ct_b) = $A.freeze<byte>(ct_arr)
   val () = $EV.listen(cm_b, 5, ct_b, 11, 200,
-    lam(_pl: int): int => let
+    lam(_pl: $EV.event_len): int => let
       val () = $EV.prevent_default()
       (* Show context menu overlay *)
       var ctx_c = @[char][4]('q', 'c', 't', 'x')
@@ -151,7 +151,7 @@ fn _import_epub
   val p = $FI.open(node_id, id_len)
   val p = $P.vow(p)
 in
-  $P.and_then<int><int>(p, lam(file_handle) => let
+  $P.and_then<Int><int>(p, lam(file_handle) => let
     val file_size = $FI.get_size()
   in
     if file_size <= 0 then let
@@ -223,7 +223,7 @@ in
             val dc_p = $P.vow(dc_p)
           in
             (* Stage 2: parse container.xml, re-read file for OPF lookup *)
-            $P.and_then<int><int>(dc_p, lam(dc_handle) => let
+            $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
               val dc_len = $DC.get_len()
             in
               if dc_len <= 0 then let
@@ -326,7 +326,7 @@ in
                       val dc2_p = $P.vow(dc2_p)
                     in
                       (* Stage 3: parse OPF metadata *)
-                      $P.and_then<int><int>(dc2_p, lam(dc2_handle) => let
+                      $P.and_then<Int><int>(dc2_p, lam(dc2_handle) => let
                         val dc2_len = $DC.get_len()
                       in
                         if dc2_len <= 0 then let
