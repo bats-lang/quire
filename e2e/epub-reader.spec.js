@@ -1162,8 +1162,8 @@ test.describe('EPUB Reader E2E', () => {
     await page.locator('#qbc00').click({ button: 'right' });
     await page.waitForTimeout(500);
 
-    // Context menu should exist (may or may not be visible depending on event handling)
-    await expect(page.locator('#qctx')).toBeAttached();
+    // The contextmenu listener shows the menu
+    await expect(page.locator('#qctx')).toBeVisible();
 
     expect(errors.length).toBe(0);
   });
