@@ -64,7 +64,7 @@ fn _save_position(): void = let
   val () = $A.set<byte>(ka, 2, int2byte0(115))
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_put(kb, 3, bb, 4)
-  val () = $P.discard<int>(p)
+  val () = $P.discard<Int>(p)
   val () = $A.drop<byte>(kf, kb)
   val kt = $A.thaw<byte>(kf)
   val () = $A.free<byte>(kt)
@@ -91,7 +91,7 @@ in
       val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
       val @(kf, kb) = $A.freeze<byte>(ka)
       val p = $IDB.idb_put(kb, 4, fb, fsz_s)
-      val () = $P.discard<int>(p)
+      val () = $P.discard<Int>(p)
       val () = $A.drop<byte>(kf, kb)
       val kt = $A.thaw<byte>(kf)
       val () = $A.free<byte>(kt)
@@ -130,7 +130,7 @@ fn _save_metadata_to_idb(): void = let
   val () = $A.set<byte>(ka, 3, int2byte0(97))  (* a *)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_put(kb, 4, bb, 36)
-  val () = $P.discard<int>(p)
+  val () = $P.discard<Int>(p)
   val () = $A.drop<byte>(kf, kb)
   val kt = $A.thaw<byte>(kf)
   val () = $A.free<byte>(kt)
@@ -246,7 +246,7 @@ fn _save_font_size(): void = let
   val () = $A.set<byte>(ka, 3, int2byte0(116)) (* t *)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_put(kb, 4, bb, 2)
-  val () = $P.discard<int>(p)
+  val () = $P.discard<Int>(p)
   val () = $A.drop<byte>(kf, kb)
   val kt = $A.thaw<byte>(kf)
   val () = $A.free<byte>(kt)
@@ -597,7 +597,7 @@ in
     val dc_p = $P.vow(dc_p)
   in
     (* Stage 2: parse OPF to find first chapter href *)
-    $P.and_then<int><int>(dc_p, lam(dc_handle) => let
+    $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
       val dc_len = $DC.get_len()
     in
       if dc_len <= 0 then let
@@ -763,7 +763,7 @@ in
               val ch_dc_p = $P.vow(ch_dc_p)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<int><int>(ch_dc_p, lam(ch_dc_handle) => let
+              $P.and_then<Int><int>(ch_dc_p, lam(ch_dc_handle) => let
                 val ch_dc_len = $DC.get_len()
               in
                 if ch_dc_len <= 0 then let
@@ -854,7 +854,7 @@ fn _restore_font_size(): void = let
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val font_p = $P.vow(font_p)
-  val p2 = $P.and_then<int><int>(font_p, lam(font_len) =>
+  val p2 = $P.and_then<Int><int>(font_p, lam(font_len) =>
     if font_len <> 2 then $P.ret<int>(~1)
     else let
       val fdata = $IDB.idb_get_result(2)
@@ -887,12 +887,12 @@ fn _restore_from_idb(): void = let
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val book_p = $P.vow(book_p)
-  val p2 = $P.and_then<int><int>(book_p, lam(book_len) =>
+  val p2 = $P.and_then<Int><int>(book_p, lam(book_len) =>
     if book_len <= 0 then $P.ret<int>(~1)
     else if book_len > 1048576 then $P.ret<int>(~1)
     else let
       (* Read EPUB bytes from IDB result *)
-      val bsz = $AR.checked_arr_size(book_len)
+      val bsz = book_len
       val book_data = $IDB.idb_get_result(bsz)
       (* Store into file cache *)
       val @(bf, bb) = $A.freeze<byte>(book_data)
@@ -916,7 +916,7 @@ fn _restore_from_idb(): void = let
       val () = $A.free<byte>(mtmp)
       val meta_p = $P.vow(meta_p)
     in
-      $P.and_then<int><int>(meta_p, lam(meta_len) =>
+      $P.and_then<Int><int>(meta_p, lam(meta_len) =>
         if meta_len <> 36 then $P.ret<int>(~2)
         else let
           (* Read 9 x 4-byte ints = stash slots 10-18 *)
@@ -955,7 +955,7 @@ fn _restore_from_idb(): void = let
           val () = $A.free<byte>(ptmp)
           val pos_p = $P.vow(pos_p)
         in
-          $P.and_then<int><int>(pos_p, lam(pos_len) =>
+          $P.and_then<Int><int>(pos_p, lam(pos_len) =>
             if pos_len <> 4 then let
               (* No saved position — just load chapter 0 *)
               (* Show reader, hide library *)
