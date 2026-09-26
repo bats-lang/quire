@@ -68,9 +68,6 @@ jobs:
           mkdir -p dist/pwa
           dist/debug/gen-pwa
 
-      - name: Copy WASM to PWA
-        run: cp dist/wasm/app.wasm dist/pwa/app.wasm
-
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
