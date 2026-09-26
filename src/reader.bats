@@ -108,17 +108,17 @@ fn _save_metadata_to_idb(): void = let
   val buf = $A.alloc<byte>(36)
   fun _write_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
     (buf: !$A.arr(byte, l, n), max: int n,
-     slot: int s, off: int, fuel: int fuel): void =
+     slot: int s, off: pos_t, fuel: int fuel): void =
     if fuel <= 0 then ()
     else if slot >= 32 then ()
     else if off < 0 then ()
     else if off + 3 >= max then ()
     else let
       val v = $ST.stash_get_int(slot)
-      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(v mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 1, max), int2byte0((v / 256) mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 2, max), int2byte0((v / 65536) mod 256))
-      val () = $A.set<byte>(buf, $AR.checked_idx(off + 3, max), int2byte0((v / 16777216) mod 256))
+      val () = $A.set<byte>(buf, off, int2byte0(v mod 256))
+      val () = $A.set<byte>(buf, off + 1, int2byte0((v / 256) mod 256))
+      val () = $A.set<byte>(buf, off + 2, int2byte0((v / 65536) mod 256))
+      val () = $A.set<byte>(buf, off + 3, int2byte0((v / 16777216) mod 256))
     in _write_slot(buf, max, slot + 1, off + 4, fuel - 1) end
   val () = _write_slot(buf, 36, 10, 0, 9)
   val @(bf, bb) = $A.freeze<byte>(buf)
@@ -148,12 +148,12 @@ in end
 fun _write_int_digits
   {l:agz}{n:pos}{v:nat}{fuel:nat} .<fuel>.
   (buf: !$A.arr(byte, l, n), max: int n,
-   off: int, value: int v, fuel: int fuel): int =
+   off: pos_t, value: int v, fuel: int fuel): pos_t =
   if fuel <= 0 then off
   else if value < 10 then
     if off >= 0 then
       if off < max then let
-        val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(48 + value))
+        val () = $A.set<byte>(buf, off, int2byte0(48 + value))
       in off + 1 end
       else off
     else off
@@ -162,7 +162,7 @@ fun _write_int_digits
   in
     if new_off >= 0 then
       if new_off < max then let
-        val () = $A.set<byte>(buf, $AR.checked_idx(new_off, max),
+        val () = $A.set<byte>(buf, new_off,
           int2byte0(48 + (value - (value / 10) * 10)))
       in new_off + 1 end
       else new_off
@@ -171,18 +171,18 @@ fun _write_int_digits
 
 fn _set_byte
   {l:agz}{n:pos}
-  (buf: !$A.arr(byte, l, n), max: int n, off: int, b: int): int =
+  (buf: !$A.arr(byte, l, n), max: int n, off: pos_t, b: int): pos_t =
   if off >= 0 then
     if off < max then let
-      val () = $A.set<byte>(buf, $AR.checked_idx(off, max), int2byte0(b))
+      val () = $A.set<byte>(buf, off, int2byte0(b))
     in off + 1 end
     else off
   else off
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
-fn _apply_font_size(size: int): void = let
-  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): int
+fn _apply_font_size(size: pos_t): void = let
+  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): [s:int | 8 <= s; s <= 48] int s
   val () = $ST.stash_set_int(25, sz)
   (* Build CSS string ".caf{font-size:NNpx}" — max 22 bytes *)
   val buf = $A.alloc<byte>(22)
@@ -201,14 +201,14 @@ fn _apply_font_size(size: int): void = let
   val off = _set_byte(buf, 22, off, 122) (* z *)
   val off = _set_byte(buf, 22, off, 101) (* e *)
   val off = _set_byte(buf, 22, off, 58)  (* : *)
-  val off = _write_int_digits(buf, 22, off, $AR.checked_nat(sz), 3)
+  val off = _write_int_digits(buf, 22, off, sz, 3)
   val off = _set_byte(buf, 22, off, 112) (* p *)
   val off = _set_byte(buf, 22, off, 120) (* x *)
   val off = _set_byte(buf, 22, off, 125) (* } *)
 in
   if off > 0 then
     if off <= 22 then let
-      val tsz = $AR.checked_text_size(off)
+      val tsz = off
       val exact = $A.alloc<byte>(tsz)
       fun _fcopy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
         (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
@@ -216,8 +216,8 @@ in
         if i >= max_s then ()
         else if i >= max_d then ()
         else let
-          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
-          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+          val b = $A.get<byte>(src, i)
+          val () = $A.set<byte>(dst, i, b)
         in _fcopy(src, dst, max_s, max_d, i + 1) end
       val () = _fcopy(buf, exact, 22, tsz, 0)
       val () = $A.free<byte>(buf)
@@ -258,12 +258,14 @@ fn _update_page_indicator(): void = let
   val cur_page = $ST.stash_get_int(21)
   val total = $ST.stash_get_int(22)
   val chapter = $ST.stash_get_int(23)
+  (* Counts shown as digits; the stash never holds negative ones. *)
+  fn nat_or_zero(x: pos_t): [k:nat] int k = if x >= 0 then x else 0
   (* Build "Ch N · p. M/T" in a 24-byte buffer *)
   val tbuf = $A.alloc<byte>(24)
   val off = _set_byte(tbuf, 24, 0, 67)  (* C *)
   val off = _set_byte(tbuf, 24, off, 104) (* h *)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(chapter), 3)
+  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(chapter), 3)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
   val off = _set_byte(tbuf, 24, off, 194) (* 0xC2 = first byte of · *)
   val off = _set_byte(tbuf, 24, off, 183) (* 0xB7 = second byte of · *)
@@ -271,14 +273,14 @@ fn _update_page_indicator(): void = let
   val off = _set_byte(tbuf, 24, off, 112) (* p *)
   val off = _set_byte(tbuf, 24, off, 46)  (* . *)
   val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(cur_page + 1), 3)
+  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(cur_page + 1), 3)
   val off = _set_byte(tbuf, 24, off, 47)  (* / *)
-  val off = _write_int_digits(tbuf, 24, off, $AR.checked_nat(total), 3)
+  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(total), 3)
 in
   if off > 0 then
     if off < 24 then let
       (* Copy to exact-size buffer for text conversion *)
-      val tsz = $AR.checked_text_size(off)
+      val tsz = off
       val exact = $A.alloc<byte>(tsz)
       fun _copy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
         (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
@@ -286,8 +288,8 @@ in
         if i >= max_s then ()
         else if i >= max_d then ()
         else let
-          val b = $A.get<byte>(src, $AR.checked_idx(i, max_s))
-          val () = $A.set<byte>(dst, $AR.checked_idx(i, max_d), b)
+          val b = $A.get<byte>(src, i)
+          val () = $A.set<byte>(dst, i, b)
         in _copy(src, dst, max_s, max_d, i + 1) end
       val () = _copy(tbuf, exact, 24, tsz, 0)
       val () = $A.free<byte>(tbuf)
@@ -855,8 +857,8 @@ fn _restore_font_size(): void = let
     if font_len <> 2 then $P.ret<int>(~1)
     else let
       val fdata = $IDB.idb_get_result(2)
-      val lo = byte2int0($A.get<byte>(fdata, 0))
-      val hi = byte2int0($A.get<byte>(fdata, 1))
+      val lo = $AR.low_byte(byte2int0($A.get<byte>(fdata, 0)))
+      val hi = $AR.low_byte(byte2int0($A.get<byte>(fdata, 1)))
       val () = $A.free<byte>(fdata)
       val sz = lo + hi * 256
     in
@@ -920,16 +922,16 @@ fn _restore_from_idb(): void = let
           val meta_data = $IDB.idb_get_result(36)
           fun _read_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
             (buf: !$A.arr(byte, l, n), max: int n,
-             slot: int s, off: int, fuel: int fuel): void =
+             slot: int s, off: pos_t, fuel: int fuel): void =
             if fuel <= 0 then ()
             else if slot >= 32 then ()
             else if off < 0 then ()
             else if off + 3 >= max then ()
             else let
-              val b0 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off, max)))
-              val b1 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 1, max)))
-              val b2 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 2, max)))
-              val b3 = byte2int0($A.get<byte>(buf, $AR.checked_idx(off + 3, max)))
+              val b0 = byte2int0($A.get<byte>(buf, off))
+              val b1 = byte2int0($A.get<byte>(buf, off + 1))
+              val b2 = byte2int0($A.get<byte>(buf, off + 2))
+              val b3 = byte2int0($A.get<byte>(buf, off + 3))
               val v = b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
               val () = $ST.stash_set_int(slot, v)
             in _read_slot(buf, max, slot + 1, off + 4, fuel - 1) end
@@ -1006,7 +1008,7 @@ implement apply_diff_list(dl) = _apply_diff_list(dl)
 #pub fun apply_diff(d: $W.diff): void
 implement apply_diff(d) = _apply_diff(d)
 
-#pub fun apply_font_size(size: int): void
+#pub fun apply_font_size(size: pos_t): void
 implement apply_font_size(size) = _apply_font_size(size)
 
 #pub fun measure_pagination(): void
