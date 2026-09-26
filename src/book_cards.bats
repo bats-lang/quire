@@ -130,7 +130,7 @@ fn _add_book_card
   var ct_c = @[char][11]('c', 'o', 'n', 't', 'e', 'x', 't', 'm', 'e', 'n', 'u')
   val ct_arr = $S.from_char_array(ct_c, 11)
   val @(ct_f, ct_b) = $A.freeze<byte>(ct_arr)
-  val () = $EV.listen(cm_b, 5, ct_b, 11, 200,
+  val () = $EV.listen(cm_b, 5, ct_b, 11, 15,
     lam(_pl: $EV.event_len): int => let
       val () = $EV.prevent_default()
       (* Show context menu overlay *)
