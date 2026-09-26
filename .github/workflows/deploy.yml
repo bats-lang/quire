@@ -35,24 +35,20 @@ jobs:
       - name: Install WASM tools
         run: sudo apt-get install -y -q lld
 
-      - name: Cache bats compiler
-        id: cache-bats
-        uses: actions/cache@v4
+      - name: Checkout bats compiler
+        uses: actions/checkout@v4
         with:
-          path: ~/bats-bin
-          key: bats-from-c-v5-${{ runner.os }}-${{ hashFiles('.github/workflows/deploy.yml') }}
+          repository: bats-lang/bats
+          ref: main
+          path: bats-src
 
-      - name: Build bats from C
-        if: steps.cache-bats.outputs.cache-hit != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Build bats from checked-in bootstrap C
         run: |
-          RUN_ID=$(gh run list --repo bats-lang/bats --branch main --status success --workflow check --limit 1 --json databaseId --jq '.[0].databaseId')
-          gh run download "$RUN_ID" --repo bats-lang/bats --name bats-c --dir ~/bats-c
-          cd ~/bats-c
-          make PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2
+          cp -R bats-src/bootstrap/c ~/bats-c
+          make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2 debug/bats
           mkdir -p ~/bats-bin
-          cp debug/bats ~/bats-bin/bats
+          cp ~/bats-c/debug/bats ~/bats-bin/bats
+          rm -rf bats-src
 
       - name: Setup
         run: |
