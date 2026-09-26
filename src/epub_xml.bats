@@ -3,8 +3,33 @@
 #include "share/atspre_staload.hats"
 #use array as A
 #use arith as AR
+#use result as R
 #use str as S
 #use xml-tree as X
+
+(* ============================================================
+   Proven reads
+   ============================================================ *)
+
+(* A position in a buffer; indexed so a read at it can be proven. *)
+#pub typedef pos_t = [p:int] int p
+
+(* Byte at p, or 0 outside [0, n). *)
+#pub fn peek {l:agz}{n:pos}{p:int}
+  (src: !$A.borrow(byte, l, n), p: int p, n: int n): int
+
+implement peek (src, p, n) =
+  if p < 0 then 0
+  else if p >= n then 0
+  else byte2int0($A.read<byte>(src, p))
+
+(* An offset from zip (find_eocd, get_data_offset), or ~1 if none. *)
+#pub fn zip_off (o: $R.option([o:nat] int o)): pos_t
+
+implement zip_off (o) =
+  case+ o of
+  | ~$R.some(v) => v
+  | ~$R.none() => ~1
 
 (* ============================================================
    Array to text conversion
@@ -35,7 +60,7 @@ in $A.text_done(tb) end
 
 fun _copy_from_borrow_r
   {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int} .<fuel>.
-  (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
+  (src: !$A.borrow(byte, lb, nb), src_off: pos_t, src_max: int nb,
    dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int, fuel: int fuel): void =
   if fuel <= 0 then ()
@@ -45,7 +70,7 @@ fun _copy_from_borrow_r
   else if src_off >= src_max then ()
   else if dst_off >= dst_max then ()
   else let
-    val b = $S.borrow_byte(src, src_off, src_max)
+    val b = peek(src, src_off, src_max)
     val () = $A.set<byte>(dst, dst_off, int2byte0(b))
   in
     _copy_from_borrow_r(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1, fuel - 1)
@@ -53,7 +78,7 @@ fun _copy_from_borrow_r
 
 #pub fn copy_from_borrow
   {lb:agz}{nb:pos}{la:agz}{na:pos}{do_:int}
-  (src: !$A.borrow(byte, lb, nb), src_off: int, src_max: int nb,
+  (src: !$A.borrow(byte, lb, nb), src_off: pos_t, src_max: int nb,
    dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
    count: int): void
 
@@ -62,7 +87,7 @@ implement copy_from_borrow(src, src_off, src_max, dst, dst_off, dst_max, count) 
 
 #pub fn copy_arr_region
   {ls:agz}{ns:pos}{ld:agz}{nd:pos}
-  (src: $A.arr(byte, ls, ns), src_off: int, src_max: int ns,
+  (src: $A.arr(byte, ls, ns), src_off: pos_t, src_max: int ns,
    dst: !$A.arr(byte, ld, nd), dst_max: int nd,
    count: int): $A.arr(byte, ls, ns)
 
@@ -79,11 +104,11 @@ in $A.thaw<byte>(frozen) end
 
 fun _match_chars {lb:agz}{n:pos}{np:pos}{k:nat | k <= np} .<np - k>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   off: int, pat: &(@[char][np]), plen: int np,
+   off: pos_t, pat: &(@[char][np]), plen: int np,
    i: int k): bool =
   if i >= plen then true
   else let
-    val db = $S.borrow_byte(data, off + i, len)
+    val db = peek(data, off + i, len)
     val pb = char2int0(pat.[i])
   in
     if db != pb then false
@@ -93,7 +118,7 @@ fun _match_chars {lb:agz}{n:pos}{np:pos}{k:nat | k <= np} .<np - k>.
 #pub fn xml_name_eq
   {lb:agz}{n:pos}{np:pos}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   name_off: int, name_len: int,
+   name_off: pos_t, name_len: int,
    pat: &(@[char][np]), plen: int np): bool
 
 implement xml_name_eq(data, len, name_off, name_len, pat, plen) =
@@ -109,7 +134,7 @@ implement xml_name_eq(data, len, name_off, name_len, pat, plen) =
 fun _borrow_region_eq_r
   {lb:agz}{n:pos}{fuel:nat} .<fuel>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   off_a: int, off_b: int, count: int, fuel: int fuel): bool =
+   off_a: pos_t, off_b: pos_t, count: int, fuel: int fuel): bool =
   if fuel <= 0 then true
   else if count <= 0 then true
   else if off_a < 0 then false
@@ -117,8 +142,8 @@ fun _borrow_region_eq_r
   else if off_a >= len then false
   else if off_b >= len then false
   else let
-    val a = $S.borrow_byte(data, off_a, len)
-    val b = $S.borrow_byte(data, off_b, len)
+    val a = peek(data, off_a, len)
+    val b = peek(data, off_b, len)
   in
     if a != b then false
     else _borrow_region_eq_r(data, len, off_a + 1, off_b + 1, count - 1, fuel - 1)
@@ -127,7 +152,7 @@ fun _borrow_region_eq_r
 #pub fn borrow_region_eq
   {lb:agz}{n:pos}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   off_a: int, off_b: int, count: int): bool
+   off_a: pos_t, off_b: pos_t, count: int): bool
 
 implement borrow_region_eq(data, len, off_a, off_b, count) =
   _borrow_region_eq_r(data, len, off_a, off_b, count, len)
@@ -140,7 +165,7 @@ fun _find_attr_val
   {lb:agz}{n:pos}{sa:nat}{np:pos} .<sa, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    attrs: !$X.xml_attr_list(sa),
-   aname: &(@[char][np]), alen: int np): @(int, int) =
+   aname: &(@[char][np]), alen: int np): @(pos_t, pos_t) =
   case+ attrs of
   | $X.xml_attrs_cons(aname_off, aname_len, val_off, val_len, rest) =>
     if xml_name_eq(data, len, aname_off, aname_len, aname, alen) then
@@ -155,7 +180,7 @@ fun _find_attr_val
 fun _walk_rootfile_nodes_r
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz)): @(int, int) =
+   nodes: !$X.xml_node_list(sz)): @(pos_t, pos_t) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val r = _walk_rootfile_node(data, len, node)
@@ -168,7 +193,7 @@ fun _walk_rootfile_nodes_r
 and _walk_rootfile_node
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   node: !$X.xml_node(sz)): @(int, int) =
+   node: !$X.xml_node(sz)): @(pos_t, pos_t) =
   case+ node of
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _c_rootfile = @[char][8]('r', 'o', 'o', 't', 'f', 'i', 'l', 'e')
@@ -182,7 +207,7 @@ and _walk_rootfile_node
 and _find_full_path
   {lb:agz}{n:pos}{sa:nat} .<sa, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   attrs: !$X.xml_attr_list(sa)): @(int, int) =
+   attrs: !$X.xml_attr_list(sa)): @(pos_t, pos_t) =
   case+ attrs of
   | $X.xml_attrs_cons(aname_off, aname_len, val_off, val_len, rest) => let
     var _c_fp = @[char][9]('f', 'u', 'l', 'l', '-', 'p', 'a', 't', 'h')
@@ -196,7 +221,7 @@ and _find_full_path
 #pub fn walk_rootfile_nodes
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(sz)): @(int, int)
+   nodes: !$X.xml_node_list(sz)): @(pos_t, pos_t)
 
 implement walk_rootfile_nodes{lb}{n}{sz}(data, len, nodes) =
   _walk_rootfile_nodes_r(data, len, nodes)
@@ -209,8 +234,8 @@ fun _walk_opf_metadata_r
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): @(int, int, int, int) =
+   t_off: pos_t, t_len: pos_t,
+   a_off: pos_t, a_len: pos_t): @(pos_t, pos_t, pos_t, pos_t) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val r = _walk_opf_node(data, len, node, t_off, t_len, a_off, a_len)
@@ -223,8 +248,8 @@ and _walk_opf_node
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    node: !$X.xml_node(sz),
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): @(int, int, int, int) =
+   t_off: pos_t, t_len: pos_t,
+   a_off: pos_t, a_len: pos_t): @(pos_t, pos_t, pos_t, pos_t) =
   case+ node of
   | $X.xml_element(name_off, name_len, _, children) => let
     var _c_title = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
@@ -242,7 +267,7 @@ and _walk_opf_node
 
 and _get_first_text
   {sz:nat} .<sz, 0>.
-  (children: !$X.xml_node_list(sz)): @(int, int) =
+  (children: !$X.xml_node_list(sz)): @(pos_t, pos_t) =
   case+ children of
   | $X.xml_nodes_cons(node, _) =>
     (case+ node of
@@ -254,8 +279,8 @@ and _get_first_text
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): @(int, int, int, int)
+   t_off: pos_t, t_len: pos_t,
+   a_off: pos_t, a_len: pos_t): @(pos_t, pos_t, pos_t, pos_t)
 
 implement walk_opf_metadata{lb}{n}{sz}(data, len, nodes, t_off, t_len, a_off, a_len) =
   _walk_opf_metadata_r(data, len, nodes, t_off, t_len, a_off, a_len)
@@ -268,7 +293,7 @@ fun _find_nth_idref_r
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   skip: int): @(int, int, int) =
+   skip: int): @(pos_t, pos_t, int) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val r = _check_itemref_nth(data, len, node, skip)
@@ -282,7 +307,7 @@ and _check_itemref_nth
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    node: !$X.xml_node(sz),
-   skip: int): @(int, int, int) =
+   skip: int): @(pos_t, pos_t, int) =
   case+ node of
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
@@ -304,7 +329,7 @@ and _check_itemref_nth
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   skip: int): @(int, int, int)
+   skip: int): @(pos_t, pos_t, int)
 
 implement find_nth_idref{lb}{n}{sz}(data, len, nodes, skip) =
   _find_nth_idref_r(data, len, nodes, skip)
@@ -359,7 +384,7 @@ fun _find_manifest_href_r
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   idref_off: int, idref_len: int): @(int, int) =
+   idref_off: pos_t, idref_len: pos_t): @(pos_t, pos_t) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val r = _check_manifest_item(data, len, node, idref_off, idref_len)
@@ -373,7 +398,7 @@ and _check_manifest_item
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
    node: !$X.xml_node(sz),
-   idref_off: int, idref_len: int): @(int, int) =
+   idref_off: pos_t, idref_len: pos_t): @(pos_t, pos_t) =
   case+ node of
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _c_item = @[char][4]('i', 't', 'e', 'm')
@@ -399,7 +424,7 @@ and _check_manifest_item
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   idref_off: int, idref_len: int): @(int, int)
+   idref_off: pos_t, idref_len: pos_t): @(pos_t, pos_t)
 
 implement find_manifest_href{lb}{n}{sz}(data, len, nodes, idref_off, idref_len) =
   _find_manifest_href_r(data, len, nodes, idref_off, idref_len)
@@ -409,7 +434,7 @@ implement find_manifest_href{lb}{n}{sz}(data, len, nodes, idref_off, idref_len) 
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), len: int n,
    nodes: !$X.xml_node_list(sz),
-   chapter_idx: int): @(int, int)
+   chapter_idx: int): @(pos_t, pos_t)
 
 implement find_chapter_href_n(data, len, nodes, chapter_idx) = let
   val idref = find_nth_idref(data, len, nodes, chapter_idx)

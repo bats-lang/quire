@@ -22,11 +22,28 @@ staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 
+(* Show bytes [off, off+n) of data as wid's text; false when the range is
+   unusable (absent, empty, or 256 bytes or more). *)
+fn _set_meta_text
+  {lb:agz}{nb:pos}
+  (data: !$A.borrow(byte, lb, nb), len: int nb,
+   wid: $W.widget_id, off: pos_t, n: pos_t): bool =
+  if off < 0 then false
+  else if n <= 0 then false
+  else if n >= 256 then false
+  else let
+    val tbuf = $A.alloc<byte>(n)
+    val () = copy_from_borrow(data, off, len, tbuf, 0, n, n)
+    val txt = arr_to_text(tbuf, n)
+    val () = $A.free<byte>(tbuf)
+    val () = apply_diff($W.SetTextContent(wid, txt, n))
+  in true end
+
 fn _add_book_card
   {lb:agz}{nb:pos}
   (data: !$A.borrow(byte, lb, nb), len: int nb,
-   t_off: int, t_len: int,
-   a_off: int, a_len: int): void = let
+   t_off: pos_t, t_len: pos_t,
+   a_off: pos_t, a_len: pos_t): void = let
   (* Hide empty message and create card *)
   var elb_c = @[char][4]('q', 'e', 'l', 'b')
   val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
@@ -53,13 +70,7 @@ fn _add_book_card
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
   (* Set title — try metadata, fall back to "Imported Book" *)
-  val () = (if t_off >= 0 && t_len > 0 && t_len < 256 then let
-    val tsz = $AR.checked_text_size(t_len)
-    val tbuf = $A.alloc<byte>(tsz)
-    val () = copy_from_borrow(data, t_off, len, tbuf, 0, tsz, tsz)
-    val txt = arr_to_text(tbuf, tsz)
-    val () = $A.free<byte>(tbuf)
-  in apply_diff($W.SetTextContent(tc_id, txt, tsz)) end
+  val () = (if _set_meta_text(data, len, tc_id, t_off, t_len) then ()
   else let
     var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
   in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
@@ -71,13 +82,7 @@ fn _add_book_card
   val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, ad))
   val () = apply_diff(cls_a)
-  val () = (if a_off >= 0 && a_len > 0 && a_len < 256 then let
-    val asz = $AR.checked_text_size(a_len)
-    val abuf = $A.alloc<byte>(asz)
-    val () = copy_from_borrow(data, a_off, len, abuf, 0, asz, asz)
-    val txt = arr_to_text(abuf, asz)
-    val () = $A.free<byte>(abuf)
-  in apply_diff($W.SetTextContent(ac_id, txt, asz)) end
+  val () = (if _set_meta_text(data, len, ac_id, a_off, a_len) then ()
   else let
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
@@ -156,13 +161,13 @@ in
       val () = $FI.close(file_handle)
     in $P.ret<int>(~1) end
     else let
-      val file_size_s = $AR.checked_arr_size(file_size)
+      val file_size_s = file_size
       val file_buf = $A.alloc<byte>(file_size_s)
       val rd_res = $FI.file_read(file_handle, 0, file_buf, file_size_s)
       val () = $R.discard<int><int>(rd_res)
 
       val eocd_opt = $Z.find_eocd(file_buf, file_size_s)
-      val eocd_off = $R.option_unwrap_or<int>(eocd_opt, ~1)
+      val eocd_off = zip_off(eocd_opt)
     in
       if eocd_off < 0 then let
         val () = $A.free<byte>(file_buf)
@@ -173,8 +178,7 @@ in
         var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
         val _cont_arr = $S.from_char_array(_cont_chars, 22)
         val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-        val cont = $Z.find_entry_by_name(file_buf, file_size_s, cd_off,
-                    $AR.checked_nat(cd_count),
+        val cont = $Z.find_entry_by_name(file_buf, file_size_s, cd_off, cd_count,
                     _cont_b, 22)
         val () = $A.drop<byte>(_cont_f, _cont_b)
         val _cont_t = $A.thaw<byte>(_cont_f)
@@ -187,22 +191,23 @@ in
         else let
           val doff_opt = $Z.get_data_offset(file_buf, file_size_s,
                           cont.local_header_offset)
-          val doff = $R.option_unwrap_or<int>(doff_opt, ~1)
+          val doff = zip_off(doff_opt)
+          val cont_csz = cont.compressed_size
         in
           if doff < 0 then let
             val () = $A.free<byte>(file_buf)
             val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
-          else if cont.compressed_size <= 0 then let
+          else if cont_csz <= 0 then let
             val () = $A.free<byte>(file_buf)
             val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
-          else if cont.compressed_size > 1048576 then let
+          else if cont_csz > 1048576 then let
             val () = $A.free<byte>(file_buf)
             val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
           else let
-            val csz = $AR.checked_arr_size(cont.compressed_size)
+            val csz = cont_csz
             val comp_buf = $A.alloc<byte>(csz)
             val file_buf = copy_arr_region(file_buf, doff, file_size_s,
                                       comp_buf, csz, csz)
@@ -230,7 +235,7 @@ in
                 val () = $FI.close(file_handle)
               in $P.ret<int>(~5) end
               else let
-                val dc_sz = $AR.checked_arr_size(dc_len)
+                val dc_sz = dc_len
                 val dc_buf = $A.alloc<byte>(dc_sz)
                 val br_res = $DC.blob_read(dc_handle, 0, dc_buf, dc_sz)
                 val () = $R.discard<int><int>(br_res)
@@ -264,11 +269,10 @@ in
                   val () = $FI.close(file_handle)
                 in $P.ret<int>(~6) end
                 else let
-                  val opf_path_sz = $AR.checked_arr_size(opf_len)
+                  val opf_path_sz = opf_len
                   val opf_path_buf = $A.alloc<byte>(opf_path_sz)
                   val () = copy_from_borrow(dc_borrow, opf_off, dc_sz,
-                            opf_path_buf, 0, opf_path_sz,
-                            $AR.checked_nat(opf_len))
+                            opf_path_buf, 0, opf_path_sz, opf_len)
 
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
@@ -276,14 +280,13 @@ in
                   val () = $A.free<byte>(dc_buf2)
 
                   (* Re-read file for OPF entry lookup *)
-                  val file_size_s2 = $AR.checked_arr_size(file_size)
+                  val file_size_s2 = file_size_s
                   val file_buf2 = $A.alloc<byte>(file_size_s2)
                   val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
 
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
                   val opf_entry = $Z.find_entry_by_name(
-                    file_buf2, file_size_s2, cd_off,
-                    $AR.checked_nat(cd_count),
+                    file_buf2, file_size_s2, cd_off, cd_count,
                     opf_borrow, opf_path_sz)
                   val () = $A.drop<byte>(opf_frozen, opf_borrow)
                   val opf_path_buf2 = $A.thaw<byte>(opf_frozen)
@@ -295,19 +298,20 @@ in
                   else let
                     val opf_doff_opt = $Z.get_data_offset(file_buf2, file_size_s2,
                                         opf_entry.local_header_offset)
-                    val opf_doff = $R.option_unwrap_or<int>(opf_doff_opt, ~1)
+                    val opf_doff = zip_off(opf_doff_opt)
+                    val opf_csz0 = opf_entry.compressed_size
                   in
                     if opf_doff < 0 then let
                       val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
-                    else if opf_entry.compressed_size <= 0 then let
+                    else if opf_csz0 <= 0 then let
                       val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
-                    else if opf_entry.compressed_size > 1048576 then let
+                    else if opf_csz0 > 1048576 then let
                       val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
                     else let
-                      val opf_csz = $AR.checked_arr_size(opf_entry.compressed_size)
+                      val opf_csz = opf_csz0
                       val opf_comp = $A.alloc<byte>(opf_csz)
                       val file_buf2 = copy_arr_region(file_buf2, opf_doff, file_size_s2,
                                                 opf_comp, opf_csz, opf_csz)
@@ -332,7 +336,7 @@ in
                           val () = $DC.blob_free(dc2_handle)
                         in $P.ret<int>(~9) end
                         else let
-                          val dc2_sz = $AR.checked_arr_size(dc2_len)
+                          val dc2_sz = dc2_len
                           val opf_buf = $A.alloc<byte>(dc2_sz)
                           val () = $R.discard($DC.blob_read(dc2_handle, 0, opf_buf, dc2_sz))
                           val () = $DC.blob_free(dc2_handle)
