@@ -34,3 +34,27 @@ discipline is checked at compile time:
 The window itself should be in the types too: the reader state holds
 exactly the five arenas, indexed by page number, so a page outside the
 window has no arena to allocate from.
+
+### Where book content is allocated today (all with `alloc`)
+
+* `src/book_cards.bats` (import): the whole EPUB file (`file_buf`,
+  `file_buf2`), the compressed and decompressed container.xml
+  (`comp_buf`, `dc_buf`), the OPF path and the compressed and
+  decompressed OPF (`opf_path_buf`, `opf_comp`, `opf_buf`), and a
+  title buffer (`tbuf`).
+* `src/reader.bats` (opening and reading a book): the EPUB file
+  (`fbuf`, `fbuf2`, `fbuf3`), the OPF (`opf_cbuf`, `opf_buf`), the
+  chapter path (`ch_buf`), the compressed and decompressed chapter
+  (`ch_comp`, `ch_xhtml`), and title and text copies (`exact`, `tbuf`).
+* Everything else (`src/bin/quire.bats`, the small buffers in
+  `reader.bats`) is element ids, event names and storage keys: UI, not
+  book content; it stays on `alloc`.
+
+### Found while taking this inventory
+
+* An EPUB larger than 1 MiB cannot be imported at all: `book_cards.bats`
+  returns -1 when `file_size > 1048576`, because the whole file is read
+  into one `alloc`. Real books with pictures are often larger. Import
+  and reading should read ZIP entries at their offsets as needed,
+  never the whole file.
+* Book images are not loaded or shown yet; only chapter text is.
