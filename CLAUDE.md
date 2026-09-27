@@ -37,24 +37,29 @@ window has no arena to allocate from.
 
 ### Where book content is allocated today (all with `alloc`)
 
-* `src/book_cards.bats` (import): the whole EPUB file (`file_buf`,
-  `file_buf2`), the compressed and decompressed container.xml
-  (`comp_buf`, `dc_buf`), the OPF path and the compressed and
-  decompressed OPF (`opf_path_buf`, `opf_comp`, `opf_buf`), and a
+* `src/book.bats` (`zip_read`, reading an entry by ranges): the
+  archive's tail, its central directory, the entry's local header, and
+  the entry's compressed data (the buffer `zip_read` returns).
+* `src/book_cards.bats` (import): the compressed and decompressed
+  container.xml (`comp_buf`, `dc_buf`), the OPF path and the compressed
+  and decompressed OPF (`opf_path_buf`, `opf_comp`, `opf_buf`), and a
   title buffer (`tbuf`).
-* `src/reader.bats` (opening and reading a book): the EPUB file
-  (`fbuf`, `fbuf2`, `fbuf3`), the OPF (`opf_cbuf`, `opf_buf`), the
-  chapter path (`ch_buf`), the compressed and decompressed chapter
-  (`ch_comp`, `ch_xhtml`), and title and text copies (`exact`, `tbuf`).
+* `src/reader.bats` (opening and reading a book): the OPF (`opf_cbuf`,
+  `opf_buf`), the OPF's name (for its directory), the chapter path
+  (`ch_buf`), the compressed and decompressed chapter (`ch_comp`,
+  `ch_xhtml`), and title and text copies (`exact`, `tbuf`).
+* The EPUB file itself never enters wasm memory: file-input keeps it on
+  the JS side, it is read by ranges, and it is saved to and restored
+  from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`).
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
 
 ### Found while taking this inventory
 
-* An EPUB larger than 1 MiB cannot be imported at all: `book_cards.bats`
-  returns -1 when `file_size > 1048576`, because the whole file is read
-  into one `alloc`. Real books with pictures are often larger. Import
-  and reading should read ZIP entries at their offsets as needed,
-  never the whole file.
+* (Fixed) An EPUB larger than 1 MiB could not be imported, because the
+  whole file was read into one `alloc`. Entries are now read at their
+  offsets, and the file has no size bound; one entry's compressed data,
+  and the central directory, are still read into one buffer each (at
+  most 1 MiB).
 * Book images are not loaded or shown yet; only chapter text is.
