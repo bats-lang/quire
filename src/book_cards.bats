@@ -103,7 +103,7 @@ fn _add_book_card
   val ck_arr = $S.from_char_array(ck_c, 5)
   val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
   val () = $EV.listen(ci_b, ci_len, ck_b, 5, 100,
-    lam(_pl: $EV.event_len): int => let
+    lam(_pl: $EV.event_payload): int => let
       var ll_c = @[char][4]('q', 'l', 'l', 'c')
       val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
       var rv_c = @[char][4]('q', 'r', 'v', 'w')
@@ -130,7 +130,7 @@ fn _add_book_card
   val ct_arr = $S.from_char_array(ct_c, 11)
   val @(ct_f, ct_b) = $A.freeze<byte>(ct_arr)
   val () = $EV.listen(cm_b, 5, ct_b, 11, 15,
-    lam(_pl: $EV.event_len): int => let
+    lam(_pl: $EV.event_payload): int => let
       val () = $EV.prevent_default()
       (* Show context menu overlay *)
       var ctx_c = @[char][4]('q', 'c', 't', 'x')

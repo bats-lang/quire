@@ -716,10 +716,14 @@ fn _restore_font_size(): void = let
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val font_p = $P.vow(font_p)
-  val p2 = $P.and_then<Int><int>(font_p, lam(font_len) =>
-    if font_len <> 2 then $P.ret<int>(~1)
+  val p2 = $P.and_then<Int><int>(font_p, lam(font_h) =>
+    case+ take_blob(font_h) of
+    | ~NoBlobBytes() => $P.ret<int>(~1)
+    | ~BlobBytes(fdata, font_len) =>
+    if font_len <> 2 then let
+      val () = $A.free<byte>(fdata)
+    in $P.ret<int>(~1) end
     else let
-      val fdata = $IDB.idb_get_result(2)
       val lo = $AR.low_byte(byte2int0($A.get<byte>(fdata, 0)))
       val hi = $AR.low_byte(byte2int0($A.get<byte>(fdata, 1)))
       val () = $A.free<byte>(fdata)
@@ -735,6 +739,17 @@ fn _restore_font_size(): void = let
   val () = $P.discard<int>(p2)
 in end
 
+(* No saved position: show the reader, hide the library, load chapter 0 *)
+fn _open_at_start(): void = let
+  var ll_c = @[char][4]('q', 'l', 'l', 'c')
+  val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
+  var rv_c = @[char][4]('q', 'r', 'v', 'w')
+  val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+  val () = _apply_diff($W.SetHidden(ll_id, true))
+  val () = _apply_diff($W.SetHidden(rv_id, false))
+  val ch_p = _load_chapter(0)
+in $P.discard<int>(ch_p) end
+
 (* Restore reading state from IDB on startup *)
 fn _restore_from_idb(): void = let
   (* Step 1: get "book" from IDB *)
@@ -749,13 +764,10 @@ fn _restore_from_idb(): void = let
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val book_p = $P.vow(book_p)
-  val p2 = $P.and_then<Int><int>(book_p, lam(book_len) =>
-    if book_len <= 0 then $P.ret<int>(~1)
-    else if book_len > 1048576 then $P.ret<int>(~1)
-    else let
-      (* Read EPUB bytes from IDB result *)
-      val bsz = book_len
-      val book_data = $IDB.idb_get_result(bsz)
+  val p2 = $P.and_then<Int><int>(book_p, lam(book_h) =>
+    case+ take_blob(book_h) of
+    | ~NoBlobBytes() => $P.ret<int>(~1)
+    | ~BlobBytes(book_data, bsz) => let
       (* Store into file cache *)
       val @(bf, bb) = $A.freeze<byte>(book_data)
       val fh = $FI.file_store(bb, bsz)
@@ -776,12 +788,16 @@ fn _restore_from_idb(): void = let
       val () = $A.free<byte>(mtmp)
       val meta_p = $P.vow(meta_p)
     in
-      $P.and_then<Int><int>(meta_p, lam(meta_len) =>
-        if meta_len <> 36 then $P.ret<int>(~2)
+      $P.and_then<Int><int>(meta_p, lam(meta_h) =>
+        case+ take_blob(meta_h) of
+        | ~NoBlobBytes() => $P.ret<int>(~2)
+        | ~BlobBytes(meta_data, meta_len) =>
+        if meta_len <> 36 then let
+          val () = $A.free<byte>(meta_data)
+        in $P.ret<int>(~2) end
         else let
           (* 9 x 4-byte ints (see _save_metadata_to_idb), stored by an
              earlier run: checked here, once, against the book's bytes *)
-          val meta_data = $IDB.idb_get_result(36)
           val d = _get_i32(meta_data, 16)
           val sz = _get_i32(meta_data, 20)
           val m = _get_i32(meta_data, 24)
@@ -814,21 +830,17 @@ fn _restore_from_idb(): void = let
           val () = $A.free<byte>(ptmp)
           val pos_p = $P.vow(pos_p)
         in
-          $P.and_then<Int><int>(pos_p, lam(pos_len) =>
+          $P.and_then<Int><int>(pos_p, lam(pos_h) =>
+            case+ take_blob(pos_h) of
+            | ~NoBlobBytes() => let
+                val () = _open_at_start()
+              in $P.ret<int>(0) end
+            | ~BlobBytes(pos_data, pos_len) =>
             if pos_len <> 4 then let
-              (* No saved position — just load chapter 0 *)
-              (* Show reader, hide library *)
-              var ll_c = @[char][4]('q', 'l', 'l', 'c')
-              val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-              var rv_c = @[char][4]('q', 'r', 'v', 'w')
-              val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
-              val () = _apply_diff($W.SetHidden(ll_id, true))
-              val () = _apply_diff($W.SetHidden(rv_id, false))
-              val ch_p = _load_chapter(0)
-              val () = $P.discard<int>(ch_p)
+              val () = $A.free<byte>(pos_data)
+              val () = _open_at_start()
             in $P.ret<int>(0) end
             else let
-              val pos_data = $IDB.idb_get_result(4)
               val ch_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 0)))
               val ch_hi = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 1)))
               val pg_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 2)))
