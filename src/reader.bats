@@ -201,8 +201,7 @@ fn _apply_font_size(sz: font_px): void = let
   val off = $S.int_to_str(buf, off, 29, sz)
   val off = _put(buf, off, "px}")
   val txt = _prefix_text(buf, 29, off)
-  var fs_c = @[char][4]('q', 'f', 's', 's')
-  val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+  val fs_id = $W.Generated($A.text_lit("qfss"), 4)
 in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
@@ -949,10 +948,8 @@ in end
 
 (* No saved position: show the reader, hide the library, load chapter 0 *)
 fn _open_at_start(): void = let
-  var ll_c = @[char][4]('q', 'l', 'l', 'c')
-  val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-  var rv_c = @[char][4]('q', 'r', 'v', 'w')
-  val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+  val ll_id = $W.Generated($A.text_lit("qllc"), 4)
+  val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
   val () = _apply_diff($W.SetHidden(ll_id, true))
   val () = _apply_diff($W.SetHidden(rv_id, false))
   val ch_p = _load_chapter(0)
@@ -1057,10 +1054,8 @@ fn _restore_from_idb(): void = let
               val saved_ch = ch_lo + ch_hi * 256
               val saved_pg = pg_lo + pg_hi * 256
               (* Show reader, hide library *)
-              var ll_c = @[char][4]('q', 'l', 'l', 'c')
-              val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-              var rv_c = @[char][4]('q', 'r', 'v', 'w')
-              val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+              val ll_id = $W.Generated($A.text_lit("qllc"), 4)
+              val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
               val () = _apply_diff($W.SetHidden(ll_id, true))
               val () = _apply_diff($W.SetHidden(rv_id, false))
               (* Load the saved chapter (1-indexed → 0-indexed) *)
