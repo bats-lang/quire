@@ -145,92 +145,42 @@ in end
 
 (* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter (1-indexed), 24=total_chapters *)
 
-(* Write an integer into a byte buffer at offset, return new offset *)
-fun _write_int_digits
-  {l:agz}{n:pos}{v:nat}{fuel:nat} .<fuel>.
-  (buf: !$A.arr(byte, l, n), max: int n,
-   off: pos_t, value: int v, fuel: int fuel): pos_t =
-  if fuel <= 0 then off
-  else if value < 10 then
-    if off >= 0 then
-      if off < max then let
-        val () = $A.set<byte>(buf, off, int2byte0(48 + value))
-      in off + 1 end
-      else off
-    else off
+(* s's bytes at buf[p, p + sn) *)
+fun _put_str {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}{i:nat | i <= sn} .<sn - i>.
+  (buf: !$A.arr(byte, l, n), p: int p, s: string sn, sl: int sn, i: int i): int(p + sn) =
+  if i >= sl then p + sl
   else let
-    val new_off = _write_int_digits(buf, max, off, value / 10, fuel - 1)
-  in
-    if new_off >= 0 then
-      if new_off < max then let
-        val () = $A.set<byte>(buf, new_off,
-          int2byte0(48 + (value - (value / 10) * 10)))
-      in new_off + 1 end
-      else new_off
-    else new_off
-  end
+    val () = $A.set<byte>(buf, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
+  in _put_str(buf, p, s, sl, i + 1) end
 
-fn _set_byte
-  {l:agz}{n:pos}
-  (buf: !$A.arr(byte, l, n), max: int n, off: pos_t, b: int): pos_t =
-  if off >= 0 then
-    if off < max then let
-      val () = $A.set<byte>(buf, off, int2byte0(b))
-    in off + 1 end
-    else off
-  else off
+fn _put {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}
+  (buf: !$A.arr(byte, l, n), p: int p, s: string sn): int(p + sn) =
+  _put_str(buf, p, s, g1u2i(string1_length(s)), 0)
+
+(* The text of buf[0, k); frees buf *)
+fn _prefix_text {l:agz}{n:pos | n <= 1048576}{k:pos | k <= n}
+  (buf: $A.arr(byte, l, n), n: int n, k: int k): $A.text(k) = let
+  val exact = $A.alloc<byte>(k)
+  val buf = $S.copy_arr_region(buf, 0, n, exact, k, k)
+  val () = $A.free<byte>(buf)
+  val txt = arr_to_text(exact, k)
+  val () = $A.free<byte>(exact)
+in txt end
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
 fn _apply_font_size(size: pos_t): void = let
   val sz = (if size < 8 then 8 else if size > 48 then 48 else size): [s:int | 8 <= s; s <= 48] int s
   val () = $ST.stash_set_int(25, sz)
-  (* Build CSS string ".caf{font-size:NNpx}" — max 22 bytes *)
-  val buf = $A.alloc<byte>(22)
-  val off = _set_byte(buf, 22, 0, 46)   (* . *)
-  val off = _set_byte(buf, 22, off, 99)  (* c *)
-  val off = _set_byte(buf, 22, off, 97)  (* a *)
-  val off = _set_byte(buf, 22, off, 102) (* f *)
-  val off = _set_byte(buf, 22, off, 123) (* { *)
-  val off = _set_byte(buf, 22, off, 102) (* f *)
-  val off = _set_byte(buf, 22, off, 111) (* o *)
-  val off = _set_byte(buf, 22, off, 110) (* n *)
-  val off = _set_byte(buf, 22, off, 116) (* t *)
-  val off = _set_byte(buf, 22, off, 45)  (* - *)
-  val off = _set_byte(buf, 22, off, 115) (* s *)
-  val off = _set_byte(buf, 22, off, 105) (* i *)
-  val off = _set_byte(buf, 22, off, 122) (* z *)
-  val off = _set_byte(buf, 22, off, 101) (* e *)
-  val off = _set_byte(buf, 22, off, 58)  (* : *)
-  val off = _write_int_digits(buf, 22, off, sz, 3)
-  val off = _set_byte(buf, 22, off, 112) (* p *)
-  val off = _set_byte(buf, 22, off, 120) (* x *)
-  val off = _set_byte(buf, 22, off, 125) (* } *)
-in
-  if off > 0 then
-    if off <= 22 then let
-      val tsz = off
-      val exact = $A.alloc<byte>(tsz)
-      fun _fcopy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
-        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
-         max_s: int na, max_d: int nb, i: int i): void =
-        if i >= max_s then ()
-        else if i >= max_d then ()
-        else let
-          val b = $A.get<byte>(src, i)
-          val () = $A.set<byte>(dst, i, b)
-        in _fcopy(src, dst, max_s, max_d, i + 1) end
-      val () = _fcopy(buf, exact, 22, tsz, 0)
-      val () = $A.free<byte>(buf)
-      val txt = arr_to_text(exact, tsz)
-      val () = $A.free<byte>(exact)
-      var fs_c = @[char][4]('q', 'f', 's', 's')
-      val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
-      val () = _apply_diff($W.SetTextContent(fs_id, txt, tsz))
-    in end
-    else $A.free<byte>(buf)
-  else $A.free<byte>(buf)
-end
+  (* ".caf{font-size:" (15 bytes), the size (at most 11), "px}" *)
+  val buf = $A.alloc<byte>(29)
+  val off = _put(buf, 0, ".caf{font-size:")
+  val off = $S.int_to_str(buf, off, 29, sz)
+  val off = _put(buf, off, "px}")
+  val txt = _prefix_text(buf, 29, off)
+  var fs_c = @[char][4]('q', 'f', 's', 's')
+  val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
 fn _save_font_size(): void = let
@@ -259,54 +209,22 @@ fn _update_page_indicator(): void = let
   val cur_page = $ST.stash_get_int(21)
   val total = $ST.stash_get_int(22)
   val chapter = $ST.stash_get_int(23)
-  (* Counts shown as digits; the stash never holds negative ones. *)
-  fn nat_or_zero(x: pos_t): [k:nat] int k = if x >= 0 then x else 0
-  (* Build "Ch N · p. M/T" in a 24-byte buffer *)
-  val tbuf = $A.alloc<byte>(24)
-  val off = _set_byte(tbuf, 24, 0, 67)  (* C *)
-  val off = _set_byte(tbuf, 24, off, 104) (* h *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(chapter), 3)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _set_byte(tbuf, 24, off, 194) (* 0xC2 = first byte of · *)
-  val off = _set_byte(tbuf, 24, off, 183) (* 0xB7 = second byte of · *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _set_byte(tbuf, 24, off, 112) (* p *)
-  val off = _set_byte(tbuf, 24, off, 46)  (* . *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(cur_page + 1), 3)
-  val off = _set_byte(tbuf, 24, off, 47)  (* / *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(total), 3)
-in
-  if off > 0 then
-    if off < 24 then let
-      (* Copy to exact-size buffer for text conversion *)
-      val tsz = off
-      val exact = $A.alloc<byte>(tsz)
-      fun _copy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
-        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
-         max_s: int na, max_d: int nb, i: int i): void =
-        if i >= max_s then ()
-        else if i >= max_d then ()
-        else let
-          val b = $A.get<byte>(src, i)
-          val () = $A.set<byte>(dst, i, b)
-        in _copy(src, dst, max_s, max_d, i + 1) end
-      val () = _copy(tbuf, exact, 24, tsz, 0)
-      val () = $A.free<byte>(tbuf)
-      val txt = arr_to_text(exact, tsz)
-      val () = $A.free<byte>(exact)
-      var pi_c = @[char][4]('q', 'p', 'g', 'i')
-      val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
-      val () = _apply_diff($W.SetTextContent(pi_id, txt, tsz))
-    in end
-    else let
-      val () = $A.free<byte>(tbuf)
-    in end
-  else let
-    val () = $A.free<byte>(tbuf)
-  in end
-end
+  (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
+     middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
+  val tbuf = $A.alloc<byte>(44)
+  val off = _put(tbuf, 0, "Ch ")
+  val off = $S.int_to_str(tbuf, off, 44, chapter)
+  val () = $A.set<byte>(tbuf, off, $A.int2byte(32))
+  val () = $A.set<byte>(tbuf, off + 1, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, off + 2, $A.int2byte(183))
+  val off = _put(tbuf, off + 3, " p. ")
+  val off = $S.int_to_str(tbuf, off, 44, cur_page + 1)
+  val off = _put(tbuf, off, "/")
+  val off = $S.int_to_str(tbuf, off, 44, total)
+  val txt = _prefix_text(tbuf, 44, off)
+  var pi_c = @[char][4]('q', 'p', 'g', 'i')
+  val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
+in _apply_diff($W.SetTextContent(pi_id, txt, off)) end
 
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
