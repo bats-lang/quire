@@ -75,7 +75,7 @@ fn _save_epub_to_idb(): void =
   | NoBook() => ()
   | OpenBook(fh, fsz, _, _, _, _, _) => let
       val fbuf = $A.alloc<byte>(fsz)
-      val () = $R.discard($FI.file_read(fh, 0, fbuf, fsz))
+      val () = $FI.file_read(fh, 0, fbuf, fsz)
       val @(ff, fb) = $A.freeze<byte>(fbuf)
       val ka = $A.alloc<byte>(4)
       val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
@@ -111,15 +111,15 @@ fn _get_i32 {l:agz}{n:pos}{off:nat | off + 4 <= n}
   val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
 in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
 
-(* Save the open book's metadata to IDB as 9 x 4-byte ints: file
-   handle, file size, 0, 0, OPF data offset, size, method, name offset,
-   name length *)
+(* Save the open book's metadata to IDB as 9 x 4-byte ints: 0 (where
+   the file handle was, which means nothing to a later run), file size,
+   0, 0, OPF data offset, size, method, name offset, name length *)
 fn _save_metadata_to_idb(): void =
   case+ book_get() of
   | NoBook() => ()
-  | OpenBook(fh, fsz, d, sz, m, no, nl) => let
+  | OpenBook(_, fsz, d, sz, m, no, nl) => let
   val buf = $A.alloc<byte>(36)
-  val () = _put_i32(buf, 0, fh)
+  val () = _put_i32(buf, 0, 0)
   val () = _put_i32(buf, 4, fsz)
   val () = _put_i32(buf, 8, 0)
   val () = _put_i32(buf, 12, 0)
@@ -518,7 +518,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
     (* Read full file *)
     val fbuf2 = $A.alloc<byte>(fsz_s)
-    val () = $R.discard($FI.file_read(fh, 0, fbuf2, fsz_s))
+    val () = $FI.file_read(fh, 0, fbuf2, fsz_s)
 
     val opf_csz_s = opf_csz
     val opf_cbuf = $A.alloc<byte>(opf_csz_s)
@@ -536,19 +536,11 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   in
     (* Stage 2: parse OPF to find first chapter href *)
     $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
-      val dc_len = $DC.get_len()
+      val dc = take_blob(dc_handle)
     in
-      if dc_len <= 0 then let
-        val () = $DC.blob_free(dc_handle)
-      in $P.ret<int>(~2) end
-      else if dc_len > 1048576 then let
-        val () = $DC.blob_free(dc_handle)
-      in $P.ret<int>(~2) end
-      else let
-        val dc_sz = dc_len
-        val opf_buf = $A.alloc<byte>(dc_sz)
-        val () = $R.discard($DC.blob_read(dc_handle, 0, opf_buf, dc_sz))
-        val () = $DC.blob_free(dc_handle)
+      case+ dc of
+      | ~NoBlobBytes() => $P.ret<int>(~2)
+      | ~BlobBytes(opf_buf, dc_sz) => let
 
         val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
@@ -580,7 +572,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
              in the central directory for path prefix resolution *)
           val fsz_s3 = fsz_s
           val fbuf3 = $A.alloc<byte>(fsz_s3)
-          val () = $R.discard($FI.file_read(fh, 0, fbuf3, fsz_s3))
+          val () = $FI.file_read(fh, 0, fbuf3, fsz_s3)
 
           (* Find directory prefix from OPF name in central directory.
              The OPF path e.g. "OEBPS/content.opf" tells us the
@@ -642,19 +634,11 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
             in
               (* Stage 3: parse HTML and render *)
               $P.and_then<Int><int>(ch_dc_p, lam(ch_dc_handle) => let
-                val ch_dc_len = $DC.get_len()
+                val ch_dc = take_blob(ch_dc_handle)
               in
-                if ch_dc_len <= 0 then let
-                  val () = $DC.blob_free(ch_dc_handle)
-                in $P.ret<int>(~6) end
-                else if ch_dc_len > 1048576 then let
-                  val () = $DC.blob_free(ch_dc_handle)
-                in $P.ret<int>(~6) end
-                else let
-                  val ch_dc_sz = ch_dc_len
-                  val ch_xhtml = $A.alloc<byte>(ch_dc_sz)
-                  val () = $R.discard($DC.blob_read(ch_dc_handle, 0, ch_xhtml, ch_dc_sz))
-                  val () = $DC.blob_free(ch_dc_handle)
+                case+ ch_dc of
+                | ~NoBlobBytes() => $P.ret<int>(~6)
+                | ~BlobBytes(ch_xhtml, ch_dc_sz) => let
 
                   (* Parse XHTML with xml-tree *)
                   val @(xf, xb) = $A.freeze<byte>(ch_xhtml)
