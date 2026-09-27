@@ -28,6 +28,23 @@ staload "pages.sats"
   | {lc:agz}{c:pos | c <= 1048576}{co:nat | co + c <= n}{k:nat}
     BookIndex(n) of ($A.arr(byte, lc, c), int c, int co, book_entries(n, c, k))
 
+(* The book's chapters, in spine order, each found once in its index
+   (the first time a chapter is loaded, book_spine_set): a chapter's
+   data [d, d + s) in the n-byte file, its method m, its name
+   [no, no + nl) in the file and the length dl of that name's
+   directory part; missing when its href is empty, over 1 MiB with the
+   OPF's directory, or names no entry; k chapters *)
+#pub datavtype book_chapters(n:int, k:int) =
+  | ChaptersNil(n, 0) of ()
+  | {k:nat}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}{dl:nat | dl <= nl}
+    Chapter(n, k + 1) of (int d, int s, int m, int no, int nl, int dl, book_chapters(n, k))
+  | {k:nat} ChapterMissing(n, k + 1) of (book_chapters(n, k))
+
+(* The book's chapters once found, with their count *)
+#pub datavtype book_spine(n:int) =
+  | {k:nat} Spine(n) of (book_chapters(n, k), int k)
+  | NoSpine(n) of ()
+
 (* The open book's file and its size; its OPF's
    compressed data [opf_data, opf_data + opf_size) and compression
    method; the OPF's name [opf_name, opf_name + opf_name_len) in the
@@ -36,7 +53,7 @@ staload "pages.sats"
    handle, closed when the book is replaced), and its index. *)
 #pub datavtype open_book =
   | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
-    OpenBook of ($FI.infile(n), int n, book_index(n), int d, int s, int m, int no, int nl)
+    OpenBook of ($FI.infile(n), int n, book_index(n), book_spine(n), int d, int s, int m, int no, int nl)
   | {n:pos} Importing of ($FI.infile(n), int n, book_index(n))
   | NoBook of ()
 
@@ -58,6 +75,34 @@ staload "pages.sats"
    regions; false when another book is open *)
 #pub fn book_finish {z:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
   (s: int, z: int z, d: int d, sz: int sz, m: int m, no: int no, nl: int nl): bool
+
+(* An entry of the n-byte file found by name: its data [d, d + s),
+   method m and name [no, no + nl) *)
+#pub datavtype entry_hit(n:int) =
+  | {d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
+    EntryHit(n) of (int d, int s, int m, int no, int nl)
+  | EntryMiss(n) of ()
+
+(* The entry named name[0, nb) in the index of the open book, when it is
+   book s of z bytes; a miss when there is none or another book is open *)
+#pub fn book_find_entry {z:pos}{lb:agz}{nb:pos}
+  (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): entry_hit(z)
+
+(* Keeps chs, k chapters, as the chapters of the open book, when it is
+   book s of z bytes and has none yet; else frees them *)
+#pub fn book_spine_set {z:pos}{k:nat}
+  (s: int, z: int z, chs: book_chapters(z, k), k: int k): void
+
+(* Chapter i of the open book, book s *)
+#pub datavtype chapter_got =
+  | {n:pos}{d:nat}{sz:pos | d + sz <= n; sz <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}{dl:nat | dl <= nl}{k:nat}
+    ChapterGot of (int n, int d, int sz, int m, int no, int nl, int dl, int k)
+  (* The book has k chapters, but not an i-th one that names an entry *)
+  | {k:nat} ChapterNone of (int k)
+  (* The book's chapters are not found yet (or book s is not open) *)
+  | ChaptersUnknown of ()
+
+#pub fn book_chapter_get {i:nat} (s: int, i: int i): chapter_got
 
 (* Closes the book being imported, book s, when its import fails *)
 #pub fn book_abandon (s: int): void
@@ -260,6 +305,40 @@ in
        in ZipGot(ar, buf, cs, m, d, no, nl) end)
 end
 
+fun book_chapters_free {n:int}{k:nat} .<k>. (chs: book_chapters(n, k)): void =
+  case+ chs of
+  | ~ChaptersNil() => ()
+  | ~Chapter(_, _, _, _, _, _, rest) => book_chapters_free(rest)
+  | ~ChapterMissing(rest) => book_chapters_free(rest)
+
+fn book_spine_free {n:int} (sp: book_spine(n)): void =
+  case+ sp of
+  | ~Spine(chs, _) => book_chapters_free(chs)
+  | ~NoSpine() => ()
+
+(* Chapter i of chs, of the book's k *)
+fun book_chapter_at {n:pos}{j:nat}{i:nat}{k:nat} .<j>.
+  (chs: !book_chapters(n, j), n: int n, i: int i, k: int k): chapter_got =
+  case+ chs of
+  | ChaptersNil() => ChapterNone(k)
+  | @Chapter(d, sz, m, no, nl, dl, rest) =>
+    if i = 0 then let
+      val r = ChapterGot(n, d, sz, m, no, nl, dl, k)
+      prval () = fold@(chs)
+    in r end
+    else let
+      val r = book_chapter_at(rest, n, i - 1, k)
+      prval () = fold@(chs)
+    in r end
+  | @ChapterMissing(rest) =>
+    if i = 0 then let
+      prval () = fold@(chs)
+    in ChapterNone(k) end
+    else let
+      val r = book_chapter_at(rest, n, i - 1, k)
+      prval () = fold@(chs)
+    in r end
+
 implement book_take() = let
   var b: open_book = NoBook()
   val () = ref_exch_elt<open_book>(_book, b)
@@ -270,8 +349,9 @@ implement book_put(b) = let
   val () = ref_exch_elt<open_book>(_book, cur)
 in
   case+ cur of
-  | ~OpenBook(f, _, ix, _, _, _, _, _) => let
+  | ~OpenBook(f, _, ix, sp, _, _, _, _, _) => let
       val () = book_index_free(ix)
+      val () = book_spine_free(sp)
     in $FI.close(f) end
   | ~Importing(f, _, ix) => let
       val () = book_index_free(ix)
@@ -285,7 +365,7 @@ implement book_meta_get() = let
   val b = book_take()
 in
   case+ b of
-  | @OpenBook(_, n, _, d, sz, m, no, nl) => let
+  | @OpenBook(_, n, _, _, d, sz, m, no, nl) => let
       val r = @(n, d, sz, m, no, nl)
       prval () = fold@(b)
       val () = book_put(b)
@@ -297,7 +377,7 @@ implement book_idb_put (key, nk) = let
   val b = book_take()
 in
   case+ b of
-  | @OpenBook(f, _, _, _, _, _, _, _) => let
+  | @OpenBook(f, _, _, _, _, _, _, _, _) => let
       val p = $FI.idb_put(key, nk, f)
       val () = $P.discard<Int>(p)
       prval () = fold@(b)
@@ -309,7 +389,7 @@ implement book_read {z}{o,k}{l}{ow}{m} (s, z, o, out, k) = let
   val b = book_take()
 in
   case+ b of
-  | @OpenBook(f, n, _, _, _, _, _, _) =>
+  | @OpenBook(f, n, _, _, _, _, _, _, _) =>
     if s = !_book_serial then
       (if n = z then let
          val () = $FI.file_read(f, o, out, k)
@@ -391,7 +471,7 @@ implement book_zip_read {z}{lb}{nb} (s, z, name, nb) = let
   val b = book_take()
 in
   case+ b of
-  | @OpenBook(f, n, ix, _, _, _, _, _) =>
+  | @OpenBook(f, n, ix, _, _, _, _, _, _) =>
     if s = !_book_serial then
       (if n = z then let
          val r = index_read(f, ix, z, name, nb)
@@ -419,11 +499,82 @@ in
   | ~Importing(f, n, ix) =>
     if s = !_book_serial then
       (if n = z then let
-         val () = book_put(OpenBook(f, n, ix, d, sz, m, no, nl))
+         val () = book_put(OpenBook(f, n, ix, NoSpine(), d, sz, m, no, nl))
        in true end
        else let val () = book_put(Importing(f, n, ix)) in false end)
     else let val () = book_put(Importing(f, n, ix)) in false end
   | _ => let val () = book_put(b) in false end
+end
+
+implement book_find_entry {z}{lb}{nb} (s, z, name, nb) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, n, ix, _, _, _, _, _, _) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val+ @BookIndex(cd, _, co, es) = ix
+         val hit = book_find(cd, co, es, name, nb)
+         prval () = fold@(ix)
+         prval () = fold@(b)
+         val () = book_put(b)
+       in
+         case+ hit of
+         | ~BookHit(d, sz, m, no, nl) => EntryHit(d, sz, m, no, nl)
+         | ~BookMiss() => EntryMiss()
+       end
+       else let prval () = fold@(b); val () = book_put(b) in EntryMiss() end)
+    else let prval () = fold@(b); val () = book_put(b) in EntryMiss() end
+  | _ => let val () = book_put(b) in EntryMiss() end
+end
+
+implement book_spine_set {z}{k} (s, z, chs, k) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, n, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then
+      (if n = z then
+         (case+ sp of
+          | NoSpine() => let
+              val () = book_spine_free(sp)
+              val () = sp := Spine(chs, k)
+              prval () = fold@(b)
+            in book_put(b) end
+          | Spine(_, _) => let
+              prval () = fold@(b)
+              val () = book_put(b)
+            in book_chapters_free(chs) end)
+       else let
+         prval () = fold@(b)
+         val () = book_put(b)
+       in book_chapters_free(chs) end)
+    else let
+      prval () = fold@(b)
+      val () = book_put(b)
+    in book_chapters_free(chs) end
+  | _ => let
+      val () = book_put(b)
+    in book_chapters_free(chs) end
+end
+
+implement book_chapter_get {i} (s, i) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, n, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then let
+      val r = (case+ sp of
+        | @Spine(chs, k) => let
+            val r = book_chapter_at(chs, n, i, k)
+            prval () = fold@(sp)
+          in r end
+        | NoSpine() => ChaptersUnknown()): chapter_got
+      prval () = fold@(b)
+      val () = book_put(b)
+    in r end
+    else let prval () = fold@(b); val () = book_put(b) in ChaptersUnknown() end
+  | _ => let val () = book_put(b) in ChaptersUnknown() end
 end
 
 implement book_abandon (s) =

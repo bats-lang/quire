@@ -106,6 +106,14 @@ whose data spans are proven inside the file. Reading an entry
 (`index_read`, for the container.xml, the OPF, a chapter or an image)
 only looks its name up there; nothing in the file is checked again.
 
+A book's chapters are found once too, the first time one is loaded
+(`_spine_build` in `src/reader.bats`): the OPF is read and parsed, and
+each spine item's href, after the OPF's directory, is looked up in the
+index. The chapters (`book_chapters`, each an entry whose data span is
+proven, or missing) are kept in the book (`book_spine_set`), so loading
+chapter i only walks to it (`book_chapter_get`); the OPF is not read
+again.
+
 ### Found while taking this inventory
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the
