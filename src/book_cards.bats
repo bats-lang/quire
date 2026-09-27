@@ -150,8 +150,12 @@ fn _import_epub
   val p = $FI.open(node_id, id_len)
   val p = $P.vow(p)
 in
-  $P.and_then<Int><int>(p, lam(file_handle) => let
-    val file_size = $FI.get_size()
+  $P.and_then<Int><int>(p, lam(opened) =>
+  case+ $FI.claim(opened) of
+  | ~$R.none() => $P.ret<int>(~1)
+  | ~$R.some(file_handle) => let
+    (* The picked file's size, checked here once *)
+    val file_size = $FI.size(file_handle)
   in
     if file_size <= 0 then let
       val () = $FI.close(file_handle)
@@ -162,8 +166,7 @@ in
     else let
       val file_size_s = file_size
       val file_buf = $A.alloc<byte>(file_size_s)
-      val rd_res = $FI.file_read(file_handle, 0, file_buf, file_size_s)
-      val () = $R.discard<int><int>(rd_res)
+      val () = $FI.file_read(file_handle, 0, file_buf, file_size_s)
     in
       case+ $Z.find_dir(file_buf, file_size_s) of
       | ~$R.none() => let
@@ -206,22 +209,13 @@ in
           in
             (* Stage 2: parse container.xml, re-read file for OPF lookup *)
             $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
-              val dc_len = $DC.get_len()
+              val dc = take_blob(dc_handle)
             in
-              if dc_len <= 0 then let
-                val () = $DC.blob_free(dc_handle)
+              case+ dc of
+              | ~NoBlobBytes() => let
                 val () = $FI.close(file_handle)
               in $P.ret<int>(~5) end
-              else if dc_len > 1048576 then let
-                val () = $DC.blob_free(dc_handle)
-                val () = $FI.close(file_handle)
-              in $P.ret<int>(~5) end
-              else let
-                val dc_sz = dc_len
-                val dc_buf = $A.alloc<byte>(dc_sz)
-                val br_res = $DC.blob_read(dc_handle, 0, dc_buf, dc_sz)
-                val () = $R.discard<int><int>(br_res)
-                val () = $DC.blob_free(dc_handle)
+              | ~BlobBytes(dc_buf, dc_sz) => let
 
                 val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
                 val nodes = $X.parse_document(dc_borrow, dc_sz)
@@ -257,7 +251,7 @@ in
                   (* Re-read file for OPF entry lookup *)
                   val file_size_s2 = file_size_s
                   val file_buf2 = $A.alloc<byte>(file_size_s2)
-                  val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
+                  val () = $FI.file_read(file_handle, 0, file_buf2, file_size_s2)
 
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
                   val opf_entry = $Z.find_entry(file_buf2, file_size_s2, dir,
@@ -291,19 +285,11 @@ in
                     in
                       (* Stage 3: parse OPF metadata *)
                       $P.and_then<Int><int>(dc2_p, lam(dc2_handle) => let
-                        val dc2_len = $DC.get_len()
+                        val dc2 = take_blob(dc2_handle)
                       in
-                        if dc2_len <= 0 then let
-                          val () = $DC.blob_free(dc2_handle)
-                        in $P.ret<int>(~9) end
-                        else if dc2_len > 1048576 then let
-                          val () = $DC.blob_free(dc2_handle)
-                        in $P.ret<int>(~9) end
-                        else let
-                          val dc2_sz = dc2_len
-                          val opf_buf = $A.alloc<byte>(dc2_sz)
-                          val () = $R.discard($DC.blob_read(dc2_handle, 0, opf_buf, dc2_sz))
-                          val () = $DC.blob_free(dc2_handle)
+                        case+ dc2 of
+                        | ~NoBlobBytes() => $P.ret<int>(~9)
+                        | ~BlobBytes(opf_buf, dc2_sz) => let
 
                           val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
                           val opf_nodes = $X.parse_document(opf_b, dc2_sz)
