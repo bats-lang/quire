@@ -394,9 +394,9 @@ in n end
 
 (* Match XHTML tag name to widget html_normal type *)
 fn _match_tag_to_normal
-  {lb:agz}{n:pos}
+  {lb:agz}{n:pos}{o,k:nat | o + k <= n}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   name_off: pos_t, name_len: int): $W.html_normal = let
+   name_off: int o, name_len: int k): $W.html_normal = let
   var _t_p = @[char][1]('p')
   var _t_h1 = @[char][2]('h', '1')
   var _t_h2 = @[char][2]('h', '2')
@@ -436,44 +436,44 @@ fn _match_tag_to_normal
   var _t_thead = @[char][5]('t', 'h', 'e', 'a', 'd')
   var _t_tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
 in
-  if xml_name_eq(data, len, name_off, name_len, _t_p, 1) then $W.P()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h1, 2) then $W.H1()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h2, 2) then $W.H2()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h3, 2) then $W.H3()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h4, 2) then $W.H4()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h5, 2) then $W.H5()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h6, 2) then $W.H6()
-  else if xml_name_eq(data, len, name_off, name_len, _t_div, 3) then $W.Div()
-  else if xml_name_eq(data, len, name_off, name_len, _t_span, 4) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_em, 2) then $W.Em()
-  else if xml_name_eq(data, len, name_off, name_len, _t_strong, 6) then $W.Strong()
-  else if xml_name_eq(data, len, name_off, name_len, _t_bq, 10) then $W.Blockquote()
-  else if xml_name_eq(data, len, name_off, name_len, _t_pre, 3) then $W.Pre()
-  else if xml_name_eq(data, len, name_off, name_len, _t_code, 4) then $W.HtmlCode()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ul, 2) then $W.Ul()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
-  else if xml_name_eq(data, len, name_off, name_len, _t_li, 2) then $W.Li()
-  else if xml_name_eq(data, len, name_off, name_len, _t_section, 7) then $W.Section()
-  else if xml_name_eq(data, len, name_off, name_len, _t_article, 7) then $W.Article()
-  else if xml_name_eq(data, len, name_off, name_len, _t_small, 5) then $W.Small()
-  else if xml_name_eq(data, len, name_off, name_len, _t_mark, 4) then $W.Mark()
-  else if xml_name_eq(data, len, name_off, name_len, _t_del, 3) then $W.Del()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ins, 3) then $W.Ins()
-  else if xml_name_eq(data, len, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
-  else if xml_name_eq(data, len, name_off, name_len, _t_sup, 3) then $W.Sup()
-  else if xml_name_eq(data, len, name_off, name_len, _t_a, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_b, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_i, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_u, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_s, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_figure, 6) then $W.Figure()
-  else if xml_name_eq(data, len, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
-  else if xml_name_eq(data, len, name_off, name_len, _t_table, 5) then $W.Table()
-  else if xml_name_eq(data, len, name_off, name_len, _t_tr, 2) then $W.Tr()
-  else if xml_name_eq(data, len, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
-  else if xml_name_eq(data, len, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
-  else if xml_name_eq(data, len, name_off, name_len, _t_thead, 5) then $W.Thead()
-  else if xml_name_eq(data, len, name_off, name_len, _t_tbody, 5) then $W.Tbody()
+  if xml_name_eq(data, name_off, name_len, _t_p, 1) then $W.P()
+  else if xml_name_eq(data, name_off, name_len, _t_h1, 2) then $W.H1()
+  else if xml_name_eq(data, name_off, name_len, _t_h2, 2) then $W.H2()
+  else if xml_name_eq(data, name_off, name_len, _t_h3, 2) then $W.H3()
+  else if xml_name_eq(data, name_off, name_len, _t_h4, 2) then $W.H4()
+  else if xml_name_eq(data, name_off, name_len, _t_h5, 2) then $W.H5()
+  else if xml_name_eq(data, name_off, name_len, _t_h6, 2) then $W.H6()
+  else if xml_name_eq(data, name_off, name_len, _t_div, 3) then $W.Div()
+  else if xml_name_eq(data, name_off, name_len, _t_span, 4) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_em, 2) then $W.Em()
+  else if xml_name_eq(data, name_off, name_len, _t_strong, 6) then $W.Strong()
+  else if xml_name_eq(data, name_off, name_len, _t_bq, 10) then $W.Blockquote()
+  else if xml_name_eq(data, name_off, name_len, _t_pre, 3) then $W.Pre()
+  else if xml_name_eq(data, name_off, name_len, _t_code, 4) then $W.HtmlCode()
+  else if xml_name_eq(data, name_off, name_len, _t_ul, 2) then $W.Ul()
+  else if xml_name_eq(data, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
+  else if xml_name_eq(data, name_off, name_len, _t_li, 2) then $W.Li()
+  else if xml_name_eq(data, name_off, name_len, _t_section, 7) then $W.Section()
+  else if xml_name_eq(data, name_off, name_len, _t_article, 7) then $W.Article()
+  else if xml_name_eq(data, name_off, name_len, _t_small, 5) then $W.Small()
+  else if xml_name_eq(data, name_off, name_len, _t_mark, 4) then $W.Mark()
+  else if xml_name_eq(data, name_off, name_len, _t_del, 3) then $W.Del()
+  else if xml_name_eq(data, name_off, name_len, _t_ins, 3) then $W.Ins()
+  else if xml_name_eq(data, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
+  else if xml_name_eq(data, name_off, name_len, _t_sup, 3) then $W.Sup()
+  else if xml_name_eq(data, name_off, name_len, _t_a, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_b, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_i, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_u, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_s, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_figure, 6) then $W.Figure()
+  else if xml_name_eq(data, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
+  else if xml_name_eq(data, name_off, name_len, _t_table, 5) then $W.Table()
+  else if xml_name_eq(data, name_off, name_len, _t_tr, 2) then $W.Tr()
+  else if xml_name_eq(data, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
+  else if xml_name_eq(data, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
+  else if xml_name_eq(data, name_off, name_len, _t_thead, 5) then $W.Thead()
+  else if xml_name_eq(data, name_off, name_len, _t_tbody, 5) then $W.Tbody()
   else $W.Div()
 end
 
@@ -481,7 +481,7 @@ end
 fun _render_nodes
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, nodes: !$X.xml_node_list(sz)): void =
+   pidx: int, nodes: !$X.xml_node_list(n, sz)): void =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val () = _render_node(data, len, pidx, node)
@@ -491,14 +491,15 @@ fun _render_nodes
 and _render_node
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, node: !$X.xml_node(sz)): void =
+   pidx: int, node: !$X.xml_node(n, sz)): void =
   case+ node of
   | $X.xml_text(off, tlen) =>
-    if tlen > 0 then
+    (* To do: a text node of 64 KiB or more (SetTextContent's limit) is
+       not shown; it should be split. *)
       if tlen < 65536 then let
         val tsz = tlen
         val tbuf = $A.alloc<byte>(tsz)
-        val () = copy_from_borrow(data, off, len, tbuf, 0, tsz, tlen)
+        val () = $S.copy_from_borrow(data, off, len, tbuf, 0, tsz, tlen)
         val txt = arr_to_text(tbuf, tsz)
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
@@ -508,7 +509,6 @@ and _render_node
         val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
       in end
       else ()
-    else ()
   | $X.xml_element(name_off, name_len, _, children) => let
     (* Skip tags: head, title, meta, link, style, script *)
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
@@ -518,33 +518,33 @@ and _render_node
     var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
     var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
   in
-    if xml_name_eq(data, len, name_off, name_len, _t_head, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_title, 5) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_meta, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_link, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_style, 5) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_script, 6) then ()
+    if xml_name_eq(data, name_off, name_len, _t_head, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then ()
     else let
       (* Transparent tags: html, body — render children with same parent *)
       var _t_html = @[char][4]('h', 't', 'm', 'l')
       var _t_body = @[char][4]('b', 'o', 'd', 'y')
     in
-      if xml_name_eq(data, len, name_off, name_len, _t_html, 4) then
+      if xml_name_eq(data, name_off, name_len, _t_html, 4) then
         _render_nodes(data, len, pidx, children)
-      else if xml_name_eq(data, len, name_off, name_len, _t_body, 4) then
+      else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
         _render_nodes(data, len, pidx, children)
       else let
         (* Void tags: br, hr *)
         var _t_br = @[char][2]('b', 'r')
         var _t_hr = @[char][2]('h', 'r')
       in
-        if xml_name_eq(data, len, name_off, name_len, _t_br, 2) then let
+        if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Br()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         in end
-        else if xml_name_eq(data, len, name_off, name_len, _t_hr, 2) then let
+        else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Hr()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -616,27 +616,21 @@ in
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
 
         (* Count spine items and store total chapters *)
-        val total_ch = count_spine_items(opf_b, dc_sz, opf_nodes, 0)
+        val total_ch = count_spine_items(opf_b, opf_nodes)
         val () = $ST.stash_set_int(24, total_ch)
 
         (* Find Nth spine itemref → manifest item href *)
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
-        val ch_off = ch_href.0
-        val ch_len = ch_href.1
       in
-        if ch_off < 0 then let
+        case+ ch_href of
+        | xspan_none() => let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)
           val () = $A.free<byte>(t)
         in $P.ret<int>(~3) end
-        else if ch_len <= 0 then let
-          val () = $X.free_nodes(opf_nodes)
-          val () = $A.drop<byte>(opf_f, opf_b)
-          val t = $A.thaw<byte>(opf_f)
-          val () = $A.free<byte>(t)
-        in $P.ret<int>(~3) end
-        else if ch_len > 1048576 then let
+        | xspan_at(ch_off, ch_len) =>
+        if ch_len <= 0 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)

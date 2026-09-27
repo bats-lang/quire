@@ -22,28 +22,30 @@ staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 
-(* Show bytes [off, off+n) of data as wid's text; false when the range is
-   unusable (absent, empty, or 256 bytes or more). *)
+(* Show the span of data as wid's text; false when there is none, or it
+   is empty or 256 bytes or more (the book's title or author, from its
+   OPF: a longer one is not shown). *)
 fn _set_meta_text
   {lb:agz}{nb:pos}
   (data: !$A.borrow(byte, lb, nb), len: int nb,
-   wid: $W.widget_id, off: pos_t, n: pos_t): bool =
-  if off < 0 then false
-  else if n <= 0 then false
-  else if n >= 256 then false
-  else let
-    val tbuf = $A.alloc<byte>(n)
-    val () = copy_from_borrow(data, off, len, tbuf, 0, n, n)
-    val txt = arr_to_text(tbuf, n)
-    val () = $A.free<byte>(tbuf)
-    val () = apply_diff($W.SetTextContent(wid, txt, n))
-  in true end
+   wid: $W.widget_id, span: xspan(nb)): bool =
+  case+ span of
+  | xspan_none() => false
+  | xspan_at(off, n) =>
+    if n <= 0 then false
+    else if n >= 256 then false
+    else let
+      val tbuf = $A.alloc<byte>(n)
+      val () = $S.copy_from_borrow(data, off, len, tbuf, 0, n, n)
+      val txt = arr_to_text(tbuf, n)
+      val () = $A.free<byte>(tbuf)
+      val () = apply_diff($W.SetTextContent(wid, txt, n))
+    in true end
 
 fn _add_book_card
   {lb:agz}{nb:pos}
   (data: !$A.borrow(byte, lb, nb), len: int nb,
-   t_off: pos_t, t_len: pos_t,
-   a_off: pos_t, a_len: pos_t): void = let
+   title: xspan(nb), author: xspan(nb)): void = let
   (* Hide empty message and create card *)
   var elb_c = @[char][4]('q', 'e', 'l', 'b')
   val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
@@ -70,7 +72,7 @@ fn _add_book_card
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
   (* Set title — try metadata, fall back to "Imported Book" *)
-  val () = (if _set_meta_text(data, len, tc_id, t_off, t_len) then ()
+  val () = (if _set_meta_text(data, len, tc_id, title) then ()
   else let
     var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
   in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
@@ -82,7 +84,7 @@ fn _add_book_card
   val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, ad))
   val () = apply_diff(cls_a)
-  val () = (if _set_meta_text(data, len, ac_id, a_off, a_len) then ()
+  val () = (if _set_meta_text(data, len, ac_id, author) then ()
   else let
     var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
   in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
@@ -243,25 +245,18 @@ in
 
                 val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
                 val nodes = $X.parse_document(dc_borrow, dc_sz)
-                val opf_path = walk_rootfile_nodes(dc_borrow, dc_sz, nodes)
-                val opf_off = opf_path.0
-                val opf_len = opf_path.1
+                val opf_path = walk_rootfile_nodes(dc_borrow, nodes)
               in
-                if opf_off < 0 then let
+                case+ opf_path of
+                | xspan_none() => let
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
                   val () = $A.free<byte>(dc_buf2)
                   val () = $FI.close(file_handle)
                 in $P.ret<int>(~6) end
-                else if opf_len <= 0 then let
-                  val () = $X.free_nodes(nodes)
-                  val () = $A.drop<byte>(dc_frozen, dc_borrow)
-                  val dc_buf2 = $A.thaw<byte>(dc_frozen)
-                  val () = $A.free<byte>(dc_buf2)
-                  val () = $FI.close(file_handle)
-                in $P.ret<int>(~6) end
-                else if opf_len > 1048576 then let
+                | xspan_at(opf_off, opf_len) =>
+                if opf_len <= 0 then let
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(dc_frozen, dc_borrow)
                   val dc_buf2 = $A.thaw<byte>(dc_frozen)
@@ -271,7 +266,7 @@ in
                 else let
                   val opf_path_sz = opf_len
                   val opf_path_buf = $A.alloc<byte>(opf_path_sz)
-                  val () = copy_from_borrow(dc_borrow, opf_off, dc_sz,
+                  val () = $S.copy_from_borrow(dc_borrow, opf_off, dc_sz,
                             opf_path_buf, 0, opf_path_sz, opf_len)
 
                   val () = $X.free_nodes(nodes)
@@ -343,12 +338,10 @@ in
 
                           val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
                           val opf_nodes = $X.parse_document(opf_b, dc2_sz)
-                          val meta = walk_opf_metadata(opf_b, dc2_sz, opf_nodes,
-                                      ~1, 0, ~1, 0)
+                          val @(title, author) = walk_opf_metadata(opf_b, opf_nodes)
 
                           (* Create card with metadata *)
-                          val () = _add_book_card(opf_b, dc2_sz,
-                                    meta.0, meta.1, meta.2, meta.3)
+                          val () = _add_book_card(opf_b, dc2_sz, title, author)
 
                           val () = $X.free_nodes(opf_nodes)
                           val () = $A.drop<byte>(opf_f, opf_b)
