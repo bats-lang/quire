@@ -13,7 +13,6 @@
 #use wasm.bats-packages.dev/file-input as FI
 #use widget as W
 
-staload "state.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "theme.sats"
@@ -35,8 +34,11 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 (* Whether a tap on the content hid the reader's nav bar *)
 val _nav_hidden = ref<bool>(false)
 
+(* A childless element with id t[0, 4) *)
+fn _el (t: $A.text(4), top: $W.html_top, cls: $W.class_opt, hidden: bool): $W.widget =
+  $W.Element($W.ElementNode($W.Generated(t, 4), top, cls, hidden, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+
 implement main0 () = let
-  val st = empty_state()
 
   val doc = $D.create_document($A.text_lit("div"), 3, $A.text_lit("bats-root"), 9)
 
@@ -51,241 +53,119 @@ implement main0 () = let
   val fs_id = $W.Generated($A.text_lit("qfss"), 4)
   val @(root, fs_diffs) = $W.inject_css(root, fs_id, $A.text_lit(".caf{font-size:16px}"), 20)
   val () = $D.apply_list(doc, fs_diffs)
+  (* The tree is not read again: every later change is a diff by id *)
+  val () = $W.widget_free(root)
 
-  val ll_id = $W.Generated($A.text_lit("qllc"), 4)
-  val ll = $W.Element($W.ElementNode(ll_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(root, diff) = $W.add_child(root, ll)
-  val () = $D.apply(doc, diff)
-  val @(ll, diff) = $W.set_class(ll, cls_library_list())
-  val () = $D.apply(doc, diff)
-
+  (* Each element is built with its class and hidden flag, and added under
+     its parent by id; apply consumes the element *)
+  (* Library list *)
+  val () = $D.apply(doc, $W.AddChild($W.Root(),
+    _el($A.text_lit("qllc"), $W.Normal($W.Div()), $W.ClassIdx(cls_library_list()), false)))
   (* App title *)
-  val at_id = $W.Generated($A.text_lit("qatl"), 4)
-  val at = $W.Element($W.ElementNode(at_id, $W.Normal($W.H1()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(ll, at)
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(at_id, $A.text_lit("Quire"), 5))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qllc"), 4),
+    _el($A.text_lit("qatl"), $W.Normal($W.H1()), $W.NoClass(), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qatl"), 4), $A.text_lit("Quire"), 5))
   (* Reader view — hidden initially *)
-  val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
-  val rv = $W.Element($W.ElementNode(rv_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(root, diff) = $W.add_child(root, rv)
-  val () = $D.apply(doc, diff)
-  val @(rv, diff) = $W.set_class(rv, cls_reader_view())
-  val () = $D.apply(doc, diff)
-  val @(rv, diff) = $W.set_hidden(rv, true)
-  val () = $D.apply(doc, diff)
-
+  val () = $D.apply(doc, $W.AddChild($W.Root(),
+    _el($A.text_lit("qrvw"), $W.Normal($W.Div()), $W.ClassIdx(cls_reader_view()), true)))
   (* Nav bar inside reader view *)
-  val nv_id = $W.Generated($A.text_lit("qrnv"), 4)
-  val nv = $W.Element($W.ElementNode(nv_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(rv, diff) = $W.add_child(rv, nv)
-  val () = $D.apply(doc, diff)
-  val @(nv, diff) = $W.set_class(nv, cls_nav_bar())
-  val () = $D.apply(doc, diff)
-
-  (* Back button inside nav bar *)
-  val bb_id = $W.Generated($A.text_lit("qbbk"), 4)
-  val bb = $W.Element($W.ElementNode(bb_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(nv, diff) = $W.add_child(nv, bb)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(bb, cls_back_btn())
-  val () = $D.apply(doc, diff)
-  (* U+2190 = ← = 0xE2 0x86 0x90 *)
-  val () = $D.apply(doc, $W.set_text_content(bb_id, $A.text_lit("\xE2\x86\x90"), 3))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrvw"), 4),
+    _el($A.text_lit("qrnv"), $W.Normal($W.Div()), $W.ClassIdx(cls_nav_bar()), false)))
+  (* Back button inside nav bar: U+2190 = ← = 0xE2 0x86 0x90 *)
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qbbk"), $W.Normal($W.Div()), $W.ClassIdx(cls_back_btn()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qbbk"), 4), $A.text_lit("\xE2\x86\x90"), 3))
   (* Chapter title *)
-  val ct_id = $W.Generated($A.text_lit("qcht"), 4)
-  val ct = $W.Element($W.ElementNode(ct_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(nv, diff) = $W.add_child(nv, ct)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(ct, cls_chapter_title())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(ct_id, $A.text_lit("Chapter 1"), 9))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qcht"), $W.Normal($W.Div()), $W.ClassIdx(cls_chapter_title()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qcht"), 4), $A.text_lit("Chapter 1"), 9))
   (* Page info *)
-  val pi_id = $W.Generated($A.text_lit("qpgi"), 4)
-  val pi = $W.Element($W.ElementNode(pi_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(nv, diff) = $W.add_child(nv, pi)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(pi, cls_page_info())
-  val () = $D.apply(doc, diff)
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qpgi"), $W.Normal($W.Div()), $W.ClassIdx(cls_page_info()), false)))
   (* Prev button — U+2039 = ‹ = 0xE2 0x80 0xB9 *)
-  val pv_id = $W.Generated($A.text_lit("qprv"), 4)
-  val pv = $W.Element($W.ElementNode(pv_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(nv, diff) = $W.add_child(nv, pv)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(pv, cls_nav_button())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(pv_id, $A.text_lit("\xE2\x80\xB9"), 3))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qprv"), $W.Normal($W.Div()), $W.ClassIdx(cls_nav_button()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qprv"), 4), $A.text_lit("\xE2\x80\xB9"), 3))
   (* Next button — U+203A = › = 0xE2 0x80 0xBA *)
-  val nx_id = $W.Generated($A.text_lit("qnxt"), 4)
-  val nx = $W.Element($W.ElementNode(nx_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(nv, nx)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(nx, cls_nav_button())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(nx_id, $A.text_lit("\xE2\x80\xBA"), 3))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qnxt"), $W.Normal($W.Div()), $W.ClassIdx(cls_nav_button()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qnxt"), 4), $A.text_lit("\xE2\x80\xBA"), 3))
   (* Settings gear button — U+2699 = ⚙ = 0xE2 0x9A 0x99 *)
-  val sg_id = $W.Generated($A.text_lit("qset"), 4)
-  val sg = $W.Element($W.ElementNode(sg_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(nv, sg)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(sg, cls_nav_button())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(sg_id, $A.text_lit("\xE2\x9A\x99"), 3))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrnv"), 4),
+    _el($A.text_lit("qset"), $W.Normal($W.Div()), $W.ClassIdx(cls_nav_button()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qset"), 4), $A.text_lit("\xE2\x9A\x99"), 3))
   (* Content area inside reader view *)
-  val ca_id = $W.Generated($A.text_lit("qcnt"), 4)
-  val ca = $W.Element($W.ElementNode(ca_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(rv, diff) = $W.add_child(rv, ca)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(ca, cls_content_area())
-  val () = $D.apply(doc, diff)
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrvw"), 4),
+    _el($A.text_lit("qcnt"), $W.Normal($W.Div()), $W.ClassIdx(cls_content_area()), false)))
   (* Click zones — transparent overlays for page navigation *)
-  val zl_id = $W.Generated($A.text_lit("qczl"), 4)
-  val zl = $W.Element($W.ElementNode(zl_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(rv, diff) = $W.add_child(rv, zl)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(zl, cls_zone_left())
-  val () = $D.apply(doc, diff)
-
-  val zr_id = $W.Generated($A.text_lit("qczr"), 4)
-  val zr = $W.Element($W.ElementNode(zr_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(rv, diff) = $W.add_child(rv, zr)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(zr, cls_zone_right())
-  val () = $D.apply(doc, diff)
-
-  val zc_id = $W.Generated($A.text_lit("qczc"), 4)
-  val zc = $W.Element($W.ElementNode(zc_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(rv, zc)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(zc, cls_zone_center())
-  val () = $D.apply(doc, diff)
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrvw"), 4),
+    _el($A.text_lit("qczl"), $W.Normal($W.Div()), $W.ClassIdx(cls_zone_left()), false)))
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrvw"), 4),
+    _el($A.text_lit("qczr"), $W.Normal($W.Div()), $W.ClassIdx(cls_zone_right()), false)))
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qrvw"), 4),
+    _el($A.text_lit("qczc"), $W.Normal($W.Div()), $W.ClassIdx(cls_zone_center()), false)))
   (* Settings panel — hidden overlay *)
-  val sp_id = $W.Generated($A.text_lit("qspn"), 4)
-  val sp = $W.Element($W.ElementNode(sp_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(root, diff) = $W.add_child(root, sp)
-  val () = $D.apply(doc, diff)
-  val @(sp, diff) = $W.set_class(sp, cls_settings_panel())
-  val () = $D.apply(doc, diff)
-  val @(sp, diff) = $W.set_hidden(sp, true)
-  val () = $D.apply(doc, diff)
-
+  val () = $D.apply(doc, $W.AddChild($W.Root(),
+    _el($A.text_lit("qspn"), $W.Normal($W.Div()), $W.ClassIdx(cls_settings_panel()), true)))
   (* "Font Size" label *)
-  val fl_id = $W.Generated($A.text_lit("qsfl"), 4)
-  val fl = $W.Element($W.ElementNode(fl_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(sp, diff) = $W.add_child(sp, fl)
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(fl_id, $A.text_lit("Font Size"), 9))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qspn"), 4),
+    _el($A.text_lit("qsfl"), $W.Normal($W.Div()), $W.NoClass(), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qsfl"), 4), $A.text_lit("Font Size"), 9))
   (* A- button (decrease font) *)
-  val am_id = $W.Generated($A.text_lit("qfsm"), 4)
-  val am = $W.Element($W.ElementNode(am_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(sp, diff) = $W.add_child(sp, am)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(am, cls_settings_btn())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(am_id, $A.text_lit("A-"), 2))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qspn"), 4),
+    _el($A.text_lit("qfsm"), $W.Normal($W.Div()), $W.ClassIdx(cls_settings_btn()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qfsm"), 4), $A.text_lit("A-"), 2))
   (* A+ button (increase font) *)
-  val ap_id = $W.Generated($A.text_lit("qfsp"), 4)
-  val ap = $W.Element($W.ElementNode(ap_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(sp, diff) = $W.add_child(sp, ap)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(ap, cls_settings_btn())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(ap_id, $A.text_lit("A+"), 2))
-
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qspn"), 4),
+    _el($A.text_lit("qfsp"), $W.Normal($W.Div()), $W.ClassIdx(cls_settings_btn()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qfsp"), 4), $A.text_lit("A+"), 2))
   (* Close button *)
-  val sc_id = $W.Generated($A.text_lit("qscl"), 4)
-  val scl = $W.Element($W.ElementNode(sc_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(_, diff) = $W.add_child(sp, scl)
-  val () = $D.apply(doc, diff)
-  val @(_, diff) = $W.set_class(scl, cls_settings_btn())
-  val () = $D.apply(doc, diff)
-  val () = $D.apply(doc, $W.set_text_content(sc_id, $A.text_lit("Close"), 5))
+  val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qspn"), 4),
+    _el($A.text_lit("qscl"), $W.Normal($W.Div()), $W.ClassIdx(cls_settings_btn()), false)))
+  val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qscl"), 4), $A.text_lit("Close"), 5))
 
 in
-  if is_library_empty(st) then let
+  (* The library starts empty: books are imported into it *)
+  let
     (* Library toolbar — above empty state message *)
-    val tb_id = $W.Generated($A.text_lit("qltb"), 4)
-    val tb = $W.Element($W.ElementNode(tb_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ll, tb)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(tb, cls_lib_toolbar())
-    val () = $D.apply(doc, diff)
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qllc"), 4),
+      _el($A.text_lit("qltb"), $W.Normal($W.Div()), $W.ClassIdx(cls_lib_toolbar()), false)))
     (* App title in toolbar *)
-    val at_id = $W.Generated($A.text_lit("qatl"), 4)
-    val atl = $W.Element($W.ElementNode(at_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(tb, atl)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(atl, cls_app_title())
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(at_id, $A.text_lit("Quire"), 5))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qltb"), 4),
+      _el($A.text_lit("qatl"), $W.Normal($W.Div()), $W.ClassIdx(cls_app_title()), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qatl"), 4), $A.text_lit("Quire"), 5))
 
     (* Empty state message *)
-    val el_id = $W.Generated($A.text_lit("qelb"), 4)
-    val el = $W.Element($W.ElementNode(el_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ll, el)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(el, cls_empty_lib())
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(el_id, $A.text_lit("Import an EPUB file to start reading ..."), 40))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qllc"), 4),
+      _el($A.text_lit("qelb"), $W.Normal($W.Div()), $W.ClassIdx(cls_empty_lib()), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qelb"), 4), $A.text_lit("Import an EPUB file to start reading ..."), 40))
 
     (* Import button in toolbar *)
-    val ib_id = $W.Generated($A.text_lit("qibn"), 4)
-    val ib = $W.Element($W.ElementNode(ib_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(tb, ib)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(ib, cls_import_btn())
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(ib_id, $A.text_lit("Import EPUB"), 11))
-
-    val fi_id = $W.Generated($A.text_lit("qfin"), 4)
-    val fi = $W.Element($W.ElementNode(fi_id, $W.Void($W.HtmlInput($W.InputFile(), $W.NoneStr(), $W.NoneStr(), false, false, false)), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ib, fi)
-    val () = $D.apply(doc, diff)
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qltb"), 4),
+      _el($A.text_lit("qibn"), $W.Normal($W.Div()), $W.ClassIdx(cls_import_btn()), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qibn"), 4), $A.text_lit("Import EPUB"), 11))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qibn"), 4),
+      _el($A.text_lit("qfin"), $W.Void($W.HtmlInput($W.InputFile(), $W.NoneStr(), $W.NoneStr(), false, false, false)), $W.NoClass(), false)))
 
     (* Sort button in toolbar *)
-    val sr_id = $W.Generated($A.text_lit("qsrt"), 4)
-    val sr = $W.Element($W.ElementNode(sr_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(tb, sr)
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(sr_id, $A.text_lit("Sort"), 4))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qltb"), 4),
+      _el($A.text_lit("qsrt"), $W.Normal($W.Div()), $W.NoClass(), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qsrt"), 4), $A.text_lit("Sort"), 4))
 
     (* Context menu overlay — hidden initially *)
-    val ctx_id = $W.Generated($A.text_lit("qctx"), 4)
-    val ctx = $W.Element($W.ElementNode(ctx_id, $W.Normal($W.Div()), $W.NoClass(), true, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ll, ctx)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(ctx, cls_ctx_overlay())
-    val () = $D.apply(doc, diff)
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qllc"), 4),
+      _el($A.text_lit("qctx"), $W.Normal($W.Div()), $W.ClassIdx(cls_ctx_overlay()), true)))
     (* Context menu box *)
-    val cmb_id = $W.Generated($A.text_lit("qcmb"), 4)
-    val cmb = $W.Element($W.ElementNode(cmb_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(ctx, cmb)
-    val () = $D.apply(doc, diff)
-    val @(_, diff) = $W.set_class(cmb, cls_ctx_menu())
-    val () = $D.apply(doc, diff)
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qctx"), 4),
+      _el($A.text_lit("qcmb"), $W.Normal($W.Div()), $W.ClassIdx(cls_ctx_menu()), false)))
     (* Archive button *)
-    val ab_id = $W.Generated($A.text_lit("qarb"), 4)
-    val ab = $W.Element($W.ElementNode(ab_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(cmb, ab)
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(ab_id, $A.text_lit("Archive"), 7))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qcmb"), 4),
+      _el($A.text_lit("qarb"), $W.Normal($W.Div()), $W.NoClass(), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qarb"), 4), $A.text_lit("Archive"), 7))
     (* Hide button *)
-    val hb_id = $W.Generated($A.text_lit("qhib"), 4)
-    val hb = $W.Element($W.ElementNode(hb_id, $W.Normal($W.Div()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-    val @(_, diff) = $W.add_child(cmb, hb)
-    val () = $D.apply(doc, diff)
-    val () = $D.apply(doc, $W.set_text_content(hb_id, $A.text_lit("Hide"), 4))
+    val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qcmb"), 4),
+      _el($A.text_lit("qhib"), $W.Normal($W.Div()), $W.NoClass(), false)))
+    val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qhib"), 4), $A.text_lit("Hide"), 4))
 
     (* Wire file input change event to epub import *)
     val fi_narr = $A.alloc<byte>(4)
@@ -739,8 +619,5 @@ in
     (* Restore font size and saved book from IDB *)
     val () = restore_font_size()
     val () = restore_from_idb()
-  in end
-  else let
-    val () = $D.destroy(doc)
   in end
 end
