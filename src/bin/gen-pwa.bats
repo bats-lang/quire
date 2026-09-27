@@ -17,4 +17,8 @@ implement main0 () = let
     assets, 0, 1)
   val () = $A.free<byte>(assets)
   val () = println! ("PWA generated in dist/pwa/")
+  (* The Capacitor project around it; its id is the one Quire is
+     published under on Google Play *)
+  val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android")
+  val () = println! ("Android project generated in dist/android/")
 in end
