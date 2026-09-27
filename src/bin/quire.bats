@@ -13,7 +13,6 @@
 #use wasm.bats-packages.dev/file-input as FI
 #use widget as W
 
-staload "state.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "theme.sats"
@@ -40,7 +39,6 @@ fn _el (t: $A.text(4), top: $W.html_top, cls: $W.class_opt, hidden: bool): $W.wi
   $W.Element($W.ElementNode($W.Generated(t, 4), top, cls, hidden, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
 
 implement main0 () = let
-  val st = empty_state()
 
   val doc = $D.create_document($A.text_lit("div"), 3, $A.text_lit("bats-root"), 9)
 
@@ -127,7 +125,8 @@ implement main0 () = let
   val () = $D.apply(doc, $W.set_text_content($W.Generated($A.text_lit("qscl"), 4), $A.text_lit("Close"), 5))
 
 in
-  if is_library_empty(st) then let
+  (* The library starts empty: books are imported into it *)
+  let
     (* Library toolbar — above empty state message *)
     val () = $D.apply(doc, $W.AddChild($W.Generated($A.text_lit("qllc"), 4),
       _el($A.text_lit("qltb"), $W.Normal($W.Div()), $W.ClassIdx(cls_lib_toolbar()), false)))
@@ -620,8 +619,5 @@ in
     (* Restore font size and saved book from IDB *)
     val () = restore_font_size()
     val () = restore_from_idb()
-  in end
-  else let
-    val () = $D.destroy(doc)
   in end
 end
