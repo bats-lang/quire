@@ -68,7 +68,18 @@ jobs:
           test -f dist/pwa/index.html
           test -f dist/pwa/bridge.js
           test -f dist/pwa/app.wasm
+          test -x dist/android/build-android.sh
+          grep -q '"appId": "dev.middlefield.quire"' dist/android/capacitor.config.json
           echo "PWA verification passed"
+
+      - name: Upload Android project
+        uses: actions/upload-artifact@v4
+        with:
+          name: quire-android
+          path: |
+            dist/android
+            dist/pwa
+          retention-days: 1
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -94,3 +105,15 @@ jobs:
           name: e2e-screenshots
           path: test-results/
           retention-days: 14
+
+  # The Android app (AAB and APK), built by the pwa package's workflow and
+  # signed with this repository's secrets; see ANDROID.md
+  android:
+    needs: check
+    uses: bats-lang/pwa/.github/workflows/android.yml@main
+    secrets: inherit
+    with:
+      artifact: quire-android
+      project-dir: android
+      # Above the version code (1) of the build uploaded before this workflow
+      version-code-offset: 1
