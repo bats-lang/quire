@@ -58,16 +58,12 @@ fn _add_book_card
   val ll_id = $W.Generated($A.text_lit("qllc"), 4)
   val card = $W.Element($W.ElementNode(card_id,
     $W.Normal($W.Div()), $W.ClassIdx(cls_book_card()), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(card, cls_diff) = $W.set_class(card, cls_book_card())
   val () = apply_diff($W.AddChild(ll_id, card))
-  val () = apply_diff(cls_diff)
   (* Title div *)
   val tc_id = num_wid("qtc", idx, 2)
   val td = $W.Element($W.ElementNode(tc_id,
     $W.Normal($W.Div()), $W.ClassIdx(cls_book_title()), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(td, cls_d) = $W.set_class(td, cls_book_title())
   val () = apply_diff($W.AddChild(card_id, td))
-  val () = apply_diff(cls_d)
   (* Set title — try metadata, fall back to "Imported Book" *)
   val () = (if _set_meta_text(data, len, tc_id, title) then ()
   else let
@@ -76,9 +72,7 @@ fn _add_book_card
   val ac_id = num_wid("qac", idx, 2)
   val ad = $W.Element($W.ElementNode(ac_id,
     $W.Normal($W.Div()), $W.ClassIdx(cls_book_author()), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, ad))
-  val () = apply_diff(cls_a)
   val () = (if _set_meta_text(data, len, ac_id, author) then ()
   else let
   in apply_diff($W.SetTextContent(ac_id, $A.text_lit("Unknown Author"), 14)) end)
@@ -86,9 +80,7 @@ fn _add_book_card
   val sc_id = num_wid("qst", idx, 2)
   val sd = $W.Element($W.ElementNode(sc_id,
     $W.Normal($W.Div()), $W.ClassIdx(cls_book_author()), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-  val @(sd, cls_s) = $W.set_class(sd, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, sd))
-  val () = apply_diff(cls_s)
   val () = apply_diff($W.SetTextContent(sc_id, $A.text_lit("New"), 3))
   (* Wire click handler: card click opens reader *)
   val @(ci_arr, ci_len) = num_id("qbc", idx, 2)
