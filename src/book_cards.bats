@@ -30,8 +30,8 @@ fn _set_meta_text
   (data: !$A.borrow(byte, lb, nb), len: int nb,
    wid: $W.widget_id, span: xspan(nb)): bool =
   case+ span of
-  | xspan_none() => false
-  | xspan_at(off, n) =>
+  | ~xspan_none() => false
+  | ~xspan_at(off, n) =>
     if n <= 0 then false
     else if n >= 256 then false
     else let
@@ -192,13 +192,13 @@ in
             val opf_path = walk_rootfile_nodes(dc_borrow, nodes)
           in
             case+ opf_path of
-            | xspan_none() => let
+            | ~xspan_none() => let
               val () = $X.free_nodes(nodes)
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
               val () = $FI.close(file_handle)
             in $P.ret<int>(~6) end
-            | xspan_at(opf_off, opf_len) =>
+            | ~xspan_at(opf_off, opf_len) =>
             (* The OPF's path names a zip entry, so it is shorter than
                65536 bytes (a zip name's limit) *)
             if opf_len <= 0 then let

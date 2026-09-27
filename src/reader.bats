@@ -521,15 +521,15 @@ and _render_node
       val () = _node_attr_lit(doc, idx, "src", "data:,")
       var _a_alt = @[char][3]('a', 'l', 't')
       val () = (case+ find_attr(data, attrs, _a_alt, 3) of
-        | xspan_at(ao, al) =>
+        | ~xspan_at(ao, al) =>
           if al < 65536 then _node_attr(doc, idx, "alt", data, ao, al)
           else _node_attr_lit(doc, idx, "alt", "image")
-        | xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
+        | ~xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
       var _a_src = @[char][3]('s', 'r', 'c')
     in
       case+ find_attr(data, attrs, _a_src, 3) of
-      | xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
-      | xspan_none() => acc
+      | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
+      | ~xspan_none() => acc
     end
     else let
       val idx = _next_content_idx()
@@ -787,12 +787,12 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
       in
         case+ ch_href of
-        | xspan_none() => let
+        | ~xspan_none() => let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val () = piece_free(par, $A.thaw<byte>(opf_f))
         in $P.ret<int>(~3) end
-        | xspan_at(ch_off, ch_len) =>
+        | ~xspan_at(ch_off, ch_len) =>
         if ch_len <= 0 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
