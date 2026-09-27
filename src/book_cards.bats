@@ -144,8 +144,7 @@ in
     else let
       (* The book cell owns the file from here: the stages below read it
          while it is still the book being imported (serial s) *)
-      val () = book_set(Importing(file_handle, file_size))
-      val s = book_serial()
+      val s = book_begin(file_handle, file_size)
       var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
       val _cont_arr = $S.from_char_array(_cont_chars, 22)
       val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)

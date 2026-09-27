@@ -69,7 +69,7 @@ In arena pieces (`piece` in `src/book.bats`: a piece of the current
 page's arena, or the one piece of an arena sized to it, so it has no
 1 MiB bound):
 
-* an entry's compressed data (the piece `zip_read` returns): the
+* an entry's compressed data (the piece `index_read` returns): the
   container.xml, the OPF and each chapter;
 * decompressed content (`take_content`): the container.xml, the OPF and
   each chapter's XHTML;
@@ -81,8 +81,10 @@ turns yet, since pages are CSS columns of the chapter's DOM.
 
 With `alloc`:
 
-* `src/book.bats` (`zip_read`): the archive's tail, its central
-  directory (at most 1 MiB), and the entry's local header.
+* `src/book.bats` (`book_index_make`): the archive's tail and each
+  entry's local header while the book is opened, and its central
+  directory (at most 1 MiB), kept while the book is open for its
+  entries' names.
 * `src/book_cards.bats` (import): the OPF path (`opf_path_buf`, under
   65536 bytes as a zip name is) and a title buffer (`tbuf`).
 * `src/reader.bats`: the OPF's name (for its directory), the chapter
@@ -93,6 +95,16 @@ With `alloc`:
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
+
+### The archive is checked once
+
+`book_begin` opens a book (an import, or a restore from IndexedDB) and
+checks its archive then, once: the end record, the central directory
+(zip's `cd_refs`) and every entry's local header. What survives is the
+book's index (`book_index`): the kept directory and a list of entries
+whose data spans are proven inside the file. Reading an entry
+(`index_read`, for the container.xml, the OPF, a chapter or an image)
+only looks its name up there; nothing in the file is checked again.
 
 ### Found while taking this inventory
 

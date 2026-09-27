@@ -995,8 +995,7 @@ fn _restore_from_idb(): void = let
       in $P.ret<int>(~1) end
       else let
       (* The book cell owns the file from here, as an import does *)
-      val () = book_set(Importing(fh, bsz))
-      val s = book_serial()
+      val s = book_begin(fh, bsz)
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
