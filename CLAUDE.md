@@ -44,7 +44,8 @@ sized to it, created and destroyed whole, so it has no 1 MiB bound):
   container.xml, the OPF and each chapter;
 * decompressed content (`take_content`): the container.xml, the OPF and
   each chapter's XHTML;
-* the OPF's compressed data when a chapter is loaded (`opf_cbuf`).
+* the OPF's compressed data when a chapter is loaded (`opf_cbuf`);
+* each image's bytes (`_show_image` in `src/reader.bats`).
 
 Each piece lives only while it is parsed: nothing is kept between page
 turns yet, since pages are CSS columns of the chapter's DOM.
@@ -72,4 +73,9 @@ With `alloc`:
   decompressed content are read into arena pieces, so a chapter over
   1 MiB is shown; only the central directory is still read into one
   buffer of at most 1 MiB.
-* Book images are not loaded or shown yet; only chapter text is.
+* (Fixed) Book images were not shown. A chapter's `<img>` elements are
+  now filled once the chapter is rendered: each src is resolved against
+  the chapter's directory ("." and ".." segments, a "#fragment"
+  dropped), its entry read into an arena piece (decompressed into
+  another when deflated) and handed to the element as a blob URL. SVG
+  `<image>` covers are not shown yet.

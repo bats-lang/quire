@@ -22,6 +22,7 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
+staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
@@ -404,21 +405,51 @@ in
   else $W.Div()
 end
 
-(* Walk xml_node_list, rendering each node into parent *)
+(* The <img> elements of a chapter being rendered, k of them: each one's
+   content node and its src attribute, the span [so, so + sl) of the
+   chapter's n bytes *)
+datavtype imgs(n:int, int) =
+  | imgs_nil(n, 0) of ()
+  | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
+    imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
+
+(* An image's alt text: its alt attribute when it has one (of fewer than
+   256 bytes), else "image" *)
+fn _img_alt {lb:agz}{n:pos}{sa:nat}
+  (data: !$A.borrow(byte, lb, n), len: int n, attrs: !$X.xml_attr_list(n, sa))
+  : [k:pos | k < 256] @($A.text(k), int k) = let
+  var _a_alt = @[char][3]('a', 'l', 't')
+  var img_c = @[char][5]('i', 'm', 'a', 'g', 'e')
+in
+  case+ find_attr(data, attrs, _a_alt, 3) of
+  | xspan_at(ao, al) =>
+    if al <= 0 then @($S.text_of_chars(img_c, 5), 5)
+    else if al >= 256 then @($S.text_of_chars(img_c, 5), 5)
+    else let
+      val buf = $A.alloc<byte>(al)
+      val () = $S.copy_from_borrow(data, ao, len, buf, 0, al, al)
+      val t = arr_to_text(buf, al)
+      val () = $A.free<byte>(buf)
+    in @(t, al) end
+  | xspan_none() => @($S.text_of_chars(img_c, 5), 5)
+end
+
+(* Walk xml_node_list, rendering each node into parent; the <img>
+   elements met are added to acc *)
 fun _render_nodes
-  {lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1} .<sz, 1>.
+  {lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1}{k:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, nodes: !$X.xml_node_list(n, sz)): void =
+   pidx: int q, nodes: !$X.xml_node_list(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val () = _render_node(data, len, pidx, node)
-    in _render_nodes(data, len, pidx, rest) end
-  | $X.xml_nodes_nil() => ()
+      val acc = _render_node(data, len, pidx, node, acc)
+    in _render_nodes(data, len, pidx, rest, acc) end
+  | $X.xml_nodes_nil() => acc
 
 and _render_node
-  {lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1} .<sz, 0>.
+  {lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1}{k:nat} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, node: !$X.xml_node(n, sz)): void =
+   pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ node of
   | $X.xml_text(off, tlen) =>
     (* To do: a text node of 64 KiB or more (SetTextContent's limit) is
@@ -434,9 +465,9 @@ and _render_node
           $W.Normal($W.Span()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
         val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
-      in end
-      else ()
-  | $X.xml_element(name_off, name_len, _, children) => let
+      in acc end
+      else acc
+  | $X.xml_element(name_off, name_len, attrs, children) => let
     (* Skip tags: head, title, meta, link, style, script *)
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
     var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -445,38 +476,55 @@ and _render_node
     var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
     var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
   in
-    if xml_name_eq(data, name_off, name_len, _t_head, 4) then ()
-    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then ()
-    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then ()
-    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then ()
-    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then ()
-    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then ()
+    if xml_name_eq(data, name_off, name_len, _t_head, 4) then acc
+    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then acc
+    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then acc
+    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then acc
+    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then acc
+    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
     else let
       (* Transparent tags: html, body — render children with same parent *)
       var _t_html = @[char][4]('h', 't', 'm', 'l')
       var _t_body = @[char][4]('b', 'o', 'd', 'y')
     in
       if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-        _render_nodes(data, len, pidx, children)
+        _render_nodes(data, len, pidx, children, acc)
       else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-        _render_nodes(data, len, pidx, children)
+        _render_nodes(data, len, pidx, children, acc)
       else let
-        (* Void tags: br, hr *)
+        (* Void tags: br, hr, img *)
         var _t_br = @[char][2]('b', 'r')
         var _t_hr = @[char][2]('h', 'r')
+        var _t_img = @[char][3]('i', 'm', 'g')
       in
         if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Br()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        in end
+        in acc end
         else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Hr()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        in end
+        in acc end
+        else if xml_name_eq(data, name_off, name_len, _t_img, 3) then let
+          (* An image: shown once its bytes are read from the book
+             (_load_images); until then its src is an empty data URL *)
+          val idx = _next_content_idx()
+          var ph = @[char][6]('d', 'a', 't', 'a', ':', ',')
+          val @(alt, al) = _img_alt(data, len, attrs)
+          val w = $W.Element($W.ElementNode(_content_wid(idx),
+            $W.Void($W.Img($S.text_of_chars(ph, 6), 6, alt, al, $W.LoadingEager())),
+            $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
+          var _a_src = @[char][3]('s', 'r', 'c')
+        in
+          case+ find_attr(data, attrs, _a_src, 3) of
+          | xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
+          | xspan_none() => acc
+        end
         else let
           (* Normal element: match tag name, create element, recurse *)
           val idx = _next_content_idx()
@@ -484,8 +532,7 @@ and _render_node
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Normal(tag), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-          val () = _render_nodes(data, len, idx, children)
-        in end
+        in _render_nodes(data, len, idx, children, acc) end
       end
     end
   end
@@ -509,10 +556,203 @@ fn _opf_prefix_len {z:nat}{no,nl:nat | no + nl <= z; nl < 65536}
     val () = $A.free<byte>(buf)
   in p end
 
+(* ============================================================
+   Images: read from the book, shown in the chapter's <img> elements
+   ============================================================ *)
+
+(* Counts chapter loads: an image whose bytes arrive after another
+   chapter began loading is not shown (its element is gone) *)
+val _load_gen = ref<int>(0)
+
+(* The end of the segment of buf[i, m): the next '/' at or after i, or m *)
+fun _seg_end {l:agz}{m:pos}{i:nat | i <= m} .<m - i>.
+  (buf: !$A.arr(byte, l, m), m: int m, i: int i): [j:int | i <= j; j <= m] int j =
+  if i >= m then i
+  else if byte2int0($A.get<byte>(buf, i)) = 47 then i
+  else _seg_end(buf, m, i + 1)
+
+(* Just past the last '/' of buf[0, p], or 0: where ".." leaves a path
+   buf[0, p + 2) that ends with '/' *)
+fun _back {l:agz}{m:pos}{p:int | p < m} .<max(p + 1, 0)>.
+  (buf: !$A.arr(byte, l, m), p: int p): [q:nat | q <= max(p + 1, 0)] int q =
+  if p < 0 then 0
+  else if byte2int0($A.get<byte>(buf, p)) = 47 then p + 1
+  else _back(buf, p - 1)
+
+(* buf[s, s + c) to buf[d, d + c), front first (d <= s) *)
+fun _move {l:agz}{m:pos}{s,d,c:nat | d <= s; s + c <= m} .<c>.
+  (buf: !$A.arr(byte, l, m), s: int s, d: int d, c: int c): void =
+  if c <= 0 then ()
+  else let
+    val () = $A.set<byte>(buf, d, $A.get<byte>(buf, s))
+  in _move(buf, s + 1, d + 1, c - 1) end
+
+(* The path buf[0, m) with its empty, "." and ".." segments resolved,
+   in place: the segments read from i on are written from w on (w <= i);
+   the resolved length *)
+fun _norm {l:agz}{m:pos}{i,w:nat | w <= i; i <= m} .<m - i>.
+  (buf: !$A.arr(byte, l, m), m: int m, i: int i, w: int w): [k:nat | k <= m] int k =
+  if i >= m then w
+  else let
+    val [j:int] j = _seg_end(buf, m, i)
+    val c = j - i
+    val dot1 = (if c >= 1 then byte2int0($A.get<byte>(buf, i)) = 46 else false): bool
+    val dot2 = (if c >= 2 then byte2int0($A.get<byte>(buf, i + 1)) = 46 else false): bool
+    val up = (if w >= 2 then _back(buf, w - 2) else 0): [q:nat | q <= w] int q
+  in
+    if j < m then
+      (* a segment and its '/': the next one starts at j + 1 *)
+      if c = 0 then _norm(buf, m, j + 1, w)
+      else if c = 1 && dot1 then _norm(buf, m, j + 1, w)
+      else if c = 2 && dot1 && dot2 then _norm(buf, m, j + 1, up)
+      else let
+        val () = _move(buf, i, w, c)
+        val () = $A.set<byte>(buf, w + c, $A.int2byte(47))
+      in _norm(buf, m, j + 1, w + c + 1) end
+    (* the last segment *)
+    else if c = 1 && dot1 then w
+    else if c = 2 && dot1 && dot2 then up
+    else let
+      val () = _move(buf, i, w, c)
+    in w + c end
+  end
+
+(* The end of an src value data[so, so + e): its first '#', or its end *)
+fun _src_end {lb:agz}{n:pos}{so,sl:nat | so + sl <= n}{e:nat | e <= sl} .<sl - e>.
+  (data: !$A.borrow(byte, lb, n), so: int so, sl: int sl, e: int e): [r:nat | r <= sl] int r =
+  if e >= sl then e
+  else if byte2int0($A.read<byte>(data, so + e)) = 35 then e
+  else _src_end(data, so, sl, e + 1)
+
+(* Whether path[0, k) ends with pat[0, np), letters in any case *)
+fun _ends_with {lp:agz}{k:pos}{np:pos | np <= k}{i:nat | i <= np} .<np - i>.
+  (path: !$A.borrow(byte, lp, k), k: int k, pat: &(@[char][np]), np: int np, i: int i): bool =
+  if i >= np then true
+  else let
+    val b = byte2int0($A.read<byte>(path, k - np + i))
+    val lb = (if b >= 65 then (if b <= 90 then b + 32 else b) else b): int
+  in
+    if lb <> char2int0(pat.[i]) then false
+    else _ends_with(path, k, pat, np, i + 1)
+  end
+
+(* The image type the name path[0, k) says (by its extension) *)
+fn _mime_of {lp:agz}{k:pos} (path: !$A.borrow(byte, lp, k), k: int k): [sn:pos | sn <= 24] string sn = let
+  var png = @[char][4]('.', 'p', 'n', 'g')
+  var jpg = @[char][4]('.', 'j', 'p', 'g')
+  var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
+  var gif = @[char][4]('.', 'g', 'i', 'f')
+  var svg = @[char][4]('.', 's', 'v', 'g')
+  var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
+in
+  if k >= 5 && _ends_with(path, k, jpeg, 5, 0) then "image/jpeg"
+  else if k >= 5 && _ends_with(path, k, webp, 5, 0) then "image/webp"
+  else if k < 4 then "application/octet-stream"
+  else if _ends_with(path, k, png, 4, 0) then "image/png"
+  else if _ends_with(path, k, jpg, 4, 0) then "image/jpeg"
+  else if _ends_with(path, k, gif, 4, 0) then "image/gif"
+  else if _ends_with(path, k, svg, 4, 0) then "image/svg+xml"
+  else "application/octet-stream"
+end
+
+(* Content node idx's image: the nd bytes of data, of type mime *)
+fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
+  (idx: int i, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
+  val ml = g1u2i(string1_length(mime))
+  val mb = $A.alloc<byte>(ml)
+  val _ = _put(mb, 0, mime)
+  val @(fm, bm) = $A.freeze<byte>(mb)
+  val @(ida, idk) = _num_id("c", idx, 3)
+  val @(fi, bi) = $A.freeze<byte>(ida)
+  val () = $BDOM.set_image_src(bi, idk, data, nd, bm, ml)
+  val () = $A.drop<byte>(fi, bi)
+  val () = $A.free<byte>($A.thaw<byte>(fi))
+  val () = $A.drop<byte>(fm, bm)
+in $A.free<byte>($A.thaw<byte>(fm)) end
+
+(* Content node idx's image, the entry named path[0, k) of the book's
+   z-byte file fh: shown now when it is stored, once decompressed when it
+   is deflated (unless chapter load gen is no longer the latest); not at
+   all when it is missing *)
+fn _show_image {z:pos}{i:nat}{lp:agz}{k:pos}
+  (fh: $FI.infile(z), z: int z, idx: int i, gen: int,
+   path: !$A.borrow(byte, lp, k), k: int k): void = let
+  val mime = _mime_of(path, k)
+in
+  case+ zip_read(fh, z, path, k) of
+  | ~ZipMissing() => ()
+  | ~ZipGot(ar, buf, cs, m, _, _, _) =>
+    if m = 0 then let
+      val @(f, b) = $A.freeze<byte>(buf)
+      val () = _set_src(idx, b, cs, mime)
+      val () = $A.drop<byte>(f, b)
+    in piece_free(ar, $A.thaw<byte>(f)) end
+    else let
+      val @(f, b) = $A.freeze<byte>(buf)
+      val dp = $DC.decompress(b, cs, m)
+      val () = $A.drop<byte>(f, b)
+      val () = piece_free(ar, $A.thaw<byte>(f))
+      val dp = $P.vow(dp)
+    in
+      $P.discard<int>($P.and_then<Int><int>(dp, lam(h) =>
+        case+ take_content(h) of
+        | ~NoContentBytes() => $P.ret<int>(~1)
+        | ~ContentBytes(ar2, buf2, n2) => let
+            val @(f2, b2) = $A.freeze<byte>(buf2)
+            val () = (if !_load_gen = gen then _set_src(idx, b2, n2, mime) else ())
+            val () = $A.drop<byte>(f2, b2)
+            val () = piece_free(ar2, $A.thaw<byte>(f2))
+          in $P.ret<int>(0) end))
+    end
+end
+
+(* The image of content node idx, whose src is data[so, so + sl): the
+   entry that src names relative to the chapter's directory (the first
+   dl bytes of the chapter's name, at no in the file) *)
+fn _load_image {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}{i:nat}
+  (fh: $FI.infile(z), z: int z, no: int no, dl: int dl,
+   data: !$A.borrow(byte, lb, n), n: int n, idx: int i, so: int so, sl: int sl, gen: int): void = let
+  val h = _src_end(data, so, sl, 0)
+in
+  (* An src of 65536 bytes or more names no zip entry (a zip name is
+     shorter): the book's data, checked here *)
+  if h <= 0 then ()
+  else if h >= 65536 then ()
+  else let
+    val m = dl + h
+    val buf = $A.alloc<byte>(m)
+    val () = $FI.file_read(fh, no, buf, dl)
+    val () = $S.copy_from_borrow(data, so, n, buf, dl, m, h)
+    val k = _norm(buf, m, 0, 0)
+  in
+    if k <= 0 then $A.free<byte>(buf)
+    else let
+      val exact = $A.alloc<byte>(k)
+      val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
+      val () = $A.free<byte>(buf)
+      val @(fz, bv) = $A.freeze<byte>(exact)
+      val () = _show_image(fh, z, idx, gen, bv, k)
+      val () = $A.drop<byte>(fz, bv)
+    in $A.free<byte>($A.thaw<byte>(fz)) end
+  end
+end
+
+(* The images xs of the chapter data[0, n) *)
+fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:nat} .<k>.
+  (fh: $FI.infile(z), z: int z, no: int no, dl: int dl,
+   data: !$A.borrow(byte, lb, n), n: int n, xs: imgs(n, k), gen: int): void =
+  case+ xs of
+  | ~imgs_nil() => ()
+  | ~imgs_cons(idx, so, sl, tl) => let
+      val () = _load_image(fh, z, no, dl, data, n, idx, so, sl, gen)
+    in _load_images(fh, z, no, dl, data, n, tl, gen) end
+
 fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   case+ book_get() of
   | NoBook() => $P.ret<int>(~1)
   | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
+    val () = !_load_gen := !_load_gen + 1
+    val gen = !_load_gen
   in
     (* The OPF's compressed bytes, read at their span into a piece *)
     case+ piece_new(opf_csz) of
@@ -588,7 +828,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         in
           case+ ch_entry of
           | ~ZipMissing() => $P.ret<int>(~4)
-          | ~ZipGot(ccar, ch_comp, ch_csz, ch_method, _, _, _) => let
+          | ~ZipGot(ccar, ch_comp, ch_csz, ch_method, _, ch_no, ch_nl) => let
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
               val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
@@ -615,8 +855,11 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val () = !_content_n := 0
 
                   (* Render XHTML tree into content area *)
-                  val () = _render_nodes(xb, ch_dc_sz, ~1, nodes)
+                  val imgs = _render_nodes(xb, ch_dc_sz, ~1, nodes, imgs_nil())
                   val () = $X.free_nodes(nodes)
+                  (* Its images, named relative to the chapter's directory *)
+                  val ch_dl = _opf_prefix_len(fh, ch_no, ch_nl)
+                  val () = _load_images(fh, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen)
                   val () = $A.drop<byte>(xf, xb)
                   val () = piece_free(xar, $A.thaw<byte>(xf))
 

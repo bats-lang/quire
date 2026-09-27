@@ -82,6 +82,15 @@ fun _find_attr_val
     else _find_attr_val(data, rest, aname, alen)
   | $X.xml_attrs_nil() => xspan_none()
 
+(* The value of the attribute named aname among attrs, when there is one *)
+#pub fn find_attr
+  {lb:agz}{n:pos}{sa:nat}{np:pos}
+  (data: !$A.borrow(byte, lb, n),
+   attrs: !$X.xml_attr_list(n, sa),
+   aname: &(@[char][np]), alen: int np): xspan(n)
+
+implement find_attr(data, attrs, aname, alen) = _find_attr_val(data, attrs, aname, alen)
+
 (* ============================================================
    Container.xml: find rootfile full-path
    ============================================================ *)
