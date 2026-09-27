@@ -25,15 +25,13 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
-  var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val doc = $D.open_document($S.text_of_chars(mid, 9), 9)
+  val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.apply_list(doc, dl)
   val () = $D.destroy(doc)
 in end
 
 fn _apply_diff(d: $W.diff): void = let
-  var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val doc = $D.open_document($S.text_of_chars(mid, 9), 9)
+  val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.apply(doc, d)
   val () = $D.destroy(doc)
 in end
@@ -67,7 +65,7 @@ fn _save_pos(ch: int, pg: int): void = let
 in end
 
 fn _save_position(): void =
-  case+ reading_get() of Reading(p, _, c, _) => _save_pos(c, p)
+  case+ reading_get() of @(p, _, c, _) => _save_pos(c, p)
 
 (* Save the EPUB file to IDB, from the JS side (it is never copied
    through wasm memory, whatever its size) *)
@@ -203,8 +201,7 @@ fn _apply_font_size(sz: font_px): void = let
   val off = $S.int_to_str(buf, off, 29, sz)
   val off = _put(buf, off, "px}")
   val txt = _prefix_text(buf, 29, off)
-  var fs_c = @[char][4]('q', 'f', 's', 's')
-  val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+  val fs_id = $W.Generated($A.text_lit("qfss"), 4)
 in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
@@ -230,6 +227,24 @@ fn _save_font_size(): void = let
   val () = $A.free<byte>(bt)
 in end
 
+(* The text of the element whose id is the literal id: buf[0, k), copied
+   from the buffer (no text or diff is built, so nothing is allocated);
+   frees buf *)
+fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
+  (id: string ni, buf: $A.arr(byte, l, n), k: int k): void = let
+  val ni = g1u2i(string1_length(id))
+  val ia = $A.alloc<byte>(ni)
+  val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
+  val @(fi, bi) = $A.freeze<byte>(ia)
+  val @(fb, bb) = $A.freeze<byte>(buf)
+  val doc = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.set_text(doc, bi, ni, bb, 0, k)
+  val () = $D.destroy(doc)
+  val () = $A.drop<byte>(fb, bb)
+  val () = $A.free<byte>($A.thaw<byte>(fb))
+  val () = $A.drop<byte>(fi, bi)
+in $A.free<byte>($A.thaw<byte>(fi)) end
+
 fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
   (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
      middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
@@ -243,13 +258,10 @@ fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): 
   val off = $S.int_to_str(tbuf, off, 44, cur_page + 1)
   val off = _put(tbuf, off, "/")
   val off = $S.int_to_str(tbuf, off, 44, total)
-  val txt = _prefix_text(tbuf, 44, off)
-  var pi_c = @[char][4]('q', 'p', 'g', 'i')
-  val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
-in _apply_diff($W.SetTextContent(pi_id, txt, off)) end
+in _set_text_of("qpgi", tbuf, off) end
 
 fn _update_page_indicator(): void =
-  case+ reading_get() of Reading(p, t, c, _) => _show_indicator(p, t, c)
+  case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)
 
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
@@ -270,13 +282,13 @@ fn _measure_pagination(): void = let
   val total = (if cw > 0 then sw / cw else 1): [v:int] int v
   val t = (if total > 1 then total else 1): [t:pos] int t
   val () = (case+ reading_get() of
-    | Reading(_, _, c, tc) => reading_set(Reading(0, t, c, tc)))
+    | @(_, _, c, tc) => reading_set(@(0, t, c, tc)))
 in _update_page_indicator() end
 
 (* Shows page p of the chapter's t pages *)
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
-  val () = reading_set(Reading(p, t, c, tc))
+  val () = reading_set(@(p, t, c, tc))
   val page = p
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
@@ -303,16 +315,61 @@ in end
 (* Content nodes are numbered from 0 in each chapter *)
 val _content_n = ref<[n:nat] int n>(0)
 
-(* Generate widget_id for content node at index *)
-fn _content_wid {i:nat} (idx: int i): $W.widget_id = _num_wid("c", idx, 3)
+(* Content node i's element: id "c" and i's digits, with op run on its
+   id as a borrow *)
+(* The id of content node i (or of the content area qcnt, for ~1) in a
+   fresh array; with its length *)
+fn _node_id {q:int | q >= ~1} (i: int q): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) =
+  if i < 0 then let
+    val a = $A.alloc<byte>(4)
+    val () = $A.write_text(a, 0, $A.text_lit("qcnt"), 4)
+  in @(a, 4) end
+  else _num_id("c", i, 3)
 
-(* The parent's widget_id: ~1 is the content area qcnt, and i >= 0 is
-   content node i *)
-fn _parent_wid {q:int | q >= ~1} (pidx: int q): $W.widget_id =
-  if pidx < 0 then let
-    var c = @[char][4]('q', 'c', 'n', 't')
-  in $W.Generated($S.text_of_chars(c, 4), 4) end
-  else _content_wid(pidx)
+(* A new element <tag> for content node idx, the last child of node pidx *)
+fn _add_node {ld:agz}{q:int | q >= ~1}{i:nat}{tl:pos | tl < 256}
+  (doc: !$D.document(ld), pidx: int q, idx: int i, tag: string tl): void = let
+  val @(pa, pl) = _node_id(pidx)
+  val @(ca, cl) = _node_id(idx)
+  val @(fp, bp) = $A.freeze<byte>(pa)
+  val @(fc, bc) = $A.freeze<byte>(ca)
+  val () = $D.add_element(doc, bp, pl, bc, cl, tag)
+  val () = $A.drop<byte>(fc, bc)
+  val () = $A.free<byte>($A.thaw<byte>(fc))
+  val () = $A.drop<byte>(fp, bp)
+in $A.free<byte>($A.thaw<byte>(fp)) end
+
+(* Content node idx's text: data[off, off + k) *)
+fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
+  (doc: !$D.document(ld), idx: int i, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
+  val @(ia, il) = _node_id(idx)
+  val @(fi, bi) = $A.freeze<byte>(ia)
+  val () = $D.set_text(doc, bi, il, data, off, k)
+  val () = $A.drop<byte>(fi, bi)
+in $A.free<byte>($A.thaw<byte>(fi)) end
+
+(* Content node idx's attribute name: data[off, off + k) *)
+fn _node_attr {ld,lb:agz}{n:pos}{i:nat}{nl:pos | nl < 256}{o,k:nat | o + k <= n; k < 65536}
+  (doc: !$D.document(ld), idx: int i, name: string nl, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
+  val @(ia, il) = _node_id(idx)
+  val @(fi, bi) = $A.freeze<byte>(ia)
+  val () = $D.set_attr(doc, bi, il, name, data, off, k)
+  val () = $A.drop<byte>(fi, bi)
+in $A.free<byte>($A.thaw<byte>(fi)) end
+
+(* Content node idx's attribute name: the literal v *)
+fn _node_attr_lit {ld:agz}{i:nat}{nl:pos | nl < 256}{vl:pos | vl < 256}
+  (doc: !$D.document(ld), idx: int i, name: string nl, v: string vl): void = let
+  val vl = g1u2i(string1_length(v))
+  val va = $A.alloc<byte>(vl)
+  val () = $A.write_text(va, 0, $A.text_lit(v), vl)
+  val @(fv, bv) = $A.freeze<byte>(va)
+  val () = _node_attr(doc, idx, name, bv, 0, vl)
+  val () = $A.drop<byte>(fv, bv)
+in $A.free<byte>($A.thaw<byte>(fv)) end
+
+(* Content nodes are numbered from 0 in each chapter *)
+val _content_n = ref<[n:nat] int n>(0)
 
 (* Get next content node index and increment counter *)
 fn _next_content_idx(): [n:nat] int n = let
@@ -320,89 +377,72 @@ fn _next_content_idx(): [n:nat] int n = let
   val () = !_content_n := n + 1
 in n end
 
-(* Match XHTML tag name to widget html_normal type *)
-fn _match_tag_to_normal
+(* The tag an XHTML element is shown as: itself when it is one quire
+   shows, a span for a, b, i, u and s, and a div for anything else *)
+fn _tag_of
   {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   name_off: int o, name_len: int k): $W.html_normal = let
-  var _t_p = @[char][1]('p')
-  var _t_h1 = @[char][2]('h', '1')
-  var _t_h2 = @[char][2]('h', '2')
-  var _t_h3 = @[char][2]('h', '3')
-  var _t_h4 = @[char][2]('h', '4')
-  var _t_h5 = @[char][2]('h', '5')
-  var _t_h6 = @[char][2]('h', '6')
-  var _t_div = @[char][3]('d', 'i', 'v')
-  var _t_span = @[char][4]('s', 'p', 'a', 'n')
-  var _t_em = @[char][2]('e', 'm')
-  var _t_strong = @[char][6]('s', 't', 'r', 'o', 'n', 'g')
-  var _t_bq = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
-  var _t_pre = @[char][3]('p', 'r', 'e')
-  var _t_code = @[char][4]('c', 'o', 'd', 'e')
-  var _t_ul = @[char][2]('u', 'l')
-  var _t_ol = @[char][2]('o', 'l')
-  var _t_li = @[char][2]('l', 'i')
-  var _t_section = @[char][7]('s', 'e', 'c', 't', 'i', 'o', 'n')
-  var _t_article = @[char][7]('a', 'r', 't', 'i', 'c', 'l', 'e')
-  var _t_small = @[char][5]('s', 'm', 'a', 'l', 'l')
-  var _t_mark = @[char][4]('m', 'a', 'r', 'k')
-  var _t_del = @[char][3]('d', 'e', 'l')
-  var _t_ins = @[char][3]('i', 'n', 's')
-  var _t_sub = @[char][3]('s', 'u', 'b')
-  var _t_sup = @[char][3]('s', 'u', 'p')
-  var _t_a = @[char][1]('a')
-  var _t_b = @[char][1]('b')
-  var _t_i = @[char][1]('i')
-  var _t_u = @[char][1]('u')
-  var _t_s = @[char][1]('s')
-  var _t_figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
-  var _t_figcap = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
-  var _t_table = @[char][5]('t', 'a', 'b', 'l', 'e')
-  var _t_tr = @[char][2]('t', 'r')
-  var _t_td = @[char][2]('t', 'd')
-  var _t_th = @[char][2]('t', 'h')
-  var _t_thead = @[char][5]('t', 'h', 'e', 'a', 'd')
-  var _t_tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
+  (data: !$A.borrow(byte, lb, n), name_off: int o, name_len: int k): [tl:pos | tl < 256] string tl = let
+  fn is {np:pos} (data: !$A.borrow(byte, lb, n), pat: &(@[char][np]), np: int np): bool =
+    xml_name_eq(data, name_off, name_len, pat, np)
+  var p_ = @[char][1]('p')
+  var h1 = @[char][2]('h', '1')
+  var h2 = @[char][2]('h', '2')
+  var h3 = @[char][2]('h', '3')
+  var h4 = @[char][2]('h', '4')
+  var h5 = @[char][2]('h', '5')
+  var h6 = @[char][2]('h', '6')
+  var span = @[char][4]('s', 'p', 'a', 'n')
+  var em = @[char][2]('e', 'm')
+  var strong = @[char][6]('s', 't', 'r', 'o', 'n', 'g')
+  var bq = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var pre = @[char][3]('p', 'r', 'e')
+  var code = @[char][4]('c', 'o', 'd', 'e')
+  var ul = @[char][2]('u', 'l')
+  var ol = @[char][2]('o', 'l')
+  var li = @[char][2]('l', 'i')
+  var section = @[char][7]('s', 'e', 'c', 't', 'i', 'o', 'n')
+  var article = @[char][7]('a', 'r', 't', 'i', 'c', 'l', 'e')
+  var small = @[char][5]('s', 'm', 'a', 'l', 'l')
+  var mark = @[char][4]('m', 'a', 'r', 'k')
+  var del = @[char][3]('d', 'e', 'l')
+  var ins = @[char][3]('i', 'n', 's')
+  var sub = @[char][3]('s', 'u', 'b')
+  var sup = @[char][3]('s', 'u', 'p')
+  var a_ = @[char][1]('a')
+  var b_ = @[char][1]('b')
+  var i_ = @[char][1]('i')
+  var u_ = @[char][1]('u')
+  var s_ = @[char][1]('s')
+  var figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
+  var figcap = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var table = @[char][5]('t', 'a', 'b', 'l', 'e')
+  var tr = @[char][2]('t', 'r')
+  var td = @[char][2]('t', 'd')
+  var th = @[char][2]('t', 'h')
+  var thead = @[char][5]('t', 'h', 'e', 'a', 'd')
+  var tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
 in
-  if xml_name_eq(data, name_off, name_len, _t_p, 1) then $W.P()
-  else if xml_name_eq(data, name_off, name_len, _t_h1, 2) then $W.H1()
-  else if xml_name_eq(data, name_off, name_len, _t_h2, 2) then $W.H2()
-  else if xml_name_eq(data, name_off, name_len, _t_h3, 2) then $W.H3()
-  else if xml_name_eq(data, name_off, name_len, _t_h4, 2) then $W.H4()
-  else if xml_name_eq(data, name_off, name_len, _t_h5, 2) then $W.H5()
-  else if xml_name_eq(data, name_off, name_len, _t_h6, 2) then $W.H6()
-  else if xml_name_eq(data, name_off, name_len, _t_div, 3) then $W.Div()
-  else if xml_name_eq(data, name_off, name_len, _t_span, 4) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_em, 2) then $W.Em()
-  else if xml_name_eq(data, name_off, name_len, _t_strong, 6) then $W.Strong()
-  else if xml_name_eq(data, name_off, name_len, _t_bq, 10) then $W.Blockquote()
-  else if xml_name_eq(data, name_off, name_len, _t_pre, 3) then $W.Pre()
-  else if xml_name_eq(data, name_off, name_len, _t_code, 4) then $W.HtmlCode()
-  else if xml_name_eq(data, name_off, name_len, _t_ul, 2) then $W.Ul()
-  else if xml_name_eq(data, name_off, name_len, _t_ol, 2) then $W.Ol($W.OlDefault())
-  else if xml_name_eq(data, name_off, name_len, _t_li, 2) then $W.Li()
-  else if xml_name_eq(data, name_off, name_len, _t_section, 7) then $W.Section()
-  else if xml_name_eq(data, name_off, name_len, _t_article, 7) then $W.Article()
-  else if xml_name_eq(data, name_off, name_len, _t_small, 5) then $W.Small()
-  else if xml_name_eq(data, name_off, name_len, _t_mark, 4) then $W.Mark()
-  else if xml_name_eq(data, name_off, name_len, _t_del, 3) then $W.Del()
-  else if xml_name_eq(data, name_off, name_len, _t_ins, 3) then $W.Ins()
-  else if xml_name_eq(data, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
-  else if xml_name_eq(data, name_off, name_len, _t_sup, 3) then $W.Sup()
-  else if xml_name_eq(data, name_off, name_len, _t_a, 1) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_b, 1) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_i, 1) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_u, 1) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_s, 1) then $W.Span()
-  else if xml_name_eq(data, name_off, name_len, _t_figure, 6) then $W.Figure()
-  else if xml_name_eq(data, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
-  else if xml_name_eq(data, name_off, name_len, _t_table, 5) then $W.Table()
-  else if xml_name_eq(data, name_off, name_len, _t_tr, 2) then $W.Tr()
-  else if xml_name_eq(data, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
-  else if xml_name_eq(data, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoScope())
-  else if xml_name_eq(data, name_off, name_len, _t_thead, 5) then $W.Thead()
-  else if xml_name_eq(data, name_off, name_len, _t_tbody, 5) then $W.Tbody()
-  else $W.Div()
+  if is(data, p_, 1) then "p"
+  else if is(data, h1, 2) then "h1" else if is(data, h2, 2) then "h2"
+  else if is(data, h3, 2) then "h3" else if is(data, h4, 2) then "h4"
+  else if is(data, h5, 2) then "h5" else if is(data, h6, 2) then "h6"
+  else if is(data, span, 4) then "span" else if is(data, em, 2) then "em"
+  else if is(data, strong, 6) then "strong" else if is(data, bq, 10) then "blockquote"
+  else if is(data, pre, 3) then "pre" else if is(data, code, 4) then "code"
+  else if is(data, ul, 2) then "ul" else if is(data, ol, 2) then "ol"
+  else if is(data, li, 2) then "li" else if is(data, section, 7) then "section"
+  else if is(data, article, 7) then "article" else if is(data, small, 5) then "small"
+  else if is(data, mark, 4) then "mark" else if is(data, del, 3) then "del"
+  else if is(data, ins, 3) then "ins" else if is(data, sub, 3) then "sub"
+  else if is(data, sup, 3) then "sup"
+  else if is(data, a_, 1) then "span" else if is(data, b_, 1) then "span"
+  else if is(data, i_, 1) then "span" else if is(data, u_, 1) then "span"
+  else if is(data, s_, 1) then "span"
+  else if is(data, figure, 6) then "figure" else if is(data, figcap, 10) then "figcaption"
+  else if is(data, table, 5) then "table" else if is(data, tr, 2) then "tr"
+  else if is(data, td, 2) then "td" else if is(data, th, 2) then "th"
+  else if is(data, thead, 5) then "thead" else if is(data, tbody, 5) then "tbody"
+  else "div"
 end
 
 (* The <img> elements of a chapter being rendered, k of them: each one's
@@ -413,128 +453,87 @@ datavtype imgs(n:int, int) =
   | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
     imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
 
-(* An image's alt text: its alt attribute when it has one (of fewer than
-   256 bytes), else "image" *)
-fn _img_alt {lb:agz}{n:pos}{sa:nat}
-  (data: !$A.borrow(byte, lb, n), len: int n, attrs: !$X.xml_attr_list(n, sa))
-  : [k:pos | k < 256] @($A.text(k), int k) = let
-  var _a_alt = @[char][3]('a', 'l', 't')
-  var img_c = @[char][5]('i', 'm', 'a', 'g', 'e')
-in
-  case+ find_attr(data, attrs, _a_alt, 3) of
-  | xspan_at(ao, al) =>
-    if al <= 0 then @($S.text_of_chars(img_c, 5), 5)
-    else if al >= 256 then @($S.text_of_chars(img_c, 5), 5)
-    else let
-      val buf = $A.alloc<byte>(al)
-      val () = $S.copy_from_borrow(data, ao, len, buf, 0, al, al)
-      val t = arr_to_text(buf, al)
-      val () = $A.free<byte>(buf)
-    in @(t, al) end
-  | xspan_none() => @($S.text_of_chars(img_c, 5), 5)
-end
-
-(* Walk xml_node_list, rendering each node into parent; the <img>
+(* Walk xml_node_list, rendering each node into parent (through doc's
+   borrow operations: nothing is allocated for the page); the <img>
    elements met are added to acc *)
 fun _render_nodes
-  {lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1}{k:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
+  {ld,lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1}{k:nat} .<sz, 1>.
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
    pidx: int q, nodes: !$X.xml_node_list(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val acc = _render_node(data, len, pidx, node, acc)
-    in _render_nodes(data, len, pidx, rest, acc) end
+      val acc = _render_node(doc, data, len, pidx, node, acc)
+    in _render_nodes(doc, data, len, pidx, rest, acc) end
   | $X.xml_nodes_nil() => acc
 
 and _render_node
-  {lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1}{k:nat} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n,
+  {ld,lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1}{k:nat} .<sz, 0>.
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
    pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ node of
   | $X.xml_text(off, tlen) =>
-    (* To do: a text node of 64 KiB or more (SetTextContent's limit) is
-       not shown; it should be split. *)
-      if tlen < 65536 then let
-        val tsz = tlen
-        val tbuf = $A.alloc<byte>(tsz)
-        val () = $S.copy_from_borrow(data, off, len, tbuf, 0, tsz, tlen)
-        val txt = arr_to_text(tbuf, tsz)
-        val () = $A.free<byte>(tbuf)
-        val idx = _next_content_idx()
-        val w = $W.Element($W.ElementNode(_content_wid(idx),
-          $W.Normal($W.Span()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-        val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
-      in acc end
-      else acc
+    (* To do: a text node of 64 KiB or more (a text op's limit) is not
+       shown; it should be split. *)
+    if tlen < 65536 then let
+      val idx = _next_content_idx()
+      val () = _add_node(doc, pidx, idx, "span")
+      val () = _node_text(doc, idx, data, off, tlen)
+    in acc end
+    else acc
   | $X.xml_element(name_off, name_len, attrs, children) => let
-    (* Skip tags: head, title, meta, link, style, script *)
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
     var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
     var _t_meta = @[char][4]('m', 'e', 't', 'a')
     var _t_link = @[char][4]('l', 'i', 'n', 'k')
     var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
     var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+    var _t_html = @[char][4]('h', 't', 'm', 'l')
+    var _t_body = @[char][4]('b', 'o', 'd', 'y')
+    var _t_br = @[char][2]('b', 'r')
+    var _t_hr = @[char][2]('h', 'r')
+    var _t_img = @[char][3]('i', 'm', 'g')
   in
+    (* Skipped: head, title, meta, link, style, script *)
     if xml_name_eq(data, name_off, name_len, _t_head, 4) then acc
     else if xml_name_eq(data, name_off, name_len, _t_title, 5) then acc
     else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then acc
     else if xml_name_eq(data, name_off, name_len, _t_link, 4) then acc
     else if xml_name_eq(data, name_off, name_len, _t_style, 5) then acc
     else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
-    else let
-      (* Transparent tags: html, body — render children with same parent *)
-      var _t_html = @[char][4]('h', 't', 'm', 'l')
-      var _t_body = @[char][4]('b', 'o', 'd', 'y')
+    (* Transparent: html, body (their children go to the same parent) *)
+    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
+      _render_nodes(doc, data, len, pidx, children, acc)
+    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
+      _render_nodes(doc, data, len, pidx, children, acc)
+    (* Void: br, hr, img *)
+    else if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
+      val () = _add_node(doc, pidx, _next_content_idx(), "br")
+    in acc end
+    else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
+      val () = _add_node(doc, pidx, _next_content_idx(), "hr")
+    in acc end
+    else if xml_name_eq(data, name_off, name_len, _t_img, 3) then let
+      (* An image: shown once its bytes are read from the book
+         (_load_images); until then its src is an empty data URL *)
+      val idx = _next_content_idx()
+      val () = _add_node(doc, pidx, idx, "img")
+      val () = _node_attr_lit(doc, idx, "src", "data:,")
+      var _a_alt = @[char][3]('a', 'l', 't')
+      val () = (case+ find_attr(data, attrs, _a_alt, 3) of
+        | ~xspan_at(ao, al) =>
+          if al < 65536 then _node_attr(doc, idx, "alt", data, ao, al)
+          else _node_attr_lit(doc, idx, "alt", "image")
+        | ~xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
+      var _a_src = @[char][3]('s', 'r', 'c')
     in
-      if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-        _render_nodes(data, len, pidx, children, acc)
-      else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-        _render_nodes(data, len, pidx, children, acc)
-      else let
-        (* Void tags: br, hr, img *)
-        var _t_br = @[char][2]('b', 'r')
-        var _t_hr = @[char][2]('h', 'r')
-        var _t_img = @[char][3]('i', 'm', 'g')
-      in
-        if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
-          val idx = _next_content_idx()
-          val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Void($W.Br()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        in acc end
-        else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
-          val idx = _next_content_idx()
-          val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Void($W.Hr()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        in acc end
-        else if xml_name_eq(data, name_off, name_len, _t_img, 3) then let
-          (* An image: shown once its bytes are read from the book
-             (_load_images); until then its src is an empty data URL *)
-          val idx = _next_content_idx()
-          var ph = @[char][6]('d', 'a', 't', 'a', ':', ',')
-          val @(alt, al) = _img_alt(data, len, attrs)
-          val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Void($W.Img($S.text_of_chars(ph, 6), 6, alt, al, $W.LoadingEager())),
-            $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-          var _a_src = @[char][3]('s', 'r', 'c')
-        in
-          case+ find_attr(data, attrs, _a_src, 3) of
-          | xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
-          | xspan_none() => acc
-        end
-        else let
-          (* Normal element: match tag name, create element, recurse *)
-          val idx = _next_content_idx()
-          val tag = _match_tag_to_normal(data, len, name_off, name_len)
-          val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Normal(tag), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
-          val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
-        in _render_nodes(data, len, idx, children, acc) end
-      end
+      case+ find_attr(data, attrs, _a_src, 3) of
+      | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
+      | ~xspan_none() => acc
     end
+    else let
+      val idx = _next_content_idx()
+      val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
+    in _render_nodes(doc, data, len, idx, children, acc) end
   end
 
 (* Just past the last '/' in buf[p, e), or la if there is none *)
@@ -781,18 +780,18 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         (* Count spine items and store total chapters *)
         val total_ch = count_spine_items(opf_b, opf_nodes)
         val () = (case+ reading_get() of
-          | Reading(p, t, c, _) => reading_set(Reading(p, t, c, total_ch)))
+          | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
 
         (* Find Nth spine itemref → manifest item href *)
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
       in
         case+ ch_href of
-        | xspan_none() => let
+        | ~xspan_none() => let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val () = piece_free(par, $A.thaw<byte>(opf_f))
         in $P.ret<int>(~3) end
-        | xspan_at(ch_off, ch_len) =>
+        | ~xspan_at(ch_off, ch_len) =>
         if ch_len <= 0 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
@@ -848,14 +847,17 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val @(xf, xb) = $A.freeze<byte>(ch_xhtml)
                   val nodes = $X.parse_document(xb, ch_dc_sz)
 
-                  (* Clear content area *)
-                  var cnt_c = @[char][4]('q', 'c', 'n', 't')
-                  val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-                  val () = _apply_diff($W.RemoveAllChildren(cnt_id))
+                  (* Clear the content area, then render the XHTML tree
+                     into it: one document for the chapter *)
+                  val doc = $D.open_document($A.text_lit("bats-root"), 9)
+                  val @(qa, ql) = _node_id(~1)
+                  val @(fq, bq) = $A.freeze<byte>(qa)
+                  val () = $D.remove_children(doc, bq, ql)
+                  val () = $A.drop<byte>(fq, bq)
+                  val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
-
-                  (* Render XHTML tree into content area *)
-                  val imgs = _render_nodes(xb, ch_dc_sz, ~1, nodes, imgs_nil())
+                  val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil())
+                  val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
                   val ch_dl = _opf_prefix_len(fh, ch_no, ch_nl)
@@ -864,16 +866,14 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val () = piece_free(xar, $A.thaw<byte>(xf))
 
                   val () = (case+ reading_get() of
-                    | Reading(p, t, _, tc) => reading_set(Reading(p, t, chapter_idx + 1, tc)))
+                    | @(p, t, _, tc) => reading_set(@(p, t, chapter_idx + 1, tc)))
                   (* Update chapter title in nav bar *)
                   val ch_num = chapter_idx + 1
-                  var ct_c = @[char][4]('q', 'c', 'h', 't')
-                  val ct_id = $W.Generated($S.text_of_chars(ct_c, 4), 4)
                   (* "Chapter " (8 bytes) and the number (at most 11) *)
                   val tbuf = $A.alloc<byte>(19)
                   val off = _put(tbuf, 0, "Chapter ")
                   val off = $S.int_to_str(tbuf, off, 19, ch_num)
-                  val () = _apply_diff($W.SetTextContent(ct_id, _prefix_text(tbuf, 19, off), off))
+                  val () = _set_text_of("qcht", tbuf, off)
                   val () = _measure_pagination()
                   val () = _save_position()
                 in $P.ret<int>(0) end
@@ -889,7 +889,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
 (* The next page: in this chapter, else the next chapter's first *)
 fn _page_next(): void =
   case+ reading_get() of
-  | Reading(p, t, c, tc) =>
+  | @(p, t, c, tc) =>
     if p + 1 < t then _show_page(p + 1, t, c, tc)
     else if c < tc then $P.discard<int>(_load_chapter(c))
     else _show_page(p, t, c, tc)
@@ -898,7 +898,7 @@ fn _page_next(): void =
    first *)
 fn _page_prev(): void =
   case+ reading_get() of
-  | Reading(p, t, c, tc) =>
+  | @(p, t, c, tc) =>
     if p > 0 then _show_page(p - 1, t, c, tc)
     else if c > 1 then $P.discard<int>(_load_chapter(c - 2))
     else _show_page(0, t, c, tc)
@@ -907,7 +907,7 @@ fn _page_prev(): void =
    has fewer *)
 fn _show_saved_page {g:nat} (pg: int g): void =
   case+ reading_get() of
-  | Reading(_, t, c, tc) =>
+  | @(_, t, c, tc) =>
     if pg < t then _show_page(pg, t, c, tc) else _show_page(t - 1, t, c, tc)
 
 (* Restore font size from IDB on startup *)
@@ -948,10 +948,8 @@ in end
 
 (* No saved position: show the reader, hide the library, load chapter 0 *)
 fn _open_at_start(): void = let
-  var ll_c = @[char][4]('q', 'l', 'l', 'c')
-  val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-  var rv_c = @[char][4]('q', 'r', 'v', 'w')
-  val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+  val ll_id = $W.Generated($A.text_lit("qllc"), 4)
+  val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
   val () = _apply_diff($W.SetHidden(ll_id, true))
   val () = _apply_diff($W.SetHidden(rv_id, false))
   val ch_p = _load_chapter(0)
@@ -1056,10 +1054,8 @@ fn _restore_from_idb(): void = let
               val saved_ch = ch_lo + ch_hi * 256
               val saved_pg = pg_lo + pg_hi * 256
               (* Show reader, hide library *)
-              var ll_c = @[char][4]('q', 'l', 'l', 'c')
-              val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-              var rv_c = @[char][4]('q', 'r', 'v', 'w')
-              val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+              val ll_id = $W.Generated($A.text_lit("qllc"), 4)
+              val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
               val () = _apply_diff($W.SetHidden(ll_id, true))
               val () = _apply_diff($W.SetHidden(rv_id, false))
               (* Load the saved chapter (1-indexed → 0-indexed) *)

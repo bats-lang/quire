@@ -42,10 +42,19 @@ in $A.text_done(tb) end
    ============================================================ *)
 
 (* A span [o, o + k) of an n-byte document (from xml-tree, which proves
-   it inside the document), or none *)
-#pub datatype xspan(n:int) =
+   it inside the document), or none. Linear: a datatype's cell is never
+   freed (there is no GC), so each span is consumed by a ~ pattern or by
+   xspan_free. *)
+#pub datavtype xspan(n:int) =
   | {o,k:nat | o + k <= n} xspan_at(n) of (int o, int k)
   | xspan_none(n) of ()
+
+#pub fn xspan_free {n:int} (s: xspan(n)): void
+
+implement xspan_free (s) =
+  case+ s of
+  | ~xspan_at(_, _) => ()
+  | ~xspan_none() => ()
 
 (* ============================================================
    XML name matching
@@ -101,7 +110,7 @@ fun _walk_rootfile_nodes_r
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ _walk_rootfile_node(data, node) of
-     | xspan_none() => _walk_rootfile_nodes_r(data, rest)
+     | ~xspan_none() => _walk_rootfile_nodes_r(data, rest)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
@@ -149,10 +158,12 @@ and _walk_opf_node
     var _c_title = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
     var _c_creator = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
   in
-    if xml_name_eq(data, name_off, name_len, _c_title, 8) then
-      @(_get_first_text(children), author)
-    else if xml_name_eq(data, name_off, name_len, _c_creator, 10) then
-      @(title, _get_first_text(children))
+    if xml_name_eq(data, name_off, name_len, _c_title, 8) then let
+      val () = xspan_free(title)
+    in @(_get_first_text(children), author) end
+    else if xml_name_eq(data, name_off, name_len, _c_creator, 10) then let
+      val () = xspan_free(author)
+    in @(title, _get_first_text(children)) end
     else _walk_opf_metadata_r(data, children, title, author)
   end
   | $X.xml_text(_, _) => @(title, author)
@@ -190,7 +201,7 @@ fun _find_nth_idref_r
       val @(r, left) = _check_itemref_nth(data, node, skip)
     in
       case+ r of
-      | xspan_none() => _find_nth_idref_r(data, rest, left)
+      | ~xspan_none() => _find_nth_idref_r(data, rest, left)
       | _ => @(r, left)
     end
   | $X.xml_nodes_nil() => @(xspan_none(), skip)
@@ -255,7 +266,7 @@ fun _find_manifest_href_r
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ _check_manifest_item(data, len, node, idref_off, idref_len) of
-     | xspan_none() => _find_manifest_href_r(data, len, rest, idref_off, idref_len)
+     | ~xspan_none() => _find_manifest_href_r(data, len, rest, idref_off, idref_len)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
@@ -271,13 +282,13 @@ and _check_manifest_item
       var _c_id = @[char][2]('i', 'd')
     in
       case+ _find_attr_val(data, attrs, _c_id, 2) of
-      | xspan_at(id_off, id_len) =>
+      | ~xspan_at(id_off, id_len) =>
         if id_len <> idref_len then xspan_none()
         else if $S.borrow_region_eq(data, len, id_off, idref_off, idref_len) then let
           var _c_href = @[char][4]('h', 'r', 'e', 'f')
         in _find_attr_val(data, attrs, _c_href, 4) end
         else xspan_none()
-      | xspan_none() => xspan_none()
+      | ~xspan_none() => xspan_none()
     end
     else _find_manifest_href_r(data, len, children, idref_off, idref_len)
   end
@@ -293,6 +304,6 @@ implement find_chapter_href_n(data, len, nodes, chapter_idx) = let
   val @(idref, _) = _find_nth_idref_r(data, nodes, chapter_idx)
 in
   case+ idref of
-  | xspan_at(o, k) => _find_manifest_href_r(data, len, nodes, o, k)
-  | xspan_none() => xspan_none()
+  | ~xspan_at(o, k) => _find_manifest_href_r(data, len, nodes, o, k)
+  | ~xspan_none() => xspan_none()
 end

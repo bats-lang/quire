@@ -134,25 +134,28 @@ in
       val s = $Z.cd_size(dir)
       val c = $Z.cd_offset(dir)
     in
-      if s > 1048576 then ZipMissing()
+      if s > 1048576 then let
+        val+ ~$Z.zip_cd_mk(_, _, _) = dir
+      in ZipMissing() end
       else let
         val cd = $A.alloc<byte>(s)
         val () = $FI.file_read(f, c, cd, s)
         val r = $Z.find_ref(cd, dir, z, name, nb)
         val () = $A.free<byte>(cd)
+        val+ ~$Z.zip_cd_mk(_, _, _) = dir
       in
         case+ r of
         | ~$R.none() => ZipMissing()
         | ~$R.some(e) => let
-            val+ $Z.zip_ref_mk(h, _, _, _, no, nl) = e
             val hdr = $A.alloc<byte>(30)
-            val () = $FI.file_read(f, h, hdr, 30)
+            val () = $FI.file_read(f, $Z.ref_header(e), hdr, 30)
             val sp = $Z.find_data(hdr, e, z)
             val () = $A.free<byte>(hdr)
+            val+ ~$Z.zip_ref_mk(_, _, _, _, no, nl) = e
           in
             case+ sp of
             | ~$R.none() => ZipMissing()
-            | ~$R.some($Z.zip_span_mk(d, cs, m, _)) =>
+            | ~$R.some(~$Z.zip_span_mk(d, cs, m, _)) =>
               if cs <= 0 then ZipMissing()
               else if cs > 268435456 then ZipMissing()
               else (case+ piece_new(cs) of
@@ -180,16 +183,17 @@ implement font_get() = !_font
 implement font_set(s) = !_font := s
 
 (* Where the reader is: page p of the chapter's t pages (at least one),
-   in chapter c (counted from 1; 0 before one loads) of the book's tc. *)
-#pub datatype reading =
-  | {t:pos}{p:nat | p < t}{c,tc:nat}
-    Reading of (int p, int t, int c, int tc)
+   in chapter c (counted from 1; 0 before one loads) of the book's tc.
+   A flat tuple, kept in its ref: a datatype's value is allocated on
+   every change and never freed. *)
+#pub typedef reading =
+  [t:pos][p:nat | p < t][c,tc:nat] @(int p, int t, int c, int tc)
 
 #pub fun reading_get(): reading
 
 #pub fun reading_set(r: reading): void
 
-val _reading = ref<reading>(Reading(0, 1, 0, 0))
+val _reading = ref<reading>(@(0, 1, 0, 0))
 
 implement reading_get() = !_reading
 

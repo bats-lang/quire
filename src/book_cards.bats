@@ -30,8 +30,8 @@ fn _set_meta_text
   (data: !$A.borrow(byte, lb, nb), len: int nb,
    wid: $W.widget_id, span: xspan(nb)): bool =
   case+ span of
-  | xspan_none() => false
-  | xspan_at(off, n) =>
+  | ~xspan_none() => false
+  | ~xspan_at(off, n) =>
     if n <= 0 then false
     else if n >= 256 then false
     else let
@@ -50,14 +50,12 @@ fn _add_book_card
   (data: !$A.borrow(byte, lb, nb), len: int nb,
    title: xspan(nb), author: xspan(nb)): void = let
   (* Hide empty message and create card *)
-  var elb_c = @[char][4]('q', 'e', 'l', 'b')
-  val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
+  val elb_id = $W.Generated($A.text_lit("qelb"), 4)
   val () = apply_diff($W.SetHidden(elb_id, true))
   val idx = !_cards
   val () = !_cards := idx + 1
   val card_id = num_wid("qbc", idx, 2)
-  var ll_c = @[char][4]('q', 'l', 'l', 'c')
-  val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
+  val ll_id = $W.Generated($A.text_lit("qllc"), 4)
   val card = $W.Element($W.ElementNode(card_id,
     $W.Normal($W.Div()), $W.ClassIdx(cls_book_card()), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(card, cls_diff) = $W.set_class(card, cls_book_card())
@@ -73,8 +71,7 @@ fn _add_book_card
   (* Set title — try metadata, fall back to "Imported Book" *)
   val () = (if _set_meta_text(data, len, tc_id, title) then ()
   else let
-    var fb = @[char][13]('I', 'm', 'p', 'o', 'r', 't', 'e', 'd', ' ', 'B', 'o', 'o', 'k')
-  in apply_diff($W.SetTextContent(tc_id, $S.text_of_chars(fb, 13), 13)) end)
+  in apply_diff($W.SetTextContent(tc_id, $A.text_lit("Imported Book"), 13)) end)
   (* Author div *)
   val ac_id = num_wid("qac", idx, 2)
   val ad = $W.Element($W.ElementNode(ac_id,
@@ -84,8 +81,7 @@ fn _add_book_card
   val () = apply_diff(cls_a)
   val () = (if _set_meta_text(data, len, ac_id, author) then ()
   else let
-    var fb = @[char][14]('U', 'n', 'k', 'n', 'o', 'w', 'n', ' ', 'A', 'u', 't', 'h', 'o', 'r')
-  in apply_diff($W.SetTextContent(ac_id, $S.text_of_chars(fb, 14), 14)) end)
+  in apply_diff($W.SetTextContent(ac_id, $A.text_lit("Unknown Author"), 14)) end)
   (* Status label — "New" for freshly imported books *)
   val sc_id = num_wid("qst", idx, 2)
   val sd = $W.Element($W.ElementNode(sc_id,
@@ -93,8 +89,7 @@ fn _add_book_card
   val @(sd, cls_s) = $W.set_class(sd, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, sd))
   val () = apply_diff(cls_s)
-  var nw = @[char][3]('N', 'e', 'w')
-  val () = apply_diff($W.SetTextContent(sc_id, $S.text_of_chars(nw, 3), 3))
+  val () = apply_diff($W.SetTextContent(sc_id, $A.text_lit("New"), 3))
   (* Wire click handler: card click opens reader *)
   val @(ci_arr, ci_len) = num_id("qbc", idx, 2)
   val @(ci_f, ci_b) = $A.freeze<byte>(ci_arr)
@@ -103,16 +98,12 @@ fn _add_book_card
   val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
   val () = $EV.listen(ci_b, ci_len, ck_b, 5, 100,
     lam(_pl: $EV.event_payload): int => let
-      var ll_c = @[char][4]('q', 'l', 'l', 'c')
-      val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
-      var rv_c = @[char][4]('q', 'r', 'v', 'w')
-      val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
+      val ll_id = $W.Generated($A.text_lit("qllc"), 4)
+      val rv_id = $W.Generated($A.text_lit("qrvw"), 4)
       val () = apply_diff($W.SetHidden(ll_id, true))
       val () = apply_diff($W.SetHidden(rv_id, false))
-      var cnt_c = @[char][4]('q', 'c', 'n', 't')
-      val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
-      var lc = @[char][18]('L', 'o', 'a', 'd', 'i', 'n', 'g', ' ', 'c', 'h', 'a', 'p', 't', 'e', 'r', '.', '.', '.')
-      val () = apply_diff($W.SetTextContent(cnt_id, $S.text_of_chars(lc, 18), 18))
+      val cnt_id = $W.Generated($A.text_lit("qcnt"), 4)
+      val () = apply_diff($W.SetTextContent(cnt_id, $A.text_lit("Loading chapter..."), 18))
       val ch_p = load_chapter(0)
       val () = $P.discard<int>(ch_p)
     in 0 end)
@@ -132,8 +123,7 @@ fn _add_book_card
     lam(_pl: $EV.event_payload): int => let
       val () = $EV.prevent_default()
       (* Show context menu overlay *)
-      var ctx_c = @[char][4]('q', 'c', 't', 'x')
-      val ctx_id = $W.Generated($S.text_of_chars(ctx_c, 4), 4)
+      val ctx_id = $W.Generated($A.text_lit("qctx"), 4)
       val () = apply_diff($W.SetHidden(ctx_id, false))
     in 0 end)
   val () = $A.drop<byte>(cm_f, cm_b)
@@ -192,13 +182,13 @@ in
             val opf_path = walk_rootfile_nodes(dc_borrow, nodes)
           in
             case+ opf_path of
-            | xspan_none() => let
+            | ~xspan_none() => let
               val () = $X.free_nodes(nodes)
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
               val () = $FI.close(file_handle)
             in $P.ret<int>(~6) end
-            | xspan_at(opf_off, opf_len) =>
+            | ~xspan_at(opf_off, opf_len) =>
             (* The OPF's path names a zip entry, so it is shorter than
                65536 bytes (a zip name's limit) *)
             if opf_len <= 0 then let
