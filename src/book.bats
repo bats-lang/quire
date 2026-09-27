@@ -51,15 +51,3 @@ val _reading = ref<reading>(Reading(0, 1, 0, 0))
 implement reading_get() = !_reading
 
 implement reading_set(r) = !_reading := r
-
-(* The DOM document's next node id, kept between diffs: the document is
-   opened for each diff and gives it back when destroyed *)
-#pub fun next_nid_get(): int
-
-#pub fun next_nid_set(nid: int): void
-
-val _next_nid = ref<int>(0)
-
-implement next_nid_get() = !_next_nid
-
-implement next_nid_set(nid) = !_next_nid := nid

@@ -803,16 +803,12 @@ in
     val ck11_tmp = $A.thaw<byte>(ck11_f)
     val () = $A.free<byte>(ck11_tmp)
 
-    val nid = $D.get_next_id(doc)
-    val () = next_nid_set(nid)
     val () = $D.destroy(doc)
     (* Restore font size and saved book from IDB *)
     val () = restore_font_size()
     val () = restore_from_idb()
   in end
   else let
-    val nid = $D.get_next_id(doc)
-    val () = next_nid_set(nid)
     val () = $D.destroy(doc)
   in end
 end

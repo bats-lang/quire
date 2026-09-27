@@ -26,21 +26,15 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val nid = next_nid_get()
-  val doc = $D.open_document($S.text_of_chars(mid, 9), 9, nid)
+  val doc = $D.open_document($S.text_of_chars(mid, 9), 9)
   val () = $D.apply_list(doc, dl)
-  val nid2 = $D.get_next_id(doc)
-  val () = next_nid_set(nid2)
   val () = $D.destroy(doc)
 in end
 
 fn _apply_diff(d: $W.diff): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val nid = next_nid_get()
-  val doc = $D.open_document($S.text_of_chars(mid, 9), 9, nid)
+  val doc = $D.open_document($S.text_of_chars(mid, 9), 9)
   val () = $D.apply(doc, d)
-  val nid2 = $D.get_next_id(doc)
-  val () = next_nid_set(nid2)
   val () = $D.destroy(doc)
 in end
 
