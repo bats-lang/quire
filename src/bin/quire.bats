@@ -15,6 +15,7 @@
 #use widget as W
 
 staload "state.sats"
+staload "book.sats"
 staload "theme.sats"
 staload "epub_xml.sats"
 staload "reader.sats"
@@ -52,7 +53,6 @@ implement main0 () = let
   var fs_init = @[char][20]('\x2E', 'c', 'a', 'f', '\x7B', 'f', 'o', 'n', 't', '-', 's', 'i', 'z', 'e', ':', '1', '6', 'p', 'x', '\x7D')
   val @(root, fs_diffs) = $W.inject_css(root, fs_id, $S.text_of_chars(fs_init, 20), 20)
   val () = $D.apply_list(doc, fs_diffs)
-  val () = $ST.stash_set_int(25, 16)
 
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
@@ -725,11 +725,10 @@ in
     val @(ck9_f, ck9_b) = $A.freeze<byte>(ck9_arr)
     val () = $EV.listen(am_nb, 4, ck9_b, 5, 9,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(25)
-        val next = cur - 2
+        val cur = font_get()
       in
-        if next >= 8 then let
-          val () = apply_font_size(next)
+        if cur >= 10 then let
+          val () = apply_font_size(cur - 2)
           val () = save_font_size()
           val () = measure_pagination()
         in 0 end
@@ -758,11 +757,10 @@ in
     val @(ck10_f, ck10_b) = $A.freeze<byte>(ck10_arr)
     val () = $EV.listen(ap_nb, 4, ck10_b, 5, 10,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(25)
-        val next = cur + 2
+        val cur = font_get()
       in
-        if next <= 48 then let
-          val () = apply_font_size(next)
+        if cur <= 46 then let
+          val () = apply_font_size(cur + 2)
           val () = save_font_size()
           val () = measure_pagination()
         in 0 end

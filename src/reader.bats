@@ -180,9 +180,8 @@ in txt end
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
-fn _apply_font_size(size: pos_t): void = let
-  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): [s:int | 8 <= s; s <= 48] int s
-  val () = $ST.stash_set_int(25, sz)
+fn _apply_font_size(sz: font_px): void = let
+  val () = font_set(sz)
   (* ".caf{font-size:" (15 bytes), the size (at most 11), "px}" *)
   val buf = $A.alloc<byte>(29)
   val off = _put(buf, 0, ".caf{font-size:")
@@ -195,7 +194,7 @@ in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
 fn _save_font_size(): void = let
-  val sz = $ST.stash_get_int(25)
+  val sz = font_get()
   val buf = $A.alloc<byte>(2)
   val () = $A.set<byte>(buf, 0, int2byte0(sz mod 256))
   val () = $A.set<byte>(buf, 1, int2byte0(sz / 256))
@@ -879,7 +878,7 @@ implement apply_diff_list(dl) = _apply_diff_list(dl)
 #pub fun apply_diff(d: $W.diff): void
 implement apply_diff(d) = _apply_diff(d)
 
-#pub fun apply_font_size(size: pos_t): void
+#pub fun apply_font_size(size: font_px): void
 implement apply_font_size(size) = _apply_font_size(size)
 
 #pub fun measure_pagination(): void

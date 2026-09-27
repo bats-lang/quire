@@ -21,3 +21,17 @@ val _book = ref<open_book>(NoBook())
 implement book_get() = !_book
 
 implement book_set(b) = !_book := b
+
+(* The reader's font size in px: 8 to 48, the range the A- and A+
+   buttons step through. *)
+#pub typedef font_px = [s:int | 8 <= s; s <= 48] int s
+
+#pub fun font_get(): font_px
+
+#pub fun font_set(s: font_px): void
+
+val _font = ref<font_px>(16)
+
+implement font_get() = !_font
+
+implement font_set(s) = !_font := s
