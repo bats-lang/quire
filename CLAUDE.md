@@ -2,9 +2,9 @@
 
 ## To do: book memory in a rolling window of page arenas
 
-Partly done: the window exists (`src/pages.bats`), but nothing is
-allocated from it yet. The rest is the intended design, and it will take
-a good deal of refactoring.
+Partly done: the window exists (`src/pages.bats`), and the buffers a
+chapter or image is parsed from come from the current page's arena. The
+rest is the intended design.
 
 Everything that belongs to a book's content (chapter text, pictures and
 other images, per-page layout data) is allocated from arenas (array's
@@ -52,10 +52,22 @@ shown: one page on rotates it, and any other move (a jump, a new
 chapter, a new page count after a resize) releases it and makes it
 anew. Going back to the library releases it (`window_close`).
 
+A buffer a book's content is parsed from (`piece_new` in
+`src/book.bats`: an entry's data, a decompressed OPF, chapter or image)
+is a piece of the current page's arena when it fits there
+(`page_lend`). The arena leaves the window while the piece is out (its
+slot is `Lent`), so the arena in the window never has a piece out, and
+`page_give_back` returns it to its slot, or releases it when the window
+has moved on. When there is no window yet (the first chapter's load),
+or the page has no room, the piece is the one piece of an arena of its
+own, as before. `piece_owner` says which, so `piece_free` gives it back
+to the right one.
+
 ### Where book content is allocated today
 
-In arena pieces (`piece` in `src/book.bats`: the one piece of an arena
-sized to it, created and destroyed whole, so it has no 1 MiB bound):
+In arena pieces (`piece` in `src/book.bats`: a piece of the current
+page's arena, or the one piece of an arena sized to it, so it has no
+1 MiB bound):
 
 * an entry's compressed data (the piece `zip_read` returns): the
   container.xml, the OPF and each chapter;

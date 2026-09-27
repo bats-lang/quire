@@ -11,6 +11,8 @@
 #use wasm.bats-packages.dev/file-input as FI
 #use zip as Z
 
+staload "pages.sats"
+
 (* The open book's file and its size; its OPF's
    compressed data [opf_data, opf_data + opf_size) and compression
    method; the OPF's name [opf_name, opf_name + opf_name_len) in the
@@ -72,22 +74,32 @@
    (the book's data, checked here once) *)
 #pub fn take_blob (handle: Int): blob_bytes
 
+(* The arena a piece of n bytes at la came from: the current page's
+   (lent out of the reader's window, see pages.bats), or an arena of its
+   own when the page has no room for it *)
+#pub datavtype piece_owner(n:int, la:addr) =
+  | {u:nat | u <= PAGE_BYTES}{q,t:int | 0 <= q; q < t}
+    OwnerPage(n, la) of ($A.arena(byte, la, PAGE_BYTES, u, 1), int q, int t, int u)
+  | OwnerOwn(n, la) of ($A.arena(byte, la, n, n, 1))
+
 (* n bytes of the book's content (an entry's data, a decompressed OPF or
-   chapter), which can be larger than alloc's 1 MiB: the one piece of an
-   arena of their own, freed whole with piece_free *)
+   chapter, an image), which can be larger than alloc's 1 MiB, held only
+   while it is parsed: a piece of the current page's arena when it fits
+   there, else the one piece of an arena of its own; freed with
+   piece_free *)
 #pub datavtype piece(n:int) =
-  | {la,l:agz} Piece(n) of ($A.arena(byte, la, n, n, 1), $A.arrx(byte, l, n, la))
+  | {la,l:agz} Piece(n) of (piece_owner(n, la), $A.arrx(byte, l, n, la))
   | NoPiece(n) of ()
 
 (* A piece of n bytes, or none when the memory cannot be had *)
 #pub fn piece_new {n:pos | n <= 268435456} (n: int n): piece(n)
 
 #pub fn piece_free {la,l:agz}{n:pos}
-  (ar: $A.arena(byte, la, n, n, 1), p: $A.arrx(byte, l, n, la)): void
+  (ar: piece_owner(n, la), p: $A.arrx(byte, l, n, la)): void
 
 (* Decompressed content, read whole into a piece *)
 #pub datavtype content_bytes =
-  | {la,l:agz}{n:pos} ContentBytes of ($A.arena(byte, la, n, n, 1), $A.arrx(byte, l, n, la), int n)
+  | {la,l:agz}{n:pos} ContentBytes of (piece_owner(n, la), $A.arrx(byte, l, n, la), int n)
   | NoContentBytes of ()
 
 (* The content a decompress promise resolved with, read whole and
@@ -100,7 +112,7 @@
    name is [no, no + nl), both proven inside the archive *)
 #pub datavtype zip_got(z:int) =
   | {la,l:agz}{s:pos | s <= 268435456}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no,nl:nat | no + nl <= z; nl < 65536}
-    ZipGot(z) of ($A.arena(byte, la, s, s, 1), $A.arrx(byte, l, s, la), int s, int m, int d, int no, int nl)
+    ZipGot(z) of (piece_owner(s, la), $A.arrx(byte, l, s, la), int s, int m, int d, int no, int nl)
   | ZipMissing(z) of ()
 
 (* The entry named name[0, nb) of the z-byte file f, reading only the
@@ -202,15 +214,21 @@ implement take_blob (handle) =
     end
 
 implement piece_new (n) =
-  case+ $A.arena_create<byte>(n) of
-  | ~$A.arena_none() => NoPiece()
-  | ~$A.arena_some(ar) => let
-      val p = $A.arena_alloc<byte>(ar, n)
-    in Piece(ar, p) end
+  case+ page_lend(n) of
+  | ~PageLent(ar, p, q, t, u) => Piece(OwnerPage(ar, q, t, u), p)
+  | ~NoLend() =>
+    (case+ $A.arena_create<byte>(n) of
+     | ~$A.arena_none() => NoPiece()
+     | ~$A.arena_some(ar) => let
+         val p = $A.arena_alloc<byte>(ar, n)
+       in Piece(OwnerOwn(ar), p) end)
 
-implement piece_free (ar, p) = let
-  val () = $A.arena_return<byte>(ar, p)
-in $A.arena_destroy<byte>(ar) end
+implement piece_free (owner, p) =
+  case+ owner of
+  | ~OwnerPage(ar, q, t, u) => page_give_back(ar, p, q, t, u)
+  | ~OwnerOwn(ar) => let
+      val () = $A.arena_return<byte>(ar, p)
+    in $A.arena_destroy<byte>(ar) end
 
 implement take_content (handle) =
   case+ $DC.blob_claim(handle) of
