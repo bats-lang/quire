@@ -353,7 +353,7 @@ in
     val () = $A.set<byte>(ch_arr, 5, int2byte0(101))
     val @(ch_f, ch_b) = $A.freeze<byte>(ch_arr)
     val () = $EV.listen(fi_nb, 4, ch_b, 6, 1,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         (* Show importing indicator *)
         var elb_c = @[char][4]('q', 'e', 'l', 'b')
         val elb_id = $W.Generated($S.text_of_chars(elb_c, 4), 4)
@@ -425,7 +425,7 @@ in
     val abck_arr = $S.from_char_array(abck_c, 5)
     val @(abck_f, abck_b) = $A.freeze<byte>(abck_arr)
     val () = $EV.listen(ab_nb, 4, abck_b, 5, 12,
-      lam(_pl: $EV.event_len): int => let
+      lam(_pl: $EV.event_payload): int => let
         (* Hide the card and close context menu *)
         var card_c = @[char][5]('q', 'b', 'c', '0', '0')
         val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
@@ -450,7 +450,7 @@ in
     val hbck_arr = $S.from_char_array(hbck_c, 5)
     val @(hbck_f, hbck_b) = $A.freeze<byte>(hbck_arr)
     val () = $EV.listen(hb_nb, 4, hbck_b, 5, 13,
-      lam(_pl: $EV.event_len): int => let
+      lam(_pl: $EV.event_payload): int => let
         (* Hide the card and close context menu *)
         var card_c = @[char][5]('q', 'b', 'c', '0', '0')
         val card_id = $W.Generated($S.text_of_chars(card_c, 5), 5)
@@ -479,7 +479,7 @@ in
     val () = $A.set<byte>(ck_arr, 4, int2byte0(107))
     val @(ck_f, ck_b) = $A.freeze<byte>(ck_arr)
     val () = $EV.listen(bb_nb, 4, ck_b, 5, 2,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         (* Show library, hide reader *)
         var ll2_c = @[char][4]('q', 'l', 'l', 'c')
         val ll2_id = $W.Generated($S.text_of_chars(ll2_c, 4), 4)
@@ -510,7 +510,7 @@ in
     val () = $A.set<byte>(ck2_arr, 4, int2byte0(107))
     val @(ck2_f, ck2_b) = $A.freeze<byte>(ck2_arr)
     val () = $EV.listen(pv_nb, 4, ck2_b, 5, 3,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val () = page_prev()
       in 0 end)
     val () = $A.drop<byte>(pv_nf, pv_nb)
@@ -535,7 +535,7 @@ in
     val () = $A.set<byte>(ck3_arr, 4, int2byte0(107))
     val @(ck3_f, ck3_b) = $A.freeze<byte>(ck3_arr)
     val () = $EV.listen(nx_nb, 4, ck3_b, 5, 4,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val () = page_next()
       in 0 end)
     val () = $A.drop<byte>(nx_nf, nx_nb)
@@ -560,7 +560,7 @@ in
     val () = $A.set<byte>(ck4_arr, 4, int2byte0(107))
     val @(ck4_f, ck4_b) = $A.freeze<byte>(ck4_arr)
     val () = $EV.listen(zl_nb, 4, ck4_b, 5, 5,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val () = page_prev()
       in 0 end)
     val () = $A.drop<byte>(zl_nf, zl_nb)
@@ -585,7 +585,7 @@ in
     val () = $A.set<byte>(ck5_arr, 4, int2byte0(107))
     val @(ck5_f, ck5_b) = $A.freeze<byte>(ck5_arr)
     val () = $EV.listen(zr_nb, 4, ck5_b, 5, 6,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val () = page_next()
       in 0 end)
     val () = $A.drop<byte>(zr_nf, zr_nb)
@@ -606,7 +606,7 @@ in
     val zcck_arr = $S.from_char_array(zcck_c, 5)
     val @(zcck_f, zcck_b) = $A.freeze<byte>(zcck_arr)
     val () = $EV.listen(zc_nb, 4, zcck_b, 5, 14,
-      lam(_pl: $EV.event_len): int => let
+      lam(_pl: $EV.event_payload): int => let
         (* Toggle nav bar visibility *)
         var nv_c = @[char][4]('q', 'r', 'n', 'v')
         val nv_id = $W.Generated($S.text_of_chars(nv_c, 4), 4)
@@ -637,12 +637,10 @@ in
     val () = $A.set<byte>(kd_arr, 6, int2byte0(110)) (* n *)
     val @(kd_f, kd_b) = $A.freeze<byte>(kd_arr)
     val () = $EV.listen_document(kd_b, 7, 7,
-      lam(payload_len: $EV.event_len): int =>
-        if payload_len <= 0 then 0
-        else if payload_len > 1048576 then 0
-        else let
-          val payload_sz = payload_len
-          val payload = $EV.get_payload(payload_sz)
+      lam(payload_h: $EV.event_payload): int =>
+        case+ take_blob(payload_h) of
+        | ~NoBlobBytes() => 0
+        | ~BlobBytes(payload, payload_sz) => let
           val key_len = byte2int0($A.get<byte>(payload, 0))
         in
           if payload_sz <= 2 then let val () = $A.free<byte>(payload) in 0 end
@@ -700,7 +698,7 @@ in
     val () = $A.set<byte>(ck8_arr, 4, int2byte0(107)) (* k *)
     val @(ck8_f, ck8_b) = $A.freeze<byte>(ck8_arr)
     val () = $EV.listen(sg_nb, 4, ck8_b, 5, 8,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         var sp_c = @[char][4]('q', 's', 'p', 'n')
         val sp_id = $W.Generated($S.text_of_chars(sp_c, 4), 4)
         val () = apply_diff($W.SetHidden(sp_id, false))
@@ -727,7 +725,7 @@ in
     val () = $A.set<byte>(ck9_arr, 4, int2byte0(107)) (* k *)
     val @(ck9_f, ck9_b) = $A.freeze<byte>(ck9_arr)
     val () = $EV.listen(am_nb, 4, ck9_b, 5, 9,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val cur = font_get()
       in
         if cur >= 10 then let
@@ -759,7 +757,7 @@ in
     val () = $A.set<byte>(ck10_arr, 4, int2byte0(107)) (* k *)
     val @(ck10_f, ck10_b) = $A.freeze<byte>(ck10_arr)
     val () = $EV.listen(ap_nb, 4, ck10_b, 5, 10,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         val cur = font_get()
       in
         if cur <= 46 then let
@@ -791,7 +789,7 @@ in
     val () = $A.set<byte>(ck11_arr, 4, int2byte0(107)) (* k *)
     val @(ck11_f, ck11_b) = $A.freeze<byte>(ck11_arr)
     val () = $EV.listen(sc_nb, 4, ck11_b, 5, 11,
-      lam(_payload_len: $EV.event_len): int => let
+      lam(_payload_len: $EV.event_payload): int => let
         var sp_c = @[char][4]('q', 's', 'p', 'n')
         val sp_id = $W.Generated($S.text_of_chars(sp_c, 4), 4)
         val () = apply_diff($W.SetHidden(sp_id, true))
