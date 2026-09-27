@@ -561,15 +561,13 @@ fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p}
 
 (* The length of the directory part of the name [no, no + nl) of the
    file: up to and including its last '/', 0 when it has none *)
-fn _opf_prefix_len {z:pos}{no,nl:nat | no + nl <= z; nl < 65536}
-  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p =
-  if nl <= 0 then 0
-  else let
-    val buf = $A.alloc<byte>(nl)
-    val _ = book_read(s, z, no, buf, nl)
-    val p = _after_last_slash(buf, 0, nl, 0)
-    val () = $A.free<byte>(buf)
-  in p end
+fn _opf_prefix_len {z:pos}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
+  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p = let
+  val buf = $A.alloc<byte>(nl)
+  val _ = book_read(s, z, no, buf, nl)
+  val p = _after_last_slash(buf, 0, nl, 0)
+  val () = $A.free<byte>(buf)
+in p end
 
 (* ============================================================
    Images: read from the book, shown in the chapter's <img> elements
@@ -1036,7 +1034,7 @@ fn _restore_from_idb(): void = let
             else if sz <= 0 then false else if sz > bsz - d then false
             else if sz > 268435456 then false
             else if no < 0 then false else if no > bsz then false
-            else if nl < 0 then false else if nl > bsz - no then false
+            else if nl <= 0 then false else if nl > bsz - no then false
             else if nl >= 65536 then false
             else if m = 0 then book_finish(s, bsz, d, sz, 0, no, nl)
             else if m = 8 then book_finish(s, bsz, d, sz, 8, no, nl)

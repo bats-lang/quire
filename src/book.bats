@@ -20,7 +20,7 @@ staload "pages.sats"
    reader uses them with no check. The book owns its file (a linear
    handle, closed when the book is replaced). *)
 #pub datavtype open_book =
-  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
+  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
     OpenBook of ($FI.infile(n), int n, int d, int s, int m, int no, int nl)
   | {n:pos} Importing of ($FI.infile(n), int n)
   | NoBook of ()
@@ -37,7 +37,7 @@ staload "pages.sats"
 
 (* The book being imported, book s of z bytes, opened with its OPF's
    regions; false when another book is open *)
-#pub fn book_finish {z:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= z; nl < 65536}
+#pub fn book_finish {z:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
   (s: int, z: int z, d: int d, sz: int sz, m: int m, no: int no, nl: int nl): bool
 
 (* Closes the book being imported, book s, when its import fails *)
@@ -49,7 +49,7 @@ staload "pages.sats"
 
 (* The open book's size and the OPF's regions in it *)
 #pub typedef book_meta =
-  [n:pos][d:nat][s:pos | d + s <= n; s <= 268435456][m:int | m == 0 || m == 8][no,nl:nat | no + nl <= n; nl < 65536]
+  [n:pos][d:nat][s:pos | d + s <= n; s <= 268435456][m:int | m == 0 || m == 8][no:nat][nl:pos | no + nl <= n; nl < 65536]
   @(int n, int d, int s, int m, int no, int nl)
 
 (* The open book's size and regions, or none when no book is open *)
@@ -111,7 +111,7 @@ staload "pages.sats"
    (in a piece), method, where they are [d, d + s) and where its
    name is [no, no + nl), both proven inside the archive *)
 #pub datavtype zip_got(z:int) =
-  | {la,l:agz}{s:pos | s <= 268435456}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no,nl:nat | no + nl <= z; nl < 65536}
+  | {la,l:agz}{s:pos | s <= 268435456}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
     ZipGot(z) of (piece_owner(s, la), $A.arrx(byte, l, s, la), int s, int m, int d, int no, int nl)
   | ZipMissing(z) of ()
 
