@@ -2,8 +2,9 @@
 
 ## To do: book memory in a rolling window of page arenas
 
-Not done yet; this is the intended design, and it will take a good deal
-of refactoring.
+Partly done: the window exists (`src/pages.bats`), and the buffers a
+chapter or image is parsed from come from the current page's arena. The
+rest is the intended design.
 
 Everything that belongs to a book's content (chapter text, pictures and
 other images, per-page layout data) is allocated from arenas (array's
@@ -35,10 +36,38 @@ The window itself should be in the types too: the reader state holds
 exactly the five arenas, indexed by page number, so a page outside the
 window has no arena to allocate from.
 
+### The window today
+
+`src/pages.bats` holds it. `page_arena(q, t)` is the arena of page q of
+a chapter of t pages, with no piece out; it exists only for
+`0 <= q < t`. `window(p, t)` holds exactly the arenas of pages p - 2 to
+p + 2. `window_forward` turns it into `window(p + 1, t)` by releasing
+page p - 2's arena and making page p + 3's (`window_back` is the mirror
+image), so keeping any other arena does not type-check. Each arena is
+4 MiB (`PAGE_BYTES`).
+
+The reader's window lives in a `ref` taken out and put back with
+`ref_exch_elt`, since it is linear. `_show_page` moves it to the page
+shown: one page on rotates it, and any other move (a jump, a new
+chapter, a new page count after a resize) releases it and makes it
+anew. Going back to the library releases it (`window_close`).
+
+A buffer a book's content is parsed from (`piece_new` in
+`src/book.bats`: an entry's data, a decompressed OPF, chapter or image)
+is a piece of the current page's arena when it fits there
+(`page_lend`). The arena leaves the window while the piece is out (its
+slot is `Lent`), so the arena in the window never has a piece out, and
+`page_give_back` returns it to its slot, or releases it when the window
+has moved on. When there is no window yet (the first chapter's load),
+or the page has no room, the piece is the one piece of an arena of its
+own, as before. `piece_owner` says which, so `piece_free` gives it back
+to the right one.
+
 ### Where book content is allocated today
 
-In arena pieces (`piece` in `src/book.bats`: the one piece of an arena
-sized to it, created and destroyed whole, so it has no 1 MiB bound):
+In arena pieces (`piece` in `src/book.bats`: a piece of the current
+page's arena, or the one piece of an arena sized to it, so it has no
+1 MiB bound):
 
 * an entry's compressed data (the piece `zip_read` returns): the
   container.xml, the OPF and each chapter;

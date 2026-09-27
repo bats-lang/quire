@@ -15,6 +15,7 @@
 
 staload "state.sats"
 staload "book.sats"
+staload "pages.sats"
 staload "theme.sats"
 staload "epub_xml.sats"
 staload "reader.sats"
@@ -421,6 +422,8 @@ in
         val rv2_id = $W.Generated($A.text_lit("qrvw"), 4)
         val () = apply_diff($W.SetHidden(ll2_id, false))
         val () = apply_diff($W.SetHidden(rv2_id, true))
+        (* The book is closed: its pages' arenas are released *)
+        val () = window_close()
       in 0 end)
     val () = $A.drop<byte>(bb_nf, bb_nb)
     val bb_ntmp = $A.thaw<byte>(bb_nf)

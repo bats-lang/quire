@@ -17,6 +17,7 @@
 staload "theme.sats"
 staload "epub_xml.sats"
 staload "book.sats"
+staload "pages.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
@@ -69,18 +70,14 @@ fn _save_position(): void =
 
 (* Save the EPUB file to IDB, from the JS side (it is never copied
    through wasm memory, whatever its size) *)
-fn _save_epub_to_idb(): void =
-  case+ book_get() of
-  | NoBook() => ()
-  | OpenBook(fh, _, _, _, _, _, _) => let
+fn _save_epub_to_idb(): void = let
       val ka = $A.alloc<byte>(4)
       val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
       val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
       val @(kf, kb) = $A.freeze<byte>(ka)
-      val p = $FI.idb_put(kb, 4, fh)
-      val () = $P.discard<Int>(p)
+      val () = book_idb_put(kb, 4)
       val () = $A.drop<byte>(kf, kb)
     in $A.free<byte>($A.thaw<byte>(kf)) end
 
@@ -107,9 +104,9 @@ in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
    the file handle was, which means nothing to a later run), file size,
    0, 0, OPF data offset, size, method, name offset, name length *)
 fn _save_metadata_to_idb(): void =
-  case+ book_get() of
-  | NoBook() => ()
-  | OpenBook(_, fsz, d, sz, m, no, nl) => let
+  case+ book_meta_get() of
+  | ~$R.none() => ()
+  | ~$R.some(@(fsz, d, sz, m, no, nl)) => let
   val buf = $A.alloc<byte>(36)
   val () = _put_i32(buf, 0, 0)
   val () = _put_i32(buf, 4, fsz)
@@ -283,12 +280,14 @@ fn _measure_pagination(): void = let
   val t = (if total > 1 then total else 1): [t:pos] int t
   val () = (case+ reading_get() of
     | @(_, _, c, tc) => reading_set(@(0, t, c, tc)))
+  val () = window_show(0, t)
 in _update_page_indicator() end
 
 (* Shows page p of the chapter's t pages *)
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
   val () = reading_set(@(p, t, c, tc))
+  val () = window_show(p, t)
   val page = p
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
@@ -562,12 +561,12 @@ fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p}
 
 (* The length of the directory part of the name [no, no + nl) of the
    file: up to and including its last '/', 0 when it has none *)
-fn _opf_prefix_len {z:nat}{no,nl:nat | no + nl <= z; nl < 65536}
-  (fh: $FI.infile(z), no: int no, nl: int nl): [p:nat | p <= nl] int p =
+fn _opf_prefix_len {z:pos}{no,nl:nat | no + nl <= z; nl < 65536}
+  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p =
   if nl <= 0 then 0
   else let
     val buf = $A.alloc<byte>(nl)
-    val () = $FI.file_read(fh, no, buf, nl)
+    val _ = book_read(s, z, no, buf, nl)
     val p = _after_last_slash(buf, 0, nl, 0)
     val () = $A.free<byte>(buf)
   in p end
@@ -687,15 +686,15 @@ fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
 in $A.free<byte>($A.thaw<byte>(fm)) end
 
 (* Content node idx's image, the entry named path[0, k) of the book's
-   z-byte file fh: shown now when it is stored, once decompressed when it
+   z-byte file (book s): shown now when it is stored, once decompressed when it
    is deflated (unless chapter load gen is no longer the latest); not at
    all when it is missing *)
 fn _show_image {z:pos}{i:nat}{lp:agz}{k:pos}
-  (fh: $FI.infile(z), z: int z, idx: int i, gen: int,
+  (s: int, z: int z, idx: int i, gen: int,
    path: !$A.borrow(byte, lp, k), k: int k): void = let
   val mime = _mime_of(path, k)
 in
-  case+ zip_read(fh, z, path, k) of
+  case+ book_zip_read(s, z, path, k) of
   | ~ZipMissing() => ()
   | ~ZipGot(ar, buf, cs, m, _, _, _) =>
     if m = 0 then let
@@ -726,7 +725,7 @@ end
    entry that src names relative to the chapter's directory (the first
    dl bytes of the chapter's name, at no in the file) *)
 fn _load_image {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}{i:nat}
-  (fh: $FI.infile(z), z: int z, no: int no, dl: int dl,
+  (s: int, z: int z, no: int no, dl: int dl,
    data: !$A.borrow(byte, lb, n), n: int n, idx: int i, so: int so, sl: int sl, gen: int): void = let
   val h = _src_end(data, so, sl, 0)
 in
@@ -737,7 +736,7 @@ in
   else let
     val m = dl + h
     val buf = $A.alloc<byte>(m)
-    val () = $FI.file_read(fh, no, buf, dl)
+    val _ = book_read(s, z, no, buf, dl)
     val () = $S.copy_from_borrow(data, so, n, buf, dl, m, h)
     val k = _norm(buf, m, 0, 0)
   in
@@ -747,7 +746,7 @@ in
       val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
       val () = $A.free<byte>(buf)
       val @(fz, bv) = $A.freeze<byte>(exact)
-      val () = _show_image(fh, z, idx, gen, bv, k)
+      val () = _show_image(s, z, idx, gen, bv, k)
       val () = $A.drop<byte>(fz, bv)
     in $A.free<byte>($A.thaw<byte>(fz)) end
   end
@@ -755,18 +754,19 @@ end
 
 (* The images xs of the chapter data[0, n) *)
 fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:nat} .<k>.
-  (fh: $FI.infile(z), z: int z, no: int no, dl: int dl,
+  (s: int, z: int z, no: int no, dl: int dl,
    data: !$A.borrow(byte, lb, n), n: int n, xs: imgs(n, k), gen: int): void =
   case+ xs of
   | ~imgs_nil() => ()
   | ~imgs_cons(idx, so, sl, tl) => let
-      val () = _load_image(fh, z, no, dl, data, n, idx, so, sl, gen)
-    in _load_images(fh, z, no, dl, data, n, tl, gen) end
+      val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
+    in _load_images(s, z, no, dl, data, n, tl, gen) end
 
 fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
-  case+ book_get() of
-  | NoBook() => $P.ret<int>(~1)
-  | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
+  case+ book_meta_get() of
+  | ~$R.none() => $P.ret<int>(~1)
+  | ~$R.some(@(fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len)) => let
+    val serial = book_serial()
     val () = !_load_gen := !_load_gen + 1
     val gen = !_load_gen
   in
@@ -774,7 +774,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
     case+ piece_new(opf_csz) of
     | ~NoPiece() => $P.ret<int>(~1)
     | ~Piece(car, opf_cbuf) => let
-    val () = $FI.file_read(fh, opf_doff, opf_cbuf, opf_csz)
+    val _ = book_read(serial, fsz_s, opf_doff, opf_cbuf, opf_csz)
 
     val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
     val dc_p = $DC.decompress(ocb, opf_csz, opf_comp)
@@ -817,7 +817,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         else let
           (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
              prefixes chapter hrefs *)
-          val prefix_len = _opf_prefix_len(fh, opf_name_off, opf_name_len)
+          val prefix_len = _opf_prefix_len(serial, fsz_s, opf_name_off, opf_name_len)
           val full_len = prefix_len + ch_len
         in
           if full_len > 1048576 then let
@@ -829,7 +829,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
           val ch_buf = $A.alloc<byte>(full_len)
           (* The prefix read from the file at the OPF's name, then the
              chapter href from the OPF *)
-          val () = $FI.file_read(fh, opf_name_off, ch_buf, prefix_len)
+          val _ = book_read(serial, fsz_s, opf_name_off, ch_buf, prefix_len)
           val () = $S.copy_from_borrow(opf_b, ch_off, dc_sz,
                     ch_buf, prefix_len, full_len, ch_len)
 
@@ -838,7 +838,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
           val () = piece_free(par, $A.thaw<byte>(opf_f))
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = zip_read(fh, fsz_s, chb, full_len)
+          val ch_entry = book_zip_read(serial, fsz_s, chb, full_len)
           val () = $A.drop<byte>(chf, chb)
           val () = $A.free<byte>($A.thaw<byte>(chf))
         in
@@ -877,8 +877,8 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
-                  val ch_dl = _opf_prefix_len(fh, ch_no, ch_nl)
-                  val () = _load_images(fh, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen)
+                  val ch_dl = _opf_prefix_len(serial, fsz_s, ch_no, ch_nl)
+                  val () = _load_images(serial, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen)
                   val () = $A.drop<byte>(xf, xb)
                   val () = piece_free(xar, $A.thaw<byte>(xf))
 
@@ -992,8 +992,13 @@ fn _restore_from_idb(): void = let
     | ~$R.some(fh) => let
       val bsz = $FI.size(fh)
     in
-      if bsz <= 0 then $P.ret<int>(~1)
+      if bsz <= 0 then let
+        val () = $FI.close(fh)
+      in $P.ret<int>(~1) end
       else let
+      (* The book cell owns the file from here, as an import does *)
+      val () = book_set(Importing(fh, bsz))
+      val s = book_serial()
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
@@ -1010,10 +1015,13 @@ fn _restore_from_idb(): void = let
     in
       $P.and_then<Int><int>(meta_p, lam(meta_h) =>
         case+ take_blob(meta_h) of
-        | ~NoBlobBytes() => $P.ret<int>(~2)
+        | ~NoBlobBytes() => let
+          val () = book_abandon(s)
+        in $P.ret<int>(~2) end
         | ~BlobBytes(meta_data, meta_len) =>
         if meta_len <> 36 then let
           val () = $A.free<byte>(meta_data)
+          val () = book_abandon(s)
         in $P.ret<int>(~2) end
         else let
           (* 9 x 4-byte ints (see _save_metadata_to_idb), stored by an
@@ -1030,15 +1038,13 @@ fn _restore_from_idb(): void = let
             else if no < 0 then false else if no > bsz then false
             else if nl < 0 then false else if nl > bsz - no then false
             else if nl >= 65536 then false
-            else if m = 0 then let
-              val () = book_set(OpenBook(fh, bsz, d, sz, 0, no, nl))
-            in true end
-            else if m = 8 then let
-              val () = book_set(OpenBook(fh, bsz, d, sz, 8, no, nl))
-            in true end
+            else if m = 0 then book_finish(s, bsz, d, sz, 0, no, nl)
+            else if m = 8 then book_finish(s, bsz, d, sz, 8, no, nl)
             else false): bool
         in
-          if ~ok then $P.ret<int>(~2)
+          if ~ok then let
+            val () = book_abandon(s)
+          in $P.ret<int>(~2) end
           else let
           (* Step 3: get "pos" from IDB *)
           val pa = $A.alloc<byte>(3)
