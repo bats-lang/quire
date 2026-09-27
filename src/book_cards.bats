@@ -16,6 +16,7 @@
 #use widget as W
 
 staload "theme.sats"
+staload "book.sats"
 staload "epub_xml.sats"
 staload "reader.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -320,16 +321,9 @@ in
                           val opf_buf2 = $A.thaw<byte>(opf_f)
                           val () = $A.free<byte>(opf_buf2)
 
-                          (* Stash file info for chapter loading *)
-                          val () = $ST.stash_set_int(10, file_handle)
-                          val () = $ST.stash_set_int(11, file_size)
-                          (* Stash OPF entry info *)
-                          val () = $ST.stash_set_int(14, opf_doff)
-                          val () = $ST.stash_set_int(15, opf_csz)
-                          val () = $ST.stash_set_int(16, opf_method)
-                          (* Stash OPF name in central directory for path prefix *)
-                          val () = $ST.stash_set_int(17, opf_name_off)
-                          val () = $ST.stash_set_int(18, opf_name_len)
+                          (* The open book, for chapter loading *)
+                          val () = book_set(OpenBook(file_handle, file_size_s, opf_doff, opf_csz,
+                                     opf_method, opf_name_off, opf_name_len))
                         in $P.ret<int>(0) end
                       end)
                     end

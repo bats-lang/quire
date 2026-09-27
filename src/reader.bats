@@ -17,6 +17,7 @@
 
 staload "theme.sats"
 staload "epub_xml.sats"
+staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
@@ -48,9 +49,7 @@ in end
    ============================================================ *)
 
 (* Save reading position to IDB: 4 bytes = u16 chapter + u16 page *)
-fn _save_position(): void = let
-  val ch = $ST.stash_get_int(23)
-  val pg = $ST.stash_get_int(21)
+fn _save_pos(ch: int, pg: int): void = let
   val buf = $A.alloc<byte>(4)
   val () = $A.set<byte>(buf, 0, int2byte0(ch mod 256))
   val () = $A.set<byte>(buf, 1, int2byte0(ch / 256))
@@ -73,16 +72,16 @@ fn _save_position(): void = let
   val () = $A.free<byte>(bt)
 in end
 
+fn _save_position(): void =
+  case+ reading_get() of Reading(p, _, c, _) => _save_pos(c, p)
+
 (* Save EPUB file bytes to IDB *)
-fn _save_epub_to_idb(): void = let
-  val fh = $ST.stash_get_int(10)
-  val fsz = $ST.stash_get_int(11)
-in
-  if fsz > 0 then
-    if fsz <= 1048576 then let
-      val fsz_s = fsz
-      val fbuf = $A.alloc<byte>(fsz_s)
-      val () = $R.discard($FI.file_read(fh, 0, fbuf, fsz_s))
+fn _save_epub_to_idb(): void =
+  case+ book_get() of
+  | NoBook() => ()
+  | OpenBook(fh, fsz, _, _, _, _, _) => let
+      val fbuf = $A.alloc<byte>(fsz)
+      val () = $R.discard($FI.file_read(fh, 0, fbuf, fsz))
       val @(ff, fb) = $A.freeze<byte>(fbuf)
       val ka = $A.alloc<byte>(4)
       val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
@@ -90,38 +89,51 @@ in
       val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
       val @(kf, kb) = $A.freeze<byte>(ka)
-      val p = $IDB.idb_put(kb, 4, fb, fsz_s)
+      val p = $IDB.idb_put(kb, 4, fb, fsz)
       val () = $P.discard<Int>(p)
       val () = $A.drop<byte>(kf, kb)
       val kt = $A.thaw<byte>(kf)
       val () = $A.free<byte>(kt)
       val () = $A.drop<byte>(ff, fb)
       val ft = $A.thaw<byte>(ff)
-      val () = $A.free<byte>(ft)
-    in end
-    else ()
-  else ()
-end
+    in $A.free<byte>(ft) end
 
-(* Save stash metadata to IDB: slots 10-18 as 9 x 4-byte ints *)
-fn _save_metadata_to_idb(): void = let
+(* v as 4 little-endian bytes at buf[off, off + 4) *)
+fn _put_i32 {l:agz}{n:pos}{off:nat | off + 4 <= n}
+  (buf: !$A.arr(byte, l, n), off: int off, v: int): void = let
+  val () = $A.set<byte>(buf, off, $A.int2byte($AR.low_byte(v)))
+  val () = $A.set<byte>(buf, off + 1, $A.int2byte($AR.low_byte($AR.bsr_int_int(v, 8))))
+  val () = $A.set<byte>(buf, off + 2, $A.int2byte($AR.low_byte($AR.bsr_int_int(v, 16))))
+in $A.set<byte>(buf, off + 3, $A.int2byte($AR.low_byte($AR.bsr_int_int(v, 24)))) end
+
+(* The little-endian two's complement int at buf[off, off + 4); the top
+   byte carries the sign, so no term overflows *)
+fn _get_i32 {l:agz}{n:pos}{off:nat | off + 4 <= n}
+  (buf: !$A.arr(byte, l, n), off: int off): [v:int] int v = let
+  val b0 = $AR.low_byte(byte2int0($A.get<byte>(buf, off)))
+  val b1 = $AR.low_byte(byte2int0($A.get<byte>(buf, off + 1)))
+  val b2 = $AR.low_byte(byte2int0($A.get<byte>(buf, off + 2)))
+  val b3 = $AR.low_byte(byte2int0($A.get<byte>(buf, off + 3)))
+  val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
+in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
+
+(* Save the open book's metadata to IDB as 9 x 4-byte ints: file
+   handle, file size, 0, 0, OPF data offset, size, method, name offset,
+   name length *)
+fn _save_metadata_to_idb(): void =
+  case+ book_get() of
+  | NoBook() => ()
+  | OpenBook(fh, fsz, d, sz, m, no, nl) => let
   val buf = $A.alloc<byte>(36)
-  fun _write_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
-    (buf: !$A.arr(byte, l, n), max: int n,
-     slot: int s, off: pos_t, fuel: int fuel): void =
-    if fuel <= 0 then ()
-    else if slot >= 32 then ()
-    else if off < 0 then ()
-    else if off + 3 >= max then ()
-    else let
-      (* Little-endian two's complement: byte k is (v >> 8k) & 255. *)
-      val v = $ST.stash_get_int(slot)
-      val () = $A.set<byte>(buf, off, int2byte0($AR.band_int_int(v, 255)))
-      val () = $A.set<byte>(buf, off + 1, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 8), 255)))
-      val () = $A.set<byte>(buf, off + 2, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 16), 255)))
-      val () = $A.set<byte>(buf, off + 3, int2byte0($AR.band_int_int($AR.bsr_int_int(v, 24), 255)))
-    in _write_slot(buf, max, slot + 1, off + 4, fuel - 1) end
-  val () = _write_slot(buf, 36, 10, 0, 9)
+  val () = _put_i32(buf, 0, fh)
+  val () = _put_i32(buf, 4, fsz)
+  val () = _put_i32(buf, 8, 0)
+  val () = _put_i32(buf, 12, 0)
+  val () = _put_i32(buf, 16, d)
+  val () = _put_i32(buf, 20, sz)
+  val () = _put_i32(buf, 24, m)
+  val () = _put_i32(buf, 28, no)
+  val () = _put_i32(buf, 32, nl)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val ka = $A.alloc<byte>(4)
   val () = $A.set<byte>(ka, 0, int2byte0(109)) (* m *)
@@ -169,9 +181,8 @@ in txt end
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
-fn _apply_font_size(size: pos_t): void = let
-  val sz = (if size < 8 then 8 else if size > 48 then 48 else size): [s:int | 8 <= s; s <= 48] int s
-  val () = $ST.stash_set_int(25, sz)
+fn _apply_font_size(sz: font_px): void = let
+  val () = font_set(sz)
   (* ".caf{font-size:" (15 bytes), the size (at most 11), "px}" *)
   val buf = $A.alloc<byte>(29)
   val off = _put(buf, 0, ".caf{font-size:")
@@ -184,7 +195,7 @@ in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
 fn _save_font_size(): void = let
-  val sz = $ST.stash_get_int(25)
+  val sz = font_get()
   val buf = $A.alloc<byte>(2)
   val () = $A.set<byte>(buf, 0, int2byte0(sz mod 256))
   val () = $A.set<byte>(buf, 1, int2byte0(sz / 256))
@@ -205,10 +216,7 @@ fn _save_font_size(): void = let
   val () = $A.free<byte>(bt)
 in end
 
-fn _update_page_indicator(): void = let
-  val cur_page = $ST.stash_get_int(21)
-  val total = $ST.stash_get_int(22)
-  val chapter = $ST.stash_get_int(23)
+fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
   (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
      middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
   val tbuf = $A.alloc<byte>(44)
@@ -226,6 +234,9 @@ fn _update_page_indicator(): void = let
   val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
 in _apply_diff($W.SetTextContent(pi_id, txt, off)) end
 
+fn _update_page_indicator(): void =
+  case+ reading_get() of Reading(p, t, c, _) => _show_indicator(p, t, c)
+
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
@@ -238,25 +249,21 @@ fn _measure_pagination(): void = let
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val _ = $R.discard<int><int>(mr)
+  (* The page's widths, checked here: the chapter has scroll width /
+     width pages, and at least one *)
   val cw = $DR.get_measure_w()
   val sw = $DR.get_measure_scroll_w()
-in
-  if cw > 0 then let
-    val total = sw / cw
-    val total_p = (if total < 1 then 1 else total): int
-    val () = $ST.stash_set_int(21, 0)
-    val () = $ST.stash_set_int(22, total_p)
-    val () = _update_page_indicator()
-  in end
-  else let
-    val () = $ST.stash_set_int(21, 0)
-    val () = $ST.stash_set_int(22, 1)
-    val () = _update_page_indicator()
-  in end
-end
+  val total = (if cw > 0 then sw / cw else 1): [v:int] int v
+  val t = (if total > 1 then total else 1): [t:pos] int t
+  val () = (case+ reading_get() of
+    | Reading(_, _, c, tc) => reading_set(Reading(0, t, c, tc)))
+in _update_page_indicator() end
 
-fn _scroll_to_page(page: int): void = let
-  val () = $ST.stash_set_int(21, page)
+(* Shows page p of the chapter's t pages *)
+fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
+  (p: int p, t: int t, c: int c, tc: int tc): void = let
+  val () = reading_set(Reading(p, t, c, tc))
+  val page = p
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
   val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
@@ -481,6 +488,13 @@ and _render_node
     end
   end
 
+(* Just past the last '/' in buf[p, e), or la if there is none *)
+fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p} .<e - p>.
+  (buf: !$A.arr(byte, l, n), p: int p, e: int e, la: int la): [r:int | la <= r; r <= e] int r =
+  if p >= e then la
+  else if byte2int0($A.get<byte>(buf, p)) = 47 then _after_last_slash(buf, p + 1, e, p + 1)
+  else _after_last_slash(buf, p + 1, e, la)
+
 (* The entry named name in the archive buf *)
 fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
   (buf: !$A.arr(byte, l, n), n: int n, name: !$A.borrow(byte, lb, nb), nb: int nb)
@@ -489,26 +503,17 @@ fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
   | ~$R.some(dir) => $Z.find_entry(buf, n, dir, name, nb)
   | ~$R.none() => $R.none()
 
-fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
-  val fh = $ST.stash_get_int(10)
-  val fsz = $ST.stash_get_int(11)
-  val opf_doff = $ST.stash_get_int(14)
-  val opf_csz = $ST.stash_get_int(15)
-  val opf_comp = $ST.stash_get_int(16)
-in
-  if fsz <= 0 then $P.ret<int>(~1)
-  else if fsz > 1048576 then $P.ret<int>(~1)
-  else if opf_csz <= 0 then $P.ret<int>(~1)
-  else if opf_csz > 1048576 then $P.ret<int>(~1)
-  else let
+fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
+  case+ book_get() of
+  | NoBook() => $P.ret<int>(~1)
+  | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
     (* Read full file *)
-    val fsz_s = fsz
     val fbuf2 = $A.alloc<byte>(fsz_s)
     val () = $R.discard($FI.file_read(fh, 0, fbuf2, fsz_s))
 
     val opf_csz_s = opf_csz
     val opf_cbuf = $A.alloc<byte>(opf_csz_s)
-    val fbuf2 = copy_arr_region(fbuf2, opf_doff, fsz_s,
+    val fbuf2 = $S.copy_arr_region(fbuf2, opf_doff, fsz_s,
                                   opf_cbuf, opf_csz_s, opf_csz_s)
     val () = $A.free<byte>(fbuf2)
 
@@ -541,7 +546,8 @@ in
 
         (* Count spine items and store total chapters *)
         val total_ch = count_spine_items(opf_b, opf_nodes)
-        val () = $ST.stash_set_int(24, total_ch)
+        val () = (case+ reading_get() of
+          | Reading(p, t, c, _) => reading_set(Reading(p, t, c, total_ch)))
 
         (* Find Nth spine itemref → manifest item href *)
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
@@ -570,40 +576,13 @@ in
           (* Find directory prefix from OPF name in central directory.
              The OPF path e.g. "OEBPS/content.opf" tells us the
              directory prefix "OEBPS/" to prepend to chapter hrefs. *)
-          val opf_name_off = $ST.stash_get_int(17)
-          val opf_name_len = $ST.stash_get_int(18)
-          fun _find_last_slash
-            {l:agz}{n:pos}{k:int}{e:int}{la:int}{fuel:nat} .<fuel>.
-            (buf: !$A.arr(byte, l, n), max: int n,
-             pos: int k, endp: int e, last_after: int la,
-             fuel: int fuel): [r:int] int r =
-            if fuel <= 0 then last_after
-            else if pos < 0 then last_after
-            else if pos >= max then last_after
-            else if pos >= endp then last_after
-            else let
-              val b = byte2int0($A.get<byte>(buf, pos))
-            in
-              if b = 47 then
-                _find_last_slash(buf, max, pos + 1, endp, pos + 1, fuel - 1)
-              else
-                _find_last_slash(buf, max, pos + 1, endp, last_after, fuel - 1)
-            end
-          val prefix_end = _find_last_slash(fbuf3, fsz_s3,
-            opf_name_off, opf_name_off + opf_name_len, opf_name_off, fsz_s3)
+          val prefix_end = _after_last_slash(fbuf3, opf_name_off, opf_name_off + opf_name_len, opf_name_off)
           val prefix_len = prefix_end - opf_name_off
 
           (* Build full path: prefix + href *)
           val full_len = prefix_len + ch_len
         in
-          if prefix_len < 0 then let
-            val () = $A.free<byte>(fbuf3)
-            val () = $X.free_nodes(opf_nodes)
-            val () = $A.drop<byte>(opf_f, opf_b)
-            val t = $A.thaw<byte>(opf_f)
-            val () = $A.free<byte>(t)
-          in $P.ret<int>(~4) end
-          else if full_len > 1048576 then let
+          if full_len > 1048576 then let
             val () = $A.free<byte>(fbuf3)
             val () = $X.free_nodes(opf_nodes)
             val () = $A.drop<byte>(opf_f, opf_b)
@@ -613,25 +592,10 @@ in
           else let
           val full_len_s = full_len
           val ch_buf = $A.alloc<byte>(full_len_s)
-          (* Copy prefix from file buffer *)
-          fun _copy_arr_region
-            {la:agz}{na:pos}{lb:agz}{nb:pos}{i:int}{j:int}{fuel:nat} .<fuel>.
-            (src: !$A.arr(byte, la, na), s_off: int i, s_max: int na,
-             dst: !$A.arr(byte, lb, nb), d_off: int j, d_max: int nb,
-             fuel: int fuel): void =
-            if fuel <= 0 then ()
-            else if s_off < 0 then ()
-            else if d_off < 0 then ()
-            else if s_off >= s_max then ()
-            else if d_off >= d_max then ()
-            else let
-              val b = $A.get<byte>(src, s_off)
-              val () = $A.set<byte>(dst, d_off, b)
-            in _copy_arr_region(src, s_off + 1, s_max, dst, d_off + 1, d_max, fuel - 1) end
-          val () = _copy_arr_region(fbuf3, opf_name_off, fsz_s3,
-                    ch_buf, 0, full_len_s, prefix_len)
-          (* Copy chapter href from OPF borrow *)
-          val () = copy_from_borrow(opf_b, ch_off, dc_sz,
+          (* The prefix from the file, then the chapter href from the OPF *)
+          val fbuf3 = $S.copy_arr_region(fbuf3, opf_name_off, fsz_s3,
+                    ch_buf, full_len_s, prefix_len)
+          val () = $S.copy_from_borrow(opf_b, ch_off, dc_sz,
                     ch_buf, prefix_len, full_len_s, ch_len)
 
           val () = $X.free_nodes(opf_nodes)
@@ -700,7 +664,8 @@ in
                   val ch_xhtml2 = $A.thaw<byte>(xf)
                   val () = $A.free<byte>(ch_xhtml2)
 
-                  val () = $ST.stash_set_int(23, chapter_idx + 1)
+                  val () = (case+ reading_get() of
+                    | Reading(p, t, _, tc) => reading_set(Reading(p, t, chapter_idx + 1, tc)))
                   (* Update chapter title in nav bar *)
                   val ch_num = chapter_idx + 1
                   var ct_c = @[char][4]('q', 'c', 'h', 't')
@@ -723,27 +688,30 @@ in
       end
     end)
   end
-end
 
-fn _go_to_page(page: int): void = let
-  val total = $ST.stash_get_int(22)
-  val cur_ch = $ST.stash_get_int(23)
-  val total_ch = $ST.stash_get_int(24)
-in
-  if page >= total then
-    if cur_ch < total_ch then let
-      val ch_p = _load_chapter(cur_ch)
-      val () = $P.discard<int>(ch_p)
-    in end
-    else _scroll_to_page(total - 1)
-  else if page < 0 then
-    if cur_ch > 1 then let
-      val ch_p = _load_chapter(cur_ch - 2)
-      val () = $P.discard<int>(ch_p)
-    in end
-    else _scroll_to_page(0)
-  else _scroll_to_page(page)
-end
+(* The next page: in this chapter, else the next chapter's first *)
+fn _page_next(): void =
+  case+ reading_get() of
+  | Reading(p, t, c, tc) =>
+    if p + 1 < t then _show_page(p + 1, t, c, tc)
+    else if c < tc then $P.discard<int>(_load_chapter(c))
+    else _show_page(p, t, c, tc)
+
+(* The previous page: in this chapter, else the previous chapter's
+   first *)
+fn _page_prev(): void =
+  case+ reading_get() of
+  | Reading(p, t, c, tc) =>
+    if p > 0 then _show_page(p - 1, t, c, tc)
+    else if c > 1 then $P.discard<int>(_load_chapter(c - 2))
+    else _show_page(0, t, c, tc)
+
+(* Page pg, saved by an earlier run: the last page if the chapter now
+   has fewer *)
+fn _show_saved_page {g:nat} (pg: int g): void =
+  case+ reading_get() of
+  | Reading(_, t, c, tc) =>
+    if pg < t then _show_page(pg, t, c, tc) else _show_page(t - 1, t, c, tc)
 
 (* Restore font size from IDB on startup *)
 fn _restore_font_size(): void = let
@@ -804,8 +772,6 @@ fn _restore_from_idb(): void = let
       val () = $A.drop<byte>(bf, bb)
       val btmp = $A.thaw<byte>(bf)
       val () = $A.free<byte>(btmp)
-      val () = $ST.stash_set_int(10, fh)
-      val () = $ST.stash_set_int(11, book_len)
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
@@ -823,30 +789,29 @@ fn _restore_from_idb(): void = let
       $P.and_then<Int><int>(meta_p, lam(meta_len) =>
         if meta_len <> 36 then $P.ret<int>(~2)
         else let
-          (* Read 9 x 4-byte ints = stash slots 10-18 *)
+          (* 9 x 4-byte ints (see _save_metadata_to_idb), stored by an
+             earlier run: checked here, once, against the book's bytes *)
           val meta_data = $IDB.idb_get_result(36)
-          fun _read_slot {l:agz}{n:pos}{s:nat}{fuel:nat} .<fuel>.
-            (buf: !$A.arr(byte, l, n), max: int n,
-             slot: int s, off: pos_t, fuel: int fuel): void =
-            if fuel <= 0 then ()
-            else if slot >= 32 then ()
-            else if off < 0 then ()
-            else if off + 3 >= max then ()
-            else let
-              val b0 = byte2int0($A.get<byte>(buf, off))
-              val b1 = byte2int0($A.get<byte>(buf, off + 1))
-              val b2 = byte2int0($A.get<byte>(buf, off + 2))
-              val b3 = byte2int0($A.get<byte>(buf, off + 3))
-              (* The top byte carries the sign, so no term overflows. *)
-              val hi = (if b3 < 128 then b3 else b3 - 256): int
-              val v = b0 + b1 * 256 + b2 * 65536 + hi * 16777216
-              val () = $ST.stash_set_int(slot, v)
-            in _read_slot(buf, max, slot + 1, off + 4, fuel - 1) end
-          val () = _read_slot(meta_data, 36, 10, 0, 9)
+          val d = _get_i32(meta_data, 16)
+          val sz = _get_i32(meta_data, 20)
+          val m = _get_i32(meta_data, 24)
+          val no = _get_i32(meta_data, 28)
+          val nl = _get_i32(meta_data, 32)
           val () = $A.free<byte>(meta_data)
-          (* Override slot 10 with the new file handle from file_store *)
-          val () = $ST.stash_set_int(10, fh)
-
+          val ok = (if d < 0 then false else if d > bsz then false
+            else if sz <= 0 then false else if sz > bsz - d then false
+            else if no < 0 then false else if no > bsz then false
+            else if nl < 0 then false else if nl > bsz - no then false
+            else if m = 0 then let
+              val () = book_set(OpenBook(fh, bsz, d, sz, 0, no, nl))
+            in true end
+            else if m = 8 then let
+              val () = book_set(OpenBook(fh, bsz, d, sz, 8, no, nl))
+            in true end
+            else false): bool
+        in
+          if ~ok then $P.ret<int>(~2)
+          else let
           (* Step 3: get "pos" from IDB *)
           val pa = $A.alloc<byte>(3)
           val () = $A.set<byte>(pa, 0, int2byte0(112)) (* p *)
@@ -874,10 +839,10 @@ fn _restore_from_idb(): void = let
             in $P.ret<int>(0) end
             else let
               val pos_data = $IDB.idb_get_result(4)
-              val ch_lo = byte2int0($A.get<byte>(pos_data, 0))
-              val ch_hi = byte2int0($A.get<byte>(pos_data, 1))
-              val pg_lo = byte2int0($A.get<byte>(pos_data, 2))
-              val pg_hi = byte2int0($A.get<byte>(pos_data, 3))
+              val ch_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 0)))
+              val ch_hi = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 1)))
+              val pg_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 2)))
+              val pg_hi = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 3)))
               val () = $A.free<byte>(pos_data)
               val saved_ch = ch_lo + ch_hi * 256
               val saved_pg = pg_lo + pg_hi * 256
@@ -889,16 +854,17 @@ fn _restore_from_idb(): void = let
               val () = _apply_diff($W.SetHidden(ll_id, 1))
               val () = _apply_diff($W.SetHidden(rv_id, 0))
               (* Load the saved chapter (1-indexed → 0-indexed) *)
-              val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): int
+              val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): [i:nat] int i
               val ch_p = _load_chapter(ch_idx)
               (* After chapter loads, scroll to saved page *)
               val ch_p2 = $P.and_then<int><int>(ch_p, lam(result) =>
                 if result = 0 then let
-                  val () = _scroll_to_page(saved_pg)
+                  val () = _show_saved_page(saved_pg)
                 in $P.ret<int>(0) end
                 else $P.ret<int>(result))
               val () = $P.discard<int>(ch_p2)
             in $P.ret<int>(0) end)
+          end
         end)
     end)
   val () = $P.discard<int>(p2)
@@ -915,20 +881,21 @@ implement apply_diff_list(dl) = _apply_diff_list(dl)
 #pub fun apply_diff(d: $W.diff): void
 implement apply_diff(d) = _apply_diff(d)
 
-#pub fun apply_font_size(size: pos_t): void
+#pub fun apply_font_size(size: font_px): void
 implement apply_font_size(size) = _apply_font_size(size)
 
 #pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
 
-#pub fun go_to_page(page: int): void
-implement go_to_page(page) = _go_to_page(page)
+#pub fun page_next(): void
+implement page_next() = _page_next()
 
-#pub fun load_chapter(chapter_idx: int): $P.promise(int, $P.Chained)
+#pub fun page_prev(): void
+implement page_prev() = _page_prev()
+
+#pub fun load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained)
 implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
 
-#pub fun scroll_to_page(page: int): void
-implement scroll_to_page(page) = _scroll_to_page(page)
 
 #pub fun save_position(): void
 implement save_position() = _save_position()

@@ -15,6 +15,7 @@
 #use widget as W
 
 staload "state.sats"
+staload "book.sats"
 staload "theme.sats"
 staload "epub_xml.sats"
 staload "reader.sats"
@@ -52,7 +53,6 @@ implement main0 () = let
   var fs_init = @[char][20]('\x2E', 'c', 'a', 'f', '\x7B', 'f', 'o', 'n', 't', '-', 's', 'i', 'z', 'e', ':', '1', '6', 'p', 'x', '\x7D')
   val @(root, fs_diffs) = $W.inject_css(root, fs_id, $S.text_of_chars(fs_init, 20), 20)
   val () = $D.apply_list(doc, fs_diffs)
-  val () = $ST.stash_set_int(25, 16)
 
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
@@ -508,8 +508,8 @@ in
     val @(ck2_f, ck2_b) = $A.freeze<byte>(ck2_arr)
     val () = $EV.listen(pv_nb, 4, ck2_b, 5, 3,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(21)
-      in go_to_page(cur - 1); 0 end)
+        val () = page_prev()
+      in 0 end)
     val () = $A.drop<byte>(pv_nf, pv_nb)
     val pv_ntmp = $A.thaw<byte>(pv_nf)
     val () = $A.free<byte>(pv_ntmp)
@@ -533,8 +533,8 @@ in
     val @(ck3_f, ck3_b) = $A.freeze<byte>(ck3_arr)
     val () = $EV.listen(nx_nb, 4, ck3_b, 5, 4,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(21)
-      in go_to_page(cur + 1); 0 end)
+        val () = page_next()
+      in 0 end)
     val () = $A.drop<byte>(nx_nf, nx_nb)
     val nx_ntmp = $A.thaw<byte>(nx_nf)
     val () = $A.free<byte>(nx_ntmp)
@@ -558,8 +558,8 @@ in
     val @(ck4_f, ck4_b) = $A.freeze<byte>(ck4_arr)
     val () = $EV.listen(zl_nb, 4, ck4_b, 5, 5,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(21)
-      in go_to_page(cur - 1); 0 end)
+        val () = page_prev()
+      in 0 end)
     val () = $A.drop<byte>(zl_nf, zl_nb)
     val zl_ntmp = $A.thaw<byte>(zl_nf)
     val () = $A.free<byte>(zl_ntmp)
@@ -583,8 +583,8 @@ in
     val @(ck5_f, ck5_b) = $A.freeze<byte>(ck5_arr)
     val () = $EV.listen(zr_nb, 4, ck5_b, 5, 6,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(21)
-      in go_to_page(cur + 1); 0 end)
+        val () = page_next()
+      in 0 end)
     val () = $A.drop<byte>(zr_nf, zr_nb)
     val zr_ntmp = $A.thaw<byte>(zr_nf)
     val () = $A.free<byte>(zr_ntmp)
@@ -654,8 +654,8 @@ in
               if b2 = 114 then let
                 (* ArrowRight → next page *)
                 val () = $A.free<byte>(payload)
-                val cur = $ST.stash_get_int(21)
-              in go_to_page(cur + 1); 0 end
+                val () = page_next()
+              in 0 end
               else let val () = $A.free<byte>(payload) in 0 end
             else let val () = $A.free<byte>(payload) in 0 end
           else if key_len = 9 then
@@ -664,16 +664,16 @@ in
               if b2 = 114 then let
                 (* ArrowLeft → prev page *)
                 val () = $A.free<byte>(payload)
-                val cur = $ST.stash_get_int(21)
-              in go_to_page(cur - 1); 0 end
+                val () = page_prev()
+              in 0 end
               else let val () = $A.free<byte>(payload) in 0 end
             else let val () = $A.free<byte>(payload) in 0 end
           else if key_len = 1 then
             if b1 = 32 then let
               (* Space → next page *)
               val () = $A.free<byte>(payload)
-              val cur = $ST.stash_get_int(21)
-            in go_to_page(cur + 1); 0 end
+              val () = page_next()
+            in 0 end
             else let val () = $A.free<byte>(payload) in 0 end
           else let val () = $A.free<byte>(payload) in 0 end
           end
@@ -725,11 +725,10 @@ in
     val @(ck9_f, ck9_b) = $A.freeze<byte>(ck9_arr)
     val () = $EV.listen(am_nb, 4, ck9_b, 5, 9,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(25)
-        val next = cur - 2
+        val cur = font_get()
       in
-        if next >= 8 then let
-          val () = apply_font_size(next)
+        if cur >= 10 then let
+          val () = apply_font_size(cur - 2)
           val () = save_font_size()
           val () = measure_pagination()
         in 0 end
@@ -758,11 +757,10 @@ in
     val @(ck10_f, ck10_b) = $A.freeze<byte>(ck10_arr)
     val () = $EV.listen(ap_nb, 4, ck10_b, 5, 10,
       lam(_payload_len: $EV.event_len): int => let
-        val cur = $ST.stash_get_int(25)
-        val next = cur + 2
+        val cur = font_get()
       in
-        if next <= 48 then let
-          val () = apply_font_size(next)
+        if cur <= 46 then let
+          val () = apply_font_size(cur + 2)
           val () = save_font_size()
           val () = measure_pagination()
         in 0 end
