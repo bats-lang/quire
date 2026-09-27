@@ -776,6 +776,38 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  test('SVG cover images are shown', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    // The usual cover page: an <svg> holding an <image>, by xlink:href
+    // or by plain href
+    const body = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1 1">
+<image width="1" height="1" xlink:href="images/cover.png"/>
+</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"><image width="1" height="1" href="images/back.png"/></svg>`;
+    await importEpub(page, {
+      title: 'Covers',
+      author: 'Bot',
+      rawChapters: [{ body }],
+      extraEntries: [
+        { name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true },
+        { name: 'OEBPS/images/back.png', data: TINY_PNG },
+      ],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const imgs = [...document.querySelectorAll('#qcnt img')];
+        return imgs.length === 2 && imgs.every(i => i.src.startsWith('blob:') && i.complete && i.naturalWidth === 1);
+      },
+      { timeout: 15000 }
+    );
+
+    expect(errors.length).toBe(0);
+  });
+
   test('reading position is restored', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));

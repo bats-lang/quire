@@ -492,6 +492,7 @@ and _render_node
     var _t_br = @[char][2]('b', 'r')
     var _t_hr = @[char][2]('h', 'r')
     var _t_img = @[char][3]('i', 'm', 'g')
+    var _t_image = @[char][5]('i', 'm', 'a', 'g', 'e')
   in
     (* Skipped: head, title, meta, link, style, script *)
     if xml_name_eq(data, name_off, name_len, _t_head, 4) then acc
@@ -529,6 +530,22 @@ and _render_node
       case+ find_attr(data, attrs, _a_src, 3) of
       | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
       | ~xspan_none() => acc
+    end
+    (* An SVG <image> (a cover page's usual form): shown as an <img>,
+       its source xlink:href, or href *)
+    else if xml_name_eq(data, name_off, name_len, _t_image, 5) then let
+      val idx = _next_content_idx()
+      val () = _add_node(doc, pidx, idx, "img")
+      val () = _node_attr_lit(doc, idx, "src", "data:,")
+      val () = _node_attr_lit(doc, idx, "alt", "image")
+      var _a_xhref = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
+      var _a_href = @[char][4]('h', 'r', 'e', 'f')
+    in
+      case+ find_attr(data, attrs, _a_xhref, 10) of
+      | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
+      | ~xspan_none() => (case+ find_attr(data, attrs, _a_href, 4) of
+        | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
+        | ~xspan_none() => acc)
     end
     else let
       val idx = _next_content_idx()

@@ -77,5 +77,6 @@ With `alloc`:
   now filled once the chapter is rendered: each src is resolved against
   the chapter's directory ("." and ".." segments, a "#fragment"
   dropped), its entry read into an arena piece (decompressed into
-  another when deflated) and handed to the element as a blob URL. SVG
-  `<image>` covers are not shown yet.
+  another when deflated) and handed to the element as a blob URL. An SVG
+  `<image>` (a cover page's usual form) is shown the same way, as an
+  `<img>` whose source is its `xlink:href` (or `href`).
