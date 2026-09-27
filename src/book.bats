@@ -5,6 +5,7 @@
 #include "share/atspre_staload.hats"
 
 #use array as A
+#use promise as P
 #use result as R
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/file-input as FI
@@ -14,13 +15,52 @@
    compressed data [opf_data, opf_data + opf_size) and compression
    method; the OPF's name [opf_name, opf_name + opf_name_len) in the
    central directory. The regions are proven inside the file, so the
-   reader uses them with no check. *)
-#pub datatype open_book =
+   reader uses them with no check. The book owns its file (a linear
+   handle, closed when the book is replaced). *)
+#pub datavtype open_book =
   | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
     OpenBook of ($FI.infile(n), int n, int d, int s, int m, int no, int nl)
+  | {n:pos} Importing of ($FI.infile(n), int n)
   | NoBook of ()
 
-#pub fun book_get(): open_book
+(* The open book, taken out of its cell, which is left with none: it
+   is put back with book_put *)
+#pub fn book_take(): open_book
+
+(* Puts b in the book cell; the book that was there, if any, is closed *)
+#pub fn book_put(b: open_book): void
+
+(* Opens b as the book: book_put, with a new serial *)
+#pub fun book_set(b: open_book): void
+
+(* The book being imported, book s of z bytes, opened with its OPF's
+   regions; false when another book is open *)
+#pub fn book_finish {z:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= z; nl < 65536}
+  (s: int, z: int z, d: int d, sz: int sz, m: int m, no: int no, nl: int nl): bool
+
+(* Closes the book being imported, book s, when its import fails *)
+#pub fn book_abandon (s: int): void
+
+(* The serial of the open book: a stage of a load started on one book
+   reads only while the same book is open *)
+#pub fn book_serial(): int
+
+(* The open book's size and the OPF's regions in it *)
+#pub typedef book_meta =
+  [n:pos][d:nat][s:pos | d + s <= n; s <= 268435456][m:int | m == 0 || m == 8][no,nl:nat | no + nl <= n; nl < 65536]
+  @(int n, int d, int s, int m, int no, int nl)
+
+(* The open book's size and regions, or none when no book is open *)
+#pub fn book_meta_get(): $R.option(book_meta)
+
+(* Stores the open book's file in IndexedDB under key, from the JS side;
+   nothing when no book is open *)
+#pub fn book_idb_put {lk:agz}{nk:pos} (key: !$A.borrow(byte, lk, nk), nk: int nk): void
+
+(* out[0, k) := bytes [o, o + k) of the open book, when it is book s of
+   z bytes; false, with out untouched, when another book is open *)
+#pub fn book_read {z:pos}{o,k:nat | o + k <= z}{l:agz}{ow:addr}{m:pos | k <= m}
+  (s: int, z: int z, o: int o, out: !$A.arrx(byte, l, m, ow), k: int k): bool
 
 (* A decompressed blob's bytes, at most 1 MiB *)
 #pub datavtype blob_bytes =
@@ -55,8 +95,6 @@
    piece can be had for it *)
 #pub fn take_content (handle: Int): content_bytes
 
-#pub fun book_set(b: open_book): void
-
 (* An entry of a z-byte archive, read by ranges: its compressed bytes
    (in a piece), method, where they are [d, d + s) and where its
    name is [no, no + nl), both proven inside the archive *)
@@ -71,11 +109,82 @@
    1 MiB, or when no piece can be had for the data (the book's data,
    checked here once) *)
 #pub fn zip_read {z:pos}{lb:agz}{nb:pos}
-  (f: $FI.infile(z), z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z)
+  (f: !$FI.infile(z), z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z)
+
+(* zip_read on the open book, when it is book s of z bytes; missing
+   when another book is open *)
+#pub fn book_zip_read {z:pos}{lb:agz}{nb:pos}
+  (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z)
 
 val _book = ref<open_book>(NoBook())
 
-implement book_get() = !_book
+val _book_serial = ref<int>(0)
+
+implement book_take() = let
+  var b: open_book = NoBook()
+  val () = ref_exch_elt<open_book>(_book, b)
+in b end
+
+implement book_put(b) = let
+  var cur: open_book = b
+  val () = ref_exch_elt<open_book>(_book, cur)
+in
+  case+ cur of
+  | ~OpenBook(f, _, _, _, _, _, _) => $FI.close(f)
+  | ~Importing(f, _) => $FI.close(f)
+  | ~NoBook() => ()
+end
+
+implement book_serial() = !_book_serial
+
+implement book_meta_get() = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, n, d, sz, m, no, nl) => let
+      val r = @(n, d, sz, m, no, nl)
+      prval () = fold@(b)
+      val () = book_put(b)
+    in $R.some(r) end
+  | _ => let val () = book_put(b) in $R.none() end
+end
+
+implement book_idb_put (key, nk) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(f, _, _, _, _, _, _) => let
+      val p = $FI.idb_put(key, nk, f)
+      val () = $P.discard<Int>(p)
+      prval () = fold@(b)
+    in book_put(b) end
+  | _ => book_put(b)
+end
+
+implement book_read {z}{o,k}{l}{ow}{m} (s, z, o, out, k) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(f, n, _, _, _, _, _) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val () = $FI.file_read(f, o, out, k)
+         prval () = fold@(b)
+         val () = book_put(b)
+       in true end
+       else let prval () = fold@(b); val () = book_put(b) in false end)
+    else let prval () = fold@(b); val () = book_put(b) in false end
+  | @Importing(f, n) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val () = $FI.file_read(f, o, out, k)
+         prval () = fold@(b)
+         val () = book_put(b)
+       in true end
+       else let prval () = fold@(b); val () = book_put(b) in false end)
+    else let prval () = fold@(b); val () = book_put(b) in false end
+  | NoBook() => let val () = book_put(b) in false end
+end
 
 implement take_blob (handle) =
   case+ $DC.blob_claim(handle) of
@@ -119,7 +228,58 @@ implement take_content (handle) =
           in ContentBytes(ar, p, n) end)
     end
 
-implement book_set(b) = !_book := b
+implement book_set(b) = let
+  val () = !_book_serial := !_book_serial + 1
+in book_put(b) end
+
+implement book_zip_read {z}{lb}{nb} (s, z, name, nb) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(f, n, _, _, _, _, _) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val r = zip_read(f, z, name, nb)
+         prval () = fold@(b)
+         val () = book_put(b)
+       in r end
+       else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end)
+    else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end
+  | @Importing(f, n) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val r = zip_read(f, z, name, nb)
+         prval () = fold@(b)
+         val () = book_put(b)
+       in r end
+       else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end)
+    else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end
+  | NoBook() => let val () = book_put(b) in ZipMissing() end
+end
+
+implement book_finish (s, z, d, sz, m, no, nl) = let
+  val b = book_take()
+in
+  case+ b of
+  | ~Importing(f, n) =>
+    if s = !_book_serial then
+      (if n = z then let
+         val () = book_put(OpenBook(f, n, d, sz, m, no, nl))
+       in true end
+       else let val () = book_put(Importing(f, n)) in false end)
+    else let val () = book_put(Importing(f, n)) in false end
+  | _ => let val () = book_put(b) in false end
+end
+
+implement book_abandon (s) =
+  if s = !_book_serial then let
+    val b = book_take()
+  in
+    case+ b of
+    | ~Importing(f, _) => $FI.close(f)
+    | _ => book_put(b)
+  end
+  else ()
 
 implement zip_read {z}{lb}{nb} (f, z, name, nb) = let
   val t = (if z < 65557 then z else 65557): [t:pos | t <= z; t <= 65557] int t

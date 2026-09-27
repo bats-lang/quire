@@ -150,16 +150,20 @@ in
       val () = $FI.close(file_handle)
     in $P.ret<int>(~1) end
     else let
+      (* The book cell owns the file from here: the stages below read it
+         while it is still the book being imported (serial s) *)
+      val () = book_set(Importing(file_handle, file_size))
+      val s = book_serial()
       var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
       val _cont_arr = $S.from_char_array(_cont_chars, 22)
       val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-      val cont = zip_read(file_handle, file_size, _cont_b, 22)
+      val cont = book_zip_read(s, file_size, _cont_b, 22)
       val () = $A.drop<byte>(_cont_f, _cont_b)
       val () = $A.free<byte>($A.thaw<byte>(_cont_f))
     in
       case+ cont of
       | ~ZipMissing() => let
-        val () = $FI.close(file_handle)
+        val () = book_abandon(s)
       in $P.ret<int>(~3) end
       | ~ZipGot(car, comp_buf, csz, method, _, _, _) => let
         val @(cf, cb) = $A.freeze<byte>(comp_buf)
@@ -174,7 +178,7 @@ in
         in
           case+ dc of
           | ~NoContentBytes() => let
-            val () = $FI.close(file_handle)
+            val () = book_abandon(s)
           in $P.ret<int>(~5) end
           | ~ContentBytes(dar, dc_buf, dc_sz) => let
             val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
@@ -186,7 +190,7 @@ in
               val () = $X.free_nodes(nodes)
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
-              val () = $FI.close(file_handle)
+              val () = book_abandon(s)
             in $P.ret<int>(~6) end
             | ~xspan_at(opf_off, opf_len) =>
             (* The OPF's path names a zip entry, so it is shorter than
@@ -195,13 +199,13 @@ in
               val () = $X.free_nodes(nodes)
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
-              val () = $FI.close(file_handle)
+              val () = book_abandon(s)
             in $P.ret<int>(~6) end
             else if opf_len >= 65536 then let
               val () = $X.free_nodes(nodes)
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
-              val () = $FI.close(file_handle)
+              val () = book_abandon(s)
             in $P.ret<int>(~6) end
             else let
               val opf_path_buf = $A.alloc<byte>(opf_len)
@@ -211,12 +215,14 @@ in
               val () = $A.drop<byte>(dc_frozen, dc_borrow)
               val () = piece_free(dar, $A.thaw<byte>(dc_frozen))
               val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
-              val opf_entry = zip_read(file_handle, file_size, opf_borrow, opf_len)
+              val opf_entry = book_zip_read(s, file_size, opf_borrow, opf_len)
               val () = $A.drop<byte>(opf_frozen, opf_borrow)
               val () = $A.free<byte>($A.thaw<byte>(opf_frozen))
             in
               case+ opf_entry of
-              | ~ZipMissing() => $P.ret<int>(~7)
+              | ~ZipMissing() => let
+                val () = book_abandon(s)
+              in $P.ret<int>(~7) end
               | ~ZipGot(oar, opf_comp, opf_csz, opf_method, opf_doff, opf_name_off, opf_name_len) => let
                 val @(ocf, ocb) = $A.freeze<byte>(opf_comp)
                 val dc2_p = $DC.decompress(ocb, opf_csz, opf_method)
@@ -229,7 +235,9 @@ in
                   val dc2 = take_content(dc2_handle)
                 in
                   case+ dc2 of
-                  | ~NoContentBytes() => $P.ret<int>(~9)
+                  | ~NoContentBytes() => let
+                    val () = book_abandon(s)
+                  in $P.ret<int>(~9) end
                   | ~ContentBytes(par, opf_buf, dc2_sz) => let
                     val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
                     val opf_nodes = $X.parse_document(opf_b, dc2_sz)
@@ -243,8 +251,8 @@ in
                     val () = piece_free(par, $A.thaw<byte>(opf_f))
 
                     (* The open book, for chapter loading *)
-                    val () = book_set(OpenBook(file_handle, file_size, opf_doff, opf_csz,
-                               opf_method, opf_name_off, opf_name_len))
+                    val _ = book_finish(s, file_size, opf_doff, opf_csz,
+                              opf_method, opf_name_off, opf_name_len)
                   in $P.ret<int>(0) end
                 end)
               end
