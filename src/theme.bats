@@ -7,91 +7,91 @@
 
 (* Class indices — css.class_text maps: 0->caa, 1->cab, ... *)
 
-#pub fun cls_library_list(): int
+#pub fun cls_library_list(): [i:nat | i < 676] int i
 
 implement cls_library_list() = 0
 
-#pub fun cls_empty_lib(): int
+#pub fun cls_empty_lib(): [i:nat | i < 676] int i
 
 implement cls_empty_lib() = 1
 
-#pub fun cls_import_btn(): int
+#pub fun cls_import_btn(): [i:nat | i < 676] int i
 
 implement cls_import_btn() = 2
 
-#pub fun cls_reader_view(): int
+#pub fun cls_reader_view(): [i:nat | i < 676] int i
 
 implement cls_reader_view() = 3
 
-#pub fun cls_back_btn(): int
+#pub fun cls_back_btn(): [i:nat | i < 676] int i
 
 implement cls_back_btn() = 4
 
-#pub fun cls_content_area(): int
+#pub fun cls_content_area(): [i:nat | i < 676] int i
 
 implement cls_content_area() = 5
 
-#pub fun cls_nav_bar(): int
+#pub fun cls_nav_bar(): [i:nat | i < 676] int i
 
 implement cls_nav_bar() = 6
 
-#pub fun cls_page_info(): int
+#pub fun cls_page_info(): [i:nat | i < 676] int i
 
 implement cls_page_info() = 7
 
-#pub fun cls_nav_button(): int
+#pub fun cls_nav_button(): [i:nat | i < 676] int i
 
 implement cls_nav_button() = 8
 
-#pub fun cls_chapter_title(): int
+#pub fun cls_chapter_title(): [i:nat | i < 676] int i
 
 implement cls_chapter_title() = 9
 
-#pub fun cls_zone_left(): int
+#pub fun cls_zone_left(): [i:nat | i < 676] int i
 
 implement cls_zone_left() = 10
 
-#pub fun cls_zone_right(): int
+#pub fun cls_zone_right(): [i:nat | i < 676] int i
 
 implement cls_zone_right() = 11
 
-#pub fun cls_zone_center(): int
+#pub fun cls_zone_center(): [i:nat | i < 676] int i
 
 implement cls_zone_center() = 12
 
-#pub fun cls_settings_panel(): int
+#pub fun cls_settings_panel(): [i:nat | i < 676] int i
 
 implement cls_settings_panel() = 13
 
-#pub fun cls_settings_btn(): int
+#pub fun cls_settings_btn(): [i:nat | i < 676] int i
 
 implement cls_settings_btn() = 14
 
-#pub fun cls_book_card(): int
+#pub fun cls_book_card(): [i:nat | i < 676] int i
 
 implement cls_book_card() = 15
 
-#pub fun cls_book_title(): int
+#pub fun cls_book_title(): [i:nat | i < 676] int i
 
 implement cls_book_title() = 16
 
-#pub fun cls_book_author(): int
+#pub fun cls_book_author(): [i:nat | i < 676] int i
 
 implement cls_book_author() = 17
 
-#pub fun cls_lib_toolbar(): int
+#pub fun cls_lib_toolbar(): [i:nat | i < 676] int i
 
 implement cls_lib_toolbar() = 18
 
-#pub fun cls_ctx_overlay(): int
+#pub fun cls_ctx_overlay(): [i:nat | i < 676] int i
 
 implement cls_ctx_overlay() = 19
 
-#pub fun cls_ctx_menu(): int
+#pub fun cls_ctx_menu(): [i:nat | i < 676] int i
 
 implement cls_ctx_menu() = 20
 
-#pub fun cls_app_title(): int
+#pub fun cls_app_title(): [i:nat | i < 676] int i
 
 implement cls_app_title() = 21
 

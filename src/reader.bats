@@ -145,92 +145,42 @@ in end
 
 (* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter (1-indexed), 24=total_chapters *)
 
-(* Write an integer into a byte buffer at offset, return new offset *)
-fun _write_int_digits
-  {l:agz}{n:pos}{v:nat}{fuel:nat} .<fuel>.
-  (buf: !$A.arr(byte, l, n), max: int n,
-   off: pos_t, value: int v, fuel: int fuel): pos_t =
-  if fuel <= 0 then off
-  else if value < 10 then
-    if off >= 0 then
-      if off < max then let
-        val () = $A.set<byte>(buf, off, int2byte0(48 + value))
-      in off + 1 end
-      else off
-    else off
+(* s's bytes at buf[p, p + sn) *)
+fun _put_str {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}{i:nat | i <= sn} .<sn - i>.
+  (buf: !$A.arr(byte, l, n), p: int p, s: string sn, sl: int sn, i: int i): int(p + sn) =
+  if i >= sl then p + sl
   else let
-    val new_off = _write_int_digits(buf, max, off, value / 10, fuel - 1)
-  in
-    if new_off >= 0 then
-      if new_off < max then let
-        val () = $A.set<byte>(buf, new_off,
-          int2byte0(48 + (value - (value / 10) * 10)))
-      in new_off + 1 end
-      else new_off
-    else new_off
-  end
+    val () = $A.set<byte>(buf, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
+  in _put_str(buf, p, s, sl, i + 1) end
 
-fn _set_byte
-  {l:agz}{n:pos}
-  (buf: !$A.arr(byte, l, n), max: int n, off: pos_t, b: int): pos_t =
-  if off >= 0 then
-    if off < max then let
-      val () = $A.set<byte>(buf, off, int2byte0(b))
-    in off + 1 end
-    else off
-  else off
+fn _put {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}
+  (buf: !$A.arr(byte, l, n), p: int p, s: string sn): int(p + sn) =
+  _put_str(buf, p, s, g1u2i(string1_length(s)), 0)
+
+(* The text of buf[0, k); frees buf *)
+fn _prefix_text {l:agz}{n:pos | n <= 1048576}{k:pos | k <= n}
+  (buf: $A.arr(byte, l, n), n: int n, k: int k): $A.text(k) = let
+  val exact = $A.alloc<byte>(k)
+  val buf = $S.copy_arr_region(buf, 0, n, exact, k, k)
+  val () = $A.free<byte>(buf)
+  val txt = arr_to_text(exact, k)
+  val () = $A.free<byte>(exact)
+in txt end
 
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
 fn _apply_font_size(size: pos_t): void = let
   val sz = (if size < 8 then 8 else if size > 48 then 48 else size): [s:int | 8 <= s; s <= 48] int s
   val () = $ST.stash_set_int(25, sz)
-  (* Build CSS string ".caf{font-size:NNpx}" — max 22 bytes *)
-  val buf = $A.alloc<byte>(22)
-  val off = _set_byte(buf, 22, 0, 46)   (* . *)
-  val off = _set_byte(buf, 22, off, 99)  (* c *)
-  val off = _set_byte(buf, 22, off, 97)  (* a *)
-  val off = _set_byte(buf, 22, off, 102) (* f *)
-  val off = _set_byte(buf, 22, off, 123) (* { *)
-  val off = _set_byte(buf, 22, off, 102) (* f *)
-  val off = _set_byte(buf, 22, off, 111) (* o *)
-  val off = _set_byte(buf, 22, off, 110) (* n *)
-  val off = _set_byte(buf, 22, off, 116) (* t *)
-  val off = _set_byte(buf, 22, off, 45)  (* - *)
-  val off = _set_byte(buf, 22, off, 115) (* s *)
-  val off = _set_byte(buf, 22, off, 105) (* i *)
-  val off = _set_byte(buf, 22, off, 122) (* z *)
-  val off = _set_byte(buf, 22, off, 101) (* e *)
-  val off = _set_byte(buf, 22, off, 58)  (* : *)
-  val off = _write_int_digits(buf, 22, off, sz, 3)
-  val off = _set_byte(buf, 22, off, 112) (* p *)
-  val off = _set_byte(buf, 22, off, 120) (* x *)
-  val off = _set_byte(buf, 22, off, 125) (* } *)
-in
-  if off > 0 then
-    if off <= 22 then let
-      val tsz = off
-      val exact = $A.alloc<byte>(tsz)
-      fun _fcopy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
-        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
-         max_s: int na, max_d: int nb, i: int i): void =
-        if i >= max_s then ()
-        else if i >= max_d then ()
-        else let
-          val b = $A.get<byte>(src, i)
-          val () = $A.set<byte>(dst, i, b)
-        in _fcopy(src, dst, max_s, max_d, i + 1) end
-      val () = _fcopy(buf, exact, 22, tsz, 0)
-      val () = $A.free<byte>(buf)
-      val txt = arr_to_text(exact, tsz)
-      val () = $A.free<byte>(exact)
-      var fs_c = @[char][4]('q', 'f', 's', 's')
-      val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
-      val () = _apply_diff($W.SetTextContent(fs_id, txt, tsz))
-    in end
-    else $A.free<byte>(buf)
-  else $A.free<byte>(buf)
-end
+  (* ".caf{font-size:" (15 bytes), the size (at most 11), "px}" *)
+  val buf = $A.alloc<byte>(29)
+  val off = _put(buf, 0, ".caf{font-size:")
+  val off = $S.int_to_str(buf, off, 29, sz)
+  val off = _put(buf, off, "px}")
+  val txt = _prefix_text(buf, 29, off)
+  var fs_c = @[char][4]('q', 'f', 's', 's')
+  val fs_id = $W.Generated($S.text_of_chars(fs_c, 4), 4)
+in _apply_diff($W.SetTextContent(fs_id, txt, off)) end
 
 (* Save font size to IDB *)
 fn _save_font_size(): void = let
@@ -259,54 +209,22 @@ fn _update_page_indicator(): void = let
   val cur_page = $ST.stash_get_int(21)
   val total = $ST.stash_get_int(22)
   val chapter = $ST.stash_get_int(23)
-  (* Counts shown as digits; the stash never holds negative ones. *)
-  fn nat_or_zero(x: pos_t): [k:nat] int k = if x >= 0 then x else 0
-  (* Build "Ch N · p. M/T" in a 24-byte buffer *)
-  val tbuf = $A.alloc<byte>(24)
-  val off = _set_byte(tbuf, 24, 0, 67)  (* C *)
-  val off = _set_byte(tbuf, 24, off, 104) (* h *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(chapter), 3)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _set_byte(tbuf, 24, off, 194) (* 0xC2 = first byte of · *)
-  val off = _set_byte(tbuf, 24, off, 183) (* 0xB7 = second byte of · *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _set_byte(tbuf, 24, off, 112) (* p *)
-  val off = _set_byte(tbuf, 24, off, 46)  (* . *)
-  val off = _set_byte(tbuf, 24, off, 32)  (* space *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(cur_page + 1), 3)
-  val off = _set_byte(tbuf, 24, off, 47)  (* / *)
-  val off = _write_int_digits(tbuf, 24, off, nat_or_zero(total), 3)
-in
-  if off > 0 then
-    if off < 24 then let
-      (* Copy to exact-size buffer for text conversion *)
-      val tsz = off
-      val exact = $A.alloc<byte>(tsz)
-      fun _copy {la:agz}{na:pos}{lb:agz}{nb:pos}{i:nat | i <= na} .<na - i>.
-        (src: !$A.arr(byte, la, na), dst: !$A.arr(byte, lb, nb),
-         max_s: int na, max_d: int nb, i: int i): void =
-        if i >= max_s then ()
-        else if i >= max_d then ()
-        else let
-          val b = $A.get<byte>(src, i)
-          val () = $A.set<byte>(dst, i, b)
-        in _copy(src, dst, max_s, max_d, i + 1) end
-      val () = _copy(tbuf, exact, 24, tsz, 0)
-      val () = $A.free<byte>(tbuf)
-      val txt = arr_to_text(exact, tsz)
-      val () = $A.free<byte>(exact)
-      var pi_c = @[char][4]('q', 'p', 'g', 'i')
-      val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
-      val () = _apply_diff($W.SetTextContent(pi_id, txt, tsz))
-    in end
-    else let
-      val () = $A.free<byte>(tbuf)
-    in end
-  else let
-    val () = $A.free<byte>(tbuf)
-  in end
-end
+  (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
+     middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
+  val tbuf = $A.alloc<byte>(44)
+  val off = _put(tbuf, 0, "Ch ")
+  val off = $S.int_to_str(tbuf, off, 44, chapter)
+  val () = $A.set<byte>(tbuf, off, $A.int2byte(32))
+  val () = $A.set<byte>(tbuf, off + 1, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, off + 2, $A.int2byte(183))
+  val off = _put(tbuf, off + 3, " p. ")
+  val off = $S.int_to_str(tbuf, off, 44, cur_page + 1)
+  val off = _put(tbuf, off, "/")
+  val off = $S.int_to_str(tbuf, off, 44, total)
+  val txt = _prefix_text(tbuf, 44, off)
+  var pi_c = @[char][4]('q', 'p', 'g', 'i')
+  val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
+in _apply_diff($W.SetTextContent(pi_id, txt, off)) end
 
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
@@ -394,9 +312,9 @@ in n end
 
 (* Match XHTML tag name to widget html_normal type *)
 fn _match_tag_to_normal
-  {lb:agz}{n:pos}
+  {lb:agz}{n:pos}{o,k:nat | o + k <= n}
   (data: !$A.borrow(byte, lb, n), len: int n,
-   name_off: pos_t, name_len: int): $W.html_normal = let
+   name_off: int o, name_len: int k): $W.html_normal = let
   var _t_p = @[char][1]('p')
   var _t_h1 = @[char][2]('h', '1')
   var _t_h2 = @[char][2]('h', '2')
@@ -436,44 +354,44 @@ fn _match_tag_to_normal
   var _t_thead = @[char][5]('t', 'h', 'e', 'a', 'd')
   var _t_tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
 in
-  if xml_name_eq(data, len, name_off, name_len, _t_p, 1) then $W.P()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h1, 2) then $W.H1()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h2, 2) then $W.H2()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h3, 2) then $W.H3()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h4, 2) then $W.H4()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h5, 2) then $W.H5()
-  else if xml_name_eq(data, len, name_off, name_len, _t_h6, 2) then $W.H6()
-  else if xml_name_eq(data, len, name_off, name_len, _t_div, 3) then $W.Div()
-  else if xml_name_eq(data, len, name_off, name_len, _t_span, 4) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_em, 2) then $W.Em()
-  else if xml_name_eq(data, len, name_off, name_len, _t_strong, 6) then $W.Strong()
-  else if xml_name_eq(data, len, name_off, name_len, _t_bq, 10) then $W.Blockquote()
-  else if xml_name_eq(data, len, name_off, name_len, _t_pre, 3) then $W.Pre()
-  else if xml_name_eq(data, len, name_off, name_len, _t_code, 4) then $W.HtmlCode()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ul, 2) then $W.Ul()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
-  else if xml_name_eq(data, len, name_off, name_len, _t_li, 2) then $W.Li()
-  else if xml_name_eq(data, len, name_off, name_len, _t_section, 7) then $W.Section()
-  else if xml_name_eq(data, len, name_off, name_len, _t_article, 7) then $W.Article()
-  else if xml_name_eq(data, len, name_off, name_len, _t_small, 5) then $W.Small()
-  else if xml_name_eq(data, len, name_off, name_len, _t_mark, 4) then $W.Mark()
-  else if xml_name_eq(data, len, name_off, name_len, _t_del, 3) then $W.Del()
-  else if xml_name_eq(data, len, name_off, name_len, _t_ins, 3) then $W.Ins()
-  else if xml_name_eq(data, len, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
-  else if xml_name_eq(data, len, name_off, name_len, _t_sup, 3) then $W.Sup()
-  else if xml_name_eq(data, len, name_off, name_len, _t_a, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_b, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_i, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_u, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_s, 1) then $W.Span()
-  else if xml_name_eq(data, len, name_off, name_len, _t_figure, 6) then $W.Figure()
-  else if xml_name_eq(data, len, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
-  else if xml_name_eq(data, len, name_off, name_len, _t_table, 5) then $W.Table()
-  else if xml_name_eq(data, len, name_off, name_len, _t_tr, 2) then $W.Tr()
-  else if xml_name_eq(data, len, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
-  else if xml_name_eq(data, len, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
-  else if xml_name_eq(data, len, name_off, name_len, _t_thead, 5) then $W.Thead()
-  else if xml_name_eq(data, len, name_off, name_len, _t_tbody, 5) then $W.Tbody()
+  if xml_name_eq(data, name_off, name_len, _t_p, 1) then $W.P()
+  else if xml_name_eq(data, name_off, name_len, _t_h1, 2) then $W.H1()
+  else if xml_name_eq(data, name_off, name_len, _t_h2, 2) then $W.H2()
+  else if xml_name_eq(data, name_off, name_len, _t_h3, 2) then $W.H3()
+  else if xml_name_eq(data, name_off, name_len, _t_h4, 2) then $W.H4()
+  else if xml_name_eq(data, name_off, name_len, _t_h5, 2) then $W.H5()
+  else if xml_name_eq(data, name_off, name_len, _t_h6, 2) then $W.H6()
+  else if xml_name_eq(data, name_off, name_len, _t_div, 3) then $W.Div()
+  else if xml_name_eq(data, name_off, name_len, _t_span, 4) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_em, 2) then $W.Em()
+  else if xml_name_eq(data, name_off, name_len, _t_strong, 6) then $W.Strong()
+  else if xml_name_eq(data, name_off, name_len, _t_bq, 10) then $W.Blockquote()
+  else if xml_name_eq(data, name_off, name_len, _t_pre, 3) then $W.Pre()
+  else if xml_name_eq(data, name_off, name_len, _t_code, 4) then $W.HtmlCode()
+  else if xml_name_eq(data, name_off, name_len, _t_ul, 2) then $W.Ul()
+  else if xml_name_eq(data, name_off, name_len, _t_ol, 2) then $W.Ol($W.NoneInt())
+  else if xml_name_eq(data, name_off, name_len, _t_li, 2) then $W.Li()
+  else if xml_name_eq(data, name_off, name_len, _t_section, 7) then $W.Section()
+  else if xml_name_eq(data, name_off, name_len, _t_article, 7) then $W.Article()
+  else if xml_name_eq(data, name_off, name_len, _t_small, 5) then $W.Small()
+  else if xml_name_eq(data, name_off, name_len, _t_mark, 4) then $W.Mark()
+  else if xml_name_eq(data, name_off, name_len, _t_del, 3) then $W.Del()
+  else if xml_name_eq(data, name_off, name_len, _t_ins, 3) then $W.Ins()
+  else if xml_name_eq(data, name_off, name_len, _t_sub, 3) then $W.HtmlSub()
+  else if xml_name_eq(data, name_off, name_len, _t_sup, 3) then $W.Sup()
+  else if xml_name_eq(data, name_off, name_len, _t_a, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_b, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_i, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_u, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_s, 1) then $W.Span()
+  else if xml_name_eq(data, name_off, name_len, _t_figure, 6) then $W.Figure()
+  else if xml_name_eq(data, name_off, name_len, _t_figcap, 10) then $W.Figcaption()
+  else if xml_name_eq(data, name_off, name_len, _t_table, 5) then $W.Table()
+  else if xml_name_eq(data, name_off, name_len, _t_tr, 2) then $W.Tr()
+  else if xml_name_eq(data, name_off, name_len, _t_td, 2) then $W.Td(1, 1)
+  else if xml_name_eq(data, name_off, name_len, _t_th, 2) then $W.Th(1, 1, $W.NoneInt())
+  else if xml_name_eq(data, name_off, name_len, _t_thead, 5) then $W.Thead()
+  else if xml_name_eq(data, name_off, name_len, _t_tbody, 5) then $W.Tbody()
   else $W.Div()
 end
 
@@ -481,7 +399,7 @@ end
 fun _render_nodes
   {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, nodes: !$X.xml_node_list(sz)): void =
+   pidx: int, nodes: !$X.xml_node_list(n, sz)): void =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val () = _render_node(data, len, pidx, node)
@@ -491,14 +409,15 @@ fun _render_nodes
 and _render_node
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, node: !$X.xml_node(sz)): void =
+   pidx: int, node: !$X.xml_node(n, sz)): void =
   case+ node of
   | $X.xml_text(off, tlen) =>
-    if tlen > 0 then
+    (* To do: a text node of 64 KiB or more (SetTextContent's limit) is
+       not shown; it should be split. *)
       if tlen < 65536 then let
         val tsz = tlen
         val tbuf = $A.alloc<byte>(tsz)
-        val () = copy_from_borrow(data, off, len, tbuf, 0, tsz, tlen)
+        val () = $S.copy_from_borrow(data, off, len, tbuf, 0, tsz, tlen)
         val txt = arr_to_text(tbuf, tsz)
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
@@ -508,7 +427,6 @@ and _render_node
         val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
       in end
       else ()
-    else ()
   | $X.xml_element(name_off, name_len, _, children) => let
     (* Skip tags: head, title, meta, link, style, script *)
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
@@ -518,33 +436,33 @@ and _render_node
     var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
     var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
   in
-    if xml_name_eq(data, len, name_off, name_len, _t_head, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_title, 5) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_meta, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_link, 4) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_style, 5) then ()
-    else if xml_name_eq(data, len, name_off, name_len, _t_script, 6) then ()
+    if xml_name_eq(data, name_off, name_len, _t_head, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then ()
+    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then ()
     else let
       (* Transparent tags: html, body — render children with same parent *)
       var _t_html = @[char][4]('h', 't', 'm', 'l')
       var _t_body = @[char][4]('b', 'o', 'd', 'y')
     in
-      if xml_name_eq(data, len, name_off, name_len, _t_html, 4) then
+      if xml_name_eq(data, name_off, name_len, _t_html, 4) then
         _render_nodes(data, len, pidx, children)
-      else if xml_name_eq(data, len, name_off, name_len, _t_body, 4) then
+      else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
         _render_nodes(data, len, pidx, children)
       else let
         (* Void tags: br, hr *)
         var _t_br = @[char][2]('b', 'r')
         var _t_hr = @[char][2]('h', 'r')
       in
-        if xml_name_eq(data, len, name_off, name_len, _t_br, 2) then let
+        if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Br()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         in end
-        else if xml_name_eq(data, len, name_off, name_len, _t_hr, 2) then let
+        else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
             $W.Void($W.Hr()), ~1, 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
@@ -563,11 +481,17 @@ and _render_node
     end
   end
 
+(* The entry named name in the archive buf *)
+fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
+  (buf: !$A.arr(byte, l, n), n: int n, name: !$A.borrow(byte, lb, nb), nb: int nb)
+  : $R.option($Z.zip_entry(n)) =
+  case+ $Z.find_dir(buf, n) of
+  | ~$R.some(dir) => $Z.find_entry(buf, n, dir, name, nb)
+  | ~$R.none() => $R.none()
+
 fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
   val fh = $ST.stash_get_int(10)
   val fsz = $ST.stash_get_int(11)
-  val cd_off = $ST.stash_get_int(12)
-  val cd_cnt = $ST.stash_get_int(13)
   val opf_doff = $ST.stash_get_int(14)
   val opf_csz = $ST.stash_get_int(15)
   val opf_comp = $ST.stash_get_int(16)
@@ -616,27 +540,21 @@ in
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
 
         (* Count spine items and store total chapters *)
-        val total_ch = count_spine_items(opf_b, dc_sz, opf_nodes, 0)
+        val total_ch = count_spine_items(opf_b, opf_nodes)
         val () = $ST.stash_set_int(24, total_ch)
 
         (* Find Nth spine itemref → manifest item href *)
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
-        val ch_off = ch_href.0
-        val ch_len = ch_href.1
       in
-        if ch_off < 0 then let
+        case+ ch_href of
+        | xspan_none() => let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)
           val () = $A.free<byte>(t)
         in $P.ret<int>(~3) end
-        else if ch_len <= 0 then let
-          val () = $X.free_nodes(opf_nodes)
-          val () = $A.drop<byte>(opf_f, opf_b)
-          val t = $A.thaw<byte>(opf_f)
-          val () = $A.free<byte>(t)
-        in $P.ret<int>(~3) end
-        else if ch_len > 1048576 then let
+        | xspan_at(ch_off, ch_len) =>
+        if ch_len <= 0 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
           val t = $A.thaw<byte>(opf_f)
@@ -722,40 +640,27 @@ in
           val () = $A.free<byte>(t)
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = $Z.find_entry_by_name(
-            fbuf3, fsz_s3, cd_off, cd_cnt,
-            chb, full_len_s)
+          val ch_entry = _find_zip_entry(fbuf3, fsz_s3, chb, full_len_s)
           val () = $A.drop<byte>(chf, chb)
           val ch_buf2 = $A.thaw<byte>(chf)
           val () = $A.free<byte>(ch_buf2)
         in
-          if ch_entry.name_offset < 0 then let
+          case+ ch_entry of
+          | ~$R.none() => let
             val () = $A.free<byte>(fbuf3)
           in $P.ret<int>(~4) end
-          else let
-            val ch_doff_opt = $Z.get_data_offset(fbuf3, fsz_s3,
-                                ch_entry.local_header_offset)
-            val ch_doff = zip_off(ch_doff_opt)
-            val ch_csz0 = ch_entry.compressed_size
-          in
-            if ch_doff < 0 then let
-              val () = $A.free<byte>(fbuf3)
-            in $P.ret<int>(~5) end
-            else if ch_csz0 <= 0 then let
-              val () = $A.free<byte>(fbuf3)
-            in $P.ret<int>(~5) end
-            else if ch_csz0 > 1048576 then let
+          | ~$R.some($Z.zip_entry_mk(_, _, ch_doff, ch_csz, ch_method, _)) =>
+            if ch_csz <= 0 then let
               val () = $A.free<byte>(fbuf3)
             in $P.ret<int>(~5) end
             else let
-              val ch_csz = ch_csz0
               val ch_comp = $A.alloc<byte>(ch_csz)
-              val () = _copy_arr_region(fbuf3, ch_doff, fsz_s3,
-                                        ch_comp, 0, ch_csz, ch_csz)
+              val fbuf3 = $S.copy_arr_region(fbuf3, ch_doff, fsz_s3,
+                                        ch_comp, ch_csz, ch_csz)
               val () = $A.free<byte>(fbuf3)
 
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
-              val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_entry.compression)
+              val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
               val ch_comp2 = $A.thaw<byte>(ccf)
               val () = $A.free<byte>(ch_comp2)
@@ -813,7 +718,6 @@ in
                 in $P.ret<int>(0) end
               end)
             end
-          end
         end
           end
       end
