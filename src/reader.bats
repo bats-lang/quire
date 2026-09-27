@@ -49,9 +49,7 @@ in end
    ============================================================ *)
 
 (* Save reading position to IDB: 4 bytes = u16 chapter + u16 page *)
-fn _save_position(): void = let
-  val ch = $ST.stash_get_int(23)
-  val pg = $ST.stash_get_int(21)
+fn _save_pos(ch: int, pg: int): void = let
   val buf = $A.alloc<byte>(4)
   val () = $A.set<byte>(buf, 0, int2byte0(ch mod 256))
   val () = $A.set<byte>(buf, 1, int2byte0(ch / 256))
@@ -73,6 +71,9 @@ fn _save_position(): void = let
   val bt = $A.thaw<byte>(bf)
   val () = $A.free<byte>(bt)
 in end
+
+fn _save_position(): void =
+  case+ reading_get() of Reading(p, _, c, _) => _save_pos(c, p)
 
 (* Save EPUB file bytes to IDB *)
 fn _save_epub_to_idb(): void =
@@ -215,10 +216,7 @@ fn _save_font_size(): void = let
   val () = $A.free<byte>(bt)
 in end
 
-fn _update_page_indicator(): void = let
-  val cur_page = $ST.stash_get_int(21)
-  val total = $ST.stash_get_int(22)
-  val chapter = $ST.stash_get_int(23)
+fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
   (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
      middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
   val tbuf = $A.alloc<byte>(44)
@@ -236,6 +234,9 @@ fn _update_page_indicator(): void = let
   val pi_id = $W.Generated($S.text_of_chars(pi_c, 4), 4)
 in _apply_diff($W.SetTextContent(pi_id, txt, off)) end
 
+fn _update_page_indicator(): void =
+  case+ reading_get() of Reading(p, t, c, _) => _show_indicator(p, t, c)
+
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
@@ -248,25 +249,21 @@ fn _measure_pagination(): void = let
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val _ = $R.discard<int><int>(mr)
+  (* The page's widths, checked here: the chapter has scroll width /
+     width pages, and at least one *)
   val cw = $DR.get_measure_w()
   val sw = $DR.get_measure_scroll_w()
-in
-  if cw > 0 then let
-    val total = sw / cw
-    val total_p = (if total < 1 then 1 else total): int
-    val () = $ST.stash_set_int(21, 0)
-    val () = $ST.stash_set_int(22, total_p)
-    val () = _update_page_indicator()
-  in end
-  else let
-    val () = $ST.stash_set_int(21, 0)
-    val () = $ST.stash_set_int(22, 1)
-    val () = _update_page_indicator()
-  in end
-end
+  val total = (if cw > 0 then sw / cw else 1): [v:int] int v
+  val t = (if total > 1 then total else 1): [t:pos] int t
+  val () = (case+ reading_get() of
+    | Reading(_, _, c, tc) => reading_set(Reading(0, t, c, tc)))
+in _update_page_indicator() end
 
-fn _scroll_to_page(page: int): void = let
-  val () = $ST.stash_set_int(21, page)
+(* Shows page p of the chapter's t pages *)
+fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
+  (p: int p, t: int t, c: int c, tc: int tc): void = let
+  val () = reading_set(Reading(p, t, c, tc))
+  val page = p
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
   val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
@@ -506,7 +503,7 @@ fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
   | ~$R.some(dir) => $Z.find_entry(buf, n, dir, name, nb)
   | ~$R.none() => $R.none()
 
-fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) =
+fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   case+ book_get() of
   | NoBook() => $P.ret<int>(~1)
   | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
@@ -549,7 +546,8 @@ fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) =
 
         (* Count spine items and store total chapters *)
         val total_ch = count_spine_items(opf_b, opf_nodes)
-        val () = $ST.stash_set_int(24, total_ch)
+        val () = (case+ reading_get() of
+          | Reading(p, t, c, _) => reading_set(Reading(p, t, c, total_ch)))
 
         (* Find Nth spine itemref → manifest item href *)
         val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
@@ -666,7 +664,8 @@ fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) =
                   val ch_xhtml2 = $A.thaw<byte>(xf)
                   val () = $A.free<byte>(ch_xhtml2)
 
-                  val () = $ST.stash_set_int(23, chapter_idx + 1)
+                  val () = (case+ reading_get() of
+                    | Reading(p, t, _, tc) => reading_set(Reading(p, t, chapter_idx + 1, tc)))
                   (* Update chapter title in nav bar *)
                   val ch_num = chapter_idx + 1
                   var ct_c = @[char][4]('q', 'c', 'h', 't')
@@ -690,25 +689,29 @@ fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) =
     end)
   end
 
-fn _go_to_page(page: int): void = let
-  val total = $ST.stash_get_int(22)
-  val cur_ch = $ST.stash_get_int(23)
-  val total_ch = $ST.stash_get_int(24)
-in
-  if page >= total then
-    if cur_ch < total_ch then let
-      val ch_p = _load_chapter(cur_ch)
-      val () = $P.discard<int>(ch_p)
-    in end
-    else _scroll_to_page(total - 1)
-  else if page < 0 then
-    if cur_ch > 1 then let
-      val ch_p = _load_chapter(cur_ch - 2)
-      val () = $P.discard<int>(ch_p)
-    in end
-    else _scroll_to_page(0)
-  else _scroll_to_page(page)
-end
+(* The next page: in this chapter, else the next chapter's first *)
+fn _page_next(): void =
+  case+ reading_get() of
+  | Reading(p, t, c, tc) =>
+    if p + 1 < t then _show_page(p + 1, t, c, tc)
+    else if c < tc then $P.discard<int>(_load_chapter(c))
+    else _show_page(p, t, c, tc)
+
+(* The previous page: in this chapter, else the previous chapter's
+   first *)
+fn _page_prev(): void =
+  case+ reading_get() of
+  | Reading(p, t, c, tc) =>
+    if p > 0 then _show_page(p - 1, t, c, tc)
+    else if c > 1 then $P.discard<int>(_load_chapter(c - 2))
+    else _show_page(0, t, c, tc)
+
+(* Page pg, saved by an earlier run: the last page if the chapter now
+   has fewer *)
+fn _show_saved_page {g:nat} (pg: int g): void =
+  case+ reading_get() of
+  | Reading(_, t, c, tc) =>
+    if pg < t then _show_page(pg, t, c, tc) else _show_page(t - 1, t, c, tc)
 
 (* Restore font size from IDB on startup *)
 fn _restore_font_size(): void = let
@@ -836,10 +839,10 @@ fn _restore_from_idb(): void = let
             in $P.ret<int>(0) end
             else let
               val pos_data = $IDB.idb_get_result(4)
-              val ch_lo = byte2int0($A.get<byte>(pos_data, 0))
-              val ch_hi = byte2int0($A.get<byte>(pos_data, 1))
-              val pg_lo = byte2int0($A.get<byte>(pos_data, 2))
-              val pg_hi = byte2int0($A.get<byte>(pos_data, 3))
+              val ch_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 0)))
+              val ch_hi = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 1)))
+              val pg_lo = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 2)))
+              val pg_hi = $AR.low_byte(byte2int0($A.get<byte>(pos_data, 3)))
               val () = $A.free<byte>(pos_data)
               val saved_ch = ch_lo + ch_hi * 256
               val saved_pg = pg_lo + pg_hi * 256
@@ -851,12 +854,12 @@ fn _restore_from_idb(): void = let
               val () = _apply_diff($W.SetHidden(ll_id, 1))
               val () = _apply_diff($W.SetHidden(rv_id, 0))
               (* Load the saved chapter (1-indexed → 0-indexed) *)
-              val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): int
+              val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): [i:nat] int i
               val ch_p = _load_chapter(ch_idx)
               (* After chapter loads, scroll to saved page *)
               val ch_p2 = $P.and_then<int><int>(ch_p, lam(result) =>
                 if result = 0 then let
-                  val () = _scroll_to_page(saved_pg)
+                  val () = _show_saved_page(saved_pg)
                 in $P.ret<int>(0) end
                 else $P.ret<int>(result))
               val () = $P.discard<int>(ch_p2)
@@ -884,14 +887,15 @@ implement apply_font_size(size) = _apply_font_size(size)
 #pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
 
-#pub fun go_to_page(page: int): void
-implement go_to_page(page) = _go_to_page(page)
+#pub fun page_next(): void
+implement page_next() = _page_next()
 
-#pub fun load_chapter(chapter_idx: int): $P.promise(int, $P.Chained)
+#pub fun page_prev(): void
+implement page_prev() = _page_prev()
+
+#pub fun load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained)
 implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
 
-#pub fun scroll_to_page(page: int): void
-implement scroll_to_page(page) = _scroll_to_page(page)
 
 #pub fun save_position(): void
 implement save_position() = _save_position()

@@ -35,3 +35,19 @@ val _font = ref<font_px>(16)
 implement font_get() = !_font
 
 implement font_set(s) = !_font := s
+
+(* Where the reader is: page p of the chapter's t pages (at least one),
+   in chapter c (counted from 1; 0 before one loads) of the book's tc. *)
+#pub datatype reading =
+  | {t:pos}{p:nat | p < t}{c,tc:nat}
+    Reading of (int p, int t, int c, int tc)
+
+#pub fun reading_get(): reading
+
+#pub fun reading_set(r: reading): void
+
+val _reading = ref<reading>(Reading(0, 1, 0, 0))
+
+implement reading_get() = !_reading
+
+implement reading_set(r) = !_reading := r
