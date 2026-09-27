@@ -60,14 +60,14 @@ fn _add_book_card
   var ll_c = @[char][4]('q', 'l', 'l', 'c')
   val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
   val card = $W.Element($W.ElementNode(card_id,
-    $W.Normal($W.Div()), cls_book_card(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    $W.Normal($W.Div()), $W.ClassIdx(cls_book_card()), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(card, cls_diff) = $W.set_class(card, cls_book_card())
   val () = apply_diff($W.AddChild(ll_id, card))
   val () = apply_diff(cls_diff)
   (* Title div *)
   val tc_id = num_wid("qtc", idx, 2)
   val td = $W.Element($W.ElementNode(tc_id,
-    $W.Normal($W.Div()), cls_book_title(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    $W.Normal($W.Div()), $W.ClassIdx(cls_book_title()), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(td, cls_d) = $W.set_class(td, cls_book_title())
   val () = apply_diff($W.AddChild(card_id, td))
   val () = apply_diff(cls_d)
@@ -79,7 +79,7 @@ fn _add_book_card
   (* Author div *)
   val ac_id = num_wid("qac", idx, 2)
   val ad = $W.Element($W.ElementNode(ac_id,
-    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    $W.Normal($W.Div()), $W.ClassIdx(cls_book_author()), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(ad, cls_a) = $W.set_class(ad, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, ad))
   val () = apply_diff(cls_a)
@@ -90,7 +90,7 @@ fn _add_book_card
   (* Status label — "New" for freshly imported books *)
   val sc_id = num_wid("qst", idx, 2)
   val sd = $W.Element($W.ElementNode(sc_id,
-    $W.Normal($W.Div()), cls_book_author(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+    $W.Normal($W.Div()), $W.ClassIdx(cls_book_author()), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
   val @(sd, cls_s) = $W.set_class(sd, cls_book_author())
   val () = apply_diff($W.AddChild(card_id, sd))
   val () = apply_diff(cls_s)
