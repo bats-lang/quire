@@ -347,6 +347,22 @@ fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* Whether data[p] starts a UTF-8 character (is not 10xxxxxx) *)
+fn _utf8_start {lb:agz}{n:pos}{p:nat | p < n}
+  (data: !$A.borrow(byte, lb, n), p: int p): bool =
+  $AR.band_int_int(byte2int0($A.read<byte>(data, p)), 192) <> 128
+
+(* The length of the longest prefix of data[off, off + k), k of 64 KiB
+   or more, under 64 KiB (a text op's limit) that ends before a UTF-8
+   character's start, so no character is split; 65535 when the data is
+   not UTF-8 there *)
+fn _text_cut {lb:agz}{n:pos}{o,k:nat | o + k <= n; k >= 65536}
+  (data: !$A.borrow(byte, lb, n), off: int o, k: int k): [c:int | 65533 <= c; c <= 65535] int c =
+  if _utf8_start(data, off + 65535) then 65535
+  else if _utf8_start(data, off + 65534) then 65534
+  else if _utf8_start(data, off + 65533) then 65533
+  else 65535
+
 (* Content node idx's attribute name: data[off, off + k) *)
 fn _node_attr {ld,lb:agz}{n:pos}{i:nat}{nl:pos | nl < 256}{o,k:nat | o + k <= n; k < 65536}
   (doc: !$D.document(ld), idx: int i, name: string nl, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
@@ -375,6 +391,21 @@ fn _next_content_idx(): [n:nat] int n = let
   val n = !_content_n
   val () = !_content_n := n + 1
 in n end
+
+(* Text data[off, off + k) as spans, the last children of content node
+   pidx: one span per piece under 64 KiB (a text op's limit), split
+   where a UTF-8 character starts *)
+fun _text_spans {ld,lb:agz}{n:pos}{q:int | q >= ~1}{o,k:nat | o + k <= n} .<k>.
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), pidx: int q, off: int o, k: int k): void = let
+  val idx = _next_content_idx()
+  val () = _add_node(doc, pidx, idx, "span")
+in
+  if k < 65536 then _node_text(doc, idx, data, off, k)
+  else let
+    val c = _text_cut(data, off, k)
+    val () = _node_text(doc, idx, data, off, c)
+  in _text_spans(doc, data, pidx, off + c, k - c) end
+end
 
 (* The tag an XHTML element is shown as: itself when it is one quire
    shows, a span for a, b, i, u and s, and a div for anything else *)
@@ -470,15 +501,9 @@ and _render_node
   (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
    pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ node of
-  | $X.xml_text(off, tlen) =>
-    (* To do: a text node of 64 KiB or more (a text op's limit) is not
-       shown; it should be split. *)
-    if tlen < 65536 then let
-      val idx = _next_content_idx()
-      val () = _add_node(doc, pidx, idx, "span")
-      val () = _node_text(doc, idx, data, off, tlen)
+  | $X.xml_text(off, tlen) => let
+      val () = _text_spans(doc, data, pidx, off, tlen)
     in acc end
-    else acc
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
     var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -522,7 +547,7 @@ and _render_node
       val () = (case+ find_attr(data, attrs, _a_alt, 3) of
         | ~xspan_at(ao, al) =>
           if al < 65536 then _node_attr(doc, idx, "alt", data, ao, al)
-          else _node_attr_lit(doc, idx, "alt", "image")
+          else _node_attr(doc, idx, "alt", data, ao, _text_cut(data, ao, al))
         | ~xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
       var _a_src = @[char][3]('s', 'r', 'c')
     in
@@ -561,15 +586,13 @@ fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p}
 
 (* The length of the directory part of the name [no, no + nl) of the
    file: up to and including its last '/', 0 when it has none *)
-fn _opf_prefix_len {z:pos}{no,nl:nat | no + nl <= z; nl < 65536}
-  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p =
-  if nl <= 0 then 0
-  else let
-    val buf = $A.alloc<byte>(nl)
-    val _ = book_read(s, z, no, buf, nl)
-    val p = _after_last_slash(buf, 0, nl, 0)
-    val () = $A.free<byte>(buf)
-  in p end
+fn _opf_prefix_len {z:pos}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
+  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p = let
+  val buf = $A.alloc<byte>(nl)
+  val _ = book_read(s, z, no, buf, nl)
+  val p = _after_last_slash(buf, 0, nl, 0)
+  val () = $A.free<byte>(buf)
+in p end
 
 (* ============================================================
    Images: read from the book, shown in the chapter's <img> elements
@@ -762,89 +785,93 @@ fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:
       val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
     in _load_images(s, z, no, dl, data, n, tl, gen) end
 
-fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
-  case+ book_meta_get() of
-  | ~$R.none() => $P.ret<int>(~1)
-  | ~$R.some(@(fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len)) => let
-    val serial = book_serial()
-    val () = !_load_gen := !_load_gen + 1
-    val gen = !_load_gen
-  in
-    (* The OPF's compressed bytes, read at their span into a piece *)
-    case+ piece_new(opf_csz) of
-    | ~NoPiece() => $P.ret<int>(~1)
-    | ~Piece(car, opf_cbuf) => let
-    val _ = book_read(serial, fsz_s, opf_doff, opf_cbuf, opf_csz)
-
-    val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
-    val dc_p = $DC.decompress(ocb, opf_csz, opf_comp)
-    val () = $A.drop<byte>(ocf, ocb)
-    val () = piece_free(car, $A.thaw<byte>(ocf))
-
-    val dc_p = $P.vow(dc_p)
-  in
-    (* Stage 2: parse OPF to find first chapter href *)
-    $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
-      val dc = take_content(dc_handle)
-    in
-      case+ dc of
-      | ~NoContentBytes() => $P.ret<int>(~2)
-      | ~ContentBytes(par, opf_buf, dc_sz) => let
-
-        val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
-        val opf_nodes = $X.parse_document(opf_b, dc_sz)
-
-        (* Count spine items and store total chapters *)
-        val total_ch = count_spine_items(opf_b, opf_nodes)
-        val () = (case+ reading_get() of
-          | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
-
-        (* Find Nth spine itemref → manifest item href *)
-        val ch_href = find_chapter_href_n(opf_b, dc_sz, opf_nodes, chapter_idx)
-      in
-        case+ ch_href of
-        | ~xspan_none() => let
-          val () = $X.free_nodes(opf_nodes)
-          val () = $A.drop<byte>(opf_f, opf_b)
-          val () = piece_free(par, $A.thaw<byte>(opf_f))
-        in $P.ret<int>(~3) end
-        | ~xspan_at(ch_off, ch_len) =>
-        if ch_len <= 0 then let
-          val () = $X.free_nodes(opf_nodes)
-          val () = $A.drop<byte>(opf_f, opf_b)
-          val () = piece_free(par, $A.thaw<byte>(opf_f))
-        in $P.ret<int>(~3) end
+(* The chapters from spine itemref i down to the first, onto acc: each
+   href, after the OPF's directory (prefix_len bytes of the name at
+   opf_no), found in book s's index; the OPF's data checked here, once *)
+fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
+  {lb:agz}{n:pos}{sz:nat}{i:int | i >= ~1}{a:nat} .<i + 1>.
+  (s: int, z: int z, opf_no: int ono, prefix_len: int pl,
+   opf_b: !$A.borrow(byte, lb, n), dc_sz: int n, nodes: !$X.xml_node_list(n, sz),
+   i: int i, acc: book_chapters(z, a)): book_chapters(z, a + i + 1) =
+  if i < 0 then acc
+  else let
+    val ch = (case+ find_chapter_href_n(opf_b, dc_sz, nodes, i) of
+      | ~xspan_none() => ChapterMissing(acc)
+      | ~xspan_at(ch_off, ch_len) =>
+        if ch_len <= 0 then ChapterMissing(acc)
+        else if prefix_len + ch_len > 1048576 then ChapterMissing(acc)
         else let
-          (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
-             prefixes chapter hrefs *)
-          val prefix_len = _opf_prefix_len(serial, fsz_s, opf_name_off, opf_name_len)
           val full_len = prefix_len + ch_len
-        in
-          if full_len > 1048576 then let
-            val () = $X.free_nodes(opf_nodes)
-            val () = $A.drop<byte>(opf_f, opf_b)
-            val () = piece_free(par, $A.thaw<byte>(opf_f))
-          in $P.ret<int>(~4) end
-          else let
           val ch_buf = $A.alloc<byte>(full_len)
           (* The prefix read from the file at the OPF's name, then the
              chapter href from the OPF *)
-          val _ = book_read(serial, fsz_s, opf_name_off, ch_buf, prefix_len)
+          val _ = book_read(s, z, opf_no, ch_buf, prefix_len)
           val () = $S.copy_from_borrow(opf_b, ch_off, dc_sz,
                     ch_buf, prefix_len, full_len, ch_len)
-
-          val () = $X.free_nodes(opf_nodes)
-          val () = $A.drop<byte>(opf_f, opf_b)
-          val () = piece_free(par, $A.thaw<byte>(opf_f))
-
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = book_zip_read(serial, fsz_s, chb, full_len)
+          val hit = book_find_entry(s, z, chb, full_len)
           val () = $A.drop<byte>(chf, chb)
           val () = $A.free<byte>($A.thaw<byte>(chf))
         in
-          case+ ch_entry of
-          | ~ZipMissing() => $P.ret<int>(~4)
-          | ~ZipGot(ccar, ch_comp, ch_csz, ch_method, _, ch_no, ch_nl) => let
+          case+ hit of
+          | ~EntryMiss() => ChapterMissing(acc)
+          | ~EntryHit(d, cs, m, no, nl) =>
+              Chapter(d, cs, m, no, nl, _opf_prefix_len(s, z, no, nl), acc)
+        end): book_chapters(z, a + 1)
+  in _spine_chapters(s, z, opf_no, prefix_len, opf_b, dc_sz, nodes, i - 1, ch) end
+
+(* Finds book s's chapters from its OPF and keeps them in the book: its
+   chapter count, or below 0 when the OPF cannot be read *)
+fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
+  case+ book_meta_get() of
+  | ~$R.none() => $P.ret<int>(~1)
+  | ~$R.some(@(fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len)) =>
+    (* The OPF's compressed bytes, read at their span into a piece *)
+    (case+ piece_new(opf_csz) of
+     | ~NoPiece() => $P.ret<int>(~1)
+     | ~Piece(car, opf_cbuf) => let
+         val _ = book_read(serial, fsz_s, opf_doff, opf_cbuf, opf_csz)
+         val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
+         val dc_p = $DC.decompress(ocb, opf_csz, opf_comp)
+         val () = $A.drop<byte>(ocf, ocb)
+         val () = piece_free(car, $A.thaw<byte>(ocf))
+         val dc_p = $P.vow(dc_p)
+       in
+         $P.and_then<Int><int>(dc_p, lam(dc_handle) =>
+           case+ take_content(dc_handle) of
+           | ~NoContentBytes() => $P.ret<int>(~2)
+           | ~ContentBytes(par, opf_buf, dc_sz) => let
+               val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
+               val opf_nodes = $X.parse_document(opf_b, dc_sz)
+               val total = count_spine_items(opf_b, opf_nodes)
+               (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
+                  prefixes chapter hrefs *)
+               val prefix_len = _opf_prefix_len(serial, fsz_s, opf_name_off, opf_name_len)
+               val chs = _spine_chapters(serial, fsz_s, opf_name_off, prefix_len,
+                           opf_b, dc_sz, opf_nodes, total - 1, ChaptersNil())
+               val () = book_spine_set(serial, fsz_s, chs, total)
+               val () = $X.free_nodes(opf_nodes)
+               val () = $A.drop<byte>(opf_f, opf_b)
+               val () = piece_free(par, $A.thaw<byte>(opf_f))
+             in $P.ret<int>(total) end)
+       end)
+
+(* Shows chapter chapter_idx of book serial, from its chapters *)
+fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise(int, $P.Chained) =
+  case+ book_chapter_get(serial, chapter_idx) of
+  | ~ChaptersUnknown() => $P.ret<int>(~1)
+  | ~ChapterNone(total_ch) => let
+      val () = (case+ reading_get() of
+        | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
+    in $P.ret<int>(~4) end
+  | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, ch_no, _, ch_dl, total_ch) => let
+      val () = (case+ reading_get() of
+        | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
+    in
+      case+ piece_new(ch_csz) of
+      | ~NoPiece() => $P.ret<int>(~5)
+      | ~Piece(ccar, ch_comp) => let
+              val _ = book_read(serial, fsz_s, ch_d, ch_comp, ch_csz)
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
               val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
@@ -877,7 +904,6 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
-                  val ch_dl = _opf_prefix_len(serial, fsz_s, ch_no, ch_nl)
                   val () = _load_images(serial, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen)
                   val () = $A.drop<byte>(xf, xb)
                   val () = piece_free(xar, $A.thaw<byte>(xf))
@@ -896,12 +922,22 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                 in $P.ret<int>(0) end
               end)
             end
-        end
-          end
-      end
-    end)
-  end
-  end
+    end
+
+(* Loads chapter chapter_idx: first the book's chapters, from its OPF,
+   when they are not found yet *)
+fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) = let
+  val serial = book_serial()
+  val () = !_load_gen := !_load_gen + 1
+  val gen = !_load_gen
+in
+  case+ book_chapter_get(serial, chapter_idx) of
+  | ~ChaptersUnknown() =>
+    $P.and_then<int><int>(_spine_build(serial), lam(r) =>
+      if r < 0 then $P.ret<int>(r) else _chapter_open(serial, chapter_idx, gen))
+  | ~ChapterNone(_) => _chapter_open(serial, chapter_idx, gen)
+  | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_idx, gen)
+end
 
 (* The next page: in this chapter, else the next chapter's first *)
 fn _page_next(): void =
@@ -997,8 +1033,7 @@ fn _restore_from_idb(): void = let
       in $P.ret<int>(~1) end
       else let
       (* The book cell owns the file from here, as an import does *)
-      val () = book_set(Importing(fh, bsz))
-      val s = book_serial()
+      val s = book_begin(fh, bsz)
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
@@ -1036,7 +1071,7 @@ fn _restore_from_idb(): void = let
             else if sz <= 0 then false else if sz > bsz - d then false
             else if sz > 268435456 then false
             else if no < 0 then false else if no > bsz then false
-            else if nl < 0 then false else if nl > bsz - no then false
+            else if nl <= 0 then false else if nl > bsz - no then false
             else if nl >= 65536 then false
             else if m = 0 then book_finish(s, bsz, d, sz, 0, no, nl)
             else if m = 8 then book_finish(s, bsz, d, sz, 8, no, nl)
