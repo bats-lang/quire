@@ -17,6 +17,7 @@
 staload "theme.sats"
 staload "epub_xml.sats"
 staload "book.sats"
+staload "pages.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
@@ -283,12 +284,14 @@ fn _measure_pagination(): void = let
   val t = (if total > 1 then total else 1): [t:pos] int t
   val () = (case+ reading_get() of
     | @(_, _, c, tc) => reading_set(@(0, t, c, tc)))
+  val () = window_show(0, t)
 in _update_page_indicator() end
 
 (* Shows page p of the chapter's t pages *)
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
   val () = reading_set(@(p, t, c, tc))
+  val () = window_show(p, t)
   val page = p
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))

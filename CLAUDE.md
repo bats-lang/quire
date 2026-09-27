@@ -2,8 +2,9 @@
 
 ## To do: book memory in a rolling window of page arenas
 
-Not done yet; this is the intended design, and it will take a good deal
-of refactoring.
+Partly done: the window exists (`src/pages.bats`), but nothing is
+allocated from it yet. The rest is the intended design, and it will take
+a good deal of refactoring.
 
 Everything that belongs to a book's content (chapter text, pictures and
 other images, per-page layout data) is allocated from arenas (array's
@@ -34,6 +35,22 @@ discipline is checked at compile time:
 The window itself should be in the types too: the reader state holds
 exactly the five arenas, indexed by page number, so a page outside the
 window has no arena to allocate from.
+
+### The window today
+
+`src/pages.bats` holds it. `page_arena(q, t)` is the arena of page q of
+a chapter of t pages, with no piece out; it exists only for
+`0 <= q < t`. `window(p, t)` holds exactly the arenas of pages p - 2 to
+p + 2. `window_forward` turns it into `window(p + 1, t)` by releasing
+page p - 2's arena and making page p + 3's (`window_back` is the mirror
+image), so keeping any other arena does not type-check. Each arena is
+4 MiB (`PAGE_BYTES`).
+
+The reader's window lives in a `ref` taken out and put back with
+`ref_exch_elt`, since it is linear. `_show_page` moves it to the page
+shown: one page on rotates it, and any other move (a jump, a new
+chapter, a new page count after a resize) releases it and makes it
+anew. Going back to the library releases it (`window_close`).
 
 ### Where book content is allocated today
 
