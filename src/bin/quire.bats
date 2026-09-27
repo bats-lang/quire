@@ -8,7 +8,6 @@
 #use sha256 as SHA
 #use str as S
 #use xml-tree as X
-#use zip as Z
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/dom as D
 #use wasm.bats-packages.dev/file-input as FI
