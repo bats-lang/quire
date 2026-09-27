@@ -10,13 +10,13 @@
 #use wasm.bats-packages.dev/file-input as FI
 #use zip as Z
 
-(* The open book's file (at most 1 MiB) and its size; its OPF's
-   compressed data [opf_data, opf_data + opf_size) and compression
+(* The open book's file and its size; its OPF's
+   compressed data [opf_data, opf_data + opf_size) (at most 1 MiB) and compression
    method; the OPF's name [opf_name, opf_name + opf_name_len) in the
    central directory. The regions are proven inside the file, so the
    reader uses them with no check. *)
 #pub datatype open_book =
-  | {n:pos | n <= 1048576}{d:nat}{s:pos | d + s <= n}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
+  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 1048576}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
     OpenBook of ($FI.infile(n), int n, int d, int s, int m, int no, int nl)
   | NoBook of ()
 

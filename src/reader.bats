@@ -68,28 +68,22 @@ in end
 fn _save_position(): void =
   case+ reading_get() of Reading(p, _, c, _) => _save_pos(c, p)
 
-(* Save EPUB file bytes to IDB *)
+(* Save the EPUB file to IDB, from the JS side (it is never copied
+   through wasm memory, whatever its size) *)
 fn _save_epub_to_idb(): void =
   case+ book_get() of
   | NoBook() => ()
-  | OpenBook(fh, fsz, _, _, _, _, _) => let
-      val fbuf = $A.alloc<byte>(fsz)
-      val () = $FI.file_read(fh, 0, fbuf, fsz)
-      val @(ff, fb) = $A.freeze<byte>(fbuf)
+  | OpenBook(fh, _, _, _, _, _, _) => let
       val ka = $A.alloc<byte>(4)
       val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
       val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
       val @(kf, kb) = $A.freeze<byte>(ka)
-      val p = $IDB.idb_put(kb, 4, fb, fsz)
+      val p = $FI.idb_put(kb, 4, fh)
       val () = $P.discard<Int>(p)
       val () = $A.drop<byte>(kf, kb)
-      val kt = $A.thaw<byte>(kf)
-      val () = $A.free<byte>(kt)
-      val () = $A.drop<byte>(ff, fb)
-      val ft = $A.thaw<byte>(ff)
-    in $A.free<byte>(ft) end
+    in $A.free<byte>($A.thaw<byte>(kf)) end
 
 (* v as 4 little-endian bytes at buf[off, off + 4) *)
 fn _put_i32 {l:agz}{n:pos}{off:nat | off + 4 <= n}
@@ -731,21 +725,19 @@ fn _restore_from_idb(): void = let
   val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
   val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
   val @(kf, kb) = $A.freeze<byte>(ka)
-  val book_p = $IDB.idb_get(kb, 4)
+  val book_p = $FI.idb_get(kb, 4)
   val () = $A.drop<byte>(kf, kb)
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val book_p = $P.vow(book_p)
   val p2 = $P.and_then<Int><int>(book_p, lam(book_h) =>
-    case+ take_blob(book_h) of
-    | ~NoBlobBytes() => $P.ret<int>(~1)
-    | ~BlobBytes(book_data, bsz) => let
-      (* Store into file cache *)
-      val @(bf, bb) = $A.freeze<byte>(book_data)
-      val fh = $FI.file_store(bb, bsz)
-      val () = $A.drop<byte>(bf, bb)
-      val btmp = $A.thaw<byte>(bf)
-      val () = $A.free<byte>(btmp)
+    case+ $FI.claim(book_h) of
+    | ~$R.none() => $P.ret<int>(~1)
+    | ~$R.some(fh) => let
+      val bsz = $FI.size(fh)
+    in
+      if bsz <= 0 then $P.ret<int>(~1)
+      else let
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
@@ -778,6 +770,7 @@ fn _restore_from_idb(): void = let
           val () = $A.free<byte>(meta_data)
           val ok = (if d < 0 then false else if d > bsz then false
             else if sz <= 0 then false else if sz > bsz - d then false
+            else if sz > 1048576 then false
             else if no < 0 then false else if no > bsz then false
             else if nl < 0 then false else if nl > bsz - no then false
             else if nl >= 65536 then false
@@ -841,6 +834,7 @@ fn _restore_from_idb(): void = let
             in $P.ret<int>(0) end)
           end
         end)
+      end
     end)
   val () = $P.discard<int>(p2)
 in end

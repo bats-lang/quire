@@ -673,6 +673,41 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // An EPUB over 1 MiB (a 1.5 MiB stored file besides its chapters)
+  // imports, reads, and is restored from IndexedDB after a reload: its
+  // entries are read at their offsets, never the whole file at once
+  test('EPUB over 1 MiB imports, reads and persists', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const big = Buffer.alloc(1536 * 1024);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 7919) & 0xff;
+    await importEpub(page, {
+      title: 'Big Book',
+      author: 'Bot',
+      chapters: 2,
+      paragraphsPerChapter: 8,
+      extraEntries: [{ name: 'OEBPS/images/big.bin', data: big, store: true }],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    const hasChapter = () => page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && /Chapter 1/.test(el.textContent) && el.textContent.length > 50;
+      },
+      { timeout: 15000 }
+    );
+    await hasChapter();
+    await page.waitForTimeout(1000);
+
+    await page.reload();
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await hasChapter();
+
+    expect(errors.length).toBe(0);
+  });
+
   test('reading position is restored', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));

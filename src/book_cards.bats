@@ -159,9 +159,6 @@ in
     if file_size <= 0 then let
       val () = $FI.close(file_handle)
     in $P.ret<int>(~1) end
-    else if file_size > 1048576 then let
-      val () = $FI.close(file_handle)
-    in $P.ret<int>(~1) end
     else let
       var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
       val _cont_arr = $S.from_char_array(_cont_chars, 22)

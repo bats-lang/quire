@@ -355,6 +355,10 @@ ${spineItems}  </spine>
     zipEntries.push({ name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true });
   }
 
+  // extraEntries: more files in the archive, e.g. a large one that makes
+  // the EPUB bigger than a whole-file read could hold
+  for (const e of (opts.extraEntries || [])) zipEntries.push(e);
+
   // storeChapters: true → store chapters uncompressed (diagnostic: test sync path)
   if (opts.storeChapters) {
     chapters.forEach(ch => { ch.store = true; });
