@@ -563,11 +563,17 @@ and _render_node
     end
   end
 
+(* The entry named name in the archive buf *)
+fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
+  (buf: !$A.arr(byte, l, n), n: int n, name: !$A.borrow(byte, lb, nb), nb: int nb)
+  : $R.option($Z.zip_entry(n)) =
+  case+ $Z.find_dir(buf, n) of
+  | ~$R.some(dir) => $Z.find_entry(buf, n, dir, name, nb)
+  | ~$R.none() => $R.none()
+
 fn _load_chapter(chapter_idx: int): $P.promise(int, $P.Chained) = let
   val fh = $ST.stash_get_int(10)
   val fsz = $ST.stash_get_int(11)
-  val cd_off = $ST.stash_get_int(12)
-  val cd_cnt = $ST.stash_get_int(13)
   val opf_doff = $ST.stash_get_int(14)
   val opf_csz = $ST.stash_get_int(15)
   val opf_comp = $ST.stash_get_int(16)
@@ -716,40 +722,27 @@ in
           val () = $A.free<byte>(t)
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = $Z.find_entry_by_name(
-            fbuf3, fsz_s3, cd_off, cd_cnt,
-            chb, full_len_s)
+          val ch_entry = _find_zip_entry(fbuf3, fsz_s3, chb, full_len_s)
           val () = $A.drop<byte>(chf, chb)
           val ch_buf2 = $A.thaw<byte>(chf)
           val () = $A.free<byte>(ch_buf2)
         in
-          if ch_entry.name_offset < 0 then let
+          case+ ch_entry of
+          | ~$R.none() => let
             val () = $A.free<byte>(fbuf3)
           in $P.ret<int>(~4) end
-          else let
-            val ch_doff_opt = $Z.get_data_offset(fbuf3, fsz_s3,
-                                ch_entry.local_header_offset)
-            val ch_doff = zip_off(ch_doff_opt)
-            val ch_csz0 = ch_entry.compressed_size
-          in
-            if ch_doff < 0 then let
-              val () = $A.free<byte>(fbuf3)
-            in $P.ret<int>(~5) end
-            else if ch_csz0 <= 0 then let
-              val () = $A.free<byte>(fbuf3)
-            in $P.ret<int>(~5) end
-            else if ch_csz0 > 1048576 then let
+          | ~$R.some($Z.zip_entry_mk(_, _, ch_doff, ch_csz, ch_method, _)) =>
+            if ch_csz <= 0 then let
               val () = $A.free<byte>(fbuf3)
             in $P.ret<int>(~5) end
             else let
-              val ch_csz = ch_csz0
               val ch_comp = $A.alloc<byte>(ch_csz)
-              val () = _copy_arr_region(fbuf3, ch_doff, fsz_s3,
-                                        ch_comp, 0, ch_csz, ch_csz)
+              val fbuf3 = $S.copy_arr_region(fbuf3, ch_doff, fsz_s3,
+                                        ch_comp, ch_csz, ch_csz)
               val () = $A.free<byte>(fbuf3)
 
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
-              val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_entry.compression)
+              val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
               val ch_comp2 = $A.thaw<byte>(ccf)
               val () = $A.free<byte>(ch_comp2)
@@ -807,7 +800,6 @@ in
                 in $P.ret<int>(0) end
               end)
             end
-          end
         end
           end
       end

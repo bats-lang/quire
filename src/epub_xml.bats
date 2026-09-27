@@ -23,14 +23,6 @@ implement peek (src, p, n) =
   else if p >= n then 0
   else byte2int0($A.read<byte>(src, p))
 
-(* An offset from zip (find_eocd, get_data_offset), or ~1 if none. *)
-#pub fn zip_off (o: $R.option([o:nat] int o)): pos_t
-
-implement zip_off (o) =
-  case+ o of
-  | ~$R.some(v) => v
-  | ~$R.none() => ~1
-
 (* ============================================================
    Array to text conversion
    ============================================================ *)

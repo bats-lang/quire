@@ -167,57 +167,40 @@ in
       val file_buf = $A.alloc<byte>(file_size_s)
       val rd_res = $FI.file_read(file_handle, 0, file_buf, file_size_s)
       val () = $R.discard<int><int>(rd_res)
-
-      val eocd_opt = $Z.find_eocd(file_buf, file_size_s)
-      val eocd_off = zip_off(eocd_opt)
     in
-      if eocd_off < 0 then let
+      case+ $Z.find_dir(file_buf, file_size_s) of
+      | ~$R.none() => let
         val () = $A.free<byte>(file_buf)
         val () = $FI.close(file_handle)
       in $P.ret<int>(~2) end
-      else let
-        val @(cd_off, cd_count) = $Z.parse_eocd(file_buf, file_size_s, eocd_off)
+      | ~$R.some(dir) => let
         var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
         val _cont_arr = $S.from_char_array(_cont_chars, 22)
         val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-        val cont = $Z.find_entry_by_name(file_buf, file_size_s, cd_off, cd_count,
-                    _cont_b, 22)
+        val cont = $Z.find_entry(file_buf, file_size_s, dir, _cont_b, 22)
         val () = $A.drop<byte>(_cont_f, _cont_b)
         val _cont_t = $A.thaw<byte>(_cont_f)
         val () = $A.free<byte>(_cont_t)
       in
-        if cont.name_offset < 0 then let
+        case+ cont of
+        | ~$R.none() => let
           val () = $A.free<byte>(file_buf)
           val () = $FI.close(file_handle)
         in $P.ret<int>(~3) end
-        else let
-          val doff_opt = $Z.get_data_offset(file_buf, file_size_s,
-                          cont.local_header_offset)
-          val doff = zip_off(doff_opt)
-          val cont_csz = cont.compressed_size
-        in
-          if doff < 0 then let
-            val () = $A.free<byte>(file_buf)
-            val () = $FI.close(file_handle)
-          in $P.ret<int>(~4) end
-          else if cont_csz <= 0 then let
-            val () = $A.free<byte>(file_buf)
-            val () = $FI.close(file_handle)
-          in $P.ret<int>(~4) end
-          else if cont_csz > 1048576 then let
+        | ~$R.some($Z.zip_entry_mk(_, _, doff, csz, method, _)) =>
+          if csz <= 0 then let
             val () = $A.free<byte>(file_buf)
             val () = $FI.close(file_handle)
           in $P.ret<int>(~4) end
           else let
-            val csz = cont_csz
             val comp_buf = $A.alloc<byte>(csz)
-            val file_buf = copy_arr_region(file_buf, doff, file_size_s,
+            val file_buf = $S.copy_arr_region(file_buf, doff, file_size_s,
                                       comp_buf, csz, csz)
             (* Free file_buf now — we will re-read in stage 2 *)
             val () = $A.free<byte>(file_buf)
 
             val @(cf, cb) = $A.freeze<byte>(comp_buf)
-            val dc_p = $DC.decompress(cb, csz, cont.compression)
+            val dc_p = $DC.decompress(cb, csz, method)
             val () = $A.drop<byte>(cf, cb)
             val comp_buf2 = $A.thaw<byte>(cf)
             val () = $A.free<byte>(comp_buf2)
@@ -280,40 +263,29 @@ in
                   val () = $R.discard($FI.file_read(file_handle, 0, file_buf2, file_size_s2))
 
                   val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
-                  val opf_entry = $Z.find_entry_by_name(
-                    file_buf2, file_size_s2, cd_off, cd_count,
+                  val opf_entry = $Z.find_entry(file_buf2, file_size_s2, dir,
                     opf_borrow, opf_path_sz)
                   val () = $A.drop<byte>(opf_frozen, opf_borrow)
                   val opf_path_buf2 = $A.thaw<byte>(opf_frozen)
                   val () = $A.free<byte>(opf_path_buf2)
                 in
-                  if opf_entry.name_offset < 0 then let
+                  case+ opf_entry of
+                  | ~$R.none() => let
                     val () = $A.free<byte>(file_buf2)
                   in $P.ret<int>(~7) end
-                  else let
-                    val opf_doff_opt = $Z.get_data_offset(file_buf2, file_size_s2,
-                                        opf_entry.local_header_offset)
-                    val opf_doff = zip_off(opf_doff_opt)
-                    val opf_csz0 = opf_entry.compressed_size
-                  in
-                    if opf_doff < 0 then let
-                      val () = $A.free<byte>(file_buf2)
-                    in $P.ret<int>(~8) end
-                    else if opf_csz0 <= 0 then let
-                      val () = $A.free<byte>(file_buf2)
-                    in $P.ret<int>(~8) end
-                    else if opf_csz0 > 1048576 then let
+                  | ~$R.some($Z.zip_entry_mk(opf_name_off, opf_name_len, opf_doff, opf_csz0, opf_method, _)) =>
+                    if opf_csz0 <= 0 then let
                       val () = $A.free<byte>(file_buf2)
                     in $P.ret<int>(~8) end
                     else let
                       val opf_csz = opf_csz0
                       val opf_comp = $A.alloc<byte>(opf_csz)
-                      val file_buf2 = copy_arr_region(file_buf2, opf_doff, file_size_s2,
+                      val file_buf2 = $S.copy_arr_region(file_buf2, opf_doff, file_size_s2,
                                                 opf_comp, opf_csz, opf_csz)
                       val () = $A.free<byte>(file_buf2)
 
                       val @(ocf, ocb) = $A.freeze<byte>(opf_comp)
-                      val dc2_p = $DC.decompress(ocb, opf_csz, opf_entry.compression)
+                      val dc2_p = $DC.decompress(ocb, opf_csz, opf_method)
                       val () = $A.drop<byte>(ocf, ocb)
                       val opf_comp2 = $A.thaw<byte>(ocf)
                       val () = $A.free<byte>(opf_comp2)
@@ -351,24 +323,20 @@ in
                           (* Stash file info for chapter loading *)
                           val () = $ST.stash_set_int(10, file_handle)
                           val () = $ST.stash_set_int(11, file_size)
-                          val () = $ST.stash_set_int(12, cd_off)
-                          val () = $ST.stash_set_int(13, cd_count)
                           (* Stash OPF entry info *)
                           val () = $ST.stash_set_int(14, opf_doff)
-                          val () = $ST.stash_set_int(15, opf_entry.compressed_size)
-                          val () = $ST.stash_set_int(16, opf_entry.compression)
+                          val () = $ST.stash_set_int(15, opf_csz)
+                          val () = $ST.stash_set_int(16, opf_method)
                           (* Stash OPF name in central directory for path prefix *)
-                          val () = $ST.stash_set_int(17, opf_entry.name_offset)
-                          val () = $ST.stash_set_int(18, opf_entry.name_len)
+                          val () = $ST.stash_set_int(17, opf_name_off)
+                          val () = $ST.stash_set_int(18, opf_name_len)
                         in $P.ret<int>(0) end
                       end)
                     end
-                  end
                 end
               end
             end)
           end
-        end
       end
     end
   end)
