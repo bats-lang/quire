@@ -14,15 +14,6 @@
 (* A position in a buffer; indexed so a read at it can be proven. *)
 #pub typedef pos_t = [p:int] int p
 
-(* Byte at p, or 0 outside [0, n). *)
-#pub fn peek {l:agz}{n:pos}{p:int}
-  (src: !$A.borrow(byte, l, n), p: int p, n: int n): int
-
-implement peek (src, p, n) =
-  if p < 0 then 0
-  else if p >= n then 0
-  else byte2int0($A.read<byte>(src, p))
-
 (* ============================================================
    Array to text conversion
    ============================================================ *)
@@ -45,56 +36,6 @@ implement arr_to_text{l}{n}(src, len) = let
   val tb = $A.text_build(len)
   val tb = _arr_to_text_loop(src, len, tb, 0)
 in $A.text_done(tb) end
-
-(* ============================================================
-   Borrow copy utilities
-   ============================================================ *)
-
-(* To do: zip offsets are not yet proven inside the file (the zip
-   package returns unindexed ints), so this copy still checks each
-   position; it goes when zip returns proven regions. *)
-fun _copy_from_borrow_r
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{fuel:nat}{do_:int} .<fuel>.
-  (src: !$A.borrow(byte, lb, nb), src_off: pos_t, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
-   count: int, fuel: int fuel): void =
-  if fuel <= 0 then ()
-  else if count <= 0 then ()
-  else if src_off < 0 then ()
-  else if dst_off < 0 then ()
-  else if src_off >= src_max then ()
-  else if dst_off >= dst_max then ()
-  else let
-    val b = peek(src, src_off, src_max)
-    val () = $A.set<byte>(dst, dst_off, int2byte0(b))
-  in
-    _copy_from_borrow_r(src, src_off + 1, src_max, dst, dst_off + 1, dst_max, count - 1, fuel - 1)
-  end
-
-(* To do: used only for the chapter path in reader, whose prefix length
-   still comes from the stash unindexed; it goes with the typed reader
-   state. *)
-#pub fn copy_from_borrow
-  {lb:agz}{nb:pos}{la:agz}{na:pos}{do_:int}
-  (src: !$A.borrow(byte, lb, nb), src_off: pos_t, src_max: int nb,
-   dst: !$A.arr(byte, la, na), dst_off: int do_, dst_max: int na,
-   count: int): void
-
-implement copy_from_borrow(src, src_off, src_max, dst, dst_off, dst_max, count) =
-  _copy_from_borrow_r(src, src_off, src_max, dst, dst_off, dst_max, count, src_max)
-
-#pub fn copy_arr_region
-  {ls:agz}{ns:pos}{ld:agz}{nd:pos}
-  (src: $A.arr(byte, ls, ns), src_off: pos_t, src_max: int ns,
-   dst: !$A.arr(byte, ld, nd), dst_max: int nd,
-   count: int): $A.arr(byte, ls, ns)
-
-implement copy_arr_region(src, src_off, src_max, dst, dst_max, count) = let
-  val @(frozen, borrow) = $A.freeze<byte>(src)
-  val () = _copy_from_borrow_r(borrow, src_off, src_max,
-                             dst, 0, dst_max, count, src_max)
-  val () = $A.drop<byte>(frozen, borrow)
-in $A.thaw<byte>(frozen) end
 
 (* ============================================================
    Spans of a parsed document
