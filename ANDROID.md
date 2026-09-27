@@ -9,6 +9,13 @@ workflow (`bats-lang/pwa/.github/workflows/android.yml`) on the project
 * `release-aab`: the Android App Bundle, for Google Play;
 * `release-apk`: the APK, for installing directly.
 
+A third job, `smoke-test`, installs the APK on an Android emulator
+(API 34), launches it and waits for the library's "Import EPUB" button,
+which only the wasm renders; it fails if that never shows, the app
+crashes, or the page logs a console error. Its artifact
+`android-smoke-test` has a screenshot of the running app, the UI dump
+and the logcat.
+
 The app id is `dev.middlefield.quire`, the one Quire is published under.
 The version code is the workflow's run number plus 1 (Google Play needs
 each upload's to be higher than the last).

@@ -117,3 +117,6 @@ jobs:
       project-dir: android
       # Above the version code (1) of the build uploaded before this workflow
       version-code-offset: 1
+      # Run it on an emulator until the library's button, which the wasm
+      # renders (the static page shows only a spinner), is on the screen
+      smoke-test-text: Import EPUB
