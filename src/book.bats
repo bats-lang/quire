@@ -11,12 +11,12 @@
 #use zip as Z
 
 (* The open book's file and its size; its OPF's
-   compressed data [opf_data, opf_data + opf_size) (at most 1 MiB) and compression
+   compressed data [opf_data, opf_data + opf_size) and compression
    method; the OPF's name [opf_name, opf_name + opf_name_len) in the
    central directory. The regions are proven inside the file, so the
    reader uses them with no check. *)
 #pub datatype open_book =
-  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 1048576}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
+  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no,nl:nat | no + nl <= n; nl < 65536}
     OpenBook of ($FI.infile(n), int n, int d, int s, int m, int no, int nl)
   | NoBook of ()
 
@@ -32,20 +32,44 @@
    (the book's data, checked here once) *)
 #pub fn take_blob (handle: Int): blob_bytes
 
+(* n bytes of the book's content (an entry's data, a decompressed OPF or
+   chapter), which can be larger than alloc's 1 MiB: the one piece of an
+   arena of their own, freed whole with piece_free *)
+#pub datavtype piece(n:int) =
+  | {la,l:agz} Piece(n) of ($A.arena(byte, la, n, n, 1), $A.arrx(byte, l, n, la))
+  | NoPiece(n) of ()
+
+(* A piece of n bytes, or none when the memory cannot be had *)
+#pub fn piece_new {n:pos | n <= 268435456} (n: int n): piece(n)
+
+#pub fn piece_free {la,l:agz}{n:pos}
+  (ar: $A.arena(byte, la, n, n, 1), p: $A.arrx(byte, l, n, la)): void
+
+(* Decompressed content, read whole into a piece *)
+#pub datavtype content_bytes =
+  | {la,l:agz}{n:pos} ContentBytes of ($A.arena(byte, la, n, n, 1), $A.arrx(byte, l, n, la), int n)
+  | NoContentBytes of ()
+
+(* The content a decompress promise resolved with, read whole and
+   freed: none when decompression failed, the result is empty, or no
+   piece can be had for it *)
+#pub fn take_content (handle: Int): content_bytes
+
 #pub fun book_set(b: open_book): void
 
 (* An entry of a z-byte archive, read by ranges: its compressed bytes
-   (at most 1 MiB), method, where they are [d, d + s) and where its
+   (in a piece), method, where they are [d, d + s) and where its
    name is [no, no + nl), both proven inside the archive *)
 #pub datavtype zip_got(z:int) =
-  | {l:agz}{s:pos | s <= 1048576}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no,nl:nat | no + nl <= z; nl < 65536}
-    ZipGot(z) of ($A.arr(byte, l, s), int s, int m, int d, int no, int nl)
+  | {la,l:agz}{s:pos | s <= 268435456}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no,nl:nat | no + nl <= z; nl < 65536}
+    ZipGot(z) of ($A.arena(byte, la, s, s, 1), $A.arrx(byte, l, s, la), int s, int m, int d, int no, int nl)
   | ZipMissing(z) of ()
 
 (* The entry named name[0, nb) of the z-byte file f, reading only the
    archive's end, its central directory, the entry's local header and
-   its data; missing when there is none, or when the directory or the
-   data is over 1 MiB (the book's data, checked here once) *)
+   its data; missing when there is none, when the directory is over
+   1 MiB, or when no piece can be had for the data (the book's data,
+   checked here once) *)
 #pub fn zip_read {z:pos}{lb:agz}{nb:pos}
   (f: $FI.infile(z), z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z)
 
@@ -66,6 +90,33 @@ implement take_blob (handle) =
         val () = $DC.blob_read(b, 0, buf, n)
         val () = $DC.blob_free(b)
       in BlobBytes(buf, n) end
+    end
+
+implement piece_new (n) =
+  case+ $A.arena_create<byte>(n) of
+  | ~$A.arena_none() => NoPiece()
+  | ~$A.arena_some(ar) => let
+      val p = $A.arena_alloc<byte>(ar, n)
+    in Piece(ar, p) end
+
+implement piece_free (ar, p) = let
+  val () = $A.arena_return<byte>(ar, p)
+in $A.arena_destroy<byte>(ar) end
+
+implement take_content (handle) =
+  case+ $DC.blob_claim(handle) of
+  | ~$R.none() => NoContentBytes()
+  | ~$R.some(b) => let
+      val n = $DC.blob_len(b)
+    in
+      if n <= 0 then let val () = $DC.blob_free(b) in NoContentBytes() end
+      else if n > 268435456 then let val () = $DC.blob_free(b) in NoContentBytes() end
+      else (case+ piece_new(n) of
+        | ~NoPiece() => let val () = $DC.blob_free(b) in NoContentBytes() end
+        | ~Piece(ar, p) => let
+            val () = $DC.blob_read(b, 0, p, n)
+            val () = $DC.blob_free(b)
+          in ContentBytes(ar, p, n) end)
     end
 
 implement book_set(b) = !_book := b
@@ -103,11 +154,12 @@ in
             | ~$R.none() => ZipMissing()
             | ~$R.some($Z.zip_span_mk(d, cs, m, _)) =>
               if cs <= 0 then ZipMissing()
-              else if cs > 1048576 then ZipMissing()
-              else let
-                val buf = $A.alloc<byte>(cs)
-                val () = $FI.file_read(f, d, buf, cs)
-              in ZipGot(buf, cs, m, d, no, nl) end
+              else if cs > 268435456 then ZipMissing()
+              else (case+ piece_new(cs) of
+                | ~NoPiece() => ZipMissing()
+                | ~Piece(ar, buf) => let
+                    val () = $FI.file_read(f, d, buf, cs)
+                  in ZipGot(ar, buf, cs, m, d, no, nl) end)
           end
       end
     end

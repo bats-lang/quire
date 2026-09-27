@@ -513,26 +513,27 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   case+ book_get() of
   | NoBook() => $P.ret<int>(~1)
   | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
-    (* The OPF's compressed bytes, read at their span *)
-    val opf_csz_s = opf_csz
-    val opf_cbuf = $A.alloc<byte>(opf_csz_s)
-    val () = $FI.file_read(fh, opf_doff, opf_cbuf, opf_csz_s)
+  in
+    (* The OPF's compressed bytes, read at their span into a piece *)
+    case+ piece_new(opf_csz) of
+    | ~NoPiece() => $P.ret<int>(~1)
+    | ~Piece(car, opf_cbuf) => let
+    val () = $FI.file_read(fh, opf_doff, opf_cbuf, opf_csz)
 
     val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
-    val dc_p = $DC.decompress(ocb, opf_csz_s, opf_comp)
+    val dc_p = $DC.decompress(ocb, opf_csz, opf_comp)
     val () = $A.drop<byte>(ocf, ocb)
-    val opf_cbuf2 = $A.thaw<byte>(ocf)
-    val () = $A.free<byte>(opf_cbuf2)
+    val () = piece_free(car, $A.thaw<byte>(ocf))
 
     val dc_p = $P.vow(dc_p)
   in
     (* Stage 2: parse OPF to find first chapter href *)
     $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
-      val dc = take_blob(dc_handle)
+      val dc = take_content(dc_handle)
     in
       case+ dc of
-      | ~NoBlobBytes() => $P.ret<int>(~2)
-      | ~BlobBytes(opf_buf, dc_sz) => let
+      | ~NoContentBytes() => $P.ret<int>(~2)
+      | ~ContentBytes(par, opf_buf, dc_sz) => let
 
         val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
         val opf_nodes = $X.parse_document(opf_b, dc_sz)
@@ -549,15 +550,13 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         | xspan_none() => let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
-          val t = $A.thaw<byte>(opf_f)
-          val () = $A.free<byte>(t)
+          val () = piece_free(par, $A.thaw<byte>(opf_f))
         in $P.ret<int>(~3) end
         | xspan_at(ch_off, ch_len) =>
         if ch_len <= 0 then let
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
-          val t = $A.thaw<byte>(opf_f)
-          val () = $A.free<byte>(t)
+          val () = piece_free(par, $A.thaw<byte>(opf_f))
         in $P.ret<int>(~3) end
         else let
           (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
@@ -568,7 +567,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
           if full_len > 1048576 then let
             val () = $X.free_nodes(opf_nodes)
             val () = $A.drop<byte>(opf_f, opf_b)
-            val () = $A.free<byte>($A.thaw<byte>(opf_f))
+            val () = piece_free(par, $A.thaw<byte>(opf_f))
           in $P.ret<int>(~4) end
           else let
           val ch_buf = $A.alloc<byte>(full_len)
@@ -580,7 +579,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
 
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
-          val () = $A.free<byte>($A.thaw<byte>(opf_f))
+          val () = piece_free(par, $A.thaw<byte>(opf_f))
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
           val ch_entry = zip_read(fh, fsz_s, chb, full_len)
@@ -589,22 +588,21 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
         in
           case+ ch_entry of
           | ~ZipMissing() => $P.ret<int>(~4)
-          | ~ZipGot(ch_comp, ch_csz, ch_method, _, _, _) => let
+          | ~ZipGot(ccar, ch_comp, ch_csz, ch_method, _, _, _) => let
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
               val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
-              val ch_comp2 = $A.thaw<byte>(ccf)
-              val () = $A.free<byte>(ch_comp2)
+              val () = piece_free(ccar, $A.thaw<byte>(ccf))
 
               val ch_dc_p = $P.vow(ch_dc_p)
             in
               (* Stage 3: parse HTML and render *)
               $P.and_then<Int><int>(ch_dc_p, lam(ch_dc_handle) => let
-                val ch_dc = take_blob(ch_dc_handle)
+                val ch_dc = take_content(ch_dc_handle)
               in
                 case+ ch_dc of
-                | ~NoBlobBytes() => $P.ret<int>(~6)
-                | ~BlobBytes(ch_xhtml, ch_dc_sz) => let
+                | ~NoContentBytes() => $P.ret<int>(~6)
+                | ~ContentBytes(xar, ch_xhtml, ch_dc_sz) => let
 
                   (* Parse XHTML with xml-tree *)
                   val @(xf, xb) = $A.freeze<byte>(ch_xhtml)
@@ -620,8 +618,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val () = _render_nodes(xb, ch_dc_sz, ~1, nodes)
                   val () = $X.free_nodes(nodes)
                   val () = $A.drop<byte>(xf, xb)
-                  val ch_xhtml2 = $A.thaw<byte>(xf)
-                  val () = $A.free<byte>(ch_xhtml2)
+                  val () = piece_free(xar, $A.thaw<byte>(xf))
 
                   val () = (case+ reading_get() of
                     | Reading(p, t, _, tc) => reading_set(Reading(p, t, chapter_idx + 1, tc)))
@@ -643,6 +640,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
           end
       end
     end)
+  end
   end
 
 (* The next page: in this chapter, else the next chapter's first *)
@@ -770,7 +768,7 @@ fn _restore_from_idb(): void = let
           val () = $A.free<byte>(meta_data)
           val ok = (if d < 0 then false else if d > bsz then false
             else if sz <= 0 then false else if sz > bsz - d then false
-            else if sz > 1048576 then false
+            else if sz > 268435456 then false
             else if no < 0 then false else if no > bsz then false
             else if nl < 0 then false else if nl > bsz - no then false
             else if nl >= 65536 then false

@@ -708,6 +708,36 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // A chapter whose XHTML is over 1 MiB (40 paragraphs of 32 KiB) is
+  // shown whole: its compressed and decompressed bytes are read into
+  // arena pieces sized to them, not 1 MiB allocations
+  test('chapter over 1 MiB is shown', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const para = (k) => ('Paragraph ' + k + ' ' + 'lorem ipsum dolor sit amet '.repeat(1300)).slice(0, 32768);
+    let body = '<h1>Chapter 1</h1>\n';
+    for (let k = 0; k < 39; k++) body += `<p>${para(k)}</p>\n`;
+    body += '<p>THE-LAST-PARAGRAPH</p>\n';
+    expect(body.length).toBeGreaterThan(1048576);
+    await importEpub(page, {
+      title: 'Long Chapter',
+      author: 'Bot',
+      rawChapters: [{ body }, { body: '<h1>Chapter 2</h1><p>short</p>' }],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && /THE-LAST-PARAGRAPH/.test(el.textContent) && el.textContent.length > 1048576;
+      },
+      { timeout: 30000 }
+    );
+
+    expect(errors.length).toBe(0);
+  });
+
   test('reading position is restored', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
