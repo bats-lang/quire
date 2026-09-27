@@ -32,6 +32,9 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
    App entry point
    ============================================================ *)
 
+(* Whether a tap on the content hid the reader's nav bar *)
+val _nav_hidden = ref<bool>(false)
+
 implement main0 () = let
   val st = empty_state()
 
@@ -607,14 +610,14 @@ in
         (* Toggle nav bar visibility *)
         var nv_c = @[char][4]('q', 'r', 'n', 'v')
         val nv_id = $W.Generated($S.text_of_chars(nv_c, 4), 4)
-        val hidden = $ST.stash_get_int(30)
+        val hidden = !_nav_hidden
       in
-        if hidden > 0 then let
-          val () = $ST.stash_set_int(30, 0)
+        if hidden then let
+          val () = !_nav_hidden := false
           val () = apply_diff($W.SetHidden(nv_id, 0))
         in 0 end
         else let
-          val () = $ST.stash_set_int(30, 1)
+          val () = !_nav_hidden := true
           val () = apply_diff($W.SetHidden(nv_id, 1))
         in 0 end
       end)
@@ -801,7 +804,7 @@ in
     val () = $A.free<byte>(ck11_tmp)
 
     val nid = $D.get_next_id(doc)
-    val () = $ST.stash_set_int(20, nid)
+    val () = next_nid_set(nid)
     val () = $D.destroy(doc)
     (* Restore font size and saved book from IDB *)
     val () = restore_font_size()
@@ -809,7 +812,7 @@ in
   in end
   else let
     val nid = $D.get_next_id(doc)
-    val () = $ST.stash_set_int(20, nid)
+    val () = next_nid_set(nid)
     val () = $D.destroy(doc)
   in end
 end

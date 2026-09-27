@@ -26,21 +26,21 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val nid = $ST.stash_get_int(20)
+  val nid = next_nid_get()
   val doc = $D.open_document($S.text_of_chars(mid, 9), 9, nid)
   val () = $D.apply_list(doc, dl)
   val nid2 = $D.get_next_id(doc)
-  val () = $ST.stash_set_int(20, nid2)
+  val () = next_nid_set(nid2)
   val () = $D.destroy(doc)
 in end
 
 fn _apply_diff(d: $W.diff): void = let
   var mid = @[char][9]('b', 'a', 't', 's', '-', 'r', 'o', 'o', 't')
-  val nid = $ST.stash_get_int(20)
+  val nid = next_nid_get()
   val doc = $D.open_document($S.text_of_chars(mid, 9), 9, nid)
   val () = $D.apply(doc, d)
   val nid2 = $D.get_next_id(doc)
-  val () = $ST.stash_set_int(20, nid2)
+  val () = next_nid_set(nid2)
   val () = $D.destroy(doc)
 in end
 
@@ -179,6 +179,32 @@ fn _prefix_text {l:agz}{n:pos | n <= 1048576}{k:pos | k <= n}
   val () = $A.free<byte>(exact)
 in txt end
 
+(* pre, then i's decimal digits zero-padded to at least w: an element
+   id that stays distinct for every i *)
+fn _num_id {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
+  (pre: string sn, i: int i, w: int w): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
+  (* z zeros at buf[p, p + z) *)
+  fun zeros {l:agz}{p,z:nat | p + z <= 16} .<z>.
+    (buf: !$A.arr(byte, l, 16), p: int p, z: int z): int(p + z) =
+    if z = 0 then p
+    else let val () = $A.set<byte>(buf, p, $A.int2byte(48)) in zeros(buf, p + 1, z - 1) end
+  val z = (if i < 10 then w - 1 else if i < 100 then w - 2 else 0): [z:nat | z <= 2] int z
+  val buf = $A.alloc<byte>(16)
+  val off = _put(buf, 0, pre)
+  val off = zeros(buf, off, z)
+  val off = $S.int_to_str(buf, off, 16, i)
+  val exact = $A.alloc<byte>(off)
+  val buf = $S.copy_arr_region(buf, 0, 16, exact, off, off)
+  val () = $A.free<byte>(buf)
+in @(exact, off) end
+
+fn _num_wid {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
+  (pre: string sn, i: int i, w: int w): $W.widget_id = let
+  val @(a, k) = _num_id(pre, i, w)
+  val txt = arr_to_text(a, k)
+  val () = $A.free<byte>(a)
+in $W.Generated(txt, k) end
+
 (* Apply font size to content area via dynamic style element *)
 (* Writes ".caf{font-size:NNpx}" to style element qfss *)
 fn _apply_font_size(sz: font_px): void = let
@@ -286,35 +312,24 @@ in end
    Content tree rendering (XHTML → DOM nodes)
    ============================================================ *)
 
-(* Stash slot 28: content node counter *)
+(* Content nodes are numbered from 0 in each chapter *)
+val _content_n = ref<[n:nat] int n>(0)
 
 (* Generate widget_id for content node at index *)
-fn _content_wid(idx: int): $W.widget_id = let
-  val n = idx - (idx / 1000) * 1000
-  val d2 = n / 100
-  val r2 = n - d2 * 100
-  val d1 = r2 / 10
-  val d0 = r2 - d1 * 10
-  val buf = $A.alloc<byte>(4)
-  val () = $A.set<byte>(buf, 0, int2byte0(99))
-  val () = $A.set<byte>(buf, 1, int2byte0(48 + d2))
-  val () = $A.set<byte>(buf, 2, int2byte0(48 + d1))
-  val () = $A.set<byte>(buf, 3, int2byte0(48 + d0))
-  val txt = arr_to_text(buf, 4)
-  val () = $A.free<byte>(buf)
-in $W.Generated(txt, 4) end
+fn _content_wid {i:nat} (idx: int i): $W.widget_id = _num_wid("c", idx, 3)
 
-(* Generate widget_id for parent: -1 = qcnt, >= 0 = content node *)
-fn _parent_wid(pidx: int): $W.widget_id =
+(* The parent's widget_id: ~1 is the content area qcnt, and i >= 0 is
+   content node i *)
+fn _parent_wid {q:int | q >= ~1} (pidx: int q): $W.widget_id =
   if pidx < 0 then let
     var c = @[char][4]('q', 'c', 'n', 't')
   in $W.Generated($S.text_of_chars(c, 4), 4) end
   else _content_wid(pidx)
 
 (* Get next content node index and increment counter *)
-fn _next_content_idx(): int = let
-  val n = $ST.stash_get_int(28)
-  val () = $ST.stash_set_int(28, n + 1)
+fn _next_content_idx(): [n:nat] int n = let
+  val n = !_content_n
+  val () = !_content_n := n + 1
 in n end
 
 (* Match XHTML tag name to widget html_normal type *)
@@ -404,9 +419,9 @@ end
 
 (* Walk xml_node_list, rendering each node into parent *)
 fun _render_nodes
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  {lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, nodes: !$X.xml_node_list(n, sz)): void =
+   pidx: int q, nodes: !$X.xml_node_list(n, sz)): void =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
       val () = _render_node(data, len, pidx, node)
@@ -414,9 +429,9 @@ fun _render_nodes
   | $X.xml_nodes_nil() => ()
 
 and _render_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  {lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int, node: !$X.xml_node(n, sz)): void =
+   pidx: int q, node: !$X.xml_node(n, sz)): void =
   case+ node of
   | $X.xml_text(off, tlen) =>
     (* To do: a text node of 64 KiB or more (SetTextContent's limit) is
@@ -655,7 +670,7 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   var cnt_c = @[char][4]('q', 'c', 'n', 't')
                   val cnt_id = $W.Generated($S.text_of_chars(cnt_c, 4), 4)
                   val () = _apply_diff($W.RemoveAllChildren(cnt_id))
-                  val () = $ST.stash_set_int(28, 0)
+                  val () = !_content_n := 0
 
                   (* Render XHTML tree into content area *)
                   val () = _render_nodes(xb, ch_dc_sz, ~1, nodes)
@@ -670,14 +685,11 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
                   val ch_num = chapter_idx + 1
                   var ct_c = @[char][4]('q', 'c', 'h', 't')
                   val ct_id = $W.Generated($S.text_of_chars(ct_c, 4), 4)
-                  val ch_tens = ch_num / 10
-                  val ch_ones = ch_num - ch_tens * 10
-                  val () = (if ch_tens > 0 then let
-                    var cht = @[char][10]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', int2char0(48 + ch_tens), int2char0(48 + ch_ones))
-                  in _apply_diff($W.SetTextContent(ct_id, $S.text_of_chars(cht, 10), 10)) end
-                  else let
-                    var cht = @[char][9]('C', 'h', 'a', 'p', 't', 'e', 'r', ' ', int2char0(48 + ch_ones))
-                  in _apply_diff($W.SetTextContent(ct_id, $S.text_of_chars(cht, 9), 9)) end)
+                  (* "Chapter " (8 bytes) and the number (at most 11) *)
+                  val tbuf = $A.alloc<byte>(19)
+                  val off = _put(tbuf, 0, "Chapter ")
+                  val off = $S.int_to_str(tbuf, off, 19, ch_num)
+                  val () = _apply_diff($W.SetTextContent(ct_id, _prefix_text(tbuf, 19, off), off))
                   val () = _measure_pagination()
                   val () = _save_position()
                 in $P.ret<int>(0) end
@@ -917,5 +929,13 @@ implement restore_from_idb() = _restore_from_idb()
 
 #pub fun update_page_indicator(): void
 implement update_page_indicator() = _update_page_indicator()
+
+#pub fun num_wid {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
+  (pre: string sn, i: int i, w: int w): $W.widget_id
+implement num_wid(pre, i, w) = _num_wid(pre, i, w)
+
+#pub fun num_id {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
+  (pre: string sn, i: int i, w: int w): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k)
+implement num_id(pre, i, w) = _num_id(pre, i, w)
 
 end (* #target wasm *)
