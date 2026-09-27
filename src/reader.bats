@@ -347,6 +347,22 @@ fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* Whether data[p] starts a UTF-8 character (is not 10xxxxxx) *)
+fn _utf8_start {lb:agz}{n:pos}{p:nat | p < n}
+  (data: !$A.borrow(byte, lb, n), p: int p): bool =
+  $AR.band_int_int(byte2int0($A.read<byte>(data, p)), 192) <> 128
+
+(* The length of the longest prefix of data[off, off + k), k of 64 KiB
+   or more, under 64 KiB (a text op's limit) that ends before a UTF-8
+   character's start, so no character is split; 65535 when the data is
+   not UTF-8 there *)
+fn _text_cut {lb:agz}{n:pos}{o,k:nat | o + k <= n; k >= 65536}
+  (data: !$A.borrow(byte, lb, n), off: int o, k: int k): [c:int | 65533 <= c; c <= 65535] int c =
+  if _utf8_start(data, off + 65535) then 65535
+  else if _utf8_start(data, off + 65534) then 65534
+  else if _utf8_start(data, off + 65533) then 65533
+  else 65535
+
 (* Content node idx's attribute name: data[off, off + k) *)
 fn _node_attr {ld,lb:agz}{n:pos}{i:nat}{nl:pos | nl < 256}{o,k:nat | o + k <= n; k < 65536}
   (doc: !$D.document(ld), idx: int i, name: string nl, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
@@ -375,6 +391,21 @@ fn _next_content_idx(): [n:nat] int n = let
   val n = !_content_n
   val () = !_content_n := n + 1
 in n end
+
+(* Text data[off, off + k) as spans, the last children of content node
+   pidx: one span per piece under 64 KiB (a text op's limit), split
+   where a UTF-8 character starts *)
+fun _text_spans {ld,lb:agz}{n:pos}{q:int | q >= ~1}{o,k:nat | o + k <= n} .<k>.
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), pidx: int q, off: int o, k: int k): void = let
+  val idx = _next_content_idx()
+  val () = _add_node(doc, pidx, idx, "span")
+in
+  if k < 65536 then _node_text(doc, idx, data, off, k)
+  else let
+    val c = _text_cut(data, off, k)
+    val () = _node_text(doc, idx, data, off, c)
+  in _text_spans(doc, data, pidx, off + c, k - c) end
+end
 
 (* The tag an XHTML element is shown as: itself when it is one quire
    shows, a span for a, b, i, u and s, and a div for anything else *)
@@ -470,15 +501,9 @@ and _render_node
   (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
    pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
   case+ node of
-  | $X.xml_text(off, tlen) =>
-    (* To do: a text node of 64 KiB or more (a text op's limit) is not
-       shown; it should be split. *)
-    if tlen < 65536 then let
-      val idx = _next_content_idx()
-      val () = _add_node(doc, pidx, idx, "span")
-      val () = _node_text(doc, idx, data, off, tlen)
+  | $X.xml_text(off, tlen) => let
+      val () = _text_spans(doc, data, pidx, off, tlen)
     in acc end
-    else acc
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
     var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -522,7 +547,7 @@ and _render_node
       val () = (case+ find_attr(data, attrs, _a_alt, 3) of
         | ~xspan_at(ao, al) =>
           if al < 65536 then _node_attr(doc, idx, "alt", data, ao, al)
-          else _node_attr_lit(doc, idx, "alt", "image")
+          else _node_attr(doc, idx, "alt", data, ao, _text_cut(data, ao, al))
         | ~xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
       var _a_src = @[char][3]('s', 'r', 'c')
     in

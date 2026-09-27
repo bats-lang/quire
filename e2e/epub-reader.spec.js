@@ -738,6 +738,38 @@ test.describe('EPUB Reader E2E', () => {
     expect(errors.length).toBe(0);
   });
 
+  // A text node of 64 KiB or more (a text op's limit) is shown whole,
+  // as spans split where a UTF-8 character starts: none is cut in two
+  test('text node over 64 KiB is shown whole', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    // 169 KiB of two-byte characters and ASCII (three spans), so a cut at 65535 bytes
+    // falls inside a character unless it backs off to its start
+    const unit = 'é' + 'abcdefg';
+    const text = 'START-' + unit.repeat(19200) + '-END';
+    expect(Buffer.byteLength(text, 'utf8')).toBeGreaterThan(2 * 65536);
+    await importEpub(page, {
+      title: 'Long Text',
+      author: 'Bot',
+      rawChapters: [{ body: `<h1>Chapter 1</h1><p>${text}</p>` }],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      (expected) => {
+        const el = document.getElementById('qcnt');
+        return el && el.textContent.includes(expected);
+      },
+      text,
+      { timeout: 30000 }
+    );
+    const bad = await page.locator('#qcnt').evaluate(el => el.textContent.includes('\uFFFD'));
+    expect(bad).toBe(false);
+
+    expect(errors.length).toBe(0);
+  });
+
   // A chapter's images are read from the book and shown: one stored,
   // one named through "..", one deflated (its src with a #fragment); a
   // missing one keeps its empty placeholder
