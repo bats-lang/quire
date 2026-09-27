@@ -438,7 +438,7 @@ and _render_node
         val () = $A.free<byte>(tbuf)
         val idx = _next_content_idx()
         val w = $W.Element($W.ElementNode(_content_wid(idx),
-          $W.Normal($W.Span()), $W.NoClass(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+          $W.Normal($W.Span()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
         val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         val () = _apply_diff($W.SetTextContent(_content_wid(idx), txt, tsz))
       in end
@@ -475,13 +475,13 @@ and _render_node
         if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Void($W.Br()), $W.NoClass(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+            $W.Void($W.Br()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         in end
         else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
           val idx = _next_content_idx()
           val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Void($W.Hr()), $W.NoClass(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+            $W.Void($W.Hr()), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
         in end
         else let
@@ -489,7 +489,7 @@ and _render_node
           val idx = _next_content_idx()
           val tag = _match_tag_to_normal(data, len, name_off, name_len)
           val w = $W.Element($W.ElementNode(_content_wid(idx),
-            $W.Normal(tag), $W.NoClass(), 0, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
+            $W.Normal(tag), $W.NoClass(), false, $W.NoneInt(), $W.NoneStr(), $W.WNil()))
           val () = _apply_diff($W.AddChild(_parent_wid(pidx), w))
           val () = _render_nodes(data, len, idx, children)
         in end
@@ -838,8 +838,8 @@ fn _restore_from_idb(): void = let
               val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
               var rv_c = @[char][4]('q', 'r', 'v', 'w')
               val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
-              val () = _apply_diff($W.SetHidden(ll_id, 1))
-              val () = _apply_diff($W.SetHidden(rv_id, 0))
+              val () = _apply_diff($W.SetHidden(ll_id, true))
+              val () = _apply_diff($W.SetHidden(rv_id, false))
               val ch_p = _load_chapter(0)
               val () = $P.discard<int>(ch_p)
             in $P.ret<int>(0) end
@@ -857,8 +857,8 @@ fn _restore_from_idb(): void = let
               val ll_id = $W.Generated($S.text_of_chars(ll_c, 4), 4)
               var rv_c = @[char][4]('q', 'r', 'v', 'w')
               val rv_id = $W.Generated($S.text_of_chars(rv_c, 4), 4)
-              val () = _apply_diff($W.SetHidden(ll_id, 1))
-              val () = _apply_diff($W.SetHidden(rv_id, 0))
+              val () = _apply_diff($W.SetHidden(ll_id, true))
+              val () = _apply_diff($W.SetHidden(rv_id, false))
               (* Load the saved chapter (1-indexed → 0-indexed) *)
               val ch_idx = (if saved_ch > 0 then saved_ch - 1 else 0): [i:nat] int i
               val ch_p = _load_chapter(ch_idx)
