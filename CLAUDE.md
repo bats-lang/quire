@@ -35,19 +35,29 @@ The window itself should be in the types too: the reader state holds
 exactly the five arenas, indexed by page number, so a page outside the
 window has no arena to allocate from.
 
-### Where book content is allocated today (all with `alloc`)
+### Where book content is allocated today
 
-* `src/book.bats` (`zip_read`, reading an entry by ranges): the
-  archive's tail, its central directory, the entry's local header, and
-  the entry's compressed data (the buffer `zip_read` returns).
-* `src/book_cards.bats` (import): the compressed and decompressed
-  container.xml (`comp_buf`, `dc_buf`), the OPF path and the compressed
-  and decompressed OPF (`opf_path_buf`, `opf_comp`, `opf_buf`), and a
-  title buffer (`tbuf`).
-* `src/reader.bats` (opening and reading a book): the OPF (`opf_cbuf`,
-  `opf_buf`), the OPF's name (for its directory), the chapter path
-  (`ch_buf`), the compressed and decompressed chapter (`ch_comp`,
-  `ch_xhtml`), and title and text copies (`exact`, `tbuf`).
+In arena pieces (`piece` in `src/book.bats`: the one piece of an arena
+sized to it, created and destroyed whole, so it has no 1 MiB bound):
+
+* an entry's compressed data (the piece `zip_read` returns): the
+  container.xml, the OPF and each chapter;
+* decompressed content (`take_content`): the container.xml, the OPF and
+  each chapter's XHTML;
+* the OPF's compressed data when a chapter is loaded (`opf_cbuf`);
+* each image's bytes (`_show_image` in `src/reader.bats`).
+
+Each piece lives only while it is parsed: nothing is kept between page
+turns yet, since pages are CSS columns of the chapter's DOM.
+
+With `alloc`:
+
+* `src/book.bats` (`zip_read`): the archive's tail, its central
+  directory (at most 1 MiB), and the entry's local header.
+* `src/book_cards.bats` (import): the OPF path (`opf_path_buf`, under
+  65536 bytes as a zip name is) and a title buffer (`tbuf`).
+* `src/reader.bats`: the OPF's name (for its directory), the chapter
+  path (`ch_buf`), and title and text copies (`exact`, `tbuf`).
 * The EPUB file itself never enters wasm memory: file-input keeps it on
   the JS side, it is read by ranges, and it is saved to and restored
   from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`).
@@ -59,7 +69,13 @@ window has no arena to allocate from.
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the
   whole file was read into one `alloc`. Entries are now read at their
-  offsets, and the file has no size bound; one entry's compressed data,
-  and the central directory, are still read into one buffer each (at
-  most 1 MiB).
-* Book images are not loaded or shown yet; only chapter text is.
+  offsets, and the file has no size bound. An entry's data and its
+  decompressed content are read into arena pieces, so a chapter over
+  1 MiB is shown; only the central directory is still read into one
+  buffer of at most 1 MiB.
+* (Fixed) Book images were not shown. A chapter's `<img>` elements are
+  now filled once the chapter is rendered: each src is resolved against
+  the chapter's directory ("." and ".." segments, a "#fragment"
+  dropped), its entry read into an arena piece (decompressed into
+  another when deflated) and handed to the element as a blob URL. SVG
+  `<image>` covers are not shown yet.

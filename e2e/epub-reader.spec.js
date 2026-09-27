@@ -20,7 +20,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { createEpub } from './create-epub.js';
+import { createEpub, TINY_PNG } from './create-epub.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -704,6 +704,74 @@ test.describe('EPUB Reader E2E', () => {
     await page.reload();
     await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
     await hasChapter();
+
+    expect(errors.length).toBe(0);
+  });
+
+  // A chapter whose XHTML is over 1 MiB (40 paragraphs of 32 KiB) is
+  // shown whole: its compressed and decompressed bytes are read into
+  // arena pieces sized to them, not 1 MiB allocations
+  test('chapter over 1 MiB is shown', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const para = (k) => ('Paragraph ' + k + ' ' + 'lorem ipsum dolor sit amet '.repeat(1300)).slice(0, 32768);
+    let body = '<h1>Chapter 1</h1>\n';
+    for (let k = 0; k < 39; k++) body += `<p>${para(k)}</p>\n`;
+    body += '<p>THE-LAST-PARAGRAPH</p>\n';
+    expect(body.length).toBeGreaterThan(1048576);
+    await importEpub(page, {
+      title: 'Long Chapter',
+      author: 'Bot',
+      rawChapters: [{ body }, { body: '<h1>Chapter 2</h1><p>short</p>' }],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.getElementById('qcnt');
+        return el && /THE-LAST-PARAGRAPH/.test(el.textContent) && el.textContent.length > 1048576;
+      },
+      { timeout: 30000 }
+    );
+
+    expect(errors.length).toBe(0);
+  });
+
+  // A chapter's images are read from the book and shown: one stored,
+  // one named through "..", one deflated (its src with a #fragment); a
+  // missing one keeps its empty placeholder
+  test('chapter images are shown', async ({ page }) => {
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const body = `<h1>Chapter 1</h1>
+<p><img src="images/a.png" alt="stored"/></p>
+<p><img src="../OEBPS/images/b.png" alt="dotdot"/></p>
+<p><img src="images/c.png#frag" alt="deflated"/></p>
+<p><img src="images/missing.png" alt="missing"/></p>`;
+    await importEpub(page, {
+      title: 'Pictures',
+      author: 'Bot',
+      rawChapters: [{ body }],
+      extraEntries: [
+        { name: 'OEBPS/images/a.png', data: TINY_PNG, store: true },
+        { name: 'OEBPS/images/b.png', data: TINY_PNG, store: true },
+        { name: 'OEBPS/images/c.png', data: TINY_PNG },
+      ],
+    });
+
+    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
+    await page.waitForFunction(
+      () => {
+        const imgs = [...document.querySelectorAll('#qcnt img')];
+        const shown = imgs.filter(i => i.alt !== 'missing');
+        return imgs.length === 4 && shown.every(i => i.src.startsWith('blob:') && i.complete && i.naturalWidth === 1);
+      },
+      { timeout: 15000 }
+    );
+    const missing = await page.locator('#qcnt img[alt="missing"]').getAttribute('src');
+    expect(missing).toBe('data:,');
 
     expect(errors.length).toBe(0);
   });
