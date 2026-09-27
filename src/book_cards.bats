@@ -9,7 +9,6 @@
 #use result as R
 #use str as S
 #use xml-tree as X
-#use zip as Z
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/dom as D
 #use wasm.bats-packages.dev/file-input as FI
@@ -160,159 +159,100 @@ in
     if file_size <= 0 then let
       val () = $FI.close(file_handle)
     in $P.ret<int>(~1) end
-    else if file_size > 1048576 then let
-      val () = $FI.close(file_handle)
-    in $P.ret<int>(~1) end
     else let
-      val file_size_s = file_size
-      val file_buf = $A.alloc<byte>(file_size_s)
-      val () = $FI.file_read(file_handle, 0, file_buf, file_size_s)
+      var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
+      val _cont_arr = $S.from_char_array(_cont_chars, 22)
+      val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
+      val cont = zip_read(file_handle, file_size, _cont_b, 22)
+      val () = $A.drop<byte>(_cont_f, _cont_b)
+      val () = $A.free<byte>($A.thaw<byte>(_cont_f))
     in
-      case+ $Z.find_dir(file_buf, file_size_s) of
-      | ~$R.none() => let
-        val () = $A.free<byte>(file_buf)
+      case+ cont of
+      | ~ZipMissing() => let
         val () = $FI.close(file_handle)
-      in $P.ret<int>(~2) end
-      | ~$R.some(dir) => let
-        var _cont_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
-        val _cont_arr = $S.from_char_array(_cont_chars, 22)
-        val @(_cont_f, _cont_b) = $A.freeze<byte>(_cont_arr)
-        val cont = $Z.find_entry(file_buf, file_size_s, dir, _cont_b, 22)
-        val () = $A.drop<byte>(_cont_f, _cont_b)
-        val _cont_t = $A.thaw<byte>(_cont_f)
-        val () = $A.free<byte>(_cont_t)
+      in $P.ret<int>(~3) end
+      | ~ZipGot(comp_buf, csz, method, _, _, _) => let
+        val @(cf, cb) = $A.freeze<byte>(comp_buf)
+        val dc_p = $DC.decompress(cb, csz, method)
+        val () = $A.drop<byte>(cf, cb)
+        val () = $A.free<byte>($A.thaw<byte>(cf))
+        val dc_p = $P.vow(dc_p)
       in
-        case+ cont of
-        | ~$R.none() => let
-          val () = $A.free<byte>(file_buf)
-          val () = $FI.close(file_handle)
-        in $P.ret<int>(~3) end
-        | ~$R.some($Z.zip_entry_mk(_, _, doff, csz, method, _)) =>
-          if csz <= 0 then let
-            val () = $A.free<byte>(file_buf)
+        (* Stage 2: parse container.xml, read the OPF it names *)
+        $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
+          val dc = take_blob(dc_handle)
+        in
+          case+ dc of
+          | ~NoBlobBytes() => let
             val () = $FI.close(file_handle)
-          in $P.ret<int>(~4) end
-          else let
-            val comp_buf = $A.alloc<byte>(csz)
-            val file_buf = $S.copy_arr_region(file_buf, doff, file_size_s,
-                                      comp_buf, csz, csz)
-            (* Free file_buf now — we will re-read in stage 2 *)
-            val () = $A.free<byte>(file_buf)
-
-            val @(cf, cb) = $A.freeze<byte>(comp_buf)
-            val dc_p = $DC.decompress(cb, csz, method)
-            val () = $A.drop<byte>(cf, cb)
-            val comp_buf2 = $A.thaw<byte>(cf)
-            val () = $A.free<byte>(comp_buf2)
-
-            val dc_p = $P.vow(dc_p)
+          in $P.ret<int>(~5) end
+          | ~BlobBytes(dc_buf, dc_sz) => let
+            val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
+            val nodes = $X.parse_document(dc_borrow, dc_sz)
+            val opf_path = walk_rootfile_nodes(dc_borrow, nodes)
           in
-            (* Stage 2: parse container.xml, re-read file for OPF lookup *)
-            $P.and_then<Int><int>(dc_p, lam(dc_handle) => let
-              val dc = take_blob(dc_handle)
+            case+ opf_path of
+            | xspan_none() => let
+              val () = $X.free_nodes(nodes)
+              val () = $A.drop<byte>(dc_frozen, dc_borrow)
+              val () = $A.free<byte>($A.thaw<byte>(dc_frozen))
+              val () = $FI.close(file_handle)
+            in $P.ret<int>(~6) end
+            | xspan_at(opf_off, opf_len) =>
+            if opf_len <= 0 then let
+              val () = $X.free_nodes(nodes)
+              val () = $A.drop<byte>(dc_frozen, dc_borrow)
+              val () = $A.free<byte>($A.thaw<byte>(dc_frozen))
+              val () = $FI.close(file_handle)
+            in $P.ret<int>(~6) end
+            else let
+              val opf_path_buf = $A.alloc<byte>(opf_len)
+              val () = $S.copy_from_borrow(dc_borrow, opf_off, dc_sz,
+                        opf_path_buf, 0, opf_len, opf_len)
+              val () = $X.free_nodes(nodes)
+              val () = $A.drop<byte>(dc_frozen, dc_borrow)
+              val () = $A.free<byte>($A.thaw<byte>(dc_frozen))
+              val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
+              val opf_entry = zip_read(file_handle, file_size, opf_borrow, opf_len)
+              val () = $A.drop<byte>(opf_frozen, opf_borrow)
+              val () = $A.free<byte>($A.thaw<byte>(opf_frozen))
             in
-              case+ dc of
-              | ~NoBlobBytes() => let
-                val () = $FI.close(file_handle)
-              in $P.ret<int>(~5) end
-              | ~BlobBytes(dc_buf, dc_sz) => let
-
-                val @(dc_frozen, dc_borrow) = $A.freeze<byte>(dc_buf)
-                val nodes = $X.parse_document(dc_borrow, dc_sz)
-                val opf_path = walk_rootfile_nodes(dc_borrow, nodes)
+              case+ opf_entry of
+              | ~ZipMissing() => $P.ret<int>(~7)
+              | ~ZipGot(opf_comp, opf_csz, opf_method, opf_doff, opf_name_off, opf_name_len) => let
+                val @(ocf, ocb) = $A.freeze<byte>(opf_comp)
+                val dc2_p = $DC.decompress(ocb, opf_csz, opf_method)
+                val () = $A.drop<byte>(ocf, ocb)
+                val () = $A.free<byte>($A.thaw<byte>(ocf))
+                val dc2_p = $P.vow(dc2_p)
               in
-                case+ opf_path of
-                | xspan_none() => let
-                  val () = $X.free_nodes(nodes)
-                  val () = $A.drop<byte>(dc_frozen, dc_borrow)
-                  val dc_buf2 = $A.thaw<byte>(dc_frozen)
-                  val () = $A.free<byte>(dc_buf2)
-                  val () = $FI.close(file_handle)
-                in $P.ret<int>(~6) end
-                | xspan_at(opf_off, opf_len) =>
-                if opf_len <= 0 then let
-                  val () = $X.free_nodes(nodes)
-                  val () = $A.drop<byte>(dc_frozen, dc_borrow)
-                  val dc_buf2 = $A.thaw<byte>(dc_frozen)
-                  val () = $A.free<byte>(dc_buf2)
-                  val () = $FI.close(file_handle)
-                in $P.ret<int>(~6) end
-                else let
-                  val opf_path_sz = opf_len
-                  val opf_path_buf = $A.alloc<byte>(opf_path_sz)
-                  val () = $S.copy_from_borrow(dc_borrow, opf_off, dc_sz,
-                            opf_path_buf, 0, opf_path_sz, opf_len)
-
-                  val () = $X.free_nodes(nodes)
-                  val () = $A.drop<byte>(dc_frozen, dc_borrow)
-                  val dc_buf2 = $A.thaw<byte>(dc_frozen)
-                  val () = $A.free<byte>(dc_buf2)
-
-                  (* Re-read file for OPF entry lookup *)
-                  val file_size_s2 = file_size_s
-                  val file_buf2 = $A.alloc<byte>(file_size_s2)
-                  val () = $FI.file_read(file_handle, 0, file_buf2, file_size_s2)
-
-                  val @(opf_frozen, opf_borrow) = $A.freeze<byte>(opf_path_buf)
-                  val opf_entry = $Z.find_entry(file_buf2, file_size_s2, dir,
-                    opf_borrow, opf_path_sz)
-                  val () = $A.drop<byte>(opf_frozen, opf_borrow)
-                  val opf_path_buf2 = $A.thaw<byte>(opf_frozen)
-                  val () = $A.free<byte>(opf_path_buf2)
+                (* Stage 3: parse OPF metadata *)
+                $P.and_then<Int><int>(dc2_p, lam(dc2_handle) => let
+                  val dc2 = take_blob(dc2_handle)
                 in
-                  case+ opf_entry of
-                  | ~$R.none() => let
-                    val () = $A.free<byte>(file_buf2)
-                  in $P.ret<int>(~7) end
-                  | ~$R.some($Z.zip_entry_mk(opf_name_off, opf_name_len, opf_doff, opf_csz0, opf_method, _)) =>
-                    if opf_csz0 <= 0 then let
-                      val () = $A.free<byte>(file_buf2)
-                    in $P.ret<int>(~8) end
-                    else let
-                      val opf_csz = opf_csz0
-                      val opf_comp = $A.alloc<byte>(opf_csz)
-                      val file_buf2 = $S.copy_arr_region(file_buf2, opf_doff, file_size_s2,
-                                                opf_comp, opf_csz, opf_csz)
-                      val () = $A.free<byte>(file_buf2)
+                  case+ dc2 of
+                  | ~NoBlobBytes() => $P.ret<int>(~9)
+                  | ~BlobBytes(opf_buf, dc2_sz) => let
+                    val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
+                    val opf_nodes = $X.parse_document(opf_b, dc2_sz)
+                    val @(title, author) = walk_opf_metadata(opf_b, opf_nodes)
 
-                      val @(ocf, ocb) = $A.freeze<byte>(opf_comp)
-                      val dc2_p = $DC.decompress(ocb, opf_csz, opf_method)
-                      val () = $A.drop<byte>(ocf, ocb)
-                      val opf_comp2 = $A.thaw<byte>(ocf)
-                      val () = $A.free<byte>(opf_comp2)
+                    (* Create card with metadata *)
+                    val () = _add_book_card(opf_b, dc2_sz, title, author)
 
-                      val dc2_p = $P.vow(dc2_p)
-                    in
-                      (* Stage 3: parse OPF metadata *)
-                      $P.and_then<Int><int>(dc2_p, lam(dc2_handle) => let
-                        val dc2 = take_blob(dc2_handle)
-                      in
-                        case+ dc2 of
-                        | ~NoBlobBytes() => $P.ret<int>(~9)
-                        | ~BlobBytes(opf_buf, dc2_sz) => let
+                    val () = $X.free_nodes(opf_nodes)
+                    val () = $A.drop<byte>(opf_f, opf_b)
+                    val () = $A.free<byte>($A.thaw<byte>(opf_f))
 
-                          val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
-                          val opf_nodes = $X.parse_document(opf_b, dc2_sz)
-                          val @(title, author) = walk_opf_metadata(opf_b, opf_nodes)
-
-                          (* Create card with metadata *)
-                          val () = _add_book_card(opf_b, dc2_sz, title, author)
-
-                          val () = $X.free_nodes(opf_nodes)
-                          val () = $A.drop<byte>(opf_f, opf_b)
-                          val opf_buf2 = $A.thaw<byte>(opf_f)
-                          val () = $A.free<byte>(opf_buf2)
-
-                          (* The open book, for chapter loading *)
-                          val () = book_set(OpenBook(file_handle, file_size_s, opf_doff, opf_csz,
-                                     opf_method, opf_name_off, opf_name_len))
-                        in $P.ret<int>(0) end
-                      end)
-                    end
-                end
+                    (* The open book, for chapter loading *)
+                    val () = book_set(OpenBook(file_handle, file_size, opf_doff, opf_csz,
+                               opf_method, opf_name_off, opf_name_len))
+                  in $P.ret<int>(0) end
+                end)
               end
-            end)
+            end
           end
+        end)
       end
     end
   end)

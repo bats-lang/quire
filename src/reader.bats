@@ -9,7 +9,6 @@
 #use result as R
 #use str as S
 #use xml-tree as X
-#use zip as Z
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/dom as D
 #use wasm.bats-packages.dev/file-input as FI
@@ -69,28 +68,22 @@ in end
 fn _save_position(): void =
   case+ reading_get() of Reading(p, _, c, _) => _save_pos(c, p)
 
-(* Save EPUB file bytes to IDB *)
+(* Save the EPUB file to IDB, from the JS side (it is never copied
+   through wasm memory, whatever its size) *)
 fn _save_epub_to_idb(): void =
   case+ book_get() of
   | NoBook() => ()
-  | OpenBook(fh, fsz, _, _, _, _, _) => let
-      val fbuf = $A.alloc<byte>(fsz)
-      val () = $FI.file_read(fh, 0, fbuf, fsz)
-      val @(ff, fb) = $A.freeze<byte>(fbuf)
+  | OpenBook(fh, _, _, _, _, _, _) => let
       val ka = $A.alloc<byte>(4)
       val () = $A.set<byte>(ka, 0, int2byte0(98))  (* b *)
       val () = $A.set<byte>(ka, 1, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
       val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
       val @(kf, kb) = $A.freeze<byte>(ka)
-      val p = $IDB.idb_put(kb, 4, fb, fsz)
+      val p = $FI.idb_put(kb, 4, fh)
       val () = $P.discard<Int>(p)
       val () = $A.drop<byte>(kf, kb)
-      val kt = $A.thaw<byte>(kf)
-      val () = $A.free<byte>(kt)
-      val () = $A.drop<byte>(ff, fb)
-      val ft = $A.thaw<byte>(ff)
-    in $A.free<byte>(ft) end
+    in $A.free<byte>($A.thaw<byte>(kf)) end
 
 (* v as 4 little-endian bytes at buf[off, off + 4) *)
 fn _put_i32 {l:agz}{n:pos}{off:nat | off + 4 <= n}
@@ -504,27 +497,26 @@ fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p}
   else if byte2int0($A.get<byte>(buf, p)) = 47 then _after_last_slash(buf, p + 1, e, p + 1)
   else _after_last_slash(buf, p + 1, e, la)
 
-(* The entry named name in the archive buf *)
-fn _find_zip_entry {l:agz}{n:pos}{lb:agz}{nb:pos}
-  (buf: !$A.arr(byte, l, n), n: int n, name: !$A.borrow(byte, lb, nb), nb: int nb)
-  : $R.option($Z.zip_entry(n)) =
-  case+ $Z.find_dir(buf, n) of
-  | ~$R.some(dir) => $Z.find_entry(buf, n, dir, name, nb)
-  | ~$R.none() => $R.none()
+(* The length of the directory part of the name [no, no + nl) of the
+   file: up to and including its last '/', 0 when it has none *)
+fn _opf_prefix_len {z:nat}{no,nl:nat | no + nl <= z; nl < 65536}
+  (fh: $FI.infile(z), no: int no, nl: int nl): [p:nat | p <= nl] int p =
+  if nl <= 0 then 0
+  else let
+    val buf = $A.alloc<byte>(nl)
+    val () = $FI.file_read(fh, no, buf, nl)
+    val p = _after_last_slash(buf, 0, nl, 0)
+    val () = $A.free<byte>(buf)
+  in p end
 
 fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
   case+ book_get() of
   | NoBook() => $P.ret<int>(~1)
   | OpenBook(fh, fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len) => let
-    (* Read full file *)
-    val fbuf2 = $A.alloc<byte>(fsz_s)
-    val () = $FI.file_read(fh, 0, fbuf2, fsz_s)
-
+    (* The OPF's compressed bytes, read at their span *)
     val opf_csz_s = opf_csz
     val opf_cbuf = $A.alloc<byte>(opf_csz_s)
-    val fbuf2 = $S.copy_arr_region(fbuf2, opf_doff, fsz_s,
-                                  opf_cbuf, opf_csz_s, opf_csz_s)
-    val () = $A.free<byte>(fbuf2)
+    val () = $FI.file_read(fh, opf_doff, opf_cbuf, opf_csz_s)
 
     val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
     val dc_p = $DC.decompress(ocb, opf_csz_s, opf_comp)
@@ -568,62 +560,36 @@ fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) =
           val () = $A.free<byte>(t)
         in $P.ret<int>(~3) end
         else let
-          (* Re-read file now so we can access the OPF name
-             in the central directory for path prefix resolution *)
-          val fsz_s3 = fsz_s
-          val fbuf3 = $A.alloc<byte>(fsz_s3)
-          val () = $FI.file_read(fh, 0, fbuf3, fsz_s3)
-
-          (* Find directory prefix from OPF name in central directory.
-             The OPF path e.g. "OEBPS/content.opf" tells us the
-             directory prefix "OEBPS/" to prepend to chapter hrefs. *)
-          val prefix_end = _after_last_slash(fbuf3, opf_name_off, opf_name_off + opf_name_len, opf_name_off)
-          val prefix_len = prefix_end - opf_name_off
-
-          (* Build full path: prefix + href *)
+          (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
+             prefixes chapter hrefs *)
+          val prefix_len = _opf_prefix_len(fh, opf_name_off, opf_name_len)
           val full_len = prefix_len + ch_len
         in
           if full_len > 1048576 then let
-            val () = $A.free<byte>(fbuf3)
             val () = $X.free_nodes(opf_nodes)
             val () = $A.drop<byte>(opf_f, opf_b)
-            val t = $A.thaw<byte>(opf_f)
-            val () = $A.free<byte>(t)
+            val () = $A.free<byte>($A.thaw<byte>(opf_f))
           in $P.ret<int>(~4) end
           else let
-          val full_len_s = full_len
-          val ch_buf = $A.alloc<byte>(full_len_s)
-          (* The prefix from the file, then the chapter href from the OPF *)
-          val fbuf3 = $S.copy_arr_region(fbuf3, opf_name_off, fsz_s3,
-                    ch_buf, full_len_s, prefix_len)
+          val ch_buf = $A.alloc<byte>(full_len)
+          (* The prefix read from the file at the OPF's name, then the
+             chapter href from the OPF *)
+          val () = $FI.file_read(fh, opf_name_off, ch_buf, prefix_len)
           val () = $S.copy_from_borrow(opf_b, ch_off, dc_sz,
-                    ch_buf, prefix_len, full_len_s, ch_len)
+                    ch_buf, prefix_len, full_len, ch_len)
 
           val () = $X.free_nodes(opf_nodes)
           val () = $A.drop<byte>(opf_f, opf_b)
-          val t = $A.thaw<byte>(opf_f)
-          val () = $A.free<byte>(t)
+          val () = $A.free<byte>($A.thaw<byte>(opf_f))
 
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val ch_entry = _find_zip_entry(fbuf3, fsz_s3, chb, full_len_s)
+          val ch_entry = zip_read(fh, fsz_s, chb, full_len)
           val () = $A.drop<byte>(chf, chb)
-          val ch_buf2 = $A.thaw<byte>(chf)
-          val () = $A.free<byte>(ch_buf2)
+          val () = $A.free<byte>($A.thaw<byte>(chf))
         in
           case+ ch_entry of
-          | ~$R.none() => let
-            val () = $A.free<byte>(fbuf3)
-          in $P.ret<int>(~4) end
-          | ~$R.some($Z.zip_entry_mk(_, _, ch_doff, ch_csz, ch_method, _)) =>
-            if ch_csz <= 0 then let
-              val () = $A.free<byte>(fbuf3)
-            in $P.ret<int>(~5) end
-            else let
-              val ch_comp = $A.alloc<byte>(ch_csz)
-              val fbuf3 = $S.copy_arr_region(fbuf3, ch_doff, fsz_s3,
-                                        ch_comp, ch_csz, ch_csz)
-              val () = $A.free<byte>(fbuf3)
-
+          | ~ZipMissing() => $P.ret<int>(~4)
+          | ~ZipGot(ch_comp, ch_csz, ch_method, _, _, _) => let
               val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
               val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
               val () = $A.drop<byte>(ccf, ccb)
@@ -759,21 +725,19 @@ fn _restore_from_idb(): void = let
   val () = $A.set<byte>(ka, 2, int2byte0(111)) (* o *)
   val () = $A.set<byte>(ka, 3, int2byte0(107)) (* k *)
   val @(kf, kb) = $A.freeze<byte>(ka)
-  val book_p = $IDB.idb_get(kb, 4)
+  val book_p = $FI.idb_get(kb, 4)
   val () = $A.drop<byte>(kf, kb)
   val ktmp = $A.thaw<byte>(kf)
   val () = $A.free<byte>(ktmp)
   val book_p = $P.vow(book_p)
   val p2 = $P.and_then<Int><int>(book_p, lam(book_h) =>
-    case+ take_blob(book_h) of
-    | ~NoBlobBytes() => $P.ret<int>(~1)
-    | ~BlobBytes(book_data, bsz) => let
-      (* Store into file cache *)
-      val @(bf, bb) = $A.freeze<byte>(book_data)
-      val fh = $FI.file_store(bb, bsz)
-      val () = $A.drop<byte>(bf, bb)
-      val btmp = $A.thaw<byte>(bf)
-      val () = $A.free<byte>(btmp)
+    case+ $FI.claim(book_h) of
+    | ~$R.none() => $P.ret<int>(~1)
+    | ~$R.some(fh) => let
+      val bsz = $FI.size(fh)
+    in
+      if bsz <= 0 then $P.ret<int>(~1)
+      else let
 
       (* Step 2: get "meta" from IDB *)
       val ma = $A.alloc<byte>(4)
@@ -806,8 +770,10 @@ fn _restore_from_idb(): void = let
           val () = $A.free<byte>(meta_data)
           val ok = (if d < 0 then false else if d > bsz then false
             else if sz <= 0 then false else if sz > bsz - d then false
+            else if sz > 1048576 then false
             else if no < 0 then false else if no > bsz then false
             else if nl < 0 then false else if nl > bsz - no then false
+            else if nl >= 65536 then false
             else if m = 0 then let
               val () = book_set(OpenBook(fh, bsz, d, sz, 0, no, nl))
             in true end
@@ -868,6 +834,7 @@ fn _restore_from_idb(): void = let
             in $P.ret<int>(0) end)
           end
         end)
+      end
     end)
   val () = $P.discard<int>(p2)
 in end
