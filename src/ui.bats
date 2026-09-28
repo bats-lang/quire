@@ -50,6 +50,32 @@ implement nid_make(pre, i) = let
   val () = $A.free<byte>(buf)
 in @(exact, off) end
 
+(* The zeros before i's digits at buf[o], to make them three *)
+fn _pad3 {l:agz}{o:nat | o <= 3}{i:nat} (buf: !$A.arr(byte, l, 16), o: int o, i: int i): [p:nat | p <= o + 2] int p =
+  if i < 10 then let
+    val () = $A.set<byte>(buf, o, $A.int2byte(48))
+    val () = $A.set<byte>(buf, o + 1, $A.int2byte(48))
+  in o + 2 end
+  else if i < 100 then let
+    val () = $A.set<byte>(buf, o, $A.int2byte(48))
+  in o + 1 end
+  else o
+
+(* A content node's id: pre and i's digits, zero-padded to three (as
+   the reader numbers its content nodes) *)
+#pub fn nid_pad3 {sn:pos | sn <= 3}{i:nat} (pre: string sn, i: int i)
+  : [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k)
+
+implement nid_pad3(pre, i) = let
+  val buf = $A.alloc<byte>(16)
+  val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
+  val off = _pad3(buf, off, i)
+  val off = $S.int_to_str(buf, off, 16, i)
+  val exact = $A.alloc<byte>(off)
+  val buf = $S.copy_arr_region(buf, 0, 16, exact, off, off)
+  val () = $A.free<byte>(buf)
+in @(exact, off) end
+
 (* A numbered id with a suffix: pre, i's digits, then suf *)
 #pub fn nid_make2 {sn:pos | sn <= 4}{i:nat}{un:pos | un <= 4}
   (pre: string sn, i: int i, suf: string un)

@@ -23,6 +23,7 @@ staload "ui.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
+staload "annot.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -172,15 +173,9 @@ in
   | ~$R.err(_) => false
 end
 
-(* The content node at the top of the page shown (its number), or -1:
-   the element at the middle of the page's first line *)
-fn _anchor_now (): [v:int | v >= ~1] int v = let
-  val () = _measure_lit("qcnt")
-  val cx = $DR.get_measure_x()
-  val cy = $DR.get_measure_y()
-  val cw = $DR.get_measure_w()
-in
-  case+ $DR.element_at_point(cx + cw / 2, cy + 24) of
+(* The content node at x, y (its number), or -1 *)
+fn _node_at (x: int, y: int): [v:int | v >= ~1] int v =
+  case+ $DR.element_at_point(x, y) of
   | ~$R.none() => ~1
   | ~$R.some(b) => let
       val n = $DC.blob_len(b)
@@ -197,7 +192,21 @@ in
         val () = $A.free<byte>($A.thaw<byte>(f))
       in v end
     end
-end
+
+(* The first content node down the middle of the page, from y, in steps
+   of 40 px, j more times *)
+fun _node_down {j:nat} .<j>. (x: int, y: int, j: int j): [v:int | v >= ~1] int v = let
+  val v = _node_at(x, y)
+in if v >= 0 then v else if j <= 0 then ~1 else _node_down(x, y + 40, j - 1) end
+
+(* The content node at the top of the page shown (its number), or -1:
+   the first element down the middle of the page from its first line *)
+fn _anchor_now (): [v:int | v >= ~1] int v = let
+  val () = _measure_lit("qcnt")
+  val cx = $DR.get_measure_x()
+  val cy = $DR.get_measure_y()
+  val cw = $DR.get_measure_w()
+in _node_down(cx + cw / 2, cy + 24, 8) end
 
 (* The page, of the chapter's t, that content node i is on (the page
    shown now is cur); cur when it is not in the chapter *)
@@ -357,6 +366,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val () = $A.free<byte>(cnt_tmp)
   val () = _update_page_indicator()
   val () = _scrub_show()
+  val () = annot_star()
   val () = _record_position()
 in end
 
@@ -920,6 +930,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = toc_title(chapter_idx)
                   val () = (case+ reading_get() of @(_, _, _, tc) => _ticks_show(tc))
                   val () = _measure_pagination()
+                  val () = annot_marks()
                 in $P.ret<int>(0) end
               end)
             end
@@ -1174,6 +1185,10 @@ end
 (* Stores where the reader is *)
 #pub fun reader_save (): void
 implement reader_save () = _record_position()
+
+(* The content node at the top of the page shown, or -1 *)
+#pub fun reader_anchor (): Int
+implement reader_anchor () = _anchor_now()
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

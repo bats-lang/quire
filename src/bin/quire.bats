@@ -17,6 +17,8 @@ staload "settings.sats"
 staload "import.sats"
 staload "reader.sats"
 staload "toc.sats"
+staload "annot.sats"
+staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
@@ -39,6 +41,8 @@ val _wheel_busy = ref<bool>(false)
 val _resize_gen = ref<int>(0)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
+(* The annotation whose note the dialog edits *)
+val _note_idx = ref<int>(~1)
 (* Where a touch started *)
 val _touch_x = ref<int>(0)
 val _touch_y = ref<int>(0)
@@ -230,17 +234,19 @@ fn _open_book {i:int} (i: int i): void =
       val ch = x.ch
       val pg = x.pg
       val anchor = x.anchor
+      val h1 = x.h1
+      val h2 = x.h2
     in
       if open_key_get() = x.key then
-        $P.discard<int>(reader_goto(ch, pg, anchor))
+        $P.discard<int>($P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor)))
       else
-        $P.discard<int>($P.and_then<Int><int>(open_stored(x.key, x.h1, x.h2), lam(r) =>
+        $P.discard<int>($P.and_then<Int><int>(open_stored(x.key, h1, h2), lam(r) =>
           if r < 0 then let
             val () = _show_library()
             val () = ui_text("qert", "This book's file could not be read. Import it again.")
             val () = ui_show("qerr", true)
           in $P.ret<int>(r) end
-          else reader_goto(ch, pg, anchor)))
+          else $P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor))))
     end
 
 (* ============================================================
@@ -383,6 +389,91 @@ fn _clamp {lo,hi:int | lo <= hi} (v: Int, lo: int lo, hi: int hi): [r:int | lo <
    Listeners
    ============================================================ *)
 
+(* ============================================================
+   Annotations
+   ============================================================ *)
+
+(* Whether text is selected *)
+fn _has_selection (): bool =
+  case+ $DR.get_selection_text() of
+  | ~$R.none() => false
+  | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
+
+(* The note dialog for annotation i *)
+fn _note_open (i: int): void =
+  if i < 0 then ()
+  else let
+    val () = !_note_idx := i
+    val () = modal_open(5, "Note", "Cancel", "Save", "-")
+    val () = modal_textarea()
+  in annot_note_show(i) end
+
+(* The note in the dialog's text area, kept as annotation _note_idx's *)
+fn _note_save (): void = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
+  val @(f, b) = $A.freeze<byte>(a)
+  val r = $DR.read_input_value(b, 4)
+  val () = $A.drop<byte>(f, b)
+  val () = $A.free<byte>($A.thaw<byte>(f))
+  val i = !_note_idx
+in
+  case+ r of
+  | ~$R.none() => let
+      val e = $A.alloc<byte>(1)
+      val () = annot_note_set(i, e, 0)
+    in annot_render() end
+  | ~$R.some(v) => let
+      val n = $DC.blob_len(v)
+    in
+      if n <= 0 then let
+        val () = $DC.blob_free(v)
+        val e = $A.alloc<byte>(1)
+        val () = annot_note_set(i, e, 0)
+      in annot_render() end
+      else if n > 65536 then let
+        val () = $DC.blob_free(v)
+      in end
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(v, 0, a, n)
+        val () = $DC.blob_free(v)
+        val () = annot_note_set(i, a, n)
+      in annot_render() end
+    end
+end
+
+(* The selected text, to the clipboard *)
+fn _copy_selection (): void =
+  case+ $DR.get_selection_text() of
+  | ~$R.none() => ()
+  | ~$R.some(b) => let
+      val n = $DC.blob_len(b)
+    in
+      if n <= 0 then $DC.blob_free(b)
+      else if n > 1048576 then $DC.blob_free(b)
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(b, 0, a, n)
+        val () = $DC.blob_free(b)
+        val @(f, bb) = $A.freeze<byte>(a)
+        val () = $P.discard<Int>($P.vow($CB.clipboard_write(bb, n)))
+        val () = $A.drop<byte>(f, bb)
+      in $A.free<byte>($A.thaw<byte>(f)) end
+    end
+
+(* Exports the open book's annotations *)
+fn _export (): void = let
+  val i = lib_index_of_key(open_key_get())
+  val @(t, tn) = lib_text(i, 0)
+  val @(a, an) = lib_text(i, 1)
+in annot_export(t, tn, a, an) end
+
+(* Goes to annotation i, remembering where the reader was *)
+fn _annot_go (i: int): void = let
+  val @(ch, pg, sn) = annot_dest(i)
+in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
+
 fn _wire_library (): void = let
   (* import *)
   val () = ui_listen("qfin", "change", 1, lam(_) => let val () = import_picked() in 0 end)
@@ -487,6 +578,11 @@ fn _wire_library (): void = let
            val () = set_reset()
          in let val () = $NAV.reload() in 0 end end
          else if b1 then let val () = modal_close() in 0 end else 0)
+      else if k = 5 then
+        (if b2 then let
+           val () = _note_save()
+         in let val () = modal_close() in 0 end end
+         else if b1 then let val () = modal_close() in 0 end else 0)
       else if b1 then let val () = modal_close() in 0 end
       else if b2 then let val () = modal_close() in 0 end
       else 0
@@ -580,6 +676,8 @@ in
   else if _key_is(b, n, " ") then (if shift then _prev() else _next())
   else if _key_is(b, n, "Home") then reader_page(0)
   else if _key_is(b, n, "End") then reader_page(1000000)
+  else if _key_is(b, n, "b") then annot_bookmark_toggle(reader_anchor())
+  else if _key_is(b, n, "B") then annot_bookmark_toggle(reader_anchor())
   else if _key_is(b, n, "t") then _chrome_set(~(!_chrome))
   else if _key_is(b, n, "T") then _chrome_set(~(!_chrome))
   else if _key_is(b, n, "Escape") then
@@ -599,13 +697,26 @@ fn _toc_open (): void = let
   val () = ui_show("qtoc", true)
 in ui_focus("qtcx") end
 
+(* The contents panel, open on its bookmarks tab *)
+fn _bookmarks_open (): void = let
+  val () = annot_render_bookmarks()
+  val () = ui_attr("qtct", "aria-selected", "false")
+  val () = ui_attr("qtcm", "aria-selected", "true")
+  val () = ui_show("qtcl", false)
+in ui_show("qtbl", true) end
+
 fn _wire_toc (): void = let
   val () = ui_listen("qtcb", "click", 34, lam(_) => let val () = _toc_open() in 0 end)
   val () = ui_listen("qtoc", "click", 35, lam(h) => let
       val t = _target(h)
       val row = _row_of(t, "qe")
+      val bgo = _row_of(t, "qb")
+      val bdl = _row_of(t, "qx")
       val () = (if _is(t, "qtcx") then ui_show("qtoc", false)
         else if _is(t, "qtct") then _toc_open()
+        else if _is(t, "qtcm") then _bookmarks_open()
+        else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
+        else if bdl >= 0 then let val () = annot_delete(bdl) in _bookmarks_open() end
         else if row >= 0 then let
           val () = ui_show("qtoc", false)
         in reader_goto_entry(row) end
@@ -637,13 +748,54 @@ fn _wire_toc (): void = let
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in end
 
+fn _wire_annotations (): void = let
+  val () = ui_listen("qbmk", "click", 41, lam(_) => let
+      val () = annot_bookmark_toggle(reader_anchor())
+    in 0 end)
+  val () = ui_listen_doc("selectionchange", 42, lam(_) =>
+      if !_view = 1 then let val () = ui_show("qsel", _has_selection()) in 0 end else 0)
+  val () = ui_listen("qsel", "click", 43, lam(h) => let
+      val t = _target(h)
+      val hl = _is(t, "qslh")
+      val nt = _is(t, "qsln")
+      val cp = _is(t, "qslc")
+      val () = _target_free(t)
+      val () = (if hl then let val _ = annot_highlight() in () end
+        else if nt then _note_open(annot_highlight())
+        else if cp then _copy_selection()
+        else ())
+    in let val () = ui_show("qsel", false) in 0 end end)
+  val () = ui_listen("qanb", "click", 44, lam(_) => let
+      val () = annot_render()
+      val () = ui_show("qanp", true)
+    in let val () = ui_focus("qanc") in 0 end end)
+  val () = ui_listen("qanp", "click", 45, lam(h) => let
+      val t = _target(h)
+      val go = _row_of(t, "qa")
+      val nt = _row_of(t, "qn")
+      val dl = _row_of(t, "qd")
+      val close = _is(t, "qanc")
+      val ex = _is(t, "qanx")
+      val () = _target_free(t)
+      val () = (if close then ui_show("qanp", false)
+        else if ex then _export()
+        else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
+        else if nt >= 0 then _note_open(nt)
+        else if dl >= 0 then let val () = annot_delete(dl) in annot_render() end
+        else ())
+    in 0 end)
+in end
+
 fn _wire_reader (): void = let
   val () = ui_listen("qbbk", "click", 2, lam(_) => let val () = _show_library() in 0 end)
   val () = ui_listen("qprv", "click", 3, lam(_) => let val () = page_prev() in 0 end)
   val () = ui_listen("qnxt", "click", 4, lam(_) => let val () = page_next() in 0 end)
   val () = ui_listen("qcnt", "click", 5, lam(h) => let
       val x = _event_x(h)
-    in if x >= 0 then let val () = _zone_click(x) in 0 end else 0 end)
+    in
+      if _has_selection() then 0
+      else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
+    end)
   val () = ui_listen_doc("keydown", 7, lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
@@ -723,6 +875,7 @@ implement main0 () = let
   val () = _wire_settings()
   val () = _wire_reader()
   val () = _wire_toc()
+  val () = _wire_annotations()
   (* files handed to the app from outside it (an Android intent) *)
   val () = $EV.listen_external_files(33, lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())

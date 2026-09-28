@@ -112,3 +112,9 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .sbar input{flex:1;min-height:40px;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
 .snav{display:flex;align-items:center;justify-content:center;gap:8px;padding:6px;border-top:1px solid var(--line);font-size:14px}
 @media (max-width:480px){.lib{padding-left:10px;padding-right:10px}.ttl{font-size:20px}}
+.hrow{border-bottom:1px solid var(--line);padding:8px 12px}
+.hgo{display:block;width:100%;text-align:left;padding:4px 0}
+.hgo *{pointer-events:none}
+.hq{display:block}
+.hbtn{padding:4px 10px;border:1px solid var(--line);border-radius:4px;font-size:13px;min-height:32px}
+.grp{font-weight:bold;padding:12px 12px 4px;color:var(--muted);font-size:13px;letter-spacing:.04em;text-transform:uppercase}

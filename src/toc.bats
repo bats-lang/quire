@@ -584,4 +584,46 @@ end
 
 implement toc_title (ch) = toc_title_in("qcht", ch)
 
+(* The label of the entry at index i of t, copied; none when there is
+   no such entry *)
+datavtype label =
+  | {l:agz}{k:pos | k <= LBL} Label of ($A.arr(byte, l, k), int k)
+  | NoLabel of ()
+
+fun _label_at {k:nat} .<k>. (t: !toc(k), i: int): label =
+  case+ t of
+  | toc_nil() => NoLabel()
+  | @toc_cons(lb, ll, _, _, _, _, rest) =>
+    if i > 0 then let
+      val r = _label_at(rest, i - 1)
+      prval () = fold@(t)
+    in r end
+    else let
+      val tb = $A.alloc<byte>(ll)
+      val () = _dup(lb, tb, ll, 0)
+      val k = ll
+      prval () = fold@(t)
+    in Label(tb, k) end
+
+(* Chapter ch's title (from 0), as toc_title shows it, in a new array *)
+#pub fn toc_label_of {c:nat} (ch: int c): [l:agz][k:pos | k <= 200] @($A.arr(byte, l, k), int k)
+
+implement toc_label_of (ch) = let
+  val c = _take()
+  val+ @TocCell(t, _) = c
+  val cur = _current(t, ch, 0, ~1)
+  val r = _label_at(t, cur)
+  prval () = fold@(c)
+  val () = _put(c)
+in
+  case+ r of
+  | ~Label(a, k) => @(a, k)
+  | ~NoLabel() => let
+      val @(b, k) = _chapter_label(ch + 1)
+      val a = $A.alloc<byte>(k)
+      val () = _dup(b, a, k, 0)
+      val () = $A.free<byte>(b)
+    in @(a, k) end
+end
+
 end (* #target wasm *)
