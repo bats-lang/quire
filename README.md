@@ -6,12 +6,37 @@ An EPUB e-reader built on the [bats-lang](https://github.com/bats-lang) ecosyste
 
 ## Features
 
-- Import EPUB files from your device
-- Paginated chapter reading with click/tap navigation
-- Chapter-by-chapter progress tracking
-- Font size settings with persistence
-- Library view with book cards
-- Works offline as a PWA
+**Library**
+- Import EPUB files by picking or dropping them; on Android, open them
+  from another app or share them to Quire
+- Import progress, a message for files that are not EPUBs, and a question
+  when a book is imported twice (matched by its SHA-256)
+- Cards with covers, titles, authors and progress; sort by last opened,
+  title, author or date added; search by title or author
+- Shelves: the library, hidden books and archived books (an archived
+  book keeps its place and notes, and is read again by importing it)
+- Book info, delete, and a factory reset
+
+**Reading**
+- Pages turned by buttons, keys (arrows, Page Up/Down, Space, Home, End),
+  taps on the page's sides, the mouse wheel and swipes; right-to-left
+  books turn the other way
+- The contents (EPUB 3 nav or EPUB 2 NCX), a scrubber with chapter ticks,
+  and a back button after every jump
+- The place is kept: on reopening, after a reload, and when the type
+  size, spacing, margins or window size change
+- Search in the book, with results by chapter and the match marked
+- Bookmarks, highlights and notes, exported as Markdown
+- The book's markup, links (inside the book and out of it), images,
+  tables and its own fonts
+
+**Settings and data**
+- Type size, line spacing, margins, font (Literata, Inter or the book's)
+  and theme (auto, light, sepia, dark), applied and kept as they change
+- Backup and restore of the library, settings, places and annotations as
+  one JSON file (not the EPUBs); a book restored before it is imported
+  takes its state back when it is
+- Works offline as a PWA, and as an Android app
 
 ## Architecture
 
@@ -37,7 +62,8 @@ bats build --only native --repository ../repository-prototype
 # Generate PWA shell
 mkdir -p dist/pwa && dist/debug/gen-pwa
 
-# Run e2e tests
+# Run the e2e tests (desktop and phone for every area; the layout tests
+# at five screen sizes)
 npx playwright test
 ```
 

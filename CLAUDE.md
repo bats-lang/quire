@@ -74,10 +74,14 @@ page's arena, or the one piece of an arena sized to it, so it has no
 * decompressed content (`take_content`): the container.xml, the OPF and
   each chapter's XHTML;
 * the OPF's compressed data when a chapter is loaded (`opf_cbuf`);
-* each image's bytes (`_show_image` in `src/reader.bats`).
+* each image's bytes (`_show_image` in `src/reader.bats`);
+* a book's annotations while a backup is written (`annot_json`), each
+  book's part of the backup, and the whole file (`backup_export`);
+* a backup file while it is restored (`backup_import`).
 
-Each piece lives only while it is parsed: nothing is kept between page
-turns yet, since pages are CSS columns of the chapter's DOM.
+Each piece lives only while it is parsed or written: nothing is kept
+between page turns yet, since pages are CSS columns of the chapter's
+DOM.
 
 With `alloc`:
 

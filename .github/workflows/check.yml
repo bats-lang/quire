@@ -70,7 +70,17 @@ jobs:
           test -f dist/pwa/app.wasm
           test -x dist/android/build-android.sh
           grep -q '"appId": "dev.middlefield.quire"' dist/android/capacitor.config.json
+          # the icons the manifest names, and the EPUBs the app opens
+          test -s dist/pwa/icon-192.png
+          test -s dist/pwa/icon-512.png
+          grep -q 'android:mimeType="application/epub+zip"' dist/android/intent-filters.xml
           echo "PWA verification passed"
+
+      # A book for the Android smoke test to share with the app
+      - name: Make the book to share
+        run: >-
+          node -e "import('./e2e/create-epub.js').then(m => require('fs').writeFileSync('dist/android/smoke-share.epub',
+          m.createEpub({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true })))"
 
       - name: Upload Android project
         uses: actions/upload-artifact@v4
@@ -120,3 +130,8 @@ jobs:
       # Run it on an emulator until the library's button, which the wasm
       # renders (the static page shows only a spinner), is on the screen
       smoke-test-text: Import EPUB
+      # then share a book with it, as another app would, until its title
+      # is in the library
+      smoke-share-file: android/smoke-share.epub
+      smoke-share-type: application/epub+zip
+      smoke-share-text: Shared With Quire

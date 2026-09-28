@@ -111,18 +111,15 @@ describe('WASM Smoke', () => {
     // Dispatch change to trigger WASM's event handler → file_open → read → decompress → parse → render
     fileInput.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
 
-    // Wait for async import pipeline
-    for (let i = 0; i < 30; i++) {
+    // Wait for async import pipeline: the library shows the book's card
+    let bookCard = null;
+    for (let i = 0; i < 50 && !bookCard; i++) {
       await new Promise(r => setTimeout(r, 100));
-      // WASM may write null bytes for '0' in IDs (browser normalizes, jsdom keeps raw)
-      const allEls = dom.window.document.querySelectorAll('[id]');
-      const found = Array.from(allEls).some(el => el.id.startsWith('qbc'));
-      if (found) break;
+      bookCard = dom.window.document.querySelector('#qlst .card');
     }
 
-    // Book card should appear (ID starts with 'qbc')
-    const allEls = dom.window.document.querySelectorAll('[id]');
-    const bookCard = Array.from(allEls).find(el => el.id.startsWith('qbc'));
-    expect(bookCard).toBeDefined();
+    expect(bookCard).not.toBeNull();
+    expect(bookCard.textContent).toContain('Node Smoke');
+    expect(bookCard.textContent).toContain('Test Bot');
   });
 });

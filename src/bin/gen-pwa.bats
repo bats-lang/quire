@@ -37,7 +37,8 @@ implement main0 () = let
   val () = $A.free<byte>(assets)
   val () = println! ("PWA generated in dist/pwa/")
   (* The Capacitor project around it; its id is the one Quire is
-     published under on Google Play *)
-  val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android")
+     published under on Google Play. It opens EPUBs, and is shared
+     them. *)
+  val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
   val () = println! ("Android project generated in dist/android/")
 in end

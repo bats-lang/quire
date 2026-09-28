@@ -70,4 +70,18 @@ test.describe('Smoke', () => {
     await expect(page.locator('#qcnt')).toContainText('Chapter 1');
     expect(errors).toEqual([]);
   });
+
+  test('the app loads offline once it has been opened', async ({ page, context }) => {
+    await page.goto('/');
+    await expect(page.locator('#qibn')).toBeVisible();
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // a load the worker serves, so it keeps what it fetches
+    await page.reload();
+    await expect(page.locator('#qibn')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+    await context.setOffline(true);
+    await page.reload();
+    await expect(page.locator('#qibn')).toBeVisible();
+    await context.setOffline(false);
+  });
 });
