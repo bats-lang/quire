@@ -305,21 +305,11 @@ fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
   val cp = (if t > 0 then p * 1000 / t else 0): Int
 in _thousandth(b + _of_thousandth(cp, w), tot) end
 
-(* The style prop v/10 "%" (with one decimal) of element id *)
-fn _style_pct {ni:pos | ni < 256}{sn:pos | sn <= 8}{v:nat | v <= 1000}
-  (id: string ni, prop: string sn, v: int v): void = let
-  val b = $A.alloc<byte>(32)
-  val off = _put(b, 0, prop)
-  val off = $S.int_to_str(b, off, 32, v / 10)
-  val off = _put(b, off, ".")
-  val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
-  val off = _put(b, off, "%")
-in ui_attr_buf(id, AStyle, b, off) end
 
 (* The scrubber at v: its thumb, its fill and the percentage *)
 fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
-  val () = _style_pct("qsth", "left:", v)
-  val () = _style_pct("qtkf", "width:", v)
+  val () = ui_place("qsth", PLeft, v)
+  val () = ui_place("qtkf", PWidth, v)
   val b = $A.alloc<byte>(16)
   val off = $S.int_to_str(b, 0, 16, v / 10)
   val off = _put(b, off, "%")
@@ -343,14 +333,8 @@ fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
     val @(ki, kl) = nid_make("qk", i)
     val () = ui_attr_n(ki, kl, AClass, "tick")
     val v = _thousandth(b, tot)
-    val bb = $A.alloc<byte>(32)
-    val off = _put(bb, 0, "left:")
-    val off = $S.int_to_str(bb, off, 32, v / 10)
-    val off = _put(bb, off, ".")
-    val off = $S.int_to_str(bb, off, 32, v - (v / 10) * 10)
-    val off = _put(bb, off, "%")
     val @(ki, kl) = nid_make("qk", i)
-    val () = ui_attr_n_buf(ki, kl, AStyle, bb, off)
+    val () = ui_place_n(ki, kl, PLeft, v)
   in _ticks(i + 1, tc) end
 
 fn _ticks_show {tc:nat} (tc: int tc): void = let
@@ -1833,7 +1817,7 @@ in ui_show("qpbk", false) end
 implement reader_scrub_preview (x) = let
   val v = _track_at(x)
   val () = _scrub_at(v)
-  val () = _style_pct("qstt", "left:", v)
+  val () = ui_place("qstt", PLeft, v)
   val () = (case+ reading_get() of
     | @(_, _, _, tc) => let
         val @(c, _) = _chapter_at(v, 0, tc)

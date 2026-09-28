@@ -459,15 +459,18 @@ fun _empty {n:nat} .<n>. (n: int n): void =
     if i < 0 then () else let val () = _delete_book(i) in _empty(n - 1) end
   end
 
-(* Asks whether to empty the Trash; if the answer is yes, every book in
-   it and everything stored for it go, then after runs *)
-#pub fn lib_ask_empty_trash (after: () -<cloref1> void): void
+(* Asks about h, with the action that does it; if the answer is yes, it
+   is done, then after runs. HEmptyTrash: every book in the Trash and
+   everything stored for it go (and any Undo offer, which could only
+   put back what is gone) *)
+#pub fn lib_ask_harm (h: harm, after: () -<cloref1> void): void
 
-implement lib_ask_empty_trash (after) =
-  modal_confirm(HEmptyTrash(), lam () => let
-    val () = undo_close()
-    val () = _empty(lib_count())
-  in after() end)
+implement lib_ask_harm (h, after) =
+  case+ h of
+  | HEmptyTrash() => modal_confirm(h, lam () => let
+      val () = undo_close()
+      val () = _empty(lib_count())
+    in after() end)
 
 (* Each book's key and the shelf it was on *)
 datatype shelved(int) =
@@ -951,13 +954,8 @@ in
     val () = ui_add_nn(pi, pl, fi, fl, TDiv)
     val @(fi, fl) = nid_make2("k", i, "f")
     val () = ui_attr_n(fi, fl, AClass, "pfill")
-    (* "width:N%" *)
-    val sb = $A.alloc<byte>(24)
-    val () = $A.write_text(sb, 0, $A.text_lit("width:"), 6)
-    val off = $S.int_to_str(sb, 6, 24, per)
-    val () = $A.set<byte>(sb, off, $A.int2byte(37))
     val @(fi, fl) = nid_make2("k", i, "f")
-    val () = ui_attr_n_buf(fi, fl, AStyle, sb, off + 1)
+    val () = ui_place_n(fi, fl, PWidth, per * 10)
     val @(pi, pl) = nid_make2("k", i, "p")
     val @(xi, xl) = nid_make2("k", i, "x")
     val () = ui_add_nn(pi, pl, xi, xl, TSpan)

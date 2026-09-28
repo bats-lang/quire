@@ -219,8 +219,15 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
     await menuItem(page, 'Move to Trash').click();
   }
   await libraryMenu(page);
+  // the one irreversible action is the one marked: red, unlike the
+  // items and the button beside it
+  const colour = l => l.evaluate(e => getComputedStyle(e).color);
+  const red = await colour(menuItem(page, 'Empty Trash'));
+  expect(red).not.toBe(await colour(menuItem(page, 'Factory reset')));
   await menuItem(page, 'Empty Trash').click();
   const ask = dialog(page, 'Empty the Trash?');
+  expect(await colour(ask.getByRole('button', { name: 'Empty' }))).toBe(red);
+  expect(await colour(ask.getByRole('button', { name: 'Cancel' }))).not.toBe(red);
   await ask.getByRole('button', { name: 'Cancel' }).click();
   for (let i = 0; i < 3; i++) await shelf(page).click();
   await expect(cards(page)).toHaveCount(2);

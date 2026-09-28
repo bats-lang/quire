@@ -262,13 +262,16 @@ fn _sattr_n_buf {li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:p
   val () = $A.free<byte>($A.thaw<byte>(if_))
 in end
 
-#pub datatype attr = AClass | ASelected | APressed | AValue | AStyle | AControls
+(* The attributes other code may set. There is no style: the one inline
+   style is a place (ui_place), so nothing can set a colour, a size or
+   anything else the stylesheet proves *)
+#pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | ASrc | AValueNow | ACurrent
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
   | AClass() => "class" | ASelected() => "aria-selected" | APressed() => "aria-pressed"
-  | AValue() => "value" | AStyle() => "style" | AControls() => "aria-controls"
+  | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current"
 
@@ -293,6 +296,36 @@ implement ui_attr_buf(id, a, buf, k) = _sattr_buf(id, _attr_name(a), buf, k)
   (id: $A.arr(byte, li, ni), inn: int ni, a: attr, buf: $A.arr(byte, l, n), k: int k): void
 
 implement ui_attr_n_buf(id, inn, a, buf, k) = _sattr_n_buf(id, inn, _attr_name(a), buf, k)
+
+(* Where an element sits along its track (PLeft) or how much of it it
+   fills (PWidth) *)
+#pub datatype place = PLeft | PWidth
+
+(* "left:" or "width:", then v / 10 with one decimal, then "%" *)
+fn _place_style {l:agz}{v:nat | v <= 1000} (b: !$A.arr(byte, l, 32), p: place, v: int v): [k:pos | k <= 32] int k = let
+  val off = (case+ p of
+    | PLeft() => _put_str(b, 0, "left:", 5, 0)
+    | PWidth() => _put_str(b, 0, "width:", 6, 0)): [o:pos | o <= 6] int o
+  val off = $S.int_to_str(b, off, 32, v / 10)
+  val off = _put_str(b, off, ".", 1, 0)
+  val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
+in _put_str(b, off, "%", 1, 0) end
+
+(* Element id's place: v tenths of a percent of its track *)
+#pub fn ui_place {ni:pos | ni < 256}{v:nat | v <= 1000} (id: string ni, p: place, v: int v): void
+
+implement ui_place (id, p, v) = let
+  val b = $A.alloc<byte>(32)
+  val k = _place_style(b, p, v)
+in _sattr_buf(id, "style", b, k) end
+
+#pub fn ui_place_n {li:agz}{ni:pos | ni < 256}{v:nat | v <= 1000}
+  (id: $A.arr(byte, li, ni), inn: int ni, p: place, v: int v): void
+
+implement ui_place_n (id, inn, p, v) = let
+  val b = $A.alloc<byte>(32)
+  val k = _place_style(b, p, v)
+in _sattr_n_buf(id, inn, "style", b, k) end
 
 (* The class of element id *)
 #pub fn ui_class {ni:pos | ni < 256}{nv:pos | nv < 256} (id: string ni, cls: string nv): void
@@ -494,16 +527,34 @@ fn _glyph (ic: icon): [k:pos | k < 256] string k =
   | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
   | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE"
 
-(* What a menu item or a dialog's button does: Danger for one that
-   deletes or resets, which the stylesheet marks *)
-#pub datatype tone = Plain | Danger
+(* What would be lost for good. Only emptying the Trash cannot be
+   undone (everything else is done at once and offered back: undo.bats),
+   so it is the one harm *)
+#pub datatype harm =
+  | HEmptyTrash                           (* every book in the Trash *)
+
+(* The menu item that asks about h: its id and its label *)
+fn _harm_item (h: harm): @([k:pos | k < 256] string k, [k:pos | k < 256] string k) =
+  case+ h of
+  | HEmptyTrash() => @("qlmt", "Empty Trash")
+
+(* The id of h's menu item, for its click: the item asks about h *)
+#pub fn ui_harm_id (h: harm): [k:pos | k < 256] string k
+implement ui_harm_id (h) = let val @(id, _) = _harm_item(h) in id end
+
+(* What a dialog's button does: Danger(h) for the one that does h. Red
+   is the stylesheet's mark for [data-harm], which only this module
+   sets, and only from a harm: on h's menu item (ui_harm_item) and on
+   the button that does h (ui_tone) *)
+#pub datatype tone = Plain | Danger of harm
 
 (* The kinds of control, each carrying what names it *)
 datatype control =
   | {nc,nl:pos | nc < 256; nl < 256} CText of (string nc, string nl)
   | {nc,nn:pos | nc < 256; nn < 256} CIcon of (string nc, icon, string nn)
   | {nc:pos | nc < 256} CNamedByContent of (string nc)
-  | {nl:pos | nl < 256} CMenuItem of (string nl, tone)
+  | {nl:pos | nl < 256} CMenuItem of (string nl)
+  | CHarmItem of harm
   | {nl,nx:pos | nl < 256; nx < 256} CTab of (string nl, string nx, bool)
 
 (* Control c as element ib, the last child of pb *)
@@ -519,9 +570,15 @@ fn _control {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}
       val () = _dattr(doc, ib, inn, "aria-label", name)
     in _dtext(doc, ib, inn, _glyph(ic)) end
   | CNamedByContent(cls) => _dbutton(doc, pb, pn, ib, inn, cls)
-  | CMenuItem(label, t) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, (case+ t of Plain() => "mi" | Danger() => "mi danger"): [k:pos | k < 256] string k)
+  | CMenuItem(label) => let
+      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
       val () = _dattr(doc, ib, inn, "role", "menuitem")
+    in _dtext(doc, ib, inn, label) end
+  | CHarmItem(h) => let
+      val @(_, label) = _harm_item(h)
+      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
+      val () = _dattr(doc, ib, inn, "role", "menuitem")
+      val () = _dattr(doc, ib, inn, "data-harm", "y")
     in _dtext(doc, ib, inn, label) end
   | CTab(label, controls, sel) => let
       val () = _dbutton(doc, pb, pn, ib, inn, "tab")
@@ -613,9 +670,25 @@ implement ui_text_btn_nn(parent, pn, id, inn, cls, label) = _control_nn(parent, 
 
 (* An item of a menu, named by its label *)
 #pub fn ui_menuitem {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}
-  (parent: string np, id: string ni, label: string nl, t: tone): void
+  (parent: string np, id: string ni, label: string nl): void
 
-implement ui_menuitem(parent, id, label, t) = _control_s(parent, id, CMenuItem(label, t))
+implement ui_menuitem(parent, id, label) = _control_s(parent, id, CMenuItem(label))
+
+(* The menu item that asks about h, marked as losing what it names: its
+   id and label are h's *)
+#pub fn ui_harm_item {np:pos | np < 256} (parent: string np, h: harm): void
+
+implement ui_harm_item(parent, h) = let
+  val @(id, _) = _harm_item(h)
+in _control_s(parent, id, CHarmItem(h)) end
+
+(* Button id's tone: marked when it does a harm *)
+#pub fn ui_tone {ni:pos | ni < 256} (id: string ni, t: tone): void
+
+implement ui_tone(id, t) =
+  case+ t of
+  | Danger(_) => _sattr(id, "data-harm", "y")
+  | Plain() => _sattr(id, "data-harm", "n")
 
 (* A tab named by its label, controlling the panel controls *)
 #pub fn ui_tab {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}{nx:pos | nx < 256}

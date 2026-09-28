@@ -172,7 +172,10 @@ Elements are made through `src/ui.bats`:
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
   images are decorative (`alt=""`); a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
-* `ui_attr` takes a typed attribute that cannot be a name or a role.
+* `ui_attr` takes a typed attribute that cannot be a name, a role or a
+  style. The one inline style is a place (`ui_place`: left or width,
+  in tenths of a percent up to 100%), so no inline style can set a
+  colour or anything else the stylesheet proves.
 
 Nothing is lost at a click, except by emptying the Trash:
 
@@ -188,8 +191,15 @@ Nothing is lost at a click, except by emptying the Trash:
   puts back each book's shelf and the settings.
 * Emptying the Trash is the one irreversible action, and the one
   question with a red button: the dialog (`src/modal.bats`) asks a
-  `harm`, which has only `HEmptyTrash`. It closes any Undo offer first,
-  since what that would put back is gone.
+  `harm` (`src/ui.bats`), which has only `HEmptyTrash`. It closes any
+  Undo offer first, since what that would put back is gone.
+* Red is the stylesheet's rule for `[data-harm=y]`, which only
+  `src/ui.bats` sets, and only from a harm: on the harm's menu item
+  (`ui_harm_item`, whose id and label are the harm's) and on a button
+  whose tone is `Danger(h)` (the dialog's, for `Harmful(h)`). A click
+  on a harm's item is dispatched by the harm its id belongs to
+  (`_harm_clicked` in `src/bin/quire.bats`) to `lib_ask_harm`, which
+  asks that same harm, so a red item always asks about what it names.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
@@ -200,6 +210,13 @@ that listener itself (`modal_listen`) and its answer function is not
 exported, so other code can dismiss a dialog (`modal_dismiss`) but
 never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
+
+The overlays (the menus, book info and the reader's panels) are a
+`layer` (`src/layer.bats`), whose element ids only that module knows:
+they are shown and hidden only by `layer_open` and `layer_close`, which
+keep the stack of open overlays, last opened on top. Escape answers the
+dialog if one is open, and otherwise closes the top of that stack
+(`layer_escape`), whatever opened it.
 
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the

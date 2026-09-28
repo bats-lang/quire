@@ -10,6 +10,7 @@
 staload "book.sats"
 staload "pages.sats"
 staload "ui.sats"
+staload "layer.sats"
 staload "app.sats"
 staload "modal.sats"
 staload "undo.sats"
@@ -109,6 +110,11 @@ fn _is {sn:pos} (t: !target, id: string sn): bool =
   | Target(b, n, _) => _bytes_are(b, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
+(* The harm whose menu item (ui_harm_item) t is: its click asks about
+   that same harm *)
+fn _harm_clicked (t: !target): Option_vt(harm) =
+  if _is(t, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
+
 (* The number n of the target's id pre<n>, or -1 *)
 fn _row_of {sn:pos | sn <= 4} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
   case+ t of
@@ -187,10 +193,10 @@ fn _input_text (h: $EV.event_payload): [l:agz][k:nat] @($A.arr(byte, l, k + 1), 
 fn _show_library (): void = let
   val () = !_view := 0
   val () = ui_show("qrvw", false)
-  val () = ui_show("qspn", false)
-  val () = ui_show("qtoc", false)
-  val () = ui_show("qsrp", false)
-  val () = ui_show("qanp", false)
+  val () = layer_close(LTypography())
+  val () = layer_close(LContents())
+  val () = layer_close(LSearch())
+  val () = layer_close(LAnnotations())
   val () = ui_show("qllc", true)
   val () = reader_search_stop()
   val () = reader_stack_clear()
@@ -217,7 +223,7 @@ end
 fn _show_reader (): void = let
   val () = !_view := 1
   val () = ui_show("qllc", false)
-  val () = ui_show("qinf", false)
+  val () = layer_close(LBookInfo())
   val () = ui_show("qrvw", true)
   (* The browser's (and Android's) back button leaves the reader *)
   val a = $A.alloc<byte>(2)
@@ -353,7 +359,7 @@ fn _menu_open {i:int} (i: int i): void =
   | ~$R.some(x) => let
       val () = !_menu_idx := i
       val () = _shelf_labels("qcmh", "qcma", "qcmd", x.shelf)
-      val () = ui_show("qctx", true)
+      val () = layer_open(LBookMenu())
     in ui_focus("qcmi") end
 
 (* "N% · Ch C of T" for x in b; its length *)
@@ -406,7 +412,7 @@ fn _info_open {i:int} (i: int i): void =
       val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
       val () = ui_show("qinc", x.cover > 0)
-      val () = ui_show("qinf", true)
+      val () = layer_open(LBookInfo())
     in ui_focus("qinx") end
 
 (* A book menu or info view action on book i: 1 hide, unhide or (from
@@ -426,7 +432,7 @@ fn _book_action {i:int} (i: int i, act: int): void =
        else _archive(i))
     else if x.shelf = 3 then ()
     else let
-      val () = ui_show("qinf", false)
+      val () = layer_close(LBookInfo())
     in lib_trash(i) end
 
 (* ============================================================
@@ -532,7 +538,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   val r = RCons(r, OnEl("qctx"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
-      val () = ui_show("qctx", false)
+      val () = layer_close(LBookMenu())
       val () = (if i >= 0 then
           (if _is(t, "qcmi") then _info_open(i)
            else if _is(t, "qcmh") then _book_action(i, 1)
@@ -544,10 +550,10 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   val r = RCons(r, OnEl("qinf"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
-      val () = (if _is(t, "qinx") then ui_show("qinf", false)
+      val () = (if _is(t, "qinx") then layer_close(LBookInfo())
         else if i < 0 then ()
-        else if _is(t, "qinh") then let val () = ui_show("qinf", false) in _book_action(i, 1) end
-        else if _is(t, "qinr") then let val () = ui_show("qinf", false) in _book_action(i, 2) end
+        else if _is(t, "qinh") then let val () = layer_close(LBookInfo()) in _book_action(i, 1) end
+        else if _is(t, "qinr") then let val () = layer_close(LBookInfo()) in _book_action(i, 2) end
         else if _is(t, "qind") then _book_action(i, 3)
         else ())
     in let val () = _target_free(t) in 0 end end)
@@ -588,35 +594,37 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
     end)
   (* a backup picked to restore *)
   val r = RCons(r, OnEl("qlmi"), "change", lam(_) => let
-      val () = ui_show("qlmn", false)
+      val () = layer_close(LLibraryMenu())
       val () = backup_import()
     in 0 end)
   (* the error banner *)
   val r = RCons(r, OnEl("qerx"), "click", lam(_) => let val () = ui_show("qerr", false) in 0 end)
   (* the library menu *)
   val r = RCons(r, OnEl("qlgr"), "click", lam(_) => let
-      val () = ui_show("qlmn", true)
+      val () = layer_open(LLibraryMenu())
     in let val () = ui_focus("qlme") in 0 end end)
   val r = RCons(r, OnEl("qlmn"), "click", lam(h) => let
       val t = _target(h)
-      val () = (if _is(t, "qlmt") then let
-          val () = ui_show("qlmn", false)
-        in lib_ask_empty_trash(lam () => _save_render()) end
-        else if _is(t, "qlmr") then let
-          val () = ui_show("qlmn", false)
+      val () = (case+ _harm_clicked(t) of
+        | ~Some_vt(h) => let
+            val () = layer_close(LLibraryMenu())
+          in lib_ask_harm(h, lam () => _save_render()) end
+        | ~None_vt() =>
+        if _is(t, "qlmr") then let
+          val () = layer_close(LLibraryMenu())
         in _factory_reset() end
         else if _is(t, "qlme") then let
-          val () = ui_show("qlmn", false)
+          val () = layer_close(LLibraryMenu())
         in backup_export() end
-        else if _is(t, "qlmc") then ui_show("qlmn", false)
-        else if _is(t, "qlmn") then ui_show("qlmn", false)
+        else if _is(t, "qlmc") then layer_close(LLibraryMenu())
+        else if _is(t, "qlmn") then layer_close(LLibraryMenu())
         else ())
     in let val () = _target_free(t) in 0 end end)
 in r end
 
 fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
   val r = RCons(r, OnEl("qset"), "click", lam(_) => let
-      val () = ui_show("qspn", true)
+      val () = layer_open(LTypography())
     in let val () = ui_focus("qscl") in 0 end end)
   val r = RCons(r, OnEl("qspn"), "click", lam(h) => let
       val t = _target(h)
@@ -635,7 +643,7 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
         else false): bool
       val close = _is(t, "qscl")
       val () = _target_free(t)
-      val () = (if close then ui_show("qspn", false) else ())
+      val () = (if close then layer_close(LTypography()) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
   val r = RCons(r, OnEl("qsr1"), "input", lam(h) => let
       val () = set_size_set(_clamp(_input_num(h), 12, 32))
@@ -668,13 +676,13 @@ fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n
 in ui_icon_btn("qsrh", "qsrx", "ibtn", IcClose, "Close search") end
 
 fn _search_open (): void = let
-  val () = ui_show("qsrp", true)
+  val () = layer_open(LSearch())
 in ui_focus("qsri") end
 
 (* Ends the search: the reader goes back to where it was before it
    jumped to a hit *)
 fn _search_end (): void = let
-  val () = ui_show("qsrp", false)
+  val () = layer_close(LSearch())
   val () = reader_search_close()
   (* the next search starts afresh: an empty field, no old results *)
   val () = _search_field($A.alloc<byte>(1), 0)
@@ -734,26 +742,13 @@ fn _search_selection (): void =
         val () = $DC.blob_read(b, 0, c, n)
         val () = $DC.blob_free(b)
         val () = _search_field(a, n)
-        val () = ui_show("qsrp", true)
+        val () = layer_open(LSearch())
         val () = !_search_tick := !_search_tick + 1
       in reader_search(c, n) end
     end
 
 (* Closes the reader's panels; whether one was open *)
-fn _panels_close (): bool = let
-  val () = ui_measure("qtoc")
-  val a = $DR.get_measure_w() > 0
-  val () = ui_measure("qspn")
-  val b = $DR.get_measure_w() > 0
-  val () = ui_measure("qsrp")
-  val c = $DR.get_measure_w() > 0
-  val () = ui_measure("qanp")
-  val d = $DR.get_measure_w() > 0
-  val () = ui_show("qtoc", false)
-  val () = ui_show("qspn", false)
-  val () = ui_show("qsrp", false)
-  val () = ui_show("qanp", false)
-in a || b || c || d end
+fn _panels_close (): bool = layer_close_all()
 
 (* A page turn: the bars hide *)
 fn _next (): void = let
@@ -823,13 +818,20 @@ in
 end
 
 (* Escape: the dialog is answered with its first button, or else the
-   library's open menu or book info closes; true when one was *)
+   overlay opened last closes (layer_escape); true when one did. After
+   a reader panel, the page has the focus again; after the search panel,
+   so does the page, and a search with no hits ends *)
 fn _escape_overlay (): bool =
   if modal_open_now() then let val () = modal_dismiss() in true end
-  else if _shown("qctx") then let val () = ui_show("qctx", false) in true end
-  else if _shown("qlmn") then let val () = ui_show("qlmn", false) in true end
-  else if _shown("qinf") then let val () = ui_show("qinf", false) in true end
-  else false
+  else case+ layer_escape() of
+  | NothingOpen() => false
+  | Escaped(LSearch()) => let
+      val () = (if _shown("qsrn") then ui_focus("qcnt") else _search_end())
+    in true end
+  | Escaped(LContents()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LTypography()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LAnnotations()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
    (Shift+Enter the one before), Escape closes the panel *)
@@ -838,9 +840,9 @@ fn _search_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
 in
   if _key_is(b, n, "Enter") then let
       val () = reader_search_step(if shift then ~1 else 1)
-    in if _shown("qsrn") then let val () = ui_show("qsrp", false) in ui_focus("qcnt") end else () end
+    in if _shown("qsrn") then let val () = layer_close(LSearch()) in ui_focus("qcnt") end else () end
   else if _key_is(b, n, "Escape") then let
-      val () = ui_show("qsrp", false)
+      val () = layer_close(LSearch())
     in if _shown("qsrn") then ui_focus("qcnt") else _search_end() end
   else ()
 end
@@ -853,7 +855,7 @@ fn _toc_open (): void = let
   val () = ui_attr("qtcm", ASelected, "false")
   val () = ui_show("qtcl", true)
   val () = ui_show("qtbl", false)
-  val () = ui_show("qtoc", true)
+  val () = layer_open(LContents())
 in ui_focus("qtcx") end
 
 (* The contents panel, open on its bookmarks tab *)
@@ -871,13 +873,13 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       val row = _row_of(t, "qe")
       val bgo = _row_of(t, "qb")
       val bdl = _row_of(t, "qx")
-      val () = (if _is(t, "qtcx") then ui_show("qtoc", false)
+      val () = (if _is(t, "qtcx") then layer_close(LContents())
         else if _is(t, "qtct") then _toc_open()
         else if _is(t, "qtcm") then _bookmarks_open()
-        else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
+        else if bgo >= 0 then let val () = layer_close(LContents()) in _annot_go(bgo) end
         else if bdl >= 0 then annot_delete_bookmark(bdl)
         else if row >= 0 then let
-          val () = ui_show("qtoc", false)
+          val () = layer_close(LContents())
         in reader_goto_entry(row) end
         else ())
       val () = _target_free(t)
@@ -928,7 +930,7 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
     in let val () = ui_show("qsel", false) in 0 end end)
   val r = RCons(r, OnEl("qanb"), "click", lam(_) => let
       val () = annot_render()
-      val () = ui_show("qanp", true)
+      val () = layer_open(LAnnotations())
     in let val () = ui_focus("qanc") in 0 end end)
   val r = RCons(r, OnEl("qanp"), "click", lam(h) => let
       val t = _target(h)
@@ -938,9 +940,9 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
       val close = _is(t, "qanc")
       val ex = _is(t, "qanx")
       val () = _target_free(t)
-      val () = (if close then ui_show("qanp", false)
+      val () = (if close then layer_close(LAnnotations())
         else if ex then _export()
-        else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
+        else if go >= 0 then let val () = layer_close(LAnnotations()) in _annot_go(go) end
         else if nt >= 0 then annot_ask_note(nt, false)
         else if dl >= 0 then annot_delete_highlight(dl)
         else ())
@@ -949,7 +951,7 @@ in r end
 
 fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
   val r = RCons(r, OnEl("qsch"), "click", lam(_) => let
-      val () = (if _shown("qsrp") then ui_show("qsrp", false) else _search_open())
+      val () = (if layer_is_open(LSearch()) then layer_close(LSearch()) else _search_open())
     in 0 end)
   (* the field is made again for a selection's search: its events are
      taken on the panel *)
@@ -961,7 +963,7 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
       val () = _target_free(t)
       val () = (if close then _search_end()
         else if go >= 0 then let
-          val () = ui_show("qsrp", false)
+          val () = layer_close(LSearch())
         in reader_search_go(go) end
         else ())
     in 0 end)
@@ -1009,7 +1011,7 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 11) = let
           val () = (if (if esc then _escape_overlay() else false) then ()
             else if !_view <> 1 then ()
             else if _shown("qmod") then ()
-            else if _shown("qsrp") then _search_key(b, n)
+            else if layer_is_open(LSearch()) then _search_key(b, n)
             else _reader_key(b, n))
           val () = $A.free<byte>(b)
         in 0 end)

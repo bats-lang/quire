@@ -9,13 +9,6 @@ staload "ui.sats"
 staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 
-(* What a destructive question is about: what would be lost for good.
-   Only emptying the Trash cannot be undone, so it is the one thing
-   asked about: everything else is done at once and offered back
-   (src/undo.bats) *)
-#pub datatype harm =
-  | HEmptyTrash                           (* every book in the Trash *)
-
 (* The questions that lose nothing *)
 #pub datatype question =
   | QInform                  (* a message: OK *)
@@ -59,15 +52,15 @@ fn _harm_words (h: harm): @(lit, lit, lit) =
   case+ h of
   | HEmptyTrash() => @("Empty the Trash?", "Every book in the Trash is deleted, with its reading position and annotations. This cannot be undone.", "Empty")
 
-(* The buttons' labels and the second one's tone for question a: Danger
-   exactly when a is Harmful *)
+(* The buttons' labels and the second one's tone for question a:
+   Danger(h) exactly when a is Harmful(h) *)
 fn _buttons (a: ask): @(lit, lit, tone) =
   case+ a of
   | AskNothing() => @("OK", "-", Plain)
   | Harmless(QInform()) => @("OK", "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
   | Harmless(QNote()) => @("Cancel", "Save", Plain)
-  | Harmful(h) => let val @(_, _, verb) = _harm_words(h) in @("Cancel", verb, Danger) end
+  | Harmful(h) => let val @(_, _, verb) = _harm_words(h) in @("Cancel", verb, Danger(h)) end
 
 fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void = let
   val () = !_pending := Pending(a, yes, no)
@@ -76,8 +69,9 @@ fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void
   val () = ui_text("qmb1", b1)
   val () = ui_text("qmb2", b2)
   val () = (case+ t of
-    | Danger() => ui_class("qmb2", "btn danger")
+    | Danger(_) => ui_class("qmb2", "btn")
     | Plain() => ui_class("qmb2", "btn btn-p"))
+  val () = ui_tone("qmb2", t)
   val () = ui_show("qmb2", string_get_at(b2, 0) <> '-')
   val () = ui_show("qmtx", true)
   val () = ui_show("qmta", false)
