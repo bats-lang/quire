@@ -51,10 +51,11 @@ export const importInput = page => page.getByLabel('Import EPUB');
 /** The list of books */
 export const books = page => page.getByRole('region', { name: 'Books' });
 
-/** Every card in the list */
-export const cards = page => books(page).getByRole('button');
+/** Every book's row in the list: a group named by the book's title,
+    holding its card and its "Book menu" button */
+export const cards = page => books(page).getByRole('group');
 
-/** The card of the book whose card has text */
+/** The row of the book whose card has text */
 export function card(page, text) {
   return cards(page).filter({ hasText: text });
 }
@@ -79,10 +80,10 @@ export async function libraryMenu(page) {
   await expect(page.getByRole('menu')).toBeVisible();
 }
 
-/** Opens the book menu of the card with text */
+/** Opens the book menu of the card with text, with its visible button */
 export async function bookMenu(page, text) {
-  await card(page, text).click({ button: 'right' });
-  await expect(page.getByRole('menu')).toBeVisible();
+  await card(page, text).getByRole('button', { name: 'Book menu' }).click();
+  await expect(page.getByRole('menu', { name: 'Book menu' })).toBeVisible();
 }
 
 /** Opens the app on an empty library; returns the page's errors (a

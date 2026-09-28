@@ -95,7 +95,7 @@ fun _join {l:agz}{la:addr}{t:nat}{k,s:nat | s <= t} .<k>.
    ============================================================ *)
 
 fn _say {nt:pos | nt < 256} (t: string nt): void = let
-  val () = modal_open(0, "Backup", "OK", "-", "-")
+  val () = modal_open(AskInform(), "Backup")
 in modal_text_lit(t) end
 
 (* The file's start: its settings, and the books' opening bracket *)
@@ -565,7 +565,7 @@ in
 end
 
 fn _restored (c: int): void = let
-  val () = modal_open(0, "Backup restored", "OK", "-", "-")
+  val () = modal_open(AskInform(), "Backup restored")
   val b = $A.alloc<byte>(64)
   val () = $A.write_text(b, 0, $A.text_lit("Books restored: "), 16)
   val q = jw_int(b, 16, c)
@@ -622,7 +622,7 @@ implement backup_import () =
   if _qbfi_count() <= 0 then ()
   else $P.discard<int>($P.and_then<Int><int>($P.vow(_qbfi_open()), lam(h) => let
     (* the file is taken from the input: its choice is cleared *)
-    val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", "Import backup", false)
+    val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", false)
   in
     case+ $FI.claim(h) of
     | ~$R.none() => let

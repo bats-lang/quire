@@ -460,13 +460,9 @@ fn _level_class {v:nat | v <= 3} (v: int v): [n:pos | n < 256] string n =
 fn _row {l:agz}{m:pos}{ll:pos | ll <= LBL; ll <= m}{i:nat}{v:nat | v <= 3}
   (i: int i, v: int v, lb: !$A.arr(byte, l, m), ll: int ll, cur: bool): void = let
   val @(ri, rl) = nid_make("qe", i)
-  val () = ui_add_n("qtcl", ri, rl, "button")
+  val () = ui_btn_n("qtcl", ri, rl, _level_class(v))
   val @(ri, rl) = nid_make("qe", i)
-  val () = ui_attr_n(ri, rl, "class", _level_class(v))
-  val @(ri, rl) = nid_make("qe", i)
-  val () = ui_attr_n(ri, rl, "type", "button")
-  val @(ri, rl) = nid_make("qe", i)
-  val () = (if cur then ui_attr_n(ri, rl, "aria-current", "true") else ui_attr_n(ri, rl, "aria-current", "false"))
+  val () = (if cur then ui_attr_n(ri, rl, ACurrent, "true") else ui_attr_n(ri, rl, ACurrent, "false"))
   val tb = $A.alloc<byte>(ll)
   val () = _dup(lb, tb, ll, 0)
   val @(ri, rl) = nid_make("qe", i)

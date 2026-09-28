@@ -133,3 +133,39 @@ again.
   another when deflated) and handed to the element as a blob URL. An SVG
   `<image>` (a cover page's usual form) is shown the same way, as an
   `<img>` whose source is its `xlink:href` (or `href`).
+
+## What the types guarantee about the interface
+
+The stylesheet is built in `src/style.bats`, not written as CSS:
+
+* A text colour and its background are only ever set together
+  (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
+  of the three themes. The proof is css's `CONTRAST` over the palette
+  (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
+  css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
+  a pair that falls short does not type-check. Control edges and
+  accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
+  set their font size to 0, and a dialog's veil makes its own text
+  transparent.
+* The base rules are the only `!important` ones: every control is at
+  least 44px square, text fields use a 16px font (so iOS does not zoom
+  in), and focus shows a 2px ring in the text's own colour.
+* The sheet's size is in its type (`sheet(r, st)`: r bytes left), so it
+  always fits the 64 KiB text it is put in.
+
+Elements are made through `src/ui.bats`:
+
+* Plain elements come from a tag type with no interactive tags; a
+  button, a field or an image can only be made by a constructor that
+  names it. A text button is named by its text alone, so its name
+  holds what it shows (WCAG 2.5.3); an icon button is given its name;
+  images are decorative (`alt=""`); a role that needs a name (dialog,
+  region, toolbar, menu, group) is given one with it.
+* `ui_attr` takes a typed attribute that cannot be a name or a role.
+
+The dialog (`src/modal.bats`) asks a datatype (`ask`) that fixes its
+buttons and whether the second is destructive, and its answer comes
+back with the question (`Confirmed`/`Dismissed`). Deleting a book, a
+highlight or a bookmark, a factory reset and a settings reset are done
+only on the `Confirmed` answer to the question that named them, and
+`_modal_answer` matches every question exhaustively.
