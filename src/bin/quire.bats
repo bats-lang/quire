@@ -46,6 +46,9 @@ val _focus_link = ref<int>(~1)
 val _scrubbing = ref<bool>(false)
 (* The annotation whose note the dialog edits *)
 val _note_idx = ref<int>(~1)
+(* Whether that annotation was made for the note, from a selection: a
+   cancelled note then takes it away again *)
+val _note_fresh = ref<bool>(false)
 (* Where a touch started *)
 val _touch_x = ref<int>(0)
 val _touch_y = ref<int>(0)
@@ -418,6 +421,7 @@ fn _note_open (i: int): void =
   if i < 0 then ()
   else let
     val () = !_note_idx := i
+    val () = !_note_fresh := false
     val () = modal_open(5, "Note", "Cancel", "Save", "-")
     val () = modal_textarea()
   in annot_note_show(i) end
@@ -487,6 +491,47 @@ in annot_export(t, tn, a, an) end
 fn _annot_go (i: int): void = let
   val @(ch, pg, sn) = annot_dest(i)
 in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
+
+(* The dialog's answer: its first button (b1: Skip, Cancel or OK, which
+   Escape also gives) or its second (b2) *)
+fn _modal_answer (b1: bool, b2: bool): void = let
+  val k = modal_kind()
+in
+  if k = 1 then
+    (if b1 then import_dup_answer(1)
+     else if b2 then import_dup_answer(2) else ())
+  else if k = 2 then
+    (if b2 then let
+       val () = modal_close()
+       val () = ui_show("qinf", false)
+       val i = !_menu_idx
+     in if i >= 0 then _delete(i) else () end
+     else if b1 then modal_close() else ())
+  else if k = 3 then
+    (if b2 then let
+       val () = modal_close()
+       val () = $IDB.idb_delete_database()
+       val () = lib_clear()
+       val () = set_reset()
+     in $NAV.reload() end
+     else if b1 then modal_close() else ())
+  else if k = 5 then
+    (if b2 then let
+       val () = _note_save()
+       val () = !_note_fresh := false
+     in modal_close() end
+     else if b1 then let
+       (* a note begun from a selection and cancelled leaves no highlight *)
+       val () = (if !_note_fresh then let
+           val () = !_note_fresh := false
+           val () = annot_delete(!_note_idx)
+         in annot_render() end else ())
+     in modal_close() end
+     else ())
+  else if b1 then modal_close()
+  else if b2 then modal_close()
+  else ()
+end
 
 fn _wire_library (): void = let
   (* import *)
@@ -577,38 +622,10 @@ fn _wire_library (): void = let
   (* the dialog *)
   val () = ui_listen("qmod", "click", 29, lam(h) => let
       val t = _target(h)
-      val k = modal_kind()
       val b1 = _is(t, "qmb1")
       val b2 = _is(t, "qmb2")
       val () = _target_free(t)
-    in
-      if k = 1 then
-        (if b1 then let val () = import_dup_answer(1) in 0 end
-         else if b2 then let val () = import_dup_answer(2) in 0 end else 0)
-      else if k = 2 then
-        (if b2 then let
-           val () = modal_close()
-           val () = ui_show("qinf", false)
-           val i = !_menu_idx
-         in if i >= 0 then let val () = _delete(i) in 0 end else 0 end
-         else if b1 then let val () = modal_close() in 0 end else 0)
-      else if k = 3 then
-        (if b2 then let
-           val () = modal_close()
-           val () = $IDB.idb_delete_database()
-           val () = lib_clear()
-           val () = set_reset()
-         in let val () = $NAV.reload() in 0 end end
-         else if b1 then let val () = modal_close() in 0 end else 0)
-      else if k = 5 then
-        (if b2 then let
-           val () = _note_save()
-         in let val () = modal_close() in 0 end end
-         else if b1 then let val () = modal_close() in 0 end else 0)
-      else if b1 then let val () = modal_close() in 0 end
-      else if b2 then let val () = modal_close() in 0 end
-      else 0
-    end)
+    in let val () = _modal_answer(b1, b2) in 0 end end)
 in end
 
 fn _wire_settings (): void = let
@@ -817,6 +834,15 @@ in
   else ()
 end
 
+(* Escape: the dialog is answered with its first button, or else the
+   library's open menu or book info closes; true when one was *)
+fn _escape_overlay (): bool =
+  if _shown("qmod") then let val () = _modal_answer(true, false) in true end
+  else if _shown("qctx") then let val () = ui_show("qctx", false) in true end
+  else if _shown("qlmn") then let val () = ui_show("qlmn", false) in true end
+  else if _shown("qinf") then let val () = ui_show("qinf", false) in true end
+  else false
+
 (* A key while the search panel is open: Enter goes to the next hit
    (Shift+Enter the one before), Escape closes the panel *)
 fn _search_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
@@ -907,7 +933,9 @@ fn _wire_annotations (): void = let
       val sr = _is(t, "qsls")
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
-        else if nt then _note_open(annot_highlight())
+        else if nt then let
+            val () = _note_open(annot_highlight())
+          in !_note_fresh := true end
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
@@ -991,7 +1019,9 @@ fn _wire_reader (): void = let
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) => let
-          val () = (if !_view <> 1 then ()
+          val esc = _key_is(b, n, "Escape")
+          val () = (if (if esc then _escape_overlay() else false) then ()
+            else if !_view <> 1 then ()
             else if _shown("qmod") then ()
             else if _shown("qsrp") then _search_key(b, n)
             else _reader_key(b, n))

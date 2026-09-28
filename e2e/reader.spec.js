@@ -318,3 +318,57 @@ test('a card shows how far the book has been read', async ({ page }) => {
   await expect(card(page, 'Progress')).toContainText(/\d+%/);
   expect(await card(page, 'Progress').innerText()).not.toContain('New');
 });
+
+test('the t key shows and hides the bars', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Toggle', 1, 10));
+  const prev = control(page, 'Previous page');
+  await page.keyboard.press('Escape'); // the bars shown on opening
+  await expect(prev).toBeHidden();
+  await page.keyboard.press('t');
+  await expect(prev).toBeVisible();
+  await page.keyboard.press('t');
+  await expect(prev).toBeHidden();
+});
+
+test('the place is kept when the app is hidden and then closed', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Hidden Away', 2));
+  for (let k = 0; k < 2; k++) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(3);
+  const at = await place(page);
+  // the tab is hidden (another app), then the page is gone without going back to the library
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.reload();
+  await openBook(page, 'Hidden Away');
+  expect(await place(page)).toEqual(at);
+});
+
+test.describe('on a touch screen', () => {
+  test.use({ hasTouch: true });
+
+  test('a swipe turns the page, and a short or upright one does not', async ({ page }) => {
+    await start(page);
+    await readBook(page, book('Swiped', 1, 20));
+    const box = await bookPage(page).boundingBox();
+    const y = box.y + box.height / 2;
+    const swipe = (x0, y0, x1, y1) => bookPage(page).evaluate((el, [x0, y0, x1, y1]) => {
+      const t = (x, y) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
+      el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [t(x0, y0)], changedTouches: [t(x0, y0)] }));
+      el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [t(x1, y1)] }));
+    }, [x0, y0, x1, y1]);
+    const mid = box.x + box.width / 2;
+    await swipe(mid + 100, y, mid - 100, y);
+    await expect.poll(async () => (await place(page)).p).toBe(2);
+    await swipe(mid - 100, y, mid + 100, y);
+    await expect.poll(async () => (await place(page)).p).toBe(1);
+    // too short, and more down than across
+    await swipe(mid + 20, y, mid - 20, y);
+    await swipe(mid + 70, y - 150, mid - 70, y + 150);
+    await page.waitForTimeout(300);
+    expect((await place(page)).p).toBe(1);
+  });
+});

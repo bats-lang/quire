@@ -129,3 +129,41 @@ test('the star bookmarks the page, lists it, and unbookmarks it', async ({ page 
   await showChrome(page);
   await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('Copy puts the selected text on the clipboard', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Copy').click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Para 1.0');
+});
+
+test('a note that is cancelled leaves nothing behind', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Note').click();
+  await note(page).getByRole('textbox', { name: 'Note' }).fill('Never mind');
+  await note(page).getByRole('button', { name: 'Cancel' }).click();
+  await expect(note(page)).toBeHidden();
+  await expect.poll(() => marks(page)).toMatchObject({ size: 0 });
+  await openPanel(page);
+  await expect(panel(page)).toContainText('No highlights yet');
+});
+
+test('a bookmark is deleted from the bookmarks tab', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await page.keyboard.press('b');
+  await showChrome(page);
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'true');
+  await control(page, 'Contents').click();
+  await dialog(page, 'Contents').getByRole('tab', { name: 'Bookmarks' }).click();
+  const list = dialog(page, 'Contents').getByRole('tabpanel', { name: 'Bookmarks' });
+  await list.getByRole('button', { name: 'Delete' }).click();
+  await expect(list.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await showChrome(page);
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
+});

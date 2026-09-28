@@ -91,3 +91,11 @@ test('the selection can be searched for', async ({ page }) => {
   await expect(box(page)).toHaveValue('Para');
   await expect(summary(page)).toHaveText('60 results');
 });
+
+test('Ctrl+F opens the search', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await page.keyboard.press('Control+f');
+  await expect(panel(page)).toBeVisible();
+  await expect(box(page)).toBeFocused();
+});
