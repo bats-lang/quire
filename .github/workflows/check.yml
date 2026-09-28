@@ -117,7 +117,10 @@ jobs:
           retention-days: 14
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
-  # signed with this repository's secrets; see ANDROID.md
+  # signed with this repository's secrets; see ANDROID.md. Every run, a
+  # branch's or a pull request's too, builds and signs them the same way
+  # and checks that both are signed with the release key; only a push to
+  # main uploads them as downloadable artifacts.
   android:
     needs: check
     uses: bats-lang/pwa/.github/workflows/android.yml@main
@@ -125,6 +128,8 @@ jobs:
     with:
       artifact: quire-android
       project-dir: android
+      require-signed: true
+      publish: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
       # Above the version code (1) of the build uploaded before this workflow
       version-code-offset: 1
       # Run it on an emulator until the library's button, which the wasm
