@@ -20,6 +20,7 @@ staload "book.sats"
 staload "ui.sats"
 staload "library.sats"
 staload "toc.sats"
+staload "jsonio.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
@@ -147,24 +148,21 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + SLOT * j <= n} .<j>.
 
 fn _key (): [l:agz] $A.arr(byte, l, 15) = lib_key(97, !_h1, !_h2)
 
-fn _save (): void = let
-  val c = _take()
-  val+ @AnnCell(xs, k) = c
-  val n = 4 + SLOT * k
+(* Stores xs under the key of book h1, h2 *)
+fn _store {j:nat | j <= AMAX} (h1: int, h2: int, xs: !ann(j), j: int j): void = let
+  val n = 4 + SLOT * j
 in
   case+ piece_new(n) of
-  | ~NoPiece() => let prval () = fold@(c) in _put(c) end
+  | ~NoPiece() => ()
   | ~Piece(ow, out) => let
       val () = $A.write_byte(out, 0, 81) (* Q *)
       val () = $A.write_byte(out, 1, 65) (* A *)
       val () = $A.write_byte(out, 2, 49) (* 1 *)
       val () = $A.write_byte(out, 3, 10)
       val m = _ser(out, 4, xs)
-      prval () = fold@(c)
-      val () = _put(c)
       val @(f, b) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(f, b, m)
-      val @(kf, kb) = $A.freeze<byte>(_key())
+      val @(kf, kb) = $A.freeze<byte>(lib_key(97, h1, h2))
       val () = $P.discard<Int>($IDB.idb_put(kb, 15, used, m))
       val () = $A.drop<byte>(kf, kb)
       val () = $A.free<byte>($A.thaw<byte>(kf))
@@ -172,6 +170,13 @@ in
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end
 end
+
+fn _save (): void = let
+  val c = _take()
+  val+ @AnnCell(xs, k) = c
+  val () = _store(!_h1, !_h2, xs, k)
+  prval () = fold@(c)
+in _put(c) end
 
 (* The little-endian numbers at buf[p] *)
 fn _i32 {l:agz}{la:addr}{n:nat}{p:nat | p + 4 <= n}
@@ -879,5 +884,197 @@ in
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end
 end
+
+(* ============================================================
+   Backup: a book's annotations as JSON
+   ============================================================ *)
+
+(* The bytes one annotation takes in JSON, at most *)
+#define AJ 15000
+
+fn _kind_json {l:agz}{la:addr}{n:nat}{p:nat | p + 20 <= n}
+  (out: !$A.arrx(byte, l, n, la), p: int p, kd: int): [q:int | p < q; q <= p + 20] int q =
+  if kd = 1 then jw_lit(out, p, "{\"kind\":\"highlight\"")
+  else jw_lit(out, p, "{\"kind\":\"bookmark\"")
+
+fun _json_anns {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + AJ * j + 1 <= n} .<j>.
+  (out: !$A.arrx(byte, l, n, la), p: int p, xs: !ann(j), first: bool): [q:nat | q + 1 <= n] int q =
+  case+ xs of
+  | ann_nil() => p
+  | @ann_cons(kd, ch, sn, so, en, eo, pg, tm, t, tl, nt, nl, rest) => let
+      val p1 = (if first then p else jw_lit(out, p, ",")): [q:int | p <= q; q <= p + 1] int q
+      val p2 = _kind_json(out, p1, kd)
+      val p3 = jw_lit(out, p2, ",\"chapter\":")
+      val p4 = jw_int(out, p3, ch)
+      val p5 = jw_lit(out, p4, ",\"node\":")
+      val p6 = jw_int(out, p5, sn)
+      val p7 = jw_lit(out, p6, ",\"offset\":")
+      val p8 = jw_int(out, p7, so)
+      val p9 = jw_lit(out, p8, ",\"endNode\":")
+      val p10 = jw_int(out, p9, en)
+      val p11 = jw_lit(out, p10, ",\"endOffset\":")
+      val p12 = jw_int(out, p11, eo)
+      val p13 = jw_lit(out, p12, ",\"page\":")
+      val p14 = jw_int(out, p13, pg)
+      val p15 = jw_lit(out, p14, ",\"time\":")
+      val p16 = jw_int(out, p15, tm)
+      val p17 = jw_lit(out, p16, ",\"text\":")
+      val p18 = jw_str(out, p17, t, tl)
+      val p19 = jw_lit(out, p18, ",\"note\":")
+      val p20 = jw_str(out, p19, nt, nl)
+      val p21 = jw_lit(out, p20, "}")
+      val q = _json_anns(out, p21, rest, false)
+      prval () = fold@(xs)
+    in q end
+
+(* The annotations stored in buf[0, n) (a book's "a" record) as a JSON
+   array; none when they cannot be read or the memory cannot be had *)
+#pub fn annot_json {l:agz}{la:addr}{n:nat} (buf: !$A.arrx(byte, l, n, la), n: int n): jchunk
+
+implement annot_json (buf, n) =
+  if n < 4 then JNone()
+  else if byte2int0($A.get<byte>(buf, 1)) <> 65 then JNone()
+  else let
+    val @(xs, k) = _parse(buf, n, 4, ann_nil(), 0)
+  in
+    case+ piece_new(2 + AJ * k) of
+    | ~NoPiece() => let val () = ann_free(xs) in JNone() end
+    | ~Piece(ow, out) => let
+        val () = $A.write_byte(out, 0, 91)
+        val q = _json_anns(out, 1, xs, true)
+        val () = $A.write_byte(out, q, 93)
+        val () = ann_free(xs)
+      in JChunk(ow, out, q + 1) end
+  end
+
+(* A copy of a[0, k), in k + 1 bytes *)
+fn _copy_le {l:agz}{n:pos}{k:nat | k <= n; k < 1048576} (a: !$A.arr(byte, l, n), k: int k): [lc:agz] $A.arr(byte, lc, k + 1) = let
+  val b = $A.alloc<byte>(k + 1)
+  val () = _dup(a, b, k, 0)
+in b end
+
+(* The number a member's key names: 1 chapter, 2 node, 3 offset, 4
+   endNode, 5 endOffset, 6 page, 7 time; -1 for any other *)
+fn _anum {lk:agz}{k:nat | k <= 16} (kb: !$A.arr(byte, lk, 16), k: int k): [i:int | ~1 <= i; i < 8] int i =
+  if jr_key_is(kb, k, "chapter") then 1
+  else if jr_key_is(kb, k, "node") then 2
+  else if jr_key_is(kb, k, "offset") then 3
+  else if jr_key_is(kb, k, "endNode") then 4
+  else if jr_key_is(kb, k, "endOffset") then 5
+  else if jr_key_is(kb, k, "page") then 6
+  else if jr_key_is(kb, k, "time") then 7
+  else ~1
+
+(* A number member's value at v, kept in vs[i] *)
+fn _anum_at {l,lv:agz}{la:addr}{n:nat}{v:nat | v <= n}{i:nat | i < 8}
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, vs: !$A.arr(Int, lv, 8), i: int i): [q:int | v <= q; q <= n] int q = let
+  val @(ok, x, q) = jr_int(buf, n, v)
+in
+  if ok then let val () = $A.set<Int>(vs, i, x) in q end
+  else jr_skip(buf, n, v)
+end
+
+(* The kind member's value at v ("highlight" or 1 for a highlight) *)
+fn _akind_at {l,lk,lv:agz}{la:addr}{n:nat}{v:nat | v < n}
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 8)): [q:int | v < q; q <= n] int q =
+  if jr_is(buf, n, v, 34) then let
+    val @(ok, k, q) = jr_str(buf, n, v, kb, 16)
+    val () = $A.set<Int>(vs, 0, (if ok then (if jr_key_is(kb, k, "highlight") then 1 else 0) else 0))
+  in q end
+  else let
+    val @(ok, x, q) = jr_int(buf, n, v)
+    val () = $A.set<Int>(vs, 0, (if ok then (if x = 1 then 1 else 0) else 0))
+  in if q > v then q else jr_skip(buf, n, v + 1) end
+
+(* The members of an annotation's object from p, to its closing brace:
+   its numbers into vs, its text into tb[0, tl) and its note into
+   nb[0, nl) *)
+fun _amem {l,lk,lt,ln,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{tl0:nat | tl0 <= TXT}{nl0:nat | nl0 <= NOTE} .<n - p>.
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16),
+   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 8), tl: int tl0, nl: int nl0)
+  : [q:int | p <= q; q <= n][tl:nat | tl <= TXT][nl:nat | nl <= NOTE] @(bool, int tl, int nl, int q) = let
+  val q = jr_ws(buf, n, p)
+in
+  if q >= n then @(false, tl, nl, n)
+  else if jr_is(buf, n, q, 125) then @(true, tl, nl, q + 1)
+  else if jr_is(buf, n, q, 44) then _amem(buf, n, q + 1, kb, tb, nb, vs, tl, nl)
+  else let
+    val @(ok, k, v) = jr_key(buf, n, q, kb, 16)
+  in
+    if ~ok then @(false, tl, nl, v)
+    else if v >= n then @(false, tl, nl, v)
+    else if jr_key_is(kb, k, "text") then let
+      val @(sok, tl2, e) = jr_str(buf, n, v, tb, TXT)
+    in if sok then _amem(buf, n, e, kb, tb, nb, vs, tl2, nl) else @(false, tl, nl, e) end
+    else if jr_key_is(kb, k, "note") then let
+      val @(sok, nl2, e) = jr_str(buf, n, v, nb, NOTE)
+    in if sok then _amem(buf, n, e, kb, tb, nb, vs, tl, nl2) else @(false, tl, nl, e) end
+    else if jr_key_is(kb, k, "kind") then _amem(buf, n, _akind_at(buf, n, v, kb, vs), kb, tb, nb, vs, tl, nl)
+    else let
+      val i = _anum(kb, k)
+    in
+      if i >= 0 then _amem(buf, n, _anum_at(buf, n, v, vs, i), kb, tb, nb, vs, tl, nl)
+      else _amem(buf, n, jr_skip(buf, n, v), kb, tb, nb, vs, tl, nl)
+    end
+  end
+end
+
+fun _zero {lv:agz}{i:nat | i <= 8} .<8 - i>. (vs: !$A.arr(Int, lv, 8), i: int i): void =
+  if i >= 8 then () else let val () = $A.set<Int>(vs, i, 0) in _zero(vs, i + 1) end
+
+(* The annotations of a JSON array's items from p, to its closing
+   bracket, onto acc (at most AMAX) *)
+fun _aitems {l,lk,lt,ln,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= AMAX} .<n - p>.
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16),
+   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 8), acc: ann(a), a: int a)
+  : [k:nat | k <= AMAX] @(bool, ann(k), int k) = let
+  val q = jr_ws(buf, n, p)
+in
+  if q >= n then @(false, acc, a)
+  else if jr_is(buf, n, q, 93) then @(true, acc, a)
+  else if jr_is(buf, n, q, 44) then _aitems(buf, n, q + 1, kb, tb, nb, vs, acc, a)
+  else if jr_is(buf, n, q, 123) then let
+    val () = _zero(vs, 0)
+    val @(ok, tl, nl, e) = _amem(buf, n, q + 1, kb, tb, nb, vs, 0, 0)
+  in
+    if ~ok then @(false, acc, a)
+    else if a >= AMAX then _aitems(buf, n, e, kb, tb, nb, vs, acc, a)
+    else let
+      val t = _copy_le(tb, tl)
+      val nt = _copy_le(nb, nl)
+      val xs = _insert($A.get<Int>(vs, 0), $A.get<Int>(vs, 1), $A.get<Int>(vs, 2), $A.get<Int>(vs, 3),
+                 $A.get<Int>(vs, 4), $A.get<Int>(vs, 5), $A.get<Int>(vs, 6), $A.get<Int>(vs, 7),
+                 t, tl, nt, nl, acc)
+    in _aitems(buf, n, e, kb, tb, nb, vs, xs, a + 1) end
+  end
+  else @(false, acc, a)
+end
+
+(* Stores the annotations of the JSON array at p (in a backup the user
+   picked, checked here as it is read) as book h1, h2's; how many, or
+   -1 when the array cannot be read *)
+#pub fn annot_json_store {l:agz}{la:addr}{n:nat}{p:nat | p <= n}
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, h1: int, h2: int): int
+
+implement annot_json_store (buf, n, p, h1, h2) =
+  if p >= n then ~1
+  else if ~jr_is(buf, n, p, 91) then ~1
+  else let
+    val kb = $A.alloc<byte>(16)
+    val tb = $A.alloc<byte>(TXT)
+    val nb = $A.alloc<byte>(NOTE)
+    val vs = $A.alloc<Int>(8)
+    val @(ok, xs, k) = _aitems(buf, n, p + 1, kb, tb, nb, vs, ann_nil(), 0)
+    val () = $A.free<byte>(kb)
+    val () = $A.free<byte>(tb)
+    val () = $A.free<byte>(nb)
+    val () = $A.free<Int>(vs)
+  in
+    if ok then let
+      val () = _store(h1, h2, xs, k)
+      val () = ann_free(xs)
+    in k end
+    else let val () = ann_free(xs) in ~1 end
+  end
 
 end (* #target wasm *)

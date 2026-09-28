@@ -19,6 +19,7 @@ staload "book.sats"
 staload "paths.sats"
 staload "epub_xml.sats"
 staload "library.sats"
+staload "backup.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -280,8 +281,11 @@ in
     val @(to, tl) = (case+ title of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
     val @(ao, al) = (case+ author of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
   in
-    if mode = MODE_NEW then
-      lib_add(h1, h2, opf_b, n, to, tl, ao, al, z, cover, $TM.epoch_minutes())
+    if mode = MODE_NEW then let
+      val key = lib_add(h1, h2, opf_b, n, to, tl, ao, al, z, cover, $TM.epoch_minutes())
+      (* the record a backup kept for it, if any *)
+      val () = (if key > 0 then backup_claim(h1, h2) else ())
+    in key end
     else let
       val () = lib_update(idx, lam(x) => @{
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = 0, added = x.added, opened = x.opened,

@@ -12,6 +12,7 @@ staload "pages.sats"
 staload "ui.sats"
 staload "app.sats"
 staload "modal.sats"
+staload "backup.sats"
 staload "library.sats"
 staload "settings.sats"
 staload "import.sats"
@@ -545,6 +546,11 @@ fn _wire_library (): void = let
       val @(q, n) = _input_text(h)
       val () = lib_query_set(q, n)
     in let val () = lib_render() in 0 end end)
+  (* a backup picked to restore *)
+  val () = ui_listen("qbfi", "change", 50, lam(_) => let
+      val () = ui_show("qlmn", false)
+      val () = backup_import()
+    in 0 end)
   (* the error banner *)
   val () = ui_listen("qerx", "click", 26, lam(_) => let val () = ui_show("qerr", false) in 0 end)
   (* the library menu *)
@@ -557,6 +563,9 @@ fn _wire_library (): void = let
           val () = ui_show("qlmn", false)
           val () = modal_open(3, "Factory reset?", "Cancel", "Reset", "-")
         in modal_text_lit("Every book, position, annotation and setting is deleted.") end
+        else if _is(t, "qlme") then let
+          val () = ui_show("qlmn", false)
+        in backup_export() end
         else if _is(t, "qlmc") then ui_show("qlmn", false)
         else if _is(t, "qlmn") then ui_show("qlmn", false)
         else ())
