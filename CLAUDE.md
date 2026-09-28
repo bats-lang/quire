@@ -227,7 +227,10 @@ commit turns it and a cancel puts it back. The page (`qcnt`, region 1,
 `data-gesture-region`) takes touch and pen only, so a mouse drag still
 selects text; its CSS touch-action comes from the same axes the region
 is declared with (`page_turn_axes` in `src/style.bats`). A drag's end
-suppresses the click the browser sends after it (`_dragged`).
+suppresses the click the browser sends after it (`_dragged`). The shim
+captures a mouse pointer only once it has moved more than 4 px: capture
+at pointerdown would send the click to the reader view instead of the
+button under it, so no button in the reader could be clicked.
 
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
