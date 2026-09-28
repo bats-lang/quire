@@ -750,42 +750,54 @@ in _sattr(id, "aria-labelledby", by) end
    Events and focus
    ============================================================ *)
 
-(* Calls cb on each event ev at element id *)
-#pub fn ui_listen {ni:pos | ni < 256}{ne:pos | ne < 256}
-  (id: string ni, ev: string ne, lid: $EV.listener_id,
-   cb: ($EV.event_payload) -<cloref1> int): void
+(* What a listener listens on *)
+#pub datatype on =
+  | {n:pos | n < 256} OnEl of (string n)
+  | OnDocument
+  | OnWindow
+  | OnExternalFiles   (* files handed to the app from outside it *)
 
-implement ui_listen(id, ev, lid, cb) = let
-  val inn = _len(id) and en = _len(ev)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(ef, eb) = $A.freeze<byte>(_lit(ev, en))
-  val () = $EV.listen(ib, inn, eb, en, lid, cb)
-  val () = $A.drop<byte>(ef, eb)
-  val () = $A.free<byte>($A.thaw<byte>(ef))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+(* The app's listeners, as one table: the last added is at its head.
+   A listener's id is its position in the table (the first added is 0),
+   so no two listeners share an id, and the table's length, which its
+   type carries, bounds the ids below the bridge's 128. The table is
+   registered at once by ui_listen_all; there is no other way to
+   register a listener. *)
+#pub datatype regs(int) =
+  | RNil(0)
+  | {n:nat}{e:pos | e < 256} RCons(n + 1) of
+      (regs(n), on, string e, ($EV.event_payload) -<cloref1> int)
 
-(* Calls cb on each event ev at the document *)
-#pub fn ui_listen_doc {ne:pos | ne < 256}
-  (ev: string ne, lid: $EV.listener_id, cb: ($EV.event_payload) -<cloref1> int): void
-
-implement ui_listen_doc(ev, lid, cb) = let
+fn _listen1 {ne:pos | ne < 256}
+  (o: on, ev: string ne, lid: $EV.listener_id, cb: ($EV.event_payload) -<cloref1> int): void = let
   val en = _len(ev)
   val @(ef, eb) = $A.freeze<byte>(_lit(ev, en))
-  val () = $EV.listen_document(eb, en, lid, cb)
+  val () = (case+ o of
+    | OnEl(id) => let
+        val inn = _len(id)
+        val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
+        val () = $EV.listen(ib, inn, eb, en, lid, cb)
+        val () = $A.drop<byte>(if_, ib)
+      in $A.free<byte>($A.thaw<byte>(if_)) end
+    | OnDocument() => $EV.listen_document(eb, en, lid, cb)
+    | OnWindow() => $EV.listen_window(eb, en, lid, cb)
+    | OnExternalFiles() => $EV.listen_external_files(lid, cb))
   val () = $A.drop<byte>(ef, eb)
 in $A.free<byte>($A.thaw<byte>(ef)) end
 
-(* Calls cb on each event ev at the window *)
-#pub fn ui_listen_win {ne:pos | ne < 256}
-  (ev: string ne, lid: $EV.listener_id, cb: ($EV.event_payload) -<cloref1> int): void
+(* Registers r's listeners, each with its position as its id; the
+   number registered *)
+fun _listen_all {n:nat | n <= 128} .<n>. (r: regs(n)): int n =
+  case+ r of
+  | RNil() => 0
+  | RCons(rest, o, ev, cb) => let
+      val k = _listen_all(rest)
+      val () = _listen1(o, ev, k, cb)
+    in k + 1 end
 
-implement ui_listen_win(ev, lid, cb) = let
-  val en = _len(ev)
-  val @(ef, eb) = $A.freeze<byte>(_lit(ev, en))
-  val () = $EV.listen_window(eb, en, lid, cb)
-  val () = $A.drop<byte>(ef, eb)
-in $A.free<byte>($A.thaw<byte>(ef)) end
+#pub fn ui_listen_all {n:nat | n <= 128} (r: regs(n)): void
+
+implement ui_listen_all (r) = let val _ = _listen_all(r) in end
 
 (* Measures element id: its box goes to dom_read's measure slots *)
 #pub fn ui_measure {ni:pos | ni < 256} (id: string ni): void
