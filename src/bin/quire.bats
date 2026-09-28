@@ -366,6 +366,8 @@ fn _info_open {i:int} (i: int i): void =
       val () = (if x.shelf = 2 then ui_text("qinr", "Restore") else ui_text("qinr", "Archive"))
       val () = ui_attr("qinc", "src", "data:,")
       val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
+      (* a book without a cover shows none, not a broken image *)
+      val () = ui_show("qinc", x.cover > 0)
       val () = ui_show("qinf", true)
     in ui_focus("qinx") end
 

@@ -174,6 +174,8 @@ test('book info shows the book and its progress', async ({ page }) => {
   await expect(info).toContainText('Info Book');
   await expect(info).toContainText('Informant');
   await expect(info).toContainText(/Last read\s*Never/);
+  // a book without a cover shows no image
+  await expect(info.getByRole('img')).toHaveCount(0);
   await info.getByRole('button', { name: '← Library' }).click();
   await expect(info).toBeHidden();
 });

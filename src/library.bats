@@ -878,7 +878,7 @@ in
   else if has_q then ui_text("qelb", "No books match")
   else if shelf = 1 then ui_text("qelb", "No hidden books")
   else if shelf = 2 then ui_text("qelb", "No archived books")
-  else ui_text("qelb", "Import an EPUB file to start reading ...")
+  else ui_text("qelb", "Import an EPUB file to start reading.")
 end
 
 (* Shows shelf s (0 the shelf, 1 hidden, 2 archived) *)

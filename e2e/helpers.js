@@ -249,3 +249,31 @@ export async function openSettings(page) {
   await control(page, 'Typography').click();
   await expect(dialog(page, 'Typography and theme')).toBeVisible();
 }
+
+/** The visible buttons within root whose text has a contrast ratio
+    under 3 against the background behind it, by their names */
+export async function illegible(root) {
+  return root.evaluate(root => {
+    const rgba = s => { const m = s.match(/[\d.]+/g).map(Number); return { r: m[0], g: m[1], b: m[2], a: m.length > 3 ? m[3] : 1 }; };
+    const lum = c => {
+      const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    const behind = e => {
+      for (let el = e; el; el = el.parentElement) {
+        const c = rgba(getComputedStyle(el).backgroundColor);
+        if (c.a > 0.5) return c;
+      }
+      return { r: 255, g: 255, b: 255, a: 1 };
+    };
+    const bad = [];
+    for (const b of root.querySelectorAll('button')) {
+      const r = b.getBoundingClientRect();
+      if (r.width === 0 || !b.textContent.trim()) continue;
+      const fg = lum(rgba(getComputedStyle(b).color)), bg = lum(behind(b));
+      const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+      if (ratio < 3) bad.push(b.getAttribute('aria-label') || b.textContent.trim());
+    }
+    return bad;
+  });
+}

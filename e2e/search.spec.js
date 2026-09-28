@@ -40,6 +40,8 @@ test('the book is searched, and the results are gone to and stepped through', as
   await expect.poll(async () => (await place(page)).ch).toBe(2);
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Zebra&c' });
   await expect(bar(page)).toContainText('2 of 3');
+  // the bar keeps to one line, below the top bar
+  expect((await bar(page).boundingBox()).height).toBeLessThan(60);
   await barButton(page, 'Next result').click();
   await expect(bar(page)).toContainText('3 of 3');
   await expect.poll(async () => (await place(page)).ch).toBe(3);

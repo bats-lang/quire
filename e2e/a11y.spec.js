@@ -4,7 +4,8 @@
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {
-  start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control,
+  start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control, dialog,
+  selectText, illegible,
 } from './helpers.js';
 
 const audit = async page => {
@@ -30,6 +31,19 @@ test('no view has accessibility violations', async ({ page }) => {
   await page.keyboard.press('Escape');
   await page.keyboard.press('/');
   expect(await audit(page)).toEqual([]);
+  // the bars shown over the page: the selection's, and the search results'
+  await page.keyboard.type('para');
+  const results = dialog(page, 'Search in book').getByRole('region', { name: 'Results' }).getByRole('button');
+  await results.first().click();
+  await expect(page.getByRole('toolbar', { name: 'Search results' })).toBeVisible();
+  expect(await audit(page)).toEqual([]);
+  expect(await illegible(page.getByRole('toolbar', { name: 'Search results' }))).toEqual([]);
+  await page.getByRole('toolbar', { name: 'Search results' }).getByRole('button', { name: 'Close search' }).click();
+  await selectText(page, 0, 8);
+  await expect(page.getByRole('toolbar', { name: 'Selection' })).toBeVisible();
+  expect(await audit(page)).toEqual([]);
+  // axe leaves the contrast of a bar over the page undecided: checked here
+  expect(await illegible(page.getByRole('toolbar', { name: 'Selection' }))).toEqual([]);
 });
 
 test('the library\'s controls are reached with Tab and work with Enter', async ({ page }) => {

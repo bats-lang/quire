@@ -49,7 +49,7 @@ fn _library (): void = let
   val () = ui_attr("qlst", "role", "region")
   val () = ui_attr("qlst", "aria-label", "Books")
   val () = ui_el("qllc", "qelb", "div", "empty")
-in ui_text("qelb", "Import an EPUB file to start reading ...") end
+in ui_text("qelb", "Import an EPUB file to start reading.") end
 
 (* The book menu (right-click or long-press on a card) *)
 fn _context_menu (): void = let
