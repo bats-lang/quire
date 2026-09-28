@@ -350,27 +350,86 @@ test('the place is kept when the app is hidden and then closed', async ({ page }
 test.describe('on a touch screen', () => {
   test.use({ hasTouch: true });
 
-  test('a swipe turns the page, and a short or upright one does not', async ({ page }) => {
+  // A pointer's path, as touch pointer events, one move per step, ms
+  // apart: the gestures recognizer classifies them in the app
+  const drag = (page, points, ms, { cancel = false, id = 7 } = {}) =>
+    bookPage(page).evaluate(async (el, [points, ms, cancel, id]) => {
+      const ev = (type, [x, y]) => el.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: id, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
+      }));
+      const wait = (t) => new Promise((r) => setTimeout(r, t));
+      ev('pointerdown', points[0]);
+      for (const p of points.slice(1)) { await wait(ms); ev('pointermove', p); }
+      await wait(ms);
+      ev(cancel ? 'pointercancel' : 'pointerup', points[points.length - 1]);
+      await wait(50);
+    }, [points, ms, cancel, id]);
+  const across = (x0, x1, y, n) =>
+    Array.from({ length: n + 1 }, (_, i) => [x0 + ((x1 - x0) * i) / n, y]);
+
+  test('a swipe turns the page, and a short, upright, edge or cancelled one does not', async ({ page }) => {
     await start(page);
     await readBook(page, book('Swiped', 1, 20));
     const box = await bookPage(page).boundingBox();
     const y = box.y + box.height / 2;
-    const swipe = (x0, y0, x1, y1) => bookPage(page).evaluate((el, [x0, y0, x1, y1]) => {
-      const t = (x, y) => new Touch({ identifier: 1, target: el, clientX: x, clientY: y });
-      el.dispatchEvent(new TouchEvent('touchstart', { bubbles: true, touches: [t(x0, y0)], changedTouches: [t(x0, y0)] }));
-      el.dispatchEvent(new TouchEvent('touchend', { bubbles: true, touches: [], changedTouches: [t(x1, y1)] }));
-    }, [x0, y0, x1, y1]);
     const mid = box.x + box.width / 2;
-    await swipe(mid + 100, y, mid - 100, y);
+    // a flick to the left: the next page
+    await drag(page, across(mid + 60, mid - 60, y, 4), 16);
     await expect.poll(async () => (await place(page)).p).toBe(2);
-    await swipe(mid - 100, y, mid + 100, y);
+    // a slow, long drag to the right: back
+    await drag(page, across(mid - 80, mid + 80, y, 8), 60);
     await expect.poll(async () => (await place(page)).p).toBe(1);
-    // too short, and more down than across
-    await swipe(mid + 20, y, mid - 20, y);
-    await swipe(mid + 70, y - 150, mid - 70, y + 150);
+    // too short and slow
+    await drag(page, across(mid + 20, mid - 20, y, 4), 80);
+    // more down than across
+    await drag(page, [[mid, y - 150], [mid + 20, y - 50], [mid + 40, y + 50], [mid + 60, y + 150]], 16);
+    // from the screen's left edge (the system's back gesture)
+    await drag(page, across(5, 205, y, 4), 16);
+    // cancelled by the system mid-drag
+    await drag(page, across(mid + 100, mid - 100, y, 4), 16, { cancel: true });
     await page.waitForTimeout(300);
     expect((await place(page)).p).toBe(1);
   });
+
+  test('the page follows the finger, and goes back when the drag is cancelled', async ({ page }) => {
+    await start(page);
+    await readBook(page, book('Followed', 1, 20));
+    const box = await bookPage(page).boundingBox();
+    const y = box.y + box.height / 2;
+    const mid = box.x + box.width / 2;
+    const offsets = await bookPage(page).evaluate(async (el, [mid, y]) => {
+      const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 9, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
+      }));
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const rest = el.scrollLeft;
+      ev('pointerdown', mid + 60);
+      for (const dx of [20, 40, 60]) { await frame(); ev('pointermove', mid + 60 - dx); }
+      await frame(); await frame();
+      const held = el.scrollLeft;
+      ev('pointercancel', mid);
+      await frame();
+      return [rest, held, el.scrollLeft];
+    }, [mid, y]);
+    // dragged 60 px to the left: the next page shows that much
+    expect(offsets[1] - offsets[0]).toBeGreaterThan(30);
+    expect(offsets[2]).toBe(offsets[0]);
+    expect((await place(page)).p).toBe(1);
+  });
+});
+
+test('a mouse drag over the page selects text and does not turn it', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Dragged', 1, 20));
+  const box = await bookPage(page).boundingBox();
+  const y = box.y + box.height / 3;
+  await page.mouse.move(box.x + box.width / 2 + 100, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 - 100, y, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  expect((await place(page)).p).toBe(1);
+  expect(await page.evaluate(() => window.getSelection().toString().length)).toBeGreaterThan(0);
 });
 
 test('Escape closes the overlay opened last, one at a time', async ({ page }) => {

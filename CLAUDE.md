@@ -218,6 +218,20 @@ keep the stack of open overlays, last opened on top. Escape answers the
 dialog if one is open, and otherwise closes the top of that stack
 (`layer_escape`), whatever opened it.
 
+The page turns by a horizontal drag, recognized by the gestures package
+(its classifier and drag state machine are proven there): bridge's
+`listen_gestures` on the reader view (`OnGestures("qrvw")`) sends batched
+pointer records, `_gesture_batch` in `src/bin/quire.bats` feeds them to
+the recognizer, a pan scrolls the page with the finger (`reader_pan`), a
+commit turns it and a cancel puts it back. The page (`qcnt`, region 1,
+`data-gesture-region`) takes touch and pen only, so a mouse drag still
+selects text; its CSS touch-action comes from the same axes the region
+is declared with (`page_turn_axes` in `src/style.bats`). A drag's end
+suppresses the click the browser sends after it (`_dragged`). The shim
+captures a mouse pointer only once it has moved more than 4 px: capture
+at pointerdown would send the click to the reader view instead of the
+button under it, so no button in the reader could be clicked.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most the bridge's 128.

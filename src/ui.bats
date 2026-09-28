@@ -266,14 +266,14 @@ in end
    style is a place (ui_place), so nothing can set a colour, a size or
    anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
-  | ATabindex | ASrc | AValueNow | ACurrent
+  | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
   | AClass() => "class" | ASelected() => "aria-selected" | APressed() => "aria-pressed"
   | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
-  | ACurrent() => "aria-current"
+  | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}
@@ -829,6 +829,9 @@ in _sattr(id, "aria-labelledby", by) end
   | OnDocument
   | OnWindow
   | OnExternalFiles   (* files handed to the app from outside it *)
+  (* pointer events under an element, for the gestures package (bridge's
+     listen_gestures) *)
+  | {n:pos | n < 256} OnGestures of (string n)
 
 (* The app's listeners, as one table: the last added is at its head.
    A listener's id is its position in the table (the first added is 0),
@@ -854,7 +857,13 @@ fn _listen1 {ne:pos | ne < 256}
       in $A.free<byte>($A.thaw<byte>(if_)) end
     | OnDocument() => $EV.listen_document(eb, en, lid, cb)
     | OnWindow() => $EV.listen_window(eb, en, lid, cb)
-    | OnExternalFiles() => $EV.listen_external_files(lid, cb))
+    | OnExternalFiles() => $EV.listen_external_files(lid, cb)
+    | OnGestures(id) => let
+        val inn = _len(id)
+        val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
+        val () = $EV.listen_gestures(ib, inn, lid, cb)
+        val () = $A.drop<byte>(if_, ib)
+      in $A.free<byte>($A.thaw<byte>(if_)) end)
   val () = $A.drop<byte>(ef, eb)
 in $A.free<byte>($A.thaw<byte>(ef)) end
 

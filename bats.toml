@@ -9,6 +9,7 @@ unsafe = false
 "builder" = ""
 "css" = ""
 "file" = ""
+"gestures" = ""
 "path" = ""
 "promise" = ""
 "pwa" = ""

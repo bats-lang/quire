@@ -139,6 +139,8 @@ fn _reader (): void = let
   val () = ui_icon_btn("qrnv", "qsch", "ibtn", IcSearch, "Search in book")
   val () = ui_el("qrvw", "qcnt", TDiv, "caf")
   val () = ui_attr("qcnt", ATabindex, "0")
+  (* the page turn's gesture region (quire.bats's PAGE_REGION) *)
+  val () = ui_attr("qcnt", AGestureRegion, "1")
   val () = ui_named("qcnt", NDocument, "Page")
   val () = ui_text_btn("qrvw", "qpbk", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("qpbk")
