@@ -56,6 +56,8 @@ test('importing the same book again asks, and Skip keeps one copy', async ({ pag
   await ask.getByRole('button', { name: 'Skip' }).click();
   await expect(ask).toBeHidden();
   await expect(cards(page)).toHaveCount(1);
+  // nothing is left saying the file is being read
+  await expect(page.getByRole('status').filter({ hasText: 'Reading file' })).toBeHidden();
 });
 
 test('the sort button cycles the orders, and the order is kept', async ({ page }) => {
@@ -177,6 +179,14 @@ test('book info shows the book and its progress', async ({ page }) => {
   // a book without a cover shows no image
   await expect(info.getByRole('img')).toHaveCount(0);
   await info.getByRole('button', { name: '← Library' }).click();
+  // one with a cover shows it, at a size that can be seen
+  await importFiles(page, [epubFile({ title: 'Covered Book', author: 'Pictor', coverImage: true })], 2);
+  await bookMenu(page, 'Covered Book');
+  await menuItem(page, 'Book info').click();
+  const cover = info.getByRole('img');
+  await expect.poll(() => cover.evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
+  expect((await cover.boundingBox()).width).toBeGreaterThanOrEqual(100);
+  await info.getByRole('button', { name: '← Library' }).click();
   await expect(info).toBeHidden();
 });
 
@@ -214,6 +224,7 @@ test('importing the same book again and choosing Replace keeps one copy that sti
   await ask.getByRole('button', { name: 'Replace' }).click();
   await expect(ask).toBeHidden();
   await expect(cards(page)).toHaveCount(1);
+  await expect(page.getByRole('status').filter({ hasText: /Reading file|Opening archive|Adding/ })).toBeHidden();
   await openBook(page, 'Replaced Twice');
 });
 
@@ -285,4 +296,14 @@ test('a factory reset can be cancelled', async ({ page }) => {
   await expect(dialog(page, 'Factory reset?')).toBeHidden();
   await page.reload();
   await expect(card(page, 'Survivor')).toHaveCount(1);
+});
+
+test('after a duplicate is skipped, the other files picked with it are imported', async ({ page }) => {
+  await start(page);
+  const first = epubFile({ title: 'Already Here', author: 'A' });
+  await importFiles(page, [first], 1);
+  await importInput(page).setInputFiles([first, epubFile({ title: 'Brand New', author: 'B' })]);
+  await dialog(page, 'Already in library').getByRole('button', { name: 'Skip' }).click();
+  await expect(card(page, 'Brand New')).toHaveCount(1, { timeout: 30000 });
+  await expect(cards(page)).toHaveCount(2);
 });

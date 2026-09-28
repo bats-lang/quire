@@ -31,8 +31,11 @@ test('the book is searched, and the results are gone to and stepped through', as
   await expect(summary(page)).toHaveText('3 results');
   const rows = results(page);
   await expect(rows).toHaveCount(3);
-  await expect(rows.nth(1)).toContainText('Chapter 2');
   await expect(rows.nth(1)).toContainText('Zebra&crossing');
+  // the results sit under their chapters' names, each named once
+  const listed = panel(page).getByRole('region', { name: 'Results' });
+  await expect(listed.getByText('Chapter 2', { exact: true })).toHaveCount(1);
+  expect(await listed.innerText()).toMatch(/Chapter 1[\s\S]*Zebra[\s\S]*Chapter 2[\s\S]*Zebra[\s\S]*Chapter 3[\s\S]*Zebra/i);
   // typing did not turn pages or bookmark
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   await rows.nth(1).click();
@@ -98,4 +101,19 @@ test('Ctrl+F opens the search', async ({ page }) => {
   await page.keyboard.press('Control+f');
   await expect(panel(page)).toBeVisible();
   await expect(box(page)).toBeFocused();
+});
+
+test('a search that was ended starts afresh when opened again', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await page.keyboard.press('/');
+  await page.keyboard.type('zebra');
+  await expect(summary(page)).toHaveText('3 results');
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await page.keyboard.press('/');
+  await expect(box(page)).toHaveValue('');
+  await expect(results(page)).toHaveCount(0);
+  await page.keyboard.type('para 3.1');
+  await expect(box(page)).toHaveValue('para 3.1');
 });

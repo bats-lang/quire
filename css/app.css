@@ -48,7 +48,7 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .info{position:fixed;inset:0;z-index:15;background:var(--bg);overflow:auto;padding:max(12px,env(safe-area-inset-top)) 16px 24px}
 .info-in{max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:8px}
 .info-in>.btn{align-self:flex-start}
-.icov{max-width:200px;max-height:300px;align-self:center;border-radius:4px}
+.icov{width:160px;max-width:50vw;max-height:300px;object-fit:contain;align-self:center;border-radius:4px}
 .it{font-family:Literata,Georgia,serif;font-size:22px;font-weight:bold}
 .irow{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0;color:var(--muted)}
 .irow b{color:var(--fg);font-weight:normal}

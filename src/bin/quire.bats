@@ -692,6 +692,10 @@ in ui_focus("qsri") end
 fn _search_end (): void = let
   val () = ui_show("qsrp", false)
   val () = reader_search_close()
+  (* the next search starts afresh: an empty field, no old results *)
+  val () = _search_field($A.alloc<byte>(1), 0)
+  val () = ui_clear("qsrl")
+  val () = ui_clear("qsrm")
 in ui_focus("qcnt") end
 
 (* Searches for the field's text *)

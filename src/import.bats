@@ -392,8 +392,9 @@ datavtype dup =
   | NoDup of ()
 
 val _dup = ref<dup>(NoDup())
-(* The stashed resolver the answer fires: 1 skip, 2 replace *)
-val _dup_answer = ref<int>(0)
+(* The stashed resolver the answer fires (1 skip, 2 replace), or -1
+   when no question is open; ids start at 0 *)
+val _dup_answer = ref<int>(~1)
 
 fn _dup_take (): dup = let
   var x: dup = NoDup()
@@ -477,7 +478,9 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
             in
               $P.and_then<Int><Int>($P.vow(p), lam(ans) =>
                 case+ _dup_take() of
-                | ~NoDup() => $P.ret<Int>(~1)
+                | ~NoDup() => let
+                    val () = ui_show("qimp", false)
+                  in $P.ret<Int>(~1) end
                 | ~Dup(f2, n2, g1, g2, j) =>
                   if ans = 2 then _import_go(f2, n2, g1, g2, j)
                   else let
@@ -493,9 +496,11 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
 
 implement import_dup_answer (ans) = let
   val () = modal_close()
+  (* skipped: the file's import card goes at once *)
+  val () = (if ans = 2 then () else ui_show("qimp", false))
   val id = !_dup_answer
-  val () = !_dup_answer := 0
-in if id > 0 then $P.fire(id, (if ans = 2 then 2 else 1)) else () end
+  val () = !_dup_answer := ~1
+in if id >= 0 then $P.fire(id, (if ans = 2 then 2 else 1)) else () end
 
 (* Imports files i to c - 1 of source src (0 the file input qfin, 1 the
    last drop), one after another *)

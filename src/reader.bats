@@ -1621,21 +1621,24 @@ and _scan_node {lb,lq:agz}{n:pos}{sz:pos}{nq:pos}{qn:pos | qn <= nq}{r:nat | r <
 (* The results list, or its state *)
 fn _search_status {nt:pos | nt < 256} (t: string nt): void = ui_text("qsrm", t)
 
-(* One row of the results: hit i, in chapter ch, with its text *)
-fn _hit_row {i:nat}{c:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
-  (i: int i, ch: int c, a: !$A.arr(byte, l, m), sl: int sl): void = let
+(* The heading of chapter ch's results *)
+fn _hit_heading {c:nat} (ch: int c): void = let
+  val @(ga, gl) = nid_make("qj", ch)
+  val () = ui_add_n("qsrl", ga, gl, "div")
+  val @(ga, gl) = nid_make("qj", ch)
+  val () = ui_attr_n(ga, gl, "class", "grp")
+  val @(lb, lk) = toc_label_of(ch)
+  val @(ga, gl) = nid_make("qj", ch)
+in ui_text_n_buf(ga, gl, lb, lk) end
+
+(* One row of the results: hit i, with its text (its chapter is the
+   heading above it) *)
+fn _hit_row {i:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
+  (i: int i, a: !$A.arr(byte, l, m), sl: int sl): void = let
   val @(ra, rl) = nid_make("qh", i)
   val () = ui_add_n("qsrl", ra, rl, "button")
   val @(ra, rl) = nid_make("qh", i)
   val () = ui_attr_n(ra, rl, "class", "pi hgo")
-  val @(pa, pl) = nid_make("qh", i)
-  val @(ca, cl) = nid_make("qhc", i)
-  val () = ui_add_nn(pa, pl, ca, cl, "span")
-  val @(ca, cl) = nid_make("qhc", i)
-  val () = ui_attr_n(ca, cl, "class", "bt")
-  val @(lb, lk) = toc_label_of(ch)
-  val @(ca, cl) = nid_make("qhc", i)
-  val () = ui_text_n_buf(ca, cl, lb, lk)
   val @(pa, pl) = nid_make("qh", i)
   val @(sa, sl2) = nid_make("qhs", i)
   val () = ui_add_nn(pa, pl, sa, sl2, "span")
@@ -1646,12 +1649,17 @@ fn _hit_row {i:nat}{c:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
   val @(sa, sl2) = nid_make("qhs", i)
 in ui_text_n_buf(sa, sl2, b, sl) end
 
-fun _hit_rows {k:nat}{i:nat} .<k>. (x: !hits(k), i: int i): void =
+(* The rows of hits x from hit i, under a heading wherever the chapter
+   changes from last *)
+fun _hit_rows {k:nat}{i:nat} .<k>. (x: !hits(k), i: int i, last: Int): void =
   case+ x of
   | hits_nil() => ()
   | @hits_cons(c, _, _, a, sl, rest) => let
-      val () = (if c >= 0 then _hit_row(i, c, a, sl) else ())
-      val () = _hit_rows(rest, i + 1)
+      val () = (if c >= 0 then let
+          val () = (if c <> last then _hit_heading(c) else ())
+        in _hit_row(i, a, sl) end else ())
+      val c0 = c
+      val () = _hit_rows(rest, i + 1, c0)
       prval () = fold@(x)
     in end
 
@@ -1663,7 +1671,7 @@ fn _search_done (gen: int): void =
     | ~SearchCell(h, k, q, qn) => let
         val h = hits_rev(h, hits_nil())
         val () = ui_clear("qsrl")
-        val () = _hit_rows(h, 0)
+        val () = _hit_rows(h, 0, ~1)
         val () = (if k = 0 then _search_status("No results")
           else if k = 1 then _search_status("1 result")
           else if k >= HMAX then _search_status("500 results or more")
