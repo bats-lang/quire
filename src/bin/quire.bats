@@ -486,7 +486,7 @@ in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
 
 fn _wire_library (): void = let
   (* import *)
-  val () = ui_listen("qfin", "change", 1, lam(_) => let val () = import_picked() in 0 end)
+  val () = ui_listen("qibn", "change", 1, lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
   val () = ui_listen("qllc", "dragover", 23, lam(_) => let
       val () = $EV.prevent_default()
@@ -547,7 +547,7 @@ fn _wire_library (): void = let
       val () = lib_query_set(q, n)
     in let val () = lib_render() in 0 end end)
   (* a backup picked to restore *)
-  val () = ui_listen("qbfi", "change", 50, lam(_) => let
+  val () = ui_listen("qlmi", "change", 50, lam(_) => let
       val () = ui_show("qlmn", false)
       val () = backup_import()
     in 0 end)
@@ -620,19 +620,21 @@ fn _wire_settings (): void = let
         else if _is(t, "qth1") then let val () = set_theme_set(1) in true end
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
-        else if _is(t, "qsrs") then let val () = set_reset() in true end
+        else if _is(t, "qsrs") then let
+            val () = set_reset()
+          in let val () = set_sliders() in true end end
         else false): bool
       val close = _is(t, "qscl")
       val () = _target_free(t)
       val () = (if close then ui_show("qspn", false) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val () = ui_listen("qfsr", "input", 10, lam(h) => let
+  val () = ui_listen("qsr1", "input", 10, lam(h) => let
       val () = set_size_set(_clamp(_input_num(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
-  val () = ui_listen("qlhr", "input", 11, lam(h) => let
+  val () = ui_listen("qsr2", "input", 11, lam(h) => let
       val () = set_lh_set(_clamp(_input_num(h), 12, 24))
     in let val () = _settings_changed() in 0 end end)
-  val () = ui_listen("qmgr", "input", 12, lam(h) => let
+  val () = ui_listen("qsr3", "input", 12, lam(h) => let
       val () = set_margin_set(_clamp(_input_num(h), 0, 4))
     in let val () = _settings_changed() in 0 end end)
 in end

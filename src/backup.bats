@@ -586,6 +586,7 @@ in
     val () = lib_sort(sort)
     val () = lib_sort_label(sort)
     val () = set_apply(sort)
+    val () = set_sliders()
     val () = lib_save()
     val () = lib_render()
   in
@@ -619,7 +620,10 @@ in p end
 
 implement backup_import () =
   if _qbfi_count() <= 0 then ()
-  else $P.discard<int>($P.and_then<Int><int>($P.vow(_qbfi_open()), lam(h) =>
+  else $P.discard<int>($P.and_then<Int><int>($P.vow(_qbfi_open()), lam(h) => let
+    (* the file is taken from the input: its choice is cleared *)
+    val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", "Import backup", false)
+  in
     case+ $FI.claim(h) of
     | ~$R.none() => let
         val () = _say("The backup could not be read.")
@@ -646,6 +650,7 @@ implement backup_import () =
               val () = _restore(out, n)
               val () = piece_free(ow, out)
             in $P.ret<int>(0) end)
-      end))
+      end
+  end))
 
 end (* #target wasm *)

@@ -271,6 +271,39 @@ implement ui_show(id, shown) =
 implement ui_show_n(id, inn, shown) =
   if shown then ui_attr_n(id, inn, "data-hide", "0") else ui_attr_n(id, inn, "data-hide", "1")
 
+(* The file input id, made again (so a file chosen twice in a row is
+   taken both times) as the one child of parent after its label: its
+   change events are taken on parent *)
+#pub fn ui_file_input {np,ni:pos | np < 256; ni < 256}{nl,na,nh:pos | nl < 256; na < 256; nh < 256}
+  (parent: string np, id: string ni, label: string nl, accept: string na, hint: string nh, multiple: bool): void
+
+implement ui_file_input(parent, id, label, accept, hint, multiple) = let
+  val () = ui_text(parent, label)
+  val () = ui_add(parent, id, "input")
+  val () = ui_attr(id, "type", "file")
+  val () = ui_attr(id, "accept", accept)
+  val () = (if multiple then ui_attr(id, "multiple", "multiple") else ())
+in ui_attr(id, "aria-label", hint) end
+
+(* The row of a range input iid from lo to hi at the value v[0, k):
+   made again (a range the user has moved no longer follows its value
+   attribute), with its label lid and its value's text vid after it *)
+#pub fn ui_range {nr,nd,nl,ni,n1,n2,nv:pos | nr < 256; nd < 256; nl < 256; ni < 256; n1 < 256; n2 < 256; nv < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
+  (row: string nr, lid: string nd, label: string nl, iid: string ni, lo: string n1, hi: string n2, vid: string nv,
+   v: $A.arr(byte, l, n), k: int k): void
+
+implement ui_range(row, lid, label, iid, lo, hi, vid, v, k) = let
+  val () = ui_clear(row)
+  val () = ui_el(row, lid, "span", "slabel")
+  val () = ui_text(lid, label)
+  val () = ui_add(row, iid, "input")
+  val () = ui_attr(iid, "type", "range")
+  val () = ui_attr(iid, "min", lo)
+  val () = ui_attr(iid, "max", hi)
+  val () = ui_attr_buf(iid, "value", v, k)
+  val () = ui_attr(iid, "aria-label", label)
+in ui_el(row, vid, "span", "sval") end
+
 (* ============================================================
    Text
    ============================================================ *)

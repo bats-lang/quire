@@ -154,6 +154,23 @@ fn _save (sort: int): void = let
   val () = $A.drop<byte>(bf, bb)
 in $A.free<byte>($A.thaw<byte>(bf)) end
 
+(* The panel's sliders, made again at the settings' values (after they
+   are loaded, reset or restored; not while one is being moved) *)
+#pub fn set_sliders (): void
+
+implement set_sliders () = let
+  val x = !_set
+  val a = $A.alloc<byte>(16)
+  val k = $S.int_to_str(a, 0, 16, x.size)
+  val () = ui_range("qsr1", "qsl1", "Size", "qfsr", "12", "32", "qfsv", a, k)
+  val a = $A.alloc<byte>(16)
+  val k = $S.int_to_str(a, 0, 16, x.lh)
+  val () = ui_range("qsr2", "qsl2", "Line spacing", "qlhr", "12", "24", "qlhv", a, k)
+  val a = $A.alloc<byte>(16)
+  val k = $S.int_to_str(a, 0, 16, x.margin)
+  val () = ui_range("qsr3", "qsl3", "Margins", "qmgr", "0", "4", "qmgv", a, k)
+in _show_controls() end
+
 (* Applies the settings (and shows them in the panel), then saves them
    with the library's sort order *)
 #pub fn set_apply (sort: int): void
@@ -170,7 +187,7 @@ in _save(sort) end
 implement set_show () = let
   val () = _apply_type()
   val () = _apply_theme()
-in _show_controls() end
+in set_sliders() end
 
 #pub fn set_size_set (v: set_size): void
 implement set_size_set (v) = let val x = !_set in !_set := @{ size = v, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme } end

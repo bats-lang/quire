@@ -500,7 +500,9 @@ in if id > 0 then $P.fire(id, (if ans = 2 then 2 else 1)) else () end
 (* Imports files i to c - 1 of source src (0 the file input qfin, 1 the
    last drop), one after another *)
 fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): void =
-  if i >= c then ()
+  if i >= c then
+    (* the input's files are all read: its choice is cleared *)
+    (if src = 0 then ui_file_input("qibn", "qfin", "Import EPUB", ".epub,application/epub+zip", "Import EPUB", true) else ())
   else let
     val p = (if src = 0 then let
         val ia = $A.alloc<byte>(4)

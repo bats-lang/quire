@@ -22,12 +22,7 @@ fn _library (): void = let
   val () = ui_attr("qshf", "aria-label", "Shelf shown")
   val () = ui_btn("qltb", "qsrt", "btn", "Sort: Last opened")
   val () = ui_el("qltb", "qibn", "div", "btn btn-p")
-  val () = ui_text("qibn", "Import EPUB")
-  val () = ui_add("qibn", "qfin", "input")
-  val () = ui_attr("qfin", "type", "file")
-  val () = ui_attr("qfin", "accept", ".epub,application/epub+zip")
-  val () = ui_attr("qfin", "multiple", "multiple")
-  val () = ui_attr("qfin", "aria-label", "Import EPUB")
+  val () = ui_file_input("qibn", "qfin", "Import EPUB", ".epub,application/epub+zip", "Import EPUB", true)
   val () = ui_btn("qltb", "qlgr", "ibtn", "\xE2\x9A\x99")
   val () = ui_attr("qlgr", "aria-label", "Library menu")
   val () = ui_el("qltb", "qlsq", "input", "search")
@@ -74,11 +69,7 @@ fn _library_menu (): void = let
   val () = ui_attr("qlmb", "role", "menu")
   val () = ui_btn("qlmb", "qlme", "mi", "Export backup")
   val () = ui_el("qlmb", "qlmi", "div", "mi btn")
-  val () = ui_text("qlmi", "Import backup")
-  val () = ui_add("qlmi", "qbfi", "input")
-  val () = ui_attr("qbfi", "type", "file")
-  val () = ui_attr("qbfi", "accept", ".json,application/json")
-  val () = ui_attr("qbfi", "aria-label", "Import backup")
+  val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", "Import backup", false)
   val () = ui_btn("qlmb", "qlmr", "mi", "Factory reset")
   val () = ui_btn("qlmb", "qlmc", "mi", "Close")
 in _hide("qlmn") end
@@ -216,18 +207,6 @@ fn _toc (): void = let
   val () = _hide("qtbl")
 in _hide("qtoc") end
 
-(* A range input of the settings sheet, with its label and value *)
-fn _range {nr,ni,nv:pos | nr < 256; ni < 256; nv < 256}{nl:pos | nl < 256}{n1,n2:pos | n1 < 256; n2 < 256}
-  (rid: string nr, label: string nl, iid: string ni, lo: string n1, hi: string n2, vid: string nv): void = let
-  val () = ui_el("qspn", rid, "div", "srow")
-  val () = ui_el(rid, vid, "span", "slabel")
-  val () = ui_text(vid, label)
-  val () = ui_add(rid, iid, "input")
-  val () = ui_attr(iid, "type", "range")
-  val () = ui_attr(iid, "min", lo)
-  val () = ui_attr(iid, "max", hi)
-  val () = ui_attr(iid, "aria-label", label)
-in end
 
 (* The settings sheet *)
 fn _settings (): void = let
@@ -241,12 +220,11 @@ fn _settings (): void = let
   val () = ui_btn("qsgf", "qff0", "sbtn", "Literata")
   val () = ui_btn("qsgf", "qff1", "sbtn", "Inter")
   val () = ui_btn("qsgf", "qff2", "sbtn", "Book")
-  val () = _range("qsr1", "Size", "qfsr", "12", "32", "qsl1")
-  val () = ui_el("qsr1", "qfsv", "span", "sval")
-  val () = _range("qsr2", "Line spacing", "qlhr", "12", "24", "qsl2")
-  val () = ui_el("qsr2", "qlhv", "span", "sval")
-  val () = _range("qsr3", "Margins", "qmgr", "0", "4", "qsl3")
-  val () = ui_el("qsr3", "qmgv", "span", "sval")
+  (* the sliders' rows: their sliders are made at the settings'
+     values (set_sliders) *)
+  val () = ui_el("qspn", "qsr1", "div", "srow")
+  val () = ui_el("qspn", "qsr2", "div", "srow")
+  val () = ui_el("qspn", "qsr3", "div", "srow")
   val () = ui_el("qspn", "qsrt2", "div", "srow")
   val () = ui_el("qsrt2", "qslt", "span", "slabel")
   val () = ui_text("qslt", "Theme")
