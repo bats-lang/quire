@@ -2,7 +2,8 @@
 // every setting is kept without being saved by hand.
 
 import { test, expect } from '@playwright/test';
-import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours } from './helpers.js';
+import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
+} from './helpers.js';
 
 const para = page => bookPage(page).locator('p').first();
 const style = (page, prop) => para(page).evaluate((e, p) => getComputedStyle(e)[p], prop);
@@ -25,7 +26,7 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   await choose(page, 'Close');
   await expect(sheet(page)).toBeHidden();
   await toLibrary(page);
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Typeset');
   await expect.poll(() => style(page, 'fontSize')).toBe('28px');
   expect(await style(page, 'lineHeight')).toBe(`${28 * 2}px`);
@@ -70,7 +71,7 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   expect(r - b).toBeGreaterThan(20);
   // kept in the library and after a reload
   await page.keyboard.press('Escape');
-  await page.reload();
+  await reload(page);
   expect(await bg()).toBe(sepia);
   // auto: light, then dark when the system asks for it
   await openBook(page, 'Colours');

@@ -147,6 +147,17 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
   set their font size to 0, and a dialog's veil makes its own text
   transparent.
+* Each theme is written (`theme`) only with a proof (`HARMONY`) that
+  it follows css's harmony rules (`harmony.bats`, which gives each
+  rule's source): its hues in at most three families of 30 degrees;
+  its surfaces, bars, edges and text neutrals of the first; danger and
+  the error banner red, highlights yellow; accent and danger as
+  saturated; a card lighter than the page; body text at 7:1; and, in a
+  dark theme, a ground that is not black, text that is not pure white,
+  and calm accent, danger and edges. No text/ground pair vibrates: one
+  of them is calm (`SURF`). `scripts/gen-harmony.py` writes the proofs
+  from `PAL`; the solver checks them, so a palette that breaks a rule
+  does not type-check.
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
