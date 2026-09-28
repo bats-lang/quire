@@ -950,7 +950,7 @@ fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] she
   val sh = close(sh)
 in sh end
 
-fn _g_2_overlays {r:nat | r >= 2752} (sh: sheet(r, 0)): [q:nat | q >= r - 2752] sheet(q, 0) = let
+fn _g_2_overlays {r:nat | r >= 2770} (sh: sheet(r, 0)): [q:nat | q >= r - 2770] sheet(q, 0) = let
   val sh = rule(sh, ".toast")
   val sh = lay(sh, Position(), "fixed")
   val sh = lay(sh, Left(), "50%")
@@ -994,10 +994,10 @@ fn _g_2_overlays {r:nat | r >= 2752} (sh: sheet(r, 0)): [q:nat | q >= r - 2752] 
   val sh = rule(sh, ".mi:hover")
   val sh = surf(S_fg_line | sh, 1, 4)
   val sh = close(sh)
-  val sh = rule(sh, ".mi.danger")
+  val sh = rule(sh, ".mi[data-harm=y]")
   val sh = surf(S_danger_card | sh, 16, 3)
   val sh = close(sh)
-  val sh = rule(sh, ".mi.danger:hover")
+  val sh = rule(sh, ".mi[data-harm=y]:hover")
   val sh = surf(S_danger_line | sh, 16, 4)
   val sh = close(sh)
   val sh = rule(sh, ".menu .mi.btn")
@@ -1027,7 +1027,7 @@ fn _g_2_overlays {r:nat | r >= 2752} (sh: sheet(r, 0)): [q:nat | q >= r - 2752] 
   val sh = lay(sh, JustifyContent(), "flex-end")
   val sh = lay(sh, FlexWrap(), "wrap")
   val sh = close(sh)
-  val sh = rule(sh, ".btn.danger")
+  val sh = rule(sh, ".btn[data-harm=y]")
   val sh = surf(S_danger_card | sh, 16, 3)
   val sh = line(sh, AllSides(), 1, 16)
   val sh = close(sh)
@@ -1330,7 +1330,7 @@ fn _g_3_reader {r:nat | r >= 5447} (sh: sheet(r, 0)): [q:nat | q >= r - 5447] sh
   val sh = close(sh)
 in sh end
 
-fn _g_4_panels {r:nat | r >= 4617} (sh: sheet(r, 0)): [q:nat | q >= r - 4617] sheet(q, 0) = let
+fn _g_4_panels {r:nat | r >= 4535} (sh: sheet(r, 0)): [q:nat | q >= r - 4535] sheet(q, 0) = let
   val sh = rule(sh, ".panel")
   val sh = lay(sh, Position(), "fixed")
   val sh = lay(sh, Top(), "0")
@@ -1429,9 +1429,6 @@ fn _g_4_panels {r:nat | r >= 4617} (sh: sheet(r, 0)): [q:nat | q >= r - 4617] sh
   val sh = lay(sh, BorderRadius(), "6px")
   val sh = lay(sh, FontSize(), "14px")
   val sh = surf(S_fg_card | sh, 1, 3)
-  val sh = close(sh)
-  val sh = rule(sh, ".hbtns button.danger")
-  val sh = surf(S_danger_card | sh, 16, 3)
   val sh = close(sh)
   val sh = rule(sh, ".hrow")
   val sh = line(sh, BottomSide(), 1, 4)

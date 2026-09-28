@@ -109,6 +109,11 @@ fn _is {sn:pos} (t: !target, id: string sn): bool =
   | Target(b, n, _) => _bytes_are(b, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
+(* The harm whose menu item (ui_harm_item) t is: its click asks about
+   that same harm *)
+fn _harm_clicked (t: !target): Option_vt(harm) =
+  if _is(t, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
+
 (* The number n of the target's id pre<n>, or -1 *)
 fn _row_of {sn:pos | sn <= 4} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
   case+ t of
@@ -599,10 +604,12 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
     in let val () = ui_focus("qlme") in 0 end end)
   val r = RCons(r, OnEl("qlmn"), "click", lam(h) => let
       val t = _target(h)
-      val () = (if _is(t, "qlmt") then let
-          val () = ui_show("qlmn", false)
-        in lib_ask_empty_trash(lam () => _save_render()) end
-        else if _is(t, "qlmr") then let
+      val () = (case+ _harm_clicked(t) of
+        | ~Some_vt(h) => let
+            val () = ui_show("qlmn", false)
+          in lib_ask_harm(h, lam () => _save_render()) end
+        | ~None_vt() =>
+        if _is(t, "qlmr") then let
           val () = ui_show("qlmn", false)
         in _factory_reset() end
         else if _is(t, "qlme") then let

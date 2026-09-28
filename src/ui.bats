@@ -494,16 +494,34 @@ fn _glyph (ic: icon): [k:pos | k < 256] string k =
   | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
   | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE"
 
-(* What a menu item or a dialog's button does: Danger for one that
-   deletes or resets, which the stylesheet marks *)
-#pub datatype tone = Plain | Danger
+(* What would be lost for good. Only emptying the Trash cannot be
+   undone (everything else is done at once and offered back: undo.bats),
+   so it is the one harm *)
+#pub datatype harm =
+  | HEmptyTrash                           (* every book in the Trash *)
+
+(* The menu item that asks about h: its id and its label *)
+fn _harm_item (h: harm): @([k:pos | k < 256] string k, [k:pos | k < 256] string k) =
+  case+ h of
+  | HEmptyTrash() => @("qlmt", "Empty Trash")
+
+(* The id of h's menu item, for its click: the item asks about h *)
+#pub fn ui_harm_id (h: harm): [k:pos | k < 256] string k
+implement ui_harm_id (h) = let val @(id, _) = _harm_item(h) in id end
+
+(* What a dialog's button does: Danger(h) for the one that does h. Red
+   is the stylesheet's mark for [data-harm], which only this module
+   sets, and only from a harm: on h's menu item (ui_harm_item) and on
+   the button that does h (ui_tone) *)
+#pub datatype tone = Plain | Danger of harm
 
 (* The kinds of control, each carrying what names it *)
 datatype control =
   | {nc,nl:pos | nc < 256; nl < 256} CText of (string nc, string nl)
   | {nc,nn:pos | nc < 256; nn < 256} CIcon of (string nc, icon, string nn)
   | {nc:pos | nc < 256} CNamedByContent of (string nc)
-  | {nl:pos | nl < 256} CMenuItem of (string nl, tone)
+  | {nl:pos | nl < 256} CMenuItem of (string nl)
+  | CHarmItem of harm
   | {nl,nx:pos | nl < 256; nx < 256} CTab of (string nl, string nx, bool)
 
 (* Control c as element ib, the last child of pb *)
@@ -519,9 +537,15 @@ fn _control {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}
       val () = _dattr(doc, ib, inn, "aria-label", name)
     in _dtext(doc, ib, inn, _glyph(ic)) end
   | CNamedByContent(cls) => _dbutton(doc, pb, pn, ib, inn, cls)
-  | CMenuItem(label, t) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, (case+ t of Plain() => "mi" | Danger() => "mi danger"): [k:pos | k < 256] string k)
+  | CMenuItem(label) => let
+      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
       val () = _dattr(doc, ib, inn, "role", "menuitem")
+    in _dtext(doc, ib, inn, label) end
+  | CHarmItem(h) => let
+      val @(_, label) = _harm_item(h)
+      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
+      val () = _dattr(doc, ib, inn, "role", "menuitem")
+      val () = _dattr(doc, ib, inn, "data-harm", "y")
     in _dtext(doc, ib, inn, label) end
   | CTab(label, controls, sel) => let
       val () = _dbutton(doc, pb, pn, ib, inn, "tab")
@@ -613,9 +637,25 @@ implement ui_text_btn_nn(parent, pn, id, inn, cls, label) = _control_nn(parent, 
 
 (* An item of a menu, named by its label *)
 #pub fn ui_menuitem {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}
-  (parent: string np, id: string ni, label: string nl, t: tone): void
+  (parent: string np, id: string ni, label: string nl): void
 
-implement ui_menuitem(parent, id, label, t) = _control_s(parent, id, CMenuItem(label, t))
+implement ui_menuitem(parent, id, label) = _control_s(parent, id, CMenuItem(label))
+
+(* The menu item that asks about h, marked as losing what it names: its
+   id and label are h's *)
+#pub fn ui_harm_item {np:pos | np < 256} (parent: string np, h: harm): void
+
+implement ui_harm_item(parent, h) = let
+  val @(id, _) = _harm_item(h)
+in _control_s(parent, id, CHarmItem(h)) end
+
+(* Button id's tone: marked when it does a harm *)
+#pub fn ui_tone {ni:pos | ni < 256} (id: string ni, t: tone): void
+
+implement ui_tone(id, t) =
+  case+ t of
+  | Danger(_) => _sattr(id, "data-harm", "y")
+  | Plain() => _sattr(id, "data-harm", "n")
 
 (* A tab named by its label, controlling the panel controls *)
 #pub fn ui_tab {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}{nx:pos | nx < 256}

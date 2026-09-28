@@ -188,8 +188,15 @@ Nothing is lost at a click, except by emptying the Trash:
   puts back each book's shelf and the settings.
 * Emptying the Trash is the one irreversible action, and the one
   question with a red button: the dialog (`src/modal.bats`) asks a
-  `harm`, which has only `HEmptyTrash`. It closes any Undo offer first,
-  since what that would put back is gone.
+  `harm` (`src/ui.bats`), which has only `HEmptyTrash`. It closes any
+  Undo offer first, since what that would put back is gone.
+* Red is the stylesheet's rule for `[data-harm=y]`, which only
+  `src/ui.bats` sets, and only from a harm: on the harm's menu item
+  (`ui_harm_item`, whose id and label are the harm's) and on a button
+  whose tone is `Danger(h)` (the dialog's, for `Harmful(h)`). A click
+  on a harm's item is dispatched by the harm its id belongs to
+  (`_harm_clicked` in `src/bin/quire.bats`) to `lib_ask_harm`, which
+  asks that same harm, so a red item always asks about what it names.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an

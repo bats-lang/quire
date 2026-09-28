@@ -459,15 +459,18 @@ fun _empty {n:nat} .<n>. (n: int n): void =
     if i < 0 then () else let val () = _delete_book(i) in _empty(n - 1) end
   end
 
-(* Asks whether to empty the Trash; if the answer is yes, every book in
-   it and everything stored for it go, then after runs *)
-#pub fn lib_ask_empty_trash (after: () -<cloref1> void): void
+(* Asks about h, with the action that does it; if the answer is yes, it
+   is done, then after runs. HEmptyTrash: every book in the Trash and
+   everything stored for it go (and any Undo offer, which could only
+   put back what is gone) *)
+#pub fn lib_ask_harm (h: harm, after: () -<cloref1> void): void
 
-implement lib_ask_empty_trash (after) =
-  modal_confirm(HEmptyTrash(), lam () => let
-    val () = undo_close()
-    val () = _empty(lib_count())
-  in after() end)
+implement lib_ask_harm (h, after) =
+  case+ h of
+  | HEmptyTrash() => modal_confirm(h, lam () => let
+      val () = undo_close()
+      val () = _empty(lib_count())
+    in after() end)
 
 (* Each book's key and the shelf it was on *)
 datatype shelved(int) =

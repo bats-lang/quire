@@ -53,10 +53,10 @@ fn _context_menu (): void = let
   val () = ui_el("bats-root", "qctx", TDiv, "ovl")
   val () = ui_el("qctx", "qcmb", TDiv, "menu")
   val () = ui_named("qcmb", NMenu, "Book menu")
-  val () = ui_menuitem("qcmb", "qcmi", "Book info", Plain)
-  val () = ui_menuitem("qcmb", "qcmh", "Hide", Plain)
-  val () = ui_menuitem("qcmb", "qcma", "Archive", Plain)
-  val () = ui_menuitem("qcmb", "qcmd", "Move to Trash", Plain)
+  val () = ui_menuitem("qcmb", "qcmi", "Book info")
+  val () = ui_menuitem("qcmb", "qcmh", "Hide")
+  val () = ui_menuitem("qcmb", "qcma", "Archive")
+  val () = ui_menuitem("qcmb", "qcmd", "Move to Trash")
 in _hide("qctx") end
 
 (* The library menu (the gear) *)
@@ -64,12 +64,12 @@ fn _library_menu (): void = let
   val () = ui_el("bats-root", "qlmn", TDiv, "ovl")
   val () = ui_el("qlmn", "qlmb", TDiv, "menu")
   val () = ui_named("qlmb", NMenu, "Library menu")
-  val () = ui_menuitem("qlmb", "qlme", "Export backup", Plain)
+  val () = ui_menuitem("qlmb", "qlme", "Export backup")
   val () = ui_el("qlmb", "qlmi", TDiv, "mi btn")
   val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", false)
-  val () = ui_menuitem("qlmb", "qlmt", "Empty Trash", Danger)
-  val () = ui_menuitem("qlmb", "qlmr", "Factory reset", Plain)
-  val () = ui_menuitem("qlmb", "qlmc", "Close", Plain)
+  val () = ui_harm_item("qlmb", HEmptyTrash())
+  val () = ui_menuitem("qlmb", "qlmr", "Factory reset")
+  val () = ui_menuitem("qlmb", "qlmc", "Close")
 in _hide("qlmn") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)
