@@ -10,6 +10,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "undo.sats"
 staload "book.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
@@ -200,9 +201,24 @@ implement set_font_set (v) = let val x = !_set in !_set := @{ size = x.size, lh 
 #pub fn set_theme_set (v: set_theme): void
 implement set_theme_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = v } end
 
-(* The defaults *)
-#pub fn set_reset (): void
-implement set_reset () = !_set := @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0 }
+(* The defaults. Private: the settings go back to them only by
+   set_reset, which offers the ones they replace back *)
+fn _reset (): void = !_set := @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0 }
+
+(* Puts the defaults back at once, then runs after (which applies
+   them); what it returns puts the settings they replaced back, and
+   runs after again *)
+#pub fn set_reset_undoable (after: () -<cloref1> void): () -<cloref1> void
+implement set_reset_undoable (after) = let
+  val before = !_set
+  val () = _reset()
+  val () = after()
+in lam () => let val () = !_set := before in after() end end
+
+(* The same, offering Undo *)
+#pub fn set_reset (after: () -<cloref1> void): void
+implement set_reset (after) =
+  undo_offer("Settings reset", set_reset_undoable(after), lam () => ())
 
 (* A byte stored by an earlier run, as a value in [lo, hi]: checked here,
    once; d when it is out of range *)

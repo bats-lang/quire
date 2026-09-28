@@ -712,7 +712,22 @@ fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] she
   val sh = close(sh)
 in sh end
 
-fn _g_2_overlays {r:nat | r >= 2323} (sh: sheet(r, 0)): [q:nat | q >= r - 2323] sheet(q, 0) = let
+fn _g_2_overlays {r:nat | r >= 2752} (sh: sheet(r, 0)): [q:nat | q >= r - 2752] sheet(q, 0) = let
+  val sh = rule(sh, ".toast")
+  val sh = lay(sh, Position(), "fixed")
+  val sh = lay(sh, Left(), "50%")
+  val sh = lay(sh, Top(), "max(64px,calc(env(safe-area-inset-top) + 60px))")
+  val sh = centre_x(sh)
+  val sh = lay(sh, ZIndex(), "30")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, Gap(), "12px")
+  val sh = lay(sh, AlignItems(), "center")
+  val sh = surf(S_barfg_bar | sh, 7, 6)
+  val sh = lay(sh, BorderRadius(), "8px")
+  val sh = lay(sh, Padding(), "4px 4px 4px 16px")
+  val sh = lay(sh, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
+  val sh = lay(sh, MaxWidth(), "min(92vw,420px)")
+  val sh = close(sh)
   val sh = rule(sh, ".ovl")
   val sh = lay(sh, Position(), "fixed")
   val sh = lay(sh, Inset(), "0")

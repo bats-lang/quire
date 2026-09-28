@@ -12,6 +12,7 @@ staload "pages.sats"
 staload "ui.sats"
 staload "app.sats"
 staload "modal.sats"
+staload "undo.sats"
 staload "backup.sats"
 staload "library.sats"
 staload "settings.sats"
@@ -234,8 +235,11 @@ fn _open_book {i:int} (i: int i): void =
   case+ lib_nums(i) of
   | ~$R.none() => ()
   | ~$R.some(x) =>
-    if x.shelf = 2 then let
-      val () = modal_open(QInform(), "Archived")
+    if x.shelf = 3 then let
+      val () = modal_inform("In the Trash")
+    in modal_text_lit("Restore this book from the Trash to read it.") end
+    else if x.shelf = 2 then let
+      val () = modal_inform("Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
@@ -268,12 +272,7 @@ fn _save_render (): void = let
 in lib_render() end
 
 (* Sets book i's shelf *)
-fn _set_shelf {i:int} (i: int i, shelf: Int): void = let
-  val () = lib_update(i, lam(x) => @{
-    key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
-    ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-    fsz = x.fsz, cover = x.cover, done = x.done })
-in _save_render() end
+fn _set_shelf {i:int} (i: int i, shelf: Int): void = lib_set_shelf(i, shelf)
 
 (* Deletes the stored data under key letter c of book (h1, h2) *)
 fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
@@ -283,26 +282,69 @@ fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val () = $A.drop<byte>(f, b)
 in $A.free<byte>($A.thaw<byte>(f)) end
 
-(* Archives book i: its file is deleted, its record kept *)
+(* Archives book i: its record is kept and its file deleted. The file
+   goes only when the Undo offer does: until then Undo puts the book
+   back where it was, file and all *)
 fn _archive {i:int} (i: int i): void =
   case+ lib_nums(i) of
   | ~$R.none() => ()
   | ~$R.some(x) => let
-      val () = _idb_del(98, x.h1, x.h2)
-      val () = (if open_key_get() = x.key then open_key_set(0) else ())
-    in _set_shelf(i, 2) end
+      val key = x.key
+      val was = x.shelf
+      val h1 = x.h1
+      val h2 = x.h2
+      val () = _set_shelf(i, 2)
+    in
+      undo_offer("Archived", lam () => let
+          val j = lib_index_of_key(key)
+        in if j >= 0 then _set_shelf(j, was) else () end,
+        (* the file goes only if the book is still archived (it may have
+           been restored meanwhile, by importing it again) *)
+        lam () => let
+          val j = lib_index_of_key(key)
+        in
+          if j < 0 then ()
+          else (case+ lib_nums(j) of
+            | ~$R.none() => ()
+            | ~$R.some(y) =>
+              if y.shelf = 2 then let
+                val () = _idb_del(98, h1, h2)
+              in if open_key_get() = key then open_key_set(0) else () end
+              else ())
+        end)
+    end
 
-(* Deletes book i and everything stored for it *)
-fn _delete {i:int} (i: int i): void =
+(* Hides or unhides book i, offering Undo *)
+fn _hide_toggle {i:int} (i: int i): void =
   case+ lib_nums(i) of
   | ~$R.none() => ()
   | ~$R.some(x) => let
-      val () = _idb_del(98, x.h1, x.h2)
-      val () = _idb_del(99, x.h1, x.h2)
-      val () = _idb_del(97, x.h1, x.h2)
-      val () = (if open_key_get() = x.key then open_key_set(0) else ())
-      val () = lib_remove(i)
-    in _save_render() end
+      val key = x.key
+      val was = x.shelf
+      val () = _set_shelf(i, (if was = 1 then 0 else 1))
+    in
+      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [k:pos | k < 256] string k, lam () => let
+          val j = lib_index_of_key(key)
+        in if j >= 0 then _set_shelf(j, was) else () end,
+        lam () => ())
+    end
+
+
+(* The book actions' labels (in the book menu or the info view) for a
+   book on shelf s: in the Trash, Restore only (a book leaves the Trash
+   for good only when it is emptied); elsewhere Hide or Unhide, Archive
+   or Restore, and Move to Trash *)
+fn _shelf_labels {n1,n2,n3:pos | n1 < 256; n2 < 256; n3 < 256}
+  (hide: string n1, arch: string n2, del: string n3, s: Int): void =
+  if s = 3 then let
+    val () = ui_text(hide, "Restore")
+    val () = ui_show(arch, false)
+  in ui_show(del, false) end
+  else let
+    val () = (if s = 1 then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
+    val () = ui_show(arch, true)
+    val () = (if s = 2 then ui_text(arch, "Restore") else ui_text(arch, "Archive"))
+  in ui_show(del, true) end
 
 (* The book menu for book i, its items as its shelf asks *)
 fn _menu_open {i:int} (i: int i): void =
@@ -310,8 +352,7 @@ fn _menu_open {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) => let
       val () = !_menu_idx := i
-      val () = (if x.shelf = 1 then ui_text("qcmh", "Unhide") else ui_text("qcmh", "Hide"))
-      val () = (if x.shelf = 2 then ui_text("qcma", "Restore") else ui_text("qcma", "Archive"))
+      val () = _shelf_labels("qcmh", "qcma", "qcmd", x.shelf)
       val () = ui_show("qctx", true)
     in ui_focus("qcmi") end
 
@@ -360,8 +401,7 @@ fn _info_open {i:int} (i: int i): void =
       val z = $A.alloc<byte>(32)
       val zk = size_text(z, x.fsz)
       val () = ui_text_buf("qivs", z, zk)
-      val () = (if x.shelf = 1 then ui_text("qinh", "Unhide") else ui_text("qinh", "Hide"))
-      val () = (if x.shelf = 2 then ui_text("qinr", "Restore") else ui_text("qinr", "Archive"))
+      val () = _shelf_labels("qinh", "qinr", "qind", x.shelf)
       val () = ui_attr("qinc", ASrc, "data:,")
       val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
@@ -369,20 +409,25 @@ fn _info_open {i:int} (i: int i): void =
       val () = ui_show("qinf", true)
     in ui_focus("qinx") end
 
-(* A book menu or info view action on book i: 1 hide/unhide, 2 archive
-   or restore, 3 delete (asked first) *)
+(* A book menu or info view action on book i: 1 hide, unhide or (from
+   the Trash) restore; 2 archive, or say how to restore; 3 move to the
+   Trash *)
 fn _book_action {i:int} (i: int i, act: int): void =
   case+ lib_nums(i) of
   | ~$R.none() => ()
   | ~$R.some(x) =>
-    if act = 1 then _set_shelf(i, (if x.shelf = 1 then 0 else 1))
+    if act = 1 then
+      (if x.shelf = 3 then _set_shelf(i, 0) else _hide_toggle(i))
     else if act = 2 then
       (if x.shelf = 2 then let
-         val () = modal_open(QInform(), "Restore")
+         val () = modal_inform("Restore")
        in modal_text_lit("To restore this book, import its file again.") end
+       else if x.shelf = 3 then ()
        else _archive(i))
+    else if x.shelf = 3 then ()
     else let
-    in modal_confirm(HDeleteBook(i)) end
+      val () = ui_show("qinf", false)
+    in lib_trash(i) end
 
 (* ============================================================
    Settings
@@ -408,50 +453,6 @@ fn _has_selection (): bool =
   case+ $DR.get_selection_text() of
   | ~$R.none() => false
   | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
-
-(* The note dialog for annotation i; fresh when the highlight was made
-   for this note (from a selection), and so goes if the note is
-   cancelled: the dialog's answer carries it (QNote) *)
-fn _note_open (i: int, fresh: bool): void =
-  if i < 0 then ()
-  else let
-    val () = modal_open(QNote(i, fresh), "Note")
-    val () = modal_textarea()
-  in annot_note_show(i) end
-
-(* The note in the dialog's text area, kept as annotation i's *)
-fn _note_save (i: int): void = let
-  val a = $A.alloc<byte>(4)
-  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
-  val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 4)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
-in
-  case+ r of
-  | ~$R.none() => let
-      val e = $A.alloc<byte>(1)
-      val () = annot_note_set(i, e, 0)
-    in annot_render() end
-  | ~$R.some(v) => let
-      val n = $DC.blob_len(v)
-    in
-      if n <= 0 then let
-        val () = $DC.blob_free(v)
-        val e = $A.alloc<byte>(1)
-        val () = annot_note_set(i, e, 0)
-      in annot_render() end
-      else if n > 65536 then let
-        val () = $DC.blob_free(v)
-      in end
-      else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(v, 0, a, n)
-        val () = $DC.blob_free(v)
-        val () = annot_note_set(i, a, n)
-      in annot_render() end
-    end
-end
 
 (* The selected text, to the clipboard *)
 fn _copy_selection (): void =
@@ -484,49 +485,21 @@ fn _annot_go (i: int): void = let
   val @(ch, pg, sn) = annot_dest(i)
 in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
 
-(* What a confirmed harm does. This is the one place that deletes a
-   book or an annotation for the user or resets anything, and it is
-   called only with the harm a Confirmed answer carries *)
-fn _destroy (h: harm): void =
-  case+ h of
-  | HDeleteBook(i) => let
-      val () = ui_show("qinf", false)
-    in if i >= 0 then _delete(i) else () end
-  | HFactoryReset() => let
-      val () = $IDB.idb_delete_database()
-      val () = lib_clear()
-      val () = set_reset()
-    in $NAV.reload() end
-  | HResetSettings() => let
-      val () = set_reset()
+(* A factory reset: every book moves to the Trash (where it can still be
+   restored until the Trash is emptied) and the settings go back to
+   their defaults; Undo puts both back *)
+fn _factory_reset (): void = let
+  val back_books = lib_trash_all()
+  val back_settings = set_reset_undoable(lam () => let
       val () = set_sliders()
-    in _settings_changed() end
-  | HDeleteHighlight(i) => let
-      val () = annot_delete(i)
-    in annot_render() end
-  | HDeleteBookmark(i) => let
-      val () = annot_delete(i)
-    in annot_render_bookmarks() end
+    in _settings_changed() end)
+in
+  undo_offer("Library moved to the Trash, settings reset", lam () => let
+      val () = back_books()
+    in back_settings() end, lam () => ())
+end
 
-(* The dialog's answer, with the question it answers: every question
-   is matched here (case+ is exhaustive), and a harm is done only on
-   the Confirmed answer to the question that named it *)
-fn _modal_answer (second: bool): void =
-  case+ modal_answer(second) of
-  | Confirmed(Harmful(h)) => _destroy(h)
-  | Dismissed(Harmful(_)) => ()
-  | Confirmed(Harmless(QDuplicate())) => import_dup_answer(true)
-  | Dismissed(Harmless(QDuplicate())) => import_dup_answer(false)
-  | Confirmed(Harmless(QNote(i, _))) => _note_save(i)
-  (* a note begun from a selection and cancelled leaves no highlight *)
-  | Dismissed(Harmless(QNote(i, fresh))) =>
-    if fresh then let val () = annot_delete(i) in annot_render() end else ()
-  | Confirmed(Harmless(QInform())) => ()
-  | Dismissed(Harmless(QInform())) => ()
-  | Confirmed(AskNothing()) => ()
-  | Dismissed(AskNothing()) => ()
-
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   (* import *)
   val r = RCons(r, OnEl("qibn"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -588,7 +561,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
     in let val () = lib_render() in 0 end end)
   val r = RCons(r, OnEl("qshf"), "click", lam(_) => let
       val s = lib_shelf_get()
-      val () = lib_shelf_set((if s >= 2 then 0 else s + 1): int)
+      val () = lib_shelf_set((if s >= 3 then 0 else s + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
@@ -626,9 +599,12 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
     in let val () = ui_focus("qlme") in 0 end end)
   val r = RCons(r, OnEl("qlmn"), "click", lam(h) => let
       val t = _target(h)
-      val () = (if _is(t, "qlmr") then let
+      val () = (if _is(t, "qlmt") then let
           val () = ui_show("qlmn", false)
-        in modal_confirm(HFactoryReset()) end
+        in lib_ask_empty_trash(lam () => _save_render()) end
+        else if _is(t, "qlmr") then let
+          val () = ui_show("qlmn", false)
+        in _factory_reset() end
         else if _is(t, "qlme") then let
           val () = ui_show("qlmn", false)
         in backup_export() end
@@ -636,18 +612,6 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
         else if _is(t, "qlmn") then ui_show("qlmn", false)
         else ())
     in let val () = _target_free(t) in 0 end end)
-  (* the dialog *)
-  val r = RCons(r, OnEl("qmod"), "click", lam(h) => let
-      val t = _target(h)
-      val b1 = _is(t, "qmb1")
-      val b2 = _is(t, "qmb2")
-      val out = _is(t, "qmod")
-      val () = _target_free(t)
-    in
-      if b2 then let val () = _modal_answer(true) in 0 end
-      else if (if b1 then true else out) then let val () = _modal_answer(false) in 0 end
-      else 0
-    end)
 in r end
 
 fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
@@ -664,7 +628,9 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
         else if _is(t, "qsrs") then let
-            val () = modal_confirm(HResetSettings())
+            val () = set_reset(lam () => let
+                val () = set_sliders()
+              in _settings_changed() end)
           in false end
         else false): bool
       val close = _is(t, "qscl")
@@ -859,7 +825,7 @@ end
 (* Escape: the dialog is answered with its first button, or else the
    library's open menu or book info closes; true when one was *)
 fn _escape_overlay (): bool =
-  if modal_open_now() then let val () = _modal_answer(false) in true end
+  if modal_open_now() then let val () = modal_dismiss() in true end
   else if _shown("qctx") then let val () = ui_show("qctx", false) in true end
   else if _shown("qlmn") then let val () = ui_show("qlmn", false) in true end
   else if _shown("qinf") then let val () = ui_show("qinf", false) in true end
@@ -909,8 +875,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
         else if _is(t, "qtct") then _toc_open()
         else if _is(t, "qtcm") then _bookmarks_open()
         else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
-        else if bdl >= 0 then let
-        in modal_confirm(HDeleteBookmark(bdl)) end
+        else if bdl >= 0 then annot_delete_bookmark(bdl)
         else if row >= 0 then let
           val () = ui_show("qtoc", false)
         in reader_goto_entry(row) end
@@ -956,8 +921,7 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
       val sr = _is(t, "qsls")
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
-        else if nt then let
-          in _note_open(annot_highlight(), true) end
+        else if nt then annot_ask_note(annot_highlight(), true)
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
@@ -977,9 +941,8 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
       val () = (if close then ui_show("qanp", false)
         else if ex then _export()
         else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
-        else if nt >= 0 then _note_open(nt, false)
-        else if dl >= 0 then let
-        in modal_confirm(HDeleteHighlight(dl)) end
+        else if nt >= 0 then annot_ask_note(nt, false)
+        else if dl >= 0 then annot_delete_highlight(dl)
         else ())
     in 0 end)
 in r end
@@ -1119,7 +1082,7 @@ in r end
 implement main0 () = let
   val () = app_build()
   (* every listener, in one table: each one's id is its place in it *)
-  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(_wire_library(RNil()))))))
+  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
   (* files handed to the app from outside it (an Android intent) *)
   val r = RCons(r, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())

@@ -89,13 +89,12 @@ test('reset puts the defaults back', async ({ page }) => {
   await openSettings(page);
   await slider(page, 'Size').fill('30');
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
+  // resetting asks nothing, and can be undone
   await choose(page, 'Reset to defaults');
-  // resetting asks first; cancelling keeps the settings
-  await dialog(page, 'Reset to defaults?').getByRole('button', { name: 'Cancel' }).click();
+  await expect.poll(() => style(page, 'fontSize')).toBe(before);
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
-  // the sheet is still open
   await choose(page, 'Reset to defaults');
-  await dialog(page, 'Reset to defaults?').getByRole('button', { name: 'Reset' }).click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });

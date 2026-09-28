@@ -5,10 +5,11 @@ import { test, expect } from '@playwright/test';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
+  openSettings, colours,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
-const shelf = page => page.getByRole('button', { name: /^(Library|Hidden|Archived)$/ });
+const shelf = page => page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ });
 const sort = page => page.getByRole('button', { name: /^Sort:/ });
 const empty = /Import an EPUB file/;
 
@@ -137,6 +138,8 @@ test('a hidden book moves to the hidden shelf and back', async ({ page }) => {
   await menuItem(page, 'Unhide').click();
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText('No hidden books')).toBeVisible();
+  // Hidden, then Archived, the Trash and back to the Library
+  await shelf(page).click();
   await shelf(page).click();
   await shelf(page).click();
   await expect(shelf(page)).toHaveText('Library');
@@ -161,22 +164,86 @@ test('an archived book keeps its record, and is read again by importing it', asy
   // importing it again restores it to the shelf
   await importInput(page).setInputFiles([f]);
   await shelf(page).click();
+  await shelf(page).click();
   await expect(shelf(page)).toHaveText('Library');
   await expect(card(page, 'Old Volume')).toHaveCount(1);
   await openBook(page, 'Old Volume');
 });
 
-test('a deleted book is gone after a reload', async ({ page }) => {
+const bg = async page => (await colours(page)).bg.join(',');
+const undo = page => page.getByRole('button', { name: 'Undo' });
+
+test('a book moved to the Trash can be undone, and restored from it', async ({ page }) => {
   await start(page);
   await importFiles(page, [epubFile({ title: 'Doomed', author: 'X' }), epubFile({ title: 'Kept', author: 'Y' })], 2);
+  // moving it to the Trash asks nothing, and offers Undo
   await bookMenu(page, 'Doomed');
-  await menuItem(page, 'Delete').click();
-  const ask = dialog(page, 'Delete book?');
-  await ask.getByRole('button', { name: 'Delete' }).click();
+  await menuItem(page, 'Move to Trash').click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(cards(page)).toHaveCount(1);
+  await undo(page).click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(undo(page)).toBeHidden();
+  // in the Trash it is kept, across a reload
+  await bookMenu(page, 'Doomed');
+  await menuItem(page, 'Move to Trash').click();
   await expect(cards(page)).toHaveCount(1);
   await page.reload();
   await expect(cards(page)).toHaveCount(1);
-  await expect(card(page, 'Kept')).toHaveCount(1);
+  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await expect(shelf(page)).toHaveText('Trash');
+  await expect(card(page, 'Doomed')).toHaveCount(1);
+  // a book in the Trash can only be restored: it leaves for good only
+  // when the Trash is emptied
+  await bookMenu(page, 'Doomed');
+  await expect(menuItem(page, 'Restore')).toBeVisible();
+  await expect(menuItem(page, 'Move to Trash')).toBeHidden();
+  await expect(menuItem(page, 'Archive')).toBeHidden();
+  await menuItem(page, 'Restore').click();
+  await expect(page.getByText('The Trash is empty')).toBeVisible();
+  await shelf(page).click();
+  await expect(cards(page)).toHaveCount(2);
+  await page.reload();
+  await expect(cards(page)).toHaveCount(2);
+});
+
+test('emptying the Trash asks, and deletes only what is in it', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Trash One', author: 'A' }),
+    epubFile({ title: 'Trash Two', author: 'B' }),
+    epubFile({ title: 'Stays', author: 'C' }),
+  ], 3);
+  for (const t of ['Trash One', 'Trash Two']) {
+    await bookMenu(page, t);
+    await menuItem(page, 'Move to Trash').click();
+  }
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  const ask = dialog(page, 'Empty the Trash?');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await expect(cards(page)).toHaveCount(2);
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  await ask.getByRole('button', { name: 'Empty' }).click();
+  await expect(page.getByText('The Trash is empty')).toBeVisible();
+  // what the Trash held can no longer be offered back
+  await expect(undo(page)).toBeHidden();
+  await page.reload();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(card(page, 'Stays')).toHaveCount(1);
+});
+
+test('archiving can be undone, and the book still opens', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Nearly Archived', author: 'A', rawChapters: chapters(1, 5) })], 1);
+  await bookMenu(page, 'Nearly Archived');
+  await menuItem(page, 'Archive').click();
+  await expect(cards(page)).toHaveCount(0);
+  await undo(page).click();
+  await expect(cards(page)).toHaveCount(1);
+  await openBook(page, 'Nearly Archived');
 });
 
 test('book info shows the book and its progress', async ({ page }) => {
@@ -204,15 +271,43 @@ test('book info shows the book and its progress', async ({ page }) => {
   await expect(info).toBeHidden();
 });
 
-test('a factory reset empties the library', async ({ page }) => {
+test('a factory reset moves the library to the Trash and resets the settings, and can be undone', async ({ page }) => {
   await start(page);
-  await importFiles(page, [epubFile({ title: 'Ephemeral', author: 'Z' })], 1);
+  await importFiles(page, [epubFile({ title: 'Ephemeral', author: 'Z' }), epubFile({ title: 'Lasting', author: 'W' })], 2);
+  await bookMenu(page, 'Lasting');
+  await menuItem(page, 'Hide').click();
+  const plain = await bg(page);
+  await openBook(page, 'Ephemeral');
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Sepia', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await toLibrary(page);
+  await expect.poll(() => bg(page)).not.toBe(plain);
+  const sepia = await bg(page);
+  // it asks nothing, and offers Undo
   await libraryMenu(page);
   await menuItem(page, 'Factory reset').click();
-  await dialog(page, 'Factory reset?').getByRole('button', { name: 'Reset' }).click();
-  await expect(importInput(page)).toBeVisible();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText(empty)).toBeVisible();
+  await expect.poll(() => bg(page)).toBe(plain);
+  // Undo puts back every book on its own shelf, and the settings
+  await undo(page).click();
+  await expect(card(page, 'Ephemeral')).toHaveCount(1);
+  await expect(card(page, 'Lasting')).toHaveCount(0);
+  await expect.poll(() => bg(page)).toBe(sepia);
+  await shelf(page).click();
+  await expect(card(page, 'Lasting')).toHaveCount(1);
+  for (let i = 0; i < 3; i++) await shelf(page).click();
+  // without Undo, the books wait in the Trash
+  await expect(shelf(page)).toHaveText('Library');
+  await libraryMenu(page);
+  await menuItem(page, 'Factory reset').click();
+  await expect(cards(page)).toHaveCount(0);
+  await page.reload();
+  await expect(cards(page)).toHaveCount(0);
+  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await expect(cards(page)).toHaveCount(2);
 });
 
 test('dropping a file on the library imports it', async ({ page }) => {
@@ -262,7 +357,7 @@ test('the book menu and the library menu close without doing anything', async ({
   await expect(cards(page)).toHaveCount(1);
 });
 
-test('book info hides, archives and deletes the book it shows', async ({ page }) => {
+test('book info hides, archives and trashes the book it shows', async ({ page }) => {
   await start(page);
   await importFiles(page, [
     epubFile({ title: 'Info Hide', author: 'A' }),
@@ -280,14 +375,15 @@ test('book info hides, archives and deletes the book it shows', async ({ page })
   await expect(card(page, 'Info Hide')).toHaveCount(0);
   await viaInfo('Info Archive', 'Archive');
   await expect(card(page, 'Info Archive')).toHaveCount(0);
-  await viaInfo('Info Delete', 'Delete');
-  await dialog(page, 'Delete book?').getByRole('button', { name: 'Delete' }).click();
+  await viaInfo('Info Delete', 'Move to Trash');
   await expect(cards(page)).toHaveCount(0);
-  // the other shelves hold the first two
+  // the other shelves hold them
   await shelf(page).click();
   await expect(card(page, 'Info Hide')).toHaveCount(1);
   await shelf(page).click();
   await expect(card(page, 'Info Archive')).toHaveCount(1);
+  await shelf(page).click();
+  await expect(card(page, 'Info Delete')).toHaveCount(1);
 });
 
 test('restoring an archived book from its menu says to import it again', async ({ page }) => {
@@ -303,17 +399,6 @@ test('restoring an archived book from its menu says to import it again', async (
   await expect(said).toContainText('import its file again');
   await said.getByRole('button', { name: 'OK' }).click();
   await expect(said).toBeHidden();
-});
-
-test('a factory reset can be cancelled', async ({ page }) => {
-  await start(page);
-  await importFiles(page, [epubFile({ title: 'Survivor', author: 'Z' })], 1);
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
-  await dialog(page, 'Factory reset?').getByRole('button', { name: 'Cancel' }).click();
-  await expect(dialog(page, 'Factory reset?')).toBeHidden();
-  await page.reload();
-  await expect(card(page, 'Survivor')).toHaveCount(1);
 });
 
 test('after a duplicate is skipped, the other files picked with it are imported', async ({ page }) => {

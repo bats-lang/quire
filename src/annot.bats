@@ -18,6 +18,8 @@
 
 staload "book.sats"
 staload "ui.sats"
+staload "modal.sats"
+staload "undo.sats"
 staload "library.sats"
 staload "toc.sats"
 staload "jsonio.sats"
@@ -590,13 +592,154 @@ implement annot_note_show (i) = let
   val () = _put(c)
 in ui_text_buf("qmta", b, nl) end
 
-(* Deletes annotation i *)
-#pub fn annot_delete (i: int): void
-
-implement annot_delete (i) = let
+(* Deletes annotation i. Private: outside this module an annotation
+   goes only by annot_delete_highlight or annot_delete_bookmark, which
+   offer it back, or as the no of a note begun from a selection
+   (annot_ask_note) *)
+fn _drop (i: int): void = let
   val () = _delete(i)
   val () = annot_marks()
 in annot_star() end
+
+(* An annotation taken out of the list, kept while its removal can be
+   undone: the offer's number, then the annotation as ann_cons holds it *)
+datavtype removed =
+  | NoRemoved of ()
+  | {l1,l2:agz}{tl:nat | tl <= TXT}{nl:nat | nl <= NOTE}
+    Removed of (int, Int, Int, Int, Int, Int, Int, Int, Int,
+      $A.arr(byte, l1, tl + 1), int tl, $A.arr(byte, l2, nl + 1), int nl)
+
+fn _removed_free (x: removed): void =
+  case+ x of
+  | ~NoRemoved() => ()
+  | ~Removed(_, _, _, _, _, _, _, _, _, t, _, n, _) => let
+      val () = $A.free<byte>(t)
+    in $A.free<byte>(n) end
+
+val _held = ref<removed>(NoRemoved())
+val _held_serial = ref<int>(0)
+
+fn _held_swap (x: removed): removed = let
+  var cur: removed = x
+  val () = ref_exch_elt<removed>(_held, cur)
+in cur end
+
+(* xs without its i-th annotation, which is returned (numbered s) *)
+fun _pull {k:nat} .<k>. (xs: ann(k), i: int, s: int): [j:nat | j <= k] @(ann(j), int j, removed) =
+  case+ xs of
+  | ~ann_nil() => @(ann_nil(), 0, NoRemoved())
+  | ~ann_cons(kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl, rest) =>
+    if i = 0 then let
+      val @(r, j) = _count(rest)
+    in @(r, j, Removed(s, kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl)) end
+    else let
+      val @(r, j, x) = _pull(rest, i - 1, s)
+    in @(ann_cons(kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl, r), j + 1, x) end
+
+(* The annotation held under number s, put back in its place *)
+fn _put_back (s: int): void =
+  case+ _held_swap(NoRemoved()) of
+  | ~NoRemoved() => ()
+  | ~Removed(s0, kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl) =>
+    if s0 <> s then _removed_free(_held_swap(Removed(s0, kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl)))
+    else let
+      val+ ~AnnCell(xs, k) = _take()
+    in
+      if k >= AMAX then let
+        val () = $A.free<byte>(t)
+        val () = $A.free<byte>(n)
+      in _put(AnnCell(xs, k)) end
+      else let
+        val () = _put(AnnCell(_insert(kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl, xs), k + 1))
+        val () = _save()
+        val () = annot_marks()
+      in annot_star() end
+    end
+
+(* The annotation held under number s, let go of *)
+fn _let_go (s: int): void =
+  case+ _held_swap(NoRemoved()) of
+  | ~NoRemoved() => ()
+  | ~Removed(s0, kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl) =>
+    if s0 <> s then _removed_free(_held_swap(Removed(s0, kd, c, sn, so, en, eo, pg, tm, t, tl, n, nl)))
+    else let
+      val () = $A.free<byte>(t)
+    in $A.free<byte>(n) end
+
+(* Deletes annotation i at once, offering it back: Undo puts it back,
+   and then again runs shown (which shows the list it was in) *)
+fn _delete_undoable {nt:pos | nt < 256} (i: int, text: string nt, shown: () -<cloref1> void): void = let
+  val s = !_held_serial + 1
+  val () = !_held_serial := s
+  val+ ~AnnCell(xs, _) = _take()
+  val @(ys, j, x) = _pull(xs, i, s)
+  val () = _put(AnnCell(ys, j))
+  val () = _save()
+  val () = annot_marks()
+  val () = annot_star()
+  val () = _removed_free(_held_swap(x))
+  val () = shown()
+in undo_offer(text, lam () => let val () = _put_back(s) in shown() end, lam () => _let_go(s)) end
+
+(* Deletes highlight i, offering Undo *)
+#pub fn annot_delete_highlight {i:int} (i: int i): void
+
+implement annot_delete_highlight (i) =
+  _delete_undoable(i, "Highlight deleted", lam () => annot_render())
+
+(* Deletes bookmark i, offering Undo *)
+#pub fn annot_delete_bookmark {i:int} (i: int i): void
+
+implement annot_delete_bookmark (i) =
+  _delete_undoable(i, "Bookmark deleted", lam () => annot_render_bookmarks())
+
+(* The note in the dialog's text area, kept as annotation i's *)
+fn _note_save (i: int): void = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
+  val @(f, b) = $A.freeze<byte>(a)
+  val r = $DR.read_input_value(b, 4)
+  val () = $A.drop<byte>(f, b)
+  val () = $A.free<byte>($A.thaw<byte>(f))
+in
+  case+ r of
+  | ~$R.none() => let
+      val e = $A.alloc<byte>(1)
+      val () = annot_note_set(i, e, 0)
+    in annot_render() end
+  | ~$R.some(v) => let
+      val n = $DC.blob_len(v)
+    in
+      if n <= 0 then let
+        val () = $DC.blob_free(v)
+        val e = $A.alloc<byte>(1)
+        val () = annot_note_set(i, e, 0)
+      in annot_render() end
+      else if n > 65536 then let
+        val () = $DC.blob_free(v)
+      in end
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(v, 0, a, n)
+        val () = $DC.blob_free(v)
+        val () = annot_note_set(i, a, n)
+      in annot_render() end
+    end
+end
+
+(* The note dialog for annotation i: Save keeps the note. When fresh,
+   the highlight was made for this note (from a selection), and
+   cancelling it (by button, Escape or a click outside) takes the
+   highlight away again *)
+#pub fn annot_ask_note (i: int, fresh: bool): void
+
+implement annot_ask_note (i, fresh) =
+  if i < 0 then ()
+  else let
+    val () = modal_open(QNote(), "Note", lam () => _note_save(i),
+      lam () => if fresh then let val () = _drop(i) in annot_render() end else ())
+    val () = modal_textarea()
+  in annot_note_show(i) end
 
 (* ============================================================
    Where one leads
@@ -690,7 +833,7 @@ fn _hrow {i:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl
   val () = _child("qr", "qw", i, TDiv, "hbtns")
   val () = (if nl > 0 then _child_text_btn("qw", "qn", i, "hbtn", "Edit note")
     else _child_text_btn("qw", "qn", i, "hbtn", "Add note"))
-in _child_text_btn("qw", "qd", i, "hbtn danger", "Delete") end
+in _child_text_btn("qw", "qd", i, "hbtn", "Delete") end
 
 fun _hrows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i, last: Int): int =
   case+ xs of
@@ -747,7 +890,7 @@ fn _brow {i:nat}{c:nat}{l1:agz}{t1:pos}{tl:nat | tl < t1; tl < 65536}
   val () = (if tl > 0 then let
       val () = _child("qb", "qz", i, TSpan, "snip")
     in _text_of("qz", i, t, tl) end else ())
-in _child_text_btn("qbr", "qx", i, "hbtn danger", "Delete") end
+in _child_text_btn("qbr", "qx", i, "hbtn", "Delete") end
 
 fun _brows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i): void =
   case+ xs of
