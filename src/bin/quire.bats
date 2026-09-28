@@ -16,6 +16,7 @@ staload "library.sats"
 staload "settings.sats"
 staload "import.sats"
 staload "reader.sats"
+staload "toc.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
@@ -98,6 +99,18 @@ fn _is {sn:pos} (t: !target, id: string sn): bool =
   | Target(b, n, _) => _bytes_are(b, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
+(* The number n of the target's id pre<n>, or -1 *)
+fn _row_of {sn:pos | sn <= 4} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
+  case+ t of
+  | @Target(b, n, _) => let
+      val @(f, bb) = $A.freeze<byte>(b)
+      val v = (if n >= 11 then nid_parse(bb, n, 10, pre) else ~1): [v:int | v >= ~1] int v
+      val () = $A.drop<byte>(f, bb)
+      val () = b := $A.thaw<byte>(f)
+      prval () = fold@(t)
+    in v end
+  | NoTarget() => ~1
+
 fn _target_free (t: target): void =
   case+ t of
   | ~Target(b, _, _) => $A.free<byte>(b)
@@ -163,6 +176,7 @@ fn _show_library (): void = let
   val () = ui_show("qsrp", false)
   val () = ui_show("qanp", false)
   val () = ui_show("qllc", true)
+  val () = reader_stack_clear()
   val () = window_close()
 in lib_render() end
 
@@ -209,6 +223,7 @@ fn _open_book {i:int} (i: int i): void =
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
+      val () = reader_stack_clear()
       val () = ui_text("qcht", "Loading...")
       val ch = x.ch
       val pg = x.pg
@@ -545,6 +560,33 @@ in
   else ()
 end
 
+(* The contents panel, open on its contents tab *)
+fn _toc_open (): void = let
+  val () = (case+ reading_get() of
+    | @(_, _, c, tc) => toc_render((if c > 0 then c - 1 else 0), tc))
+  val () = ui_attr("qtct", "aria-selected", "true")
+  val () = ui_attr("qtcm", "aria-selected", "false")
+  val () = ui_show("qtcl", true)
+  val () = ui_show("qtbl", false)
+  val () = ui_show("qtoc", true)
+in ui_focus("qtcx") end
+
+fn _wire_toc (): void = let
+  val () = ui_listen("qtcb", "click", 34, lam(_) => let val () = _toc_open() in 0 end)
+  val () = ui_listen("qtoc", "click", 35, lam(h) => let
+      val t = _target(h)
+      val row = _row_of(t, "qe")
+      val () = (if _is(t, "qtcx") then ui_show("qtoc", false)
+        else if _is(t, "qtct") then _toc_open()
+        else if row >= 0 then let
+          val () = ui_show("qtoc", false)
+        in reader_goto_entry(row) end
+        else ())
+      val () = _target_free(t)
+    in 0 end)
+  val () = ui_listen("qpbk", "click", 36, lam(_) => let val () = reader_back() in 0 end)
+in end
+
 fn _wire_reader (): void = let
   val () = ui_listen("qbbk", "click", 2, lam(_) => let val () = _show_library() in 0 end)
   val () = ui_listen("qprv", "click", 3, lam(_) => let val () = page_prev() in 0 end)
@@ -630,6 +672,7 @@ implement main0 () = let
   val () = _wire_library()
   val () = _wire_settings()
   val () = _wire_reader()
+  val () = _wire_toc()
   (* files handed to the app from outside it (an Android intent) *)
   val () = $EV.listen_external_files(33, lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())

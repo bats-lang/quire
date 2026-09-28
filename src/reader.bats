@@ -22,6 +22,7 @@ staload "paths.sats"
 staload "ui.sats"
 staload "library.sats"
 staload "import.sats"
+staload "toc.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -429,6 +430,53 @@ in
   else "div"
 end
 
+(* The fragment a jump leads to: the id of an element of the chapter
+   loading; its content node is found as the chapter is rendered *)
+datavtype frag =
+  | {l:agz}{n,f:pos | f < n} FragSome of ($A.arr(byte, l, n), int f)
+  | FragNone of ()
+
+val _frag = ref<frag>(FragNone())
+val _frag_hit = ref<Int>(~1)
+
+fn _frag_free (f: frag): void =
+  case+ f of
+  | ~FragSome(a, _) => $A.free<byte>(a)
+  | ~FragNone() => ()
+
+fn _frag_take (): frag = let
+  var c: frag = FragNone()
+  val () = ref_exch_elt<frag>(_frag, c)
+in c end
+
+fn _frag_put (f: frag): void = let
+  var c: frag = f
+  val () = ref_exch_elt<frag>(_frag, c)
+in _frag_free(c) end
+
+(* Whether data[o, o + k) is a[0, k) *)
+fun _same {lb,la:agz}{n:pos}{f:pos}{o,k:nat | o + k <= n; k <= f}{i:nat | i <= k} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, a: !$A.arr(byte, la, f), k: int k, i: int i): bool =
+  if i >= k then true
+  else if byte2int0($A.read<byte>(data, o + i)) <> byte2int0($A.get<byte>(a, i)) then false
+  else _same(data, o, a, k, i + 1)
+
+(* Notes content node idx as the fragment's, when its id is fr *)
+fn _frag_check {lb:agz}{n:pos}{sa:nat}{i:nat}
+  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), fr: !frag, idx: int i): void =
+  case+ fr of
+  | FragNone() => ()
+  | FragSome(a, f) => let
+      var _a_id = @[char][2]('i', 'd')
+    in
+      case+ find_attr(data, attrs, _a_id, 2) of
+      | ~xspan_at(o, k) =>
+        if k <> f then ()
+        else if _same(data, o, a, k, 0) then (if !_frag_hit < 0 then !_frag_hit := idx else ())
+        else ()
+      | ~xspan_none() => ()
+    end
+
 (* The <img> elements of a chapter being rendered, k of them: each one's
    content node and its src attribute, the span [so, so + sl) of the
    chapter's n bytes *)
@@ -443,17 +491,17 @@ datavtype imgs(n:int, int) =
 fun _render_nodes
   {ld,lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1}{k:nat} .<sz, 1>.
   (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, nodes: !$X.xml_node_list(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
+   pidx: int q, nodes: !$X.xml_node_list(n, sz), acc: imgs(n, k), fr: !frag): [k2:nat] imgs(n, k2) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val acc = _render_node(doc, data, len, pidx, node, acc)
-    in _render_nodes(doc, data, len, pidx, rest, acc) end
+      val acc = _render_node(doc, data, len, pidx, node, acc, fr)
+    in _render_nodes(doc, data, len, pidx, rest, acc, fr) end
   | $X.xml_nodes_nil() => acc
 
 and _render_node
   {ld,lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1}{k:nat} .<sz, 0>.
   (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k)): [k2:nat] imgs(n, k2) =
+   pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k), fr: !frag): [k2:nat] imgs(n, k2) =
   case+ node of
   | $X.xml_text(off, tlen) => let
       val () = _text_spans(doc, data, pidx, off, tlen)
@@ -481,9 +529,9 @@ and _render_node
     else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
     (* Transparent: html, body (their children go to the same parent) *)
     else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc)
+      _render_nodes(doc, data, len, pidx, children, acc, fr)
     else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc)
+      _render_nodes(doc, data, len, pidx, children, acc, fr)
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
       val () = _add_node(doc, pidx, _next_content_idx(), "br")
@@ -528,7 +576,8 @@ and _render_node
     else let
       val idx = _next_content_idx()
       val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
-    in _render_nodes(doc, data, len, idx, children, acc) end
+      val () = _frag_check(data, attrs, fr, idx)
+    in _render_nodes(doc, data, len, idx, children, acc, fr) end
   end
 
 (* The length of the directory part of the name [no, no + nl) of the
@@ -706,6 +755,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val chs = _spine_chapters(serial, fsz_s, opf_name_off, prefix_len,
                            opf_b, dc_sz, opf_nodes, total - 1, ChaptersNil())
                val () = book_spine_set(serial, fsz_s, chs, total)
+               val () = toc_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_f, opf_b)
                val () = piece_free(par, $A.thaw<byte>(opf_f))
@@ -756,7 +806,9 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = $A.drop<byte>(fq, bq)
                   val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
-                  val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil())
+                  val fr = _frag_take()
+                  val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
+                  val () = _frag_put(fr)
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
@@ -766,13 +818,8 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
 
                   val () = (case+ reading_get() of
                     | @(p, t, _, tc) => reading_set(@(p, t, chapter_idx + 1, tc)))
-                  (* Update chapter title in nav bar *)
-                  val ch_num = chapter_idx + 1
-                  (* "Chapter " (8 bytes) and the number (at most 11) *)
-                  val tbuf = $A.alloc<byte>(19)
-                  val off = _put(tbuf, 0, "Chapter ")
-                  val off = $S.int_to_str(tbuf, off, 19, ch_num)
-                  val () = _set_text_of("qcht", tbuf, off)
+                  (* The chapter's title in the top bar *)
+                  val () = toc_title(chapter_idx)
                   val () = _measure_pagination()
                 in $P.ret<int>(0) end
               end)
@@ -789,7 +836,8 @@ in
   case+ book_chapter_get(serial, chapter_idx) of
   | ~ChaptersUnknown() =>
     $P.and_then<int><int>(_spine_build(serial), lam(r) =>
-      if r < 0 then $P.ret<int>(r) else _chapter_open(serial, chapter_idx, gen))
+      if r < 0 then $P.ret<int>(r)
+      else $P.and_then<int><int>(toc_build(serial), lam(_) => _chapter_open(serial, chapter_idx, gen)))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_idx, gen)
   | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_idx, gen)
 end
@@ -814,6 +862,83 @@ in
   $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
     if r < 0 then $P.ret<int>(r)
     else let val () = _show_target(pg, anchor) in $P.ret<int>(0) end)
+end
+
+(* Loads chapter ch and shows the page of its element whose id is
+   fr[0, f) (the first page when there is none); frees fr *)
+fn _goto_frag {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f: int f): $P.promise(int, $P.Chained) =
+  if f <= 0 then let
+    val () = $A.free<byte>(fr)
+  in _goto(ch, 0, ~1) end
+  else let
+    val () = _frag_put(FragSome(fr, f))
+    val () = !_frag_hit := ~1
+    val ch = (if ch >= 0 then ch else 0): [v:nat] int v
+  in
+    $P.and_then<int><int>(_load_chapter(ch), lam(r) => let
+      val () = _frag_put(FragNone())
+    in
+      if r < 0 then $P.ret<int>(r)
+      else let val () = _show_target(0, !_frag_hit) in $P.ret<int>(0) end
+    end)
+  end
+
+(* The positions jumped away from (a contents entry, a link, a search
+   result), the latest first: the back button returns to them *)
+datavtype pstack(int) =
+  | ps_nil(0) of ()
+  | {k:nat} ps_cons(k + 1) of (Int, Int, Int, pstack(k))
+
+fun ps_free {k:nat} .<k>. (p: pstack(k)): void =
+  case+ p of
+  | ~ps_nil() => ()
+  | ~ps_cons(_, _, _, r) => ps_free(r)
+
+(* The first j of p *)
+fun ps_keep {k:nat}{j:nat} .<k>. (p: pstack(k), j: int j): [m:nat] pstack(m) =
+  case+ p of
+  | ~ps_nil() => ps_nil()
+  | ~ps_cons(c, g, a, r) =>
+    if j <= 0 then let val () = ps_free(r) in ps_nil() end
+    else ps_cons(c, g, a, ps_keep(r, j - 1))
+
+datavtype ps_cell = {k:nat} PsCell of pstack(k)
+
+val _ps = ref<ps_cell>(PsCell(ps_nil()))
+
+fn _ps_take (): ps_cell = let
+  var c: ps_cell = PsCell(ps_nil())
+  val () = ref_exch_elt<ps_cell>(_ps, c)
+in c end
+
+fn _ps_put (c: ps_cell): void = let
+  var cur: ps_cell = c
+  val () = ref_exch_elt<ps_cell>(_ps, cur)
+  val+ ~PsCell(p) = cur
+in ps_free(p) end
+
+(* Remembers where the reader is, before a jump *)
+fn _push_position (): void = let
+  val anchor = _anchor_now()
+  val+ ~PsCell(p) = _ps_take()
+  val p = (case+ reading_get() of
+    | @(pg, _, c, _) => ps_cons((if c > 0 then c - 1 else 0), pg, anchor, ps_keep(p, 29))): [m:nat] pstack(m)
+  val () = _ps_put(PsCell(p))
+in ui_show("qpbk", true) end
+
+(* Returns to the position last jumped away from *)
+fn _pop_position (): void = let
+  val+ ~PsCell(p) = _ps_take()
+in
+  case+ p of
+  | ~ps_nil() => let
+      val () = _ps_put(PsCell(ps_nil()))
+    in ui_show("qpbk", false) end
+  | ~ps_cons(c, g, a, rest) => let
+      val empty = (case+ rest of ps_nil() => true | ps_cons(_, _, _, _) => false): bool
+      val () = _ps_put(PsCell(rest))
+      val () = ui_show("qpbk", ~empty)
+    in $P.discard<int>(_goto(c, g, a)) end
 end
 
 (* The next page: in this chapter, else the next chapter's first *)
@@ -873,6 +998,40 @@ implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
    page of content node anchor when anchor >= 0 *)
 #pub fun reader_goto (ch: Int, pg: Int, anchor: Int): $P.promise(int, $P.Chained)
 implement reader_goto (ch, pg, anchor) = _goto(ch, pg, anchor)
+
+(* Jumps to row i of the contents list, remembering where the reader
+   was *)
+#pub fun reader_goto_entry (i: Int): void
+implement reader_goto_entry (i) =
+  case+ toc_dest_of(i) of
+  | ~TocNoDest() => ()
+  | ~TocDest(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
+(* Jumps to chapter ch's element fr[0, f), remembering where the reader
+   was *)
+#pub fun reader_jump {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f: int f): void
+implement reader_jump (ch, fr, f) = let
+  val () = _push_position()
+in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
+(* Jumps to page pg of chapter ch (the page of content node anchor, when
+   it is not -1), remembering where the reader was *)
+#pub fun reader_jump_to (ch: Int, pg: Int, anchor: Int): void
+implement reader_jump_to (ch, pg, anchor) = let
+  val () = _push_position()
+in $P.discard<int>(_goto(ch, pg, anchor)) end
+
+(* The back button: to the position last jumped away from *)
+#pub fun reader_back (): void
+implement reader_back () = _pop_position()
+
+(* Forgets the positions jumped from (a book is opened or closed) *)
+#pub fun reader_stack_clear (): void
+implement reader_stack_clear () = let
+  val () = _ps_put(PsCell(ps_nil()))
+in ui_show("qpbk", false) end
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

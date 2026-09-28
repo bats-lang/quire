@@ -421,3 +421,45 @@ implement find_item_with_prop (data, nodes, prop, np) = _item_with_prop_r(data, 
    io: int io, ik: int ik): xspan(n)
 
 implement find_manifest_href (data, len, nodes, io, ik) = _find_manifest_href_r(data, len, nodes, io, ik)
+
+(* The toc attribute of the first <spine> *)
+fun _spine_toc_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _spine_toc(data, node) of
+     | ~xspan_none() => _spine_toc_r(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _spine_toc
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
+      var _c_toc = @[char][3]('t', 'o', 'c')
+    in _find_attr_val(data, attrs, _c_toc, 3) end
+    else _spine_toc_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the NCX (EPUB 2's table of contents): the manifest item
+   the spine's toc attribute names *)
+#pub fn find_ncx_href
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement find_ncx_href (data, len, nodes) =
+  case+ _spine_toc_r(data, nodes) of
+  | ~xspan_at(io, ik) => _find_manifest_href_r(data, len, nodes, io, ik)
+  | ~xspan_none() => xspan_none()
+
+(* Whether data[o, o + k) has pat[0, np) in it *)
+#pub fn span_has {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool
+
+implement span_has (data, o, k, pat, np) = _span_has(data, o, k, pat, np, 0)

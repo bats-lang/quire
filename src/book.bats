@@ -104,6 +104,10 @@ staload "pages.sats"
 
 #pub fn book_chapter_get {i:nat} (s: int, i: int i): chapter_got
 
+(* The index of the chapter of the open book, book s, whose entry's name
+   is at no in the file; -1 when none is (or book s is not open) *)
+#pub fn book_chapter_of (s: int, no: int): [v:int | v >= ~1] int v
+
 (* Closes the book being imported, book s, when its import fails *)
 #pub fn book_abandon (s: int): void
 
@@ -575,6 +579,41 @@ in
     in r end
     else let prval () = fold@(b); val () = book_put(b) in ChaptersUnknown() end
   | _ => let val () = book_put(b) in ChaptersUnknown() end
+end
+
+(* The index, from i, of the first chapter of chs whose name is at no *)
+fun book_chapter_find {n:pos}{j:nat}{i:nat} .<j>.
+  (chs: !book_chapters(n, j), no: int, i: int i): [v:int | v >= ~1] int v =
+  case+ chs of
+  | ChaptersNil() => ~1
+  | @Chapter(_, _, _, cno, _, _, rest) =>
+    if cno = no then let prval () = fold@(chs) in i end
+    else let
+      val r = book_chapter_find(rest, no, i + 1)
+      prval () = fold@(chs)
+    in r end
+  | @ChapterMissing(rest) => let
+      val r = book_chapter_find(rest, no, i + 1)
+      prval () = fold@(chs)
+    in r end
+
+implement book_chapter_of (s, no) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then let
+      val r = (case+ sp of
+        | @Spine(chs, _) => let
+            val r = book_chapter_find(chs, no, 0)
+            prval () = fold@(sp)
+          in r end
+        | NoSpine() => ~1): [v:int | v >= ~1] int v
+      prval () = fold@(b)
+      val () = book_put(b)
+    in r end
+    else let prval () = fold@(b); val () = book_put(b) in ~1 end
+  | _ => let val () = book_put(b) in ~1 end
 end
 
 implement book_abandon (s) =
