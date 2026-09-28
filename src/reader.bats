@@ -136,6 +136,8 @@ fn _measure_pagination(): void = let
   val () = $A.set<byte>(cnt_narr, 2, int2byte0(110))
   val () = $A.set<byte>(cnt_narr, 3, int2byte0(116))
   val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
+  (* back to the first page, which the reading position now names *)
+  val () = $SC.set_scroll_left(cnt_b, 4, 0)
   val mr = $DR.measure(cnt_b, 4)
   val () = $A.drop<byte>(cnt_f, cnt_b)
   val cnt_tmp = $A.thaw<byte>(cnt_f)
@@ -201,14 +203,37 @@ fun _node_down {j:nat} .<j>. (x: int, y: int, j: int j): [v:int | v >= ~1] int v
   val v = _node_at(x, y)
 in if v >= 0 then v else if j <= 0 then ~1 else _node_down(x, y + 40, j - 1) end
 
-(* The content node at the top of the page shown (its number), or -1:
-   the first element down the middle of the page from its first line *)
+(* Whether content node i starts in [lo, hi) across the page: on the
+   page shown, when that is the page's width *)
+fn _starts_in {i:nat} (i: int i, lo: int, hi: int): bool =
+  if ~_measure_node(i) then false
+  else let val x = $DR.get_measure_x() in x >= lo && x < hi end
+
+(* The first of content nodes i to i + j that starts on the page, [lo,
+   hi) across; -1 when none does *)
+fun _first_start {i:nat}{j:nat} .<j>. (i: int i, j: int j, lo: int, hi: int): [v:int | v >= ~1] int v =
+  if _starts_in(i, lo, hi) then i
+  else if j <= 0 then ~1
+  else _first_start(i + 1, j - 1, lo, hi)
+
+(* The content node the page shown starts with (its number), or -1: the
+   first element down the middle of the page from its first line, or,
+   when that one began on a page before (a paragraph carried over), the
+   first of the next 40 that begins on this one, so that the page it
+   names is this page *)
 fn _anchor_now (): [v:int | v >= ~1] int v = let
   val () = _measure_lit("qcnt")
   val cx = $DR.get_measure_x()
   val cy = $DR.get_measure_y()
   val cw = $DR.get_measure_w()
-in _node_down(cx + cw / 2, cy + 24, 8) end
+  val v = _node_down(cx + cw / 2, cy + 24, 8)
+in
+  if v < 0 then v
+  else if _starts_in(v, cx - 1, cx + cw) then v
+  else let
+    val w = _first_start(v + 1, 40, cx - 1, cx + cw)
+  in if w >= 0 then w else v end
+end
 
 (* The page, of the chapter's t, that content node i is on (the page
    shown now is cur); cur when it is not in the chapter *)
@@ -229,11 +254,17 @@ fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c):
     in if p < 0 then 0 else if p >= t then t - 1 else p end
   end
 
+(* The content node at the top of the page last shown: what a new
+   layout (another size or type, measured after it changed) keeps in
+   view *)
+val _anchor_last = ref<Int>(~1)
+
 (* The position read to the open book's record in the library, which is
    then stored *)
 fn _record_position (): void = let
   val i = lib_index_of_key(open_key_get())
   val anchor = _anchor_now()
+  val () = !_anchor_last := anchor
   val now = $TM.epoch_minutes()
 in
   case+ reading_get() of
@@ -1381,9 +1412,10 @@ fn _page_prev(): void =
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
 fn _relayout (): void = let
-  val anchor = _anchor_now()
+  val anchor = !_anchor_last
+  val pg = (case+ reading_get() of @(p, _, _, _) => p): Int
   val () = _measure_pagination()
-in _show_target(0, anchor) end
+in _show_target(pg, anchor) end
 
 (* ============================================================
    Search: every chapter's text, for the query
