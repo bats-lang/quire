@@ -14,7 +14,6 @@
 #use wasm.bats-packages.dev/file-input as FI
 #use widget as W
 
-staload "theme.sats"
 staload "epub_xml.sats"
 staload "book.sats"
 staload "pages.sats"

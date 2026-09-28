@@ -6,7 +6,7 @@
 #use array as A
 
 staload "ui.sats"
-staload "theme.sats"
+staload "style.sats"
 
 fn _hide {ni:pos | ni < 256} (id: string ni): void = ui_show(id, false)
 
@@ -308,7 +308,8 @@ implement app_build () = let
   val () = ui_clear("bats-root")
   val () = ui_attr("bats-root", "class", "app th-light")
   val () = ui_add("bats-root", "qcss", "style")
-  val () = ui_text_long("qcss", app_css())
+  val @(css, cssn) = app_style()
+  val () = ui_text_buf("qcss", css, cssn)
   val () = ui_add("bats-root", "qdyn", "style")
   val () = ui_add("bats-root", "qfnt", "style")
   val () = _library()
