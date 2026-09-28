@@ -479,7 +479,7 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
               val () = _copy_in(tb, tn, buf, 0, 0)
               val () = $A.free<byte>(tb)
               val off = _puts(buf, tn, " is already in your library.")
-              val () = modal_open(AskDuplicate(), "Already in library")
+              val () = modal_open(QDuplicate(), "Already in library")
               val () = modal_text(buf, off)
             in
               $P.and_then<Int><Int>($P.vow(p), lam(ans) =>

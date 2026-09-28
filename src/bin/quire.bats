@@ -235,7 +235,7 @@ fn _open_book {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) =>
     if x.shelf = 2 then let
-      val () = modal_open(AskInform(), "Archived")
+      val () = modal_open(QInform(), "Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
@@ -378,12 +378,11 @@ fn _book_action {i:int} (i: int i, act: int): void =
     if act = 1 then _set_shelf(i, (if x.shelf = 1 then 0 else 1))
     else if act = 2 then
       (if x.shelf = 2 then let
-         val () = modal_open(AskInform(), "Restore")
+         val () = modal_open(QInform(), "Restore")
        in modal_text_lit("To restore this book, import its file again.") end
        else _archive(i))
     else let
-      val () = modal_open(AskDeleteBook(i), "Delete book?")
-    in modal_text_lit("The book, its reading position and its annotations are removed.") end
+    in modal_confirm(HDeleteBook(i)) end
 
 (* ============================================================
    Settings
@@ -412,11 +411,11 @@ fn _has_selection (): bool =
 
 (* The note dialog for annotation i; fresh when the highlight was made
    for this note (from a selection), and so goes if the note is
-   cancelled: the dialog's answer carries it (AskNote) *)
+   cancelled: the dialog's answer carries it (QNote) *)
 fn _note_open (i: int, fresh: bool): void =
   if i < 0 then ()
   else let
-    val () = modal_open(AskNote(i, fresh), "Note")
+    val () = modal_open(QNote(i, fresh), "Note")
     val () = modal_textarea()
   in annot_note_show(i) end
 
@@ -485,63 +484,65 @@ fn _annot_go (i: int): void = let
   val @(ch, pg, sn) = annot_dest(i)
 in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
 
-(* The dialog's answer, with the question it answers: every question
-   is matched here (case+ is exhaustive), and what deletes or resets
-   is done only on the Confirmed answer to the question that asked
-   for it, on what that question named *)
-fn _modal_answer (second: bool): void =
-  case+ modal_answer(second) of
-  | Confirmed(AskDuplicate()) => import_dup_answer(true)
-  | Dismissed(AskDuplicate()) => import_dup_answer(false)
-  | Confirmed(AskDeleteBook(i)) => let
+(* What a confirmed harm does. This is the one place that deletes a
+   book or an annotation for the user or resets anything, and it is
+   called only with the harm a Confirmed answer carries *)
+fn _destroy (h: harm): void =
+  case+ h of
+  | HDeleteBook(i) => let
       val () = ui_show("qinf", false)
     in if i >= 0 then _delete(i) else () end
-  | Confirmed(AskFactoryReset()) => let
+  | HFactoryReset() => let
       val () = $IDB.idb_delete_database()
       val () = lib_clear()
       val () = set_reset()
     in $NAV.reload() end
-  | Confirmed(AskResetSettings()) => let
+  | HResetSettings() => let
       val () = set_reset()
       val () = set_sliders()
     in _settings_changed() end
-  | Confirmed(AskDeleteHighlight(i)) => let
+  | HDeleteHighlight(i) => let
       val () = annot_delete(i)
     in annot_render() end
-  | Confirmed(AskDeleteBookmark(i)) => let
+  | HDeleteBookmark(i) => let
       val () = annot_delete(i)
     in annot_render_bookmarks() end
-  | Confirmed(AskNote(i, _)) => _note_save(i)
+
+(* The dialog's answer, with the question it answers: every question
+   is matched here (case+ is exhaustive), and a harm is done only on
+   the Confirmed answer to the question that named it *)
+fn _modal_answer (second: bool): void =
+  case+ modal_answer(second) of
+  | Confirmed(Harmful(h)) => _destroy(h)
+  | Dismissed(Harmful(_)) => ()
+  | Confirmed(Harmless(QDuplicate())) => import_dup_answer(true)
+  | Dismissed(Harmless(QDuplicate())) => import_dup_answer(false)
+  | Confirmed(Harmless(QNote(i, _))) => _note_save(i)
   (* a note begun from a selection and cancelled leaves no highlight *)
-  | Dismissed(AskNote(i, fresh)) =>
+  | Dismissed(Harmless(QNote(i, fresh))) =>
     if fresh then let val () = annot_delete(i) in annot_render() end else ()
-  | Confirmed(AskInform()) => ()
-  | Dismissed(AskInform()) => ()
+  | Confirmed(Harmless(QInform())) => ()
+  | Dismissed(Harmless(QInform())) => ()
   | Confirmed(AskNothing()) => ()
   | Dismissed(AskNothing()) => ()
-  | Dismissed(AskDeleteBook(_)) => ()
-  | Dismissed(AskFactoryReset()) => ()
-  | Dismissed(AskResetSettings()) => ()
-  | Dismissed(AskDeleteHighlight(_)) => ()
-  | Dismissed(AskDeleteBookmark(_)) => ()
 
-fn _wire_library (): void = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
   (* import *)
-  val () = ui_listen("qibn", "change", 1, lam(_) => let val () = import_picked() in 0 end)
+  val r = RCons(r, OnEl("qibn"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
-  val () = ui_listen("qllc", "dragover", 23, lam(_) => let
+  val r = RCons(r, OnEl("qllc"), "dragover", lam(_) => let
       val () = $EV.prevent_default()
     in let val () = ui_attr("qllc", AClass, "lib drag") in 0 end end)
-  val () = ui_listen("qllc", "dragleave", 24, lam(_) => let
+  val r = RCons(r, OnEl("qllc"), "dragleave", lam(_) => let
       val () = ui_attr("qllc", AClass, "lib")
     in 0 end)
-  val () = ui_listen("qllc", "drop", 25, lam(_) => let
+  val r = RCons(r, OnEl("qllc"), "drop", lam(_) => let
       val () = $EV.prevent_default()
       val () = ui_attr("qllc", AClass, "lib")
       val () = import_dropped()
     in 0 end)
   (* the cards: open, and the book menu *)
-  val () = ui_listen("qlst", "click", 16, lam(h) => let
+  val r = RCons(r, OnEl("qlst"), "click", lam(h) => let
       val t = _target(h)
       val i = _row_of(t, "k")
       val m = _row_of(t, "km")
@@ -551,11 +552,11 @@ fn _wire_library (): void = let
       else if m >= 0 then let val () = _menu_open(m) in 0 end
       else 0
     end)
-  val () = ui_listen("qlst", "contextmenu", 15, lam(h) => let
+  val r = RCons(r, OnEl("qlst"), "contextmenu", lam(h) => let
       val () = $EV.prevent_default()
       val i = _target_num(h, "k")
     in if i >= 0 then let val () = _menu_open(i) in 0 end else 0 end)
-  val () = ui_listen("qctx", "click", 18, lam(h) => let
+  val r = RCons(r, OnEl("qctx"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
       val () = ui_show("qctx", false)
@@ -567,7 +568,7 @@ fn _wire_library (): void = let
            else ()) else ())
     in let val () = _target_free(t) in 0 end end)
   (* the info view *)
-  val () = ui_listen("qinf", "click", 19, lam(h) => let
+  val r = RCons(r, OnEl("qinf"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
       val () = (if _is(t, "qinx") then ui_show("qinf", false)
@@ -578,26 +579,26 @@ fn _wire_library (): void = let
         else ())
     in let val () = _target_free(t) in 0 end end)
   (* sort and shelf *)
-  val () = ui_listen("qsrt", "click", 20, lam(_) => let
+  val r = RCons(r, OnEl("qsrt"), "click", lam(_) => let
       val o = lib_sort_get()
       val o = (if o >= 3 then 0 else o + 1): int
       val () = lib_sort(o)
       val () = lib_sort_label(o)
       val () = set_apply(o)
     in let val () = lib_render() in 0 end end)
-  val () = ui_listen("qshf", "click", 21, lam(_) => let
+  val r = RCons(r, OnEl("qshf"), "click", lam(_) => let
       val s = lib_shelf_get()
       val () = lib_shelf_set((if s >= 2 then 0 else s + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
-  val () = ui_listen("qlsb", "input", 22, lam(h) => let
+  val r = RCons(r, OnEl("qlsb"), "input", lam(h) => let
       val @(q, n) = _input_text(h)
       val () = ui_show("qlsx", n > 0)
       val () = lib_query_set(q, n)
     in let val () = lib_render() in 0 end end)
-  val () = ui_listen("qlsb", "click", 53, lam(h) => let
+  val r = RCons(r, OnEl("qlsb"), "click", lam(h) => let
       val t = _target(h)
       val clear = _is(t, "qlsx")
       val () = _target_free(t)
@@ -613,22 +614,21 @@ fn _wire_library (): void = let
       else 0
     end)
   (* a backup picked to restore *)
-  val () = ui_listen("qlmi", "change", 50, lam(_) => let
+  val r = RCons(r, OnEl("qlmi"), "change", lam(_) => let
       val () = ui_show("qlmn", false)
       val () = backup_import()
     in 0 end)
   (* the error banner *)
-  val () = ui_listen("qerx", "click", 26, lam(_) => let val () = ui_show("qerr", false) in 0 end)
+  val r = RCons(r, OnEl("qerx"), "click", lam(_) => let val () = ui_show("qerr", false) in 0 end)
   (* the library menu *)
-  val () = ui_listen("qlgr", "click", 27, lam(_) => let
+  val r = RCons(r, OnEl("qlgr"), "click", lam(_) => let
       val () = ui_show("qlmn", true)
     in let val () = ui_focus("qlme") in 0 end end)
-  val () = ui_listen("qlmn", "click", 28, lam(h) => let
+  val r = RCons(r, OnEl("qlmn"), "click", lam(h) => let
       val t = _target(h)
       val () = (if _is(t, "qlmr") then let
           val () = ui_show("qlmn", false)
-          val () = modal_open(AskFactoryReset(), "Factory reset?")
-        in modal_text_lit("Every book, position, annotation and setting is deleted.") end
+        in modal_confirm(HFactoryReset()) end
         else if _is(t, "qlme") then let
           val () = ui_show("qlmn", false)
         in backup_export() end
@@ -637,7 +637,7 @@ fn _wire_library (): void = let
         else ())
     in let val () = _target_free(t) in 0 end end)
   (* the dialog *)
-  val () = ui_listen("qmod", "click", 29, lam(h) => let
+  val r = RCons(r, OnEl("qmod"), "click", lam(h) => let
       val t = _target(h)
       val b1 = _is(t, "qmb1")
       val b2 = _is(t, "qmb2")
@@ -648,13 +648,13 @@ fn _wire_library (): void = let
       else if (if b1 then true else out) then let val () = _modal_answer(false) in 0 end
       else 0
     end)
-in end
+in r end
 
-fn _wire_settings (): void = let
-  val () = ui_listen("qset", "click", 8, lam(_) => let
+fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
+  val r = RCons(r, OnEl("qset"), "click", lam(_) => let
       val () = ui_show("qspn", true)
     in let val () = ui_focus("qscl") in 0 end end)
-  val () = ui_listen("qspn", "click", 9, lam(h) => let
+  val r = RCons(r, OnEl("qspn"), "click", lam(h) => let
       val t = _target(h)
       val changed = (if _is(t, "qff0") then let val () = set_font_set(0) in true end
         else if _is(t, "qff1") then let val () = set_font_set(1) in true end
@@ -664,24 +664,23 @@ fn _wire_settings (): void = let
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
         else if _is(t, "qsrs") then let
-            val () = modal_open(AskResetSettings(), "Reset to defaults?")
-            val () = modal_text_lit("Font, size, spacing, margins and theme go back to their defaults.")
+            val () = modal_confirm(HResetSettings())
           in false end
         else false): bool
       val close = _is(t, "qscl")
       val () = _target_free(t)
       val () = (if close then ui_show("qspn", false) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val () = ui_listen("qsr1", "input", 10, lam(h) => let
+  val r = RCons(r, OnEl("qsr1"), "input", lam(h) => let
       val () = set_size_set(_clamp(_input_num(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
-  val () = ui_listen("qsr2", "input", 11, lam(h) => let
+  val r = RCons(r, OnEl("qsr2"), "input", lam(h) => let
       val () = set_lh_set(_clamp(_input_num(h), 12, 24))
     in let val () = _settings_changed() in 0 end end)
-  val () = ui_listen("qsr3", "input", 12, lam(h) => let
+  val r = RCons(r, OnEl("qsr3"), "input", lam(h) => let
       val () = set_margin_set(_clamp(_input_num(h), 0, 4))
     in let val () = _settings_changed() in 0 end end)
-in end
+in r end
 
 (* ============================================================
    Search
@@ -899,9 +898,9 @@ fn _bookmarks_open (): void = let
   val () = ui_show("qtcl", false)
 in ui_show("qtbl", true) end
 
-fn _wire_toc (): void = let
-  val () = ui_listen("qtcb", "click", 34, lam(_) => let val () = _toc_open() in 0 end)
-  val () = ui_listen("qtoc", "click", 35, lam(h) => let
+fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
+  val r = RCons(r, OnEl("qtcb"), "click", lam(_) => let val () = _toc_open() in 0 end)
+  val r = RCons(r, OnEl("qtoc"), "click", lam(h) => let
       val t = _target(h)
       val row = _row_of(t, "qe")
       val bgo = _row_of(t, "qb")
@@ -911,28 +910,27 @@ fn _wire_toc (): void = let
         else if _is(t, "qtcm") then _bookmarks_open()
         else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
         else if bdl >= 0 then let
-          val () = modal_open(AskDeleteBookmark(bdl), "Delete bookmark?")
-        in modal_text_lit("The bookmark is removed.") end
+        in modal_confirm(HDeleteBookmark(bdl)) end
         else if row >= 0 then let
           val () = ui_show("qtoc", false)
         in reader_goto_entry(row) end
         else ())
       val () = _target_free(t)
     in 0 end)
-  val () = ui_listen("qpbk", "click", 36, lam(_) => let val () = reader_back() in 0 end)
+  val r = RCons(r, OnEl("qpbk"), "click", lam(_) => let val () = reader_back() in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
-  val () = ui_listen("qtrk", "pointerdown", 37, lam(h) => let
+  val r = RCons(r, OnEl("qtrk"), "pointerdown", lam(h) => let
       val x = _event_x(h)
       val () = !_scrubbing := true
       val () = _chrome_set(true)
     in let val () = reader_scrub_preview(x) in 0 end end)
-  val () = ui_listen_doc("pointermove", 38, lam(h) =>
+  val r = RCons(r, OnDocument(), "pointermove", lam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = _chrome_set(true)
       in let val () = reader_scrub_preview(x) in 0 end end
       else 0)
-  val () = ui_listen_doc("pointerup", 39, lam(h) =>
+  val r = RCons(r, OnDocument(), "pointerup", lam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = !_scrubbing := false
@@ -940,17 +938,17 @@ fn _wire_toc (): void = let
       else 0)
   (* the app hidden (another tab, another app): where the reader is is
      stored *)
-  val () = ui_listen_doc("visibilitychange", 40, lam(_) =>
+  val r = RCons(r, OnDocument(), "visibilitychange", lam(_) =>
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
-in end
+in r end
 
-fn _wire_annotations (): void = let
-  val () = ui_listen("qbmk", "click", 41, lam(_) => let
+fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
+  val r = RCons(r, OnEl("qbmk"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
-  val () = ui_listen_doc("selectionchange", 42, lam(_) =>
+  val r = RCons(r, OnDocument(), "selectionchange", lam(_) =>
       if !_view = 1 then let val () = ui_show("qsel", _has_selection()) in 0 end else 0)
-  val () = ui_listen("qsel", "click", 43, lam(h) => let
+  val r = RCons(r, OnEl("qsel"), "click", lam(h) => let
       val t = _target(h)
       val hl = _is(t, "qslh")
       val nt = _is(t, "qsln")
@@ -964,11 +962,11 @@ fn _wire_annotations (): void = let
         else if sr then _search_selection()
         else ())
     in let val () = ui_show("qsel", false) in 0 end end)
-  val () = ui_listen("qanb", "click", 44, lam(_) => let
+  val r = RCons(r, OnEl("qanb"), "click", lam(_) => let
       val () = annot_render()
       val () = ui_show("qanp", true)
     in let val () = ui_focus("qanc") in 0 end end)
-  val () = ui_listen("qanp", "click", 45, lam(h) => let
+  val r = RCons(r, OnEl("qanp"), "click", lam(h) => let
       val t = _target(h)
       val go = _row_of(t, "qa")
       val nt = _row_of(t, "qn")
@@ -981,20 +979,19 @@ fn _wire_annotations (): void = let
         else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
         else if nt >= 0 then _note_open(nt, false)
         else if dl >= 0 then let
-          val () = modal_open(AskDeleteHighlight(dl), "Delete highlight?")
-        in modal_text_lit("The highlight and its note are removed.") end
+        in modal_confirm(HDeleteHighlight(dl)) end
         else ())
     in 0 end)
-in end
+in r end
 
-fn _wire_search (): void = let
-  val () = ui_listen("qsch", "click", 46, lam(_) => let
+fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
+  val r = RCons(r, OnEl("qsch"), "click", lam(_) => let
       val () = (if _shown("qsrp") then ui_show("qsrp", false) else _search_open())
     in 0 end)
   (* the field is made again for a selection's search: its events are
      taken on the panel *)
-  val () = ui_listen("qsrp", "input", 47, lam(_) => let val () = _search_input() in 0 end)
-  val () = ui_listen("qsrp", "click", 48, lam(h) => let
+  val r = RCons(r, OnEl("qsrp"), "input", lam(_) => let val () = _search_input() in 0 end)
+  val r = RCons(r, OnEl("qsrp"), "click", lam(h) => let
       val t = _target(h)
       val go = _row_of(t, "qh")
       val close = _is(t, "qsrx")
@@ -1005,7 +1002,7 @@ fn _wire_search (): void = let
         in reader_search_go(go) end
         else ())
     in 0 end)
-  val () = ui_listen("qsrn", "click", 49, lam(h) => let
+  val r = RCons(r, OnEl("qsrn"), "click", lam(h) => let
       val t = _target(h)
       val pv = _is(t, "qsrv")
       val nx = _is(t, "qsrw")
@@ -1016,13 +1013,13 @@ fn _wire_search (): void = let
         else if close then _search_end()
         else ())
     in 0 end)
-in end
+in r end
 
-fn _wire_reader (): void = let
-  val () = ui_listen("qbbk", "click", 2, lam(_) => let val () = _show_library() in 0 end)
-  val () = ui_listen("qprv", "click", 3, lam(_) => let val () = page_prev() in 0 end)
-  val () = ui_listen("qnxt", "click", 4, lam(_) => let val () = page_next() in 0 end)
-  val () = ui_listen("qcnt", "click", 5, lam(h) => let
+fn _wire_reader {n:nat} (r: regs(n)): regs(n + 11) = let
+  val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
+  val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
+  val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
+  val r = RCons(r, OnEl("qcnt"), "click", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
       val x = _target_x(t)
@@ -1034,14 +1031,14 @@ fn _wire_reader (): void = let
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
-  val () = ui_listen("qcnt", "focusin", 51, lam(h) => let
+  val r = RCons(r, OnEl("qcnt"), "focusin", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
       val () = _target_free(t)
       val () = !_focus_link := node
     in 0 end)
-  val () = ui_listen("qcnt", "focusout", 52, lam(_) => let val () = !_focus_link := ~1 in 0 end)
-  val () = ui_listen_doc("keydown", 7, lam(h) =>
+  val r = RCons(r, OnEl("qcnt"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
+  val r = RCons(r, OnDocument(), "keydown", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) => let
@@ -1054,7 +1051,7 @@ fn _wire_reader (): void = let
           val () = $A.free<byte>(b)
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
-  val () = ui_listen("qcnt", "wheel", 13, lam(h) =>
+  val r = RCons(r, OnEl("qcnt"), "wheel", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) =>
@@ -1074,7 +1071,7 @@ fn _wire_reader (): void = let
           in 0 end
         end)
   (* a swipe of 60 px or more, more across than down, turns a page *)
-  val () = ui_listen("qcnt", "touchstart", 30, lam(h) =>
+  val r = RCons(r, OnEl("qcnt"), "touchstart", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) =>
@@ -1084,7 +1081,7 @@ fn _wire_reader (): void = let
           val () = !_touch_y := _i32at(b, 4)
           val () = $A.free<byte>(b)
         in 0 end)
-  val () = ui_listen("qcnt", "touchend", 31, lam(h) =>
+  val r = RCons(r, OnEl("qcnt"), "touchend", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) =>
@@ -1102,7 +1099,7 @@ fn _wire_reader (): void = let
           else let val () = _left() in 0 end
         end)
   (* a resize lays the chapter out again, once it settles *)
-  val () = ui_listen_win("resize", 32, lam(_) => let
+  val r = RCons(r, OnWindow(), "resize", lam(_) => let
       val () = !_resize_gen := !_resize_gen + 1
       val gen = !_resize_gen
       val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(200)), lam(_) => let
@@ -1113,7 +1110,7 @@ fn _wire_reader (): void = let
   val () = $NAV.set_popstate_callback(lam(_) => let
       val () = (if !_view = 1 then _show_library() else ())
     in 0 end)
-in end
+in r end
 
 (* ============================================================
    Startup
@@ -1121,17 +1118,14 @@ in end
 
 implement main0 () = let
   val () = app_build()
-  val () = _wire_library()
-  val () = _wire_settings()
-  val () = _wire_reader()
-  val () = _wire_toc()
-  val () = _wire_annotations()
-  val () = _wire_search()
+  (* every listener, in one table: each one's id is its place in it *)
+  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(_wire_library(RNil()))))))
   (* files handed to the app from outside it (an Android intent) *)
-  val () = $EV.listen_external_files(33, lam(h) => let
+  val r = RCons(r, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
       val () = import_external(h)
     in 0 end)
+  val () = ui_listen_all(r)
   val p = $P.and_then<int><int>(set_load(), lam(sort) => let
       val () = lib_sort_label(sort)
     in
