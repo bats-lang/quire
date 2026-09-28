@@ -4,7 +4,10 @@ CI builds Quire's Android app (a Capacitor shell around the PWA) on every
 push to main and every pull request: the `android` job of
 `.github/workflows/check.yml`. It runs the pwa package's reusable
 workflow (`bats-lang/pwa/.github/workflows/android.yml`) on the project
-`gen-pwa` writes to `dist/android`, and uploads two artifacts:
+`gen-pwa` writes to `dist/android`. Every run builds and signs the app
+the same way, and checks that the AAB and the APK are both signed with
+the release key (their signer's SHA-256 fingerprint is the keystore's).
+A push to main also uploads them, as two artifacts:
 
 * `release-aab`: the Android App Bundle, for Google Play;
 * `release-apk`: the APK, for installing directly.
@@ -33,8 +36,9 @@ each upload's to be higher than the last).
 ## Signing secrets
 
 The release build is signed with a keystore that CI reads from four
-repository secrets. Without them the build still succeeds, unsigned (as
-it does for pull requests from forks, which get no secrets).
+repository secrets. The job requires them (`require-signed`): without
+them it fails rather than build unsigned, so a pull request from a fork,
+which gets no secrets, fails its `android` job.
 
 | Secret              | Value                                   |
 |---------------------|-----------------------------------------|
@@ -92,8 +96,8 @@ which does not carry environment secrets.
 
 ### 4. Build
 
-Push to main (or open a pull request). When the `check` workflow's
-`android` job is done, download `release-aab` from the run's artifacts
+Push to main. When the `check` workflow's `android` job is done,
+download `release-aab` from the run's artifacts
 and upload the `.aab` inside to the Google Play Console.
 
 ## Building locally
