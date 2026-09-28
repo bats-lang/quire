@@ -1386,6 +1386,320 @@ fn _relayout (): void = let
 in _show_target(0, anchor) end
 
 (* ============================================================
+   Search: every chapter's text, for the query
+   ============================================================ *)
+
+(* A search walks each chapter as _render_nodes shows it, numbering its
+   content nodes the same way (the two must stay in step), and finds the
+   query in each text node's text as the page shows it (its references
+   decoded), letters in any case. A hit is its chapter, content node and
+   offset, with the text around it. *)
+
+#define HMAX 500
+
+datavtype hits(int) =
+  | hits_nil(0) of ()
+  | {k:nat}{l:agz}{sl:nat | sl <= 200}
+    hits_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, sl + 1), int sl, hits(k))
+
+fun hits_free {k:nat} .<k>. (x: hits(k)): void =
+  case+ x of
+  | ~hits_nil() => ()
+  | ~hits_cons(_, _, _, a, _, r) => let val () = $A.free<byte>(a) in hits_free(r) end
+
+fun hits_rev {k,j:nat} .<k>. (x: hits(k), acc: hits(j)): hits(k + j) =
+  case+ x of
+  | ~hits_nil() => acc
+  | ~hits_cons(c, n, o, a, sl, r) => hits_rev(r, hits_cons(c, n, o, a, sl, acc))
+
+(* The hits so far (the latest first while a search runs), their count,
+   the query q[0, qn) (lower case) and the search's number *)
+datavtype search_cell =
+  | {k:nat | k <= HMAX}{l:agz}{qn:pos | qn <= 200} SearchCell of (hits(k), int k, $A.arr(byte, l, qn), int qn)
+  | SearchNone of ()
+
+val _search = ref<search_cell>(SearchNone())
+val _search_gen = ref<int>(0)
+(* The hit shown, and whether a hit was jumped to since the search opened *)
+val _hit_cur = ref<Int>(~1)
+val _hit_jumped = ref<bool>(false)
+
+fn _search_free (c: search_cell): void =
+  case+ c of
+  | ~SearchCell(h, _, q, _) => let val () = hits_free(h) in $A.free<byte>(q) end
+  | ~SearchNone() => ()
+
+fn _search_take (): search_cell = let
+  var c: search_cell = SearchNone()
+  val () = ref_exch_elt<search_cell>(_search, c)
+in c end
+
+fn _search_put (c: search_cell): void = let
+  var cur: search_cell = c
+  val () = ref_exch_elt<search_cell>(_search, cur)
+in _search_free(cur) end
+
+(* b, in lower case when it is an ASCII capital *)
+fn _lower (b: int): int = if b >= 65 then (if b <= 90 then b + 32 else b) else b
+
+(* Whether t[j, j + qn) is q[0, qn), letters in any case *)
+fun _match_at {lt,lq:agz}{nt,nq:pos}{j:nat}{qn:nat | qn <= nq; j + qn <= nt}{i:nat | i <= qn} .<qn - i>.
+  (t: !$A.arr(byte, lt, nt), j: int j, q: !$A.arr(byte, lq, nq), qn: int qn, i: int i): bool =
+  if i >= qn then true
+  else if _lower(byte2int0($A.get<byte>(t, j + i))) <> byte2int0($A.get<byte>(q, i)) then false
+  else _match_at(t, j, q, qn, i + 1)
+
+(* The start of the UTF-8 character at or after j in t[0, n), no further
+   than e *)
+fun _char_fwd {l:agz}{m:pos}{j,e:nat | j <= e; e <= m} .<e - j>.
+  (t: !$A.arr(byte, l, m), j: int j, e: int e): [r:nat | j <= r; r <= e] int r =
+  if j >= e then e
+  else if $AR.band_int_int(byte2int0($A.get<byte>(t, j)), 192) <> 128 then j
+  else _char_fwd(t, j + 1, e)
+
+(* e, or less (no less than lo), so that t[.., e) ends before a
+   character's start *)
+fun _char_back_loop {l:agz}{m:pos}{lo,e:nat | lo <= e; e <= m} .<e - lo>.
+  (t: !$A.arr(byte, l, m), m: int m, e: int e, lo: int lo): [r:nat | lo <= r; r <= e] int r =
+  if e <= lo then lo
+  else if e >= m then e
+  else if $AR.band_int_int(byte2int0($A.get<byte>(t, e)), 192) <> 128 then e
+  else _char_back_loop(t, m, e - 1, lo)
+
+fun _snip_copy {l,la:agz}{m,ma:pos}{s,sl:nat | s + sl <= m; sl < ma}{i:nat | i <= sl} .<sl - i>.
+  (t: !$A.arr(byte, l, m), s: int s, a: !$A.arr(byte, la, ma), sl: int sl, i: int i): void =
+  if i >= sl then ()
+  else let
+    val b = byte2int0($A.get<byte>(t, s + i))
+    val () = $A.set<byte>(a, i, (if b < 32 then $A.int2byte(32) else $A.get<byte>(t, s + i)))
+  in _snip_copy(t, s, a, sl, i + 1) end
+
+(* e - s, at most 200 *)
+fn _span200 {s,e:nat | s <= e} (s: int s, e: int e): [c:nat | c <= 200; s + c <= e] int c =
+  if e - s <= 200 then e - s else 200
+
+(* The text around t[j, j + qn) in t[0, n): some 40 bytes before it and
+   80 after, whole characters, its line breaks as spaces *)
+fn _snippet {l:agz}{m:pos}{n:nat | n <= m}{j,qn:nat | j + qn <= n}
+  (t: !$A.arr(byte, l, m), m: int m, n: int n, j: int j, qn: int qn): [la:agz][sl:nat | sl <= 200] @($A.arr(byte, la, sl + 1), int sl) = let
+  val s0 = (if j > 40 then j - 40 else 0): [s:nat | s <= j] int s
+  val s = _char_fwd(t, s0, j)
+  val e0 = (if j + qn + 80 < n then j + qn + 80 else n): [e:nat | j + qn <= e; e <= n] int e
+  val e = _char_back_loop(t, m, e0, j + qn)
+  val sl = _span200(s, e)
+  val a = $A.alloc<byte>(sl + 1)
+  val () = _snip_copy(t, s, a, sl, 0)
+in @(a, sl) end
+
+(* The hits of the query in t[j, n), content node idx of chapter ch,
+   onto acc, while there are fewer than HMAX *)
+fun _find_all {lt,lq:agz}{mt,nq:pos}{n:nat | n <= mt}{qn:pos | qn <= nq}{j:nat}{k:nat | k <= HMAX} .<max(n - j, 0)>.
+  (t: !$A.arr(byte, lt, mt), mt: int mt, n: int n, j: int j, q: !$A.arr(byte, lq, nq), qn: int qn,
+   ch: Int, idx: Int, acc: hits(k), k: int k): [k2:nat | k2 <= HMAX] @(hits(k2), int k2) =
+  if k >= HMAX then @(acc, k)
+  else if j + qn > n then @(acc, k)
+  else if _match_at(t, j, q, qn, 0) then let
+    val @(a, sl) = _snippet(t, mt, n, j, qn)
+  in _find_all(t, mt, n, j + qn, q, qn, ch, idx, hits_cons(ch, idx, j, a, sl, acc), k + 1) end
+  else _find_all(t, mt, n, j + 1, q, qn, ch, idx, acc, k)
+
+(* The hits in text data[off, off + k), content node idx, decoded *)
+fn _scan_piece {lb,lq:agz}{n:pos}{o,m:nat | o + m <= n; m < 65536}{nq:pos}{qn:pos | qn <= nq}{r:nat | r <= HMAX}
+  (data: !$A.borrow(byte, lb, n), off: int o, m: int m, q: !$A.arr(byte, lq, nq), qn: int qn,
+   ch: Int, idx: Int, acc: hits(r), r: int r): [r2:nat | r2 <= HMAX] @(hits(r2), int r2) =
+  if m <= 0 then @(acc, r)
+  else let
+    val buf = $A.alloc<byte>(m)
+    val d = decode_text(data, off, m, buf)
+    val res = _find_all(buf, m, d, 0, q, qn, ch, idx, acc, r)
+    val () = $A.free<byte>(buf)
+  in res end
+
+(* The pieces of text data[off, off + k), as _text_spans makes them,
+   from content node idx: their hits, and the next node's number *)
+fun _scan_text {lb,lq:agz}{n:pos}{o,k:nat | o + k <= n}{nq:pos}{qn:pos | qn <= nq}{r:nat | r <= HMAX} .<k>.
+  (data: !$A.borrow(byte, lb, n), off: int o, k: int k, q: !$A.arr(byte, lq, nq), qn: int qn,
+   ch: Int, idx: Nat, acc: hits(r), r: int r): [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
+  if k < 65536 then let
+    val @(h, r2) = _scan_piece(data, off, k, q, qn, ch, idx, acc, r)
+  in @(idx + 1, h, r2) end
+  else let
+    val c = _text_cut(data, off, k)
+    val @(h, r2) = _scan_piece(data, off, c, q, qn, ch, idx, acc, r)
+  in _scan_text(data, off + c, k - c, q, qn, ch, idx + 1, h, r2) end
+
+(* The numbers _skip_spans takes for k bytes *)
+fun _skip_count {k:nat} .<k>. (k: int k, idx: Nat): Nat =
+  if k < 65536 then idx + 1 else _skip_count(k - 65533, idx + 1)
+
+fun _scan_nodes {lb,lq:agz}{n:pos}{sz:nat}{nq:pos}{qn:pos | qn <= nq}{r:nat | r <= HMAX} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), top: bool,
+   q: !$A.arr(byte, lq, nq), qn: int qn, ch: Int, idx: Nat, acc: hits(r), r: int r)
+  : [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(i2, h, r2) = _scan_node(data, node, top, q, qn, ch, idx, acc, r)
+    in _scan_nodes(data, rest, top, q, qn, ch, i2, h, r2) end
+  | $X.xml_nodes_nil() => @(idx, acc, r)
+
+and _scan_node {lb,lq:agz}{n:pos}{sz:pos}{nq:pos}{qn:pos | qn <= nq}{r:nat | r <= HMAX} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), top: bool,
+   q: !$A.arr(byte, lq, nq), qn: int qn, ch: Int, idx: Nat, acc: hits(r), r: int r)
+  : [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
+  case+ node of
+  | $X.xml_text(off, tlen) =>
+    if (if top then _blank(data, off, tlen, 0) else false) then @(_skip_count(tlen, idx), acc, r)
+    else _scan_text(data, off, tlen, q, qn, ch, idx, acc, r)
+  | $X.xml_element(name_off, name_len, _, children) => let
+    var _t_head = @[char][4]('h', 'e', 'a', 'd')
+    var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
+    var _t_meta = @[char][4]('m', 'e', 't', 'a')
+    var _t_link = @[char][4]('l', 'i', 'n', 'k')
+    var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
+    var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+    var _t_html = @[char][4]('h', 't', 'm', 'l')
+    var _t_body = @[char][4]('b', 'o', 'd', 'y')
+    var _t_br = @[char][2]('b', 'r')
+    var _t_hr = @[char][2]('h', 'r')
+    var _t_img = @[char][3]('i', 'm', 'g')
+    var _t_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _t_head, 4) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then @(idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
+      _scan_nodes(data, children, top, q, qn, ch, idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
+      _scan_nodes(data, children, top, q, qn, ch, idx, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_br, 2) then @(idx + 1, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then @(idx + 1, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_img, 3) then @(idx + 1, acc, r)
+    else if xml_name_eq(data, name_off, name_len, _t_image, 5) then @(idx + 1, acc, r)
+    else _scan_nodes(data, children, false, q, qn, ch, idx + 1, acc, r)
+  end
+
+(* The results list, or its state *)
+fn _search_status {nt:pos | nt < 256} (t: string nt): void = ui_text("qsrm", t)
+
+(* One row of the results: hit i, in chapter ch, with its text *)
+fn _hit_row {i:nat}{c:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
+  (i: int i, ch: int c, a: !$A.arr(byte, l, m), sl: int sl): void = let
+  val @(ra, rl) = nid_make("qh", i)
+  val () = ui_add_n("qsrl", ra, rl, "button")
+  val @(ra, rl) = nid_make("qh", i)
+  val () = ui_attr_n(ra, rl, "class", "pi hgo")
+  val @(pa, pl) = nid_make("qh", i)
+  val @(ca, cl) = nid_make("qhc", i)
+  val () = ui_add_nn(pa, pl, ca, cl, "span")
+  val @(ca, cl) = nid_make("qhc", i)
+  val () = ui_attr_n(ca, cl, "class", "bt")
+  val @(lb, lk) = toc_label_of(ch)
+  val @(ca, cl) = nid_make("qhc", i)
+  val () = ui_text_n_buf(ca, cl, lb, lk)
+  val @(pa, pl) = nid_make("qh", i)
+  val @(sa, sl2) = nid_make("qhs", i)
+  val () = ui_add_nn(pa, pl, sa, sl2, "span")
+  val @(sa, sl2) = nid_make("qhs", i)
+  val () = ui_attr_n(sa, sl2, "class", "snip")
+  val b = $A.alloc<byte>(sl + 1)
+  val () = _frag_dup(a, b, sl, 0)
+  val @(sa, sl2) = nid_make("qhs", i)
+in ui_text_n_buf(sa, sl2, b, sl) end
+
+fun _hit_rows {k:nat}{i:nat} .<k>. (x: !hits(k), i: int i): void =
+  case+ x of
+  | hits_nil() => ()
+  | @hits_cons(c, _, _, a, sl, rest) => let
+      val () = (if c >= 0 then _hit_row(i, c, a, sl) else ())
+      val () = _hit_rows(rest, i + 1)
+      prval () = fold@(x)
+    in end
+
+(* The search is done: the hits in order, listed *)
+fn _search_done (gen: int): void =
+  if gen <> !_search_gen then ()
+  else (case+ _search_take() of
+    | ~SearchNone() => ()
+    | ~SearchCell(h, k, q, qn) => let
+        val h = hits_rev(h, hits_nil())
+        val () = ui_clear("qsrl")
+        val () = _hit_rows(h, 0)
+        val () = (if k = 0 then _search_status("No results")
+          else if k = 1 then _search_status("1 result")
+          else if k >= HMAX then _search_status("500 results or more")
+          else let
+            val b = $A.alloc<byte>(24)
+            val off = $S.int_to_str(b, 0, 24, k)
+            val off = _put(b, off, " results")
+          in ui_text_buf("qsrm", b, off) end)
+      in _search_put(SearchCell(h, k, q, qn)) end)
+
+(* The hits of the chapter data[0, n) (chapter ch), added *)
+fn _search_add {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), ch: Int): void =
+  case+ _search_take() of
+  | ~SearchNone() => ()
+  | ~SearchCell(h, k, q, qn) => let
+      val @(_, h2, k2) = _scan_nodes(data, nodes, true, q, qn, ch, 0, h, k)
+    in _search_put(SearchCell(h2, k2, q, qn)) end
+
+fn _search_add_if {lb:agz}{n:pos}{sz:nat}
+  (gen: int, data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), ch: Int): void =
+  if gen = !_search_gen then _search_add(data, nodes, ch) else ()
+
+fn _search_full (): bool =
+  case+ _search_take() of
+  | ~SearchNone() => true
+  | ~SearchCell(h, k, q, qn) => let
+      val full = k >= HMAX
+      val () = _search_put(SearchCell(h, k, q, qn))
+    in full end
+
+(* Searches chapters i to tc - 1 of book s, one after another, while
+   search gen is the latest *)
+fun _search_ch {i,tc:nat} .<max(tc - i, 0)>. (s: int, i: int i, tc: int tc, gen: int): void =
+  if gen <> !_search_gen then ()
+  else if i >= tc then _search_done(gen)
+  else if _search_full() then _search_done(gen)
+  else (case+ book_chapter_get(s, i) of
+    | ~ChaptersUnknown() => _search_done(gen)
+    | ~ChapterNone(_) => _search_ch(s, i + 1, tc, gen)
+    | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, _, _, _, _) =>
+      (case+ piece_new(ch_csz) of
+       | ~NoPiece() => _search_ch(s, i + 1, tc, gen)
+       | ~Piece(car, cbuf) => let
+           val _ = book_read(s, fsz_s, ch_d, cbuf, ch_csz)
+           val @(cf, cb) = $A.freeze<byte>(cbuf)
+           val dp = $DC.decompress(cb, ch_csz, ch_method)
+           val () = $A.drop<byte>(cf, cb)
+           val () = piece_free(car, $A.thaw<byte>(cf))
+         in
+           $P.discard<int>($P.and_then<Int><int>($P.vow(dp), lam(h) => let
+             val () = (case+ take_content(h) of
+               | ~NoContentBytes() => ()
+               | ~ContentBytes(xar, xhtml, xn) => let
+                   val @(xf, xb) = $A.freeze<byte>(xhtml)
+                   val nodes = $X.parse_document(xb, xn)
+                   val () = _search_add_if(gen, xb, nodes, i)
+                   val () = $X.free_nodes(nodes)
+                   val () = $A.drop<byte>(xf, xb)
+                 in piece_free(xar, $A.thaw<byte>(xf)) end)
+             val () = _search_ch(s, i + 1, tc, gen)
+           in $P.ret<int>(0) end))
+         end))
+
+(* q[0, qn) in lower case, in a new array *)
+fun _lower_into {l,lo:agz}{m,mo:pos}{qn:nat | qn <= m; qn <= mo}{i:nat | i <= qn} .<qn - i>.
+  (q: !$A.arr(byte, l, m), o: !$A.arr(byte, lo, mo), qn: int qn, i: int i): void =
+  if i >= qn then ()
+  else let
+    val () = $A.set<byte>(o, i, $A.int2byte($AR.low_byte(_lower(byte2int0($A.get<byte>(q, i))))))
+  in _lower_into(q, o, qn, i + 1) end
+
+(* ============================================================
    Public API
    ============================================================ *)
 
@@ -1526,6 +1840,130 @@ end
 (* Whether the open book reads right to left *)
 #pub fun reader_rtl (): bool
 implement reader_rtl () = !_rtl
+
+(* k, at most 200 *)
+fn _qlen {k:pos} (k: int k): [c:pos | c <= 200; c <= k] int c = if k <= 200 then k else 200
+
+(* Searches the open book for q[0, k): its hits are listed as they are
+   found, chapter by chapter *)
+#pub fun reader_search {l:agz}{m:pos}{k:nat | k <= m} (q: $A.arr(byte, l, m), k: int k): void
+implement reader_search (q, k) = let
+  val () = !_search_gen := !_search_gen + 1
+  val gen = !_search_gen
+  val () = $BDOM.clear_marks(2)
+  val () = ui_clear("qsrl")
+  val () = ui_show("qsrn", false)
+  val () = !_hit_cur := ~1
+in
+  if k <= 0 then let
+    val () = $A.free<byte>(q)
+    val () = _search_put(SearchNone())
+  in _search_status(" ") end
+  else let
+    val qn = _qlen(k)
+    val o = $A.alloc<byte>(qn)
+    val () = _lower_into(q, o, qn, 0)
+    val () = $A.free<byte>(q)
+    val () = _search_put(SearchCell(hits_nil(), 0, o, qn))
+    val () = _search_status("Searching\xE2\x80\xA6")
+  in
+    case+ reading_get() of
+    | @(_, _, _, tc) => _search_ch(book_serial(), 0, tc, gen)
+  end
+end
+
+fun _hit_at {k:nat} .<k>. (x: !hits(k), i: int): @(Int, Int, Int) =
+  case+ x of
+  | hits_nil() => @(~1, 0, 0)
+  | @hits_cons(c, nd, o, _, _, rest) =>
+    if i = 0 then let
+      val r = @(c, nd, o)
+      prval () = fold@(x)
+    in r end
+    else let
+      val r = _hit_at(rest, i - 1)
+      prval () = fold@(x)
+    in r end
+
+(* Hit i, its count and the query's length; a chapter of -1 when there
+   is none *)
+fn _hit (i: Int): @(Int, Int, Int, Int, Int) =
+  case+ _search_take() of
+  | ~SearchNone() => @(~1, 0, 0, 0, 0)
+  | ~SearchCell(h, k, q, qn) => let
+      val @(c, nd, o) = _hit_at(h, i)
+      val () = _search_put(SearchCell(h, k, q, qn))
+    in @(c, nd, o, k, qn) end
+
+(* "i of k" under the results *)
+fn _hit_count (i: Int, k: Int): void = let
+  val b = $A.alloc<byte>(40)
+  val off = $S.int_to_str(b, 0, 40, (if i >= 0 then i + 1 else 0): Nat)
+  val off = _put(b, off, " of ")
+  val off = $S.int_to_str(b, off, 40, (if k >= 0 then k else 0): Nat)
+in ui_text_buf("qsrc", b, off) end
+
+(* Opens hit i: its page, the match marked; the first one remembers where
+   the reader was *)
+#pub fun reader_search_go (i: Int): void
+implement reader_search_go (i) = let
+  val @(c, nd, o, k, qn) = _hit(i)
+in
+  if c < 0 then ()
+  else let
+    val () = (if !_hit_jumped then () else let
+        val () = _push_position()
+      in !_hit_jumped := true end)
+    val () = !_hit_cur := i
+    val () = _hit_count(i, k)
+    val () = ui_show("qsrn", true)
+  in
+    $P.discard<int>($P.and_then<int><int>(_goto(c, 0, nd), lam(r) => let
+      val () = (if r >= 0 then (if nd >= 0 then let
+          val () = $BDOM.clear_marks(2)
+          val @(ia, il) = nid_pad3("c", nd)
+          val @(ja, jl) = nid_pad3("c", nd)
+          val @(fa, fb) = $A.freeze<byte>(ia)
+          val @(ga, gb) = $A.freeze<byte>(ja)
+          val () = $BDOM.mark_range(2, fb, il, o, gb, jl, o + qn)
+          val () = $A.drop<byte>(ga, gb)
+          val () = $A.free<byte>($A.thaw<byte>(ga))
+          val () = $A.drop<byte>(fa, fb)
+        in $A.free<byte>($A.thaw<byte>(fa)) end else ()) else ())
+    in $P.ret<int>(0) end))
+  end
+end
+
+(* The next (d = 1) or previous (d = -1) hit *)
+#pub fun reader_search_step (d: Int): void
+implement reader_search_step (d) = let
+  val @(_, _, _, k, _) = _hit(0)
+in
+  if k <= 0 then ()
+  else let
+    val i = !_hit_cur + d
+  in reader_search_go(if i < 0 then k - 1 else if i >= k then 0 else i) end
+end
+
+(* Stops the search, its hits and marks gone, where the reader is *)
+#pub fun reader_search_stop (): void
+implement reader_search_stop () = let
+  val () = !_search_gen := !_search_gen + 1
+  val () = $BDOM.clear_marks(2)
+  val () = ui_show("qsrn", false)
+  val () = ui_clear("qsrl")
+  val () = _search_status(" ")
+  val () = _search_put(SearchNone())
+  val () = !_hit_cur := ~1
+in !_hit_jumped := false end
+
+(* Closes the search: its marks go, and the reader returns to where it
+   was when it jumped to a hit *)
+#pub fun reader_search_close (): void
+implement reader_search_close () = let
+  val jumped = !_hit_jumped
+  val () = reader_search_stop()
+in if jumped then _pop_position() else () end
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

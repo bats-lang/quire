@@ -121,3 +121,5 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .caf.rtl>*{direction:rtl}
 .caf figure{margin:1em auto}
 .caf sup,.caf sub{line-height:0}
+.snavf{position:absolute;left:50%;bottom:100px;transform:translateX(-50%);z-index:6;display:flex;gap:6px;align-items:center;background:var(--bar);color:var(--barfg);border-radius:22px;padding:2px 8px;box-shadow:0 2px 8px rgba(0,0,0,.3);font-size:14px}
+.snavf .ibtn{color:var(--barfg)}

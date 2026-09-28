@@ -46,6 +46,8 @@ val _note_idx = ref<int>(~1)
 (* Where a touch started *)
 val _touch_x = ref<int>(0)
 val _touch_y = ref<int>(0)
+(* The latest keystroke in the search field's number *)
+val _search_tick = ref<int>(0)
 
 (* ============================================================
    Event payloads (bytes the host passed: checked here, once)
@@ -188,6 +190,7 @@ fn _show_library (): void = let
   val () = ui_show("qsrp", false)
   val () = ui_show("qanp", false)
   val () = ui_show("qllc", true)
+  val () = reader_search_stop()
   val () = reader_stack_clear()
   val () = window_close()
 in lib_render() end
@@ -625,6 +628,97 @@ fn _wire_settings (): void = let
     in let val () = _settings_changed() in 0 end end)
 in end
 
+(* ============================================================
+   Search
+   ============================================================ *)
+
+(* Whether an element is shown *)
+fn _shown {ni:pos | ni < 256} (id: string ni): bool = let
+  val () = ui_measure(id)
+in $DR.get_measure_w() > 0 end
+
+(* The search field, made again holding a[0, k) *)
+fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void =
+  if k > 0 then ui_attr_buf("qsri", "value", a, k) else $A.free<byte>(a)
+
+fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
+  val () = ui_clear("qsrh")
+  val () = ui_add("qsrh", "qsri", "input")
+  val () = ui_attr("qsri", "type", "search")
+  val () = ui_attr("qsri", "placeholder", "Search in book")
+  val () = ui_attr("qsri", "aria-label", "Search in book")
+  val () = _search_value(a, k)
+  val () = ui_btn("qsrh", "qsrx", "ibtn", "\xE2\x9C\x95")
+in ui_attr("qsrx", "aria-label", "Close search") end
+
+fn _search_open (): void = let
+  val () = ui_show("qsrp", true)
+in ui_focus("qsri") end
+
+(* Ends the search: the reader goes back to where it was before it
+   jumped to a hit *)
+fn _search_end (): void = let
+  val () = ui_show("qsrp", false)
+  val () = reader_search_close()
+in ui_focus("qcnt") end
+
+(* Searches for the field's text *)
+fn _search_run (): void = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qsri"), 4)
+  val @(f, b) = $A.freeze<byte>(a)
+  val r = $DR.read_input_value(b, 4)
+  val () = $A.drop<byte>(f, b)
+  val () = $A.free<byte>($A.thaw<byte>(f))
+in
+  case+ r of
+  | ~$R.none() => reader_search($A.alloc<byte>(1), 0)
+  | ~$R.some(v) => let
+      val n = $DC.blob_len(v)
+    in
+      if n <= 0 then let
+        val () = $DC.blob_free(v)
+      in reader_search($A.alloc<byte>(1), 0) end
+      else if n > 65535 then $DC.blob_free(v)
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(v, 0, a, n)
+        val () = $DC.blob_free(v)
+      in reader_search(a, n) end
+    end
+end
+
+(* A keystroke in the field: the search runs once typing pauses *)
+fn _search_input (): void = let
+  val () = !_search_tick := !_search_tick + 1
+  val g = !_search_tick
+in
+  $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(300)), lam(_) => let
+    val () = (if !_search_tick = g then _search_run() else ())
+  in $P.ret<int>(0) end))
+end
+
+(* Searches for the selected text *)
+fn _search_selection (): void =
+  case+ $DR.get_selection_text() of
+  | ~$R.none() => ()
+  | ~$R.some(b) => let
+      val n = $DC.blob_len(b)
+    in
+      if n <= 0 then $DC.blob_free(b)
+      else if n > 1000 then $DC.blob_free(b)
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(b, 0, a, n)
+        val c = $A.alloc<byte>(n)
+        val () = $DC.blob_read(b, 0, c, n)
+        val () = $DC.blob_free(b)
+        val () = _search_field(a, n)
+        val () = ui_show("qsrp", true)
+        val () = !_search_tick := !_search_tick + 1
+      in reader_search(c, n) end
+    end
+
 (* Closes the reader's panels; whether one was open *)
 fn _panels_close (): bool = let
   val () = ui_measure("qtoc")
@@ -679,6 +773,8 @@ end
 
 fn _reader_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
   val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
+  (* Ctrl or Cmd *)
+  val fl = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 10) else 0): int
 in
   if _key_is(b, n, "ArrowRight") then _right()
   else if _key_is(b, n, "PageDown") then _next()
@@ -691,9 +787,30 @@ in
   else if _key_is(b, n, "B") then annot_bookmark_toggle(reader_anchor())
   else if _key_is(b, n, "t") then _chrome_set(~(!_chrome))
   else if _key_is(b, n, "T") then _chrome_set(~(!_chrome))
+  else if _key_is(b, n, "/") then let
+      val () = $EV.prevent_default()
+    in _search_open() end
+  else if (if _key_is(b, n, "f") then fl >= 2 else false) then let
+      val () = $EV.prevent_default()
+    in _search_open() end
   else if _key_is(b, n, "Escape") then
     (if _panels_close() then ui_focus("qcnt")
+     else if _shown("qsrn") then _search_end()
      else if !_chrome then _chrome_set(false) else _show_library())
+  else ()
+end
+
+(* A key while the search panel is open: Enter goes to the next hit
+   (Shift+Enter the one before), Escape closes the panel *)
+fn _search_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
+  val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
+in
+  if _key_is(b, n, "Enter") then let
+      val () = reader_search_step(if shift then ~1 else 1)
+    in if _shown("qsrn") then let val () = ui_show("qsrp", false) in ui_focus("qcnt") end else () end
+  else if _key_is(b, n, "Escape") then let
+      val () = ui_show("qsrp", false)
+    in if _shown("qsrn") then ui_focus("qcnt") else _search_end() end
   else ()
 end
 
@@ -770,10 +887,12 @@ fn _wire_annotations (): void = let
       val hl = _is(t, "qslh")
       val nt = _is(t, "qsln")
       val cp = _is(t, "qslc")
+      val sr = _is(t, "qsls")
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
         else if nt then _note_open(annot_highlight())
         else if cp then _copy_selection()
+        else if sr then _search_selection()
         else ())
     in let val () = ui_show("qsel", false) in 0 end end)
   val () = ui_listen("qanb", "click", 44, lam(_) => let
@@ -797,6 +916,37 @@ fn _wire_annotations (): void = let
     in 0 end)
 in end
 
+fn _wire_search (): void = let
+  val () = ui_listen("qsch", "click", 46, lam(_) => let
+      val () = (if _shown("qsrp") then ui_show("qsrp", false) else _search_open())
+    in 0 end)
+  (* the field is made again for a selection's search: its events are
+     taken on the panel *)
+  val () = ui_listen("qsrp", "input", 47, lam(_) => let val () = _search_input() in 0 end)
+  val () = ui_listen("qsrp", "click", 48, lam(h) => let
+      val t = _target(h)
+      val go = _row_of(t, "qh")
+      val close = _is(t, "qsrx")
+      val () = _target_free(t)
+      val () = (if close then _search_end()
+        else if go >= 0 then let
+          val () = ui_show("qsrp", false)
+        in reader_search_go(go) end
+        else ())
+    in 0 end)
+  val () = ui_listen("qsrn", "click", 49, lam(h) => let
+      val t = _target(h)
+      val pv = _is(t, "qsrv")
+      val nx = _is(t, "qsrw")
+      val close = _is(t, "qsrz")
+      val () = _target_free(t)
+      val () = (if pv then reader_search_step(~1)
+        else if nx then reader_search_step(1)
+        else if close then _search_end()
+        else ())
+    in 0 end)
+in end
+
 fn _wire_reader (): void = let
   val () = ui_listen("qbbk", "click", 2, lam(_) => let val () = _show_library() in 0 end)
   val () = ui_listen("qprv", "click", 3, lam(_) => let val () = page_prev() in 0 end)
@@ -815,7 +965,10 @@ fn _wire_reader (): void = let
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) => let
-          val () = (if !_view = 1 then _reader_key(b, n) else ())
+          val () = (if !_view <> 1 then ()
+            else if _shown("qmod") then ()
+            else if _shown("qsrp") then _search_key(b, n)
+            else _reader_key(b, n))
           val () = $A.free<byte>(b)
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
@@ -891,6 +1044,7 @@ implement main0 () = let
   val () = _wire_reader()
   val () = _wire_toc()
   val () = _wire_annotations()
+  val () = _wire_search()
   (* files handed to the app from outside it (an Android intent) *)
   val () = $EV.listen_external_files(33, lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
