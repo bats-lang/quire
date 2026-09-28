@@ -211,6 +211,13 @@ exported, so other code can dismiss a dialog (`modal_dismiss`) but
 never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
 
+The overlays (the menus, book info and the reader's panels) are a
+`layer` (`src/layer.bats`), whose element ids only that module knows:
+they are shown and hidden only by `layer_open` and `layer_close`, which
+keep the stack of open overlays, last opened on top. Escape answers the
+dialog if one is open, and otherwise closes the top of that stack
+(`layer_escape`), whatever opened it.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most the bridge's 128.

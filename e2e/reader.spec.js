@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
-  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload,
+  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -371,4 +371,21 @@ test.describe('on a touch screen', () => {
     await page.waitForTimeout(300);
     expect((await place(page)).p).toBe(1);
   });
+});
+
+test('Escape closes the overlay opened last, one at a time', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Layered', author: 'L', rawChapters: chapters(1) });
+  await openSettings(page);
+  // the search panel opens over the typography sheet
+  await page.keyboard.press('/');
+  const search = dialog(page, 'Search in book');
+  const sheet = dialog(page, 'Typography and theme');
+  await expect(search).toBeVisible();
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(search).toBeHidden();
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
 });
