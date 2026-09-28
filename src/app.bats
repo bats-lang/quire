@@ -51,7 +51,8 @@ fn _library (): void = let
   val () = _hide("qimp")
   (* the books *)
   val () = ui_el("qllc", "qlst", "div", "list")
-  val () = ui_attr("qlst", "role", "list")
+  val () = ui_attr("qlst", "role", "region")
+  val () = ui_attr("qlst", "aria-label", "Books")
   val () = ui_el("qllc", "qelb", "div", "empty")
 in ui_text("qelb", "Import an EPUB file to start reading ...") end
 
@@ -136,6 +137,7 @@ in _hide("qinf") end
    toolbar and the back-after-a-jump button *)
 fn _reader (): void = let
   val () = ui_el("bats-root", "qrvw", "div", "rv")
+  val () = ui_attr("qrvw", "role", "main")
   val () = ui_el("qrvw", "qrnv", "div", "top")
   val () = ui_attr("qrnv", "role", "navigation")
   val () = ui_attr("qrnv", "aria-label", "Book")
@@ -194,15 +196,23 @@ fn _toc (): void = let
   val () = ui_attr("qtoc", "role", "dialog")
   val () = ui_attr("qtoc", "aria-label", "Contents")
   val () = ui_el("qtoc", "qtch", "div", "ph")
-  val () = ui_btn("qtch", "qtct", "tab", "Contents")
+  val () = ui_el("qtch", "qtcs", "span", "tabs")
+  val () = ui_attr("qtcs", "role", "tablist")
+  val () = ui_btn("qtcs", "qtct", "tab", "Contents")
+  val () = ui_attr("qtct", "role", "tab")
+  val () = ui_attr("qtct", "aria-controls", "qtcl")
   val () = ui_attr("qtct", "aria-selected", "true")
-  val () = ui_btn("qtch", "qtcm", "tab", "Bookmarks")
+  val () = ui_btn("qtcs", "qtcm", "tab", "Bookmarks")
+  val () = ui_attr("qtcm", "role", "tab")
+  val () = ui_attr("qtcm", "aria-controls", "qtbl")
   val () = ui_attr("qtcm", "aria-selected", "false")
   val () = ui_el("qtch", "qtcg", "span", "grow")
   val () = ui_btn("qtch", "qtcx", "ibtn", "\xE2\x9C\x95")
   val () = ui_attr("qtcx", "aria-label", "Close")
   val () = ui_el("qtoc", "qtcl", "div", "plist")
+  val () = ui_attr("qtcl", "role", "tabpanel")
   val () = ui_el("qtoc", "qtbl", "div", "plist")
+  val () = ui_attr("qtbl", "role", "tabpanel")
   val () = _hide("qtbl")
 in _hide("qtoc") end
 
