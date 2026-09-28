@@ -52,18 +52,18 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .irow b{color:var(--fg);font-weight:normal}
 .rv{display:flex;flex-direction:column;height:100vh;position:relative;background:var(--bg);color:var(--fg)}
 .top,.bot{display:flex;align-items:center;gap:4px;padding:2px 6px;background:var(--bar);color:var(--barfg);z-index:3}
-.top{padding-top:max(2px,env(safe-area-inset-top))}
-.bot{flex-wrap:wrap;padding-bottom:max(2px,env(safe-area-inset-bottom))}
+.top{position:absolute;top:0;left:0;right:0;padding-top:max(2px,env(safe-area-inset-top))}
+.bot{position:absolute;bottom:0;left:0;right:0;flex-wrap:wrap;padding-bottom:max(2px,env(safe-area-inset-bottom))}
 .top .ibtn,.bot .ibtn{color:var(--barfg)}
 .ctitle{flex:1;font-size:14px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .pinfo{font-size:13px;white-space:nowrap}
 .chrome-off .top,.chrome-off .bot{display:none}
-.caf{flex:1;overflow:hidden;column-fill:auto;column-gap:0;column-width:100vw;font-family:Literata,Georgia,serif;font-size:18px;line-height:1.6;outline:none}
+.caf{flex:1;overflow:hidden;box-sizing:border-box;padding-top:max(48px,env(safe-area-inset-top));padding-bottom:max(36px,env(safe-area-inset-bottom));column-fill:auto;column-gap:0;column-width:100vw;font-family:Literata,Georgia,serif;font-size:18px;line-height:1.6;outline:none}
 .caf>*{max-width:38rem;margin-left:auto;margin-right:auto;box-sizing:border-box}
 .caf p{margin:0 auto .8em;text-align:justify;hyphens:auto}
 .caf h1,.caf h2,.caf h3{text-align:center;margin-top:1.5em;margin-bottom:.5em;break-after:avoid}
 .caf hr{border:none;border-top:1px solid var(--line);margin:2em auto;max-width:200px}
-.caf img{max-width:100%;max-height:90vh;height:auto;display:block;margin:0 auto;break-inside:avoid}
+.caf img{max-width:100%;max-height:calc(100vh - 110px);object-fit:contain;height:auto;display:block;margin:0 auto;break-inside:avoid}
 .caf table{display:block;overflow-x:auto;max-width:100%;border-collapse:collapse}
 .caf td,.caf th{border:1px solid var(--line);padding:2px 6px}
 .caf a{color:var(--accent);text-decoration:underline;cursor:pointer}
@@ -118,3 +118,6 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .hq{display:block}
 .hbtn{padding:4px 10px;border:1px solid var(--line);border-radius:4px;font-size:13px;min-height:32px}
 .grp{font-weight:bold;padding:12px 12px 4px;color:var(--muted);font-size:13px;letter-spacing:.04em;text-transform:uppercase}
+.caf.rtl>*{direction:rtl}
+.caf figure{margin:1em auto}
+.caf sup,.caf sub{line-height:0}

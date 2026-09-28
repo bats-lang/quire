@@ -117,6 +117,12 @@ fn _row_of {sn:pos | sn <= 4} (t: !target, pre: string sn): [v:int | v >= ~1] in
     in v end
   | NoTarget() => ~1
 
+(* The x of the target's event, or -1 *)
+fn _target_x (t: !target): Int =
+  case+ t of
+  | Target(_, _, x) => x
+  | NoTarget() => ~1
+
 fn _target_free (t: target): void =
   case+ t of
   | ~Target(b, _, _) => $A.free<byte>(b)
@@ -644,6 +650,11 @@ fn _prev (): void = let
   val () = (if !_chrome then _chrome_set(false) else ())
 in page_prev() end
 
+(* The page to the left and to the right: back and on, or the other way
+   in a book read right to left *)
+fn _left (): void = if reader_rtl() then _next() else _prev()
+fn _right (): void = if reader_rtl() then _prev() else _next()
+
 (* The page turns a pointer at x makes: the left quarter back, the right
    quarter on, between them the bars shown or hidden *)
 fn _zone_click (x: Int): void = let
@@ -652,8 +663,8 @@ fn _zone_click (x: Int): void = let
   val cw = $DR.get_measure_w()
 in
   if cw <= 0 then ()
-  else if x < cx + cw / 4 then _prev()
-  else if x > cx + cw - cw / 4 then _next()
+  else if x < cx + cw / 4 then _left()
+  else if x > cx + cw - cw / 4 then _right()
   else _chrome_set(~(!_chrome))
 end
 
@@ -669,9 +680,9 @@ end
 fn _reader_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
   val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
 in
-  if _key_is(b, n, "ArrowRight") then _next()
+  if _key_is(b, n, "ArrowRight") then _right()
   else if _key_is(b, n, "PageDown") then _next()
-  else if _key_is(b, n, "ArrowLeft") then _prev()
+  else if _key_is(b, n, "ArrowLeft") then _left()
   else if _key_is(b, n, "PageUp") then _prev()
   else if _key_is(b, n, " ") then (if shift then _prev() else _next())
   else if _key_is(b, n, "Home") then reader_page(0)
@@ -791,9 +802,13 @@ fn _wire_reader (): void = let
   val () = ui_listen("qprv", "click", 3, lam(_) => let val () = page_prev() in 0 end)
   val () = ui_listen("qnxt", "click", 4, lam(_) => let val () = page_next() in 0 end)
   val () = ui_listen("qcnt", "click", 5, lam(h) => let
-      val x = _event_x(h)
+      val t = _target(h)
+      val node = _row_of(t, "c")
+      val x = _target_x(t)
+      val () = _target_free(t)
     in
       if _has_selection() then 0
+      else if (if node >= 0 then reader_link_at(node) else false) then 0
       else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
     end)
   val () = ui_listen_doc("keydown", 7, lam(h) =>
@@ -848,8 +863,8 @@ fn _wire_reader (): void = let
         in
           if adx < 60 then 0
           else if adx <= ady then 0
-          else if dx < 0 then let val () = _next() in 0 end
-          else let val () = _prev() in 0 end
+          else if dx < 0 then let val () = _right() in 0 end
+          else let val () = _left() in 0 end
         end)
   (* a resize lays the chapter out again, once it settles *)
   val () = ui_listen_win("resize", 32, lam(_) => let

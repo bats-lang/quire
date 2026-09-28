@@ -24,6 +24,7 @@ staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
 staload "annot.sats"
+staload "entity.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -31,6 +32,7 @@ staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
+staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 
 fn _apply_diff_list(dl: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
@@ -401,12 +403,26 @@ fn _add_node {ld:agz}{q:int | q >= ~1}{i:nat}{tl:pos | tl < 256}
   val () = $A.drop<byte>(fp, bp)
 in $A.free<byte>($A.thaw<byte>(fp)) end
 
-(* Content node idx's text: data[off, off + k) *)
+(* Element id's text: data[off, off + k) decoded *)
+fn _set_decoded {ld,li,lb:agz}{ni:pos | ni < 256}{n:pos}{o,k:nat | o + k <= n; k < 65536; k > 0}
+  (doc: !$D.document(ld), bi: !$A.borrow(byte, li, ni), il: int ni,
+   data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
+  val buf = $A.alloc<byte>(k)
+  val q = decode_text(data, off, k, buf)
+  val @(f, b) = $A.freeze<byte>(buf)
+  val () = $D.set_text(doc, bi, il, b, 0, q)
+  val () = $A.drop<byte>(f, b)
+in $A.free<byte>($A.thaw<byte>(f)) end
+
+(* Content node idx's text: data[off, off + k), its character
+   references decoded *)
 fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
   (doc: !$D.document(ld), idx: int i, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
   val @(ia, il) = _node_id(idx)
   val @(fi, bi) = $A.freeze<byte>(ia)
-  val () = $D.set_text(doc, bi, il, data, off, k)
+  val () = (if k <= 0 then $D.set_text(doc, bi, il, data, off, k)
+    else if has_reference(data, off, k) then _set_decoded(doc, bi, il, data, off, k)
+    else $D.set_text(doc, bi, il, data, off, k))
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
@@ -470,6 +486,18 @@ in
   in _text_spans(doc, data, pidx, off + c, k - c) end
 end
 
+(* Whether data[o + i, o + k) is all white space *)
+fun _blank {lb:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i): bool =
+  if i >= k then true
+  else if byte2int0($A.read<byte>(data, o + i)) > 32 then false
+  else _blank(data, o, k, i + 1)
+
+(* The numbers _text_spans would give text of k bytes, taken *)
+fun _skip_spans {k:nat} .<k>. (off: int, k: int k): void = let
+  val _ = _next_content_idx()
+in if k < 65536 then () else _skip_spans(off, k - 65533) end
+
 (* The tag an XHTML element is shown as: itself when it is one quire
    shows, a span for a, b, i, u and s, and a div for anything else *)
 fn _tag_of
@@ -514,6 +542,18 @@ fn _tag_of
   var th = @[char][2]('t', 'h')
   var thead = @[char][5]('t', 'h', 'e', 'a', 'd')
   var tbody = @[char][5]('t', 'b', 'o', 'd', 'y')
+  var q_ = @[char][1]('q')
+  var cite = @[char][4]('c', 'i', 't', 'e')
+  var abbr = @[char][4]('a', 'b', 'b', 'r')
+  var kbd = @[char][3]('k', 'b', 'd')
+  var dl = @[char][2]('d', 'l')
+  var dt = @[char][2]('d', 't')
+  var dd = @[char][2]('d', 'd')
+  var caption = @[char][7]('c', 'a', 'p', 't', 'i', 'o', 'n')
+  var tfoot = @[char][5]('t', 'f', 'o', 'o', 't')
+  var samp = @[char][4]('s', 'a', 'm', 'p')
+  var var_ = @[char][3]('v', 'a', 'r')
+  var big = @[char][3]('b', 'i', 'g')
 in
   if is(data, p_, 1) then "p"
   else if is(data, h1, 2) then "h1" else if is(data, h2, 2) then "h2"
@@ -528,9 +568,15 @@ in
   else if is(data, mark, 4) then "mark" else if is(data, del, 3) then "del"
   else if is(data, ins, 3) then "ins" else if is(data, sub, 3) then "sub"
   else if is(data, sup, 3) then "sup"
-  else if is(data, a_, 1) then "span" else if is(data, b_, 1) then "span"
-  else if is(data, i_, 1) then "span" else if is(data, u_, 1) then "span"
-  else if is(data, s_, 1) then "span"
+  else if is(data, a_, 1) then "a" else if is(data, b_, 1) then "b"
+  else if is(data, i_, 1) then "i" else if is(data, u_, 1) then "u"
+  else if is(data, s_, 1) then "s"
+  else if is(data, q_, 1) then "q" else if is(data, cite, 4) then "cite"
+  else if is(data, abbr, 4) then "abbr" else if is(data, kbd, 3) then "kbd"
+  else if is(data, dl, 2) then "dl" else if is(data, dt, 2) then "dt"
+  else if is(data, dd, 2) then "dd" else if is(data, caption, 7) then "caption"
+  else if is(data, tfoot, 5) then "tfoot" else if is(data, samp, 4) then "samp"
+  else if is(data, var_, 3) then "var" else if is(data, big, 3) then "span"
   else if is(data, figure, 6) then "figure" else if is(data, figcap, 10) then "figcaption"
   else if is(data, table, 5) then "table" else if is(data, tr, 2) then "tr"
   else if is(data, td, 2) then "td" else if is(data, th, 2) then "th"
@@ -562,6 +608,14 @@ fn _frag_put (f: frag): void = let
   val () = ref_exch_elt<frag>(_frag, c)
 in _frag_free(c) end
 
+(* dst[j, k) := src[j, k) *)
+fun _frag_dup {ls,ld:agz}{ns,nd:pos}{k:nat | k <= ns; k <= nd}{j:nat | j <= k} .<k - j>.
+  (src: !$A.arr(byte, ls, ns), dst: !$A.arr(byte, ld, nd), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(dst, j, $A.get<byte>(src, j))
+  in _frag_dup(src, dst, k, j + 1) end
+
 (* Whether data[o, o + k) is a[0, k) *)
 fun _same {lb,la:agz}{n:pos}{f:pos}{o,k:nat | o + k <= n; k <= f}{i:nat | i <= k} .<k - i>.
   (data: !$A.borrow(byte, lb, n), o: int o, a: !$A.arr(byte, la, f), k: int k, i: int i): bool =
@@ -592,6 +646,100 @@ datavtype imgs(n:int, int) =
   | imgs_nil(n, 0) of ()
   | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
     imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
+  (* A link within the book: the content nodes [s, e) it covers and its
+     href [so, so + sl), found once the chapter is shown *)
+  | {k:nat}{s,e:nat}{so,sl:nat | so + sl <= n}
+    imgs_link(n, k + 1) of (int s, int e, int so, int sl, imgs(n, k))
+
+(* The links of the chapter shown: the content nodes [s, e) each covers,
+   and the chapter (-1 for a link out of the book, which the browser
+   opens) and fragment fr[0, f) it leads to *)
+datavtype links(int) =
+  | links_nil(0) of ()
+  | {k:nat}{l:agz}{f:nat | f <= 200}
+    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, links(k))
+
+fun links_free {k:nat} .<k>. (x: links(k)): void =
+  case+ x of
+  | ~links_nil() => ()
+  | ~links_cons(_, _, _, a, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
+
+datavtype links_cell = {k:nat} LinksCell of links(k)
+
+val _links = ref<links_cell>(LinksCell(links_nil()))
+
+fn _links_take (): links_cell = let
+  var c: links_cell = LinksCell(links_nil())
+  val () = ref_exch_elt<links_cell>(_links, c)
+in c end
+
+fn _links_put (c: links_cell): void = let
+  var cur: links_cell = c
+  val () = ref_exch_elt<links_cell>(_links, cur)
+  val+ ~LinksCell(x) = cur
+in links_free(x) end
+
+fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
+  val+ ~LinksCell(x) = _links_take()
+in _links_put(LinksCell(links_cons(s, e, ch, fr, f, x))) end
+
+(* Whether data[o, o + k) starts with pat *)
+fn _starts {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool =
+  if k < np then false else xml_name_eq(data, o, np, pat, np)
+
+(* The attributes of an XHTML element that are kept on its content node:
+   dir, lang (and xml:lang), title, colspan and rowspan *)
+fun _pass_attrs {ld,lb:agz}{n:pos}{sa:nat}{i:nat} .<sa>.
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), idx: int i): void =
+  case+ attrs of
+  | $X.xml_attrs_nil() => ()
+  | $X.xml_attrs_cons(ao, al, vo, vl, rest) => let
+      var _dir = @[char][3]('d', 'i', 'r')
+      var _lang = @[char][4]('l', 'a', 'n', 'g')
+      var _xlang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+      var _title = @[char][5]('t', 'i', 't', 'l', 'e')
+      var _colspan = @[char][7]('c', 'o', 'l', 's', 'p', 'a', 'n')
+      var _rowspan = @[char][7]('r', 'o', 'w', 's', 'p', 'a', 'n')
+      val () = (if vl >= 65536 then ()
+        else if xml_name_eq(data, ao, al, _dir, 3) then _node_attr(doc, idx, "dir", data, vo, vl)
+        else if xml_name_eq(data, ao, al, _lang, 4) then _node_attr(doc, idx, "lang", data, vo, vl)
+        else if xml_name_eq(data, ao, al, _xlang, 8) then _node_attr(doc, idx, "lang", data, vo, vl)
+        else if xml_name_eq(data, ao, al, _title, 5) then _node_attr(doc, idx, "title", data, vo, vl)
+        else if xml_name_eq(data, ao, al, _colspan, 7) then _node_attr(doc, idx, "colspan", data, vo, vl)
+        else if xml_name_eq(data, ao, al, _rowspan, 7) then _node_attr(doc, idx, "rowspan", data, vo, vl)
+        else ())
+    in _pass_attrs(doc, data, rest, idx) end
+
+(* An <a> element, content nodes [idx, e): a link out of the book (http,
+   https, mailto) is made a real one, opened in a new tab; a link within
+   it is kept in acc, found once the chapter is shown *)
+fn _link {ld,lb:agz}{n:pos}{sa:nat}{i,e:nat}{k:nat}
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa),
+   idx: int i, e: int e, acc: imgs(n, k)): [k2:nat] imgs(n, k2) = let
+  var _href = @[char][4]('h', 'r', 'e', 'f')
+in
+  case+ find_attr(data, attrs, _href, 4) of
+  | ~xspan_none() => acc
+  | ~xspan_at(so, sl) => let
+      var _http = @[char][7]('h', 't', 't', 'p', ':', '/', '/')
+      var _https = @[char][8]('h', 't', 't', 'p', 's', ':', '/', '/')
+      var _mailto = @[char][7]('m', 'a', 'i', 'l', 't', 'o', ':')
+      val out = (if _starts(data, so, sl, _http, 7) then true
+        else if _starts(data, so, sl, _https, 8) then true
+        else _starts(data, so, sl, _mailto, 7)): bool
+    in
+      if out then
+        (if sl < 65536 then let
+           val () = _node_attr(doc, idx, "href", data, so, sl)
+           val () = _node_attr_lit(doc, idx, "target", "_blank")
+           val () = _node_attr_lit(doc, idx, "rel", "noopener noreferrer")
+           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0)
+         in acc end
+         else acc)
+      else imgs_link(idx, e, so, sl, acc)
+    end
+end
 
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
@@ -612,7 +760,11 @@ and _render_node
    pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k), fr: !frag): [k2:nat] imgs(n, k2) =
   case+ node of
   | $X.xml_text(off, tlen) => let
-      val () = _text_spans(doc, data, pidx, off, tlen)
+      (* white space between the page's blocks takes its numbers but
+         makes no element: it would be a line of its own *)
+      val () = (if pidx < 0 then (if _blank(data, off, tlen, 0) then _skip_spans(off, tlen)
+          else _text_spans(doc, data, pidx, off, tlen))
+        else _text_spans(doc, data, pidx, off, tlen))
     in acc end
   | $X.xml_element(name_off, name_len, attrs, children) => let
     var _t_head = @[char][4]('h', 'e', 'a', 'd')
@@ -685,7 +837,14 @@ and _render_node
       val idx = _next_content_idx()
       val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
       val () = _frag_check(data, attrs, fr, idx)
-    in _render_nodes(doc, data, len, idx, children, acc, fr) end
+      val () = _pass_attrs(doc, data, attrs, idx)
+      var _t_a = @[char][1]('a')
+    in
+      if xml_name_eq(data, name_off, name_len, _t_a, 1) then let
+        val acc = _render_nodes(doc, data, len, idx, children, acc, fr)
+      in _link(doc, data, attrs, idx, !_content_n, acc) end
+      else _render_nodes(doc, data, len, idx, children, acc, fr)
+    end
   end
 
 (* The length of the directory part of the name [no, no + nl) of the
@@ -788,15 +947,48 @@ in
   end
 end
 
-(* The images xs of the chapter data[0, n) *)
+(* The length of the fragment after the '#' at h of an href of hl
+   bytes: 0 when there is none, or it is over 200 bytes *)
+fn _frag_len {hl,h:nat | h <= hl} (hl: int hl, h: int h): [f:nat | f <= 200; f == 0 || f == hl - h - 1] int f =
+  if hl - h - 1 <= 0 then 0
+  else if hl - h - 1 > 200 then 0
+  else hl - h - 1
+
+(* fr[0, f) := data[ho + h + 1, ho + h + 1 + f) *)
+fn _frag_copy {lb,l:agz}{n:pos}{ho,h,f:nat | f == 0 || ho + h + 1 + f <= n}
+  (data: !$A.borrow(byte, lb, n), n: int n, ho: int ho, h: int h, fr: !$A.arr(byte, l, f + 1), f: int f): void =
+  if f > 0 then $S.copy_from_borrow(data, ho + h + 1, n, fr, 0, f + 1, f) else ()
+
+(* The link to data[so, so + sl) from content nodes [s, e) of chapter
+   cur, whose directory is the first dl bytes of the name at no: kept
+   with the chapter and fragment it leads to *)
+fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}
+  (s: int, z: int z, no: int no, dl: int dl, cur: Int,
+   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl): void = let
+  val h = src_end(data, so, sl)
+  val ch = (if h <= 0 then cur
+    else (case+ book_find_relative(s, z, no, dl, data, n, so, h) of
+      | ~EntryHit(_, _, _, eno, _) => book_chapter_of(s, eno)
+      | ~EntryMiss() => ~1)): Int
+  val f = _frag_len(sl, h)
+  val fr = $A.alloc<byte>(f + 1)
+  val () = _frag_copy(data, n, so, h, fr, f)
+in
+  if ch >= 0 then _links_push(s0, e0, ch, fr, f) else $A.free<byte>(fr)
+end
+
+(* The images xs of the chapter data[0, n), chapter cur, and its links *)
 fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:nat} .<k>.
   (s: int, z: int z, no: int no, dl: int dl,
-   data: !$A.borrow(byte, lb, n), n: int n, xs: imgs(n, k), gen: int): void =
+   data: !$A.borrow(byte, lb, n), n: int n, xs: imgs(n, k), gen: int, cur: Int): void =
   case+ xs of
   | ~imgs_nil() => ()
   | ~imgs_cons(idx, so, sl, tl) => let
       val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
-    in _load_images(s, z, no, dl, data, n, tl, gen) end
+    in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
+  | ~imgs_link(s0, e0, so, sl, tl) => let
+      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl)
+    in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
 
 (* The chapters from spine itemref i down to the first, onto acc: each
    href, after the OPF's directory (prefix_len bytes of the name at
@@ -833,6 +1025,108 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
         end): book_chapters(z, a + 1)
   in _spine_chapters(s, z, opf_no, prefix_len, opf_b, dc_sz, nodes, i - 1, ch) end
 
+(* ============================================================
+   The book's own font, for the "Book" font setting
+   ============================================================ *)
+
+(* Whether the book reads right to left *)
+val _rtl = ref<bool>(false)
+
+datavtype font_src =
+  | {z:pos}{d:nat}{s:pos | d + s <= z; s <= 268435456}{m:int | m == 0 || m == 8}
+    FontSrc of (int z, int d, int s, int m)
+  | FontNone of ()
+
+val _font = ref<font_src>(FontNone())
+
+fn _font_put (f: font_src): void = let
+  var c: font_src = f
+  val () = ref_exch_elt<font_src>(_font, c)
+in case+ c of ~FontSrc(_, _, _, _) => () | ~FontNone() => () end
+
+fn _font_take (): font_src = let
+  var c: font_src = FontNone()
+  val () = ref_exch_elt<font_src>(_font, c)
+in c end
+
+(* The book's first embedded font, named in the OPF opf_b[0, n) (whose
+   directory is the first pl bytes of the name at opf_no) *)
+fn _font_locate {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}{lb:agz}{n:pos}{sz:nat}
+  (s: int, z: int z, opf_no: int ono, pl: int pl,
+   opf_b: !$A.borrow(byte, lb, n), n: int n, nodes: !$X.xml_node_list(n, sz)): void =
+  case+ find_font_href(opf_b, nodes) of
+  | ~xspan_none() => _font_put(FontNone())
+  | ~xspan_at(ho, hl) =>
+    (case+ book_find_relative(s, z, opf_no, pl, opf_b, n, ho, hl) of
+     | ~EntryHit(d, cs, m, _, _) => _font_put(FontSrc(z, d, cs, m))
+     | ~EntryMiss() => _font_put(FontNone()))
+
+(* b[p + j, p + k) := u[j, k) *)
+fun _copy_at {ls,ld:agz}{ns,nd:pos}{p:nat}{k:nat | k <= ns; p + k <= nd}{j:nat | j <= k} .<k - j>.
+  (u: !$A.arr(byte, ls, ns), b: !$A.arr(byte, ld, nd), p: int p, k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(b, p + j, $A.get<byte>(u, j))
+  in _copy_at(u, b, p, k, j + 1) end
+
+(* The style that names the font at the blob URL u[0, k) QuireBook, the
+   family the "Book" setting asks for *)
+fn _font_style {k:pos | k < 2000}{l:agz}{m:pos | k <= m} (u: !$A.arr(byte, l, m), k: int k): void = let
+  val n = k + 80
+  val b = $A.alloc<byte>(n)
+  val off = _put(b, 0, "@font-face{font-family:QuireBook;src:url(")
+  val () = _copy_at(u, b, off, k, 0)
+  val off = _put(b, off + k, ")}.caf{--bookfont:QuireBook}")
+in ui_text_buf("qfnt", b, off) end
+
+(* Makes the font found by _font_locate the book font (or none) *)
+fn _font_load (s: int): $P.promise(int, $P.Chained) = let
+  val () = ui_clear("qfnt")
+in
+  case+ _font_take() of
+  | ~FontNone() => $P.ret<int>(0)
+  | ~FontSrc(z, d, cs, m) =>
+    (case+ piece_new(cs) of
+     | ~NoPiece() => $P.ret<int>(0)
+     | ~Piece(car, cbuf) => let
+         val _ = book_read(s, z, d, cbuf, cs)
+         val @(cf, cb) = $A.freeze<byte>(cbuf)
+         val dp = $DC.decompress(cb, cs, m)
+         val () = $A.drop<byte>(cf, cb)
+         val () = piece_free(car, $A.thaw<byte>(cf))
+       in
+         $P.and_then<Int><int>($P.vow(dp), lam(h) =>
+           case+ take_content(h) of
+           | ~NoContentBytes() => $P.ret<int>(0)
+           | ~ContentBytes(par, buf, n) => let
+               val ma = $A.alloc<byte>(8)
+               val _ = _put(ma, 0, "font/otf")
+               val @(mf, mb) = $A.freeze<byte>(ma)
+               val @(f, b) = $A.freeze<byte>(buf)
+               val url = $BL.create_blob_url(b, n, mb, 8)
+               val () = $A.drop<byte>(f, b)
+               val () = piece_free(par, $A.thaw<byte>(f))
+               val () = $A.drop<byte>(mf, mb)
+               val () = $A.free<byte>($A.thaw<byte>(mf))
+               val () = (case+ url of
+                 | ~$R.none() => ()
+                 | ~$R.some(ub) => let
+                     val k = $DC.blob_len(ub)
+                   in
+                     (* the host's URL, checked here *)
+                     if k <= 0 then $DC.blob_free(ub)
+                     else if k >= 2000 then $DC.blob_free(ub)
+                     else let
+                       val ua = $A.alloc<byte>(k)
+                       val () = $DC.blob_read(ub, 0, ua, k)
+                       val () = $DC.blob_free(ub)
+                       val () = _font_style(ua, k)
+                     in $A.free<byte>(ua) end
+                   end)
+             in $P.ret<int>(0) end)
+       end)
+end
+
 (* Finds book s's chapters from its OPF and keeps them in the book: its
    chapter count, or below 0 when the OPF cannot be read *)
 fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
@@ -864,6 +1158,8 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                            opf_b, dc_sz, opf_nodes, total - 1, ChaptersNil())
                val () = book_spine_set(serial, fsz_s, chs, total)
                val () = toc_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
+               val () = !_rtl := spine_rtl(opf_b, opf_nodes)
+               val () = _font_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_f, opf_b)
                val () = piece_free(par, $A.thaw<byte>(opf_f))
@@ -914,13 +1210,15 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = $A.drop<byte>(fq, bq)
                   val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
+                  val () = _links_put(LinksCell(links_nil()))
+                  val () = (if !_rtl then ui_attr("qcnt", "class", "caf rtl") else ui_attr("qcnt", "class", "caf"))
                   val fr = _frag_take()
                   val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
                   val () = _frag_put(fr)
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
-                  val () = _load_images(serial, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen)
+                  val () = _load_images(serial, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen, chapter_idx)
                   val () = $A.drop<byte>(xf, xb)
                   val () = piece_free(xar, $A.thaw<byte>(xf))
 
@@ -947,7 +1245,8 @@ in
   | ~ChaptersUnknown() =>
     $P.and_then<int><int>(_spine_build(serial), lam(r) =>
       if r < 0 then $P.ret<int>(r)
-      else $P.and_then<int><int>(toc_build(serial), lam(_) => _chapter_open(serial, chapter_idx, gen)))
+      else $P.and_then<int><int>(toc_build(serial), lam(_) =>
+        $P.and_then<int><int>(_font_load(serial), lam(_) => _chapter_open(serial, chapter_idx, gen))))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_idx, gen)
   | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_idx, gen)
 end
@@ -1189,6 +1488,44 @@ implement reader_save () = _record_position()
 (* The content node at the top of the page shown, or -1 *)
 #pub fun reader_anchor (): Int
 implement reader_anchor () = _anchor_now()
+
+(* The link covering content node i, if any: followed (a link within
+   the book, remembering where the reader was); true when there is one,
+   also for a link out of the book, which the browser opens *)
+fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
+  case+ x of
+  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, @(a0, 0)) end
+  | @links_cons(s0, e0, ch, fr, f, rest) =>
+    if (if s0 <= i then i < e0 else false) then let
+      val c = ch
+      val b = $A.alloc<byte>(f + 1)
+      val () = _frag_dup(fr, b, f + 1, 0)
+      val ff = f
+      prval () = fold@(x)
+    in @((if c < 0 then 2 else 1), c, @(b, ff)) end
+    else let
+      val r = _link_find(rest, i)
+      prval () = fold@(x)
+    in r end
+
+#pub fun reader_link_at (i: int): bool
+implement reader_link_at (i) = let
+  val c = _links_take()
+  val+ @LinksCell(x) = c
+  val @(kind, ch, @(b, f)) = _link_find(x, i)
+  prval () = fold@(c)
+  val () = _links_put(c)
+in
+  if kind = 1 then let
+    val () = _push_position()
+    val () = $P.discard<int>(_goto_frag(ch, b, f))
+  in true end
+  else let val () = $A.free<byte>(b) in kind = 2 end
+end
+
+(* Whether the open book reads right to left *)
+#pub fun reader_rtl (): bool
+implement reader_rtl () = !_rtl
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

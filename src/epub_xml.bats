@@ -463,3 +463,83 @@ implement find_ncx_href (data, len, nodes) =
   (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool
 
 implement span_has (data, o, k, pat, np) = _span_has(data, o, k, pat, np, 0)
+
+(* Whether the first <spine> reads right to left *)
+fun _spine_rtl_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): int =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val r = _spine_rtl(data, node)
+    in if r >= 0 then r else _spine_rtl_r(data, rest) end
+  | $X.xml_nodes_nil() => ~1
+
+(* 1 or 0 at a <spine>, -1 when the node has none *)
+and _spine_rtl
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): int =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
+      var _c_ppd = @[char][26]('p', 'a', 'g', 'e', '-', 'p', 'r', 'o', 'g', 'r', 'e', 's', 's', 'i', 'o', 'n', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n')
+      var _c_rtl = @[char][3]('r', 't', 'l')
+    in
+      case+ _find_attr_val(data, attrs, _c_ppd, 26) of
+      | ~xspan_at(vo, vk) => if xml_name_eq(data, vo, vk, _c_rtl, 3) then 1 else 0
+      | ~xspan_none() => 0
+    end
+    else _spine_rtl_r(data, children)
+  end
+  | $X.xml_text(_, _) => ~1
+
+(* Whether the book reads right to left (its spine's
+   page-progression-direction) *)
+#pub fn spine_rtl
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): bool
+
+implement spine_rtl (data, nodes) = _spine_rtl_r(data, nodes) = 1
+
+(* The href of the first manifest item that is a font *)
+fun _font_item_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _font_item(data, node) of
+     | ~xspan_none() => _font_item_r(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _font_item
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
+      var _c_mt = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+      var _c_font = @[char][4]('f', 'o', 'n', 't')
+      var _c_otf = @[char][8]('o', 'p', 'e', 'n', 't', 'y', 'p', 'e')
+    in
+      case+ _find_attr_val(data, attrs, _c_mt, 10) of
+      | ~xspan_at(mo, mk) =>
+        if (if _span_has(data, mo, mk, _c_font, 4, 0) then true else _span_has(data, mo, mk, _c_otf, 8, 0)) then let
+          var _c_href = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_val(data, attrs, _c_href, 4) end
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _font_item_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the book's first embedded font *)
+#pub fn find_font_href
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement find_font_href (data, nodes) = _font_item_r(data, nodes)

@@ -322,6 +322,10 @@ ${tocItems}    </ol>
 </body>
 </html>`;
 
+  // opts.extraFiles: [{ name, data, mediaType }] more manifest items
+  for (const [k, f] of (opts.extraFiles || []).entries()) {
+    manifestItems += `    <item id="x${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
+  }
   // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
   if (opts.ncx) {
     manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
@@ -353,6 +357,7 @@ ${spineItems}  </spine>
     { name: 'OEBPS/content.opf', data: contentOpf, store: true },
     opts.ncx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
+  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data });
 
   // SVG cover wrap page (emulates real-world pattern: <svg><image xlink:href="...">)
   if (svgCover) {

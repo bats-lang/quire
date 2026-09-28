@@ -10,8 +10,10 @@
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/file-input as FI
 #use zip as Z
+#use str as S
 
 staload "pages.sats"
+staload "paths.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
    [d, d + s) in the n-byte file, its method m, and its name [no, no + nl)
@@ -87,6 +89,13 @@ staload "pages.sats"
    book s of z bytes; a miss when there is none or another book is open *)
 #pub fn book_find_entry {z:pos}{lb:agz}{nb:pos}
   (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): entry_hit(z)
+
+(* The entry of the open book, book s of z bytes, that the path
+   data[ho, ho + h) names relative to a directory: the first dl bytes of
+   the name at dno in the file (such as a chapter's own name, so an
+   href in the chapter is found); "." and ".." are resolved *)
+#pub fn book_find_relative {z:pos}{dno,dl:nat | dno + dl <= z; dl < 65536}{lb:agz}{n:pos}{ho,h:nat | ho + h <= n}
+  (s: int, z: int z, dno: int dno, dl: int dl, data: !$A.borrow(byte, lb, n), n: int n, ho: int ho, h: int h): entry_hit(z)
 
 (* Keeps chs, k chapters, as the chapters of the open book, when it is
    book s of z bytes and has none yet; else frees them *)
@@ -656,6 +665,30 @@ in
     else let prval () = fold@(b); val () = book_put(b) in @(0, 0, 0) end
   | _ => let val () = book_put(b) in @(0, 0, 0) end
 end
+
+implement book_find_relative (s, z, dno, dl, data, n, ho, h) =
+  if h <= 0 then EntryMiss()
+  (* a path of 64 KiB or more names no zip entry: the book's data,
+     checked here *)
+  else if h >= 65536 then EntryMiss()
+  else let
+    val m = dl + h
+    val buf = $A.alloc<byte>(m)
+    val _ = book_read(s, z, dno, buf, dl)
+    val () = $S.copy_from_borrow(data, ho, n, buf, dl, m, h)
+    val k = path_norm(buf, m)
+  in
+    if k <= 0 then let val () = $A.free<byte>(buf) in EntryMiss() end
+    else let
+      val exact = $A.alloc<byte>(k)
+      val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
+      val () = $A.free<byte>(buf)
+      val @(f, b) = $A.freeze<byte>(exact)
+      val hit = book_find_entry(s, z, b, k)
+      val () = $A.drop<byte>(f, b)
+      val () = $A.free<byte>($A.thaw<byte>(f))
+    in hit end
+  end
 
 implement book_abandon (s) =
   if s = !_book_serial then let
