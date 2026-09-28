@@ -1436,7 +1436,7 @@ in _show_target(pg, anchor) end
 
 datavtype hits(int) =
   | hits_nil(0) of ()
-  | {k:nat}{l:agz}{sl:nat | sl <= 200}
+  | {k:nat}{l:agz}{sl:nat | sl <= 206}
     hits_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, sl + 1), int sl, hits(k))
 
 fun hits_free {k:nat} .<k>. (x: hits(k)): void =
@@ -1503,30 +1503,47 @@ fun _char_back_loop {l:agz}{m:pos}{lo,e:nat | lo <= e; e <= m} .<e - lo>.
   else if $AR.band_int_int(byte2int0($A.get<byte>(t, e)), 192) <> 128 then e
   else _char_back_loop(t, m, e - 1, lo)
 
-fun _snip_copy {l,la:agz}{m,ma:pos}{s,sl:nat | s + sl <= m; sl < ma}{i:nat | i <= sl} .<sl - i>.
-  (t: !$A.arr(byte, l, m), s: int s, a: !$A.arr(byte, la, ma), sl: int sl, i: int i): void =
+(* t[s, s + sl) into a from d, its control characters as spaces *)
+fun _snip_copy {l,la:agz}{m,ma:pos}{s,sl:nat | s + sl <= m}{d:nat | d + sl < ma}{i:nat | i <= sl} .<sl - i>.
+  (t: !$A.arr(byte, l, m), s: int s, a: !$A.arr(byte, la, ma), d: int d, sl: int sl, i: int i): void =
   if i >= sl then ()
   else let
     val b = byte2int0($A.get<byte>(t, s + i))
-    val () = $A.set<byte>(a, i, (if b < 32 then $A.int2byte(32) else $A.get<byte>(t, s + i)))
-  in _snip_copy(t, s, a, sl, i + 1) end
+    val () = $A.set<byte>(a, d + i, (if b < 32 then $A.int2byte(32) else $A.get<byte>(t, s + i)))
+  in _snip_copy(t, s, a, d, sl, i + 1) end
+
+(* An ellipsis (U+2026, 3 bytes) at a[d, d + 3) *)
+fn _ellipsis {la:agz}{ma:pos}{d:nat | d + 3 <= ma} (a: !$A.arr(byte, la, ma), d: int d): void = let
+  val () = $A.set<byte>(a, d, $A.int2byte(226))
+  val () = $A.set<byte>(a, d + 1, $A.int2byte(128))
+in $A.set<byte>(a, d + 2, $A.int2byte(166)) end
+
+(* An ellipsis at a[d, d + p) when p is 3; nothing when it is 0 *)
+fn _ellipsis_if {la:agz}{ma:pos}{d:nat}{p:int | p == 0 || p == 3; d + p <= ma}
+  (a: !$A.arr(byte, la, ma), d: int d, p: int p): void =
+  if p > 0 then _ellipsis(a, d) else ()
 
 (* e - s, at most 200 *)
 fn _span200 {s,e:nat | s <= e} (s: int s, e: int e): [c:nat | c <= 200; s + c <= e] int c =
   if e - s <= 200 then e - s else 200
 
 (* The text around t[j, j + qn) in t[0, n): some 40 bytes before it and
-   80 after, whole characters, its line breaks as spaces *)
+   80 after, whole characters, its line breaks as spaces, with an
+   ellipsis on a side where the text goes on *)
 fn _snippet {l:agz}{m:pos}{n:nat | n <= m}{j,qn:nat | j + qn <= n}
-  (t: !$A.arr(byte, l, m), m: int m, n: int n, j: int j, qn: int qn): [la:agz][sl:nat | sl <= 200] @($A.arr(byte, la, sl + 1), int sl) = let
+  (t: !$A.arr(byte, l, m), m: int m, n: int n, j: int j, qn: int qn): [la:agz][sl:nat | sl <= 206] @($A.arr(byte, la, sl + 1), int sl) = let
   val s0 = (if j > 40 then j - 40 else 0): [s:nat | s <= j] int s
   val s = _char_fwd(t, s0, j)
   val e0 = (if j + qn + 80 < n then j + qn + 80 else n): [e:nat | j + qn <= e; e <= n] int e
   val e = _char_back_loop(t, m, e0, j + qn)
   val sl = _span200(s, e)
-  val a = $A.alloc<byte>(sl + 1)
-  val () = _snip_copy(t, s, a, sl, 0)
-in @(a, sl) end
+  val pre = (if s > 0 then 3 else 0): [p:int | p == 0 || p == 3] int p
+  val post = (if s + sl < n then 3 else 0): [p:int | p == 0 || p == 3] int p
+  val a = $A.alloc<byte>(pre + sl + post + 1)
+  val () = _ellipsis_if(a, 0, pre)
+  val () = _snip_copy(t, s, a, pre, sl, 0)
+  val () = _ellipsis_if(a, pre + sl, post)
+in @(a, pre + sl + post) end
 
 (* The hits of the query in t[j, n), content node idx of chapter ch,
    onto acc, while there are fewer than HMAX *)

@@ -118,6 +118,7 @@ button:focus-visible,.card:focus-visible,input:focus-visible{outline:2px solid v
 .hrow{border-bottom:1px solid var(--line);padding:8px 12px}
 .hgo{display:block;width:100%;text-align:left;padding:4px 0}
 .pi.hgo{padding:10px 14px}
+.pi.hgo .snip{color:var(--fg);font-size:14px;margin-top:0;line-height:1.45}
 .snavf span{white-space:nowrap;padding:0 4px}
 .hgo *{pointer-events:none}
 .hq{display:block}

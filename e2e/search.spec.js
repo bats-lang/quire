@@ -32,6 +32,8 @@ test('the book is searched, and the results are gone to and stepped through', as
   const rows = results(page);
   await expect(rows).toHaveCount(3);
   await expect(rows.nth(1)).toContainText('Zebra&crossing');
+  // a snippet cut from the middle of a paragraph says so
+  await expect(rows.nth(1)).toHaveText(/^….*Zebra&crossing/);
   // the results sit under their chapters' names, each named once
   const listed = panel(page).getByRole('region', { name: 'Results' });
   await expect(listed.getByText('Chapter 2', { exact: true })).toHaveCount(1);
