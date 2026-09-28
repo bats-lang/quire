@@ -10,6 +10,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "modal.sats"
 staload "book.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
@@ -200,9 +201,14 @@ implement set_font_set (v) = let val x = !_set in !_set := @{ size = x.size, lh 
 #pub fn set_theme_set (v: set_theme): void
 implement set_theme_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = v } end
 
-(* The defaults *)
-#pub fn set_reset (): void
-implement set_reset () = !_set := @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0 }
+(* The defaults. Private: the settings go back to them only as the
+   yes of a confirmed dialog (set_ask_reset) *)
+fn _reset (): void = !_set := @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0 }
+
+(* Asks whether to put the defaults back; yes does, then runs after *)
+#pub fn set_ask_reset (after: () -<cloref1> void): void
+implement set_ask_reset (after) =
+  modal_confirm(HResetSettings(), lam () => let val () = _reset() in after() end)
 
 (* A byte stored by an earlier run, as a value in [lo, hi]: checked here,
    once; d when it is out of range *)

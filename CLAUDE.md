@@ -163,9 +163,19 @@ Elements are made through `src/ui.bats`:
   region, toolbar, menu, group) is given one with it.
 * `ui_attr` takes a typed attribute that cannot be a name or a role.
 
-The dialog (`src/modal.bats`) asks a datatype (`ask`) that fixes its
-buttons and whether the second is destructive, and its answer comes
-back with the question (`Confirmed`/`Dismissed`). Deleting a book, a
-highlight or a bookmark, a factory reset and a settings reset are done
-only on the `Confirmed` answer to the question that named them, and
-`_modal_answer` matches every question exhaustively.
+What deletes or resets is private to the module that owns it:
+removing a book and emptying the library (`src/library.bats`),
+deleting an annotation (`src/annot.bats`), and putting the settings
+back to their defaults (`src/settings.bats`) have no `#pub`. Each is
+reachable only as the action handed to the dialog by that module's
+`*_ask_*` function (`lib_ask_delete`, `annot_ask_delete_highlight`,
+`set_ask_reset`, ...), and the dialog (`src/modal.bats`) runs that
+action only from its second button's click: the dialog registers
+that listener itself (`modal_listen`) and its answer function is not
+exported, so other code can dismiss a dialog (`modal_dismiss`) but
+never confirm one. A destructive question's title, text, button verb
+and red marking all come from one `harm` value.
+
+Listeners are registered only as one table (`regs` in `src/ui.bats`),
+each with its position as its id, so no two share an id, and the
+table's length, in its type, is at most the bridge's 128.

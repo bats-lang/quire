@@ -11,6 +11,7 @@
 
 staload "ui.sats"
 staload "book.sats"
+staload "modal.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
@@ -381,10 +382,10 @@ in
   in lib_put(LibCell(books_cons(x, rest), k)) end
 end
 
-(* Removes book i from the library (its stored data is the caller's) *)
-#pub fn lib_remove {i:int} (i: int i): void
-
-implement lib_remove (i) = let
+(* Removes book i from the library. Private, as _clear: the only way
+   to either is the yes of a confirmed dialog (lib_ask_delete,
+   lib_ask_factory_reset) *)
+fn _remove {i:int} (i: int i): void = let
   val c = lib_take()
   val+ ~LibCell(bs, k) = c
 in
@@ -394,10 +395,41 @@ in
   else lib_put(LibCell(_remove_at(bs, i), k - 1))
 end
 
-(* Empties the library (a factory reset) *)
-#pub fn lib_clear (): void
+(* Empties the library *)
+fn _clear (): void = lib_put(LibCell(books_nil(), 0))
 
-implement lib_clear () = lib_put(LibCell(books_nil(), 0))
+(* Deletes the stored data under key letter c of book (h1, h2) *)
+fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
+  val k = lib_key(c, h1, h2)
+  val @(f, b) = $A.freeze<byte>(k)
+  val () = $P.discard<Int>($IDB.idb_delete(b, 15))
+  val () = $A.drop<byte>(f, b)
+in $A.free<byte>($A.thaw<byte>(f)) end
+
+(* Asks whether to delete book i; if the answer is yes, the book and
+   everything stored for it go, then after runs with the book's key *)
+#pub fn lib_ask_delete {i:int} (i: int i, after: (int) -<cloref1> void): void
+
+implement lib_ask_delete (i, after) =
+  modal_confirm(HDeleteBook(i), lam () =>
+    case+ lib_nums(i) of
+    | ~$R.none() => ()
+    | ~$R.some(x) => let
+        val () = _idb_del(98, x.h1, x.h2)
+        val () = _idb_del(99, x.h1, x.h2)
+        val () = _idb_del(97, x.h1, x.h2)
+        val () = _remove(i)
+      in after(x.key) end)
+
+(* Asks whether to empty the library; if the answer is yes, it is
+   emptied, then after runs (which deletes what is stored and starts
+   again) *)
+#pub fn lib_ask_factory_reset (after: () -<cloref1> void): void
+
+implement lib_ask_factory_reset (after) =
+  modal_confirm(HFactoryReset(), lam () => let
+    val () = _clear()
+  in after() end)
 
 (* ============================================================
    Sorting

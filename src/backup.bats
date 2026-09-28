@@ -95,7 +95,7 @@ fun _join {l:agz}{la:addr}{t:nat}{k,s:nat | s <= t} .<k>.
    ============================================================ *)
 
 fn _say {nt:pos | nt < 256} (t: string nt): void = let
-  val () = modal_open(QInform(), "Backup")
+  val () = modal_inform("Backup")
 in modal_text_lit(t) end
 
 (* The file's start: its settings, and the books' opening bracket *)
@@ -565,7 +565,7 @@ in
 end
 
 fn _restored (c: int): void = let
-  val () = modal_open(QInform(), "Backup restored")
+  val () = modal_inform("Backup restored")
   val b = $A.alloc<byte>(64)
   val () = $A.write_text(b, 0, $A.text_lit("Books restored: "), 16)
   val q = jw_int(b, 16, c)

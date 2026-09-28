@@ -18,6 +18,7 @@
 
 staload "book.sats"
 staload "ui.sats"
+staload "modal.sats"
 staload "library.sats"
 staload "toc.sats"
 staload "jsonio.sats"
@@ -590,13 +591,77 @@ implement annot_note_show (i) = let
   val () = _put(c)
 in ui_text_buf("qmta", b, nl) end
 
-(* Deletes annotation i *)
-#pub fn annot_delete (i: int): void
-
-implement annot_delete (i) = let
+(* Deletes annotation i. Private: outside this module an annotation
+   goes only as the yes of a confirmed dialog (the annot_ask_delete functions), or
+   as the no of a note begun from a selection (annot_ask_note) *)
+fn _drop (i: int): void = let
   val () = _delete(i)
   val () = annot_marks()
 in annot_star() end
+
+(* Asks whether to delete highlight i; yes deletes it *)
+#pub fn annot_ask_delete_highlight {i:int} (i: int i): void
+
+implement annot_ask_delete_highlight (i) =
+  modal_confirm(HDeleteHighlight(i), lam () => let
+    val () = _drop(i)
+  in annot_render() end)
+
+(* Asks whether to delete bookmark i; yes deletes it *)
+#pub fn annot_ask_delete_bookmark {i:int} (i: int i): void
+
+implement annot_ask_delete_bookmark (i) =
+  modal_confirm(HDeleteBookmark(i), lam () => let
+    val () = _drop(i)
+  in annot_render_bookmarks() end)
+
+(* The note in the dialog's text area, kept as annotation i's *)
+fn _note_save (i: int): void = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
+  val @(f, b) = $A.freeze<byte>(a)
+  val r = $DR.read_input_value(b, 4)
+  val () = $A.drop<byte>(f, b)
+  val () = $A.free<byte>($A.thaw<byte>(f))
+in
+  case+ r of
+  | ~$R.none() => let
+      val e = $A.alloc<byte>(1)
+      val () = annot_note_set(i, e, 0)
+    in annot_render() end
+  | ~$R.some(v) => let
+      val n = $DC.blob_len(v)
+    in
+      if n <= 0 then let
+        val () = $DC.blob_free(v)
+        val e = $A.alloc<byte>(1)
+        val () = annot_note_set(i, e, 0)
+      in annot_render() end
+      else if n > 65536 then let
+        val () = $DC.blob_free(v)
+      in end
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(v, 0, a, n)
+        val () = $DC.blob_free(v)
+        val () = annot_note_set(i, a, n)
+      in annot_render() end
+    end
+end
+
+(* The note dialog for annotation i: Save keeps the note. When fresh,
+   the highlight was made for this note (from a selection), and
+   cancelling it (by button, Escape or a click outside) takes the
+   highlight away again *)
+#pub fn annot_ask_note (i: int, fresh: bool): void
+
+implement annot_ask_note (i, fresh) =
+  if i < 0 then ()
+  else let
+    val () = modal_open(QNote(), "Note", lam () => _note_save(i),
+      lam () => if fresh then let val () = _drop(i) in annot_render() end else ())
+    val () = modal_textarea()
+  in annot_note_show(i) end
 
 (* ============================================================
    Where one leads

@@ -235,7 +235,7 @@ fn _open_book {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) =>
     if x.shelf = 2 then let
-      val () = modal_open(QInform(), "Archived")
+      val () = modal_inform("Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
@@ -292,17 +292,6 @@ fn _archive {i:int} (i: int i): void =
       val () = (if open_key_get() = x.key then open_key_set(0) else ())
     in _set_shelf(i, 2) end
 
-(* Deletes book i and everything stored for it *)
-fn _delete {i:int} (i: int i): void =
-  case+ lib_nums(i) of
-  | ~$R.none() => ()
-  | ~$R.some(x) => let
-      val () = _idb_del(98, x.h1, x.h2)
-      val () = _idb_del(99, x.h1, x.h2)
-      val () = _idb_del(97, x.h1, x.h2)
-      val () = (if open_key_get() = x.key then open_key_set(0) else ())
-      val () = lib_remove(i)
-    in _save_render() end
 
 (* The book menu for book i, its items as its shelf asks *)
 fn _menu_open {i:int} (i: int i): void =
@@ -378,11 +367,14 @@ fn _book_action {i:int} (i: int i, act: int): void =
     if act = 1 then _set_shelf(i, (if x.shelf = 1 then 0 else 1))
     else if act = 2 then
       (if x.shelf = 2 then let
-         val () = modal_open(QInform(), "Restore")
+         val () = modal_inform("Restore")
        in modal_text_lit("To restore this book, import its file again.") end
        else _archive(i))
-    else let
-    in modal_confirm(HDeleteBook(i)) end
+    (* asked first; a deleted book that was open is no longer *)
+    else lib_ask_delete(i, lam (key) => let
+        val () = ui_show("qinf", false)
+        val () = (if open_key_get() = key then open_key_set(0) else ())
+      in _save_render() end)
 
 (* ============================================================
    Settings
@@ -408,50 +400,6 @@ fn _has_selection (): bool =
   case+ $DR.get_selection_text() of
   | ~$R.none() => false
   | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
-
-(* The note dialog for annotation i; fresh when the highlight was made
-   for this note (from a selection), and so goes if the note is
-   cancelled: the dialog's answer carries it (QNote) *)
-fn _note_open (i: int, fresh: bool): void =
-  if i < 0 then ()
-  else let
-    val () = modal_open(QNote(i, fresh), "Note")
-    val () = modal_textarea()
-  in annot_note_show(i) end
-
-(* The note in the dialog's text area, kept as annotation i's *)
-fn _note_save (i: int): void = let
-  val a = $A.alloc<byte>(4)
-  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
-  val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 4)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
-in
-  case+ r of
-  | ~$R.none() => let
-      val e = $A.alloc<byte>(1)
-      val () = annot_note_set(i, e, 0)
-    in annot_render() end
-  | ~$R.some(v) => let
-      val n = $DC.blob_len(v)
-    in
-      if n <= 0 then let
-        val () = $DC.blob_free(v)
-        val e = $A.alloc<byte>(1)
-        val () = annot_note_set(i, e, 0)
-      in annot_render() end
-      else if n > 65536 then let
-        val () = $DC.blob_free(v)
-      in end
-      else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(v, 0, a, n)
-        val () = $DC.blob_free(v)
-        val () = annot_note_set(i, a, n)
-      in annot_render() end
-    end
-end
 
 (* The selected text, to the clipboard *)
 fn _copy_selection (): void =
@@ -484,49 +432,7 @@ fn _annot_go (i: int): void = let
   val @(ch, pg, sn) = annot_dest(i)
 in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
 
-(* What a confirmed harm does. This is the one place that deletes a
-   book or an annotation for the user or resets anything, and it is
-   called only with the harm a Confirmed answer carries *)
-fn _destroy (h: harm): void =
-  case+ h of
-  | HDeleteBook(i) => let
-      val () = ui_show("qinf", false)
-    in if i >= 0 then _delete(i) else () end
-  | HFactoryReset() => let
-      val () = $IDB.idb_delete_database()
-      val () = lib_clear()
-      val () = set_reset()
-    in $NAV.reload() end
-  | HResetSettings() => let
-      val () = set_reset()
-      val () = set_sliders()
-    in _settings_changed() end
-  | HDeleteHighlight(i) => let
-      val () = annot_delete(i)
-    in annot_render() end
-  | HDeleteBookmark(i) => let
-      val () = annot_delete(i)
-    in annot_render_bookmarks() end
-
-(* The dialog's answer, with the question it answers: every question
-   is matched here (case+ is exhaustive), and a harm is done only on
-   the Confirmed answer to the question that named it *)
-fn _modal_answer (second: bool): void =
-  case+ modal_answer(second) of
-  | Confirmed(Harmful(h)) => _destroy(h)
-  | Dismissed(Harmful(_)) => ()
-  | Confirmed(Harmless(QDuplicate())) => import_dup_answer(true)
-  | Dismissed(Harmless(QDuplicate())) => import_dup_answer(false)
-  | Confirmed(Harmless(QNote(i, _))) => _note_save(i)
-  (* a note begun from a selection and cancelled leaves no highlight *)
-  | Dismissed(Harmless(QNote(i, fresh))) =>
-    if fresh then let val () = annot_delete(i) in annot_render() end else ()
-  | Confirmed(Harmless(QInform())) => ()
-  | Dismissed(Harmless(QInform())) => ()
-  | Confirmed(AskNothing()) => ()
-  | Dismissed(AskNothing()) => ()
-
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   (* import *)
   val r = RCons(r, OnEl("qibn"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -628,7 +534,9 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
       val t = _target(h)
       val () = (if _is(t, "qlmr") then let
           val () = ui_show("qlmn", false)
-        in modal_confirm(HFactoryReset()) end
+        in lib_ask_factory_reset(lam () => let
+            val () = $IDB.idb_delete_database()
+          in $NAV.reload() end) end
         else if _is(t, "qlme") then let
           val () = ui_show("qlmn", false)
         in backup_export() end
@@ -636,18 +544,6 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 17) = let
         else if _is(t, "qlmn") then ui_show("qlmn", false)
         else ())
     in let val () = _target_free(t) in 0 end end)
-  (* the dialog *)
-  val r = RCons(r, OnEl("qmod"), "click", lam(h) => let
-      val t = _target(h)
-      val b1 = _is(t, "qmb1")
-      val b2 = _is(t, "qmb2")
-      val out = _is(t, "qmod")
-      val () = _target_free(t)
-    in
-      if b2 then let val () = _modal_answer(true) in 0 end
-      else if (if b1 then true else out) then let val () = _modal_answer(false) in 0 end
-      else 0
-    end)
 in r end
 
 fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
@@ -664,7 +560,9 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
         else if _is(t, "qsrs") then let
-            val () = modal_confirm(HResetSettings())
+            val () = set_ask_reset(lam () => let
+                val () = set_sliders()
+              in _settings_changed() end)
           in false end
         else false): bool
       val close = _is(t, "qscl")
@@ -859,7 +757,7 @@ end
 (* Escape: the dialog is answered with its first button, or else the
    library's open menu or book info closes; true when one was *)
 fn _escape_overlay (): bool =
-  if modal_open_now() then let val () = _modal_answer(false) in true end
+  if modal_open_now() then let val () = modal_dismiss() in true end
   else if _shown("qctx") then let val () = ui_show("qctx", false) in true end
   else if _shown("qlmn") then let val () = ui_show("qlmn", false) in true end
   else if _shown("qinf") then let val () = ui_show("qinf", false) in true end
@@ -910,7 +808,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
         else if _is(t, "qtcm") then _bookmarks_open()
         else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
         else if bdl >= 0 then let
-        in modal_confirm(HDeleteBookmark(bdl)) end
+        in annot_ask_delete_bookmark(bdl) end
         else if row >= 0 then let
           val () = ui_show("qtoc", false)
         in reader_goto_entry(row) end
@@ -956,8 +854,7 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
       val sr = _is(t, "qsls")
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
-        else if nt then let
-          in _note_open(annot_highlight(), true) end
+        else if nt then annot_ask_note(annot_highlight(), true)
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
@@ -977,9 +874,9 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
       val () = (if close then ui_show("qanp", false)
         else if ex then _export()
         else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
-        else if nt >= 0 then _note_open(nt, false)
+        else if nt >= 0 then annot_ask_note(nt, false)
         else if dl >= 0 then let
-        in modal_confirm(HDeleteHighlight(dl)) end
+        in annot_ask_delete_highlight(dl) end
         else ())
     in 0 end)
 in r end
@@ -1119,7 +1016,7 @@ in r end
 implement main0 () = let
   val () = app_build()
   (* every listener, in one table: each one's id is its place in it *)
-  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(_wire_library(RNil()))))))
+  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(modal_listen(_wire_library(RNil())))))))
   (* files handed to the app from outside it (an Android intent) *)
   val r = RCons(r, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
