@@ -334,8 +334,8 @@ fn _hide_toggle {i:int} (i: int i): void =
    book on shelf s: in the Trash, Restore only (a book leaves the Trash
    for good only when it is emptied); elsewhere Hide or Unhide, Archive
    or Restore, and Move to Trash *)
-fn _shelf_labels {n1,n2,n3,c1,c2:pos | n1 < 256; n2 < 256; n3 < 256; c1 < 256; c2 < 256}
-  (hide: string n1, arch: string n2, del: string n3, plain: string c1, danger: string c2, s: Int): void =
+fn _shelf_labels {n1,n2,n3:pos | n1 < 256; n2 < 256; n3 < 256}
+  (hide: string n1, arch: string n2, del: string n3, s: Int): void =
   if s = 3 then let
     val () = ui_text(hide, "Restore")
     val () = ui_show(arch, false)
@@ -344,8 +344,7 @@ fn _shelf_labels {n1,n2,n3,c1,c2:pos | n1 < 256; n2 < 256; n3 < 256; c1 < 256; c
     val () = (if s = 1 then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
     val () = ui_show(arch, true)
     val () = (if s = 2 then ui_text(arch, "Restore") else ui_text(arch, "Archive"))
-    val () = ui_show(del, true)
-  in ui_text(del, "Move to Trash") end
+  in ui_show(del, true) end
 
 (* The book menu for book i, its items as its shelf asks *)
 fn _menu_open {i:int} (i: int i): void =
@@ -353,7 +352,7 @@ fn _menu_open {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) => let
       val () = !_menu_idx := i
-      val () = _shelf_labels("qcmh", "qcma", "qcmd", "mi", "mi danger", x.shelf)
+      val () = _shelf_labels("qcmh", "qcma", "qcmd", x.shelf)
       val () = ui_show("qctx", true)
     in ui_focus("qcmi") end
 
@@ -402,7 +401,7 @@ fn _info_open {i:int} (i: int i): void =
       val z = $A.alloc<byte>(32)
       val zk = size_text(z, x.fsz)
       val () = ui_text_buf("qivs", z, zk)
-      val () = _shelf_labels("qinh", "qinr", "qind", "btn", "btn danger", x.shelf)
+      val () = _shelf_labels("qinh", "qinr", "qind", x.shelf)
       val () = ui_attr("qinc", ASrc, "data:,")
       val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)

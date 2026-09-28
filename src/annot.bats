@@ -833,7 +833,7 @@ fn _hrow {i:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl
   val () = _child("qr", "qw", i, TDiv, "hbtns")
   val () = (if nl > 0 then _child_text_btn("qw", "qn", i, "hbtn", "Edit note")
     else _child_text_btn("qw", "qn", i, "hbtn", "Add note"))
-in _child_text_btn("qw", "qd", i, "hbtn danger", "Delete") end
+in _child_text_btn("qw", "qd", i, "hbtn", "Delete") end
 
 fun _hrows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i, last: Int): int =
   case+ xs of
@@ -890,7 +890,7 @@ fn _brow {i:nat}{c:nat}{l1:agz}{t1:pos}{tl:nat | tl < t1; tl < 65536}
   val () = (if tl > 0 then let
       val () = _child("qb", "qz", i, TSpan, "snip")
     in _text_of("qz", i, t, tl) end else ())
-in _child_text_btn("qbr", "qx", i, "hbtn danger", "Delete") end
+in _child_text_btn("qbr", "qx", i, "hbtn", "Delete") end
 
 fun _brows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i): void =
   case+ xs of
