@@ -546,37 +546,42 @@ implement toc_dest_of (i) = let
 in r end
 
 (* The label of entry i *)
-fun _title_at {k:nat} .<k>. (t: !toc(k), i: int): bool =
+fun _title_at {k:nat}{ni:pos | ni < 256} .<k>. (t: !toc(k), i: int, id: string ni): bool =
   case+ t of
   | toc_nil() => false
   | @toc_cons(lb, ll, _, _, _, _, rest) =>
     if i > 0 then let
-      val r = _title_at(rest, i - 1)
+      val r = _title_at(rest, i - 1, id)
       prval () = fold@(t)
     in r end
     else let
       val tb = $A.alloc<byte>(ll)
       val () = _dup(lb, tb, ll, 0)
-      val () = ui_text_buf("qcht", tb, ll)
+      val () = ui_text_buf(id, tb, ll)
       prval () = fold@(t)
     in true end
 
-(* Shows chapter ch's title (from 0) in the reader's top bar: its entry's
-   label, else "Chapter" and its number *)
-#pub fn toc_title {c:nat} (ch: int c): void
+(* Shows chapter ch's title (from 0) as the text of element id: its
+   entry's label, else "Chapter" and its number *)
+#pub fn toc_title_in {c:nat}{ni:pos | ni < 256} (id: string ni, ch: int c): void
 
-implement toc_title (ch) = let
+implement toc_title_in (id, ch) = let
   val c = _take()
   val+ @TocCell(t, _) = c
   val cur = _current(t, ch, 0, ~1)
-  val shown = _title_at(t, cur)
+  val shown = _title_at(t, cur, id)
   prval () = fold@(c)
   val () = _put(c)
 in
   if shown then ()
   else let
     val @(b, k) = _chapter_label(ch + 1)
-  in ui_text_buf("qcht", b, k) end
+  in ui_text_buf(id, b, k) end
 end
+
+(* The chapter's title in the reader's top bar *)
+#pub fn toc_title {c:nat} (ch: int c): void
+
+implement toc_title (ch) = toc_title_in("qcht", ch)
 
 end (* #target wasm *)

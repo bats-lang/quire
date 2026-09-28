@@ -37,6 +37,8 @@ val _chrome_gen = ref<int>(0)
 (* A wheel turn waiting out its pause; the latest resize's number *)
 val _wheel_busy = ref<bool>(false)
 val _resize_gen = ref<int>(0)
+(* Whether the scrubber's thumb is being dragged *)
+val _scrubbing = ref<bool>(false)
 (* Where a touch started *)
 val _touch_x = ref<int>(0)
 val _touch_y = ref<int>(0)
@@ -521,6 +523,31 @@ fn _wire_settings (): void = let
     in let val () = _settings_changed() in 0 end end)
 in end
 
+(* Closes the reader's panels; whether one was open *)
+fn _panels_close (): bool = let
+  val () = ui_measure("qtoc")
+  val a = $DR.get_measure_w() > 0
+  val () = ui_measure("qspn")
+  val b = $DR.get_measure_w() > 0
+  val () = ui_measure("qsrp")
+  val c = $DR.get_measure_w() > 0
+  val () = ui_measure("qanp")
+  val d = $DR.get_measure_w() > 0
+  val () = ui_show("qtoc", false)
+  val () = ui_show("qspn", false)
+  val () = ui_show("qsrp", false)
+  val () = ui_show("qanp", false)
+in a || b || c || d end
+
+(* A page turn: the bars hide *)
+fn _next (): void = let
+  val () = (if !_chrome then _chrome_set(false) else ())
+in page_next() end
+
+fn _prev (): void = let
+  val () = (if !_chrome then _chrome_set(false) else ())
+in page_prev() end
+
 (* The page turns a pointer at x makes: the left quarter back, the right
    quarter on, between them the bars shown or hidden *)
 fn _zone_click (x: Int): void = let
@@ -529,8 +556,8 @@ fn _zone_click (x: Int): void = let
   val cw = $DR.get_measure_w()
 in
   if cw <= 0 then ()
-  else if x < cx + cw / 4 then page_prev()
-  else if x > cx + cw - cw / 4 then page_next()
+  else if x < cx + cw / 4 then _prev()
+  else if x > cx + cw - cw / 4 then _next()
   else _chrome_set(~(!_chrome))
 end
 
@@ -546,17 +573,18 @@ end
 fn _reader_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
   val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
 in
-  if _key_is(b, n, "ArrowRight") then page_next()
-  else if _key_is(b, n, "PageDown") then page_next()
-  else if _key_is(b, n, "ArrowLeft") then page_prev()
-  else if _key_is(b, n, "PageUp") then page_prev()
-  else if _key_is(b, n, " ") then (if shift then page_prev() else page_next())
+  if _key_is(b, n, "ArrowRight") then _next()
+  else if _key_is(b, n, "PageDown") then _next()
+  else if _key_is(b, n, "ArrowLeft") then _prev()
+  else if _key_is(b, n, "PageUp") then _prev()
+  else if _key_is(b, n, " ") then (if shift then _prev() else _next())
   else if _key_is(b, n, "Home") then reader_page(0)
   else if _key_is(b, n, "End") then reader_page(1000000)
   else if _key_is(b, n, "t") then _chrome_set(~(!_chrome))
   else if _key_is(b, n, "T") then _chrome_set(~(!_chrome))
   else if _key_is(b, n, "Escape") then
-    (if !_chrome then _chrome_set(false) else _show_library())
+    (if _panels_close() then ui_focus("qcnt")
+     else if !_chrome then _chrome_set(false) else _show_library())
   else ()
 end
 
@@ -585,6 +613,28 @@ fn _wire_toc (): void = let
       val () = _target_free(t)
     in 0 end)
   val () = ui_listen("qpbk", "click", 36, lam(_) => let val () = reader_back() in 0 end)
+  (* the scrubber: a drag shows where it would go, letting go goes there *)
+  val () = ui_listen("qtrk", "pointerdown", 37, lam(h) => let
+      val x = _event_x(h)
+      val () = !_scrubbing := true
+      val () = _chrome_set(true)
+    in let val () = reader_scrub_preview(x) in 0 end end)
+  val () = ui_listen_doc("pointermove", 38, lam(h) =>
+      if !_scrubbing then let
+        val x = _event_x(h)
+        val () = _chrome_set(true)
+      in let val () = reader_scrub_preview(x) in 0 end end
+      else 0)
+  val () = ui_listen_doc("pointerup", 39, lam(h) =>
+      if !_scrubbing then let
+        val x = _event_x(h)
+        val () = !_scrubbing := false
+      in let val () = reader_scrub_go(x) in 0 end end
+      else 0)
+  (* the app hidden (another tab, another app): where the reader is is
+     stored *)
+  val () = ui_listen_doc("visibilitychange", 40, lam(_) =>
+      if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in end
 
 fn _wire_reader (): void = let
@@ -615,7 +665,7 @@ fn _wire_reader (): void = let
           else if dy = 0 then 0
           else let
             val () = !_wheel_busy := true
-            val () = (if dy > 0 then page_next() else page_prev())
+            val () = (if dy > 0 then _next() else _prev())
             val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) => let
                 val () = !_wheel_busy := false
               in $P.ret<int>(0) end))
@@ -646,8 +696,8 @@ fn _wire_reader (): void = let
         in
           if adx < 60 then 0
           else if adx <= ady then 0
-          else if dx < 0 then let val () = page_next() in 0 end
-          else let val () = page_prev() in 0 end
+          else if dx < 0 then let val () = _next() in 0 end
+          else let val () = _prev() in 0 end
         end)
   (* a resize lays the chapter out again, once it settles *)
   val () = ui_listen_win("resize", 32, lam(_) => let

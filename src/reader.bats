@@ -238,6 +238,103 @@ in
     in lib_save() end
 end
 
+(* ============================================================
+   The scrubber: where the page is in the book, by the chapters'
+   sizes, in thousandths
+   ============================================================ *)
+
+fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
+  if v <= 0 then 0 else if v >= 1000 then 1000 else v
+
+(* The thousandth of the book at size position x of its tot *)
+fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
+  if tot <= 0 then 0
+  (* x * 1000 fits an int *)
+  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
+  else _clamp1000(x / (tot / 1000))
+
+(* The size position of thousandth v of tot *)
+fn _of_thousandth (v: Int, tot: Int): Int =
+  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
+
+(* Where page p of t in chapter c (from 0) is in the book *)
+fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
+  val @(b, w, tot) = book_weights(book_serial(), c)
+  val cp = (if t > 0 then p * 1000 / t else 0): Int
+in _thousandth(b + _of_thousandth(cp, w), tot) end
+
+(* The style prop v/10 "%" (with one decimal) of element id *)
+fn _style_pct {ni:pos | ni < 256}{sn:pos | sn <= 8}{v:nat | v <= 1000}
+  (id: string ni, prop: string sn, v: int v): void = let
+  val b = $A.alloc<byte>(32)
+  val off = _put(b, 0, prop)
+  val off = $S.int_to_str(b, off, 32, v / 10)
+  val off = _put(b, off, ".")
+  val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
+  val off = _put(b, off, "%")
+in ui_attr_buf(id, "style", b, off) end
+
+(* The scrubber at v: its thumb, its fill and the percentage *)
+fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
+  val () = _style_pct("qsth", "left:", v)
+  val () = _style_pct("qtkf", "width:", v)
+  val b = $A.alloc<byte>(16)
+  val off = $S.int_to_str(b, 0, 16, v / 10)
+  val off = _put(b, off, "%")
+  val () = ui_text_buf("qpct", b, off)
+  val b = $A.alloc<byte>(16)
+  val off = $S.int_to_str(b, 0, 16, v / 10)
+in ui_attr_buf("qtrk", "aria-valuenow", b, off) end
+
+(* The scrubber at the page shown *)
+fn _scrub_show (): void =
+  case+ reading_get() of
+  | @(p, t, c, _) => _scrub_at(_permille((if c > 0 then c - 1 else 0), p, t))
+
+(* A tick on the scrubber where each chapter after the first starts *)
+fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
+  if i >= tc then ()
+  else let
+    val @(b, _, tot) = book_weights(book_serial(), i)
+    val @(ki, kl) = nid_make("qk", i)
+    val () = ui_add_n("qstk", ki, kl, "div")
+    val @(ki, kl) = nid_make("qk", i)
+    val () = ui_attr_n(ki, kl, "class", "tick")
+    val v = _thousandth(b, tot)
+    val bb = $A.alloc<byte>(32)
+    val off = _put(bb, 0, "left:")
+    val off = $S.int_to_str(bb, off, 32, v / 10)
+    val off = _put(bb, off, ".")
+    val off = $S.int_to_str(bb, off, 32, v - (v / 10) * 10)
+    val off = _put(bb, off, "%")
+    val @(ki, kl) = nid_make("qk", i)
+    val () = ui_attr_n_buf(ki, kl, "style", bb, off)
+  in _ticks(i + 1, tc) end
+
+fn _ticks_show {tc:nat} (tc: int tc): void = let
+  val () = ui_clear("qstk")
+in _ticks(1, tc) end
+
+(* The chapter, of tc, at thousandth v of the book, and the thousandth
+   of the chapter *)
+fun _chapter_at {i,tc:nat} .<max(tc - i, 0)>. (v: Int, i: int i, tc: int tc): @([c:nat] int c, [r:nat | r <= 1000] int r) =
+  if i >= tc then @(0, 0)
+  else let
+    val @(b, w, tot) = book_weights(book_serial(), i)
+    val x = _of_thousandth(v, tot)
+  in
+    if (if x < b + w then true else i + 1 >= tc) then
+      @(i, _thousandth(x - b, w))
+    else _chapter_at(v, i + 1, tc)
+  end
+
+(* The thousandth of the book at x on the scrubber's track *)
+fn _track_at (x: Int): [r:nat | r <= 1000] int r = let
+  val () = _measure_lit("qtrk")
+  val tx = $DR.get_measure_x()
+  val tw = $DR.get_measure_w()
+in if tw <= 0 then 0 else _clamp1000((x - tx) * 1000 / tw) end
+
 (* Shows page p of the chapter's t pages *)
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
@@ -259,6 +356,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val () = _update_page_indicator()
+  val () = _scrub_show()
   val () = _record_position()
 in end
 
@@ -820,6 +918,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                     | @(p, t, _, tc) => reading_set(@(p, t, chapter_idx + 1, tc)))
                   (* The chapter's title in the top bar *)
                   val () = toc_title(chapter_idx)
+                  val () = (case+ reading_get() of @(_, _, _, tc) => _ticks_show(tc))
                   val () = _measure_pagination()
                 in $P.ret<int>(0) end
               end)
@@ -941,6 +1040,18 @@ in
     in $P.discard<int>(_goto(c, g, a)) end
 end
 
+(* Loads chapter ch and shows its page at thousandth cp of it *)
+fn _goto_part (ch: Int, cp: Int): $P.promise(int, $P.Chained) = let
+  val ch = (if ch >= 0 then ch else 0): [v:nat] int v
+in
+  $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
+    if r < 0 then $P.ret<int>(r)
+    else let
+      val () = (case+ reading_get() of
+        | @(_, t, _, _) => _show_target(cp * t / 1000, ~1))
+    in $P.ret<int>(0) end)
+end
+
 (* The next page: in this chapter, else the next chapter's first *)
 fn _page_next(): void =
   case+ reading_get() of
@@ -1032,6 +1143,37 @@ implement reader_back () = _pop_position()
 implement reader_stack_clear () = let
   val () = _ps_put(PsCell(ps_nil()))
 in ui_show("qpbk", false) end
+
+(* The scrubber dragged to x: the thumb there, and the title of the
+   chapter there in its tip *)
+#pub fun reader_scrub_preview (x: Int): void
+implement reader_scrub_preview (x) = let
+  val v = _track_at(x)
+  val () = _scrub_at(v)
+  val () = _style_pct("qstt", "left:", v)
+  val () = (case+ reading_get() of
+    | @(_, _, _, tc) => let
+        val @(c, _) = _chapter_at(v, 0, tc)
+      in toc_title_in("qstt", c) end)
+in ui_show("qstt", true) end
+
+(* The scrubber let go at x: to that place in the book, remembering
+   where the reader was *)
+#pub fun reader_scrub_go (x: Int): void
+implement reader_scrub_go (x) = let
+  val v = _track_at(x)
+  val () = ui_show("qstt", false)
+in
+  case+ reading_get() of
+  | @(_, _, _, tc) => let
+      val @(c, cp) = _chapter_at(v, 0, tc)
+      val () = _push_position()
+    in $P.discard<int>(_goto_part(c, cp)) end
+end
+
+(* Stores where the reader is *)
+#pub fun reader_save (): void
+implement reader_save () = _record_position()
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

@@ -108,6 +108,11 @@ staload "pages.sats"
    is at no in the file; -1 when none is (or book s is not open) *)
 #pub fn book_chapter_of (s: int, no: int): [v:int | v >= ~1] int v
 
+(* Where chapter i of the open book, book s, is in the book, by its
+   entries' compressed sizes: the sizes of the chapters before it, its
+   own, and all of theirs; @(0, 0, 0) when the chapters are unknown *)
+#pub fn book_weights (s: int, i: int): @([b:nat] int b, [w:nat] int w, [t:nat] int t)
+
 (* Closes the book being imported, book s, when its import fails *)
 #pub fn book_abandon (s: int): void
 
@@ -614,6 +619,42 @@ in
     in r end
     else let prval () = fold@(b); val () = book_put(b) in ~1 end
   | _ => let val () = book_put(b) in ~1 end
+end
+
+(* The sizes of chs: of the chapters before chapter i, of chapter i,
+   and of all of them, added to acc *)
+fun book_weigh {n:pos}{j:nat} .<j>.
+  (chs: !book_chapters(n, j), i: int, b: Nat, w: Nat, t: Nat): @(Nat, Nat, Nat) =
+  case+ chs of
+  | ChaptersNil() => @(b, w, t)
+  | @Chapter(_, sz, _, _, _, _, rest) => let
+      val r = (if i > 0 then book_weigh(rest, i - 1, b + sz, w, t + sz)
+               else if i = 0 then book_weigh(rest, i - 1, b, sz, t + sz)
+               else book_weigh(rest, i - 1, b, w, t + sz)): @(Nat, Nat, Nat)
+      prval () = fold@(chs)
+    in r end
+  | @ChapterMissing(rest) => let
+      val r = book_weigh(rest, i - 1, b, w, t)
+      prval () = fold@(chs)
+    in r end
+
+implement book_weights (s, i) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then let
+      val r = (case+ sp of
+        | @Spine(chs, _) => let
+            val r = book_weigh(chs, i, 0, 0, 0)
+            prval () = fold@(sp)
+          in r end
+        | NoSpine() => @(0, 0, 0)): @(Nat, Nat, Nat)
+      prval () = fold@(b)
+      val () = book_put(b)
+    in r end
+    else let prval () = fold@(b); val () = book_put(b) in @(0, 0, 0) end
+  | _ => let val () = book_put(b) in @(0, 0, 0) end
 end
 
 implement book_abandon (s) =
