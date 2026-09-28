@@ -47,6 +47,7 @@
 
 staload CT = "css/src/contrast.sats"
 staload H = "css/src/harmony.sats"
+staload GT = "gestures/src/tracker.sats"
 
 (* ============================================================
    Roles and palette
@@ -1581,6 +1582,13 @@ fn _g_6_media {r:nat | r >= 57} (sh: sheet(r, 0)): [q:nat | q >= r - 57] sheet(q
   val sh = media_end(sh)
 in sh end
 
+(* The axes the page turn (gestures region 1, on .caf) owns: the
+   stylesheet's touch-action for .caf comes from them, so the browser
+   leaves exactly that axis to the recognizer *)
+#pub fn page_turn_axes (): $GT.axes
+
+implement page_turn_axes () = $GT.AxH()
+
 #pub fn app_style (): [l:agz][k:nat | k < 65536] @($A.arr(byte, l, $B.BUILDER_CAP), int k)
 
 implement app_style () = let
@@ -1614,6 +1622,9 @@ implement app_style () = let
   val sh = _g_4_panels(sh)
   val sh = _g_5_media(sh)
   val sh = _g_6_media(sh)
+  val sh = rule(sh, ".caf")
+  val sh = lay(sh, TouchAction(), $GT.touch_action(page_turn_axes(), false))
+  val sh = close(sh)
   val+ ~Sheet(b) = sh
   val @(a, n) = $B.to_arr(b)
 in @(a, n) end

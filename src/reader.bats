@@ -128,6 +128,9 @@ in _set_text_of("qpgi", tbuf, off) end
 fn _update_page_indicator(): void =
   case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)
 
+(* The page's width, as it was last measured *)
+val _page_w = ref<int>(0)
+
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
   val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
@@ -145,6 +148,7 @@ fn _measure_pagination(): void = let
   (* The page's widths, checked here: the chapter has scroll width /
      width pages, and at least one *)
   val cw = $DR.get_measure_w()
+  val () = !_page_w := cw
   val sw = $DR.get_measure_scroll_w()
   val total = (if cw > 0 then sw / cw else 1): [v:int] int v
   val t = (if total > 1 then total else 1): [t:pos] int t
@@ -376,6 +380,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val mr = $DR.measure(cnt_b, 4)
   val _ = $R.discard<int><int>(mr)
   val cw = $DR.get_measure_w()
+  val () = !_page_w := cw
   val scroll_x = page * cw
   val () = $SC.set_scroll_left(cnt_b, 4, scroll_x)
   val () = $A.drop<byte>(cnt_f, cnt_b)
@@ -1755,6 +1760,23 @@ implement apply_diff(d) = _apply_diff(d)
 
 #pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
+
+(* The page shown, dx px to the right of where it rests (a drag's
+   preview; 0 puts it back) *)
+#pub fun reader_pan(dx: int): void
+
+implement reader_pan(dx) =
+  case+ reading_get() of
+  | @(p, _, _, _) => let
+      val cnt_narr = $A.alloc<byte>(4)
+      val () = $A.set<byte>(cnt_narr, 0, int2byte0(113))
+      val () = $A.set<byte>(cnt_narr, 1, int2byte0(99))
+      val () = $A.set<byte>(cnt_narr, 2, int2byte0(110))
+      val () = $A.set<byte>(cnt_narr, 3, int2byte0(116))
+      val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
+      val () = $SC.set_scroll_left(cnt_b, 4, p * !_page_w - dx)
+      val () = $A.drop<byte>(cnt_f, cnt_b)
+    in $A.free<byte>($A.thaw<byte>(cnt_f)) end
 
 #pub fun page_next(): void
 implement page_next() = _page_next()

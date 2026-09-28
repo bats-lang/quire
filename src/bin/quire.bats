@@ -6,12 +6,14 @@
 #use result as R
 #use str as S
 #use wasm.bats-packages.dev/decompress as DC
+#use gestures as G
 
 staload "book.sats"
 staload "pages.sats"
 staload "ui.sats"
 staload "layer.sats"
 staload "app.sats"
+staload "style.sats"
 staload "modal.sats"
 staload "undo.sats"
 staload "backup.sats"
@@ -27,6 +29,9 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload GP = "gestures/src/pointer.sats"
+staload GT = "gestures/src/tracker.sats"
+staload GD = "gestures/src/decode.sats"
 
 (* ============================================================
    State
@@ -46,9 +51,12 @@ val _resize_gen = ref<int>(0)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
-(* Where a touch started *)
-val _touch_x = ref<int>(0)
-val _touch_y = ref<int>(0)
+(* The gesture recognizer's state (linear, so it is taken out of its
+   cell and put back); and whether a drag has just ended, so that the
+   click the browser sends after it is not also a tap *)
+datavtype gcell = GNone | GSome of $GT.gstate
+val _gestures = ref<gcell>(GNone())
+val _dragged = ref<bool>(false)
 (* The latest keystroke in the search field's number *)
 val _search_tick = ref<int>(0)
 
@@ -866,6 +874,73 @@ fn _bookmarks_open (): void = let
   val () = ui_show("qtcl", false)
 in ui_show("qtbl", true) end
 
+(* The page turn's region: .caf (qcnt), region 1 *)
+#define PAGE_REGION 1
+
+(* A drag has ended: the click that follows it is not a tap. The flag
+   drops once the click has had its turn *)
+fn _drag_ended (): void = let
+  val () = !_dragged := true
+in $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(0)), lam(_) => let
+    val () = !_dragged := false
+  in $P.ret<int>(0) end)) end
+
+(* The page turn's events: a pan moves the page with the finger, a
+   commit turns it (a drag to the left shows the page to the right),
+   a cancel puts it back *)
+fun _on_gestures {n:nat} .<n>. (es: list_vt($GT.gevent, n)): void =
+  case+ es of
+  | ~list_vt_nil() => ()
+  | ~list_vt_cons(e, rest) => let
+      val () = (case+ e of
+        | ~$GT.GPan(r, d) => if r = PAGE_REGION then reader_pan(d / 16) else ()
+        | ~$GT.GCommit(r, dr) =>
+          if r <> PAGE_REGION then ()
+          else let
+            val () = _drag_ended()
+          in case+ dr of
+            | $GP.DLeft() => _right()
+            | $GP.DRight() => _left()
+            | _ => reader_pan(0)
+          end
+        | ~$GT.GCancel(r, _) =>
+          if r <> PAGE_REGION then ()
+          else let val () = _drag_ended() in reader_pan(0) end
+        | ~$GT.GLongPress(_, _, _) => ()
+        | ~$GT.GPinch(_, _, _, _) => ()
+        | ~$GT.GPinchEnd(_) => ()
+        | ~$GT.GScrollEnd(_, _) => ()
+        | ~$GT.GTransitionEnd(_) => ()
+        | ~$GT.GTransitionCancel(_) => ())
+    in _on_gestures(rest) end
+
+(* A batch of pointer records from the shim, through the recognizer *)
+fn _gesture_batch (h: $EV.event_payload): void =
+  case+ take_blob(h) of
+  | ~NoBlobBytes() => ()
+  | ~BlobBytes(b, n) => let
+      var c: gcell = GNone()
+      val () = ref_exch_elt<gcell>(_gestures, c)
+      val es = (case+ c of
+        | @GSome(st) => let
+            val es = $GD.gestures_feed(st, b, n)
+            prval () = fold@(c)
+          in es end
+        | GNone() => list_vt_nil()): $GT.gevents
+      val () = ref_exch_elt<gcell>(_gestures, c)
+      val () = (case+ c of ~GNone() => () | ~GSome(st) => $GT.gestures_free(st))
+      val () = $A.free<byte>(b)
+    in if !_view = 1 then _on_gestures(es) else $GT.gevents_free(es) end
+
+(* The recognizer, with the page turn's region: horizontal drags, by
+   touch or pen only (a mouse drag over the page selects text) *)
+fn _gestures_start (): void = let
+  val st = $GT.gestures_new()
+  val () = $GT.gestures_region(st, PAGE_REGION, ~1, page_turn_axes(), false, false, $GT.DevTouch())
+  var c: gcell = GSome(st)
+  val () = ref_exch_elt<gcell>(_gestures, c)
+in case+ c of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
+
 fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
   val r = RCons(r, OnEl("qtcb"), "click", lam(_) => let val () = _toc_open() in 0 end)
   val r = RCons(r, OnEl("qtoc"), "click", lam(h) => let
@@ -980,7 +1055,7 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
     in 0 end)
 in r end
 
-fn _wire_reader {n:nat} (r: regs(n)): regs(n + 11) = let
+fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
   val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
   val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
   val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
@@ -991,6 +1066,7 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 11) = let
       val () = _target_free(t)
     in
       if _has_selection() then 0
+      else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
       else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
     end)
@@ -1035,34 +1111,11 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 11) = let
               in $P.ret<int>(0) end))
           in 0 end
         end)
-  (* a swipe of 60 px or more, more across than down, turns a page *)
-  val r = RCons(r, OnEl("qcnt"), "touchstart", lam(h) =>
-      case+ take_blob(h) of
-      | ~NoBlobBytes() => 0
-      | ~BlobBytes(b, n) =>
-        if n < 8 then let val () = $A.free<byte>(b) in 0 end
-        else let
-          val () = !_touch_x := _i32at(b, 0)
-          val () = !_touch_y := _i32at(b, 4)
-          val () = $A.free<byte>(b)
-        in 0 end)
-  val r = RCons(r, OnEl("qcnt"), "touchend", lam(h) =>
-      case+ take_blob(h) of
-      | ~NoBlobBytes() => 0
-      | ~BlobBytes(b, n) =>
-        if n < 8 then let val () = $A.free<byte>(b) in 0 end
-        else let
-          val dx = _i32at(b, 0) - !_touch_x
-          val dy = _i32at(b, 4) - !_touch_y
-          val () = $A.free<byte>(b)
-          val adx = (if dx < 0 then ~dx else dx): int
-          val ady = (if dy < 0 then ~dy else dy): int
-        in
-          if adx < 60 then 0
-          else if adx <= ady then 0
-          else if dx < 0 then let val () = _right() in 0 end
-          else let val () = _left() in 0 end
-        end)
+  (* pointer events for the gestures: a horizontal drag turns the page
+     (the reader view is the stable root; the page is region 1) *)
+  val r = RCons(r, OnGestures("qrvw"), "gestures", lam(h) => let
+      val () = _gesture_batch(h)
+    in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val r = RCons(r, OnWindow(), "resize", lam(_) => let
       val () = !_resize_gen := !_resize_gen + 1
@@ -1083,6 +1136,7 @@ in r end
 
 implement main0 () = let
   val () = app_build()
+  val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
   val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
   (* files handed to the app from outside it (an Android intent) *)
