@@ -10,8 +10,10 @@
 #use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/file-input as FI
 #use zip as Z
+#use str as S
 
 staload "pages.sats"
+staload "paths.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
    [d, d + s) in the n-byte file, its method m, and its name [no, no + nl)
@@ -88,6 +90,13 @@ staload "pages.sats"
 #pub fn book_find_entry {z:pos}{lb:agz}{nb:pos}
   (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): entry_hit(z)
 
+(* The entry of the open book, book s of z bytes, that the path
+   data[ho, ho + h) names relative to a directory: the first dl bytes of
+   the name at dno in the file (such as a chapter's own name, so an
+   href in the chapter is found); "." and ".." are resolved *)
+#pub fn book_find_relative {z:pos}{dno,dl:nat | dno + dl <= z; dl < 65536}{lb:agz}{n:pos}{ho,h:nat | ho + h <= n}
+  (s: int, z: int z, dno: int dno, dl: int dl, data: !$A.borrow(byte, lb, n), n: int n, ho: int ho, h: int h): entry_hit(z)
+
 (* Keeps chs, k chapters, as the chapters of the open book, when it is
    book s of z bytes and has none yet; else frees them *)
 #pub fn book_spine_set {z:pos}{k:nat}
@@ -103,6 +112,15 @@ staload "pages.sats"
   | ChaptersUnknown of ()
 
 #pub fn book_chapter_get {i:nat} (s: int, i: int i): chapter_got
+
+(* The index of the chapter of the open book, book s, whose entry's name
+   is at no in the file; -1 when none is (or book s is not open) *)
+#pub fn book_chapter_of (s: int, no: int): [v:int | v >= ~1] int v
+
+(* Where chapter i of the open book, book s, is in the book, by its
+   entries' compressed sizes: the sizes of the chapters before it, its
+   own, and all of theirs; @(0, 0, 0) when the chapters are unknown *)
+#pub fn book_weights (s: int, i: int): @([b:nat] int b, [w:nat] int w, [t:nat] int t)
 
 (* Closes the book being imported, book s, when its import fails *)
 #pub fn book_abandon (s: int): void
@@ -576,6 +594,101 @@ in
     else let prval () = fold@(b); val () = book_put(b) in ChaptersUnknown() end
   | _ => let val () = book_put(b) in ChaptersUnknown() end
 end
+
+(* The index, from i, of the first chapter of chs whose name is at no *)
+fun book_chapter_find {n:pos}{j:nat}{i:nat} .<j>.
+  (chs: !book_chapters(n, j), no: int, i: int i): [v:int | v >= ~1] int v =
+  case+ chs of
+  | ChaptersNil() => ~1
+  | @Chapter(_, _, _, cno, _, _, rest) =>
+    if cno = no then let prval () = fold@(chs) in i end
+    else let
+      val r = book_chapter_find(rest, no, i + 1)
+      prval () = fold@(chs)
+    in r end
+  | @ChapterMissing(rest) => let
+      val r = book_chapter_find(rest, no, i + 1)
+      prval () = fold@(chs)
+    in r end
+
+implement book_chapter_of (s, no) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then let
+      val r = (case+ sp of
+        | @Spine(chs, _) => let
+            val r = book_chapter_find(chs, no, 0)
+            prval () = fold@(sp)
+          in r end
+        | NoSpine() => ~1): [v:int | v >= ~1] int v
+      prval () = fold@(b)
+      val () = book_put(b)
+    in r end
+    else let prval () = fold@(b); val () = book_put(b) in ~1 end
+  | _ => let val () = book_put(b) in ~1 end
+end
+
+(* The sizes of chs: of the chapters before chapter i, of chapter i,
+   and of all of them, added to acc *)
+fun book_weigh {n:pos}{j:nat} .<j>.
+  (chs: !book_chapters(n, j), i: int, b: Nat, w: Nat, t: Nat): @(Nat, Nat, Nat) =
+  case+ chs of
+  | ChaptersNil() => @(b, w, t)
+  | @Chapter(_, sz, _, _, _, _, rest) => let
+      val r = (if i > 0 then book_weigh(rest, i - 1, b + sz, w, t + sz)
+               else if i = 0 then book_weigh(rest, i - 1, b, sz, t + sz)
+               else book_weigh(rest, i - 1, b, w, t + sz)): @(Nat, Nat, Nat)
+      prval () = fold@(chs)
+    in r end
+  | @ChapterMissing(rest) => let
+      val r = book_weigh(rest, i - 1, b, w, t)
+      prval () = fold@(chs)
+    in r end
+
+implement book_weights (s, i) = let
+  val b = book_take()
+in
+  case+ b of
+  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
+    if s = !_book_serial then let
+      val r = (case+ sp of
+        | @Spine(chs, _) => let
+            val r = book_weigh(chs, i, 0, 0, 0)
+            prval () = fold@(sp)
+          in r end
+        | NoSpine() => @(0, 0, 0)): @(Nat, Nat, Nat)
+      prval () = fold@(b)
+      val () = book_put(b)
+    in r end
+    else let prval () = fold@(b); val () = book_put(b) in @(0, 0, 0) end
+  | _ => let val () = book_put(b) in @(0, 0, 0) end
+end
+
+implement book_find_relative (s, z, dno, dl, data, n, ho, h) =
+  if h <= 0 then EntryMiss()
+  (* a path of 64 KiB or more names no zip entry: the book's data,
+     checked here *)
+  else if h >= 65536 then EntryMiss()
+  else let
+    val m = dl + h
+    val buf = $A.alloc<byte>(m)
+    val _ = book_read(s, z, dno, buf, dl)
+    val () = $S.copy_from_borrow(data, ho, n, buf, dl, m, h)
+    val k = path_norm(buf, m)
+  in
+    if k <= 0 then let val () = $A.free<byte>(buf) in EntryMiss() end
+    else let
+      val exact = $A.alloc<byte>(k)
+      val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
+      val () = $A.free<byte>(buf)
+      val @(f, b) = $A.freeze<byte>(exact)
+      val hit = book_find_entry(s, z, b, k)
+      val () = $A.drop<byte>(f, b)
+      val () = $A.free<byte>($A.thaw<byte>(f))
+    in hit end
+  end
 
 implement book_abandon (s) =
   if s = !_book_serial then let

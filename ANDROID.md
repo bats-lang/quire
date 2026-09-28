@@ -16,6 +16,16 @@ crashes, or the page logs a console error. Its artifact
 `android-smoke-test` has a screenshot of the running app, the UI dump
 and the logcat.
 
+The smoke test then shares an EPUB with the running app, as another app
+would (it is put in the app's cache and sent with SEND), and waits for
+the book's title in the library.
+
+The app opens EPUBs from other apps (VIEW, for `application/epub+zip`)
+and takes EPUBs shared to it (SEND, SEND_MULTIPLE): its activity, written
+by the pwa package, copies each file to the app's cache and hands it to
+the page, which imports it. Its launcher icon is the PWA's
+`icon-512.png`.
+
 The app id is `dev.middlefield.quire`, the one Quire is published under.
 The version code is the workflow's run number plus 1 (Google Play needs
 each upload's to be higher than the last).

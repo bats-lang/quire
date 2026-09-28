@@ -307,3 +307,239 @@ in
   | ~xspan_at(o, k) => _find_manifest_href_r(data, len, nodes, o, k)
   | ~xspan_none() => xspan_none()
 end
+
+(* ============================================================
+   Manifest: items by property, meta by name
+   ============================================================ *)
+
+(* Whether data[o, o + k) has pat[0, np) in it at or after i *)
+fun _span_has {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}{i:nat} .<max(k - i + 1, 0)>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np, i: int i): bool =
+  if i + np > k then false
+  else if _match_chars(data, o + i, pat, np, 0) then true
+  else _span_has(data, o, k, pat, np, i + 1)
+
+(* The href of the first manifest item whose properties have prop *)
+fun _item_with_prop_r
+  {lb:agz}{n:pos}{sz:nat}{np:pos} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+   prop: &(@[char][np]), np: int np): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _item_with_prop(data, node, prop, np) of
+     | ~xspan_none() => _item_with_prop_r(data, rest, prop, np)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _item_with_prop
+  {lb:agz}{n:pos}{sz:pos}{np:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
+   prop: &(@[char][np]), np: int np): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
+      var _c_props = @[char][10]('p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's')
+    in
+      case+ _find_attr_val(data, attrs, _c_props, 10) of
+      | ~xspan_at(po, pk) =>
+        if _span_has(data, po, pk, prop, np, 0) then let
+          var _c_href = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_val(data, attrs, _c_href, 4) end
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _item_with_prop_r(data, children, prop, np)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The content of the first <meta name="cover"> *)
+fun _meta_cover_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _meta_cover(data, node) of
+     | ~xspan_none() => _meta_cover_r(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _meta_cover
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_meta = @[char][4]('m', 'e', 't', 'a')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then let
+      var _c_name = @[char][4]('n', 'a', 'm', 'e')
+      var _c_cover = @[char][5]('c', 'o', 'v', 'e', 'r')
+    in
+      case+ _find_attr_val(data, attrs, _c_name, 4) of
+      | ~xspan_at(no, nk) =>
+        if xml_name_eq(data, no, nk, _c_cover, 5) then let
+          var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+        in _find_attr_val(data, attrs, _c_content, 7) end
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _meta_cover_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the book's cover image: the manifest item with property
+   cover-image (EPUB 3), else the item a <meta name="cover"> names
+   (EPUB 2) *)
+#pub fn find_cover_href
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement find_cover_href (data, len, nodes) = let
+  var _c_ci = @[char][11]('c', 'o', 'v', 'e', 'r', '-', 'i', 'm', 'a', 'g', 'e')
+in
+  case+ _item_with_prop_r(data, nodes, _c_ci, 11) of
+  | ~xspan_none() =>
+    (case+ _meta_cover_r(data, nodes) of
+     | ~xspan_at(io, ik) => _find_manifest_href_r(data, len, nodes, io, ik)
+     | ~xspan_none() => xspan_none())
+  | found => found
+end
+
+(* The href of the manifest item with property prop (such as "nav") *)
+#pub fn find_item_with_prop
+  {lb:agz}{n:pos}{sz:nat}{np:pos}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+   prop: &(@[char][np]), np: int np): xspan(n)
+
+implement find_item_with_prop (data, nodes, prop, np) = _item_with_prop_r(data, nodes, prop, np)
+
+(* The href of the manifest item with id data[io, io + ik) *)
+#pub fn find_manifest_href
+  {lb:agz}{n:pos}{sz:nat}{io,ik:nat | io + ik <= n}
+  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz),
+   io: int io, ik: int ik): xspan(n)
+
+implement find_manifest_href (data, len, nodes, io, ik) = _find_manifest_href_r(data, len, nodes, io, ik)
+
+(* The toc attribute of the first <spine> *)
+fun _spine_toc_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _spine_toc(data, node) of
+     | ~xspan_none() => _spine_toc_r(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _spine_toc
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
+      var _c_toc = @[char][3]('t', 'o', 'c')
+    in _find_attr_val(data, attrs, _c_toc, 3) end
+    else _spine_toc_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the NCX (EPUB 2's table of contents): the manifest item
+   the spine's toc attribute names *)
+#pub fn find_ncx_href
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement find_ncx_href (data, len, nodes) =
+  case+ _spine_toc_r(data, nodes) of
+  | ~xspan_at(io, ik) => _find_manifest_href_r(data, len, nodes, io, ik)
+  | ~xspan_none() => xspan_none()
+
+(* Whether data[o, o + k) has pat[0, np) in it *)
+#pub fn span_has {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool
+
+implement span_has (data, o, k, pat, np) = _span_has(data, o, k, pat, np, 0)
+
+(* Whether the first <spine> reads right to left *)
+fun _spine_rtl_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): int =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val r = _spine_rtl(data, node)
+    in if r >= 0 then r else _spine_rtl_r(data, rest) end
+  | $X.xml_nodes_nil() => ~1
+
+(* 1 or 0 at a <spine>, -1 when the node has none *)
+and _spine_rtl
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): int =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
+      var _c_ppd = @[char][26]('p', 'a', 'g', 'e', '-', 'p', 'r', 'o', 'g', 'r', 'e', 's', 's', 'i', 'o', 'n', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n')
+      var _c_rtl = @[char][3]('r', 't', 'l')
+    in
+      case+ _find_attr_val(data, attrs, _c_ppd, 26) of
+      | ~xspan_at(vo, vk) => if xml_name_eq(data, vo, vk, _c_rtl, 3) then 1 else 0
+      | ~xspan_none() => 0
+    end
+    else _spine_rtl_r(data, children)
+  end
+  | $X.xml_text(_, _) => ~1
+
+(* Whether the book reads right to left (its spine's
+   page-progression-direction) *)
+#pub fn spine_rtl
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): bool
+
+implement spine_rtl (data, nodes) = _spine_rtl_r(data, nodes) = 1
+
+(* The href of the first manifest item that is a font *)
+fun _font_item_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _font_item(data, node) of
+     | ~xspan_none() => _font_item_r(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _font_item
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
+      var _c_mt = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+      var _c_font = @[char][4]('f', 'o', 'n', 't')
+      var _c_otf = @[char][8]('o', 'p', 'e', 'n', 't', 'y', 'p', 'e')
+    in
+      case+ _find_attr_val(data, attrs, _c_mt, 10) of
+      | ~xspan_at(mo, mk) =>
+        if (if _span_has(data, mo, mk, _c_font, 4, 0) then true else _span_has(data, mo, mk, _c_otf, 8, 0)) then let
+          var _c_href = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_val(data, attrs, _c_href, 4) end
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _font_item_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the book's first embedded font *)
+#pub fn find_font_href
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement find_font_href (data, nodes) = _font_item_r(data, nodes)

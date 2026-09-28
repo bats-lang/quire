@@ -4,6 +4,7 @@
 
 import { test, expect } from '@playwright/test';
 import { createEpub } from './create-epub.js';
+import { importInput, cards, bookPage, librarySearch } from './helpers.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -16,7 +17,7 @@ test.describe('Smoke', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
+    await expect(librarySearch(page)).toBeVisible({ timeout: 15000 });
 
     expect(errors.length).toBe(0);
   });
@@ -60,35 +61,49 @@ test.describe('Smoke', () => {
   test('EPUB import opens reader view', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-
-    const epubBuffer = createEpub({
-      title: 'Import Test',
-      author: 'Bot',
-      chapters: 1,
-      paragraphsPerChapter: 2,
-      storeChapters: true,
-    });
-
     await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
+    await expect(importInput(page)).toBeVisible();
+    const epubPath = join(SCREENSHOT_DIR, `smoke-${Date.now()}.epub`);
+    writeFileSync(epubPath, createEpub({ title: 'Smoke Test', author: 'Bot', chapters: 2, storeChapters: true }));
+    await importInput(page).setInputFiles(epubPath);
+    await cards(page).first().click();
+    await expect(bookPage(page)).toBeVisible();
+    await expect(bookPage(page)).toContainText('Chapter 1');
+    expect(errors).toEqual([]);
+  });
 
-    const fileInput = page.locator('input[type="file"]');
+  test('a new build served while the app is open reloads it', async ({ page }) => {
+    let deployed = false;
+    await page.route('**/*.wasm', route => {
+      if (deployed && route.request().method() === 'HEAD') {
+        return route.fulfill({ status: 200, headers: { etag: '"a-new-build"' }, body: '' });
+      }
+      return route.continue();
+    });
+    await page.goto('/');
+    await expect(librarySearch(page)).toBeVisible();
+    // the page marks itself; a reload is a new page without the mark
+    await page.evaluate(() => { window.__before = true; });
+    deployed = true;
+    const reloaded = page.waitForEvent('load');
+    // the check runs when the page is shown again
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await reloaded;
+    await expect(librarySearch(page)).toBeVisible();
+    expect(await page.evaluate(() => window.__before)).toBeUndefined();
+  });
 
-    const epubPath = join(SCREENSHOT_DIR, 'smoke-test.epub');
-    writeFileSync(epubPath, epubBuffer);
-    await fileInput.setInputFiles(epubPath);
-
-    // Book card should appear in library
-    await page.waitForSelector('#qbc00', { timeout: 30000 });
-
-    // Click card to open reader
-    await page.locator('#qbc00').click();
-
-    // Reader view should appear
-    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
-    // Library should be hidden
-    await expect(page.locator('#qllc')).toBeHidden();
-
-    expect(errors.length).toBe(0);
+  test('the app loads offline once it has been opened', async ({ page, context }) => {
+    await page.goto('/');
+    await expect(importInput(page)).toBeVisible();
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    // a load the worker serves, so it keeps what it fetches
+    await page.reload();
+    await expect(importInput(page)).toBeVisible();
+    await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
+    await context.setOffline(true);
+    await page.reload();
+    await expect(importInput(page)).toBeVisible();
+    await context.setOffline(false);
   });
 });

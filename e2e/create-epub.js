@@ -293,10 +293,22 @@ ${rawBody}
   }
 
   // Build TOC nav document
-  let tocItems = '';
-  for (let i = 1; i <= numChapters; i++) {
-    tocItems += `        <li><a href="chapter${i}.xhtml">Chapter ${i}</a></li>\n`;
-  }
+  // opts.toc: [{ label, href, children }] replaces the one entry per chapter
+  const tocTree = opts.toc || Array.from({ length: numChapters }, (_, k) =>
+    ({ label: `Chapter ${k + 1}`, href: `chapter${k + 1}.xhtml` }));
+  const navLis = (es) => es.map(e => `<li><a href="${e.href}">${e.label}</a>` +
+    (e.children ? `<ol>${navLis(e.children)}</ol>` : '') + '</li>\n').join('');
+  const tocItems = navLis(tocTree);
+  let ncxOrder = 0;
+  const ncxPoints = (es) => es.map(e => `<navPoint id="np${++ncxOrder}" playOrder="${ncxOrder}">` +
+    `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/>` +
+    (e.children ? ncxPoints(e.children) : '') + '</navPoint>\n').join('');
+  const tocNcx = `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+<head/><docTitle><text>${title}</text></docTitle>
+<navMap>
+${ncxPoints(tocTree)}</navMap>
+</ncx>`;
 
   const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -310,7 +322,16 @@ ${tocItems}    </ol>
 </body>
 </html>`;
 
-  manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
+  // opts.extraFiles: [{ name, data, mediaType }] more manifest items
+  for (const [k, f] of (opts.extraFiles || []).entries()) {
+    manifestItems += `    <item id="x${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
+  }
+  // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
+  if (opts.ncx) {
+    manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
+  } else {
+    manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
+  }
 
   // content.opf
   const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
@@ -323,7 +344,7 @@ ${tocItems}    </ol>
   </metadata>
   <manifest>
 ${manifestItems}  </manifest>
-  <spine>
+  <spine${opts.ncx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
 ${spineItems}  </spine>
 </package>`;
 
@@ -334,8 +355,9 @@ ${spineItems}  </spine>
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
     { name: 'OEBPS/content.opf', data: contentOpf, store: true },
-    { name: 'OEBPS/nav.xhtml', data: navXhtml },
+    opts.ncx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
+  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data });
 
   // SVG cover wrap page (emulates real-world pattern: <svg><image xlink:href="...">)
   if (svgCover) {
