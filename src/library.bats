@@ -357,6 +357,30 @@ in
   else books_cons(b, _remove_at(rest, i - 1))
 end
 
+fun _pull {k:pos}{i:nat | i < k} .<k>. (bs: books(k), i: int i): @(book, books(k - 1)) = let
+  val+ ~books_cons(b, rest) = bs
+in
+  if i = 0 then @(b, rest)
+  else let
+    val @(x, rest2) = _pull(rest, i - 1)
+  in @(x, books_cons(b, rest2)) end
+end
+
+(* Moves book i to the front of the library: the sort is stable, so of
+   the books opened in the same minute, the one opened last comes first *)
+#pub fn lib_touch {i:int} (i: int i): void
+
+implement lib_touch (i) = let
+  val c = lib_take()
+  val+ ~LibCell(bs, k) = c
+in
+  if i <= 0 then lib_put(LibCell(bs, k))
+  else if i >= k then lib_put(LibCell(bs, k))
+  else let
+    val @(x, rest) = _pull(bs, i)
+  in lib_put(LibCell(books_cons(x, rest), k)) end
+end
+
 (* Removes book i from the library (its stored data is the caller's) *)
 #pub fn lib_remove {i:int} (i: int i): void
 

@@ -277,6 +277,7 @@ in
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = now,
         ch = ch, tch = (if tc > 0 then (tc: Int) else x.tch), pg = p, pgs = t, anchor = anchor,
         fsz = x.fsz, cover = x.cover, done = (if at_end then 1 else x.done) })
+      val () = lib_touch(i)
     in lib_save() end
 end
 
