@@ -79,10 +79,13 @@ test('an annotation in the list is gone to, and can be deleted', async ({ page }
   await expect.poll(async () => (await place(page)).ch).toBe(2);
   await expect.poll(() => marks(page)).toMatchObject({ size: 1 });
   await openPanel(page);
+  // deleting asks nothing, and can be undone
   await panel(page).getByRole('button', { name: 'Delete' }).click();
-  // deleting asks first
+  await expect(panel(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Undo' }).click();
   await expect(panel(page).getByRole('button', { name: 'Delete' })).toHaveCount(1);
-  await dialog(page, 'Delete highlight?').getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1 });
+  await panel(page).getByRole('button', { name: 'Delete' }).click();
   await expect(panel(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
   await expect(panel(page)).toContainText('No highlights yet');
   await expect.poll(() => marks(page)).toMatchObject({ size: 0 });
@@ -165,7 +168,6 @@ test('a bookmark is deleted from the bookmarks tab', async ({ page }) => {
   await dialog(page, 'Contents').getByRole('tab', { name: 'Bookmarks' }).click();
   const list = dialog(page, 'Contents').getByRole('tabpanel', { name: 'Bookmarks' });
   await list.getByRole('button', { name: 'Delete' }).click();
-  await dialog(page, 'Delete bookmark?').getByRole('button', { name: 'Delete' }).click();
   await expect(list.getByRole('button', { name: 'Delete' })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await showChrome(page);

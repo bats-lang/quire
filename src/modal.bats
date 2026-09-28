@@ -9,13 +9,12 @@ staload "ui.sats"
 staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 
-(* What a destructive question is about: what would be lost *)
+(* What a destructive question is about: what would be lost for good.
+   Only emptying the Trash cannot be undone, so it is the one thing
+   asked about: everything else is done at once and offered back
+   (src/undo.bats) *)
 #pub datatype harm =
-  | HDeleteBook of ([i:int] int i)       (* library book i *)
-  | HFactoryReset                         (* every book, place and setting *)
-  | HResetSettings                        (* the reading settings *)
-  | HDeleteHighlight of ([i:int] int i)  (* annotation i *)
-  | HDeleteBookmark of ([i:int] int i)   (* annotation i *)
+  | HEmptyTrash                           (* every book in the Trash *)
 
 (* The questions that lose nothing *)
 #pub datatype question =
@@ -58,11 +57,7 @@ typedef lit = [k:pos | k < 256] string k
 (* A harm's title, text and the verb of the button that does it *)
 fn _harm_words (h: harm): @(lit, lit, lit) =
   case+ h of
-  | HDeleteBook(_) => @("Delete book?", "The book, its reading position and its annotations are removed.", "Delete")
-  | HFactoryReset() => @("Factory reset?", "Every book, position, annotation and setting is deleted.", "Reset")
-  | HResetSettings() => @("Reset to defaults?", "Font, size, spacing, margins and theme go back to their defaults.", "Reset")
-  | HDeleteHighlight(_) => @("Delete highlight?", "The highlight and its note are removed.", "Delete")
-  | HDeleteBookmark(_) => @("Delete bookmark?", "The bookmark is removed.", "Delete")
+  | HEmptyTrash() => @("Empty the Trash?", "Every book in the Trash is deleted, with its reading position and annotations. This cannot be undone.", "Empty")
 
 (* The buttons' labels and the second one's tone for question a: Danger
    exactly when a is Harmful *)

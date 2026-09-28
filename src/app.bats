@@ -67,6 +67,7 @@ fn _library_menu (): void = let
   val () = ui_menuitem("qlmb", "qlme", "Export backup", Plain)
   val () = ui_el("qlmb", "qlmi", TDiv, "mi btn")
   val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", false)
+  val () = ui_menuitem("qlmb", "qlmt", "Empty Trash", Danger)
   val () = ui_menuitem("qlmb", "qlmr", "Factory reset", Danger)
   val () = ui_menuitem("qlmb", "qlmc", "Close", Plain)
 in _hide("qlmn") end
@@ -84,6 +85,14 @@ fn _modal (): void = let
   val () = ui_text_btn("qmbs", "qmb1", "btn", "-")
   val () = ui_text_btn("qmbs", "qmb2", "btn btn-p", "-")
 in _hide("qmod") end
+
+(* The Undo toast: what was just done, and a way back *)
+fn _undo_toast (): void = let
+  val () = ui_el("bats-root", "qund", TDiv, "toast")
+  val () = ui_role("qund", RStatus)
+  val () = ui_add("qund", "qunt", TSpan)
+  val () = ui_text_btn("qund", "qunb", "btn", "Undo")
+in _hide("qund") end
 
 (* A labelled row of the book info view *)
 fn _row {nr,nv:pos | nr < 256; nv < 256}{nl:pos | nl < 256} (rid: string nr, vid: string nv, label: string nl): void = let
@@ -267,6 +276,7 @@ implement app_build () = let
   val () = _settings()
   val () = _search()
   val () = _annotations()
+  val () = _undo_toast()
 in _modal() end
 
 end (* #target wasm *)

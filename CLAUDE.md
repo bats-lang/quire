@@ -163,14 +163,28 @@ Elements are made through `src/ui.bats`:
   region, toolbar, menu, group) is given one with it.
 * `ui_attr` takes a typed attribute that cannot be a name or a role.
 
-What deletes or resets is private to the module that owns it:
-removing a book and emptying the library (`src/library.bats`),
-deleting an annotation (`src/annot.bats`), and putting the settings
-back to their defaults (`src/settings.bats`) have no `#pub`. Each is
-reachable only as the action handed to the dialog by that module's
-`*_ask_*` function (`lib_ask_delete`, `annot_ask_delete_highlight`,
-`set_ask_reset`, ...), and the dialog (`src/modal.bats`) runs that
-action only from its second button's click: the dialog registers
+Nothing is lost at a click, except by emptying the Trash:
+
+* Removing a book moves it to the Trash (shelf 3), where it can only be
+  restored; archiving, hiding, deleting a highlight or bookmark and
+  resetting the settings are done at once. Each is offered back by the
+  Undo toast (`undo_offer` in `src/undo.bats`), whose undo runs only
+  from its own button, whose listener the module registers
+  (`undo_listen`). An earlier offer is made final when another takes
+  its place or the toast goes.
+* A factory reset moves every book to the Trash and resets the
+  settings (`lib_trash_all`, `set_reset_undoable`), with one Undo that
+  puts back each book's shelf and the settings.
+* Emptying the Trash is the one irreversible action, and the one
+  question with a red button: the dialog (`src/modal.bats`) asks a
+  `harm`, which has only `HEmptyTrash`. It closes any Undo offer first,
+  since what that would put back is gone.
+
+What deletes is private to the module that owns it: deleting a book
+and emptying the Trash (`src/library.bats`), and dropping an
+annotation (`src/annot.bats`) have no `#pub`. Emptying runs only as the
+action handed to the dialog by `lib_ask_empty_trash`, and the dialog
+runs it only from its second button's click: the dialog registers
 that listener itself (`modal_listen`) and its answer function is not
 exported, so other code can dismiss a dialog (`modal_dismiss`) but
 never confirm one. A destructive question's title, text, button verb

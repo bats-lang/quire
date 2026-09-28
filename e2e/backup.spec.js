@@ -28,10 +28,14 @@ async function restoreBackup(page, path) {
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
+// A reset with its Trash emptied: nothing of the library is left
 async function factoryReset(page) {
   await libraryMenu(page);
   await menuItem(page, 'Factory reset').click();
-  await dialog(page, 'Factory reset?').getByRole('button', { name: 'Reset' }).click();
+  await expect(cards(page)).toHaveCount(0);
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
   await expect(importInput(page)).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
 }

@@ -12,6 +12,7 @@
 staload "ui.sats"
 staload "book.sats"
 staload "modal.sats"
+staload "undo.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
@@ -25,7 +26,7 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 #pub typedef bnums = @{
   key = Int,
   h1 = Int, h2 = Int,
-  shelf = Int,     (* 0 on the shelf, 1 hidden, 2 archived *)
+  shelf = Int,     (* 0 on the shelf, 1 hidden, 2 archived, 3 in the Trash *)
   added = Int,
   opened = Int,    (* 0 when never read *)
   ch = Int,        (* the chapter read last, from 0 *)
@@ -71,7 +72,7 @@ val _next_key = ref<Int>(1)
 
 (* 0 last opened, 1 title, 2 author, 3 date added *)
 val _sort_order = ref<int>(0)
-(* 0 the shelf, 1 hidden, 2 archived *)
+(* 0 the shelf, 1 hidden, 2 archived, 3 the Trash *)
 val _shelf = ref<int>(0)
 (* The library view's render: an image that arrives after another
    render is not shown *)
@@ -382,9 +383,9 @@ in
   in lib_put(LibCell(books_cons(x, rest), k)) end
 end
 
-(* Removes book i from the library. Private, as _clear: the only way
-   to either is the yes of a confirmed dialog (lib_ask_delete,
-   lib_ask_factory_reset) *)
+(* Removes book i from the library. Private: a book is removed only
+   when the Trash is emptied, the yes of a confirmed dialog
+   (lib_ask_empty_trash) *)
 fn _remove {i:int} (i: int i): void = let
   val c = lib_take()
   val+ ~LibCell(bs, k) = c
@@ -395,9 +396,6 @@ in
   else lib_put(LibCell(_remove_at(bs, i), k - 1))
 end
 
-(* Empties the library *)
-fn _clear (): void = lib_put(LibCell(books_nil(), 0))
-
 (* Deletes the stored data under key letter c of book (h1, h2) *)
 fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val k = lib_key(c, h1, h2)
@@ -406,30 +404,116 @@ fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val () = $A.drop<byte>(f, b)
 in $A.free<byte>($A.thaw<byte>(f)) end
 
-(* Asks whether to delete book i; if the answer is yes, the book and
-   everything stored for it go, then after runs with the book's key *)
-#pub fn lib_ask_delete {i:int} (i: int i, after: (int) -<cloref1> void): void
+(* Sets book i's shelf, and keeps and shows the library *)
+#pub fn lib_set_shelf {i:int} (i: int i, shelf: Int): void
 
-implement lib_ask_delete (i, after) =
-  modal_confirm(HDeleteBook(i), lam () =>
-    case+ lib_nums(i) of
-    | ~$R.none() => ()
-    | ~$R.some(x) => let
-        val () = _idb_del(98, x.h1, x.h2)
-        val () = _idb_del(99, x.h1, x.h2)
-        val () = _idb_del(97, x.h1, x.h2)
-        val () = _remove(i)
-      in after(x.key) end)
+implement lib_set_shelf (i, shelf) = let
+  val () = lib_update(i, lam(x) => @{
+    key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
+    ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
+    fsz = x.fsz, cover = x.cover, done = x.done })
+  val () = lib_save()
+in lib_render() end
 
-(* Asks whether to empty the library; if the answer is yes, it is
-   emptied, then after runs (which deletes what is stored and starts
-   again) *)
-#pub fn lib_ask_factory_reset (after: () -<cloref1> void): void
+(* Moves book i to the Trash at once: nothing of it is lost, and Undo
+   (or Restore, from the Trash) puts it back on the shelf it was on *)
+#pub fn lib_trash {i:int} (i: int i): void
 
-implement lib_ask_factory_reset (after) =
-  modal_confirm(HFactoryReset(), lam () => let
-    val () = _clear()
+implement lib_trash (i) =
+  case+ lib_nums(i) of
+  | ~$R.none() => ()
+  | ~$R.some(x) => let
+      val key = x.key
+      val was = x.shelf
+      val () = lib_set_shelf(i, 3)
+    in
+      undo_offer("Moved to Trash", lam () => let
+          val j = lib_index_of_key(key)
+        in if j >= 0 then lib_set_shelf(j, was) else () end,
+        lam () => ())
+    end
+
+(* Book i and everything stored for it, deleted *)
+fn _delete_book {i:int} (i: int i): void =
+  case+ lib_nums(i) of
+  | ~$R.none() => ()
+  | ~$R.some(x) => let
+      val () = _idb_del(98, x.h1, x.h2)
+      val () = _idb_del(99, x.h1, x.h2)
+      val () = _idb_del(97, x.h1, x.h2)
+    in _remove(i) end
+
+(* The index of the first book in the Trash from i on, or -1 *)
+fun _first_trashed {i,k:nat | i <= k} .<k - i>. (i: int i, k: int k): [r:int | r >= ~1] int r =
+  if i >= k then ~1
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _first_trashed(i + 1, k)
+    | ~$R.some(x) => if x.shelf = 3 then i else _first_trashed(i + 1, k))
+
+(* Deletes the books in the Trash, at most n of them *)
+fun _empty {n:nat} .<n>. (n: int n): void =
+  if n <= 0 then ()
+  else let
+    val i = _first_trashed(0, lib_count())
+  in
+    if i < 0 then () else let val () = _delete_book(i) in _empty(n - 1) end
+  end
+
+(* Asks whether to empty the Trash; if the answer is yes, every book in
+   it and everything stored for it go, then after runs *)
+#pub fn lib_ask_empty_trash (after: () -<cloref1> void): void
+
+implement lib_ask_empty_trash (after) =
+  modal_confirm(HEmptyTrash(), lam () => let
+    val () = undo_close()
+    val () = _empty(lib_count())
   in after() end)
+
+(* Each book's key and the shelf it was on *)
+datatype shelved(int) =
+  | ShelvedNil(0)
+  | {n:nat} ShelvedCons(n + 1) of (int, Int, shelved(n))
+
+fun _shelves {i,k:nat | i <= k}{m:nat} .<k - i>. (i: int i, k: int k, acc: shelved(m)): [r:nat] shelved(r) =
+  if i >= k then acc
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _shelves(i + 1, k, acc)
+    | ~$R.some(x) => _shelves(i + 1, k, ShelvedCons(x.key, x.shelf, acc)))
+
+(* Every book moved to the Trash (nothing of any is lost) *)
+fun _trash_all {i,k:nat | i <= k} .<k - i>. (i: int i, k: int k): void =
+  if i >= k then ()
+  else let
+    val () = lib_update(i, lam(x) => @{
+      key = x.key, h1 = x.h1, h2 = x.h2, shelf = 3, added = x.added, opened = x.opened,
+      ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
+      fsz = x.fsz, cover = x.cover, done = x.done })
+  in _trash_all(i + 1, k) end
+
+(* Each book of ss put back on its shelf *)
+fun _unshelve {n:nat} .<n>. (ss: shelved(n)): void =
+  case+ ss of
+  | ShelvedNil() => ()
+  | ShelvedCons(key, shelf, rest) => let
+      val j = lib_index_of_key(key)
+      val () = (if j >= 0 then lib_update(j, lam(x) => @{
+          key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
+          ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
+          fsz = x.fsz, cover = x.cover, done = x.done }) else ())
+    in _unshelve(rest) end
+
+(* A factory reset's part in the library: every book moved to the Trash,
+   where it can still be restored. What it returns puts each back on the
+   shelf it was on *)
+#pub fn lib_trash_all (): () -<cloref1> void
+
+implement lib_trash_all () = let
+  val k = lib_count()
+  val ss = _shelves(0, k, ShelvedNil())
+  val () = _trash_all(0, k)
+  val () = lib_save()
+  val () = lib_render()
+in lam () => let val () = _unshelve(ss) val () = lib_save() in lib_render() end end
 
 (* ============================================================
    Sorting
@@ -915,10 +999,11 @@ in
   else if has_q then ui_text("qelb", "No books match")
   else if shelf = 1 then ui_text("qelb", "No hidden books")
   else if shelf = 2 then ui_text("qelb", "No archived books")
+  else if shelf = 3 then ui_text("qelb", "The Trash is empty")
   else ui_text("qelb", "Import an EPUB file to start reading.")
 end
 
-(* Shows shelf s (0 the shelf, 1 hidden, 2 archived) *)
+(* Shows shelf s (0 the shelf, 1 hidden, 2 archived, 3 the Trash) *)
 #pub fn lib_shelf_set (s: int): void
 
 implement lib_shelf_set (s) = let
@@ -926,6 +1011,7 @@ implement lib_shelf_set (s) = let
 in
   if s = 1 then ui_text("qshf", "Hidden")
   else if s = 2 then ui_text("qshf", "Archived")
+  else if s = 3 then ui_text("qshf", "Trash")
   else ui_text("qshf", "Library")
 end
 
