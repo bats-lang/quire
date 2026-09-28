@@ -4,7 +4,8 @@
 
 import { test, expect } from '@playwright/test';
 import { createEpub } from './create-epub.js';
-import { importInput, cards, bookPage, librarySearch } from './helpers.js';
+import { importInput, cards, bookPage, librarySearch, reload,
+} from './helpers.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -98,11 +99,11 @@ test.describe('Smoke', () => {
     await expect(importInput(page)).toBeVisible();
     await page.evaluate(() => navigator.serviceWorker.ready);
     // a load the worker serves, so it keeps what it fetches
-    await page.reload();
+    await reload(page);
     await expect(importInput(page)).toBeVisible();
     await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     await context.setOffline(true);
-    await page.reload();
+    await reload(page);
     await expect(importInput(page)).toBeVisible();
     await context.setOffline(false);
   });

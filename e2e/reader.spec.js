@@ -6,7 +6,7 @@ import { test, expect } from '@playwright/test';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
-  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings,
+  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -123,7 +123,7 @@ test('the place is kept when the book is opened again, and after a reload', asyn
   expect(await place(page)).toEqual(at);
   expect((await startsOnPage(page))[0]).toBe(top);
   await toLibrary(page);
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Keep Place');
   expect(await place(page)).toEqual(at);
   expect((await startsOnPage(page))[0]).toBe(top);
@@ -138,7 +138,7 @@ test('the place is kept in a later chapter too', async ({ page }) => {
   await expect.poll(async () => JSON.stringify(await place(page))).toMatch(/"ch":2,"p":2/);
   const at = await place(page);
   await toLibrary(page);
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Later Chapter');
   expect(await place(page)).toEqual(at);
 });
@@ -187,7 +187,7 @@ test('an EPUB over 1 MiB is imported, read and kept', async ({ page }) => {
   await readBook(page, { ...book('Big Book', 2, 8), extraEntries: [{ name: 'OEBPS/images/big.bin', data: big, store: true }] });
   expect(await visibleText(page)).toContain('Para 1.0');
   await toLibrary(page);
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Big Book');
   expect(await visibleText(page)).toContain('Para 1.0');
   expect(errors).toEqual([]);
@@ -342,7 +342,7 @@ test('the place is kept when the app is hidden and then closed', async ({ page }
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Hidden Away');
   expect(await place(page)).toEqual(at);
 });

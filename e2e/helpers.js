@@ -74,6 +74,30 @@ export const dialog = (page, name) => page.getByRole('dialog', { name });
 /** A menu item by its name */
 export const menuItem = (page, name) => page.getByRole('menuitem', { name, exact: true });
 
+/** Reloads the app once every write it has started has reached
+    IndexedDB. The app saves asynchronously, so a reload straight after a
+    change could come before the write commits. A read-write transaction
+    on the same store completes only after every one created before it,
+    so waiting for one here waits for all of the app's writes so far. */
+export async function reload(page) {
+  await page.evaluate(async () => {
+    // opening a database that does not exist would create it empty
+    if (!(await indexedDB.databases()).some(d => d.name === 'bats')) return;
+    await new Promise((resolve, reject) => {
+      const r = indexedDB.open('bats');
+      r.onerror = () => reject(r.error);
+      r.onsuccess = () => {
+        const db = r.result;
+        if (!db.objectStoreNames.contains('kv')) { db.close(); resolve(); return; }
+        const tx = db.transaction('kv', 'readwrite');
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      };
+    });
+  });
+  await page.reload();
+}
+
 /** Opens the library menu (the gear) */
 export async function libraryMenu(page) {
   await page.getByRole('button', { name: 'Library menu' }).click();

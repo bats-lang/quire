@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
-  openSettings, colours,
+  openSettings, colours, reload,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -33,7 +33,7 @@ test('imported books show their title and author, and survive a reload', async (
   // the title being beside it, so it has no role to find it by: it is
   // the card's one image element
   await expect.poll(() => card(page, 'Alpha Book').locator('img').evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
-  await page.reload();
+  await reload(page);
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Beta Book')).toContainText('Bob Writer');
   expect(errors).toEqual([]);
@@ -78,7 +78,7 @@ test('the sort button cycles the orders, and the order is kept', async ({ page }
   await sort(page).click();
   await expect(sort(page)).toHaveText('Sort: Author');
   expect(await titles(page)).toEqual(['Kiwi', 'Apple', 'Mango']);
-  await page.reload();
+  await reload(page);
   await expect(sort(page)).toHaveText('Sort: Author');
   expect(await titles(page)).toEqual(['Kiwi', 'Apple', 'Mango']);
 });
@@ -188,7 +188,7 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
   await bookMenu(page, 'Doomed');
   await menuItem(page, 'Move to Trash').click();
   await expect(cards(page)).toHaveCount(1);
-  await page.reload();
+  await reload(page);
   await expect(cards(page)).toHaveCount(1);
   for (let i = 0; i < 3; i++) await shelf(page).click();
   await expect(shelf(page)).toHaveText('Trash');
@@ -203,7 +203,7 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
   await expect(page.getByText('The Trash is empty')).toBeVisible();
   await shelf(page).click();
   await expect(cards(page)).toHaveCount(2);
-  await page.reload();
+  await reload(page);
   await expect(cards(page)).toHaveCount(2);
 });
 
@@ -230,7 +230,7 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   await expect(page.getByText('The Trash is empty')).toBeVisible();
   // what the Trash held can no longer be offered back
   await expect(undo(page)).toBeHidden();
-  await page.reload();
+  await reload(page);
   await expect(cards(page)).toHaveCount(1);
   await expect(card(page, 'Stays')).toHaveCount(1);
 });
@@ -304,7 +304,7 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await libraryMenu(page);
   await menuItem(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
-  await page.reload();
+  await reload(page);
   await expect(cards(page)).toHaveCount(0);
   for (let i = 0; i < 3; i++) await shelf(page).click();
   await expect(cards(page)).toHaveCount(2);

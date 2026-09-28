@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
-  control, selectionButton,
+  control, selectionButton, reload,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Annotations');
@@ -44,7 +44,7 @@ test('a highlight is marked, kept, and listed with its note', async ({ page }) =
   await panel(page).getByRole('button', { name: 'Close' }).click();
   // kept across a reload
   await toLibrary(page);
-  await page.reload();
+  await reload(page);
   await openBook(page, 'Marked Up');
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
   await openPanel(page);
