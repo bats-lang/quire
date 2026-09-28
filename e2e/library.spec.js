@@ -307,3 +307,14 @@ test('after a duplicate is skipped, the other files picked with it are imported'
   await expect(card(page, 'Brand New')).toHaveCount(1, { timeout: 30000 });
   await expect(cards(page)).toHaveCount(2);
 });
+
+// As the Android app hands over a file another app shared or opened with
+// it: fetched from a local URL, under the name the other app gave it
+test('a file handed over by the host is imported', async ({ page }) => {
+  const errors = await start(page);
+  const epub = epubFile({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true });
+  await page.route('**/_capacitor_file_/**', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
+  await page.evaluate(() => globalThis.batsFetchExternal('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
+  await expect(card(page, 'Shared With Quire')).toContainText('Smoke Test', { timeout: 30000 });
+  expect(errors).toEqual([]);
+});
