@@ -4,6 +4,7 @@
 
 import { test, expect } from '@playwright/test';
 import { createEpub } from './create-epub.js';
+import { importInput, cards, bookPage, librarySearch } from './helpers.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -16,7 +17,7 @@ test.describe('Smoke', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
+    await expect(librarySearch(page)).toBeVisible({ timeout: 15000 });
 
     expect(errors.length).toBe(0);
   });
@@ -61,27 +62,48 @@ test.describe('Smoke', () => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
     await page.goto('/');
-    await expect(page.locator('#qibn')).toBeVisible();
+    await expect(importInput(page)).toBeVisible();
     const epubPath = join(SCREENSHOT_DIR, `smoke-${Date.now()}.epub`);
     writeFileSync(epubPath, createEpub({ title: 'Smoke Test', author: 'Bot', chapters: 2, storeChapters: true }));
-    await page.locator('#qfin').setInputFiles(epubPath);
-    await page.locator('#qlst .card').first().click();
-    await expect(page.locator('#qrvw')).toBeVisible();
-    await expect(page.locator('#qcnt')).toContainText('Chapter 1');
+    await importInput(page).setInputFiles(epubPath);
+    await cards(page).first().click();
+    await expect(bookPage(page)).toBeVisible();
+    await expect(bookPage(page)).toContainText('Chapter 1');
     expect(errors).toEqual([]);
+  });
+
+  test('a new build served while the app is open reloads it', async ({ page }) => {
+    let deployed = false;
+    await page.route('**/*.wasm', route => {
+      if (deployed && route.request().method() === 'HEAD') {
+        return route.fulfill({ status: 200, headers: { etag: '"a-new-build"' }, body: '' });
+      }
+      return route.continue();
+    });
+    await page.goto('/');
+    await expect(librarySearch(page)).toBeVisible();
+    // the page marks itself; a reload is a new page without the mark
+    await page.evaluate(() => { window.__before = true; });
+    deployed = true;
+    const reloaded = page.waitForEvent('load');
+    // the check runs when the page is shown again
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await reloaded;
+    await expect(librarySearch(page)).toBeVisible();
+    expect(await page.evaluate(() => window.__before)).toBeUndefined();
   });
 
   test('the app loads offline once it has been opened', async ({ page, context }) => {
     await page.goto('/');
-    await expect(page.locator('#qibn')).toBeVisible();
+    await expect(importInput(page)).toBeVisible();
     await page.evaluate(() => navigator.serviceWorker.ready);
     // a load the worker serves, so it keeps what it fetches
     await page.reload();
-    await expect(page.locator('#qibn')).toBeVisible();
+    await expect(importInput(page)).toBeVisible();
     await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     await context.setOffline(true);
     await page.reload();
-    await expect(page.locator('#qibn')).toBeVisible();
+    await expect(importInput(page)).toBeVisible();
     await context.setOffline(false);
   });
 });

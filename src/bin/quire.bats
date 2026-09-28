@@ -40,6 +40,8 @@ val _chrome_gen = ref<int>(0)
 (* A wheel turn waiting out its pause; the latest resize's number *)
 val _wheel_busy = ref<bool>(false)
 val _resize_gen = ref<int>(0)
+(* The content node of the link within the book that has the focus, or -1 *)
+val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
 (* The annotation whose note the dialog edits *)
@@ -804,6 +806,8 @@ in
   else if (if _key_is(b, n, "f") then fl >= 2 else false) then let
       val () = $EV.prevent_default()
     in _search_open() end
+  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then
+    (if reader_link_at(!_focus_link) then () else ())
   else if _key_is(b, n, "Escape") then
     (if _panels_close() then ui_focus("qcnt")
      else if _shown("qsrn") then _search_end()
@@ -972,6 +976,15 @@ fn _wire_reader (): void = let
       else if (if node >= 0 then reader_link_at(node) else false) then 0
       else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
     end)
+  (* a link within the book, focused from the keyboard, is followed with
+     Enter *)
+  val () = ui_listen("qcnt", "focusin", 51, lam(h) => let
+      val t = _target(h)
+      val node = _row_of(t, "c")
+      val () = _target_free(t)
+      val () = !_focus_link := node
+    in 0 end)
+  val () = ui_listen("qcnt", "focusout", 52, lam(_) => let val () = !_focus_link := ~1 in 0 end)
   val () = ui_listen_doc("keydown", 7, lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0

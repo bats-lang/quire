@@ -4,53 +4,63 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
-  start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters,
+  start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
+  control, selectionButton,
 } from './helpers.js';
+
+const panel = page => dialog(page, 'Annotations');
+const note = page => dialog(page, 'Note');
+const selection = page => page.getByRole('toolbar', { name: 'Selection' });
+const star = page => page.getByRole('button', { name: 'Bookmark this page' });
+
+async function openPanel(page) {
+  await showChrome(page);
+  await control(page, 'Annotations').click();
+  await expect(panel(page)).toBeVisible();
+}
+
+async function writeNote(page, text) {
+  await expect(note(page).getByRole('textbox', { name: 'Note' })).toBeVisible();
+  await note(page).getByRole('textbox', { name: 'Note' }).fill(text);
+  await note(page).getByRole('button', { name: 'Save' }).click();
+}
 
 const book = { title: 'Marked Up', author: 'Annotations Tests', rawChapters: chapters(2) };
 
 test('a highlight is marked, kept, and listed with its note', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, book);
-  await selectText(page, '#qcnt p', 0, 8);
-  await expect(page.locator('#qsel')).toBeVisible();
-  await page.locator('#qslh').click();
-  await expect(page.locator('#qsel')).toBeHidden();
-  await expect.poll(() => marks(page, 1)).toEqual({ size: 1, text: 'Para 1.0' });
+  await selectText(page, 0, 8);
+  await expect(selection(page)).toBeVisible();
+  await selectionButton(page, 'Highlight').click();
+  await expect(selection(page)).toBeHidden();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
   // a note on it
-  await showChrome(page);
-  await page.locator('#qanb').click();
-  await expect(page.locator('#qanp')).toBeVisible();
-  await expect(page.locator('#qanl')).toContainText('Para 1.0');
-  await page.locator('#qanl [id^=qn]').first().click();
-  await expect(page.locator('#qmta')).toBeVisible();
-  await page.locator('#qmta').fill('A thought, with "quotes"');
-  await page.locator('#qmb2').click();
-  await expect(page.locator('#qanl')).toContainText('A thought, with "quotes"');
-  await page.locator('#qanc').click();
+  await openPanel(page);
+  await expect(panel(page)).toContainText('Para 1.0');
+  await panel(page).getByRole('button', { name: 'Add note' }).click();
+  await writeNote(page, 'A thought, with "quotes"');
+  await expect(panel(page)).toContainText('A thought, with "quotes"');
+  await panel(page).getByRole('button', { name: 'Close' }).click();
   // kept across a reload
   await toLibrary(page);
   await page.reload();
   await openBook(page, 'Marked Up');
-  await expect.poll(() => marks(page, 1)).toEqual({ size: 1, text: 'Para 1.0' });
-  await showChrome(page);
-  await page.locator('#qanb').click();
-  await expect(page.locator('#qanl')).toContainText('A thought, with "quotes"');
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
+  await openPanel(page);
+  await expect(panel(page)).toContainText('A thought, with "quotes"');
   expect(errors).toEqual([]);
 });
 
 test('a note can be made straight from a selection', async ({ page }) => {
   await start(page);
   await readBook(page, book);
-  await selectText(page, '#qcnt p', 5, 8);
-  await page.locator('#qsln').click();
-  await expect(page.locator('#qmta')).toBeVisible();
-  await page.locator('#qmta').fill('Straight away');
-  await page.locator('#qmb2').click();
-  await showChrome(page);
-  await page.locator('#qanb').click();
-  await expect(page.locator('#qanl')).toContainText('1.0');
-  await expect(page.locator('#qanl')).toContainText('Straight away');
+  await selectText(page, 5, 8);
+  await selectionButton(page, 'Note').click();
+  await writeNote(page, 'Straight away');
+  await openPanel(page);
+  await expect(panel(page)).toContainText('1.0');
+  await expect(panel(page)).toContainText('Straight away');
 });
 
 test('an annotation in the list is gone to, and can be deleted', async ({ page }) => {
@@ -59,35 +69,31 @@ test('an annotation in the list is gone to, and can be deleted', async ({ page }
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).ch).toBe(2);
-  await selectText(page, '#qcnt p', 0, 8);
-  await page.locator('#qslh').click();
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
   await page.keyboard.press('Home');
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await place(page)).ch).toBe(1);
-  await showChrome(page);
-  await page.locator('#qanb').click();
-  await page.locator('#qanl .hrow .hgo').first().click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: /Para 2\.0/ }).click();
   await expect.poll(async () => (await place(page)).ch).toBe(2);
-  await expect.poll(() => marks(page, 1)).toMatchObject({ size: 1 });
-  await showChrome(page);
-  await page.locator('#qanb').click();
-  await page.locator('#qanl [id^=qd]').first().click();
-  await expect(page.locator('#qanl .hrow')).toHaveCount(0);
-  await expect(page.locator('#qanl')).toContainText('No highlights yet');
-  await expect.poll(() => marks(page, 1)).toMatchObject({ size: 0 });
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1 });
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Delete' }).click();
+  await expect(panel(page).getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(panel(page)).toContainText('No highlights yet');
+  await expect.poll(() => marks(page)).toMatchObject({ size: 0 });
 });
 
 test('the export is Markdown with the book, its highlights and notes', async ({ page }) => {
   await start(page);
   await readBook(page, book);
-  await selectText(page, '#qcnt p', 0, 8);
-  await page.locator('#qsln').click();
-  await page.locator('#qmta').fill('Exported note');
-  await page.locator('#qmb2').click();
-  await showChrome(page);
-  await page.locator('#qanb').click();
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Note').click();
+  await writeNote(page, 'Exported note');
+  await openPanel(page);
   const download = page.waitForEvent('download');
-  await page.locator('#qanx').click();
+  await panel(page).getByRole('button', { name: 'Export', exact: true }).click();
   const d = await download;
   expect(d.suggestedFilename()).toBe('quire-annotations.md');
   const md = readFileSync(await d.path(), 'utf8');
@@ -102,22 +108,24 @@ test('the star bookmarks the page, lists it, and unbookmarks it', async ({ page 
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(2);
   await showChrome(page);
-  await expect(page.locator('#qbmk')).toHaveAttribute('aria-pressed', 'false');
-  await page.locator('#qbmk').click();
-  await expect(page.locator('#qbmk')).toHaveAttribute('aria-pressed', 'true');
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
+  await star(page).click();
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'true');
   // not on another page
   await page.keyboard.press('ArrowRight');
   await showChrome(page);
-  await expect(page.locator('#qbmk')).toHaveAttribute('aria-pressed', 'false');
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
   // listed on the contents panel's bookmarks tab, and gone to from there
-  await page.locator('#qtcb').click();
-  await page.locator('#qtcm').click();
-  await expect(page.locator('#qtcm')).toHaveAttribute('aria-selected', 'true');
-  await expect(page.locator('#qtbl [id^=qb]').first()).toBeVisible();
-  await page.locator('#qtbl [id^=qb]').first().click();
+  await control(page, 'Contents').click();
+  const tab = dialog(page, 'Contents').getByRole('tab', { name: 'Bookmarks' });
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
+  const marked = dialog(page, 'Contents').getByRole('tabpanel', { name: 'Bookmarks' }).getByRole('button', { name: /Chapter 1/ });
+  await expect(marked).toBeVisible();
+  await marked.click();
   await expect.poll(async () => (await place(page)).p).toBe(2);
   // the b key takes it off again
   await page.keyboard.press('b');
   await showChrome(page);
-  await expect(page.locator('#qbmk')).toHaveAttribute('aria-pressed', 'false');
+  await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
 });

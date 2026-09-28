@@ -5,8 +5,8 @@
 import { test, expect } from '@playwright/test';
 import { TINY_PNG } from './create-epub.js';
 import {
-  start, epubFile, importFiles, openBook, readBook, place, placeChanged, startsOnPage,
-  visibleText, toLibrary, showChrome, chapters, card,
+  start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
+  showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -16,7 +16,7 @@ test('a book opens on its first page with its first chapter shown', async ({ pag
   await readBook(page, book('First Page'));
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   expect(await visibleText(page)).toContain('Para 1.0');
-  await expect(page.locator('#qcht')).toHaveText('Chapter 1');
+  await expect(chapterTitle(page)).toHaveText('Chapter 1');
   expect(errors).toEqual([]);
 });
 
@@ -26,10 +26,10 @@ test('the page buttons turn pages, and across chapters', async ({ page }) => {
   const first = await place(page);
   expect(first.t).toBeGreaterThan(1);
   await showChrome(page);
-  await page.locator('#qnxt').click();
+  await control(page, 'Next page').click();
   expect(await placeChanged(page, first)).toMatchObject({ ch: 1, p: 2 });
   await showChrome(page);
-  await page.locator('#qprv').click();
+  await control(page, 'Previous page').click();
   expect(await placeChanged(page, { ...first, p: 2 })).toMatchObject({ ch: 1, p: 1 });
   // the last page of chapter 1, then on into chapter 2
   await page.keyboard.press('End');
@@ -61,31 +61,31 @@ test('the keys turn pages', async ({ page }) => {
 test('tapping the page\'s sides turns it, and its middle shows or hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Taps'));
-  const box = await page.locator('#qcnt').boundingBox();
+  const box = await bookPage(page).boundingBox();
   const y = box.y + box.height / 2;
   await page.mouse.click(box.x + box.width - 10, y);
   await expect.poll(async () => (await place(page)).p).toBe(2);
   // a page turn hides the bars
-  await expect(page.locator('#qprv')).toBeHidden();
+  await expect(control(page, 'Previous page')).toBeHidden();
   await page.mouse.click(box.x + 10, y);
   await expect.poll(async () => (await place(page)).p).toBe(1);
   await page.mouse.click(box.x + box.width / 2, y);
-  await expect(page.locator('#qprv')).toBeVisible();
+  await expect(control(page, 'Previous page')).toBeVisible();
   await page.mouse.click(box.x + box.width / 2, y);
-  await expect(page.locator('#qprv')).toBeHidden();
+  await expect(control(page, 'Previous page')).toBeHidden();
 });
 
 test('the bars hide by themselves after a few seconds', async ({ page }) => {
   await start(page);
   await readBook(page, book('Auto Hide'));
   await showChrome(page);
-  await expect(page.locator('#qprv')).toBeHidden({ timeout: 8000 });
+  await expect(control(page, 'Previous page')).toBeHidden({ timeout: 8000 });
 });
 
 test('the mouse wheel turns pages', async ({ page }) => {
   await start(page);
   await readBook(page, book('Wheel'));
-  const box = await page.locator('#qcnt').boundingBox();
+  const box = await bookPage(page).boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, 120);
   await expect.poll(async () => (await place(page)).p).toBe(2);
@@ -98,15 +98,15 @@ test('the back arrow, Escape and the browser\'s back all return to the library',
   await start(page);
   await readBook(page, book('Ways Back'));
   await showChrome(page);
-  await page.locator('#qbbk').click();
-  await expect(page.locator('#qllc')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to library' }).click();
+  await expect(librarySearch(page)).toBeVisible();
   await openBook(page, 'Ways Back');
   await page.keyboard.press('Escape'); // the bars
   await page.keyboard.press('Escape'); // the library
-  await expect(page.locator('#qllc')).toBeVisible();
+  await expect(librarySearch(page)).toBeVisible();
   await openBook(page, 'Ways Back');
   await page.goBack();
-  await expect(page.locator('#qllc')).toBeVisible();
+  await expect(librarySearch(page)).toBeVisible();
 });
 
 test('the place is kept when the book is opened again, and after a reload', async ({ page }) => {
@@ -149,15 +149,13 @@ test('a new type size or window size keeps the page\'s text in view', async ({ p
   for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(4);
   const top = (await startsOnPage(page))[0];
-  await showChrome(page);
-  await page.locator('#qset').click();
-  await page.locator('#qfsr').fill('26');
+  await openSettings(page);
+  await page.getByRole('slider', { name: 'Size' }).fill('26');
   await page.keyboard.press('Escape');
-  await expect.poll(async () => (await startsOnPage(page)).includes(top) ||
-    (await page.evaluate(id => { const e = document.getElementById(id); const c = document.getElementById('qcnt').getBoundingClientRect(); const r = e.getBoundingClientRect(); return r.right > c.left && r.left < c.right; }, top))).toBe(true);
+  await expect.poll(() => onPage(page, top)).toBe(true);
   const size = page.viewportSize();
   await page.setViewportSize({ width: Math.round(size.width * 0.7), height: size.height });
-  await expect.poll(() => page.evaluate(id => { const e = document.getElementById(id); const c = document.getElementById('qcnt').getBoundingClientRect(); const r = e.getBoundingClientRect(); return r.right > c.left && r.left < c.right; }, top)).toBe(true);
+  await expect.poll(() => onPage(page, top)).toBe(true);
 });
 
 test('a chapter over 1 MiB is shown whole', async ({ page }) => {
@@ -168,7 +166,7 @@ test('a chapter over 1 MiB is shown whole', async ({ page }) => {
   body += '<p>THE-LAST-PARAGRAPH</p>\n';
   expect(body.length).toBeGreaterThan(1048576);
   await readBook(page, { title: 'Long Chapter', author: 'Bot', rawChapters: [{ body }, { body: '<p>short</p>' }] });
-  await expect.poll(() => page.locator('#qcnt').evaluate(el => /THE-LAST-PARAGRAPH/.test(el.textContent) && el.textContent.length > 1048576)).toBe(true);
+  await expect.poll(() => bookPage(page).evaluate(el => /THE-LAST-PARAGRAPH/.test(el.textContent) && el.textContent.length > 1048576)).toBe(true);
   await page.keyboard.press('End');
   expect(await visibleText(page)).toContain('THE-LAST-PARAGRAPH');
   expect(errors).toEqual([]);
@@ -178,8 +176,8 @@ test('a text of over 64 KiB is shown whole, no character cut', async ({ page }) 
   await start(page);
   const text = 'START-' + ('é' + 'abcdefg').repeat(19200) + '-END';
   await readBook(page, { title: 'Long Text', author: 'Bot', rawChapters: [{ body: `<p>${text}</p>` }] });
-  await expect.poll(() => page.locator('#qcnt').evaluate((el, t) => el.textContent.includes(t), text)).toBe(true);
-  expect(await page.locator('#qcnt').evaluate(el => el.textContent.includes('�'))).toBe(false);
+  await expect.poll(() => bookPage(page).evaluate((el, t) => el.textContent.includes(t), text)).toBe(true);
+  expect(await bookPage(page).evaluate(el => el.textContent.includes('�'))).toBe(false);
 });
 
 test('an EPUB over 1 MiB is imported, read and kept', async ({ page }) => {
@@ -211,15 +209,15 @@ test('a chapter\'s images are shown, and a missing one is left empty', async ({ 
       { name: 'OEBPS/images/c.png', data: TINY_PNG },
     ],
   });
-  await expect.poll(() => page.evaluate(() => {
-    const imgs = [...document.querySelectorAll('#qcnt img')];
+  await expect.poll(() => bookPage(page).evaluate(doc => {
+    const imgs = [...doc.querySelectorAll('img')];
     return imgs.filter(i => i.alt !== 'missing' && i.src.startsWith('blob:') && i.complete && i.naturalWidth === 1).length;
   })).toBe(4);
-  expect(await page.locator('#qcnt img[alt="missing"]').getAttribute('src')).toBe('data:,');
+  expect(await bookPage(page).getByRole('img', { name: 'missing' }).getAttribute('src')).toBe('data:,');
   // an image fits the page
-  const fits = await page.evaluate(() => {
-    const c = document.getElementById('qcnt').getBoundingClientRect();
-    return [...document.querySelectorAll('#qcnt img')].every(i => i.getBoundingClientRect().height <= c.height);
+  const fits = await bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    return [...doc.querySelectorAll('img')].every(i => i.getBoundingClientRect().height <= c.height);
   });
   expect(fits).toBe(true);
 });
@@ -234,19 +232,19 @@ test('text is decoded and marked up as the book has it', async ({ page }) => {
 <table><tr><td colspan="2">cell</td></tr></table>
 <p dir="rtl" lang="ar" title="tip">مرحبا</p>`;
   await readBook(page, { title: 'Markup', author: 'Bot', rawChapters: [{ body }] });
-  const p = page.locator('#qcnt p').first();
+  const p = bookPage(page).locator('p').first();
   await expect(p).toContainText('Tom & Jerry <3 été café “q”');
   for (const tag of ['b', 'i', 'em', 'strong', 'code', 'sub', 'sup']) {
     await expect(p.locator(tag)).toHaveCount(1);
   }
-  await expect(page.locator('#qcnt h1')).toHaveText('Heading One');
-  await expect(page.locator('#qcnt h2')).toHaveText('Heading Two');
-  await expect(page.locator('#qcnt hr')).toHaveCount(1);
-  expect(await page.locator('#qcnt hr').evaluate(e => e.getBoundingClientRect().width > 0)).toBe(true);
-  await expect(page.locator('#qcnt blockquote p')).toHaveText('Quoted');
-  await expect(page.locator('#qcnt li')).toHaveCount(2);
-  await expect(page.locator('#qcnt td[colspan="2"]')).toHaveText('cell');
-  const rtl = page.locator('#qcnt p[dir="rtl"]');
+  await expect(bookPage(page).locator('h1')).toHaveText('Heading One');
+  await expect(bookPage(page).locator('h2')).toHaveText('Heading Two');
+  await expect(bookPage(page).locator('hr')).toHaveCount(1);
+  expect(await bookPage(page).locator('hr').evaluate(e => e.getBoundingClientRect().width > 0)).toBe(true);
+  await expect(bookPage(page).locator('blockquote p')).toHaveText('Quoted');
+  await expect(bookPage(page).getByRole('listitem')).toHaveCount(2);
+  await expect(bookPage(page).locator('td[colspan="2"]')).toHaveText('cell');
+  const rtl = bookPage(page).locator('p[dir="rtl"]');
   await expect(rtl).toHaveAttribute('lang', 'ar');
   await expect(rtl).toHaveAttribute('title', 'tip');
   // inline elements stay inline
@@ -263,23 +261,30 @@ test('links: out of the book open outside it, inside it jump and can go back', a
       { body: filler + '<p id="far">FAR-TARGET</p>' },
     ],
   });
-  const out = page.locator('#qcnt a', { hasText: 'the web' });
+  const out = bookPage(page).getByRole('link', { name: 'the web' });
   await expect(out).toHaveAttribute('href', 'https://example.com/');
   await expect(out).toHaveAttribute('target', '_blank');
   await expect(out).toHaveAttribute('rel', /noopener/);
-  await page.locator('#qcnt a', { hasText: 'the far place' }).click();
-  await expect(page.locator('#qcht')).toHaveText('Chapter 2');
+  await bookPage(page).getByRole('link', { name: 'the far place' }).click();
+  await expect(chapterTitle(page)).toHaveText('Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
-  await expect(page.locator('#qpbk')).toBeVisible();
-  await page.locator('#qpbk').click();
-  await expect(page.locator('#qcht')).toHaveText('Chapter 1');
+  await expect(jumpBack(page)).toBeVisible();
+  await jumpBack(page).click();
+  await expect(chapterTitle(page)).toHaveText('Chapter 1');
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
+  // the link is reached and followed from the keyboard too
+  const inside = bookPage(page).getByRole('link', { name: 'the far place' });
+  await inside.focus();
+  await expect(inside).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  expect(await visibleText(page)).toContain('FAR-TARGET');
 });
 
 test('a book read right to left turns the other way', async ({ page }) => {
   await start(page);
   await readBook(page, { ...book('Right To Left', 2), rtl: true });
-  await expect(page.locator('#qcnt')).toHaveClass(/rtl/);
+  expect(await bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).direction)).toBe('rtl');
   await page.keyboard.press('ArrowLeft');
   await expect.poll(async () => (await place(page)).p).toBe(2);
   await page.keyboard.press('ArrowRight');
@@ -293,12 +298,14 @@ test('a book\'s own font is used when chosen', async ({ page }) => {
     ...book('Own Font', 1, 5),
     extraFiles: [{ name: 'fonts/own.woff2', data: font, mediaType: 'font/woff2' }],
   });
-  await expect.poll(() => page.locator('#qfnt').evaluate(e => e.textContent)).toContain('QuireBook');
-  await showChrome(page);
-  await page.locator('#qset').click();
-  await page.locator('#qff2').click();
-  await expect.poll(() => page.locator('#qcnt p').first().evaluate(e => getComputedStyle(e).fontFamily)).toContain('QuireBook');
-  await expect.poll(() => page.evaluate(() => document.fonts.check('16px QuireBook'))).toBe(true);
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Book', exact: true }).click();
+  // the page is set in a face that is neither bundled font, and that face
+  // is one the book brought, loaded
+  const family = () => bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).fontFamily.split(',')[0].trim().replace(/"/g, ''));
+  await expect.poll(family).not.toMatch(/^(Literata|Inter)$/);
+  const f = await family();
+  await expect.poll(() => page.evaluate(f => [...document.fonts].some(x => x.family.replace(/"/g, '') === f && x.status === 'loaded'), f)).toBe(true);
 });
 
 test('a card shows how far the book has been read', async ({ page }) => {

@@ -1,6 +1,9 @@
 // Shared steps for the e2e tests: books made on the fly, imported
 // through the file input, opened from their cards, and the reader's
 // place read back from the page.
+//
+// Everything is found as a reader finds it: by role, accessible name,
+// label or visible text. No test depends on an element's id or class.
 
 import { expect } from '@playwright/test';
 import { createEpub } from './create-epub.js';
@@ -40,6 +43,48 @@ export function chapters(n, paras = 20, tag = 'Para') {
   return Array.from({ length: n }, (_, k) => ({ body: chapterBody(k + 1, paras, tag) }));
 }
 
+// ---- the library ----
+
+/** The input that imports EPUB files */
+export const importInput = page => page.getByLabel('Import EPUB');
+
+/** The list of books */
+export const books = page => page.getByRole('region', { name: 'Books' });
+
+/** Every card in the list */
+export const cards = page => books(page).getByRole('button');
+
+/** The card of the book whose card has text */
+export function card(page, text) {
+  return cards(page).filter({ hasText: text });
+}
+
+/** The cards' titles, in the order shown (a card's first line) */
+export async function titles(page) {
+  return (await cards(page).allInnerTexts()).map(t => t.split('\n')[0].trim());
+}
+
+/** The library's search box, whose presence says the library is shown */
+export const librarySearch = page => page.getByRole('searchbox', { name: 'Search the library' });
+
+/** A dialog by its name (the modal dialog is named by its title) */
+export const dialog = (page, name) => page.getByRole('dialog', { name });
+
+/** A menu item by its name */
+export const menuItem = (page, name) => page.getByRole('menuitem', { name, exact: true });
+
+/** Opens the library menu (the gear) */
+export async function libraryMenu(page) {
+  await page.getByRole('button', { name: 'Library menu' }).click();
+  await expect(page.getByRole('menu')).toBeVisible();
+}
+
+/** Opens the book menu of the card with text */
+export async function bookMenu(page, text) {
+  await card(page, text).click({ button: 'right' });
+  await expect(page.getByRole('menu')).toBeVisible();
+}
+
 /** Opens the app on an empty library; returns the page's errors (a
     list that fills as they happen) */
 export async function start(page) {
@@ -47,39 +92,55 @@ export async function start(page) {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
-  await expect(page.locator('#qibn')).toBeVisible();
+  await expect(librarySearch(page)).toBeVisible();
   return errors;
 }
 
 /** Imports the files through the import button's input, and waits
     until the library shows total cards */
 export async function importFiles(page, files, total) {
-  await page.locator('#qfin').setInputFiles(files);
-  await expect(page.locator('#qlst .card')).toHaveCount(total, { timeout: 30000 });
+  await importInput(page).setInputFiles(files);
+  await expect(cards(page)).toHaveCount(total, { timeout: 30000 });
 }
 
-/** The card of the book whose title has text */
-export function card(page, text) {
-  return page.locator('#qlst .card', { hasText: text });
-}
+// ---- the reader ----
+
+/** The page of the book shown */
+export const bookPage = page => page.getByRole('document', { name: 'Page' });
+
+/** The page indicator (read even while the bars are hidden) */
+export const indicator = page => page.getByRole('status', { name: 'Page', includeHidden: true });
+
+/** The reader's top bar */
+export const topBar = page => page.getByRole('navigation', { name: 'Book' });
+
+/** The chapter's title in the top bar */
+export const chapterTitle = page => topBar(page).getByRole('heading');
+
+/** A button of the reader's bottom bar, by name */
+export const control = (page, name) =>
+  page.getByRole('toolbar', { name: 'Page controls' }).getByRole('button', { name, exact: true });
+
+/** The button that goes back after a jump */
+export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 
 /** Opens the book whose card has text, and waits for its first page */
 export async function openBook(page, text) {
   await card(page, text).click();
-  await expect(page.locator('#qrvw')).toBeVisible();
-  await expect(page.locator('#qpgi')).toContainText('p.');
+  await expect(bookPage(page)).toBeVisible();
+  await expect(indicator(page)).toContainText('p.');
 }
 
 /** Imports one book made from opts and opens it */
 export async function readBook(page, opts) {
-  const n = await page.locator('#qlst .card').count();
+  const n = await cards(page).count();
   await importFiles(page, [epubFile(opts)], n + 1);
   await openBook(page, opts.title);
 }
 
 /** The page indicator as numbers: chapter, page and pages */
 export async function place(page) {
-  const t = await page.locator('#qpgi').innerText();
+  const t = await indicator(page).textContent();
   const m = /Ch (\d+) · p\. (\d+)\/(\d+)/.exec(t);
   expect(m, `page indicator "${t}"`).not.toBeNull();
   return { ch: +m[1], p: +m[2], t: +m[3] };
@@ -91,30 +152,43 @@ export async function placeChanged(page, before) {
   return place(page);
 }
 
-/** The ids of the content elements that start on the page shown */
+/** The first words of each paragraph or heading that starts on the
+    page shown */
 export async function startsOnPage(page) {
-  return page.evaluate(() => {
-    const c = document.getElementById('qcnt').getBoundingClientRect();
-    return [...document.querySelectorAll('#qcnt [id^=c]')]
+  return bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    return [...doc.querySelectorAll('p, h1, h2, h3')]
       .filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.left >= c.left - 1 && r.left < c.right; })
-      .map(e => e.id);
+      .map(e => e.textContent.slice(0, 12));
   });
 }
 
-/** The text shown on the page (the content area's visible part) */
+/** Whether a paragraph or heading starting with text is (at least in
+    part) on the page shown */
+export async function onPage(page, text) {
+  return bookPage(page).evaluate((doc, text) => {
+    const c = doc.getBoundingClientRect();
+    return [...doc.querySelectorAll('p, h1, h2, h3')].some(e => {
+      if (!e.textContent.startsWith(text)) return false;
+      return [...e.getClientRects()].some(r => r.right > c.left && r.left < c.right);
+    });
+  }, text);
+}
+
+/** The text shown on the page (the paragraphs and headings in view) */
 export async function visibleText(page) {
-  return page.evaluate(() => {
-    const c = document.getElementById('qcnt').getBoundingClientRect();
-    return [...document.querySelectorAll('#qcnt p, #qcnt h1, #qcnt h2')]
+  return bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    return [...doc.querySelectorAll('p, h1, h2')]
       .filter(e => { const r = e.getBoundingClientRect(); return r.right > c.left && r.left < c.right; })
       .map(e => e.textContent).join('\n');
   });
 }
 
-/** Selects characters [from, to) of the first text of element sel */
-export async function selectText(page, sel, from, to) {
-  await page.evaluate(([sel, from, to]) => {
-    const el = document.querySelector(sel);
+/** Selects characters [from, to) of the first text of the page's first
+    paragraph */
+export async function selectText(page, from, to) {
+  await bookPage(page).locator('p').first().evaluate((el, [from, to]) => {
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     const t = walker.nextNode();
     const r = document.createRange();
@@ -123,33 +197,55 @@ export async function selectText(page, sel, from, to) {
     const s = getSelection();
     s.removeAllRanges();
     s.addRange(r);
-  }, [sel, from, to]);
+  }, [from, to]);
 }
 
-/** How many ranges the CSS highlight of kind k (1 highlights, 2 search)
-    holds, and the text of the first */
-export async function marks(page, k) {
-  return page.evaluate(k => {
-    const h = CSS.highlights.get('bats-mark-' + k);
-    if (!h) return { size: 0, text: '' };
-    let text = '';
-    for (const r of h) { text = r.toString(); break; }
-    return { size: h.size, text };
-  }, k);
+/** The selection's toolbar button of name */
+export const selectionButton = (page, name) =>
+  page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name, exact: true });
+
+/** How many ranges are painted over the text (highlights, or the
+    search match), and the text of the first */
+export async function marks(page) {
+  return page.evaluate(() => {
+    let size = 0, text = '';
+    for (const [, h] of CSS.highlights) {
+      for (const r of h) { if (!size) text = r.toString(); size++; }
+    }
+    return { size, text };
+  });
+}
+
+/** The colour behind the view shown, and the text's colour */
+export async function colours(page) {
+  return page.getByRole('main').filter({ visible: true }).evaluate(e => {
+    let el = e;
+    while (el && getComputedStyle(el).backgroundColor === 'rgba(0, 0, 0, 0)') el = el.parentElement;
+    const rgb = s => s.match(/\d+/g).slice(0, 3).map(Number);
+    return { bg: rgb(getComputedStyle(el || document.body).backgroundColor), fg: rgb(getComputedStyle(e).color) };
+  });
 }
 
 /** Leaves the reader for the library, through its back arrow */
 export async function toLibrary(page) {
   await showChrome(page);
-  await page.locator('#qbbk').click();
-  await expect(page.locator('#qllc')).toBeVisible();
+  await page.getByRole('button', { name: 'Back to library' }).click();
+  await expect(librarySearch(page)).toBeVisible();
 }
 
 /** Opens the reader's bars when they are hidden */
 export async function showChrome(page) {
-  if (!(await page.locator('#qprv').isVisible())) {
-    const box = await page.locator('#qcnt').boundingBox();
+  const prev = control(page, 'Previous page');
+  if (!(await prev.isVisible())) {
+    const box = await bookPage(page).boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   }
-  await expect(page.locator('#qprv')).toBeVisible();
+  await expect(prev).toBeVisible();
+}
+
+/** Opens the settings sheet */
+export async function openSettings(page) {
+  await showChrome(page);
+  await control(page, 'Typography').click();
+  await expect(dialog(page, 'Typography and theme')).toBeVisible();
 }

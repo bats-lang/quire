@@ -66,9 +66,10 @@ describe('WASM Smoke', () => {
 
     await loadWASM(wasmBytes, root, {});
 
-    // The app creates a library container with id "qllc"
-    const library = dom.window.document.getElementById('qllc');
+    // The library is the app's main landmark, with its list of books
+    const library = dom.window.document.querySelector('[role="main"]');
     expect(library).not.toBeNull();
+    expect(library.querySelector('[role="region"][aria-label="Books"]')).not.toBeNull();
   });
 
   it('should import EPUB and create book card', async () => {
@@ -115,7 +116,7 @@ describe('WASM Smoke', () => {
     let bookCard = null;
     for (let i = 0; i < 50 && !bookCard; i++) {
       await new Promise(r => setTimeout(r, 100));
-      bookCard = dom.window.document.querySelector('#qlst .card');
+      bookCard = dom.window.document.querySelector('[role="region"][aria-label="Books"] button');
     }
 
     expect(bookCard).not.toBeNull();

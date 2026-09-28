@@ -769,7 +769,11 @@ in
            val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0)
          in acc end
          else acc)
-      else imgs_link(idx, e, so, sl, acc)
+      else let
+        (* announced and reached from the keyboard as a link *)
+        val () = _node_attr_lit(doc, idx, "role", "link")
+        val () = _node_attr_lit(doc, idx, "tabindex", "0")
+      in imgs_link(idx, e, so, sl, acc) end
     end
 end
 

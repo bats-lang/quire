@@ -4,31 +4,36 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
-  start, epubFile, rawFile, importFiles, card, openBook, readBook, place, showChrome, toLibrary,
-  selectText, marks, chapters,
+  start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
+  selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
+  selectionButton, colours,
 } from './helpers.js';
 
+const restored = page => dialog(page, 'Backup restored');
+const refused = page => dialog(page, 'Backup');
+const bg = async page => (await colours(page)).bg.join(',');
+
 async function exportBackup(page) {
-  await page.locator('#qlgr').click();
+  await libraryMenu(page);
   const download = page.waitForEvent('download');
-  await page.locator('#qlme').click();
+  await menuItem(page, 'Export backup').click();
   const d = await download;
   expect(d.suggestedFilename()).toBe('quire-backup.json');
   return readFileSync(await d.path(), 'utf8');
 }
 
 async function restoreBackup(page, path) {
-  await page.locator('#qlgr').click();
-  await page.locator('#qbfi').setInputFiles([path]);
-  await expect(page.locator('#qmod')).toBeVisible();
+  await libraryMenu(page);
+  await page.getByLabel('Import backup').setInputFiles([path]);
+  await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 async function factoryReset(page) {
-  await page.locator('#qlgr').click();
-  await page.locator('#qlmr').click();
-  await page.locator('#qmb2').click();
-  await expect(page.locator('#qibn')).toBeVisible();
-  await expect(page.locator('#qlst .card')).toHaveCount(0);
+  await libraryMenu(page);
+  await menuItem(page, 'Factory reset').click();
+  await dialog(page, 'Factory reset?').getByRole('button', { name: 'Reset' }).click();
+  await expect(importInput(page)).toBeVisible();
+  await expect(cards(page)).toHaveCount(0);
 }
 
 test('a backup holds the settings, the books, their places and annotations', async ({ page }) => {
@@ -36,13 +41,12 @@ test('a backup holds the settings, the books, their places and annotations', asy
   await readBook(page, { title: 'Backed "Up"', author: 'Keeper', rawChapters: chapters(2) });
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(2);
-  await selectText(page, '#qcnt p', 0, 8);
-  await page.locator('#qsln').click();
-  await page.locator('#qmta').fill('Line one\nwith "quotes" and ünïcode');
-  await page.locator('#qmb2').click();
-  await showChrome(page);
-  await page.locator('#qset').click();
-  await page.locator('#qfsr').fill('24');
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Note').click();
+  await dialog(page, 'Note').getByRole('textbox', { name: 'Note' }).fill('Line one\nwith "quotes" and ünïcode');
+  await dialog(page, 'Note').getByRole('button', { name: 'Save' }).click();
+  await openSettings(page);
+  await page.getByRole('slider', { name: 'Size' }).fill('24');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
@@ -68,43 +72,44 @@ test('a backup restored after a reset brings everything back, and a book importe
   for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(4);
   const at = await place(page);
-  await selectText(page, '#qcnt p', 0, 8);
-  await page.locator('#qslh').click();
-  const hl = await marks(page, 1);
-  await showChrome(page);
-  await page.locator('#qset').click();
-  await page.locator('#qth2').click();
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  const hl = await marks(page);
+  await openSettings(page);
+  const plain = await bg(page);
+  await page.getByRole('button', { name: 'Sepia', exact: true }).click();
+  await expect.poll(() => bg(page)).not.toBe(plain);
   await page.keyboard.press('Escape');
   await toLibrary(page);
-  await card(page, 'Kept One').click({ button: 'right' });
-  await page.locator('#qcmh').click();
+  const sepia = await bg(page);
+  await bookMenu(page, 'Kept One');
+  await menuItem(page, 'Hide').click();
   const path = rawFile('quire-backup.json', await exportBackup(page));
 
   await factoryReset(page);
-  await expect(page.locator('#bats-root')).not.toHaveClass(/th-sepia/);
+  expect(await bg(page)).not.toBe(sepia);
   // only book one comes back first
   await importFiles(page, [one], 1);
   await restoreBackup(page, path);
-  await expect(page.locator('#qmtt')).toHaveText('Backup restored');
-  await expect(page.locator('#qmtx')).toHaveText('Books restored: 2');
-  await page.locator('#qmb1').click();
-  await expect(page.locator('#bats-root')).toHaveClass(/th-sepia/);
+  await expect(restored(page)).toContainText('Books restored: 2');
+  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await expect.poll(() => bg(page)).toBe(sepia);
   // book one is hidden again
   await expect(card(page, 'Kept One')).toHaveCount(0);
   // book two, imported after, takes its place and highlight back
   await importFiles(page, [two], 1);
   await openBook(page, 'Kept Two');
   expect(await place(page)).toEqual(at);
-  await expect.poll(() => marks(page, 1)).toEqual(hl);
+  await expect.poll(() => marks(page)).toEqual(hl);
 });
 
 test('a file that is not a backup is refused with a message', async ({ page }) => {
   await start(page);
   await restoreBackup(page, rawFile('notes.json', Buffer.from('{"hello": [1, 2, 3]}')));
-  await expect(page.locator('#qmtx')).toContainText('not a Quire backup');
-  await page.locator('#qmb1').click();
+  await expect(refused(page)).toContainText('not a Quire backup');
+  await refused(page).getByRole('button', { name: 'OK' }).click();
   await restoreBackup(page, rawFile('broken.json', Buffer.from('{"quire":1,"books":[{"id":"00')));
-  await expect(page.locator('#qmtx')).toContainText('not a Quire backup');
+  await expect(refused(page)).toContainText('not a Quire backup');
 });
 
 test('the same backup can be restored twice in a row', async ({ page }) => {
@@ -112,7 +117,7 @@ test('the same backup can be restored twice in a row', async ({ page }) => {
   await importFiles(page, [epubFile({ title: 'Twice Restored', author: 'R' })], 1);
   const path = rawFile('twice.json', await exportBackup(page));
   await restoreBackup(page, path);
-  await page.locator('#qmb1').click();
+  await restored(page).getByRole('button', { name: 'OK' }).click();
   await restoreBackup(page, path);
-  await expect(page.locator('#qmtt')).toHaveText('Backup restored');
+  await expect(restored(page)).toBeVisible();
 });
