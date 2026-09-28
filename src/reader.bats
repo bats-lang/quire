@@ -314,7 +314,7 @@ fn _style_pct {ni:pos | ni < 256}{sn:pos | sn <= 8}{v:nat | v <= 1000}
   val off = _put(b, off, ".")
   val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
   val off = _put(b, off, "%")
-in ui_attr_buf(id, "style", b, off) end
+in ui_attr_buf(id, AStyle, b, off) end
 
 (* The scrubber at v: its thumb, its fill and the percentage *)
 fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
@@ -326,7 +326,7 @@ fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
   val () = ui_text_buf("qpct", b, off)
   val b = $A.alloc<byte>(16)
   val off = $S.int_to_str(b, 0, 16, v / 10)
-in ui_attr_buf("qtrk", "aria-valuenow", b, off) end
+in ui_attr_buf("qtrk", AValueNow, b, off) end
 
 (* The scrubber at the page shown *)
 fn _scrub_show (): void =
@@ -339,9 +339,9 @@ fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
   else let
     val @(b, _, tot) = book_weights(book_serial(), i)
     val @(ki, kl) = nid_make("qk", i)
-    val () = ui_add_n("qstk", ki, kl, "div")
+    val () = ui_add_n("qstk", ki, kl, TDiv)
     val @(ki, kl) = nid_make("qk", i)
-    val () = ui_attr_n(ki, kl, "class", "tick")
+    val () = ui_attr_n(ki, kl, AClass, "tick")
     val v = _thousandth(b, tot)
     val bb = $A.alloc<byte>(32)
     val off = _put(bb, 0, "left:")
@@ -350,7 +350,7 @@ fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
     val off = $S.int_to_str(bb, off, 32, v - (v / 10) * 10)
     val off = _put(bb, off, "%")
     val @(ki, kl) = nid_make("qk", i)
-    val () = ui_attr_n_buf(ki, kl, "style", bb, off)
+    val () = ui_attr_n_buf(ki, kl, AStyle, bb, off)
   in _ticks(i + 1, tc) end
 
 fn _ticks_show {tc:nat} (tc: int tc): void = let
@@ -1246,7 +1246,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
-                  val () = (if !_rtl then ui_attr("qcnt", "class", "caf rtl") else ui_attr("qcnt", "class", "caf"))
+                  val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
                   val fr = _frag_take()
                   val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
                   val () = _frag_put(fr)
@@ -1640,9 +1640,9 @@ fn _search_status {nt:pos | nt < 256} (t: string nt): void = ui_text("qsrm", t)
 (* The heading of chapter ch's results *)
 fn _hit_heading {c:nat} (ch: int c): void = let
   val @(ga, gl) = nid_make("qj", ch)
-  val () = ui_add_n("qsrl", ga, gl, "div")
+  val () = ui_add_n("qsrl", ga, gl, TDiv)
   val @(ga, gl) = nid_make("qj", ch)
-  val () = ui_attr_n(ga, gl, "class", "grp")
+  val () = ui_attr_n(ga, gl, AClass, "grp")
   val @(lb, lk) = toc_label_of(ch)
   val @(ga, gl) = nid_make("qj", ch)
 in ui_text_n_buf(ga, gl, lb, lk) end
@@ -1652,14 +1652,12 @@ in ui_text_n_buf(ga, gl, lb, lk) end
 fn _hit_row {i:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
   (i: int i, a: !$A.arr(byte, l, m), sl: int sl): void = let
   val @(ra, rl) = nid_make("qh", i)
-  val () = ui_add_n("qsrl", ra, rl, "button")
-  val @(ra, rl) = nid_make("qh", i)
-  val () = ui_attr_n(ra, rl, "class", "pi hgo")
+  val () = ui_btn_n("qsrl", ra, rl, "pi hgo")
   val @(pa, pl) = nid_make("qh", i)
   val @(sa, sl2) = nid_make("qhs", i)
-  val () = ui_add_nn(pa, pl, sa, sl2, "span")
+  val () = ui_add_nn(pa, pl, sa, sl2, TSpan)
   val @(sa, sl2) = nid_make("qhs", i)
-  val () = ui_attr_n(sa, sl2, "class", "snip")
+  val () = ui_attr_n(sa, sl2, AClass, "snip")
   val b = $A.alloc<byte>(sl + 1)
   val () = _frag_dup(a, b, sl, 0)
   val @(sa, sl2) = nid_make("qhs", i)

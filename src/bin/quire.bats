@@ -44,11 +44,6 @@ val _resize_gen = ref<int>(0)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
-(* The annotation whose note the dialog edits *)
-val _note_idx = ref<int>(~1)
-(* Whether that annotation was made for the note, from a selection: a
-   cancelled note then takes it away again *)
-val _note_fresh = ref<bool>(false)
 (* Where a touch started *)
 val _touch_x = ref<int>(0)
 val _touch_y = ref<int>(0)
@@ -204,11 +199,11 @@ in lib_render() end
 (* The reader's bars: shown, and hidden again after 5 seconds *)
 fn _chrome_set_off (): void = let
   val () = !_chrome := false
-in ui_attr("qrvw", "class", "rv chrome-off") end
+in ui_attr("qrvw", AClass, "rv chrome-off") end
 
 fn _chrome_set (on: bool): void = let
   val () = !_chrome := on
-  val () = (if on then ui_attr("qrvw", "class", "rv") else ui_attr("qrvw", "class", "rv chrome-off"))
+  val () = (if on then ui_attr("qrvw", AClass, "rv") else ui_attr("qrvw", AClass, "rv chrome-off"))
   val () = !_chrome_gen := !_chrome_gen + 1
   val gen = !_chrome_gen
 in
@@ -240,7 +235,7 @@ fn _open_book {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) =>
     if x.shelf = 2 then let
-      val () = modal_open(0, "Archived", "OK", "-", "-")
+      val () = modal_open(AskInform(), "Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
@@ -367,7 +362,7 @@ fn _info_open {i:int} (i: int i): void =
       val () = ui_text_buf("qivs", z, zk)
       val () = (if x.shelf = 1 then ui_text("qinh", "Unhide") else ui_text("qinh", "Hide"))
       val () = (if x.shelf = 2 then ui_text("qinr", "Restore") else ui_text("qinr", "Archive"))
-      val () = ui_attr("qinc", "src", "data:,")
+      val () = ui_attr("qinc", ASrc, "data:,")
       val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
       val () = ui_show("qinc", x.cover > 0)
@@ -383,12 +378,11 @@ fn _book_action {i:int} (i: int i, act: int): void =
     if act = 1 then _set_shelf(i, (if x.shelf = 1 then 0 else 1))
     else if act = 2 then
       (if x.shelf = 2 then let
-         val () = modal_open(0, "Restore", "OK", "-", "-")
+         val () = modal_open(AskInform(), "Restore")
        in modal_text_lit("To restore this book, import its file again.") end
        else _archive(i))
     else let
-      val () = !_menu_idx := i
-      val () = modal_open(2, "Delete book?", "Cancel", "Delete", "-")
+      val () = modal_open(AskDeleteBook(i), "Delete book?")
     in modal_text_lit("The book, its reading position and its annotations are removed.") end
 
 (* ============================================================
@@ -416,25 +410,24 @@ fn _has_selection (): bool =
   | ~$R.none() => false
   | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
 
-(* The note dialog for annotation i *)
-fn _note_open (i: int): void =
+(* The note dialog for annotation i; fresh when the highlight was made
+   for this note (from a selection), and so goes if the note is
+   cancelled: the dialog's answer carries it (AskNote) *)
+fn _note_open (i: int, fresh: bool): void =
   if i < 0 then ()
   else let
-    val () = !_note_idx := i
-    val () = !_note_fresh := false
-    val () = modal_open(5, "Note", "Cancel", "Save", "-")
+    val () = modal_open(AskNote(i, fresh), "Note")
     val () = modal_textarea()
   in annot_note_show(i) end
 
-(* The note in the dialog's text area, kept as annotation _note_idx's *)
-fn _note_save (): void = let
+(* The note in the dialog's text area, kept as annotation i's *)
+fn _note_save (i: int): void = let
   val a = $A.alloc<byte>(4)
   val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
   val @(f, b) = $A.freeze<byte>(a)
   val r = $DR.read_input_value(b, 4)
   val () = $A.drop<byte>(f, b)
   val () = $A.free<byte>($A.thaw<byte>(f))
-  val i = !_note_idx
 in
   case+ r of
   | ~$R.none() => let
@@ -492,46 +485,45 @@ fn _annot_go (i: int): void = let
   val @(ch, pg, sn) = annot_dest(i)
 in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
 
-(* The dialog's answer: its first button (b1: Skip, Cancel or OK, which
-   Escape also gives) or its second (b2) *)
-fn _modal_answer (b1: bool, b2: bool): void = let
-  val k = modal_kind()
-in
-  if k = 1 then
-    (if b1 then import_dup_answer(1)
-     else if b2 then import_dup_answer(2) else ())
-  else if k = 2 then
-    (if b2 then let
-       val () = modal_close()
-       val () = ui_show("qinf", false)
-       val i = !_menu_idx
-     in if i >= 0 then _delete(i) else () end
-     else if b1 then modal_close() else ())
-  else if k = 3 then
-    (if b2 then let
-       val () = modal_close()
-       val () = $IDB.idb_delete_database()
-       val () = lib_clear()
-       val () = set_reset()
-     in $NAV.reload() end
-     else if b1 then modal_close() else ())
-  else if k = 5 then
-    (if b2 then let
-       val () = _note_save()
-       val () = !_note_fresh := false
-     in modal_close() end
-     else if b1 then let
-       (* a note begun from a selection and cancelled leaves no highlight *)
-       val () = (if !_note_fresh then let
-           val () = !_note_fresh := false
-           val () = annot_delete(!_note_idx)
-         in annot_render() end else ())
-     in modal_close() end
-     else ())
-  else if b1 then modal_close()
-  else if b2 then modal_close()
-  else ()
-end
+(* The dialog's answer, with the question it answers: every question
+   is matched here (case+ is exhaustive), and what deletes or resets
+   is done only on the Confirmed answer to the question that asked
+   for it, on what that question named *)
+fn _modal_answer (second: bool): void =
+  case+ modal_answer(second) of
+  | Confirmed(AskDuplicate()) => import_dup_answer(true)
+  | Dismissed(AskDuplicate()) => import_dup_answer(false)
+  | Confirmed(AskDeleteBook(i)) => let
+      val () = ui_show("qinf", false)
+    in if i >= 0 then _delete(i) else () end
+  | Confirmed(AskFactoryReset()) => let
+      val () = $IDB.idb_delete_database()
+      val () = lib_clear()
+      val () = set_reset()
+    in $NAV.reload() end
+  | Confirmed(AskResetSettings()) => let
+      val () = set_reset()
+      val () = set_sliders()
+    in _settings_changed() end
+  | Confirmed(AskDeleteHighlight(i)) => let
+      val () = annot_delete(i)
+    in annot_render() end
+  | Confirmed(AskDeleteBookmark(i)) => let
+      val () = annot_delete(i)
+    in annot_render_bookmarks() end
+  | Confirmed(AskNote(i, _)) => _note_save(i)
+  (* a note begun from a selection and cancelled leaves no highlight *)
+  | Dismissed(AskNote(i, fresh)) =>
+    if fresh then let val () = annot_delete(i) in annot_render() end else ()
+  | Confirmed(AskInform()) => ()
+  | Dismissed(AskInform()) => ()
+  | Confirmed(AskNothing()) => ()
+  | Dismissed(AskNothing()) => ()
+  | Dismissed(AskDeleteBook(_)) => ()
+  | Dismissed(AskFactoryReset()) => ()
+  | Dismissed(AskResetSettings()) => ()
+  | Dismissed(AskDeleteHighlight(_)) => ()
+  | Dismissed(AskDeleteBookmark(_)) => ()
 
 fn _wire_library (): void = let
   (* import *)
@@ -539,19 +531,26 @@ fn _wire_library (): void = let
   (* drag and drop *)
   val () = ui_listen("qllc", "dragover", 23, lam(_) => let
       val () = $EV.prevent_default()
-    in let val () = ui_attr("qllc", "class", "lib drag") in 0 end end)
+    in let val () = ui_attr("qllc", AClass, "lib drag") in 0 end end)
   val () = ui_listen("qllc", "dragleave", 24, lam(_) => let
-      val () = ui_attr("qllc", "class", "lib")
+      val () = ui_attr("qllc", AClass, "lib")
     in 0 end)
   val () = ui_listen("qllc", "drop", 25, lam(_) => let
       val () = $EV.prevent_default()
-      val () = ui_attr("qllc", "class", "lib")
+      val () = ui_attr("qllc", AClass, "lib")
       val () = import_dropped()
     in 0 end)
   (* the cards: open, and the book menu *)
   val () = ui_listen("qlst", "click", 16, lam(h) => let
-      val i = _target_num(h, "k")
-    in if i >= 0 then let val () = _open_book(i) in 0 end else 0 end)
+      val t = _target(h)
+      val i = _row_of(t, "k")
+      val m = _row_of(t, "km")
+      val () = _target_free(t)
+    in
+      if i >= 0 then let val () = _open_book(i) in 0 end
+      else if m >= 0 then let val () = _menu_open(m) in 0 end
+      else 0
+    end)
   val () = ui_listen("qlst", "contextmenu", 15, lam(h) => let
       val () = $EV.prevent_default()
       val i = _target_num(h, "k")
@@ -591,10 +590,28 @@ fn _wire_library (): void = let
       val () = lib_shelf_set((if s >= 2 then 0 else s + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
-  val () = ui_listen("qlsq", "input", 22, lam(h) => let
+  (* the field is made again to be cleared: its events are taken on
+     its box *)
+  val () = ui_listen("qlsb", "input", 22, lam(h) => let
       val @(q, n) = _input_text(h)
+      val () = ui_show("qlsx", n > 0)
       val () = lib_query_set(q, n)
     in let val () = lib_render() in 0 end end)
+  val () = ui_listen("qlsb", "click", 53, lam(h) => let
+      val t = _target(h)
+      val clear = _is(t, "qlsx")
+      val () = _target_free(t)
+    in
+      if clear then let
+        val () = ui_clear("qlsb")
+        val () = ui_field("qlsb", "qlsq", FSearch, "search", "Search the library")
+        val () = ui_icon_btn("qlsb", "qlsx", "ibtn sclear", IcClose, "Clear search")
+        val () = ui_show("qlsx", false)
+        val () = lib_query_set($A.alloc<byte>(1), 0)
+        val () = lib_render()
+      in let val () = ui_focus("qlsq") in 0 end end
+      else 0
+    end)
   (* a backup picked to restore *)
   val () = ui_listen("qlmi", "change", 50, lam(_) => let
       val () = ui_show("qlmn", false)
@@ -610,7 +627,7 @@ fn _wire_library (): void = let
       val t = _target(h)
       val () = (if _is(t, "qlmr") then let
           val () = ui_show("qlmn", false)
-          val () = modal_open(3, "Factory reset?", "Cancel", "Reset", "-")
+          val () = modal_open(AskFactoryReset(), "Factory reset?")
         in modal_text_lit("Every book, position, annotation and setting is deleted.") end
         else if _is(t, "qlme") then let
           val () = ui_show("qlmn", false)
@@ -624,8 +641,13 @@ fn _wire_library (): void = let
       val t = _target(h)
       val b1 = _is(t, "qmb1")
       val b2 = _is(t, "qmb2")
+      val out = _is(t, "qmod")
       val () = _target_free(t)
-    in let val () = _modal_answer(b1, b2) in 0 end end)
+    in
+      if b2 then let val () = _modal_answer(true) in 0 end
+      else if (if b1 then true else out) then let val () = _modal_answer(false) in 0 end
+      else 0
+    end)
 in end
 
 fn _wire_settings (): void = let
@@ -642,8 +664,9 @@ fn _wire_settings (): void = let
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
         else if _is(t, "qsrs") then let
-            val () = set_reset()
-          in let val () = set_sliders() in true end end
+            val () = modal_open(AskResetSettings(), "Reset to defaults?")
+            val () = modal_text_lit("Font, size, spacing, margins and theme go back to their defaults.")
+          in false end
         else false): bool
       val close = _is(t, "qscl")
       val () = _target_free(t)
@@ -671,17 +694,13 @@ in $DR.get_measure_w() > 0 end
 
 (* The search field, made again holding a[0, k) *)
 fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void =
-  if k > 0 then ui_attr_buf("qsri", "value", a, k) else $A.free<byte>(a)
+  if k > 0 then ui_attr_buf("qsri", AValue, a, k) else $A.free<byte>(a)
 
 fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
   val () = ui_clear("qsrh")
-  val () = ui_add("qsrh", "qsri", "input")
-  val () = ui_attr("qsri", "type", "search")
-  val () = ui_attr("qsri", "placeholder", "Search in book")
-  val () = ui_attr("qsri", "aria-label", "Search in book")
+  val () = ui_field("qsrh", "qsri", FSearch, "search", "Search in book")
   val () = _search_value(a, k)
-  val () = ui_btn("qsrh", "qsrx", "ibtn", "\xE2\x9C\x95")
-in ui_attr("qsrx", "aria-label", "Close search") end
+in ui_icon_btn("qsrh", "qsrx", "ibtn", IcClose, "Close search") end
 
 fn _search_open (): void = let
   val () = ui_show("qsrp", true)
@@ -841,7 +860,7 @@ end
 (* Escape: the dialog is answered with its first button, or else the
    library's open menu or book info closes; true when one was *)
 fn _escape_overlay (): bool =
-  if _shown("qmod") then let val () = _modal_answer(true, false) in true end
+  if modal_open_now() then let val () = _modal_answer(false) in true end
   else if _shown("qctx") then let val () = ui_show("qctx", false) in true end
   else if _shown("qlmn") then let val () = ui_show("qlmn", false) in true end
   else if _shown("qinf") then let val () = ui_show("qinf", false) in true end
@@ -865,8 +884,8 @@ end
 fn _toc_open (): void = let
   val () = (case+ reading_get() of
     | @(_, _, c, tc) => toc_render((if c > 0 then c - 1 else 0), tc))
-  val () = ui_attr("qtct", "aria-selected", "true")
-  val () = ui_attr("qtcm", "aria-selected", "false")
+  val () = ui_attr("qtct", ASelected, "true")
+  val () = ui_attr("qtcm", ASelected, "false")
   val () = ui_show("qtcl", true)
   val () = ui_show("qtbl", false)
   val () = ui_show("qtoc", true)
@@ -875,8 +894,8 @@ in ui_focus("qtcx") end
 (* The contents panel, open on its bookmarks tab *)
 fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
-  val () = ui_attr("qtct", "aria-selected", "false")
-  val () = ui_attr("qtcm", "aria-selected", "true")
+  val () = ui_attr("qtct", ASelected, "false")
+  val () = ui_attr("qtcm", ASelected, "true")
   val () = ui_show("qtcl", false)
 in ui_show("qtbl", true) end
 
@@ -891,7 +910,9 @@ fn _wire_toc (): void = let
         else if _is(t, "qtct") then _toc_open()
         else if _is(t, "qtcm") then _bookmarks_open()
         else if bgo >= 0 then let val () = ui_show("qtoc", false) in _annot_go(bgo) end
-        else if bdl >= 0 then let val () = annot_delete(bdl) in _bookmarks_open() end
+        else if bdl >= 0 then let
+          val () = modal_open(AskDeleteBookmark(bdl), "Delete bookmark?")
+        in modal_text_lit("The bookmark is removed.") end
         else if row >= 0 then let
           val () = ui_show("qtoc", false)
         in reader_goto_entry(row) end
@@ -938,8 +959,7 @@ fn _wire_annotations (): void = let
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
         else if nt then let
-            val () = _note_open(annot_highlight())
-          in !_note_fresh := true end
+          in _note_open(annot_highlight(), true) end
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
@@ -959,8 +979,10 @@ fn _wire_annotations (): void = let
       val () = (if close then ui_show("qanp", false)
         else if ex then _export()
         else if go >= 0 then let val () = ui_show("qanp", false) in _annot_go(go) end
-        else if nt >= 0 then _note_open(nt)
-        else if dl >= 0 then let val () = annot_delete(dl) in annot_render() end
+        else if nt >= 0 then _note_open(nt, false)
+        else if dl >= 0 then let
+          val () = modal_open(AskDeleteHighlight(dl), "Delete highlight?")
+        in modal_text_lit("The highlight and its note are removed.") end
         else ())
     in 0 end)
 in end

@@ -7,7 +7,8 @@ import {
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
 } from './helpers.js';
 
-const shelf = page => page.getByRole('button', { name: 'Shelf shown' });
+// The shelf button is named by the shelf it shows
+const shelf = page => page.getByRole('button', { name: /^(Library|Hidden|Archived)$/ });
 const sort = page => page.getByRole('button', { name: /^Sort:/ });
 const empty = /Import an EPUB file/;
 
@@ -27,8 +28,10 @@ test('imported books show their title and author, and survive a reload', async (
   await expect(card(page, 'Alpha Book')).toContainText('Ann Author');
   await expect(card(page, 'Beta Book')).toContainText('Bob Writer');
   await expect(page.getByText(empty)).toBeHidden();
-  // the cover is shown from the book's image
-  await expect.poll(() => card(page, 'Alpha Book').getByRole('img').evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
+  // the cover is shown from the book's image. It is decorative (alt=""),
+  // the title being beside it, so it has no role to find it by: it is
+  // the card's one image element
+  await expect.poll(() => card(page, 'Alpha Book').locator('img').evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
   await page.reload();
   await expect(cards(page)).toHaveCount(2);
   await expect(card(page, 'Beta Book')).toContainText('Bob Writer');
@@ -108,6 +111,16 @@ test('the search box filters by title and author', async ({ page }) => {
   await expect(page.getByText('No books match')).toBeVisible();
   await q.fill('');
   await expect(cards(page)).toHaveCount(2);
+  // the clear button shows only while there is something to clear
+  const clear = page.getByRole('button', { name: 'Clear search' });
+  await expect(clear).toBeHidden();
+  await librarySearch(page).fill('ocean');
+  await expect(cards(page)).toHaveCount(1);
+  await clear.click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(librarySearch(page)).toHaveValue('');
+  await expect(librarySearch(page)).toBeFocused();
+  await expect(clear).toBeHidden();
 });
 
 test('a hidden book moves to the hidden shelf and back', async ({ page }) => {
@@ -176,14 +189,15 @@ test('book info shows the book and its progress', async ({ page }) => {
   await expect(info).toContainText('Info Book');
   await expect(info).toContainText('Informant');
   await expect(info).toContainText(/Last read\s*Never/);
-  // a book without a cover shows no image
-  await expect(info.getByRole('img')).toHaveCount(0);
+  // a book without a cover shows no image (covers are decorative, so
+  // they are found as the view's image element, not by role)
+  await expect(info.locator('img')).toBeHidden();
   await info.getByRole('button', { name: '← Library' }).click();
   // one with a cover shows it, at a size that can be seen
   await importFiles(page, [epubFile({ title: 'Covered Book', author: 'Pictor', coverImage: true })], 2);
   await bookMenu(page, 'Covered Book');
   await menuItem(page, 'Book info').click();
-  const cover = info.getByRole('img');
+  const cover = info.locator('img');
   await expect.poll(() => cover.evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
   expect((await cover.boundingBox()).width).toBeGreaterThanOrEqual(100);
   await info.getByRole('button', { name: '← Library' }).click();
@@ -238,6 +252,10 @@ test('the book menu and the library menu close without doing anything', async ({
   // a click outside the menu
   await page.mouse.click(5, 5);
   await expect(page.getByRole('menu')).toBeHidden();
+  // a right-click on the card opens the same menu
+  await card(page, 'Left Alone').getByRole('button').first().click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: 'Book menu' })).toBeVisible();
+  await page.keyboard.press('Escape');
   await libraryMenu(page);
   await menuItem(page, 'Close').click();
   await expect(page.getByRole('menu')).toBeHidden();

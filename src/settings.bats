@@ -95,13 +95,13 @@ fn _apply_theme (): void = let
   val t = (!_set).theme
   val t = (if t = 0 then (if !_sys_dark then 3 else 1) else t): set_theme
 in
-  if t = 3 then ui_attr("bats-root", "class", "app th-dark")
-  else if t = 2 then ui_attr("bats-root", "class", "app th-sepia")
-  else ui_attr("bats-root", "class", "app th-light")
+  if t = 3 then ui_attr("bats-root", AClass, "app th-dark")
+  else if t = 2 then ui_attr("bats-root", AClass, "app th-sepia")
+  else ui_attr("bats-root", AClass, "app th-light")
 end
 
 fn _pressed {ni:pos | ni < 256} (id: string ni, on: bool): void =
-  if on then ui_attr(id, "aria-pressed", "true") else ui_attr(id, "aria-pressed", "false")
+  if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
 (* The settings panel's controls, showing the settings *)
 fn _show_controls (): void = let

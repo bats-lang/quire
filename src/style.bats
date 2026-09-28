@@ -501,7 +501,7 @@ fn _g_0_fonts {r:nat | r >= 403} (sh: sheet(r, 0)): [q:nat | q >= r - 403] sheet
   val () = raw(sh, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:swap}")
 in sh end
 
-fn _g_1_shell {r:nat | r >= 4315} (sh: sheet(r, 0)): [q:nat | q >= r - 4315] sheet(q, 0) = let
+fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] sheet(q, 0) = let
   val sh = rule(sh, "body")
   val sh = lay(sh, Margin(), "0")
   val sh = surf(S_fg_bg | sh, 1, 0)
@@ -572,8 +572,15 @@ fn _g_1_shell {r:nat | r >= 4315} (sh: sheet(r, 0)): [q:nat | q >= r - 4315] she
   val sh = lay(sh, BorderRadius(), "6px")
   val sh = surf(S_fg_bg | sh, 1, 0)
   val sh = close(sh)
-  val sh = rule(sh, ".search")
+  val sh = rule(sh, ".sfield")
   val sh = lay(sh, FlexBasis(), "100%")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, AlignItems(), "center")
+  val sh = lay(sh, Gap(), "4px")
+  val sh = close(sh)
+  val sh = rule(sh, ".search")
+  val sh = lay(sh, Flex(), "1")
+  val sh = lay(sh, MinWidth(), "0")
   val sh = lay(sh, Padding(), "6px 10px")
   val sh = lay(sh, BorderRadius(), "6px")
   val sh = close(sh)
@@ -1309,7 +1316,7 @@ fn _g_5_media {r:nat | r >= 284} (sh: sheet(r, 0)): [q:nat | q >= r - 284] sheet
   val sh = lay(sh, Padding(), "8px 9px")
   val sh = lay(sh, FontSize(), "14px")
   val sh = close(sh)
-  val sh = rule(sh, ".bar>.search")
+  val sh = rule(sh, ".bar>.sfield")
   val sh = lay(sh, Order(), "3")
   val sh = close(sh)
   val sh = media_end(sh)

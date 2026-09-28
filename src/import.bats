@@ -129,7 +129,7 @@ fn _stage {nt:pos | nt < 256} (t: string nt, pct: [p:nat | p <= 100] int p): voi
   val off = _puts(sb, 0, "width:")
   val off = $S.int_to_str(sb, off, 24, pct)
   val off = _puts(sb, off, "%")
-in ui_attr_buf("qimf", "style", sb, off) end
+in ui_attr_buf("qimf", AStyle, sb, off) end
 
 fn _stage_name (): void =
   case+ _name_take() of
@@ -386,27 +386,34 @@ end
    ============================================================ *)
 
 (* A file waiting for the answer to "already in the library": the file,
-   its size, id and the library book it matches *)
+   its size, id and the library book it matches, with the resolver the
+   answer resolves while it is asked (Asked), and without it once it
+   is answered (Answered). The resolver is linear: it is resolved once,
+   by the answer, and there is no id that could name a resolver no
+   longer there. *)
 datavtype dup =
-  | {n:pos} Dup of ($FI.infile(n), int n, Int, Int, Int)
+  | {n:pos} Asked of ($FI.infile(n), int n, Int, Int, Int, $P.resolver(Int))
+  | {n:pos} Answered of ($FI.infile(n), int n, Int, Int, Int)
   | NoDup of ()
 
 val _dup = ref<dup>(NoDup())
-(* The stashed resolver the answer fires (1 skip, 2 replace), or -1
-   when no question is open; ids start at 0 *)
-val _dup_answer = ref<int>(~1)
 
 fn _dup_take (): dup = let
   var x: dup = NoDup()
   val () = ref_exch_elt<dup>(_dup, x)
 in x end
 
+(* Puts x in; a file still held there is closed (imports go one after
+   another, so none is) *)
 fn _dup_put (x: dup): void = let
   var cur: dup = x
   val () = ref_exch_elt<dup>(_dup, cur)
 in
   case+ cur of
-  | ~Dup(f, _, _, _, _) => $FI.close(f)
+  | ~Asked(f, _, _, _, _, r) => let
+      val () = $FI.close(f)
+    in $P.resolve<Int>(r, 1) end
+  | ~Answered(f, _, _, _, _) => $FI.close(f)
   | ~NoDup() => ()
 end
 
@@ -465,15 +472,14 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
             (* An archived book is restored by importing it again *)
             if x.shelf = 2 then _import_go(f, n, h1, h2, i)
             else let
-              val () = _dup_put(Dup(f, n, h1, h2, i))
               val @(p, r) = $P.create<Int>()
-              val () = !_dup_answer := $P.stash(r)
+              val () = _dup_put(Asked(f, n, h1, h2, i, r))
               val @(tb, tn) = lib_text(i, 0)
               val buf = $A.alloc<byte>(320)
               val () = _copy_in(tb, tn, buf, 0, 0)
               val () = $A.free<byte>(tb)
               val off = _puts(buf, tn, " is already in your library.")
-              val () = modal_open(1, "Already in library", "Skip", "Replace", "-")
+              val () = modal_open(AskDuplicate(), "Already in library")
               val () = modal_text(buf, off)
             in
               $P.and_then<Int><Int>($P.vow(p), lam(ans) =>
@@ -481,7 +487,12 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
                 | ~NoDup() => let
                     val () = ui_show("qimp", false)
                   in $P.ret<Int>(~1) end
-                | ~Dup(f2, n2, g1, g2, j) =>
+                | ~Asked(f2, _, _, _, _, r2) => let
+                    val () = $FI.close(f2)
+                    val () = $P.resolve<Int>(r2, 1)
+                    val () = ui_show("qimp", false)
+                  in $P.ret<Int>(~1) end
+                | ~Answered(f2, n2, g1, g2, j) =>
                   if ans = 2 then _import_go(f2, n2, g1, g2, j)
                   else let
                     val () = $FI.close(f2)
@@ -491,23 +502,26 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
       end
     end
 
-(* The answer to "already in the library": 1 skip, 2 replace *)
-#pub fn import_dup_answer (ans: int): void
+(* The answer to "already in the library": replace (true) or skip *)
+#pub fn import_dup_answer (replace: bool): void
 
-implement import_dup_answer (ans) = let
-  val () = modal_close()
+implement import_dup_answer (replace) = let
   (* skipped: the file's import card goes at once *)
-  val () = (if ans = 2 then () else ui_show("qimp", false))
-  val id = !_dup_answer
-  val () = !_dup_answer := ~1
-in if id >= 0 then $P.fire(id, (if ans = 2 then 2 else 1)) else () end
+  val () = (if replace then () else ui_show("qimp", false))
+in
+  case+ _dup_take() of
+  | ~Asked(f, n, h1, h2, i, r) => let
+      val () = _dup_put(Answered(f, n, h1, h2, i))
+    in $P.resolve<Int>(r, (if replace then 2 else 1)) end
+  | x => _dup_put(x)
+end
 
 (* Imports files i to c - 1 of source src (0 the file input qfin, 1 the
    last drop), one after another *)
 fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): void =
   if i >= c then
     (* the input's files are all read: its choice is cleared *)
-    (if src = 0 then ui_file_input("qibn", "qfin", "Import EPUB", ".epub,application/epub+zip", "Import EPUB", true) else ())
+    (if src = 0 then ui_file_input("qibn", "qfin", "Import EPUB", ".epub,application/epub+zip", true) else ())
   else let
     val p = (if src = 0 then let
         val ia = $A.alloc<byte>(4)

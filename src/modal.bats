@@ -1,4 +1,4 @@
-(* modal -- the one dialog: a title, a text and up to three buttons *)
+(* modal -- the one dialog: a title, a text and one or two buttons *)
 
 #target wasm begin
 
@@ -7,29 +7,65 @@
 
 staload "ui.sats"
 
-(* What the open dialog asks: 0 none, 1 a duplicate import (Skip,
-   Replace), 2 delete a book (Cancel, Delete), 3 factory reset (Cancel,
-   Reset), 4 library menu (Export backup, Import backup, Reset), 5 a
-   note (Cancel, Save) *)
-val _kind = ref<int>(0)
+(* What the dialog asks. Its buttons, their labels and whether the
+   second one is marked as destructive follow from this alone, and the
+   answer comes back with it (modal_answer), so an answer is always
+   handled as an answer to the question that was asked, with what it
+   was asked about (a book, an annotation): nothing is looked up in a
+   variable that may have changed since. *)
+#pub datatype ask =
+  | AskNothing                  (* no dialog is open *)
+  | AskInform                   (* a message: OK *)
+  | AskDuplicate                (* a book already in the library: Skip, Replace *)
+  | AskDeleteBook of ([i:int] int i)  (* library book i: Cancel, Delete *)
+  | AskFactoryReset             (* everything: Cancel, Reset *)
+  | AskResetSettings            (* the reading settings: Cancel, Reset *)
+  | AskDeleteHighlight of ([i:int] int i)  (* annotation i: Cancel, Delete *)
+  | AskDeleteBookmark of ([i:int] int i)   (* annotation i: Cancel, Delete *)
+  | AskNote of (int, bool)      (* annotation i's note, and whether the
+                                   highlight was made for it: Cancel, Save *)
 
-#pub fn modal_kind (): int
-implement modal_kind () = !_kind
+(* The answer: the second button (Confirmed), or the first, Escape or
+   a click outside (Dismissed) *)
+#pub datatype answer =
+  | Confirmed of ask
+  | Dismissed of ask
 
-(* Opens the dialog of kind k with its title and buttons (a button whose
-   label is "-" is not shown) *)
-#pub fn modal_open {nt,n1,n2,n3:pos | nt < 256; n1 < 256; n2 < 256; n3 < 256}
-  (k: int, title: string nt, b1: string n1, b2: string n2, b3: string n3): void
+val _asked = ref<ask>(AskNothing())
 
-implement modal_open (k, title, b1, b2, b3) = let
-  val () = !_kind := k
+(* Whether a dialog is open *)
+#pub fn modal_open_now (): bool
+implement modal_open_now () =
+  case+ !_asked of
+  | AskNothing() => false
+  | _ => true
+
+(* The buttons' labels and the second one's tone for question a *)
+fn _buttons (a: ask): @([k:pos | k < 256] string k, [k:pos | k < 256] string k, tone) =
+  case+ a of
+  | AskNothing() => @("OK", "-", Plain)
+  | AskInform() => @("OK", "-", Plain)
+  | AskDuplicate() => @("Skip", "Replace", Plain)
+  | AskDeleteBook(_) => @("Cancel", "Delete", Danger)
+  | AskFactoryReset() => @("Cancel", "Reset", Danger)
+  | AskResetSettings() => @("Cancel", "Reset", Danger)
+  | AskDeleteHighlight(_) => @("Cancel", "Delete", Danger)
+  | AskDeleteBookmark(_) => @("Cancel", "Delete", Danger)
+  | AskNote(_, _) => @("Cancel", "Save", Plain)
+
+(* Opens the dialog asking a, with its title *)
+#pub fn modal_open {nt:pos | nt < 256} (a: ask, title: string nt): void
+
+implement modal_open (a, title) = let
+  val () = !_asked := a
+  val @(b1, b2, t) = _buttons(a)
   val () = ui_text("qmtt", title)
   val () = ui_text("qmb1", b1)
   val () = ui_text("qmb2", b2)
-  val () = ui_text("qmb3", b3)
-  val () = ui_show("qmb1", string_get_at(b1, 0) <> '-')
+  val () = (case+ t of
+    | Danger() => ui_class("qmb2", "btn danger")
+    | Plain() => ui_class("qmb2", "btn btn-p"))
   val () = ui_show("qmb2", string_get_at(b2, 0) <> '-')
-  val () = ui_show("qmb3", string_get_at(b3, 0) <> '-')
   val () = ui_show("qmtx", true)
   val () = ui_show("qmta", false)
   val () = ui_show("qmod", true)
@@ -49,9 +85,13 @@ implement modal_textarea () = let
   val () = ui_show("qmta", true)
 in ui_focus("qmta") end
 
-#pub fn modal_close (): void
-implement modal_close () = let
-  val () = !_kind := 0
-in ui_show("qmod", false) end
+(* Closes the dialog; the answer, second is whether its second button
+   was chosen, with the question it answers *)
+#pub fn modal_answer (second: bool): answer
+implement modal_answer (second) = let
+  val a = !_asked
+  val () = !_asked := AskNothing()
+  val () = ui_show("qmod", false)
+in if second then Confirmed(a) else Dismissed(a) end
 
 end (* #target wasm *)
