@@ -262,13 +262,16 @@ fn _sattr_n_buf {li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:p
   val () = $A.free<byte>($A.thaw<byte>(if_))
 in end
 
-#pub datatype attr = AClass | ASelected | APressed | AValue | AStyle | AControls
+(* The attributes other code may set. There is no style: the one inline
+   style is a place (ui_place), so nothing can set a colour, a size or
+   anything else the stylesheet proves *)
+#pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | ASrc | AValueNow | ACurrent
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
   | AClass() => "class" | ASelected() => "aria-selected" | APressed() => "aria-pressed"
-  | AValue() => "value" | AStyle() => "style" | AControls() => "aria-controls"
+  | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current"
 
@@ -293,6 +296,36 @@ implement ui_attr_buf(id, a, buf, k) = _sattr_buf(id, _attr_name(a), buf, k)
   (id: $A.arr(byte, li, ni), inn: int ni, a: attr, buf: $A.arr(byte, l, n), k: int k): void
 
 implement ui_attr_n_buf(id, inn, a, buf, k) = _sattr_n_buf(id, inn, _attr_name(a), buf, k)
+
+(* Where an element sits along its track (PLeft) or how much of it it
+   fills (PWidth) *)
+#pub datatype place = PLeft | PWidth
+
+(* "left:" or "width:", then v / 10 with one decimal, then "%" *)
+fn _place_style {l:agz}{v:nat | v <= 1000} (b: !$A.arr(byte, l, 32), p: place, v: int v): [k:pos | k <= 32] int k = let
+  val off = (case+ p of
+    | PLeft() => _put_str(b, 0, "left:", 5, 0)
+    | PWidth() => _put_str(b, 0, "width:", 6, 0)): [o:pos | o <= 6] int o
+  val off = $S.int_to_str(b, off, 32, v / 10)
+  val off = _put_str(b, off, ".", 1, 0)
+  val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
+in _put_str(b, off, "%", 1, 0) end
+
+(* Element id's place: v tenths of a percent of its track *)
+#pub fn ui_place {ni:pos | ni < 256}{v:nat | v <= 1000} (id: string ni, p: place, v: int v): void
+
+implement ui_place (id, p, v) = let
+  val b = $A.alloc<byte>(32)
+  val k = _place_style(b, p, v)
+in _sattr_buf(id, "style", b, k) end
+
+#pub fn ui_place_n {li:agz}{ni:pos | ni < 256}{v:nat | v <= 1000}
+  (id: $A.arr(byte, li, ni), inn: int ni, p: place, v: int v): void
+
+implement ui_place_n (id, inn, p, v) = let
+  val b = $A.alloc<byte>(32)
+  val k = _place_style(b, p, v)
+in _sattr_n_buf(id, inn, "style", b, k) end
 
 (* The class of element id *)
 #pub fn ui_class {ni:pos | ni < 256}{nv:pos | nv < 256} (id: string ni, cls: string nv): void

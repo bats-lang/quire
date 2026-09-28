@@ -172,7 +172,10 @@ Elements are made through `src/ui.bats`:
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
   images are decorative (`alt=""`); a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
-* `ui_attr` takes a typed attribute that cannot be a name or a role.
+* `ui_attr` takes a typed attribute that cannot be a name, a role or a
+  style. The one inline style is a place (`ui_place`: left or width,
+  in tenths of a percent up to 100%), so no inline style can set a
+  colour or anything else the stylesheet proves.
 
 Nothing is lost at a click, except by emptying the Trash:
 

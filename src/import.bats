@@ -125,11 +125,7 @@ in ui_show("qimp", false) end
 fn _stage {nt:pos | nt < 256} (t: string nt, pct: [p:nat | p <= 100] int p): void = let
   val () = ui_show("qimp", true)
   val () = ui_text("qims", t)
-  val sb = $A.alloc<byte>(24)
-  val off = _puts(sb, 0, "width:")
-  val off = $S.int_to_str(sb, off, 24, pct)
-  val off = _puts(sb, off, "%")
-in ui_attr_buf("qimf", AStyle, sb, off) end
+in ui_place("qimf", PWidth, pct * 10) end
 
 fn _stage_name (): void =
   case+ _name_take() of
