@@ -14,6 +14,8 @@
 #use wasm.bats-packages.dev/dom as D
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
+staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+#use result as R
 
 (* ============================================================
    Ids
@@ -317,6 +319,40 @@ implement ui_text_n_b(id, inn, tb, off, k) = let
   val () = $A.free<byte>($A.thaw<byte>(if_))
 in end
 
+(* The text of element id: a long literal (under 64 KiB) *)
+#pub fn ui_text_long {ni:pos | ni < 256}{nt:pos | nt < 65536} (id: string ni, t: string nt): void
+
+implement ui_text_long(id, t) = let
+  val inn = _len(id)
+  val tn = g1u2i(string1_length(t))
+  val ta = $A.alloc<byte>(tn)
+  val () = $A.write_text(ta, 0, $A.text_lit(t), tn)
+  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
+  val @(tf, tb) = $A.freeze<byte>(ta)
+  val () = _text_b(ib, inn, tb, 0, tn)
+  val () = $A.drop<byte>(tf, tb)
+  val () = $A.free<byte>($A.thaw<byte>(tf))
+  val () = $A.drop<byte>(if_, ib)
+in $A.free<byte>($A.thaw<byte>(if_)) end
+
+(* A new element with its class *)
+#pub fn ui_el {np,ni:pos | np < 256; ni < 256}{tl:pos | tl < 256}{nc:pos | nc < 256}
+  (parent: string np, id: string ni, tag: string tl, cls: string nc): void
+
+implement ui_el(parent, id, tag, cls) = let
+  val () = ui_add(parent, id, tag)
+in ui_attr(id, "class", cls) end
+
+(* A new button with its class and label *)
+#pub fn ui_btn {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nl:pos | nl < 256}
+  (parent: string np, id: string ni, cls: string nc, label: string nl): void
+
+implement ui_btn(parent, id, cls, label) = let
+  val () = ui_add(parent, id, "button")
+  val () = ui_attr(id, "type", "button")
+  val () = ui_attr(id, "class", cls)
+in ui_text(id, label) end
+
 (* ============================================================
    Events and focus
    ============================================================ *)
@@ -357,6 +393,16 @@ implement ui_listen_win(ev, lid, cb) = let
   val () = $EV.listen_window(eb, en, lid, cb)
   val () = $A.drop<byte>(ef, eb)
 in $A.free<byte>($A.thaw<byte>(ef)) end
+
+(* Measures element id: its box goes to dom_read's measure slots *)
+#pub fn ui_measure {ni:pos | ni < 256} (id: string ni): void
+
+implement ui_measure(id) = let
+  val inn = _len(id)
+  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
+  val _ = $R.discard<int><int>($DR.measure(ib, inn))
+  val () = $A.drop<byte>(if_, ib)
+in $A.free<byte>($A.thaw<byte>(if_)) end
 
 #pub fn ui_focus {ni:pos | ni < 256} (id: string ni): void
 

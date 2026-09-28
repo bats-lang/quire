@@ -591,21 +591,25 @@ end
 
 (* The library view shows only the books whose title or author has
    q[0, n) in it (letters in any case); an empty query shows all *)
-#pub fn lib_query_set {l:agz}{n:nat} (q: $A.arr(byte, l, n), n: int n): void
+#pub fn lib_query_set {l:agz}{m:pos}{n:nat | n <= m} (q: $A.arr(byte, l, m), n: int n): void
+
+fun _lowcopy {ls,ld:agz}{m,n:nat | n <= m}{i:nat | i <= n} .<n - i>.
+  (q: !$A.arr(byte, ls, m), d: !$A.arr(byte, ld, n), n: int n, i: int i): void =
+  if i >= n then ()
+  else let
+    val c = $AR.low_byte(byte2int0($A.get<byte>(q, i)))
+    val c = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): [c:nat | c < 256] int c
+    val () = $A.set<byte>(d, i, $A.int2byte(c))
+  in _lowcopy(q, d, n, i + 1) end
 
 implement lib_query_set (q, n) =
   if n <= 0 then let val () = $A.free<byte>(q) in query_put(QueryNone()) end
   else if n >= 256 then let val () = $A.free<byte>(q) in query_put(QueryNone()) end
   else let
-    fun low {l:agz}{n:nat}{i:nat | i <= n} .<n - i>. (q: !$A.arr(byte, l, n), n: int n, i: int i): void =
-      if i >= n then ()
-      else let
-        val c = $AR.low_byte(byte2int0($A.get<byte>(q, i)))
-        val c = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): [c:nat | c < 256] int c
-        val () = $A.set<byte>(q, i, $A.int2byte(c))
-      in low(q, n, i + 1) end
-    val () = low(q, n, 0)
-  in query_put(QuerySome(q, n)) end
+    val d = $A.alloc<byte>(n)
+    val () = _lowcopy(q, d, n, 0)
+    val () = $A.free<byte>(q)
+  in query_put(QuerySome(d, n)) end
 
 (* Whether q[0, m) is in s[0, n) at or after i, letters in any case *)
 fun _at {ls,lq:agz}{n,m:pos}{i:nat | i + m <= n}{j:nat | j <= m} .<m - j>.
@@ -739,13 +743,11 @@ end
 fn _card {i:nat} (b: !book, i: int i, gen: int): void = let
   val+ Book(t, tn, a, an, x) = b
   val @(ci, cl) = nid_make("k", i)
-  val () = ui_add_n("qlst", ci, cl, "div")
+  val () = ui_add_n("qlst", ci, cl, "button")
   val @(ci, cl) = nid_make("k", i)
   val () = ui_attr_n(ci, cl, "class", "card")
   val @(ci, cl) = nid_make("k", i)
-  val () = ui_attr_n(ci, cl, "role", "button")
-  val @(ci, cl) = nid_make("k", i)
-  val () = ui_attr_n(ci, cl, "tabindex", "0")
+  val () = ui_attr_n(ci, cl, "type", "button")
   (* cover *)
   val @(pi, pl) = nid_make("k", i)
   val @(vi, vl) = nid_make2("k", i, "c")
@@ -874,5 +876,65 @@ implement lib_sort_label (o) =
   else if o = 2 then ui_text("qsrt", "Sort: Author")
   else if o = 3 then ui_text("qsrt", "Sort: Date added")
   else ui_text("qsrt", "Sort: Last opened")
+
+(* ============================================================
+   Dates and sizes, as text
+   ============================================================ *)
+
+(* d as two digits at buf[p, p + 2) (d from 0 to 99) *)
+fn _two {l:agz}{n:pos}{p:nat | p + 2 <= n}{d:nat | d < 100} (buf: !$A.arr(byte, l, n), p: int p, d: int d): void = let
+  val () = $A.set<byte>(buf, p, $A.int2byte(48 + d / 10))
+in $A.set<byte>(buf, p + 1, $A.int2byte(48 + d - (d / 10) * 10)) end
+
+(* The day m (minutes since the epoch, UTC) falls on, as YYYY-MM-DD in
+   buf (its length); a civil date by Howard Hinnant's days_from_civil
+   inverse *)
+#pub fn date_text {l:agz} (buf: !$A.arr(byte, l, 32), m: Int): [k:nat | k <= 32] int k
+
+implement date_text (buf, m) = let
+  val days = (if m > 0 then m / 1440 else 0): [v:nat] int v
+  (* days up to year 9999, past which no clock this app runs on goes *)
+  val days = (if days > 2932896 then 2932896 else days): [v:nat | v <= 2932896] int v
+  val z = days + 719468
+  val era = z / 146097
+  val doe = z - era * 146097
+  val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  val y = yoe + era * 400
+  val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  val mp = (5 * doy + 2) / 153
+  val d = doy - (153 * mp + 2) / 5 + 1
+  val mo = (if mp < 10 then mp + 3 else mp - 9): Int
+  val y = (if mo <= 2 then y + 1 else y): Int
+  val off = $S.int_to_str(buf, 0, 32, y)
+  val mo = (if mo >= 1 then (if mo <= 12 then mo else 12) else 1): [v:nat | v < 100] int v
+  val d = (if d >= 1 then (if d <= 31 then d else 31) else 1): [v:nat | v < 100] int v
+  val () = $A.set<byte>(buf, off, $A.int2byte(45))
+  val () = _two(buf, off + 1, mo)
+  val () = $A.set<byte>(buf, off + 3, $A.int2byte(45))
+  val () = _two(buf, off + 4, d)
+in off + 6 end
+
+(* n bytes as "N KB" or "N.N MB" in buf (its length) *)
+#pub fn size_text {l:agz} (buf: !$A.arr(byte, l, 32), n: Int): [k:nat | k <= 32] int k
+
+implement size_text (buf, n) =
+  if n < 1048576 then let
+    val kb = (if n > 0 then (n + 1023) / 1024 else 0): Int
+    val off = $S.int_to_str(buf, 0, 32, kb)
+    val () = $A.set<byte>(buf, off, $A.int2byte(32))
+    val () = $A.set<byte>(buf, off + 1, $A.int2byte(75))
+    val () = $A.set<byte>(buf, off + 2, $A.int2byte(66))
+  in off + 3 end
+  else let
+    val tenths = n / 104858
+    val off = $S.int_to_str(buf, 0, 32, tenths / 10)
+    val () = $A.set<byte>(buf, off, $A.int2byte(46))
+    val r = tenths - (tenths / 10) * 10
+    val r = (if r >= 0 then (if r <= 9 then r else 9) else 0): [v:nat | v <= 9] int v
+    val () = $A.set<byte>(buf, off + 1, $A.int2byte(48 + r))
+    val () = $A.set<byte>(buf, off + 2, $A.int2byte(32))
+    val () = $A.set<byte>(buf, off + 3, $A.int2byte(77))
+    val () = $A.set<byte>(buf, off + 4, $A.int2byte(66))
+  in off + 5 end
 
 end (* #target wasm *)
