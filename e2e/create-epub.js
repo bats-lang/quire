@@ -344,7 +344,7 @@ ${tocItems}    </ol>
   </metadata>
   <manifest>
 ${manifestItems}  </manifest>
-  <spine${opts.ncx ? ' toc="ncx"' : ''}>
+  <spine${opts.ncx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
 ${spineItems}  </spine>
 </package>`;
 

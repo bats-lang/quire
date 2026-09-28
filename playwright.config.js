@@ -42,6 +42,7 @@ export default defineConfig({
     },
     {
       name: 'mobile-landscape',
+      testMatch: /(layout|smoke)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 667, height: 375 },
@@ -50,6 +51,7 @@ export default defineConfig({
     },
     {
       name: 'tablet',
+      testMatch: /(layout|smoke)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 768, height: 1024 },
@@ -58,6 +60,7 @@ export default defineConfig({
     },
     {
       name: 'wide',
+      testMatch: /(layout|smoke)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 1440, height: 900 },

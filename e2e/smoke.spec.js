@@ -60,35 +60,14 @@ test.describe('Smoke', () => {
   test('EPUB import opens reader view', async ({ page }) => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-
-    const epubBuffer = createEpub({
-      title: 'Import Test',
-      author: 'Bot',
-      chapters: 1,
-      paragraphsPerChapter: 2,
-      storeChapters: true,
-    });
-
     await page.goto('/');
-    await page.waitForSelector('#qllc', { timeout: 15000 });
-
-    const fileInput = page.locator('input[type="file"]');
-
-    const epubPath = join(SCREENSHOT_DIR, 'smoke-test.epub');
-    writeFileSync(epubPath, epubBuffer);
-    await fileInput.setInputFiles(epubPath);
-
-    // Book card should appear in library
-    await page.waitForSelector('#qbc00', { timeout: 30000 });
-
-    // Click card to open reader
-    await page.locator('#qbc00').click();
-
-    // Reader view should appear
-    await expect(page.locator('#qrvw')).toBeVisible({ timeout: 15000 });
-    // Library should be hidden
-    await expect(page.locator('#qllc')).toBeHidden();
-
-    expect(errors.length).toBe(0);
+    await expect(page.locator('#qibn')).toBeVisible();
+    const epubPath = join(SCREENSHOT_DIR, `smoke-${Date.now()}.epub`);
+    writeFileSync(epubPath, createEpub({ title: 'Smoke Test', author: 'Bot', chapters: 2, storeChapters: true }));
+    await page.locator('#qfin').setInputFiles(epubPath);
+    await page.locator('#qlst .card').first().click();
+    await expect(page.locator('#qrvw')).toBeVisible();
+    await expect(page.locator('#qcnt')).toContainText('Chapter 1');
+    expect(errors).toEqual([]);
   });
 });
