@@ -639,7 +639,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
     in let val () = _target_free(t) in 0 end end)
 in r end
 
-fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
+fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
   val r = RCons(r, OnEl("qset"), "click", lam(_) => let
       val () = layer_open(LTypography())
     in let val () = ui_focus("qscl") in 0 end end)
@@ -652,6 +652,10 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
         else if _is(t, "qth1") then let val () = set_theme_set(1) in true end
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
+        else if _is(t, "qal0") then let val () = set_align_set(0) in true end
+        else if _is(t, "qal1") then let val () = set_align_set(1) in true end
+        else if _is(t, "qhy0") then let val () = set_hyph_set(0) in true end
+        else if _is(t, "qhy1") then let val () = set_hyph_set(1) in true end
         else if _is(t, "qsrs") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
@@ -670,6 +674,15 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
     in let val () = _settings_changed() in 0 end end)
   val r = RCons(r, OnEl("qsr3"), "input", lam(h) => let
       val () = set_margin_set(_clamp(_input_num(h), 0, 4))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr4"), "input", lam(h) => let
+      val () = set_ps_set(_clamp(_input_num(h), 0, 20))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr5"), "input", lam(h) => let
+      val () = set_ls_set(_clamp(_input_num(h), 0, 12))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr6"), "input", lam(h) => let
+      val () = set_ws_set(_clamp(_input_num(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
 in r end
 

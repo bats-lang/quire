@@ -36,6 +36,45 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   expect(errors).toEqual([]);
 });
 
+test('alignment, hyphenation and the spacings change the page, and are kept', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Spaced', author: 'Settings Tests', rawChapters: chapters(2) });
+  const group = name => sheet(page).getByRole('group', { name });
+  // ragged and hyphenated to start with (WCAG 1.4.8: not justified)
+  expect(await style(page, 'textAlign')).toBe('start');
+  expect(await style(page, 'hyphens')).toBe('auto');
+  expect(await style(page, 'letterSpacing')).toBe('normal');
+  await openSettings(page);
+  await expect(group('Alignment').getByRole('button', { name: 'Ragged' })).toHaveAttribute('aria-pressed', 'true');
+  await group('Alignment').getByRole('button', { name: 'Justified' }).click();
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
+  await expect(group('Alignment').getByRole('button', { name: 'Justified' })).toHaveAttribute('aria-pressed', 'true');
+  await group('Hyphenation').getByRole('button', { name: 'Off' }).click();
+  await expect.poll(() => style(page, 'hyphens')).toBe('manual');
+  // the spacings reach what WCAG 1.4.12 asks a page to take
+  await slider(page, 'Paragraph spacing').fill('20');
+  await expect.poll(() => style(page, 'marginBottom')).toBe(`${18 * 2}px`);
+  await slider(page, 'Letter spacing').fill('12');
+  await expect.poll(async () => parseFloat(await style(page, 'letterSpacing'))).toBeCloseTo(18 * 0.12, 1);
+  await slider(page, 'Word spacing').fill('16');
+  await expect.poll(async () => parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
+  await expect(sheet(page)).toContainText('0.12');
+  await choose(page, 'Close');
+  await toLibrary(page);
+  await reload(page);
+  await openBook(page, 'Spaced');
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
+  expect(await style(page, 'hyphens')).toBe('manual');
+  expect(await style(page, 'marginBottom')).toBe(`${18 * 2}px`);
+  expect(parseFloat(await style(page, 'letterSpacing'))).toBeCloseTo(18 * 0.12, 1);
+  expect(parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
+  // the sheet, taller now, scrolls on a short screen to its last row
+  await openSettings(page);
+  await sheet(page).getByRole('button', { name: 'Close', exact: true }).scrollIntoViewIfNeeded();
+  await expect(sheet(page).getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
+  expect(errors).toEqual([]);
+});
+
 test('the fonts can be chosen', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Faces', author: 'Settings Tests', rawChapters: chapters(1, 5) });
@@ -95,7 +134,10 @@ test('reset puts the defaults back', async ({ page }) => {
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
+  await choose(page, 'Justified');
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
   await choose(page, 'Reset to defaults');
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
+  expect(await style(page, 'textAlign')).toBe('start');
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });

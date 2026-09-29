@@ -100,7 +100,7 @@ in modal_text_lit(t) end
 
 (* The file's start: its settings, and the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(256) of
+  case+ piece_new(512) of
   | ~NoPiece() => JNone()
   | ~Piece(ow, out) => let
       val p = jw_lit(out, 0, "{\"quire\":1,\"settings\":{\"size\":")
@@ -113,6 +113,16 @@ fn _settings_chunk (): jchunk =
       val p = jw_int(out, p, set_font_get())
       val p = jw_lit(out, p, ",\"theme\":")
       val p = jw_int(out, p, set_theme_get())
+      val p = jw_lit(out, p, ",\"align\":")
+      val p = jw_int(out, p, set_align_get())
+      val p = jw_lit(out, p, ",\"hyphens\":")
+      val p = jw_int(out, p, set_hyph_get())
+      val p = jw_lit(out, p, ",\"paragraphSpacing\":")
+      val p = jw_int(out, p, set_ps_get())
+      val p = jw_lit(out, p, ",\"letterSpacing\":")
+      val p = jw_int(out, p, set_ls_get())
+      val p = jw_lit(out, p, ",\"wordSpacing\":")
+      val p = jw_int(out, p, set_ws_get())
       val p = jw_lit(out, p, ",\"sort\":")
       val p = jw_int(out, p, lib_sort_get())
       val p = jw_lit(out, p, "},\"books\":[")
@@ -520,6 +530,21 @@ in
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "theme") then let
         val () = (if x >= 0 then (if x <= 3 then set_theme_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "align") then let
+        val () = (if x >= 0 then (if x <= 1 then set_align_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "hyphens") then let
+        val () = (if x >= 0 then (if x <= 1 then set_hyph_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "paragraphSpacing") then let
+        val () = (if x >= 0 then (if x <= 20 then set_ps_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "letterSpacing") then let
+        val () = (if x >= 0 then (if x <= 12 then set_ls_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "wordSpacing") then let
+        val () = (if x >= 0 then (if x <= 16 then set_ws_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "sort") then
         _smem(buf, n, e, kb, (if x >= 0 then (if x <= 3 then x else sort) else sort))
