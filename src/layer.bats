@@ -20,17 +20,18 @@ staload "ui.sats"
   | LSearch        (* search in the book *)
   | LAnnotations   (* highlights and notes *)
   | LNote          (* a note, opened from its reference *)
+  | LImage         (* a book's image, full screen *)
 
 fn _id (l: layer): [k:pos | k < 256] string k =
   case+ l of
   | LBookMenu() => "qctx" | LLibraryMenu() => "qlmn" | LBookInfo() => "qinf"
   | LContents() => "qtoc" | LTypography() => "qspn" | LSearch() => "qsrp"
-  | LAnnotations() => "qanp" | LNote() => "qnte"
+  | LAnnotations() => "qanp" | LNote() => "qnte" | LImage() => "qimv"
 
 fn _n (l: layer): int =
   case+ l of
   | LBookMenu() => 0 | LLibraryMenu() => 1 | LBookInfo() => 2 | LContents() => 3
-  | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7
+  | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
 
 (* The open overlays, the last opened first *)
 datatype layers(int) =

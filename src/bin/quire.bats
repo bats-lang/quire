@@ -805,6 +805,18 @@ in page_prev() end
 fn _left (): void = if reader_rtl() then _next() else _prev()
 fn _right (): void = if reader_rtl() then _prev() else _next()
 
+(* Whether x is between the sides' zones: in the middle half of the
+   page *)
+fn _in_middle (x: Int): bool = let
+  val () = ui_measure("qcnt")
+  val cx = $DR.get_measure_x()
+  val cw = $DR.get_measure_w()
+in
+  if cw <= 0 then false
+  else if x < cx + cw / 4 then false
+  else x <= cx + cw - cw / 4
+end
+
 (* What a tap at x, y on the page does, by the setting (settings.bats):
    sides, the left quarter back, the right quarter on, between them the
    bars shown or hidden; forward, the top eighth the bars, the left
@@ -892,6 +904,7 @@ fn _escape_overlay (): bool =
   | Escaped(LTypography()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LAnnotations()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LNote()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LImage()) => let val () = ui_focus("qcnt") in true end
   | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -1123,7 +1136,7 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
     in 0 end)
 in r end
 
-fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
+fn _wire_reader {n:nat} (r: regs(n)): regs(n + 12) = let
   val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
   val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
   val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
@@ -1137,7 +1150,31 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
       if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
+      (* with the sides' zones, a tap on an image between them shows it
+         full screen, rather than the bars *)
+      else if (if node >= 0 then (if set_taps_get() = 0 then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
       else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
+    end)
+  (* an image of the book, long-pressed (or right-clicked), is shown
+     full screen *)
+  val r = RCons(r, OnEl("qcnt"), "contextmenu", lam(h) => let
+      val t = _target(h)
+      val node = _row_of(t, "c")
+      val () = _target_free(t)
+    in
+      if node < 0 then 0
+      else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
+      else 0
+    end)
+  val r = RCons(r, OnEl("qimv"), "click", lam(h) => let
+      val t = _target(h)
+      val close = _is(t, "qimx")
+      val () = _target_free(t)
+    in
+      if close then let
+        val () = layer_close(LImage())
+      in let val () = ui_focus("qcnt") in 0 end end
+      else 0
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)

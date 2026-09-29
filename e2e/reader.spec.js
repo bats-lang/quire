@@ -3,11 +3,12 @@
 // page.
 
 import { test, expect } from '@playwright/test';
+import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles, indicator,
+  importFiles, indicator, chapterBody,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -362,6 +363,55 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   await bookPage(page).getByRole('link', { name: '3', exact: true }).click();
   await expect(chapterTitle(page)).toHaveText('Chapter 2');
   await expect(note).toBeHidden();
+});
+
+/** A w by h PNG of one grey */
+function png(w, h) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = b => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 0;
+  const raw = Buffer.alloc((w + 1) * h, 128);
+  for (let y = 0; y < h; y++) raw[y * (w + 1)] = 0;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('an image is shown full screen from a tap on it between the sides, or a long press', async ({ page }) => {
+  await start(page);
+  await readBook(page, {
+    title: 'Viewer', author: 'Bot',
+    rawChapters: [{ body: '<p><img src="images/p.png" alt="the map"/></p>' + chapterBody(1, 10) }],
+    extraEntries: [{ name: 'OEBPS/images/p.png', data: png(64, 64), store: true }],
+  });
+  await page.keyboard.press('t');
+  const viewer = dialog(page, 'Image');
+  const pic = bookPage(page).getByRole('img', { name: 'the map' });
+  await expect.poll(() => pic.evaluate(i => i.naturalWidth)).toBe(64);
+  const at = await place(page);
+  await pic.click();
+  await expect(viewer).toBeVisible();
+  await expect.poll(() => viewer.locator('img').evaluate(i => i.complete && i.naturalWidth)).toBe(64);
+  expect(await place(page)).toEqual(at);
+  await viewer.getByRole('button', { name: 'Close' }).click();
+  await expect(viewer).toBeHidden();
+  await expect(bookPage(page)).toBeFocused();
+  // a long press (here a right click) too; Escape closes it
+  await pic.click({ button: 'right' });
+  await expect(viewer).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  // a tap on the page's side still turns it
+  const box = await bookPage(page).boundingBox();
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.7);
+  await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
+  await expect(viewer).toBeHidden();
 });
 
 test('a book read right to left turns the other way', async ({ page }) => {

@@ -311,6 +311,16 @@ fn _note (): void = let
   val () = ui_text_btn("qntb", "qncl", "btn", "Close")
 in _hide("qnte") end
 
+(* A book's image, full screen: it can be zoomed with the fingers, and
+   scrolled; the image is the page's, whose alt says what it shows *)
+fn _image_viewer (): void = let
+  val () = ui_el("bats-root", "qimv", TDiv, "imview")
+  val () = ui_named("qimv", NDialog, "Image")
+  val () = ui_el("qimv", "qivb", TDiv, "imbox")
+  val () = ui_img("qivb", "qimg", "imimg")
+  val () = ui_icon_btn("qimv", "qimx", "ibtn imclose", IcClose, "Close")
+in _hide("qimv") end
+
 (* Makes every element of the app, in the root element bats-root *)
 #pub fn app_build (): void
 
@@ -333,6 +343,7 @@ implement app_build () = let
   val () = _search()
   val () = _annotations()
   val () = _note()
+  val () = _image_viewer()
   val () = _undo_toast()
 in _modal() end
 

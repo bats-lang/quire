@@ -1118,13 +1118,55 @@ in p end
 val _load_gen = ref<int>(0)
 
 (* Content node idx's image: the nd bytes of data, of type mime *)
+(* The image viewer's image's id, "qimg" *)
+fn _viewer_id (): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qimg"), 4)
+in @(a, 4) end
+
+(* The id of the image an image's bytes go to: content node idx's, or
+   the viewer's *)
+fn _src_id {i:nat} (idx: int i, vw: bool): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) =
+  if vw then _viewer_id() else _num_id("c", idx, 3)
+
+(* The images of the chapter shown: each one's content node and the
+   path of its entry in the book, path[0, k) *)
+datavtype pics(int) =
+  | pics_nil(0) of ()
+  | {k:nat}{l:agz}{m:pos | m < 65536} pics_cons(k + 1) of (int, $A.arr(byte, l, m), int m, pics(k))
+
+fun pics_free {k:nat} .<k>. (x: pics(k)): void =
+  case+ x of
+  | ~pics_nil() => ()
+  | ~pics_cons(_, a, _, r) => let val () = $A.free<byte>(a) in pics_free(r) end
+
+datavtype pics_cell = {k:nat} PicsCell of pics(k)
+
+val _pics = ref<pics_cell>(PicsCell(pics_nil()))
+
+fn _pics_take (): pics_cell = let
+  var c: pics_cell = PicsCell(pics_nil())
+  val () = ref_exch_elt<pics_cell>(_pics, c)
+in c end
+
+fn _pics_put (x: pics_cell): void = let
+  var c: pics_cell = x
+  val () = ref_exch_elt<pics_cell>(_pics, c)
+  val+ ~PicsCell(old) = c
+in pics_free(old) end
+
+fn _pics_push {l:agz}{k:pos | k < 65536} (idx: int, a: $A.arr(byte, l, k), k: int k): void = let
+  val+ ~PicsCell(x) = _pics_take()
+in _pics_put(PicsCell(pics_cons(idx, a, k, x))) end
+
 fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
-  (idx: int i, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
+  (idx: int i, vw: bool, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
   val ml = g1u2i(string1_length(mime))
   val mb = $A.alloc<byte>(ml)
   val _ = _put(mb, 0, mime)
   val @(fm, bm) = $A.freeze<byte>(mb)
-  val @(ida, idk) = _num_id("c", idx, 3)
+  (* content node idx's image, or the image viewer's (qimg) *)
+  val @(ida, idk) = _src_id(idx, vw)
   val @(fi, bi) = $A.freeze<byte>(ida)
   val () = $BDOM.set_image_src(bi, idk, data, nd, bm, ml)
   val () = $A.drop<byte>(fi, bi)
@@ -1137,7 +1179,7 @@ in $A.free<byte>($A.thaw<byte>(fm)) end
    is deflated (unless chapter load gen is no longer the latest); not at
    all when it is missing *)
 fn _show_image {z:pos}{i:nat}{lp:agz}{k:pos}
-  (s: int, z: int z, idx: int i, gen: int,
+  (s: int, z: int z, idx: int i, vw: bool, gen: int,
    path: !$A.borrow(byte, lp, k), k: int k): void = let
   val mime = mime_of(path, k)
 in
@@ -1146,7 +1188,7 @@ in
   | ~ZipGot(ar, buf, cs, m, _, _, _) =>
     if m = 0 then let
       val @(f, b) = $A.freeze<byte>(buf)
-      val () = _set_src(idx, b, cs, mime)
+      val () = _set_src(idx, vw, b, cs, mime)
       val () = $A.drop<byte>(f, b)
     in piece_free(ar, $A.thaw<byte>(f)) end
     else let
@@ -1161,7 +1203,7 @@ in
         | ~NoContentBytes() => $P.ret<int>(~1)
         | ~ContentBytes(ar2, buf2, n2) => let
             val @(f2, b2) = $A.freeze<byte>(buf2)
-            val () = (if !_load_gen = gen then _set_src(idx, b2, n2, mime) else ())
+            val () = (if !_load_gen = gen then _set_src(idx, vw, b2, n2, mime) else ())
             val () = $A.drop<byte>(f2, b2)
             val () = piece_free(ar2, $A.thaw<byte>(f2))
           in $P.ret<int>(0) end))
@@ -1193,9 +1235,10 @@ in
       val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
       val () = $A.free<byte>(buf)
       val @(fz, bv) = $A.freeze<byte>(exact)
-      val () = _show_image(s, z, idx, gen, bv, k)
+      val () = _show_image(s, z, idx, false, gen, bv, k)
       val () = $A.drop<byte>(fz, bv)
-    in $A.free<byte>($A.thaw<byte>(fz)) end
+      (* kept, so the image can be shown again in the viewer *)
+    in if k < 65536 then _pics_push(idx, $A.thaw<byte>(fz), k) else $A.free<byte>($A.thaw<byte>(fz)) end
   end
 end
 
@@ -1523,6 +1566,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
+                  val () = _pics_put(PicsCell(pics_nil()))
                   val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
                   val () = _page_book_lang(doc)
                   val fr = _frag_take()
@@ -2431,6 +2475,51 @@ in
                in piece_free(xar, $A.thaw<byte>(xf)) end)
          in $P.ret<int>(0) end))
        end)
+end
+
+(* The path of content node i's image, copied; none when it has none *)
+datavtype pic_path =
+  | {l:agz}{k:pos | k < 65536} PicPath of ($A.arr(byte, l, k), int k)
+  | NoPicPath of ()
+
+fun _pic_find {k:nat} .<k>. (x: !pics(k), i: int): pic_path =
+  case+ x of
+  | pics_nil() => NoPicPath()
+  | @pics_cons(idx, a, k, rest) =>
+    if idx = i then let
+      val b = $A.alloc<byte>(k)
+      val () = _frag_dup(a, b, k, 0)
+      val kk = k
+      prval () = fold@(x)
+    in PicPath(b, kk) end
+    else let
+      val r = _pic_find(rest, i)
+      prval () = fold@(x)
+    in r end
+
+(* Shows content node i's image in the image viewer, which opens; false
+   when node i is not an image of the chapter *)
+#pub fun reader_image_at (i: int): bool
+implement reader_image_at (i) = let
+  val c = _pics_take()
+  val+ @PicsCell(x) = c
+  val r = _pic_find(x, i)
+  prval () = fold@(c)
+  val () = _pics_put(c)
+in
+  case+ r of
+  | ~NoPicPath() => false
+  | ~PicPath(b, k) =>
+    (case+ book_meta_get() of
+     | ~$R.none() => let val () = $A.free<byte>(b) in false end
+     | ~$R.some(@(z, _, _, _, _, _)) => let
+         val @(fb, bb) = $A.freeze<byte>(b)
+         val () = _show_image(book_serial(), z, 0, true, !_load_gen, bb, k)
+         val () = $A.drop<byte>(fb, bb)
+         val () = $A.free<byte>($A.thaw<byte>(fb))
+         val () = layer_open(LImage())
+         val () = ui_focus("qimx")
+       in true end)
 end
 
 #pub fun reader_link_at (i: int): bool
