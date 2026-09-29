@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {
   start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control, dialog,
-  selectText, illegible,
+  selectText, illegible, clickControl,
 } from './helpers.js';
 
 const audit = async page => {
@@ -21,12 +21,10 @@ test('no view has accessibility violations', async ({ page }) => {
   await cards(page).first().click();
   await expect(bookPage(page)).toBeVisible();
   expect(await audit(page)).toEqual([]);
-  await showChrome(page);
-  await control(page, 'Typography').click();
+  await clickControl(page, 'Typography');
   expect(await audit(page)).toEqual([]);
   await page.keyboard.press('Escape');
-  await showChrome(page);
-  await control(page, 'Contents').click();
+  await clickControl(page, 'Contents');
   expect(await audit(page)).toEqual([]);
   await page.keyboard.press('Escape');
   await page.keyboard.press('/');

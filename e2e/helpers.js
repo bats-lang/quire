@@ -272,10 +272,21 @@ export async function showChrome(page) {
   await expect(prev).toBeVisible();
 }
 
+/** Clicks the bottom bar's control name, bringing the bars up first.
+    The bars hide themselves 5 s after they are shown, so a slow step
+    before the click (an audit, a loaded machine) can see them up and
+    then lose them: bringing them up and clicking are tried again
+    together until the click lands */
+export async function clickControl(page, name) {
+  await expect(async () => {
+    await showChrome(page);
+    await control(page, name).click({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
+}
+
 /** Opens the settings sheet */
 export async function openSettings(page) {
-  await showChrome(page);
-  await control(page, 'Typography').click();
+  await clickControl(page, 'Typography');
   await expect(dialog(page, 'Typography and theme')).toBeVisible();
 }
 
