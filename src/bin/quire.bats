@@ -29,6 +29,7 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload WN = "wasm.bats-packages.dev/bridge/src/window.sats"
 staload GP = "gestures/src/pointer.sats"
 staload GT = "gestures/src/tracker.sats"
 staload GD = "gestures/src/decode.sats"
@@ -201,6 +202,8 @@ fn _input_text (h: $EV.event_payload): [l:agz][k:nat] @($A.arr(byte, l, k + 1), 
 fn _show_library (): void = let
   val () = !_view := 0
   val () = ui_show("qrvw", false)
+  (* the screen may sleep again, as it does outside the reader *)
+  val () = $WN.keep_awake(false)
   val () = layer_close(LTypography())
   val () = layer_close(LContents())
   val () = layer_close(LSearch())
@@ -233,6 +236,9 @@ fn _show_reader (): void = let
   val () = ui_show("qllc", false)
   val () = layer_close(LBookInfo())
   val () = ui_show("qrvw", true)
+  (* A reader does not touch the screen for a page's length: it stays
+     awake while the book is open *)
+  val () = $WN.keep_awake(true)
   (* The browser's (and Android's) back button leaves the reader *)
   val a = $A.alloc<byte>(2)
   val () = $A.write_byte(a, 0, 35)
