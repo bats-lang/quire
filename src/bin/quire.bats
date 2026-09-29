@@ -205,6 +205,29 @@ fn _input_text (h: $EV.event_payload): [l:agz][k:nat] @($A.arr(byte, l, k + 1), 
    Views
    ============================================================ *)
 
+(* ============================================================
+   The view kept across a reload: the book that is open, if any, so a
+   reload (or the app killed and started again) comes back to it, on its
+   page, rather than to the library
+   ============================================================ *)
+
+fn _view_key (): [l:agz] $A.arr(byte, l, 4) = let
+  val k = $A.alloc<byte>(4)
+  val () = $A.write_text(k, 0, $A.text_lit("view"), 4)
+in k end
+
+(* Keeps "view": the open book's key, or -1 for the library *)
+fn _view_save (key: int): void = let
+  val b = $A.alloc<byte>(4)
+  val () = $A.write_i32(b, 0, key)
+  val @(bf, bb) = $A.freeze<byte>(b)
+  val @(kf, kb) = $A.freeze<byte>(_view_key())
+  val () = $P.discard<Int>($IDB.idb_put(kb, 4, bb, 4))
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = $A.drop<byte>(bf, bb)
+in $A.free<byte>($A.thaw<byte>(bf)) end
+
 fn _show_library (): void = let
   val () = !_view := 0
   val () = ui_show("qrvw", false)
@@ -214,7 +237,11 @@ fn _show_library (): void = let
   val () = layer_close(LContents())
   val () = layer_close(LSearch())
   val () = layer_close(LAnnotations())
+  val () = layer_close(LNote())
+  val () = layer_close(LImage())
   val () = ui_show("qllc", true)
+  (* a reload now comes back here *)
+  val () = _view_save(~1)
   val () = reader_search_stop()
   val () = reader_stack_clear()
   val () = window_close()
@@ -273,6 +300,8 @@ fn _open_book {i:int} (i: int i): void =
     else let
       val () = _show_reader()
       val () = reader_stack_clear()
+      (* a reload now comes back to this book *)
+      val () = _view_save(x.key)
       val () = ui_text("qcht", "Loading...")
       val ch = x.ch
       val pg = x.pg
@@ -291,6 +320,30 @@ fn _open_book {i:int} (i: int i): void =
           in $P.ret<int>(r) end
           else $P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor))))
     end
+
+(* The view kept by the last run: its book opened again, on its page,
+   when it is still on a shelf it is read from; else the library *)
+fn _view_restore (): $P.promise(int, $P.Chained) = let
+  val @(kf, kb) = $A.freeze<byte>(_view_key())
+  val p = $IDB.idb_get(kb, 4)
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+in
+  $P.and_then<Int><int>($P.vow(p), lam(h) => let
+    val key = (case+ take_blob(h) of
+      | ~NoBlobBytes() => ~1
+      | ~BlobBytes(b, n) =>
+        if n < 4 then let val () = $A.free<byte>(b) in ~1 end
+        else let val k = _i32at(b, 0) val () = $A.free<byte>(b) in k end): Int
+    val i = (if key < 0 then ~1 else lib_index_of_key(key)): [r:int | r >= ~1] int r
+    val readable = (if i < 0 then false else (case+ lib_nums(i) of
+      | ~$R.none() => false
+      | ~$R.some(x) => x.shelf < 2)): bool
+  in
+    if readable then let val () = _open_book(i) in $P.ret<int>(0) end
+    else let val () = _show_library() in $P.ret<int>(0) end
+  end)
+end
 
 (* ============================================================
    The library: menus, info, shelves
@@ -1283,12 +1336,15 @@ implement main0 () = let
     in 0 end)
   val () = ui_listen_all(r)
   val () = $P.discard<int>(reader_speed_load())
+  (* nothing is shown until the view kept by the last run is known: a
+     reader who was in a book comes back to it, not to the library *)
+  val () = ui_show("qllc", false)
   val p = $P.and_then<int><int>(set_load(), lam(sort) => let
       val () = lib_sort_label(sort)
     in
       $P.and_then<int><int>(lib_load(), lam(_) => let
         val () = lib_sort(sort)
         val () = lib_render()
-      in $P.ret<int>(0) end)
+      in _view_restore() end)
     end)
 in $P.discard<int>(p) end

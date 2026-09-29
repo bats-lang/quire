@@ -94,8 +94,9 @@ test('a book\'s images are dimmed in the dark theme, unless that is turned off',
   await dim.getByRole('button', { name: 'Off' }).click();
   await expect.poll(filter).toBe('none');
   await choose(page, 'Close');
+  // a reload comes back to the book, and the setting was kept
   await reload(page);
-  await openBook(page, 'Dim');
+  await expect(bookPage(page)).toBeVisible();
   await expect.poll(filter).toBe('none');
 });
 
@@ -132,12 +133,12 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   expect(sepia).not.toBe(light);
   const [r, , b] = sepia.split(',').map(Number);
   expect(r - b).toBeGreaterThan(20);
-  // kept in the library and after a reload
+  // kept after a reload, which comes back to the book
   await page.keyboard.press('Escape');
   await reload(page);
+  await expect(bookPage(page)).toBeVisible();
   expect(await bg()).toBe(sepia);
   // auto: light, then dark when the system asks for it
-  await openBook(page, 'Colours');
   await openSettings(page);
   await choose(page, 'Auto');
   await page.emulateMedia({ colorScheme: 'light' });

@@ -398,7 +398,9 @@ test('an image is shown full screen from a tap on it between the sides, or a lon
   await pic.click();
   await expect(viewer).toBeVisible();
   await expect.poll(() => viewer.locator('img').evaluate(i => i.complete && i.naturalWidth)).toBe(64);
-  expect(await place(page)).toEqual(at);
+  // the page is not turned (the chapter's page count may settle as its
+  // image loads, which is not a turn)
+  expect(await place(page)).toMatchObject({ ch: at.ch, p: at.p });
   await viewer.getByRole('button', { name: 'Close' }).click();
   await expect(viewer).toBeHidden();
   await expect(bookPage(page)).toBeFocused();
@@ -637,8 +639,56 @@ test('the place is kept when the app is hidden and then closed', async ({ page }
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await reload(page);
-  await openBook(page, 'Hidden Away');
-  expect(await place(page)).toEqual(at);
+  // back in the book, on its page, without the library in between
+  await expect(bookPage(page)).toBeVisible();
+  await expect(indicator(page)).toContainText('p.');
+  await expect.poll(() => place(page)).toEqual(at);
+});
+
+test('a reload in the middle of a book comes back to that page, and one in the library to the library', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Reloaded', 3, 30));
+  for (let k = 0; k < 7; k++) {
+    const before = await place(page);
+    await page.keyboard.press('ArrowRight');
+    await placeChanged(page, before);
+  }
+  const at = await place(page);
+  const top = (await startsOnPage(page))[0];
+  await reload(page);
+  await expect(bookPage(page)).toBeVisible();
+  await expect(indicator(page)).toContainText('p.');
+  await expect.poll(() => place(page)).toEqual(at);
+  expect(await onPage(page, top)).toBe(true);
+  // the library is never shown on the way
+  await expect(librarySearch(page)).toBeHidden();
+  // again, straight after
+  await reload(page);
+  await expect(indicator(page)).toContainText('p.');
+  await expect.poll(() => place(page)).toEqual(at);
+  // left for the library: a reload stays there
+  await toLibrary(page);
+  await reload(page);
+  await expect(librarySearch(page)).toBeVisible();
+  await expect(bookPage(page)).toBeHidden();
+});
+
+test('a reload in a real book comes back to its page', async ({ page }) => {
+  await start(page);
+  await importFiles(page, ['test/fixtures/conan-stories.epub'], 1);
+  await openBook(page, 'Gods of the North');
+  while ((await place(page)).ch === 1) await page.keyboard.press('ArrowRight');
+  for (let k = 0; k < 5; k++) {
+    const before = await place(page);
+    await page.keyboard.press('ArrowRight');
+    await placeChanged(page, before);
+  }
+  const at = await place(page);
+  const top = (await startsOnPage(page))[0];
+  await reload(page);
+  await expect(indicator(page)).toContainText('p.');
+  await expect.poll(() => place(page)).toEqual(at);
+  expect(await onPage(page, top)).toBe(true);
 });
 
 test('the screen is kept awake while a book is open, and again when the app comes back', async ({ page }) => {

@@ -1734,6 +1734,58 @@ fn _show_target (pg: Int, anchor: Int): void =
     else if pg >= t then _show_page(t - 1, t, c, tc)
     else _show_page(pg, t, c, tc)
 
+(* ============================================================
+   Settling: a chapter's layout can still change after its page is
+   shown (a font arriving, an image loading), and with it the page its
+   place is on. For a while after, the pages are counted again, and when
+   they changed the place is found again: by the node the reader was
+   taken to, until the reader turns a page
+   ============================================================ *)
+
+(* The node the place was restored to, or -1 once a page is turned *)
+val _settle_anchor = ref<Int>(~1)
+val _settle_gen = ref<int>(0)
+
+(* How many pages the chapter has now, as it is laid out *)
+fn _pages_now (): Int = let
+  val () = _measure_lit("qcnt")
+  val cw = $DR.get_measure_w()
+  val sw = $DR.get_measure_scroll_w()
+in if cw > 0 then sw / cw else ~1 end
+
+(* Every quarter second, n more times, while no other chapter has been
+   shown since (gen) *)
+fun _settle {n:nat} .<n>. (gen: int, n: int n): void =
+  if n <= 0 then ()
+  else $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) =>
+    if gen <> !_settle_gen then $P.ret<int>(0)
+    else let
+      val () = (case+ reading_get() of
+        | @(p, t, _, _) => let
+            val now = _pages_now()
+            val a = !_settle_anchor
+            (* the node the reader was taken to, if it is no longer on
+               the page shown *)
+            val moved = (if a < 0 then false else if p >= t then false
+              else _page_of_node(a, t, p) <> p): bool
+          in
+            if now <= 0 then ()
+            else if now <> t then let
+              val a = (if a >= 0 then a else !_anchor_last): Int
+              val () = _measure_pagination()
+            in _show_target(p, a) end
+            else if moved then _show_target(p, a)
+            else ()
+          end)
+      val () = _settle(gen, n - 1)
+    in $P.ret<int>(0) end))
+
+(* Starts settling the page just shown, which anchor (when >= 0) is on *)
+fn _settle_start (anchor: Int): void = let
+  val () = !_settle_anchor := anchor
+  val () = !_settle_gen := !_settle_gen + 1
+in _settle(!_settle_gen, 12) end
+
 (* Loads chapter ch (from 0) and shows its page pg, or the page of
    content node anchor (see _show_target); the promise resolves with 0,
    or below 0 when the chapter cannot be shown *)
@@ -1742,7 +1794,10 @@ fn _goto (ch: Int, pg: Int, anchor: Int): $P.promise(int, $P.Chained) = let
 in
   $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
     if r < 0 then $P.ret<int>(r)
-    else let val () = _show_target(pg, anchor) in $P.ret<int>(0) end)
+    else let
+      val () = _show_target(pg, anchor)
+      val () = _settle_start(anchor)
+    in $P.ret<int>(0) end)
 end
 
 (* Loads chapter ch and shows the page of its element whose id is
@@ -1760,7 +1815,11 @@ fn _goto_frag {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f:
       val () = _frag_put(FragNone())
     in
       if r < 0 then $P.ret<int>(r)
-      else let val () = _show_target(0, !_frag_hit) in $P.ret<int>(0) end
+      else let
+        val a = !_frag_hit
+        val () = _show_target(0, a)
+        val () = _settle_start(a)
+      in $P.ret<int>(0) end
     end)
   end
 
@@ -1896,25 +1955,31 @@ in
 end
 
 (* The next page: in this chapter, else the next chapter's first *)
-fn _page_next(): void =
+fn _page_next(): void = let
+  val () = !_settle_anchor := ~1
+in
   case+ reading_get() of
   | @(p, t, c, tc) =>
     if p + 1 < t then let val () = _spd_turn() in _show_page(p + 1, t, c, tc) end
     else if c < tc then let val () = _spd_turn() in $P.discard<int>(_goto(c, 0, ~1)) end
     else _show_page(p, t, c, tc)
+end
 
 (* The previous page: in this chapter, else the previous chapter's last *)
-fn _page_prev(): void =
+fn _page_prev(): void = let
+  val () = !_settle_anchor := ~1
+in
   case+ reading_get() of
   | @(p, t, c, tc) =>
     if p > 0 then _show_page(p - 1, t, c, tc)
     else if c > 1 then $P.discard<int>(_goto(c - 2, ~1, ~1))
     else _show_page(0, t, c, tc)
+end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
 fn _relayout (): void = let
-  val anchor = !_anchor_last
+  val anchor = (if !_settle_anchor >= 0 then !_settle_anchor else !_anchor_last): Int
   val pg = (case+ reading_get() of @(p, _, _, _) => p): Int
   val () = _measure_pagination()
 in _show_target(pg, anchor) end
