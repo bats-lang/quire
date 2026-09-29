@@ -220,6 +220,9 @@ fn _chrome_set_off (): void = let
 in ui_attr("qrvw", AClass, "rv chrome-off") end
 
 fn _chrome_set (on: bool): void = let
+  (* bringing the bars up leaves the place a jump landed on: the back
+     button goes *)
+  val () = (if on && ~(!_chrome) then reader_stack_clear() else ())
   val () = !_chrome := on
   val () = (if on then ui_attr("qrvw", AClass, "rv") else ui_attr("qrvw", AClass, "rv chrome-off"))
   val () = !_chrome_gen := !_chrome_gen + 1

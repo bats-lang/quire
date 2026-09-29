@@ -232,6 +232,18 @@ captures a mouse pointer only once it has moved more than 4 px: capture
 at pointerdown would send the click to the reader view instead of the
 button under it, so no button in the reader could be clicked.
 
+The back button a jump leaves (to the place jumped from) never stays
+up: `ps_cell` in `src/reader.bats` holds the positions it offers, and
+its only shown state, `PsShown`, needs a proof `TIMED(g)` that a timeout
+numbered g is armed; `_ps_put`, the only code that shows or hides the
+button, shows it exactly in that state. `TIMED`'s constructor is local to
+`_timed_arm`, which arms the timer, so no other code can make one, and a
+proof for one number does not type-check as another's. When the timeout
+runs (10 s, `BACK_SHOWN`) the button goes with its positions, unless a
+later jump has armed a later timeout. It goes sooner when a page is
+turned, the bars are brought up (`_chrome_set`), or a book is opened or
+closed (`reader_stack_clear`).
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most the bridge's 128.
