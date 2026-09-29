@@ -125,7 +125,7 @@ fn _harm_clicked (t: !target): Option_vt(harm) =
   if _is(t, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
 
 (* The number n of the target's id pre<n>, or -1 *)
-fn _row_of {sn:pos | sn <= 4} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
+fn _row_of {sn:pos | sn <= 16} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
   case+ t of
   | @Target(b, n, _) => let
       val @(f, bb) = $A.freeze<byte>(b)
@@ -937,8 +937,12 @@ fn _toc_open (): void = let
     | @(_, _, c, tc) => toc_render((if c > 0 then c - 1 else 0), tc))
   val () = ui_attr("qtct", ASelected, "true")
   val () = ui_attr("qtcm", ASelected, "false")
+  val () = ui_attr("pages-tab", ASelected, "false")
   val () = ui_show("qtcl", true)
   val () = ui_show("qtbl", false)
+  val () = ui_show("pages-list", false)
+  (* the Pages tab only for a book that lists its print pages *)
+  val () = ui_show("pages-tab", toc_pages_count() > 0)
   val () = layer_open(LContents())
 in ui_focus("qtcx") end
 
@@ -947,8 +951,20 @@ fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
   val () = ui_attr("qtct", ASelected, "false")
   val () = ui_attr("qtcm", ASelected, "true")
+  val () = ui_attr("pages-tab", ASelected, "false")
   val () = ui_show("qtcl", false)
+  val () = ui_show("pages-list", false)
 in ui_show("qtbl", true) end
+
+(* The contents panel, open on its print pages' tab *)
+fn _pages_open (): void = let
+  val () = toc_pages_render()
+  val () = ui_attr("qtct", ASelected, "false")
+  val () = ui_attr("qtcm", ASelected, "false")
+  val () = ui_attr("pages-tab", ASelected, "true")
+  val () = ui_show("qtcl", false)
+  val () = ui_show("qtbl", false)
+in ui_show("pages-list", true) end
 
 (* The page turn's region: .caf (qcnt), region 1 *)
 #define PAGE_REGION 1
@@ -1024,9 +1040,14 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       val row = _row_of(t, "qe")
       val bgo = _row_of(t, "qb")
       val bdl = _row_of(t, "qx")
+      val pgo = _row_of(t, "page-row")
       val () = (if _is(t, "qtcx") then layer_close(LContents())
         else if _is(t, "qtct") then _toc_open()
         else if _is(t, "qtcm") then _bookmarks_open()
+        else if _is(t, "pages-tab") then _pages_open()
+        else if pgo >= 0 then let
+          val () = layer_close(LContents())
+        in reader_goto_page(pgo) end
         else if bgo >= 0 then let val () = layer_close(LContents()) in _annot_go(bgo) end
         else if bdl >= 0 then annot_delete_bookmark(bdl)
         else if row >= 0 then let

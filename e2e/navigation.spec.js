@@ -154,3 +154,43 @@ test('the scrubber shows where the page is, and dragging it goes there', async (
   await jumpBack(page).click();
   await expect(chapterTitle(page)).toHaveText('Opening & Intro');
 });
+
+for (const ncx of [false, true]) {
+  test(`the print edition's pages (${ncx ? 'NCX' : 'nav'} page list) are listed and gone to, and the footer names the page`, async ({ page }) => {
+    await start(page);
+    const para = (i, k) => `<p>Para ${i}.${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>';
+    const body = i => Array.from({ length: 30 }, (_, k) =>
+      (k % 10 === 0 ? `<span epub:type="pagebreak" id="pg${i}-${k / 10}" title="${(i - 1) * 3 + k / 10 + 1}"/>` : '') + para(i, k)).join('');
+    const pageList = [];
+    for (let i = 1; i <= 2; i++) for (let j = 0; j < 3; j++) pageList.push({ label: String((i - 1) * 3 + j + 1), href: `chapter${i}.xhtml#pg${i}-${j}` });
+    await readBook(page, { title: ncx ? 'Paged NCX' : 'Paged', author: 'Nav Tests', rawChapters: [{ body: body(1) }, { body: body(2) }], pageList, ncx });
+    // the footer names the print page the page is on
+    await page.keyboard.press('t');
+    const footerPage = page.getByText(/^ · page \d+$/);
+    await expect(footerPage).toHaveText(' · page 1');
+    // the Pages tab lists them; one is gone to, with the way back
+    await showChrome(page);
+    await control(page, 'Contents').click();
+    const pagesTab = contents(page).getByRole('tab', { name: 'Pages' });
+    await expect(pagesTab).toBeVisible();
+    await pagesTab.click();
+    await expect(pagesTab).toHaveAttribute('aria-selected', 'true');
+    const rows = contents(page).getByRole('tabpanel', { name: 'Pages' }).getByRole('button');
+    await expect(rows).toHaveText(['1', '2', '3', '4', '5', '6']);
+    await rows.filter({ hasText: '5' }).click();
+    await expect(contents(page)).toBeHidden();
+    await expect.poll(async () => (await place(page)).ch).toBe(2);
+    await page.keyboard.press('t');
+    await expect(footerPage).toHaveText(' · page 5');
+    await expect(jumpBack(page)).toBeVisible();
+  });
+}
+
+test('a book without a page list has no Pages tab', async ({ page }) => {
+  await start(page);
+  await readBook(page, tocBook(false));
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await expect(contents(page).getByRole('tab', { name: 'Bookmarks' })).toBeVisible();
+  await expect(contents(page).getByRole('tab', { name: 'Pages' })).toBeHidden();
+});

@@ -304,6 +304,8 @@ ${rawBody}
   const navLis = (es) => es.map(e => `<li><a href="${e.href}">${e.label}</a>` +
     (e.children ? `<ol>${navLis(e.children)}</ol>` : '') + '</li>\n').join('');
   const tocItems = navLis(tocTree);
+  // opts.pageList: [{ label, href }] the print edition's pages
+  const pageList = opts.pageList || [];
   let ncxOrder = 0;
   const ncxPoints = (es) => es.map(e => `<navPoint id="np${++ncxOrder}" playOrder="${ncxOrder}">` +
     `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/>` +
@@ -313,7 +315,8 @@ ${rawBody}
 <head/><docTitle><text>${title}</text></docTitle>
 <navMap>
 ${ncxPoints(tocTree)}</navMap>
-</ncx>`;
+${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}" type="normal" value="${k + 1}">` +
+    `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/></pageTarget>`).join('\n')}</pageList>\n` : ''}</ncx>`;
 
   const navXhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
@@ -324,7 +327,7 @@ ${ncxPoints(tocTree)}</navMap>
     <ol>
 ${tocItems}    </ol>
   </nav>
-</body>
+${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
   // opts.extraFiles: [{ name, data, mediaType }] more manifest items
