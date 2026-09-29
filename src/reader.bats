@@ -1117,7 +1117,6 @@ in p end
    chapter began loading is not shown (its element is gone) *)
 val _load_gen = ref<int>(0)
 
-(* Content node idx's image: the nd bytes of data, of type mime *)
 (* The image viewer's image's id, "qimg" *)
 fn _viewer_id (): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
   val a = $A.alloc<byte>(4)
@@ -1159,6 +1158,8 @@ fn _pics_push {l:agz}{k:pos | k < 65536} (idx: int, a: $A.arr(byte, l, k), k: in
   val+ ~PicsCell(x) = _pics_take()
 in _pics_put(PicsCell(pics_cons(idx, a, k, x))) end
 
+(* Content node idx's image (or the viewer's, when vw): the nd bytes of
+   data, of type mime *)
 fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
   (idx: int i, vw: bool, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
   val ml = g1u2i(string1_length(mime))
