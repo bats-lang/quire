@@ -973,13 +973,34 @@ fn _md_head_if {l:agz}{la:addr}{n:int}{p:nat | p + 206 <= n}
 
 (* The highlights as Markdown at out[p]: each after its chapter's
    heading when it is the chapter's first *)
-fun _md {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 2800 * j + 64 <= n} .<j>.
-  (out: !$A.arrx(byte, l, n, la), p: int p, xs: !ann(j), last: Int): [q:nat | q + 64 <= n] int q =
+(* A highlight's source, after its quote: "— Author, *Title*, Chapter",
+   from the book's author ba[0, an) and title bt[0, tn) *)
+fn _md_cite {l,l1,l2:agz}{la:addr}{n:int}{p:nat | p + 750 <= n}{m1,m2:pos}{tn:nat | tn < m1; tn < 256}{an:nat | an < m2; an < 256}
+  (out: !$A.arrx(byte, l, n, la), p: int p, c: Int,
+   bt: !$A.arr(byte, l1, m1), tn: int tn, ba: !$A.arr(byte, l2, m2), an: int an): [q:nat | p <= q; q <= p + 750] int q = let
+  val q = _lit(out, p, "\xE2\x80\x94 ")
+  val () = _flat_at(ba, an, out, q, 0)
+  val q = _lit(out, q + an, ", *")
+  val () = _flat_at(bt, tn, out, q, 0)
+  val q = _lit(out, q + tn, "*")
+in
+  if c < 0 then _lit(out, q, "\n\n")
+  else let
+    val @(lb, lk) = toc_label_of(c)
+    val q = _lit(out, q, ", ")
+    val () = _flat_at(lb, lk, out, q, 0)
+    val () = $A.free<byte>(lb)
+  in _lit(out, q + lk, "\n\n") end
+end
+
+fun _md {l,l1,l2:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 3600 * j + 64 <= n}{m1,m2:pos}{tn:nat | tn < m1; tn < 256}{an:nat | an < m2; an < 256} .<j>.
+  (out: !$A.arrx(byte, l, n, la), p: int p, xs: !ann(j), last: Int,
+   bt: !$A.arr(byte, l1, m1), tn: int tn, ba: !$A.arr(byte, l2, m2), an: int an): [q:nat | q + 64 <= n] int q =
   case+ xs of
   | ann_nil() => p
   | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, nt, nl, rest) =>
     if kd <> 1 then let
-      val q = _md(out, p, rest, last)
+      val q = _md(out, p, rest, last, bt, tn, ba, an)
       prval () = fold@(xs)
     in q end
     else let
@@ -987,8 +1008,9 @@ fun _md {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 2800 * j + 64 <= n} .<j>.
       val p2 = _lit(out, p1, "> ")
       val () = _flat_at(t, tl, out, p2, 0)
       val p3 = _lit(out, p2 + tl, "\n\n")
+      val p3 = _md_cite(out, p3, c, bt, tn, ba, an)
       val p4 = _md_note(out, p3, nt, nl)
-      val q = _md(out, p4, rest, c)
+      val q = _md(out, p4, rest, c, bt, tn, ba, an)
       prval () = fold@(xs)
     in q end
 
@@ -1000,7 +1022,7 @@ fun _md {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 2800 * j + 64 <= n} .<j>.
 implement annot_export (t, tn, a, an) = let
   val c = _take()
   val+ @AnnCell(xs, k) = c
-  val n = 1024 + 2800 * k
+  val n = 1024 + 3600 * k
 in
   case+ piece_new(n) of
   | ~NoPiece() => let
@@ -1014,9 +1036,9 @@ in
       val p = _lit(out, p + tn, "\n## ")
       val () = _flat_at(a, an, out, p, 0)
       val p = _lit(out, p + an, "\n\n")
+      val q = _md(out, p, xs, ~1, t, tn, a, an)
       val () = $A.free<byte>(t)
       val () = $A.free<byte>(a)
-      val q = _md(out, p, xs, ~1)
       prval () = fold@(c)
       val () = _put(c)
       val q = _lit(out, q, "---\n*Exported from Quire*\n")

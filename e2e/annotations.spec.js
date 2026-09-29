@@ -106,6 +106,8 @@ test('the export is Markdown with the book, its highlights and notes', async ({ 
   expect(md).toMatch(/^# Marked Up\n## Annotations Tests\n/);
   expect(md).toContain('Para 1.0');
   expect(md).toContain('Exported note');
+  // each quote says where it is from, as Kindle's notebook does
+  expect(md).toMatch(/> Para 1\.0[^\n]*\n\n— Annotations Tests, \*Marked Up\*, Chapter 1\n\n\*\*Note:\*\* Exported note/);
 });
 
 test('the star bookmarks the page, lists it, and unbookmarks it', async ({ page }) => {
