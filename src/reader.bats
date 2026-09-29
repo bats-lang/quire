@@ -110,6 +110,62 @@ fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* Where a page is in the book, by the chapters' sizes, in thousandths *)
+
+fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
+  if v <= 0 then 0 else if v >= 1000 then 1000 else v
+
+(* The thousandth of the book at size position x of its tot *)
+fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
+  if tot <= 0 then 0
+  (* x * 1000 fits an int *)
+  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
+  else _clamp1000(x / (tot / 1000))
+
+(* The size position of thousandth v of tot *)
+fn _of_thousandth (v: Int, tot: Int): Int =
+  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
+
+(* Where page p of t in chapter c (from 0) is in the book *)
+fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
+  val @(b, w, tot) = book_weights(book_serial(), c)
+  val cp = (if t > 0 then p * 1000 / t else 0): Int
+in _thousandth(b + _of_thousandth(cp, w), tot) end
+
+(* "last page in chapter", "1 page left" or "N pages left" at b[p, r),
+   and r *)
+fn _left_text {l:agz}{p:nat | p + 22 <= 64}{v:nat}
+  (b: !$A.arr(byte, l, 64), p: int p, left: int v): [r:nat | r <= p + 22] int r =
+  if left = 0 then _put(b, p, "last page in chapter")
+  else let
+    val off = $S.int_to_str(b, p, 64, left)
+  in if left = 1 then _put(b, off, " page left") else _put(b, off, " pages left") end
+
+(* The running footer, shown while the bars are hidden: the chapter's
+   title in qfot, then in qfon how many pages are left in the chapter and
+   how far into the book the page is: " · 8 pages left · 32%" *)
+fn _show_footer {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
+  val () = (if chapter > 0 then toc_title_in("qfot", chapter - 1) else ())
+  val left = (if total > cur_page + 1 then total - cur_page - 1 else 0): [v:nat] int v
+  val pm = _permille((if chapter > 0 then chapter - 1 else 0), cur_page, total)
+  (* the no-break space and the dot (4 bytes), " " (1), the count (at
+     most 11), " pages left" (11) or " page left" or "last page in
+     chapter" (22), " · " (4), the percentage (at most 4) and "%" *)
+  val b = $A.alloc<byte>(64)
+  val () = $A.set<byte>(b, 0, $A.int2byte(194))
+  val () = $A.set<byte>(b, 1, $A.int2byte(160))
+  val () = $A.set<byte>(b, 2, $A.int2byte(194))
+  val () = $A.set<byte>(b, 3, $A.int2byte(183))
+  val off = _put(b, 4, " ")
+  val off = _left_text(b, off, left)
+  val () = $A.set<byte>(b, off, $A.int2byte(32))
+  val () = $A.set<byte>(b, off + 1, $A.int2byte(194))
+  val () = $A.set<byte>(b, off + 2, $A.int2byte(183))
+  val off = _put(b, off + 3, " ")
+  val off = $S.int_to_str(b, off, 64, pm / 10)
+  val off = _put(b, off, "%")
+in _set_text_of("qfon", b, off) end
+
 (* The page indicator: the chapter's title (its contents entry's label,
    else "Chapter" and its number) in qpgt, then " · p. M/T" in qpgn, which
    always shows in full while a long title is cut *)
@@ -127,7 +183,8 @@ fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): 
   val off = $S.int_to_str(tbuf, off, 32, cur_page + 1)
   val off = _put(tbuf, off, "/")
   val off = $S.int_to_str(tbuf, off, 32, total)
-in _set_text_of("qpgn", tbuf, off) end
+  val () = _set_text_of("qpgn", tbuf, off)
+in _show_footer(cur_page, total, chapter) end
 
 fn _update_page_indicator(): void =
   case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)
@@ -297,25 +354,6 @@ end
    sizes, in thousandths
    ============================================================ *)
 
-fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
-  if v <= 0 then 0 else if v >= 1000 then 1000 else v
-
-(* The thousandth of the book at size position x of its tot *)
-fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
-  if tot <= 0 then 0
-  (* x * 1000 fits an int *)
-  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
-  else _clamp1000(x / (tot / 1000))
-
-(* The size position of thousandth v of tot *)
-fn _of_thousandth (v: Int, tot: Int): Int =
-  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
-
-(* Where page p of t in chapter c (from 0) is in the book *)
-fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
-  val @(b, w, tot) = book_weights(book_serial(), c)
-  val cp = (if t > 0 then p * 1000 / t else 0): Int
-in _thousandth(b + _of_thousandth(cp, w), tot) end
 
 
 (* The scrubber at v: its thumb, its fill and the percentage *)

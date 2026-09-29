@@ -142,6 +142,12 @@ fn _reader (): void = let
   (* the page turn's gesture region (quire.bats's PAGE_REGION) *)
   val () = ui_attr("qcnt", AGestureRegion, "1")
   val () = ui_named("qcnt", NDocument, "Page")
+  (* the running footer, shown while the bars are hidden; what it says
+     the page indicator (a status) says too, so it is not read out *)
+  val () = ui_el("qrvw", "qfoo", TDiv, "foot")
+  val () = ui_attr("qfoo", AHidden, "true")
+  val () = ui_el("qfoo", "qfot", TSpan, "pgt")
+  val () = ui_el("qfoo", "qfon", TSpan, "pgn")
   val () = ui_text_btn("qrvw", "qpbk", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("qpbk")
   val () = ui_el("qrvw", "qsel", TDiv, "seltb")

@@ -372,6 +372,33 @@ test('the page indicator names the chapter, and a long title is cut before the p
   await expect.poll(async () => (await place(page)).ch).toBe('Short');
 });
 
+test('while the bars are hidden, a footer says the chapter, the pages left in it and how far into the book the page is', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Footer', 2));
+  const footer = page.getByText(/· \d+ pages? left · \d+%|· last page in chapter · \d+%/);
+  // the bars are up when a book opens; the footer is under them
+  await showChrome(page);
+  await expect(footer).toBeHidden();
+  await page.keyboard.press('t');
+  await expect(footer).toBeVisible();
+  const { t } = await place(page);
+  await expect(footer).toHaveText(`· ${t - 1} pages left · 0%`);
+  await expect(footer.locator('..')).toHaveText(`Chapter 1\u00a0· ${t - 1} pages left · 0%`);
+  // it keeps up with the page, and is not read out twice (the page
+  // indicator says the same)
+  await page.keyboard.press('ArrowRight');
+  await expect(footer).toContainText(`· ${t - 2} pages left`);
+  await page.keyboard.press('End');
+  await expect(footer).toContainText('· last page in chapter');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  const pct = +(/(\d+)%/.exec(await footer.textContent())[1]);
+  expect(pct).toBeGreaterThanOrEqual(45);
+  expect(pct).toBeLessThanOrEqual(55);
+  expect(await indicator(page).count()).toBe(1);
+  expect(await footer.evaluate(e => e.closest('[aria-hidden="true"]') !== null)).toBe(true);
+});
+
 test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Toggle', 1, 10));

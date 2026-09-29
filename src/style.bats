@@ -1077,7 +1077,7 @@ fn _g_2_overlays {r:nat | r >= 2793} (sh: sheet(r, 0)): [q:nat | q >= r - 2793] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 5615} (sh: sheet(r, 0)): [q:nat | q >= r - 5615] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1140,6 +1140,24 @@ fn _g_3_reader {r:nat | r >= 5615} (sh: sheet(r, 0)): [q:nat | q >= r - 5615] sh
   val sh = close(sh)
   val sh = rule(sh, ".chrome-off .top,.chrome-off .bot")
   val sh = lay(sh, Display(), "none")
+  val sh = close(sh)
+  (* the running footer, in the page's bottom margin while the bars are
+     hidden; taps go through it to the page *)
+  val sh = rule(sh, ".foot")
+  val sh = lay(sh, Display(), "none")
+  val sh = lay(sh, Position(), "absolute")
+  val sh = lay(sh, Left(), "0")
+  val sh = lay(sh, Right(), "0")
+  val sh = lay(sh, Bottom(), "max(8px,env(safe-area-inset-bottom))")
+  val sh = lay(sh, JustifyContent(), "center")
+  val sh = lay(sh, Padding(), "0 24px")
+  val sh = lay(sh, FontSize(), "12px")
+  val sh = lay(sh, WhiteSpace(), "nowrap")
+  val sh = lay(sh, PointerEvents(), "none")
+  val sh = surf(S_muted_bg | sh, 2, 0)
+  val sh = close(sh)
+  val sh = rule(sh, ".chrome-off .foot")
+  val sh = lay(sh, Display(), "flex")
   val sh = close(sh)
   val sh = rule(sh, ".caf")
   val sh = lay(sh, Flex(), "1")
