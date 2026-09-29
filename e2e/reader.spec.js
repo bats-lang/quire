@@ -7,6 +7,7 @@ import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
+  importFiles,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -156,6 +157,37 @@ test('a new type size or window size keeps the page\'s text in view', async ({ p
   const size = page.viewportSize();
   await page.setViewportSize({ width: Math.round(size.width * 0.7), height: size.height });
   await expect.poll(() => onPage(page, top)).toBe(true);
+});
+
+// A real book: its pages begin inside paragraphs, and not every number
+// the reader gives its content is an element (a text node's is not), so
+// the place is kept by an element that begins on the page
+test('a real book keeps its place when reopened, at a new type size and at a new window size', async ({ page }) => {
+  await start(page);
+  await importFiles(page, ['test/fixtures/conan-stories.epub'], 1);
+  await openBook(page, 'Gods of the North');
+  while ((await place(page)).ch < 2) await page.keyboard.press('ArrowRight');
+  for (let k = 0; k < 6; k++) {
+    const before = await place(page);
+    await page.keyboard.press('ArrowRight');
+    await placeChanged(page, before);
+  }
+  const at = await place(page);
+  const top = (await startsOnPage(page))[0];
+  expect(top, 'a paragraph begins on the page').toBeTruthy();
+  await toLibrary(page);
+  await openBook(page, 'Gods of the North');
+  await expect.poll(() => place(page)).toEqual(at);
+  expect(await onPage(page, top)).toBe(true);
+  await openSettings(page);
+  await page.getByRole('slider', { name: 'Size' }).fill('24');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => onPage(page, top)).toBe(true);
+  expect((await place(page)).p).toBeGreaterThan(1);
+  const size = page.viewportSize();
+  await page.setViewportSize({ width: size.height, height: size.width });
+  await expect.poll(() => onPage(page, top)).toBe(true);
+  expect((await place(page)).p).toBeGreaterThan(1);
 });
 
 test('a chapter over 1 MiB is shown whole', async ({ page }) => {

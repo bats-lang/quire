@@ -167,7 +167,11 @@ fn _measure_lit {ni:pos | ni < 256} (id: string ni): void = let
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
-(* Measures content node i: whether it is in the page *)
+(* Measures content node i: whether it is in the page. The page answers
+   1 for an element it measured and 0 for an id it has no element for (a
+   text node's number), with every measure slot 0, so only 1 is one: a
+   number with no element would otherwise start at the page's left edge,
+   and a place anchored there would be the chapter's first page *)
 fn _measure_node {i:nat} (i: int i): bool = let
   val @(ia, il) = _num_id("c", i, 3)
   val @(fi, bi) = $A.freeze<byte>(ia)
@@ -176,7 +180,7 @@ fn _measure_node {i:nat} (i: int i): bool = let
   val () = $A.free<byte>($A.thaw<byte>(fi))
 in
   case+ r of
-  | ~$R.ok(_) => true
+  | ~$R.ok(v) => v > 0
   | ~$R.err(_) => false
 end
 
