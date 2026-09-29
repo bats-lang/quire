@@ -347,6 +347,60 @@ test('the place is kept when the app is hidden and then closed', async ({ page }
   expect(await place(page)).toEqual(at);
 });
 
+test('the screen is kept awake while a book is open, and again when the app comes back', async ({ page }) => {
+  // The Screen Wake Lock API, counting the locks the app holds; like the
+  // browser's, a lock is released when the page is hidden
+  await page.addInitScript(() => {
+    const w = window.__wake = { held: 0, requests: 0, live: [] };
+    const take = () => {
+      const on = [];
+      const lock = {
+        released: false,
+        addEventListener: (type, f) => { if (type === 'release') on.push(f); },
+        release: async () => {
+          if (lock.released) return;
+          lock.released = true;
+          w.held--;
+          w.live = w.live.filter(l => l !== lock);
+          on.forEach(f => f());
+        },
+      };
+      w.held++;
+      w.live.push(lock);
+      return lock;
+    };
+    Object.defineProperty(navigator, 'wakeLock', {
+      configurable: true,
+      value: { request: async type => { w.requests++; if (type !== 'screen') throw new Error(type); return take(); } },
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') w.live.slice().forEach(l => l.release());
+    });
+  });
+  const held = () => page.evaluate(() => window.__wake.held);
+  const errors = await start(page);
+  expect(await held()).toBe(0);
+  await readBook(page, book('Awake', 2));
+  await expect.poll(held).toBe(1);
+  // hidden, the browser lets it go; shown again, the app takes it again
+  const show = v => page.evaluate(state => {
+    Object.defineProperty(document, 'visibilityState', { value: state, configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  }, v);
+  await show('hidden');
+  await expect.poll(held).toBe(0);
+  await show('visible');
+  await expect.poll(held).toBe(1);
+  // back in the library the screen may sleep, and coming back leaves it so
+  await toLibrary(page);
+  await expect.poll(held).toBe(0);
+  await show('hidden');
+  await show('visible');
+  expect(await held()).toBe(0);
+  expect(await page.evaluate(() => window.__wake.requests)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test.describe('on a touch screen', () => {
   test.use({ hasTouch: true });
 
