@@ -303,7 +303,8 @@ implement annot_marks () = let
   prval () = fold@(c)
 in _put(c) end
 
-(* Whether content node i is on the page shown *)
+(* Whether content node i is on the page shown (the page measures 1 for
+   an element, and 0 for a number with no element, which is on no page) *)
 fn _on_page (i: Int): bool =
   if i < 0 then false
   else let
@@ -315,7 +316,7 @@ fn _on_page (i: Int): bool =
   in
     case+ r of
     | ~$R.err(_) => false
-    | ~$R.ok(_) => let
+    | ~$R.ok(v) => if v <= 0 then false else let
         val x = $DR.get_measure_x()
         val () = ui_measure("qcnt")
         val cx = $DR.get_measure_x()
