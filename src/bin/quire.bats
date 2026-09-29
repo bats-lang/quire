@@ -1154,6 +1154,7 @@ implement main0 () = let
       val () = import_external(h)
     in 0 end)
   val () = ui_listen_all(r)
+  val () = $P.discard<int>(reader_speed_load())
   val p = $P.and_then<int><int>(set_load(), lam(sort) => let
       val () = lib_sort_label(sort)
     in

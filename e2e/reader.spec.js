@@ -399,6 +399,37 @@ test('while the bars are hidden, a footer says the chapter, the pages left in it
   expect(await footer.evaluate(e => e.closest('[aria-hidden="true"]') !== null)).toBe(true);
 });
 
+test('the time the chapter and the book take to finish is learned from the reader\'s own speed', async ({ page }) => {
+  await page.clock.install();
+  await start(page);
+  await readBook(page, book('Timed', 3, 60));
+  await page.keyboard.press('t');
+  const footer = page.getByText(/· \d+ pages? left/);
+  // not guessed before it is known
+  await expect(footer).not.toContainText('min');
+  // a page a minute, for a dozen pages
+  for (let k = 0; k < 12; k++) {
+    const before = await place(page);
+    await page.clock.fastForward('01:00');
+    await page.keyboard.press('ArrowRight');
+    await placeChanged(page, before);
+  }
+  const { p, t } = await place(page);
+  const left = t - p;
+  await expect(footer).toContainText(`${left} page${left === 1 ? '' : 's'} left (${left} min)`);
+  // the book's time, with the bars up, by the scrubber
+  await page.keyboard.press('t');
+  await expect(page.getByText(/^\d+% · (\d+ h )?\d+ min left$/)).toBeVisible();
+  // a long pause is not reading: the speed stays a page a minute
+  await page.keyboard.press('t');
+  const before = await place(page);
+  await page.clock.fastForward('30:00');
+  await page.keyboard.press('ArrowRight');
+  await placeChanged(page, before);
+  const at = await place(page);
+  await expect(footer).toContainText(`(${at.t - at.p} min)`);
+});
+
 test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Toggle', 1, 10));

@@ -110,6 +110,89 @@ fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* ============================================================
+   Reading speed: minutes per page, learned from the pages turned on
+   ============================================================ *)
+
+(* The minutes and the pages counted: a page turned on within 3 minutes
+   of the one before counts, with the minutes between them; a longer
+   pause does not *)
+val _spd_min = ref<Int>(0)
+val _spd_pages = ref<Int>(0)
+(* The minute of the last page turned on, or -1 *)
+val _spd_last = ref<Int>(~1)
+
+(* Whether the speed is known: 10 pages over 2 minutes at least *)
+fn _spd_known (): bool = !_spd_pages >= 10 && !_spd_min >= 2
+
+(* The minutes n pages take, at the speed learned; -1 when it is not
+   known *)
+fn _spd_minutes (n: Int): Int = let
+  val m = !_spd_min
+  val g = !_spd_pages
+in
+  if ~_spd_known() then ~1
+  else if n <= 0 then 0
+  else if g <= 0 then ~1
+  (* n * m fits an int: the minutes counted are at most 3 a page, and
+     the pages at most 2000 *)
+  else if n > 100000 then ~1
+  else if m > 6000 then ~1
+  else n * m / g
+end
+
+fn _spd_key (): [l:agz] $A.arr(byte, l, 3) = let
+  val k = $A.alloc<byte>(3)
+  val () = $A.write_byte(k, 0, 115) (* s *)
+  val () = $A.write_byte(k, 1, 112) (* p *)
+  val () = $A.write_byte(k, 2, 100) (* d *)
+in k end
+
+(* Stores the speed under "spd": the minutes and the pages, 4 bytes each *)
+fn _spd_save (): void = let
+  val b = $A.alloc<byte>(8)
+  val () = $A.write_i32(b, 0, !_spd_min)
+  val () = $A.write_i32(b, 4, !_spd_pages)
+  val @(bf, bb) = $A.freeze<byte>(b)
+  val @(kf, kb) = $A.freeze<byte>(_spd_key())
+  val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 8))
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = $A.drop<byte>(bf, bb)
+in $A.free<byte>($A.thaw<byte>(bf)) end
+
+(* A page turned on: counted, and every 10 pages kept. Past 2000 pages
+   both halve, so the speed follows the reader's lately *)
+fn _spd_turn (): void = let
+  val now = $TM.epoch_minutes()
+  val last = !_spd_last
+  val () = !_spd_last := now
+in
+  if last < 0 then ()
+  else if now < last then ()
+  else if now - last > 3 then ()
+  else let
+    val () = !_spd_min := !_spd_min + (now - last)
+    val () = !_spd_pages := !_spd_pages + 1
+    val () = (if !_spd_pages > 2000 then let
+        val () = !_spd_min := !_spd_min / 2
+      in !_spd_pages := !_spd_pages / 2 end else ())
+  in if !_spd_pages - (!_spd_pages / 10) * 10 = 0 then _spd_save() else () end
+end
+
+(* d minutes, as "<1 min", "12 min" or "3 h 20 min", at b[p, r) *)
+fn _put_dur {l:agz}{n:pos}{p:nat | p + 30 <= n}
+  (b: !$A.arr(byte, l, n), p: int p, n: int n, d: Int): [r:nat | r <= p + 30] int r =
+  if d < 1 then _put(b, p, "<1 min")
+  else if d < 60 then let
+    val off = $S.int_to_str(b, p, n, d)
+  in _put(b, off, " min") end
+  else let
+    val off = $S.int_to_str(b, p, n, d / 60)
+    val off = _put(b, off, " h ")
+    val off = $S.int_to_str(b, off, n, d - (d / 60) * 60)
+  in _put(b, off, " min") end
+
 (* Where a page is in the book, by the chapters' sizes, in thousandths *)
 
 fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
@@ -134,12 +217,23 @@ in _thousandth(b + _of_thousandth(cp, w), tot) end
 
 (* "last page in chapter", "1 page left" or "N pages left" at b[p, r),
    and r *)
-fn _left_text {l:agz}{p:nat | p + 22 <= 64}{v:nat}
-  (b: !$A.arr(byte, l, 64), p: int p, left: int v): [r:nat | r <= p + 22] int r =
+fn _left_text {l:agz}{p:nat | p + 22 <= 96}{v:nat}
+  (b: !$A.arr(byte, l, 96), p: int p, left: int v): [r:nat | r <= p + 22] int r =
   if left = 0 then _put(b, p, "last page in chapter")
   else let
-    val off = $S.int_to_str(b, p, 64, left)
+    val off = $S.int_to_str(b, p, 96, left)
   in if left = 1 then _put(b, off, " page left") else _put(b, off, " pages left") end
+
+(* " (12 min)" at b[p, r), the time the pages left take, when some are
+   left and the speed is known (mins >= 0) *)
+fn _left_time {l:agz}{p:nat | p + 33 <= 96}
+  (b: !$A.arr(byte, l, 96), p: int p, left: Int, mins: Int): [r:nat | r <= p + 33] int r =
+  if left <= 0 then p
+  else if mins < 0 then p
+  else let
+    val off = _put(b, p, " (")
+    val off = _put_dur(b, off, 96, mins)
+  in _put(b, off, ")") end
 
 (* The running footer, shown while the bars are hidden: the chapter's
    title in qfot, then in qfon how many pages are left in the chapter and
@@ -150,19 +244,21 @@ fn _show_footer {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): voi
   val pm = _permille((if chapter > 0 then chapter - 1 else 0), cur_page, total)
   (* the no-break space and the dot (4 bytes), " " (1), the count (at
      most 11), " pages left" (11) or " page left" or "last page in
-     chapter" (22), " · " (4), the percentage (at most 4) and "%" *)
-  val b = $A.alloc<byte>(64)
+     chapter" (22), " (" and the time they take (at most 30) and ")",
+     " · " (4), the percentage (at most 11) and "%" *)
+  val b = $A.alloc<byte>(96)
   val () = $A.set<byte>(b, 0, $A.int2byte(194))
   val () = $A.set<byte>(b, 1, $A.int2byte(160))
   val () = $A.set<byte>(b, 2, $A.int2byte(194))
   val () = $A.set<byte>(b, 3, $A.int2byte(183))
   val off = _put(b, 4, " ")
   val off = _left_text(b, off, left)
+  val off = _left_time(b, off, left, _spd_minutes(left))
   val () = $A.set<byte>(b, off, $A.int2byte(32))
   val () = $A.set<byte>(b, off + 1, $A.int2byte(194))
   val () = $A.set<byte>(b, off + 2, $A.int2byte(183))
   val off = _put(b, off + 3, " ")
-  val off = $S.int_to_str(b, off, 64, pm / 10)
+  val off = $S.int_to_str(b, off, 96, pm / 10)
   val off = _put(b, off, "%")
 in _set_text_of("qfon", b, off) end
 
@@ -368,10 +464,33 @@ fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
   val off = $S.int_to_str(b, 0, 16, v / 10)
 in ui_attr_buf("qtrk", AValueNow, b, off) end
 
-(* The scrubber at the page shown *)
+(* The scrubber at the page shown, its percentage with the time the rest
+   of the book takes, when the speed is known: its pages are the pages
+   left in this chapter, and the rest of the book's size in this
+   chapter's pages *)
 fn _scrub_show (): void =
   case+ reading_get() of
-  | @(p, t, c, _) => _scrub_at(_permille((if c > 0 then c - 1 else 0), p, t))
+  | @(p, t, c, _) => let
+      val ci = (if c > 0 then c - 1 else 0): Int
+      val v = _permille(ci, p, t)
+      val () = _scrub_at(v)
+      val @(bs, w, tot) = book_weights(book_serial(), ci)
+      val after = tot - bs - w
+      val left = (if p + 1 < t then t - p - 1 else 0): Int
+      (* pages of the rest: after * t / w, in two steps so it fits *)
+      val rest = (if w <= 0 then ~1 else if after <= 0 then 0
+        else if after / w > 10000 then ~1 else (after / w) * t + (after - (after / w) * w) * t / w): Int
+      val mins = (if rest < 0 then ~1 else _spd_minutes(left + rest)): Int
+    in
+      if mins < 0 then ()
+      else let
+        val b = $A.alloc<byte>(64)
+        val off = $S.int_to_str(b, 0, 64, v / 10)
+        val off = _put(b, off, "% \xC2\xB7 ")
+        val off = _put_dur(b, off, 64, mins)
+        val off = _put(b, off, " left")
+      in ui_text_buf("qpct", b, off) end
+    end
 
 (* A tick on the scrubber where each chapter after the first starts *)
 fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
@@ -1497,8 +1616,8 @@ end
 fn _page_next(): void =
   case+ reading_get() of
   | @(p, t, c, tc) =>
-    if p + 1 < t then _show_page(p + 1, t, c, tc)
-    else if c < tc then $P.discard<int>(_goto(c, 0, ~1))
+    if p + 1 < t then let val () = _spd_turn() in _show_page(p + 1, t, c, tc) end
+    else if c < tc then let val () = _spd_turn() in $P.discard<int>(_goto(c, 0, ~1)) end
     else _show_page(p, t, c, tc)
 
 (* The previous page: in this chapter, else the previous chapter's last *)
@@ -1999,6 +2118,39 @@ fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, [l:agz][f:nat] 
       val r = _link_find(rest, i)
       prval () = fold@(x)
     in r end
+
+(* The little-endian int at b[p, p + 4) *)
+fn _i32_at {l:agz}{n:pos}{p:nat | p + 4 <= n} (b: !$A.arr(byte, l, n), p: int p): Int = let
+  val b0 = $AR.low_byte(byte2int0($A.get<byte>(b, p)))
+  val b1 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 1)))
+  val b2 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 2)))
+  val b3 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 3)))
+  val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
+in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
+
+(* Reads the reading speed kept under "spd" *)
+#pub fun reader_speed_load (): $P.promise(int, $P.Chained)
+implement reader_speed_load () = let
+  val @(kf, kb) = $A.freeze<byte>(_spd_key())
+  val p = $IDB.idb_get(kb, 3)
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+in
+  $P.and_then<Int><int>($P.vow(p), lam(h) =>
+    case+ take_blob(h) of
+    | ~NoBlobBytes() => $P.ret<int>(0)
+    | ~BlobBytes(b, n) =>
+      if n < 8 then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
+      else let
+        val m = _i32_at(b, 0)
+        val g = _i32_at(b, 4)
+        val () = $A.free<byte>(b)
+        (* only a plausible count: both at least 0, the pages at most 2000 *)
+        val () = (if m >= 0 then (if g >= 0 then (if g <= 2000 then let
+            val () = !_spd_min := m
+          in !_spd_pages := g end else ()) else ()) else ())
+      in $P.ret<int>(0) end)
+end
 
 #pub fun reader_link_at (i: int): bool
 implement reader_link_at (i) = let
