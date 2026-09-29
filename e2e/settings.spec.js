@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
 } from './helpers.js';
+import { TINY_PNG } from './create-epub.js';
 
 const para = page => bookPage(page).locator('p').first();
 const style = (page, prop) => para(page).evaluate((e, p) => getComputedStyle(e)[p], prop);
@@ -73,6 +74,29 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   await sheet(page).getByRole('button', { name: 'Close', exact: true }).scrollIntoViewIfNeeded();
   await expect(sheet(page).getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
   expect(errors).toEqual([]);
+});
+
+test('a book\'s images are dimmed in the dark theme, unless that is turned off', async ({ page }) => {
+  await start(page);
+  await readBook(page, {
+    title: 'Dim', author: 'Settings Tests',
+    rawChapters: [{ body: '<p><img src="images/a.png" alt="picture"/></p><p>Words.</p>' }],
+    extraEntries: [{ name: 'OEBPS/images/a.png', data: TINY_PNG, store: true }],
+  });
+  const filter = () => bookPage(page).getByRole('img', { name: 'picture' }).evaluate(e => getComputedStyle(e).filter);
+  await openSettings(page);
+  await choose(page, 'Light');
+  await expect.poll(filter).toBe('none');
+  await choose(page, 'Dark');
+  await expect.poll(filter).toBe('brightness(0.8)');
+  const dim = sheet(page).getByRole('group', { name: 'Dim images in the dark theme' });
+  await expect(dim.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  await dim.getByRole('button', { name: 'Off' }).click();
+  await expect.poll(filter).toBe('none');
+  await choose(page, 'Close');
+  await reload(page);
+  await openBook(page, 'Dim');
+  await expect.poll(filter).toBe('none');
 });
 
 test('the fonts can be chosen', async ({ page }) => {

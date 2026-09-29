@@ -656,6 +656,8 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
         else if _is(t, "qal1") then let val () = set_align_set(1) in true end
         else if _is(t, "qhy0") then let val () = set_hyph_set(0) in true end
         else if _is(t, "qhy1") then let val () = set_hyph_set(1) in true end
+        else if _is(t, "qdi0") then let val () = set_dim_set(0) in true end
+        else if _is(t, "qdi1") then let val () = set_dim_set(1) in true end
         else if _is(t, "qsrs") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()

@@ -59,7 +59,7 @@ test('a backup holds the settings, the books, their places and annotations', asy
   expect(b.quire).toBe(1);
   expect(b.settings).toMatchObject({
     size: 24, lineHeight: 16, margins: 2, font: 0, theme: 0, sort: 0,
-    align: 0, hyphens: 1, paragraphSpacing: 8, letterSpacing: 0, wordSpacing: 10,
+    align: 0, hyphens: 1, paragraphSpacing: 8, letterSpacing: 0, wordSpacing: 10, dimImages: 1,
   });
   expect(b.books).toHaveLength(1);
   const book = b.books[0];

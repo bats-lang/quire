@@ -123,6 +123,8 @@ fn _settings_chunk (): jchunk =
       val p = jw_int(out, p, set_ls_get())
       val p = jw_lit(out, p, ",\"wordSpacing\":")
       val p = jw_int(out, p, set_ws_get())
+      val p = jw_lit(out, p, ",\"dimImages\":")
+      val p = jw_int(out, p, set_dim_get())
       val p = jw_lit(out, p, ",\"sort\":")
       val p = jw_int(out, p, lib_sort_get())
       val p = jw_lit(out, p, "},\"books\":[")
@@ -542,6 +544,9 @@ in
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "letterSpacing") then let
         val () = (if x >= 0 then (if x <= 12 then set_ls_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "dimImages") then let
+        val () = (if x >= 0 then (if x <= 1 then set_dim_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "wordSpacing") then let
         val () = (if x >= 0 then (if x <= 16 then set_ws_set(x) else ()) else ())
