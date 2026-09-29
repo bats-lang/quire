@@ -1077,7 +1077,7 @@ fn _g_2_overlays {r:nat | r >= 2793} (sh: sheet(r, 0)): [q:nat | q >= r - 2793] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 5447} (sh: sheet(r, 0)): [q:nat | q >= r - 5447] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 5615} (sh: sheet(r, 0)): [q:nat | q >= r - 5615] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1125,7 +1125,18 @@ fn _g_3_reader {r:nat | r >= 5447} (sh: sheet(r, 0)): [q:nat | q >= r - 5447] sh
   val sh = lay(sh, FontSize(), "13px")
   val sh = lay(sh, WhiteSpace(), "nowrap")
   val sh = lay(sh, Flex(), "1")
-  val sh = lay(sh, TextAlign(), "center")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, JustifyContent(), "center")
+  val sh = lay(sh, MinWidth(), "0")
+  val sh = close(sh)
+  (* a long chapter title is cut, and the page numbers after it are not *)
+  val sh = rule(sh, ".pgt")
+  val sh = lay(sh, Overflow(), "hidden")
+  val sh = lay(sh, TextOverflow(), "ellipsis")
+  val sh = lay(sh, MinWidth(), "0")
+  val sh = close(sh)
+  val sh = rule(sh, ".pgn")
+  val sh = lay(sh, Flex(), "none")
   val sh = close(sh)
   val sh = rule(sh, ".chrome-off .top,.chrome-off .bot")
   val sh = lay(sh, Display(), "none")

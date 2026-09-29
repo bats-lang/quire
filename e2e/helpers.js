@@ -163,12 +163,16 @@ export async function readBook(page, opts) {
   await openBook(page, opts.title);
 }
 
-/** The page indicator as numbers: chapter, page and pages */
+/** The page indicator read back: the chapter, page and pages. The
+    indicator names the chapter by its title; the chapter is its number
+    when the title ends in one (the made books' chapters are "Chapter N",
+    and so is a chapter the contents do not name), else the title */
 export async function place(page) {
   const t = await indicator(page).textContent();
-  const m = /Ch (\d+) · p\. (\d+)\/(\d+)/.exec(t);
+  const m = /^(.*)\s· p\. (\d+)\/(\d+)$/.exec(t.trim());
   expect(m, `page indicator "${t}"`).not.toBeNull();
-  return { ch: +m[1], p: +m[2], t: +m[3] };
+  const n = /(\d+)$/.exec(m[1]);
+  return { ch: n ? +n[1] : m[1], p: +m[2], t: +m[3] };
 }
 
 /** Waits until the page indicator changes from before */

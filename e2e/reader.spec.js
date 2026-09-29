@@ -7,7 +7,7 @@ import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles,
+  importFiles, indicator,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -166,7 +166,10 @@ test('a real book keeps its place when reopened, at a new type size and at a new
   await start(page);
   await importFiles(page, ['test/fixtures/conan-stories.epub'], 1);
   await openBook(page, 'Gods of the North');
-  while ((await place(page)).ch < 2) await page.keyboard.press('ArrowRight');
+  // the cover, which the contents do not name, is "Chapter 1"; the story
+  // after it is named by its title
+  while ((await place(page)).ch === 1) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe('GODS OF THE NORTH');
   for (let k = 0; k < 6; k++) {
     const before = await place(page);
     await page.keyboard.press('ArrowRight');
@@ -349,6 +352,24 @@ test('a card shows how far the book has been read', async ({ page }) => {
   await toLibrary(page);
   await expect(card(page, 'Progress')).toContainText(/\d+%/);
   expect(await card(page, 'Progress').innerText()).not.toContain('New');
+});
+
+test('the page indicator names the chapter, and a long title is cut before the page numbers are', async ({ page }) => {
+  await start(page);
+  const long = 'An Exceedingly Long Chapter Title That Goes On and On Past Any Phone';
+  await readBook(page, {
+    title: 'Titled', author: 'Reader Tests', rawChapters: chapters(2),
+    toc: [{ label: long, href: 'chapter1.xhtml' }, { label: 'Short', href: 'chapter2.xhtml' }],
+  });
+  await showChrome(page);
+  expect(await place(page)).toMatchObject({ ch: long, p: 1 });
+  const numbers = indicator(page).getByText(/· p\. \d+\/\d+/);
+  const box = await numbers.boundingBox();
+  const bar = await control(page, 'Next page').boundingBox();
+  expect(box.x + box.width).toBeLessThanOrEqual(bar.x + 1);
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe('Short');
 });
 
 test('the t key shows and hides the bars', async ({ page }) => {

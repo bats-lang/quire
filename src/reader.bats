@@ -110,20 +110,24 @@ fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* The page indicator: the chapter's title (its contents entry's label,
+   else "Chapter" and its number) in qpgt, then " · p. M/T" in qpgn, which
+   always shows in full while a long title is cut *)
 fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
-  (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
-     middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
-  val tbuf = $A.alloc<byte>(44)
-  val off = _put(tbuf, 0, "Ch ")
-  val off = $S.int_to_str(tbuf, off, 44, chapter)
-  val () = $A.set<byte>(tbuf, off, $A.int2byte(32))
-  val () = $A.set<byte>(tbuf, off + 1, $A.int2byte(194))
-  val () = $A.set<byte>(tbuf, off + 2, $A.int2byte(183))
-  val off = _put(tbuf, off + 3, " p. ")
-  val off = $S.int_to_str(tbuf, off, 44, cur_page + 1)
+  val () = (if chapter > 0 then toc_title_in("qpgt", chapter - 1) else ())
+  (* " · p. " (8 bytes: a no-break space, 0xC2 0xA0, since a space
+     would be dropped at the start of its box; the middle dot, 0xC2
+     0xB7), M (at most 11), "/" and T (at most 11) *)
+  val tbuf = $A.alloc<byte>(32)
+  val () = $A.set<byte>(tbuf, 0, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, 1, $A.int2byte(160))
+  val () = $A.set<byte>(tbuf, 2, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, 3, $A.int2byte(183))
+  val off = _put(tbuf, 4, " p. ")
+  val off = $S.int_to_str(tbuf, off, 32, cur_page + 1)
   val off = _put(tbuf, off, "/")
-  val off = $S.int_to_str(tbuf, off, 44, total)
-in _set_text_of("qpgi", tbuf, off) end
+  val off = $S.int_to_str(tbuf, off, 32, total)
+in _set_text_of("qpgn", tbuf, off) end
 
 fn _update_page_indicator(): void =
   case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)

@@ -44,7 +44,8 @@ for (const ncx of [false, true]) {
     await expect(jumpBack(page)).toBeVisible();
     await jumpBack(page).click();
     await expect(chapterTitle(page)).toHaveText('Opening & Intro');
-    expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
+    // the page indicator names the chapter by its title too
+    expect(await place(page)).toMatchObject({ ch: 'Opening & Intro', p: 1 });
     await expect(jumpBack(page)).toBeHidden();
     expect(errors).toEqual([]);
   });
@@ -69,7 +70,7 @@ test('reading on from where a jump landed puts the back button away', async ({ p
   await expect(chapterTitle(page)).toHaveText('The Middle');
   await expect(jumpBack(page)).toBeVisible();
   await page.keyboard.press('ArrowLeft');
-  await expect.poll(async () => (await place(page)).ch).toBe(1);
+  await expect.poll(async () => (await place(page)).ch).toBe('Opening & Intro');
   await expect(jumpBack(page)).toBeHidden();
   expect(errors).toEqual([]);
 });

@@ -159,6 +159,8 @@ fn _reader (): void = let
   val () = ui_icon_btn("qrbb", "qanb", "ibtn", IcNotes, "Annotations")
   val () = ui_el("qrbb", "qpgi", TDiv, "pinfo")
   val () = ui_named("qpgi", NStatus, "Page")
+  val () = ui_el("qpgi", "qpgt", TSpan, "pgt")
+  val () = ui_el("qpgi", "qpgn", TSpan, "pgn")
   val () = ui_icon_btn("qrbb", "qnxt", "ibtn", IcNext, "Next page")
   (* scrubber *)
   val () = ui_el("qrbb", "qscr", TDiv, "scr")
