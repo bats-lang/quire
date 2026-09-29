@@ -1335,43 +1335,104 @@ fun ps_keep {k:nat}{j:nat} .<k>. (p: pstack(k), j: int j): [m:nat] pstack(m) =
     if j <= 0 then let val () = ps_free(r) in ps_nil() end
     else ps_cons(c, g, a, ps_keep(r, j - 1))
 
-datavtype ps_cell = {k:nat} PsCell of pstack(k)
+(* How long the back button stays after a jump, in milliseconds *)
+#define BACK_SHOWN 10000
 
-val _ps = ref<ps_cell>(PsCell(ps_nil()))
+(* TIMED(g): a timeout numbered g is armed, which will run the action
+   _timed_arm was given, with g. Its constructor is local to _timed_arm,
+   so nothing else can make one *)
+local
+dataprop TIMED_(int) = {g:int} TimedArmed(g) of ()
+in
+stadef TIMED = TIMED_
+
+fn _timed_arm {g:int} (g: int g, done: (Int) -<cloref1> void): (TIMED(g) | void) = let
+  val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => let
+      val () = done(g)
+    in $P.ret<int>(0) end))
+in (TimedArmed() | ()) end
+end
+
+(* The back button, in the type of what holds it: hidden, and then no
+   position is kept; or shown, with at least one position and the proof
+   that the timeout of the number it holds is armed. So the button is
+   never shown without a pending timeout that takes it away *)
+datavtype ps_cell =
+  | PsHidden of ()
+  | {k:pos}{g:int} PsShown of (TIMED(g) | int g, pstack(k))
+
+val _ps = ref<ps_cell>(PsHidden())
+
+(* The number of the last timeout armed *)
+val _ps_timed = ref<Int>(0)
+
+fn _ps_free (c: ps_cell): void =
+  case+ c of
+  | ~PsHidden() => ()
+  | ~PsShown(_ | _, p) => ps_free(p)
 
 fn _ps_take (): ps_cell = let
-  var c: ps_cell = PsCell(ps_nil())
+  var c: ps_cell = PsHidden()
   val () = ref_exch_elt<ps_cell>(_ps, c)
 in c end
 
+(* Keeps c, and shows the button or hides it as c says: the only place
+   that shows or hides it *)
 fn _ps_put (c: ps_cell): void = let
+  val shown = (case+ c of PsHidden() => false | PsShown(_ | _, _) => true): bool
   var cur: ps_cell = c
   val () = ref_exch_elt<ps_cell>(_ps, cur)
-  val+ ~PsCell(p) = cur
-in ps_free(p) end
+  val () = _ps_free(cur)
+in ui_show("qpbk", shown) end
+
+(* Timeout g has run: the button goes, with the positions it offered,
+   when it is still the one timeout g was armed for *)
+fn _back_timeout (g: Int): void = let
+  val c = _ps_take()
+  val due = (case+ c of PsHidden() => false | PsShown(_ | h, _) => h = g): bool
+in
+  if due then let
+    val () = _ps_free(c)
+  in _ps_put(PsHidden()) end
+  else _ps_put(c)
+end
+
+(* Arms a new timeout for the button, which takes it away *)
+fn _back_arm (): [g:int] (TIMED(g) | int g) = let
+  val g = !_ps_timed + 1
+  val () = !_ps_timed := g
+  val (pf | ()) = _timed_arm(g, lam(h) => _back_timeout(h))
+in (pf | g) end
+
+(* Shows the button offering the positions p, with a new timeout *)
+fn _back_offer {k:pos} (p: pstack(k)): void = let
+  val (pf | g) = _back_arm()
+in _ps_put(PsShown(pf | g, p)) end
 
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
   val anchor = _anchor_now()
-  val+ ~PsCell(p) = _ps_take()
+  val c = _ps_take()
+  val p = (case+ c of
+    | ~PsHidden() => ps_nil()
+    | ~PsShown(_ | _, p) => p): [k:nat] pstack(k)
   val p = (case+ reading_get() of
-    | @(pg, _, c, _) => ps_cons((if c > 0 then c - 1 else 0), pg, anchor, ps_keep(p, 29))): [m:nat] pstack(m)
-  val () = _ps_put(PsCell(p))
-in ui_show("qpbk", true) end
+    | @(pg, _, ch, _) => ps_cons((if ch > 0 then ch - 1 else 0), pg, anchor, ps_keep(p, 29))): [m:pos] pstack(m)
+in _back_offer(p) end
 
-(* Returns to the position last jumped away from *)
+(* Returns to the position last jumped away from; the button stays, with
+   a new timeout, while there are more *)
 fn _pop_position (): void = let
-  val+ ~PsCell(p) = _ps_take()
+  val c = _ps_take()
 in
-  case+ p of
-  | ~ps_nil() => let
-      val () = _ps_put(PsCell(ps_nil()))
-    in ui_show("qpbk", false) end
-  | ~ps_cons(c, g, a, rest) => let
-      val empty = (case+ rest of ps_nil() => true | ps_cons(_, _, _, _) => false): bool
-      val () = _ps_put(PsCell(rest))
-      val () = ui_show("qpbk", ~empty)
-    in $P.discard<int>(_goto(c, g, a)) end
+  case+ c of
+  | ~PsHidden() => _ps_put(PsHidden())
+  | ~PsShown(_ | _, p) => let
+      val+ ~ps_cons(ch, g, a, rest) = p
+      val () = (case+ rest of
+        | ~ps_nil() => _ps_put(PsHidden())
+        | ps_cons(_, _, _, _) => _back_offer(rest))
+    in $P.discard<int>(_goto(ch, g, a)) end
 end
 
 (* Loads chapter ch and shows its page at thousandth cp of it *)
@@ -1834,11 +1895,10 @@ in $P.discard<int>(_goto(ch, pg, anchor)) end
 #pub fun reader_back (): void
 implement reader_back () = _pop_position()
 
-(* Forgets the positions jumped from (a book is opened or closed) *)
+(* Forgets the positions jumped from, and the back button goes: a book
+   is opened or closed, a page turned, or the bars brought up *)
 #pub fun reader_stack_clear (): void
-implement reader_stack_clear () = let
-  val () = _ps_put(PsCell(ps_nil()))
-in ui_show("qpbk", false) end
+implement reader_stack_clear () = _ps_put(PsHidden())
 
 (* The scrubber dragged to x: the thumb there, and the title of the
    chapter there in its tip *)

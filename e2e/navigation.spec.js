@@ -74,6 +74,47 @@ test('reading on from where a jump landed puts the back button away', async ({ p
   expect(errors).toEqual([]);
 });
 
+test('the back button goes on its own after ten seconds, and with it the place it offered', async ({ page }) => {
+  await page.clock.install();
+  const errors = await start(page);
+  await readBook(page, tocBook(false));
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await entries(page).filter({ hasText: 'The End' }).click();
+  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect(jumpBack(page)).toBeVisible();
+  await page.clock.runFor(9000);
+  await expect(jumpBack(page)).toBeVisible();
+  await page.clock.runFor(1500);
+  await expect(jumpBack(page)).toBeHidden();
+  // a later jump offers only its own way back
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await entries(page).filter({ hasText: 'The Middle' }).click();
+  await expect(chapterTitle(page)).toHaveText('The Middle');
+  await jumpBack(page).click();
+  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect(jumpBack(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('bringing up the bars puts the back button away', async ({ page }) => {
+  await page.clock.install();
+  const errors = await start(page);
+  await readBook(page, tocBook(false));
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await entries(page).filter({ hasText: 'The End' }).click();
+  await expect(chapterTitle(page)).toHaveText('The End');
+  // the bars go by themselves after five seconds; the button stays
+  await page.clock.runFor(6000);
+  await expect(control(page, 'Previous page')).toBeHidden();
+  await expect(jumpBack(page)).toBeVisible();
+  await showChrome(page);
+  await expect(jumpBack(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('the contents panel closes with Escape and its close button', async ({ page }) => {
   await start(page);
   await readBook(page, tocBook(false));
