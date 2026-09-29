@@ -13,6 +13,21 @@ const audit = async page => {
   return r.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`);
 };
 
+// Every element is made up front (app.bats) and found by its id, so two
+// sharing one would make a control act for another
+test('no two elements share an id', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Ids', author: 'A', rawChapters: chapters(2) })], 1);
+  await cards(page).first().click();
+  await expect(bookPage(page)).toBeVisible();
+  const dups = await page.evaluate(() => {
+    const seen = new Map();
+    for (const e of document.querySelectorAll('[id]')) seen.set(e.id, (seen.get(e.id) || 0) + 1);
+    return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  });
+  expect(dups).toEqual([]);
+});
+
 test('no view has accessibility violations', async ({ page }) => {
   await start(page);
   expect(await audit(page)).toEqual([]);

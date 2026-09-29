@@ -4,6 +4,7 @@
 import { test, expect } from '@playwright/test';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
 } from './helpers.js';
+import { TINY_PNG } from './create-epub.js';
 
 const para = page => bookPage(page).locator('p').first();
 const style = (page, prop) => para(page).evaluate((e, p) => getComputedStyle(e)[p], prop);
@@ -34,6 +35,68 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   await openSettings(page);
   await expect(slider(page, 'Size')).toHaveValue('28');
   expect(errors).toEqual([]);
+});
+
+test('alignment, hyphenation and the spacings change the page, and are kept', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Spaced', author: 'Settings Tests', rawChapters: chapters(2) });
+  const group = name => sheet(page).getByRole('group', { name });
+  // ragged and hyphenated to start with (WCAG 1.4.8: not justified)
+  expect(await style(page, 'textAlign')).toBe('start');
+  expect(await style(page, 'hyphens')).toBe('auto');
+  expect(await style(page, 'letterSpacing')).toBe('normal');
+  await openSettings(page);
+  await expect(group('Alignment').getByRole('button', { name: 'Ragged' })).toHaveAttribute('aria-pressed', 'true');
+  await group('Alignment').getByRole('button', { name: 'Justified' }).click();
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
+  await expect(group('Alignment').getByRole('button', { name: 'Justified' })).toHaveAttribute('aria-pressed', 'true');
+  await group('Hyphenation').getByRole('button', { name: 'Off' }).click();
+  await expect.poll(() => style(page, 'hyphens')).toBe('manual');
+  // the spacings reach what WCAG 1.4.12 asks a page to take
+  await slider(page, 'Paragraph spacing').fill('20');
+  await expect.poll(() => style(page, 'marginBottom')).toBe(`${18 * 2}px`);
+  await slider(page, 'Letter spacing').fill('12');
+  await expect.poll(async () => parseFloat(await style(page, 'letterSpacing'))).toBeCloseTo(18 * 0.12, 1);
+  await slider(page, 'Word spacing').fill('16');
+  await expect.poll(async () => parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
+  await expect(sheet(page)).toContainText('0.12');
+  await choose(page, 'Close');
+  await toLibrary(page);
+  await reload(page);
+  await openBook(page, 'Spaced');
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
+  expect(await style(page, 'hyphens')).toBe('manual');
+  expect(await style(page, 'marginBottom')).toBe(`${18 * 2}px`);
+  expect(parseFloat(await style(page, 'letterSpacing'))).toBeCloseTo(18 * 0.12, 1);
+  expect(parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
+  // the sheet, taller now, scrolls on a short screen to its last row
+  await openSettings(page);
+  await sheet(page).getByRole('button', { name: 'Close', exact: true }).scrollIntoViewIfNeeded();
+  await expect(sheet(page).getByRole('button', { name: 'Close', exact: true })).toBeInViewport();
+  expect(errors).toEqual([]);
+});
+
+test('a book\'s images are dimmed in the dark theme, unless that is turned off', async ({ page }) => {
+  await start(page);
+  await readBook(page, {
+    title: 'Dim', author: 'Settings Tests',
+    rawChapters: [{ body: '<p><img src="images/a.png" alt="picture"/></p><p>Words.</p>' }],
+    extraEntries: [{ name: 'OEBPS/images/a.png', data: TINY_PNG, store: true }],
+  });
+  const filter = () => bookPage(page).getByRole('img', { name: 'picture' }).evaluate(e => getComputedStyle(e).filter);
+  await openSettings(page);
+  await choose(page, 'Light');
+  await expect.poll(filter).toBe('none');
+  await choose(page, 'Dark');
+  await expect.poll(filter).toBe('brightness(0.8)');
+  const dim = sheet(page).getByRole('group', { name: 'Dim images in the dark theme' });
+  await expect(dim.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
+  await dim.getByRole('button', { name: 'Off' }).click();
+  await expect.poll(filter).toBe('none');
+  await choose(page, 'Close');
+  await reload(page);
+  await openBook(page, 'Dim');
+  await expect.poll(filter).toBe('none');
 });
 
 test('the fonts can be chosen', async ({ page }) => {
@@ -95,7 +158,10 @@ test('reset puts the defaults back', async ({ page }) => {
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
+  await choose(page, 'Justified');
+  await expect.poll(() => style(page, 'textAlign')).toBe('justify');
   await choose(page, 'Reset to defaults');
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
+  expect(await style(page, 'textAlign')).toBe('start');
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });

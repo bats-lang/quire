@@ -1179,10 +1179,10 @@ fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sh
   val sh = lay(sh, MarginRight(), "auto")
   val sh = lay(sh, BoxSizing(), "border-box")
   val sh = close(sh)
+  (* a paragraph's alignment, hyphenation and the space after it are
+     the reader's settings (settings.bats, in qdyn) *)
   val sh = rule(sh, ".caf p")
   val sh = lay(sh, Margin(), "0 auto .8em")
-  val sh = lay(sh, TextAlign(), "justify")
-  val sh = lay(sh, Hyphens(), "auto")
   val sh = close(sh)
   val sh = rule(sh, ".caf h1,.caf h2,.caf h3")
   val sh = lay(sh, TextAlign(), "center")
@@ -1361,7 +1361,7 @@ fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sh
   val sh = close(sh)
 in sh end
 
-fn _g_4_panels {r:nat | r >= 4609} (sh: sheet(r, 0)): [q:nat | q >= r - 4609] sheet(q, 0) = let
+fn _g_4_panels {r:nat | r >= 4685} (sh: sheet(r, 0)): [q:nat | q >= r - 4685] sheet(q, 0) = let
   val sh = rule(sh, ".panel")
   val sh = lay(sh, Position(), "fixed")
   val sh = lay(sh, Top(), "0")
@@ -1506,6 +1506,13 @@ fn _g_4_panels {r:nat | r >= 4609} (sh: sheet(r, 0)): [q:nat | q >= r - 4609] sh
   val sh = lay(sh, MaxWidth(), "520px")
   val sh = lay(sh, Margin(), "0 auto")
   val sh = lay(sh, BorderRadius(), "12px 12px 0 0")
+  (* taller than a short screen allows: it scrolls *)
+  val sh = lay(sh, MaxHeight(), "85vh")
+  val sh = lay(sh, Overflow(), "auto")
+  val sh = close(sh)
+  (* its rows keep their height, and the sheet scrolls instead *)
+  val sh = rule(sh, ".sheet>*")
+  val sh = lay(sh, Flex(), "none")
   val sh = close(sh)
   (* a note's text, over the page: a long one scrolls *)
   val sh = rule(sh, ".fntext")

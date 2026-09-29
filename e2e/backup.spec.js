@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
-  selectionButton, colours,
+  selectionButton, colours, bookPage,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -51,12 +51,16 @@ test('a backup holds the settings, the books, their places and annotations', asy
   await dialog(page, 'Note').getByRole('button', { name: 'Save' }).click();
   await openSettings(page);
   await page.getByRole('slider', { name: 'Size' }).fill('24');
+  await page.getByRole('slider', { name: 'Word spacing' }).fill('10');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
   const b = JSON.parse(json);
   expect(b.quire).toBe(1);
-  expect(b.settings).toMatchObject({ size: 24, lineHeight: 16, margins: 2, font: 0, theme: 0, sort: 0 });
+  expect(b.settings).toMatchObject({
+    size: 24, lineHeight: 16, margins: 2, font: 0, theme: 0, sort: 0,
+    align: 0, hyphens: 1, paragraphSpacing: 8, letterSpacing: 0, wordSpacing: 10, dimImages: 1,
+  });
   expect(b.books).toHaveLength(1);
   const book = b.books[0];
   expect(book).toMatchObject({ title: 'Backed "Up"', author: 'Keeper', shelf: 0, chapter: 0, chapters: 2, done: 0 });
@@ -83,6 +87,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   const plain = await bg(page);
   await page.getByRole('button', { name: 'Sepia', exact: true }).click();
   await expect.poll(() => bg(page)).not.toBe(plain);
+  await page.getByRole('button', { name: 'Justified', exact: true }).click();
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const sepia = await bg(page);
@@ -105,6 +110,8 @@ test('a backup restored after a reset brings everything back, and a book importe
   await openBook(page, 'Kept Two');
   expect(await place(page)).toEqual(at);
   await expect.poll(() => marks(page)).toEqual(hl);
+  // and the settings came back with the rest
+  expect(await bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).textAlign)).toBe('justify');
 });
 
 test('a file that is not a backup is refused with a message', async ({ page }) => {

@@ -497,6 +497,45 @@ test('the page has the book\'s language, or its chapter\'s, so it is hyphenated 
   await toLibrary(page);
   await readBook(page, { title: 'Unnamed', author: 'Reader Tests', language: null, rawChapters: chapters(1) });
   expect(await lang()).toBe('und');
+test('taps on the page follow the chosen zones: sides, forward or one hand', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Zones', 1, 40));
+  await page.keyboard.press('t');
+  const tap = async (fx, fy) => {
+    const box = await bookPage(page).boundingBox();
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  };
+  const turned = async (fx, fy, by) => {
+    const before = await place(page);
+    await tap(fx, fy);
+    await expect.poll(async () => (await place(page)).p).toBe(before.p + by);
+  };
+  const bars = () => control(page, 'Previous page').isVisible();
+  // sides: the middle brings up the bars
+  await turned(0.9, 0.5, 1);
+  await tap(0.5, 0.5);
+  await expect.poll(bars).toBe(true);
+  // forward: the middle turns on, the left quarter back, the top the bars
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('group', { name: 'What a tap on the page does' })
+    .getByRole('button', { name: 'Forward' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(bars).toBe(false);
+  await turned(0.5, 0.5, 1);
+  await turned(0.1, 0.5, -1);
+  await tap(0.5, 0.03);
+  await expect.poll(bars).toBe(true);
+  // one hand: the top third back, the bottom third on, the middle the bars
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('button', { name: 'One hand' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(bars).toBe(false);
+  await turned(0.5, 0.9, 1);
+  await turned(0.5, 0.1, -1);
+  await tap(0.5, 0.5);
+  await expect.poll(bars).toBe(true);
 });
 
 test('the t key shows and hides the bars', async ({ page }) => {
