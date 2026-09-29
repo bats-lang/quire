@@ -142,6 +142,12 @@ fn _reader (): void = let
   (* the page turn's gesture region (quire.bats's PAGE_REGION) *)
   val () = ui_attr("qcnt", AGestureRegion, "1")
   val () = ui_named("qcnt", NDocument, "Page")
+  (* the running footer, shown while the bars are hidden; what it says
+     the page indicator (a status) says too, so it is not read out *)
+  val () = ui_el("qrvw", "qfoo", TDiv, "foot")
+  val () = ui_attr("qfoo", AHidden, "true")
+  val () = ui_el("qfoo", "qfot", TSpan, "pgt")
+  val () = ui_el("qfoo", "qfon", TSpan, "pgn")
   val () = ui_text_btn("qrvw", "qpbk", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("qpbk")
   val () = ui_el("qrvw", "qsel", TDiv, "seltb")
@@ -159,6 +165,8 @@ fn _reader (): void = let
   val () = ui_icon_btn("qrbb", "qanb", "ibtn", IcNotes, "Annotations")
   val () = ui_el("qrbb", "qpgi", TDiv, "pinfo")
   val () = ui_named("qpgi", NStatus, "Page")
+  val () = ui_el("qpgi", "qpgt", TSpan, "pgt")
+  val () = ui_el("qpgi", "qpgn", TSpan, "pgn")
   val () = ui_icon_btn("qrbb", "qnxt", "ibtn", IcNext, "Next page")
   (* scrubber *)
   val () = ui_el("qrbb", "qscr", TDiv, "scr")
@@ -208,6 +216,47 @@ fn _settings (): void = let
   val () = ui_el("qspn", "qsr1", TDiv, "srow")
   val () = ui_el("qspn", "qsr2", TDiv, "srow")
   val () = ui_el("qspn", "qsr3", TDiv, "srow")
+  (* the text's alignment and hyphenation, each a named group, so its
+     buttons are announced with what they set *)
+  val () = ui_el("qspn", "qsra", TDiv, "srow")
+  val () = ui_el("qsra", "qsla", TSpan, "slabel")
+  val () = ui_text("qsla", "Alignment")
+  val () = ui_el("qsra", "qsga", TDiv, "seg")
+  val () = ui_named("qsga", NGroup, "Alignment")
+  val () = ui_text_btn("qsga", "qal0", "sbtn", "Ragged")
+  val () = ui_text_btn("qsga", "qal1", "sbtn", "Justified")
+  val () = ui_el("qspn", "qsry", TDiv, "srow")
+  val () = ui_el("qsry", "qsly", TSpan, "slabel")
+  val () = ui_text("qsly", "Hyphenation")
+  val () = ui_el("qsry", "qsgh", TDiv, "seg")
+  val () = ui_named("qsgh", NGroup, "Hyphenation")
+  val () = ui_text_btn("qsgh", "qhy1", "sbtn", "On")
+  val () = ui_text_btn("qsgh", "qhy0", "sbtn", "Off")
+  val () = ui_el("qspn", "qsrd", TDiv, "srow")
+  val () = ui_el("qsrd", "qsld", TSpan, "slabel")
+  val () = ui_text("qsld", "Dim images")
+  val () = ui_el("qsrd", "qsgd", TDiv, "seg")
+  val () = ui_named("qsgd", NGroup, "Dim images in the dark theme")
+  val () = ui_text_btn("qsgd", "qdi1", "sbtn", "On")
+  val () = ui_text_btn("qsgd", "qdi0", "sbtn", "Off")
+  val () = ui_el("qspn", "qstz", TDiv, "srow")
+  val () = ui_el("qstz", "qslz", TSpan, "slabel")
+  val () = ui_text("qslz", "Taps")
+  val () = ui_el("qstz", "qsgz", TDiv, "seg")
+  val () = ui_named("qsgz", NGroup, "What a tap on the page does")
+  val () = ui_text_btn("qsgz", "qtz0", "sbtn", "Sides")
+  val () = ui_text_btn("qsgz", "qtz1", "sbtn", "Forward")
+  val () = ui_text_btn("qsgz", "qtz2", "sbtn", "One hand")
+  val () = ui_el("qspn", "qsvk", TDiv, "srow")
+  val () = ui_el("qsvk", "qslv", TSpan, "slabel")
+  val () = ui_text("qslv", "Volume keys")
+  val () = ui_el("qsvk", "qsgv", TDiv, "seg")
+  val () = ui_named("qsgv", NGroup, "Volume keys turn the page")
+  val () = ui_text_btn("qsgv", "qvk1", "sbtn", "Turn pages")
+  val () = ui_text_btn("qsgv", "qvk0", "sbtn", "Volume")
+  val () = ui_el("qspn", "qsr4", TDiv, "srow")
+  val () = ui_el("qspn", "qsr5", TDiv, "srow")
+  val () = ui_el("qspn", "qsr6", TDiv, "srow")
   val () = ui_el("qspn", "qsrt2", TDiv, "srow")
   val () = ui_el("qsrt2", "qslt", TSpan, "slabel")
   val () = ui_text("qslt", "Theme")
@@ -257,6 +306,28 @@ fn _annotations (): void = let
   val () = ui_el("qanp", "qanl", TDiv, "plist")
 in _hide("qanp") end
 
+(* A note, opened over the page from its reference: its text, a way to
+   the note itself, and Close *)
+fn _note (): void = let
+  val () = ui_el("bats-root", "qnte", TDiv, "sheet")
+  val () = ui_named("qnte", NDialog, "Footnote")
+  val () = ui_el("qnte", "qntx", TDiv, "fntext")
+  val () = ui_el("qnte", "qntb", TDiv, "srow sfoot")
+  val () = ui_text_btn("qntb", "qngo", "link", "Go to note")
+  val () = ui_el("qntb", "qntg", TSpan, "grow")
+  val () = ui_text_btn("qntb", "qncl", "btn", "Close")
+in _hide("qnte") end
+
+(* A book's image, full screen: it can be zoomed with the fingers, and
+   scrolled; the image is the page's, whose alt says what it shows *)
+fn _image_viewer (): void = let
+  val () = ui_el("bats-root", "qimv", TDiv, "imview")
+  val () = ui_named("qimv", NDialog, "Image")
+  val () = ui_el("qimv", "qivb", TDiv, "imbox")
+  val () = ui_img("qivb", "qimg", "imimg")
+  val () = ui_icon_btn("qimv", "qimx", "ibtn imclose", IcClose, "Close")
+in _hide("qimv") end
+
 (* Makes every element of the app, in the root element bats-root *)
 #pub fn app_build (): void
 
@@ -278,6 +349,8 @@ implement app_build () = let
   val () = _settings()
   val () = _search()
   val () = _annotations()
+  val () = _note()
+  val () = _image_viewer()
   val () = _undo_toast()
 in _modal() end
 

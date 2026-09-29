@@ -266,7 +266,7 @@ in end
    style is a place (ui_place), so nothing can set a colour, a size or
    anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
-  | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion
+  | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion | AHidden
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
@@ -274,6 +274,7 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
+  | AHidden() => "aria-hidden"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}

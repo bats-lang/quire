@@ -5,13 +5,28 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {
   start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control, dialog,
-  selectText, illegible,
+  selectText, illegible, clickControl,
 } from './helpers.js';
 
 const audit = async page => {
   const r = await new AxeBuilder({ page }).analyze();
   return r.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`);
 };
+
+// Every element is made up front (app.bats) and found by its id, so two
+// sharing one would make a control act for another
+test('no two elements share an id', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Ids', author: 'A', rawChapters: chapters(2) })], 1);
+  await cards(page).first().click();
+  await expect(bookPage(page)).toBeVisible();
+  const dups = await page.evaluate(() => {
+    const seen = new Map();
+    for (const e of document.querySelectorAll('[id]')) seen.set(e.id, (seen.get(e.id) || 0) + 1);
+    return [...seen].filter(([, n]) => n > 1).map(([id]) => id);
+  });
+  expect(dups).toEqual([]);
+});
 
 test('no view has accessibility violations', async ({ page }) => {
   await start(page);
@@ -21,12 +36,10 @@ test('no view has accessibility violations', async ({ page }) => {
   await cards(page).first().click();
   await expect(bookPage(page)).toBeVisible();
   expect(await audit(page)).toEqual([]);
-  await showChrome(page);
-  await control(page, 'Typography').click();
+  await clickControl(page, 'Typography');
   expect(await audit(page)).toEqual([]);
   await page.keyboard.press('Escape');
-  await showChrome(page);
-  await control(page, 'Contents').click();
+  await clickControl(page, 'Contents');
   expect(await audit(page)).toEqual([]);
   await page.keyboard.press('Escape');
   await page.keyboard.press('/');

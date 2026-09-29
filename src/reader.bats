@@ -19,6 +19,7 @@ staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "ui.sats"
+staload "layer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
@@ -110,20 +111,177 @@ fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   val () = $A.drop<byte>(fi, bi)
 in $A.free<byte>($A.thaw<byte>(fi)) end
 
+(* ============================================================
+   Reading speed: minutes per page, learned from the pages turned on
+   ============================================================ *)
+
+(* The minutes and the pages counted: a page turned on within 3 minutes
+   of the one before counts, with the minutes between them; a longer
+   pause does not *)
+val _spd_min = ref<Int>(0)
+val _spd_pages = ref<Int>(0)
+(* The minute of the last page turned on, or -1 *)
+val _spd_last = ref<Int>(~1)
+
+(* Whether the speed is known: 10 pages over 2 minutes at least *)
+fn _spd_known (): bool = !_spd_pages >= 10 && !_spd_min >= 2
+
+(* The minutes n pages take, at the speed learned; -1 when it is not
+   known *)
+fn _spd_minutes (n: Int): Int = let
+  val m = !_spd_min
+  val g = !_spd_pages
+in
+  if ~_spd_known() then ~1
+  else if n <= 0 then 0
+  else if g <= 0 then ~1
+  (* n * m fits an int: the minutes counted are at most 3 a page, and
+     the pages at most 2000 *)
+  else if n > 100000 then ~1
+  else if m > 6000 then ~1
+  else n * m / g
+end
+
+fn _spd_key (): [l:agz] $A.arr(byte, l, 3) = let
+  val k = $A.alloc<byte>(3)
+  val () = $A.write_byte(k, 0, 115) (* s *)
+  val () = $A.write_byte(k, 1, 112) (* p *)
+  val () = $A.write_byte(k, 2, 100) (* d *)
+in k end
+
+(* Stores the speed under "spd": the minutes and the pages, 4 bytes each *)
+fn _spd_save (): void = let
+  val b = $A.alloc<byte>(8)
+  val () = $A.write_i32(b, 0, !_spd_min)
+  val () = $A.write_i32(b, 4, !_spd_pages)
+  val @(bf, bb) = $A.freeze<byte>(b)
+  val @(kf, kb) = $A.freeze<byte>(_spd_key())
+  val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 8))
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = $A.drop<byte>(bf, bb)
+in $A.free<byte>($A.thaw<byte>(bf)) end
+
+(* A page turned on: counted, and every 10 pages kept. Past 2000 pages
+   both halve, so the speed follows the reader's lately *)
+fn _spd_turn (): void = let
+  val now = $TM.epoch_minutes()
+  val last = !_spd_last
+  val () = !_spd_last := now
+in
+  if last < 0 then ()
+  else if now < last then ()
+  else if now - last > 3 then ()
+  else let
+    val () = !_spd_min := !_spd_min + (now - last)
+    val () = !_spd_pages := !_spd_pages + 1
+    val () = (if !_spd_pages > 2000 then let
+        val () = !_spd_min := !_spd_min / 2
+      in !_spd_pages := !_spd_pages / 2 end else ())
+  in if !_spd_pages - (!_spd_pages / 10) * 10 = 0 then _spd_save() else () end
+end
+
+(* d minutes, as "<1 min", "12 min" or "3 h 20 min", at b[p, r) *)
+fn _put_dur {l:agz}{n:pos}{p:nat | p + 30 <= n}
+  (b: !$A.arr(byte, l, n), p: int p, n: int n, d: Int): [r:nat | r <= p + 30] int r =
+  if d < 1 then _put(b, p, "<1 min")
+  else if d < 60 then let
+    val off = $S.int_to_str(b, p, n, d)
+  in _put(b, off, " min") end
+  else let
+    val off = $S.int_to_str(b, p, n, d / 60)
+    val off = _put(b, off, " h ")
+    val off = $S.int_to_str(b, off, n, d - (d / 60) * 60)
+  in _put(b, off, " min") end
+
+(* Where a page is in the book, by the chapters' sizes, in thousandths *)
+
+fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
+  if v <= 0 then 0 else if v >= 1000 then 1000 else v
+
+(* The thousandth of the book at size position x of its tot *)
+fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
+  if tot <= 0 then 0
+  (* x * 1000 fits an int *)
+  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
+  else _clamp1000(x / (tot / 1000))
+
+(* The size position of thousandth v of tot *)
+fn _of_thousandth (v: Int, tot: Int): Int =
+  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
+
+(* Where page p of t in chapter c (from 0) is in the book *)
+fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
+  val @(b, w, tot) = book_weights(book_serial(), c)
+  val cp = (if t > 0 then p * 1000 / t else 0): Int
+in _thousandth(b + _of_thousandth(cp, w), tot) end
+
+(* "last page in chapter", "1 page left" or "N pages left" at b[p, r),
+   and r *)
+fn _left_text {l:agz}{p:nat | p + 22 <= 96}{v:nat}
+  (b: !$A.arr(byte, l, 96), p: int p, left: int v): [r:nat | r <= p + 22] int r =
+  if left = 0 then _put(b, p, "last page in chapter")
+  else let
+    val off = $S.int_to_str(b, p, 96, left)
+  in if left = 1 then _put(b, off, " page left") else _put(b, off, " pages left") end
+
+(* " (12 min)" at b[p, r), the time the pages left take, when some are
+   left and the speed is known (mins >= 0) *)
+fn _left_time {l:agz}{p:nat | p + 33 <= 96}
+  (b: !$A.arr(byte, l, 96), p: int p, left: Int, mins: Int): [r:nat | r <= p + 33] int r =
+  if left <= 0 then p
+  else if mins < 0 then p
+  else let
+    val off = _put(b, p, " (")
+    val off = _put_dur(b, off, 96, mins)
+  in _put(b, off, ")") end
+
+(* The running footer, shown while the bars are hidden: the chapter's
+   title in qfot, then in qfon how many pages are left in the chapter and
+   how far into the book the page is: " · 8 pages left · 32%" *)
+fn _show_footer {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
+  val () = (if chapter > 0 then toc_title_in("qfot", chapter - 1) else ())
+  val left = (if total > cur_page + 1 then total - cur_page - 1 else 0): [v:nat] int v
+  val pm = _permille((if chapter > 0 then chapter - 1 else 0), cur_page, total)
+  (* the no-break space and the dot (4 bytes), " " (1), the count (at
+     most 11), " pages left" (11) or " page left" or "last page in
+     chapter" (22), " (" and the time they take (at most 30) and ")",
+     " · " (4), the percentage (at most 11) and "%" *)
+  val b = $A.alloc<byte>(96)
+  val () = $A.set<byte>(b, 0, $A.int2byte(194))
+  val () = $A.set<byte>(b, 1, $A.int2byte(160))
+  val () = $A.set<byte>(b, 2, $A.int2byte(194))
+  val () = $A.set<byte>(b, 3, $A.int2byte(183))
+  val off = _put(b, 4, " ")
+  val off = _left_text(b, off, left)
+  val off = _left_time(b, off, left, _spd_minutes(left))
+  val () = $A.set<byte>(b, off, $A.int2byte(32))
+  val () = $A.set<byte>(b, off + 1, $A.int2byte(194))
+  val () = $A.set<byte>(b, off + 2, $A.int2byte(183))
+  val off = _put(b, off + 3, " ")
+  val off = $S.int_to_str(b, off, 96, pm / 10)
+  val off = _put(b, off, "%")
+in _set_text_of("qfon", b, off) end
+
+(* The page indicator: the chapter's title (its contents entry's label,
+   else "Chapter" and its number) in qpgt, then " · p. M/T" in qpgn, which
+   always shows in full while a long title is cut *)
 fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
-  (* "Ch N · p. M/T": "Ch " (3 bytes), N (at most 11), " · p. " (7; the
-     middle dot is 0xC2 0xB7), M (at most 11), "/" and T (at most 11) *)
-  val tbuf = $A.alloc<byte>(44)
-  val off = _put(tbuf, 0, "Ch ")
-  val off = $S.int_to_str(tbuf, off, 44, chapter)
-  val () = $A.set<byte>(tbuf, off, $A.int2byte(32))
-  val () = $A.set<byte>(tbuf, off + 1, $A.int2byte(194))
-  val () = $A.set<byte>(tbuf, off + 2, $A.int2byte(183))
-  val off = _put(tbuf, off + 3, " p. ")
-  val off = $S.int_to_str(tbuf, off, 44, cur_page + 1)
+  val () = (if chapter > 0 then toc_title_in("qpgt", chapter - 1) else ())
+  (* " · p. " (8 bytes: a no-break space, 0xC2 0xA0, since a space
+     would be dropped at the start of its box; the middle dot, 0xC2
+     0xB7), M (at most 11), "/" and T (at most 11) *)
+  val tbuf = $A.alloc<byte>(32)
+  val () = $A.set<byte>(tbuf, 0, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, 1, $A.int2byte(160))
+  val () = $A.set<byte>(tbuf, 2, $A.int2byte(194))
+  val () = $A.set<byte>(tbuf, 3, $A.int2byte(183))
+  val off = _put(tbuf, 4, " p. ")
+  val off = $S.int_to_str(tbuf, off, 32, cur_page + 1)
   val off = _put(tbuf, off, "/")
-  val off = $S.int_to_str(tbuf, off, 44, total)
-in _set_text_of("qpgi", tbuf, off) end
+  val off = $S.int_to_str(tbuf, off, 32, total)
+  val () = _set_text_of("qpgn", tbuf, off)
+in _show_footer(cur_page, total, chapter) end
 
 fn _update_page_indicator(): void =
   case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)
@@ -293,25 +451,6 @@ end
    sizes, in thousandths
    ============================================================ *)
 
-fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
-  if v <= 0 then 0 else if v >= 1000 then 1000 else v
-
-(* The thousandth of the book at size position x of its tot *)
-fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
-  if tot <= 0 then 0
-  (* x * 1000 fits an int *)
-  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
-  else _clamp1000(x / (tot / 1000))
-
-(* The size position of thousandth v of tot *)
-fn _of_thousandth (v: Int, tot: Int): Int =
-  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
-
-(* Where page p of t in chapter c (from 0) is in the book *)
-fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
-  val @(b, w, tot) = book_weights(book_serial(), c)
-  val cp = (if t > 0 then p * 1000 / t else 0): Int
-in _thousandth(b + _of_thousandth(cp, w), tot) end
 
 
 (* The scrubber at v: its thumb, its fill and the percentage *)
@@ -326,10 +465,33 @@ fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
   val off = $S.int_to_str(b, 0, 16, v / 10)
 in ui_attr_buf("qtrk", AValueNow, b, off) end
 
-(* The scrubber at the page shown *)
+(* The scrubber at the page shown, its percentage with the time the rest
+   of the book takes, when the speed is known: its pages are the pages
+   left in this chapter, and the rest of the book's size in this
+   chapter's pages *)
 fn _scrub_show (): void =
   case+ reading_get() of
-  | @(p, t, c, _) => _scrub_at(_permille((if c > 0 then c - 1 else 0), p, t))
+  | @(p, t, c, _) => let
+      val ci = (if c > 0 then c - 1 else 0): Int
+      val v = _permille(ci, p, t)
+      val () = _scrub_at(v)
+      val @(bs, w, tot) = book_weights(book_serial(), ci)
+      val after = tot - bs - w
+      val left = (if p + 1 < t then t - p - 1 else 0): Int
+      (* pages of the rest: after * t / w, in two steps so it fits *)
+      val rest = (if w <= 0 then ~1 else if after <= 0 then 0
+        else if after / w > 10000 then ~1 else (after / w) * t + (after - (after / w) * w) * t / w): Int
+      val mins = (if rest < 0 then ~1 else _spd_minutes(left + rest)): Int
+    in
+      if mins < 0 then ()
+      else let
+        val b = $A.alloc<byte>(64)
+        val off = $S.int_to_str(b, 0, 64, v / 10)
+        val off = _put(b, off, "% \xC2\xB7 ")
+        val off = _put_dur(b, off, 64, mins)
+        val off = _put(b, off, " left")
+      in ui_text_buf("qpct", b, off) end
+    end
 
 (* A tick on the scrubber where each chapter after the first starts *)
 fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
@@ -670,23 +832,25 @@ datavtype imgs(n:int, int) =
   | imgs_nil(n, 0) of ()
   | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
     imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
-  (* A link within the book: the content nodes [s, e) it covers and its
-     href [so, so + sl), found once the chapter is shown *)
+  (* A link within the book: the content nodes [s, e) it covers, its
+     href [so, so + sl), found once the chapter is shown, and whether it
+     is a note's reference *)
   | {k:nat}{s,e:nat}{so,sl:nat | so + sl <= n}
-    imgs_link(n, k + 1) of (int s, int e, int so, int sl, imgs(n, k))
+    imgs_link(n, k + 1) of (int s, int e, int so, int sl, bool, imgs(n, k))
 
 (* The links of the chapter shown: the content nodes [s, e) each covers,
-   and the chapter (-1 for a link out of the book, which the browser
-   opens) and fragment fr[0, f) it leads to *)
+   the chapter (-1 for a link out of the book, which the browser opens)
+   and fragment fr[0, f) it leads to, and whether it is a note's
+   reference (epub:type noteref, or role doc-noteref) *)
 datavtype links(int) =
   | links_nil(0) of ()
   | {k:nat}{l:agz}{f:nat | f <= 200}
-    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, links(k))
+    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, bool, links(k))
 
 fun links_free {k:nat} .<k>. (x: links(k)): void =
   case+ x of
   | ~links_nil() => ()
-  | ~links_cons(_, _, _, a, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
+  | ~links_cons(_, _, _, a, _, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
 
 datavtype links_cell = {k:nat} LinksCell of links(k)
 
@@ -703,9 +867,9 @@ fn _links_put (c: links_cell): void = let
   val+ ~LinksCell(x) = cur
 in links_free(x) end
 
-fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
+fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f, note: bool): void = let
   val+ ~LinksCell(x) = _links_take()
-in _links_put(LinksCell(links_cons(s, e, ch, fr, f, x))) end
+in _links_put(LinksCell(links_cons(s, e, ch, fr, f, note, x))) end
 
 (* Whether data[o, o + k) starts with pat *)
 fn _starts {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
@@ -735,6 +899,24 @@ fun _pass_attrs {ld,lb:agz}{n:pos}{sa:nat}{i:nat} .<sa>.
         else ())
     in _pass_attrs(doc, data, rest, idx) end
 
+(* Whether an <a> is a note's reference: its epub:type names noteref, or
+   its role is doc-noteref *)
+fn _noteref {lb:agz}{n:pos}{sa:nat}
+  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): bool = let
+  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _a_role = @[char][4]('r', 'o', 'l', 'e')
+  var _nr1 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  var _nr2 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  val t = (case+ find_attr(data, attrs, _a_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(o, k) => span_has(data, o, k, _nr1, 7)): bool
+in
+  if t then true
+  else (case+ find_attr(data, attrs, _a_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(o, k) => span_has(data, o, k, _nr2, 7))
+end
+
 (* An <a> element, content nodes [idx, e): a link out of the book (http,
    https, mailto) is made a real one, opened in a new tab; a link within
    it is kept in acc, found once the chapter is shown *)
@@ -758,15 +940,54 @@ in
            val () = _node_attr(doc, idx, "href", data, so, sl)
            val () = _node_attr_lit(doc, idx, "target", "_blank")
            val () = _node_attr_lit(doc, idx, "rel", "noopener noreferrer")
-           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0)
+           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0, false)
          in acc end
          else acc)
       else let
         (* announced and reached from the keyboard as a link *)
         val () = _node_attr_lit(doc, idx, "role", "link")
         val () = _node_attr_lit(doc, idx, "tabindex", "0")
-      in imgs_link(idx, e, so, sl, acc) end
+      in imgs_link(idx, e, so, sl, _noteref(data, attrs), acc) end
     end
+end
+
+(* Whether data[o + i, o + k) is letters, digits and hyphens *)
+fun _tag_chars {lb:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i): bool =
+  if i >= k then true
+  else let
+    val c = byte2int0($A.read<byte>(data, o + i))
+    val ok = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c = 45
+  in if ok then _tag_chars(data, o, k, i + 1) else false end
+
+(* Whether data[o, o + k) is a plausible language tag *)
+fn _lang_ok {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): bool =
+  if k < 1 then false else if k > 35 then false else _tag_chars(data, o, k, 0)
+
+(* The page's lang: data[o, o + k) *)
+fn _page_lang {ld,lb:agz}{n:pos}{o,k:nat | o + k <= n; k < 65536}
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), o: int o, k: int k): void = let
+  val @(qa, ql) = _node_id(~1)
+  val @(fq, bq) = $A.freeze<byte>(qa)
+  val () = $D.set_attr(doc, bq, ql, "lang", data, o, k)
+  val () = $A.drop<byte>(fq, bq)
+in $A.free<byte>($A.thaw<byte>(fq)) end
+
+(* An html or body element's language (xml:lang, else lang), when it has
+   one, is the page's: the chapter's content goes into the page with no
+   element of its own *)
+fn _root_lang {ld,lb:agz}{n:pos}{sa:nat}
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): void = let
+  var _a_xlang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+  var _a_lang = @[char][4]('l', 'a', 'n', 'g')
+  val sp = (case+ find_attr(data, attrs, _a_xlang, 8) of
+    | ~xspan_none() => find_attr(data, attrs, _a_lang, 4)
+    | sp => sp): xspan(n)
+in
+  case+ sp of
+  | ~xspan_none() => ()
+  | ~xspan_at(o, k) => if _lang_ok(data, o, k) then (if k < 65536 then _page_lang(doc, data, o, k) else ()) else ()
 end
 
 (* Walk xml_node_list, rendering each node into parent (through doc's
@@ -815,11 +1036,14 @@ and _render_node
     else if xml_name_eq(data, name_off, name_len, _t_link, 4) then acc
     else if xml_name_eq(data, name_off, name_len, _t_style, 5) then acc
     else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
-    (* Transparent: html, body (their children go to the same parent) *)
-    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc, fr)
-    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc, fr)
+    (* Transparent: html, body (their children go to the same parent);
+       their language is the page's *)
+    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then let
+      val () = _root_lang(doc, data, attrs)
+    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
+    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then let
+      val () = _root_lang(doc, data, attrs)
+    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
       val () = _add_node(doc, pidx, _next_content_idx(), "br")
@@ -893,14 +1117,57 @@ in p end
    chapter began loading is not shown (its element is gone) *)
 val _load_gen = ref<int>(0)
 
-(* Content node idx's image: the nd bytes of data, of type mime *)
+(* The image viewer's image's id, "qimg" *)
+fn _viewer_id (): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
+  val a = $A.alloc<byte>(4)
+  val () = $A.write_text(a, 0, $A.text_lit("qimg"), 4)
+in @(a, 4) end
+
+(* The id of the image an image's bytes go to: content node idx's, or
+   the viewer's *)
+fn _src_id {i:nat} (idx: int i, vw: bool): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) =
+  if vw then _viewer_id() else _num_id("c", idx, 3)
+
+(* The images of the chapter shown: each one's content node and the
+   path of its entry in the book, path[0, k) *)
+datavtype pics(int) =
+  | pics_nil(0) of ()
+  | {k:nat}{l:agz}{m:pos | m < 65536} pics_cons(k + 1) of (int, $A.arr(byte, l, m), int m, pics(k))
+
+fun pics_free {k:nat} .<k>. (x: pics(k)): void =
+  case+ x of
+  | ~pics_nil() => ()
+  | ~pics_cons(_, a, _, r) => let val () = $A.free<byte>(a) in pics_free(r) end
+
+datavtype pics_cell = {k:nat} PicsCell of pics(k)
+
+val _pics = ref<pics_cell>(PicsCell(pics_nil()))
+
+fn _pics_take (): pics_cell = let
+  var c: pics_cell = PicsCell(pics_nil())
+  val () = ref_exch_elt<pics_cell>(_pics, c)
+in c end
+
+fn _pics_put (x: pics_cell): void = let
+  var c: pics_cell = x
+  val () = ref_exch_elt<pics_cell>(_pics, c)
+  val+ ~PicsCell(old) = c
+in pics_free(old) end
+
+fn _pics_push {l:agz}{k:pos | k < 65536} (idx: int, a: $A.arr(byte, l, k), k: int k): void = let
+  val+ ~PicsCell(x) = _pics_take()
+in _pics_put(PicsCell(pics_cons(idx, a, k, x))) end
+
+(* Content node idx's image (or the viewer's, when vw): the nd bytes of
+   data, of type mime *)
 fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
-  (idx: int i, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
+  (idx: int i, vw: bool, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
   val ml = g1u2i(string1_length(mime))
   val mb = $A.alloc<byte>(ml)
   val _ = _put(mb, 0, mime)
   val @(fm, bm) = $A.freeze<byte>(mb)
-  val @(ida, idk) = _num_id("c", idx, 3)
+  (* content node idx's image, or the image viewer's (qimg) *)
+  val @(ida, idk) = _src_id(idx, vw)
   val @(fi, bi) = $A.freeze<byte>(ida)
   val () = $BDOM.set_image_src(bi, idk, data, nd, bm, ml)
   val () = $A.drop<byte>(fi, bi)
@@ -913,7 +1180,7 @@ in $A.free<byte>($A.thaw<byte>(fm)) end
    is deflated (unless chapter load gen is no longer the latest); not at
    all when it is missing *)
 fn _show_image {z:pos}{i:nat}{lp:agz}{k:pos}
-  (s: int, z: int z, idx: int i, gen: int,
+  (s: int, z: int z, idx: int i, vw: bool, gen: int,
    path: !$A.borrow(byte, lp, k), k: int k): void = let
   val mime = mime_of(path, k)
 in
@@ -922,7 +1189,7 @@ in
   | ~ZipGot(ar, buf, cs, m, _, _, _) =>
     if m = 0 then let
       val @(f, b) = $A.freeze<byte>(buf)
-      val () = _set_src(idx, b, cs, mime)
+      val () = _set_src(idx, vw, b, cs, mime)
       val () = $A.drop<byte>(f, b)
     in piece_free(ar, $A.thaw<byte>(f)) end
     else let
@@ -937,7 +1204,7 @@ in
         | ~NoContentBytes() => $P.ret<int>(~1)
         | ~ContentBytes(ar2, buf2, n2) => let
             val @(f2, b2) = $A.freeze<byte>(buf2)
-            val () = (if !_load_gen = gen then _set_src(idx, b2, n2, mime) else ())
+            val () = (if !_load_gen = gen then _set_src(idx, vw, b2, n2, mime) else ())
             val () = $A.drop<byte>(f2, b2)
             val () = piece_free(ar2, $A.thaw<byte>(f2))
           in $P.ret<int>(0) end))
@@ -969,9 +1236,10 @@ in
       val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
       val () = $A.free<byte>(buf)
       val @(fz, bv) = $A.freeze<byte>(exact)
-      val () = _show_image(s, z, idx, gen, bv, k)
+      val () = _show_image(s, z, idx, false, gen, bv, k)
       val () = $A.drop<byte>(fz, bv)
-    in $A.free<byte>($A.thaw<byte>(fz)) end
+      (* kept, so the image can be shown again in the viewer *)
+    in if k < 65536 then _pics_push(idx, $A.thaw<byte>(fz), k) else $A.free<byte>($A.thaw<byte>(fz)) end
   end
 end
 
@@ -992,7 +1260,7 @@ fn _frag_copy {lb,l:agz}{n:pos}{ho,h,f:nat | f == 0 || ho + h + 1 + f <= n}
    with the chapter and fragment it leads to *)
 fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}
   (s: int, z: int z, no: int no, dl: int dl, cur: Int,
-   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl): void = let
+   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl, note: bool): void = let
   val h = src_end(data, so, sl)
   val ch = (if h <= 0 then cur
     else (case+ book_find_relative(s, z, no, dl, data, n, so, h) of
@@ -1002,7 +1270,7 @@ fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so
   val fr = $A.alloc<byte>(f + 1)
   val () = _frag_copy(data, n, so, h, fr, f)
 in
-  if ch >= 0 then _links_push(s0, e0, ch, fr, f) else $A.free<byte>(fr)
+  if ch >= 0 then _links_push(s0, e0, ch, fr, f, note) else $A.free<byte>(fr)
 end
 
 (* The images xs of the chapter data[0, n), chapter cur, and its links *)
@@ -1014,8 +1282,8 @@ fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:
   | ~imgs_cons(idx, so, sl, tl) => let
       val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
     in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
-  | ~imgs_link(s0, e0, so, sl, tl) => let
-      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl)
+  | ~imgs_link(s0, e0, so, sl, note, tl) => let
+      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl, note)
     in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
 
 (* The chapters from spine itemref i down to the first, onto acc: each
@@ -1059,6 +1327,65 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
 
 (* Whether the book reads right to left *)
 val _rtl = ref<bool>(false)
+
+(* The book's language (its OPF's dc:language), when it is a plausible
+   language tag: 1 to 35 letters, digits and hyphens *)
+datavtype book_lang =
+  | {l:agz}{k:pos | k <= 35} BookLang of ($A.arr(byte, l, 35), int k)
+  | NoBookLang of ()
+
+val _blang = ref<book_lang>(NoBookLang())
+
+fn _blang_put (x: book_lang): void = let
+  var c: book_lang = x
+  val () = ref_exch_elt<book_lang>(_blang, c)
+in case+ c of ~BookLang(a, _) => $A.free<byte>(a) | ~NoBookLang() => () end
+
+fn _blang_take (): book_lang = let
+  var c: book_lang = NoBookLang()
+  val () = ref_exch_elt<book_lang>(_blang, c)
+in c end
+
+(* b[j, k) := data[o + j, o + k) *)
+fun _lang_copy {lb,l:agz}{n:pos}{o,k:nat | o + k <= n; k <= 35}{j:nat | j <= k} .<k - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, 35), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
+  in _lang_copy(data, o, b, k, j + 1) end
+
+(* Keeps the book's language, from its OPF opf_b's nodes *)
+fn _lang_locate {lb:agz}{n:pos}{sz:nat}
+  (opf_b: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): void =
+  case+ opf_language(opf_b, nodes) of
+  | ~xspan_none() => _blang_put(NoBookLang())
+  | ~xspan_at(o, k) =>
+    if _lang_ok(opf_b, o, k) then
+      (if k >= 1 then (if k <= 35 then let
+         val b = $A.alloc<byte>(35)
+         val () = _lang_copy(opf_b, o, b, k, 0)
+       in _blang_put(BookLang(b, k)) end
+       else _blang_put(NoBookLang()))
+       else _blang_put(NoBookLang()))
+    else _blang_put(NoBookLang())
+
+(* The page's lang, before a chapter is shown: the book's, else "und"
+   (undetermined: the app's own "en" is not the book's) *)
+fn _page_book_lang {ld:agz} (doc: !$D.document(ld)): void =
+  case+ _blang_take() of
+  | ~NoBookLang() => let
+      val u = $A.alloc<byte>(3)
+      val () = $A.write_text(u, 0, $A.text_lit("und"), 3)
+      val @(fu, bu) = $A.freeze<byte>(u)
+      val () = _page_lang(doc, bu, 0, 3)
+      val () = $A.drop<byte>(fu, bu)
+      val () = $A.free<byte>($A.thaw<byte>(fu))
+    in _blang_put(NoBookLang()) end
+  | ~BookLang(b, k) => let
+      val @(fb, bb) = $A.freeze<byte>(b)
+      val () = _page_lang(doc, bb, 0, k)
+      val () = $A.drop<byte>(fb, bb)
+    in _blang_put(BookLang($A.thaw<byte>(fb), k)) end
 
 datavtype font_src =
   | {z:pos}{d:nat}{s:pos | d + s <= z; s <= 268435456}{m:int | m == 0 || m == 8}
@@ -1187,6 +1514,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val () = book_spine_set(serial, fsz_s, chs, total)
                val () = toc_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = !_rtl := spine_rtl(opf_b, opf_nodes)
+               val () = _lang_locate(opf_b, opf_nodes)
                val () = _font_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_f, opf_b)
@@ -1239,7 +1567,9 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = $A.free<byte>($A.thaw<byte>(fq))
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
+                  val () = _pics_put(PicsCell(pics_nil()))
                   val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
+                  val () = _page_book_lang(doc)
                   val fr = _frag_take()
                   val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
                   val () = _frag_put(fr)
@@ -1455,8 +1785,8 @@ end
 fn _page_next(): void =
   case+ reading_get() of
   | @(p, t, c, tc) =>
-    if p + 1 < t then _show_page(p + 1, t, c, tc)
-    else if c < tc then $P.discard<int>(_goto(c, 0, ~1))
+    if p + 1 < t then let val () = _spd_turn() in _show_page(p + 1, t, c, tc) end
+    else if c < tc then let val () = _spd_turn() in $P.discard<int>(_goto(c, 0, ~1)) end
     else _show_page(p, t, c, tc)
 
 (* The previous page: in this chapter, else the previous chapter's last *)
@@ -1942,36 +2272,289 @@ implement reader_anchor () = _anchor_now()
 (* The link covering content node i, if any: followed (a link within
    the book, remembering where the reader was); true when there is one,
    also for a link out of the book, which the browser opens *)
-fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
+fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, bool, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
   case+ x of
-  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, @(a0, 0)) end
-  | @links_cons(s0, e0, ch, fr, f, rest) =>
+  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, false, @(a0, 0)) end
+  | @links_cons(s0, e0, ch, fr, f, note, rest) =>
     if (if s0 <= i then i < e0 else false) then let
       val c = ch
+      val nt = note
       val b = $A.alloc<byte>(f + 1)
       val () = _frag_dup(fr, b, f + 1, 0)
       val ff = f
       prval () = fold@(x)
-    in @((if c < 0 then 2 else 1), c, @(b, ff)) end
+    in @((if c < 0 then 2 else 1), c, nt, @(b, ff)) end
     else let
       val r = _link_find(rest, i)
       prval () = fold@(x)
     in r end
 
+(* The little-endian int at b[p, p + 4) *)
+fn _i32_at {l:agz}{n:pos}{p:nat | p + 4 <= n} (b: !$A.arr(byte, l, n), p: int p): Int = let
+  val b0 = $AR.low_byte(byte2int0($A.get<byte>(b, p)))
+  val b1 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 1)))
+  val b2 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 2)))
+  val b3 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 3)))
+  val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
+in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
+
+(* Reads the reading speed kept under "spd" *)
+#pub fun reader_speed_load (): $P.promise(int, $P.Chained)
+implement reader_speed_load () = let
+  val @(kf, kb) = $A.freeze<byte>(_spd_key())
+  val p = $IDB.idb_get(kb, 3)
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+in
+  $P.and_then<Int><int>($P.vow(p), lam(h) =>
+    case+ take_blob(h) of
+    | ~NoBlobBytes() => $P.ret<int>(0)
+    | ~BlobBytes(b, n) =>
+      if n < 8 then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
+      else let
+        val m = _i32_at(b, 0)
+        val g = _i32_at(b, 4)
+        val () = $A.free<byte>(b)
+        (* only a plausible count: both at least 0, the pages at most 2000 *)
+        val () = (if m >= 0 then (if g >= 0 then (if g <= 2000 then let
+            val () = !_spd_min := m
+          in !_spd_pages := g end else ()) else ()) else ())
+      in $P.ret<int>(0) end)
+end
+
+(* ============================================================
+   Notes: a note's reference opens the note over the page
+   ============================================================ *)
+
+(* The note shown over the page: its chapter and fragment, for "Go to
+   note" *)
+datavtype note_tgt =
+  | {l:agz}{f:nat | f <= 200} NoteTgt of (Int, $A.arr(byte, l, f + 1), int f)
+  | NoNoteTgt of ()
+
+val _note_tgt = ref<note_tgt>(NoNoteTgt())
+
+fn _note_tgt_put (t: note_tgt): void = let
+  var c: note_tgt = t
+  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
+in case+ c of ~NoteTgt(_, a, _) => $A.free<byte>(a) | ~NoNoteTgt() => () end
+
+fn _note_tgt_take (): note_tgt = let
+  var c: note_tgt = NoNoteTgt()
+  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
+in c end
+
+stadef NOTE_CAP = 4096
+macdef _NOTE_CAP = 4096
+
+(* buf[p, q) := data[o + i, o + k) with runs of white space made one
+   space, and none first; at most NOTE_CAP - 1 bytes in all *)
+fun _nt_put {lb,lo:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k}{p:nat | p <= NOTE_CAP} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  if i >= k then p
+  else if p >= _NOTE_CAP - 1 then p
+  else let
+    val c = byte2int0($A.read<byte>(data, o + i))
+  in
+    if c = 32 || c = 9 || c = 10 || c = 13 then
+      (if p = 0 then _nt_put(data, o, k, i + 1, buf, p)
+       else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then _nt_put(data, o, k, i + 1, buf, p)
+       else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in _nt_put(data, o, k, i + 1, buf, p + 1) end)
+    else let
+      val () = $A.set<byte>(buf, p, $A.read<byte>(data, o + i))
+    in _nt_put(data, o, k, i + 1, buf, p + 1) end
+  end
+
+(* A space at buf[p], unless the text so far ends in one: where a block
+   of the note ends *)
+fn _nt_break {lo:agz}{p:nat | p <= NOTE_CAP} (buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  if p = 0 then p
+  else if p >= _NOTE_CAP - 1 then p
+  else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then p
+  else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in p + 1 end
+
+(* The text of the element of nodes whose id is fr[0, f), gathered into
+   buf from p (inside: whether nodes are within it) *)
+fun _nt_nodes {lb,la,lo:agz}{n:pos}{sz:nat}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val p = _nt_node(data, node, fr, f, inside, buf, p)
+    in _nt_nodes(data, rest, fr, f, inside, buf, p) end
+  | $X.xml_nodes_nil() => p
+
+and _nt_node {lb,la,lo:agz}{n:pos}{sz:pos}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
+   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  case+ node of
+  | $X.xml_text(off, tlen) => if inside then _nt_put(data, off, tlen, 0, buf, p) else p
+  | $X.xml_element(_, _, attrs, children) => let
+      var _a_id = @[char][2]('i', 'd')
+      val here = (case+ find_attr(data, attrs, _a_id, 2) of
+        | ~xspan_none() => false
+        | ~xspan_at(o, k) => if k = f then _same(data, o, fr, k, 0) else false): bool
+      val q = _nt_nodes(data, children, fr, f, (if inside then true else here), buf, p)
+    in if inside then _nt_break(buf, q) else q end
+
+(* The note's text, decoded, shown in the note overlay, which opens *)
+fn _note_show {lo:agz}{q:nat | q <= NOTE_CAP} (buf: $A.arr(byte, lo, NOTE_CAP), q: int q): void = let
+  val q = (if q > 0 then (if byte2int0($A.get<byte>(buf, q - 1)) = 32 then q - 1 else q) else q): [r:nat | r <= NOTE_CAP] int r
+  val out = $A.alloc<byte>(_NOTE_CAP)
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  val r = decode_text(bb, 0, q, out)
+  val () = $A.drop<byte>(bf, bb)
+  val () = $A.free<byte>($A.thaw<byte>(bf))
+  val () = ui_text_buf("qntx", out, r)
+  val () = layer_open(LNote())
+in ui_focus("qncl") end
+
+(* The note kept in _note_tgt, found in its chapter's XHTML data[0, n):
+   shown over the page, and kept for "Go to note"; when it has no text
+   there, the link is followed instead *)
+fn _note_found {lb:agz}{n:pos} (data: !$A.borrow(byte, lb, n), n: int n): void =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) =>
+    if f <= 0 then let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    else let
+      val buf = $A.alloc<byte>(_NOTE_CAP)
+      val nodes = $X.parse_document(data, n)
+      val q = _nt_nodes(data, nodes, fr, f, false, buf, 0)
+      val () = $X.free_nodes(nodes)
+    in
+      if q > 0 then let
+        val () = _note_show(buf, q)
+      in _note_tgt_put(NoteTgt(ch, fr, f)) end
+      else let
+        val () = $A.free<byte>(buf)
+        val () = _push_position()
+      in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    end
+
+(* The note kept in _note_tgt followed as a link: its chapter could not
+   be read *)
+fn _note_follow (): void =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
+(* Opens the note fr[0, f) of chapter ch over the page (found once its
+   chapter is read); when it cannot be found, the link is followed *)
+fn _note_open {l:agz}{f:pos | f <= 200} (ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
+  val () = _note_tgt_put(NoteTgt(ch, fr, f))
+  val s = book_serial()
+  val ci = (if ch >= 0 then ch else 0): [v:nat] int v
+in
+  case+ book_chapter_get(s, ci) of
+  | ~ChaptersUnknown() => _note_follow()
+  | ~ChapterNone(_) => _note_follow()
+  | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, _, _, _, _) =>
+    (case+ piece_new(ch_csz) of
+     | ~NoPiece() => _note_follow()
+     | ~Piece(car, cbuf) => let
+         val _ = book_read(s, fsz_s, ch_d, cbuf, ch_csz)
+         val @(cf, cb) = $A.freeze<byte>(cbuf)
+         val dp = $DC.decompress(cb, ch_csz, ch_method)
+         val () = $A.drop<byte>(cf, cb)
+         val () = piece_free(car, $A.thaw<byte>(cf))
+       in
+         $P.discard<int>($P.and_then<Int><int>($P.vow(dp), lam(h) => let
+           val () = (case+ take_content(h) of
+             | ~NoContentBytes() => _note_follow()
+             | ~ContentBytes(xar, xhtml, xn) => let
+                 val @(xf, xb) = $A.freeze<byte>(xhtml)
+                 val () = _note_found(xb, xn)
+                 val () = $A.drop<byte>(xf, xb)
+               in piece_free(xar, $A.thaw<byte>(xf)) end)
+         in $P.ret<int>(0) end))
+       end)
+end
+
+(* The path of content node i's image, copied; none when it has none *)
+datavtype pic_path =
+  | {l:agz}{k:pos | k < 65536} PicPath of ($A.arr(byte, l, k), int k)
+  | NoPicPath of ()
+
+fun _pic_find {k:nat} .<k>. (x: !pics(k), i: int): pic_path =
+  case+ x of
+  | pics_nil() => NoPicPath()
+  | @pics_cons(idx, a, k, rest) =>
+    if idx = i then let
+      val b = $A.alloc<byte>(k)
+      val () = _frag_dup(a, b, k, 0)
+      val kk = k
+      prval () = fold@(x)
+    in PicPath(b, kk) end
+    else let
+      val r = _pic_find(rest, i)
+      prval () = fold@(x)
+    in r end
+
+(* Shows content node i's image in the image viewer, which opens; false
+   when node i is not an image of the chapter *)
+#pub fun reader_image_at (i: int): bool
+implement reader_image_at (i) = let
+  val c = _pics_take()
+  val+ @PicsCell(x) = c
+  val r = _pic_find(x, i)
+  prval () = fold@(c)
+  val () = _pics_put(c)
+in
+  case+ r of
+  | ~NoPicPath() => false
+  | ~PicPath(b, k) =>
+    (case+ book_meta_get() of
+     | ~$R.none() => let val () = $A.free<byte>(b) in false end
+     | ~$R.some(@(z, _, _, _, _, _)) => let
+         val @(fb, bb) = $A.freeze<byte>(b)
+         val () = _show_image(book_serial(), z, 0, true, !_load_gen, bb, k)
+         val () = $A.drop<byte>(fb, bb)
+         val () = $A.free<byte>($A.thaw<byte>(fb))
+         val () = layer_open(LImage())
+         val () = ui_focus("qimx")
+       in true end)
+end
+
 #pub fun reader_link_at (i: int): bool
 implement reader_link_at (i) = let
   val c = _links_take()
   val+ @LinksCell(x) = c
-  val @(kind, ch, @(b, f)) = _link_find(x, i)
+  val @(kind, ch, note, @(b, f)) = _link_find(x, i)
   prval () = fold@(c)
   val () = _links_put(c)
 in
-  if kind = 1 then let
-    val () = _push_position()
-    val () = $P.discard<int>(_goto_frag(ch, b, f))
-  in true end
+  if kind = 1 then
+    (* a note's reference to a note it names opens the note over the
+       page; any other link is followed *)
+    (if note then (if f > 0 then (if f <= 200 then let
+        val () = _note_open(ch, b, f)
+      in true end
+      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
+      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
+     else let
+       val () = _push_position()
+       val () = $P.discard<int>(_goto_frag(ch, b, f))
+     in true end)
   else let val () = $A.free<byte>(b) in kind = 2 end
 end
+
+(* Goes to the note shown over the page, remembering where the reader
+   was *)
+#pub fun reader_note_go (): void
+implement reader_note_go () =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
 
 (* Whether the open book reads right to left *)
 #pub fun reader_rtl (): bool

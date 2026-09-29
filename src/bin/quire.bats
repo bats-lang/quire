@@ -142,6 +142,12 @@ fn _target_x (t: !target): Int =
   | Target(_, _, x) => x
   | NoTarget() => ~1
 
+(* The y of a pointer event's target record, or -1 *)
+fn _target_y (t: !target): Int =
+  case+ t of
+  | Target(b, n, _) => if n >= 8 then _i32at(b, 4) else ~1
+  | NoTarget() => ~1
+
 fn _target_free (t: target): void =
   case+ t of
   | ~Target(b, _, _) => $A.free<byte>(b)
@@ -639,7 +645,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
     in let val () = _target_free(t) in 0 end end)
 in r end
 
-fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
+fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
   val r = RCons(r, OnEl("qset"), "click", lam(_) => let
       val () = layer_open(LTypography())
     in let val () = ui_focus("qscl") in 0 end end)
@@ -652,6 +658,17 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
         else if _is(t, "qth1") then let val () = set_theme_set(1) in true end
         else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
         else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
+        else if _is(t, "qal0") then let val () = set_align_set(0) in true end
+        else if _is(t, "qal1") then let val () = set_align_set(1) in true end
+        else if _is(t, "qhy0") then let val () = set_hyph_set(0) in true end
+        else if _is(t, "qhy1") then let val () = set_hyph_set(1) in true end
+        else if _is(t, "qdi0") then let val () = set_dim_set(0) in true end
+        else if _is(t, "qdi1") then let val () = set_dim_set(1) in true end
+        else if _is(t, "qtz0") then let val () = set_taps_set(0) in true end
+        else if _is(t, "qtz1") then let val () = set_taps_set(1) in true end
+        else if _is(t, "qtz2") then let val () = set_taps_set(2) in true end
+        else if _is(t, "qvk0") then let val () = set_vol_set(0) in true end
+        else if _is(t, "qvk1") then let val () = set_vol_set(1) in true end
         else if _is(t, "qsrs") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
@@ -670,6 +687,15 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 5) = let
     in let val () = _settings_changed() in 0 end end)
   val r = RCons(r, OnEl("qsr3"), "input", lam(h) => let
       val () = set_margin_set(_clamp(_input_num(h), 0, 4))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr4"), "input", lam(h) => let
+      val () = set_ps_set(_clamp(_input_num(h), 0, 20))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr5"), "input", lam(h) => let
+      val () = set_ls_set(_clamp(_input_num(h), 0, 12))
+    in let val () = _settings_changed() in 0 end end)
+  val r = RCons(r, OnEl("qsr6"), "input", lam(h) => let
+      val () = set_ws_set(_clamp(_input_num(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
 in r end
 
@@ -781,14 +807,42 @@ in page_prev() end
 fn _left (): void = if reader_rtl() then _next() else _prev()
 fn _right (): void = if reader_rtl() then _prev() else _next()
 
-(* The page turns a pointer at x makes: the left quarter back, the right
-   quarter on, between them the bars shown or hidden *)
-fn _zone_click (x: Int): void = let
+(* Whether x is between the sides' zones: in the middle half of the
+   page *)
+fn _in_middle (x: Int): bool = let
   val () = ui_measure("qcnt")
   val cx = $DR.get_measure_x()
   val cw = $DR.get_measure_w()
 in
+  if cw <= 0 then false
+  else if x < cx + cw / 4 then false
+  else x <= cx + cw - cw / 4
+end
+
+(* What a tap at x, y on the page does, by the setting (settings.bats):
+   sides, the left quarter back, the right quarter on, between them the
+   bars shown or hidden; forward, the top eighth the bars, the left
+   quarter back, anywhere else on; one hand, the top third back, the
+   bottom third on, between them the bars. Back and on are the book's:
+   a book read right to left turns the other way *)
+fn _zone_click (x: Int, y: Int): void = let
+  val () = ui_measure("qcnt")
+  val cx = $DR.get_measure_x()
+  val cy = $DR.get_measure_y()
+  val cw = $DR.get_measure_w()
+  val ch = $DR.get_measure_h()
+  val z = set_taps_get()
+in
   if cw <= 0 then ()
+  else if z = 1 then
+    (if (if ch > 0 then y < cy + ch / 8 else false) then _chrome_set(~(!_chrome))
+     else if x < cx + cw / 4 then _left()
+     else _right())
+  else if z = 2 then
+    (if ch <= 0 then _chrome_set(~(!_chrome))
+     else if y < cy + ch / 3 then _prev()
+     else if y > cy + ch - ch / 3 then _next()
+     else _chrome_set(~(!_chrome)))
   else if x < cx + cw / 4 then _left()
   else if x > cx + cw - cw / 4 then _right()
   else _chrome_set(~(!_chrome))
@@ -813,6 +867,14 @@ in
   else if _key_is(b, n, "ArrowLeft") then _left()
   else if _key_is(b, n, "PageUp") then _prev()
   else if _key_is(b, n, " ") then (if shift then _prev() else _next())
+  (* the volume keys, when they turn the page and the browser gives them
+     to the page: down on, up back, and the volume left as it is *)
+  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeDown") else false) then let
+    val () = $EV.prevent_default()
+  in _next() end
+  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeUp") else false) then let
+    val () = $EV.prevent_default()
+  in _prev() end
   else if _key_is(b, n, "Home") then reader_page(0)
   else if _key_is(b, n, "End") then reader_page(1000000)
   else if _key_is(b, n, "b") then annot_bookmark_toggle(reader_anchor())
@@ -825,8 +887,11 @@ in
   else if (if _key_is(b, n, "f") then fl >= 2 else false) then let
       val () = $EV.prevent_default()
     in _search_open() end
-  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then
-    (if reader_link_at(!_focus_link) then () else ())
+  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then let
+    (* the Enter is the link's: a note opened over the page takes the
+       focus to its Close, which the same Enter would otherwise press *)
+    val () = $EV.prevent_default()
+  in if reader_link_at(!_focus_link) then () else () end
   else if _key_is(b, n, "Escape") then
     (if _panels_close() then ui_focus("qcnt")
      else if _shown("qsrn") then _search_end()
@@ -848,6 +913,8 @@ fn _escape_overlay (): bool =
   | Escaped(LContents()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LTypography()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LAnnotations()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LNote()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LImage()) => let val () = ui_focus("qcnt") in true end
   | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -993,7 +1060,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in r end
 
-fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
+fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
   val r = RCons(r, OnEl("qbmk"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
@@ -1031,6 +1098,21 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
         else if dl >= 0 then annot_delete_highlight(dl)
         else ())
     in 0 end)
+  (* a note opened over the page: gone to, or closed *)
+  val r = RCons(r, OnEl("qnte"), "click", lam(h) => let
+      val t = _target(h)
+      val go = _is(t, "qngo")
+      val close = _is(t, "qncl")
+      val () = _target_free(t)
+      val () = (if go then let
+          val () = layer_close(LNote())
+          val () = reader_note_go()
+        in ui_focus("qcnt") end
+        else if close then let
+          val () = layer_close(LNote())
+        in ui_focus("qcnt") end
+        else ())
+    in 0 end)
 in r end
 
 fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
@@ -1064,7 +1146,7 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
     in 0 end)
 in r end
 
-fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
+fn _wire_reader {n:nat} (r: regs(n)): regs(n + 12) = let
   val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
   val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
   val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
@@ -1072,12 +1154,37 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
       val t = _target(h)
       val node = _row_of(t, "c")
       val x = _target_x(t)
+      val y = _target_y(t)
       val () = _target_free(t)
     in
       if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
-      else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
+      (* with the sides' zones, a tap on an image between them shows it
+         full screen, rather than the bars *)
+      else if (if node >= 0 then (if set_taps_get() = 0 then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
+      else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
+    end)
+  (* an image of the book, long-pressed (or right-clicked), is shown
+     full screen *)
+  val r = RCons(r, OnEl("qcnt"), "contextmenu", lam(h) => let
+      val t = _target(h)
+      val node = _row_of(t, "c")
+      val () = _target_free(t)
+    in
+      if node < 0 then 0
+      else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
+      else 0
+    end)
+  val r = RCons(r, OnEl("qimv"), "click", lam(h) => let
+      val t = _target(h)
+      val close = _is(t, "qimx")
+      val () = _target_free(t)
+    in
+      if close then let
+        val () = layer_close(LImage())
+      in let val () = ui_focus("qcnt") in 0 end end
+      else 0
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
@@ -1154,6 +1261,7 @@ implement main0 () = let
       val () = import_external(h)
     in 0 end)
   val () = ui_listen_all(r)
+  val () = $P.discard<int>(reader_speed_load())
   val p = $P.and_then<int><int>(set_load(), lam(sort) => let
       val () = lib_sort_label(sort)
     in

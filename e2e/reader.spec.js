@@ -3,11 +3,12 @@
 // page.
 
 import { test, expect } from '@playwright/test';
+import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles,
+  importFiles, indicator, chapterBody,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -166,7 +167,10 @@ test('a real book keeps its place when reopened, at a new type size and at a new
   await start(page);
   await importFiles(page, ['test/fixtures/conan-stories.epub'], 1);
   await openBook(page, 'Gods of the North');
-  while ((await place(page)).ch < 2) await page.keyboard.press('ArrowRight');
+  // the cover, which the contents do not name, is "Chapter 1"; the story
+  // after it is named by its title
+  while ((await place(page)).ch === 1) await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe('GODS OF THE NORTH');
   for (let k = 0; k < 6; k++) {
     const before = await place(page);
     await page.keyboard.press('ArrowRight');
@@ -313,6 +317,103 @@ test('links: out of the book open outside it, inside it jump and can go back', a
   expect(await visibleText(page)).toContain('FAR-TARGET');
 });
 
+test('a note\'s reference opens the note over the page, which can be gone to', async ({ page }) => {
+  await start(page);
+  const filler = Array.from({ length: 25 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
+  await readBook(page, {
+    title: 'Notes', author: 'Bot',
+    rawChapters: [
+      { body: '<p>A claim<a epub:type="noteref" href="chapter3.xhtml#n1">1</a>, an aside<a epub:type="noteref" href="#n2">2</a>' +
+          ' and a lost one<a role="doc-noteref" href="chapter2.xhtml#nowhere">3</a>.</p>' + filler +
+          '<aside epub:type="footnote" id="n2"><p>Same-chapter note &amp; its words.</p></aside>' },
+      { body: filler },
+      { body: '<h1>Notes</h1><aside epub:type="endnote" id="n1"><p><a href="chapter1.xhtml">1</a> The endnote\'s own   words.</p>' +
+          '<p>Its second paragraph.</p></aside>' },
+    ],
+  });
+  const note = dialog(page, 'Footnote');
+  const at = await place(page);
+  // an endnote in another chapter: shown, and the page stays
+  await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("1 The endnote's own words. Its second paragraph.");
+  expect(await place(page)).toEqual(at);
+  await note.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(note).toBeHidden();
+  await expect(bookPage(page)).toBeFocused();
+  // a footnote in the same chapter, its reference decoded, closed with Escape
+  await bookPage(page).getByRole('link', { name: '2', exact: true }).click();
+  await expect(note).toContainText('Same-chapter note & its words.');
+  await page.keyboard.press('Escape');
+  await expect(note).toBeHidden();
+  expect(await place(page)).toEqual(at);
+  // from the keyboard, then gone to, with the way back
+  const ref = bookPage(page).getByRole('link', { name: '1', exact: true });
+  await ref.focus();
+  await page.keyboard.press('Enter');
+  await expect(note).toBeVisible();
+  await note.getByRole('button', { name: 'Go to note' }).click();
+  await expect(note).toBeHidden();
+  await expect(chapterTitle(page)).toHaveText('Chapter 3');
+  expect(await visibleText(page)).toContain("The endnote's own");
+  await expect(jumpBack(page)).toBeVisible();
+  await jumpBack(page).click();
+  await expect.poll(() => place(page)).toEqual(at);
+  // a reference to a note that is not there is followed as a link
+  await bookPage(page).getByRole('link', { name: '3', exact: true }).click();
+  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expect(note).toBeHidden();
+});
+
+/** A w by h PNG of one grey */
+function png(w, h) {
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = b => { let c = 0xffffffff; for (const x of b) c = crcTable[(c ^ x) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4); c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0); ihdr.writeUInt32BE(h, 4); ihdr[8] = 8; ihdr[9] = 0;
+  const raw = Buffer.alloc((w + 1) * h, 128);
+  for (let y = 0; y < h; y++) raw[y * (w + 1)] = 0;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('an image is shown full screen from a tap on it between the sides, or a long press', async ({ page }) => {
+  await start(page);
+  await readBook(page, {
+    title: 'Viewer', author: 'Bot',
+    rawChapters: [{ body: '<p><img src="images/p.png" alt="the map"/></p>' + chapterBody(1, 10) }],
+    extraEntries: [{ name: 'OEBPS/images/p.png', data: png(64, 64), store: true }],
+  });
+  await page.keyboard.press('t');
+  const viewer = dialog(page, 'Image');
+  const pic = bookPage(page).getByRole('img', { name: 'the map' });
+  await expect.poll(() => pic.evaluate(i => i.naturalWidth)).toBe(64);
+  const at = await place(page);
+  await pic.click();
+  await expect(viewer).toBeVisible();
+  await expect.poll(() => viewer.locator('img').evaluate(i => i.complete && i.naturalWidth)).toBe(64);
+  expect(await place(page)).toEqual(at);
+  await viewer.getByRole('button', { name: 'Close' }).click();
+  await expect(viewer).toBeHidden();
+  await expect(bookPage(page)).toBeFocused();
+  // a long press (here a right click) too; Escape closes it
+  await pic.click({ button: 'right' });
+  await expect(viewer).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(viewer).toBeHidden();
+  // a tap on the page's side still turns it
+  const box = await bookPage(page).boundingBox();
+  await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.7);
+  await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
+  await expect(viewer).toBeHidden();
+});
+
 test('a book read right to left turns the other way', async ({ page }) => {
   await start(page);
   await readBook(page, { ...book('Right To Left', 2), rtl: true });
@@ -349,6 +450,167 @@ test('a card shows how far the book has been read', async ({ page }) => {
   await toLibrary(page);
   await expect(card(page, 'Progress')).toContainText(/\d+%/);
   expect(await card(page, 'Progress').innerText()).not.toContain('New');
+});
+
+test('the page indicator names the chapter, and a long title is cut before the page numbers are', async ({ page }) => {
+  await start(page);
+  const long = 'An Exceedingly Long Chapter Title That Goes On and On Past Any Phone';
+  await readBook(page, {
+    title: 'Titled', author: 'Reader Tests', rawChapters: chapters(2),
+    toc: [{ label: long, href: 'chapter1.xhtml' }, { label: 'Short', href: 'chapter2.xhtml' }],
+  });
+  await showChrome(page);
+  expect(await place(page)).toMatchObject({ ch: long, p: 1 });
+  const numbers = indicator(page).getByText(/· p\. \d+\/\d+/);
+  const box = await numbers.boundingBox();
+  const bar = await control(page, 'Next page').boundingBox();
+  expect(box.x + box.width).toBeLessThanOrEqual(bar.x + 1);
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe('Short');
+});
+
+test('while the bars are hidden, a footer says the chapter, the pages left in it and how far into the book the page is', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Footer', 2));
+  const footer = page.getByText(/· \d+ pages? left · \d+%|· last page in chapter · \d+%/);
+  // the bars are up when a book opens; the footer is under them
+  await showChrome(page);
+  await expect(footer).toBeHidden();
+  await page.keyboard.press('t');
+  await expect(footer).toBeVisible();
+  const { t } = await place(page);
+  await expect(footer).toHaveText(`· ${t - 1} pages left · 0%`);
+  await expect(footer.locator('..')).toHaveText(`Chapter 1\u00a0· ${t - 1} pages left · 0%`);
+  // it keeps up with the page, and is not read out twice (the page
+  // indicator says the same)
+  await page.keyboard.press('ArrowRight');
+  await expect(footer).toContainText(`· ${t - 2} pages left`);
+  await page.keyboard.press('End');
+  await expect(footer).toContainText('· last page in chapter');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  const pct = +(/(\d+)%/.exec(await footer.textContent())[1]);
+  expect(pct).toBeGreaterThanOrEqual(45);
+  expect(pct).toBeLessThanOrEqual(55);
+  expect(await indicator(page).count()).toBe(1);
+  expect(await footer.evaluate(e => e.closest('[aria-hidden="true"]') !== null)).toBe(true);
+});
+
+test('the time the chapter and the book take to finish is learned from the reader\'s own speed', async ({ page }) => {
+  await page.clock.install();
+  await start(page);
+  await readBook(page, book('Timed', 3, 60));
+  await page.keyboard.press('t');
+  const footer = page.getByText(/· \d+ pages? left/);
+  // not guessed before it is known
+  await expect(footer).not.toContainText('min');
+  // a page a minute, for a dozen pages
+  for (let k = 0; k < 12; k++) {
+    const before = await place(page);
+    await page.clock.fastForward('01:00');
+    await page.keyboard.press('ArrowRight');
+    await placeChanged(page, before);
+  }
+  const { p, t } = await place(page);
+  const left = t - p;
+  await expect(footer).toContainText(`${left} page${left === 1 ? '' : 's'} left (${left} min)`);
+  // the book's time, with the bars up, by the scrubber
+  await page.keyboard.press('t');
+  await expect(page.getByText(/^\d+% · (\d+ h )?\d+ min left$/)).toBeVisible();
+  // a long pause is not reading: the speed stays a page a minute
+  await page.keyboard.press('t');
+  const before = await place(page);
+  await page.clock.fastForward('30:00');
+  await page.keyboard.press('ArrowRight');
+  await placeChanged(page, before);
+  const at = await place(page);
+  await expect(footer).toContainText(`(${at.t - at.p} min)`);
+});
+
+test('the page has the book\'s language, or its chapter\'s, so it is hyphenated and read out in it', async ({ page }) => {
+  await start(page);
+  const lang = () => bookPage(page).getAttribute('lang');
+  await readBook(page, {
+    title: 'Livre', author: 'Reader Tests', language: 'fr',
+    rawChapters: [...chapters(1), { ...chapters(2)[1], lang: 'de-CH' }, ...chapters(3).slice(2)],
+  });
+  expect(await lang()).toBe('fr');
+  // a chapter's own language (on its html element) is that chapter's
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  expect(await lang()).toBe('de-CH');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  expect(await lang()).toBe('fr');
+  // a book that names no language is not taken for English
+  await toLibrary(page);
+  await readBook(page, { title: 'Unnamed', author: 'Reader Tests', language: null, rawChapters: chapters(1) });
+  expect(await lang()).toBe('und');
+});
+
+test('taps on the page follow the chosen zones: sides, forward or one hand', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Zones', 1, 40));
+  await page.keyboard.press('t');
+  const tap = async (fx, fy) => {
+    const box = await bookPage(page).boundingBox();
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  };
+  const turned = async (fx, fy, by) => {
+    const before = await place(page);
+    await tap(fx, fy);
+    await expect.poll(async () => (await place(page)).p).toBe(before.p + by);
+  };
+  const bars = () => control(page, 'Previous page').isVisible();
+  // sides: the middle brings up the bars
+  await turned(0.9, 0.5, 1);
+  await tap(0.5, 0.5);
+  await expect.poll(bars).toBe(true);
+  // forward: the middle turns on, the left quarter back, the top the bars
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('group', { name: 'What a tap on the page does' })
+    .getByRole('button', { name: 'Forward' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(bars).toBe(false);
+  await turned(0.5, 0.5, 1);
+  await turned(0.1, 0.5, -1);
+  await tap(0.5, 0.03);
+  await expect.poll(bars).toBe(true);
+  // one hand: the top third back, the bottom third on, the middle the bars
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('button', { name: 'One hand' }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(bars).toBe(false);
+  await turned(0.5, 0.9, 1);
+  await turned(0.5, 0.1, -1);
+  await tap(0.5, 0.5);
+  await expect.poll(bars).toBe(true);
+});
+
+test('the volume keys turn the page when the reader chooses, and are the volume\'s otherwise', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Volume', 1, 30));
+  // Playwright has no volume keys: the keydown a browser that gives them
+  // to the page would send
+  const press = key => page.evaluate(k => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })), key);
+  const at = await place(page);
+  // the volume's, to begin with
+  await press('AudioVolumeDown');
+  expect(await place(page)).toEqual(at);
+  await openSettings(page);
+  const vol = dialog(page, 'Typography and theme').getByRole('group', { name: 'Volume keys turn the page' });
+  await expect(vol.getByRole('button', { name: 'Volume' })).toHaveAttribute('aria-pressed', 'true');
+  await vol.getByRole('button', { name: 'Turn pages' }).click();
+  await page.keyboard.press('Escape');
+  await press('AudioVolumeDown');
+  await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
+  await press('AudioVolumeUp');
+  await expect.poll(async () => (await place(page)).p).toBe(at.p);
 });
 
 test('the t key shows and hides the bars', async ({ page }) => {
