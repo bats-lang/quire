@@ -313,6 +313,54 @@ test('links: out of the book open outside it, inside it jump and can go back', a
   expect(await visibleText(page)).toContain('FAR-TARGET');
 });
 
+test('a note\'s reference opens the note over the page, which can be gone to', async ({ page }) => {
+  await start(page);
+  const filler = Array.from({ length: 25 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
+  await readBook(page, {
+    title: 'Notes', author: 'Bot',
+    rawChapters: [
+      { body: '<p>A claim<a epub:type="noteref" href="chapter3.xhtml#n1">1</a>, an aside<a epub:type="noteref" href="#n2">2</a>' +
+          ' and a lost one<a role="doc-noteref" href="chapter2.xhtml#nowhere">3</a>.</p>' + filler +
+          '<aside epub:type="footnote" id="n2"><p>Same-chapter note &amp; its words.</p></aside>' },
+      { body: filler },
+      { body: '<h1>Notes</h1><aside epub:type="endnote" id="n1"><p><a href="chapter1.xhtml">1</a> The endnote\'s own   words.</p>' +
+          '<p>Its second paragraph.</p></aside>' },
+    ],
+  });
+  const note = dialog(page, 'Footnote');
+  const at = await place(page);
+  // an endnote in another chapter: shown, and the page stays
+  await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
+  await expect(note).toBeVisible();
+  await expect(note).toContainText("1 The endnote's own words. Its second paragraph.");
+  expect(await place(page)).toEqual(at);
+  await note.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(note).toBeHidden();
+  await expect(bookPage(page)).toBeFocused();
+  // a footnote in the same chapter, its reference decoded, closed with Escape
+  await bookPage(page).getByRole('link', { name: '2', exact: true }).click();
+  await expect(note).toContainText('Same-chapter note & its words.');
+  await page.keyboard.press('Escape');
+  await expect(note).toBeHidden();
+  expect(await place(page)).toEqual(at);
+  // from the keyboard, then gone to, with the way back
+  const ref = bookPage(page).getByRole('link', { name: '1', exact: true });
+  await ref.focus();
+  await page.keyboard.press('Enter');
+  await expect(note).toBeVisible();
+  await note.getByRole('button', { name: 'Go to note' }).click();
+  await expect(note).toBeHidden();
+  await expect(chapterTitle(page)).toHaveText('Chapter 3');
+  expect(await visibleText(page)).toContain("The endnote's own");
+  await expect(jumpBack(page)).toBeVisible();
+  await jumpBack(page).click();
+  await expect.poll(() => place(page)).toEqual(at);
+  // a reference to a note that is not there is followed as a link
+  await bookPage(page).getByRole('link', { name: '3', exact: true }).click();
+  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  await expect(note).toBeHidden();
+});
+
 test('a book read right to left turns the other way', async ({ page }) => {
   await start(page);
   await readBook(page, { ...book('Right To Left', 2), rtl: true });

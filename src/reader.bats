@@ -19,6 +19,7 @@ staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "ui.sats"
+staload "layer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
@@ -670,23 +671,25 @@ datavtype imgs(n:int, int) =
   | imgs_nil(n, 0) of ()
   | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
     imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
-  (* A link within the book: the content nodes [s, e) it covers and its
-     href [so, so + sl), found once the chapter is shown *)
+  (* A link within the book: the content nodes [s, e) it covers, its
+     href [so, so + sl), found once the chapter is shown, and whether it
+     is a note's reference *)
   | {k:nat}{s,e:nat}{so,sl:nat | so + sl <= n}
-    imgs_link(n, k + 1) of (int s, int e, int so, int sl, imgs(n, k))
+    imgs_link(n, k + 1) of (int s, int e, int so, int sl, bool, imgs(n, k))
 
 (* The links of the chapter shown: the content nodes [s, e) each covers,
-   and the chapter (-1 for a link out of the book, which the browser
-   opens) and fragment fr[0, f) it leads to *)
+   the chapter (-1 for a link out of the book, which the browser opens)
+   and fragment fr[0, f) it leads to, and whether it is a note's
+   reference (epub:type noteref, or role doc-noteref) *)
 datavtype links(int) =
   | links_nil(0) of ()
   | {k:nat}{l:agz}{f:nat | f <= 200}
-    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, links(k))
+    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, bool, links(k))
 
 fun links_free {k:nat} .<k>. (x: links(k)): void =
   case+ x of
   | ~links_nil() => ()
-  | ~links_cons(_, _, _, a, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
+  | ~links_cons(_, _, _, a, _, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
 
 datavtype links_cell = {k:nat} LinksCell of links(k)
 
@@ -703,9 +706,9 @@ fn _links_put (c: links_cell): void = let
   val+ ~LinksCell(x) = cur
 in links_free(x) end
 
-fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
+fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f, note: bool): void = let
   val+ ~LinksCell(x) = _links_take()
-in _links_put(LinksCell(links_cons(s, e, ch, fr, f, x))) end
+in _links_put(LinksCell(links_cons(s, e, ch, fr, f, note, x))) end
 
 (* Whether data[o, o + k) starts with pat *)
 fn _starts {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
@@ -735,6 +738,24 @@ fun _pass_attrs {ld,lb:agz}{n:pos}{sa:nat}{i:nat} .<sa>.
         else ())
     in _pass_attrs(doc, data, rest, idx) end
 
+(* Whether an <a> is a note's reference: its epub:type names noteref, or
+   its role is doc-noteref *)
+fn _noteref {lb:agz}{n:pos}{sa:nat}
+  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): bool = let
+  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _a_role = @[char][4]('r', 'o', 'l', 'e')
+  var _nr1 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  var _nr2 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  val t = (case+ find_attr(data, attrs, _a_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(o, k) => span_has(data, o, k, _nr1, 7)): bool
+in
+  if t then true
+  else (case+ find_attr(data, attrs, _a_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(o, k) => span_has(data, o, k, _nr2, 7))
+end
+
 (* An <a> element, content nodes [idx, e): a link out of the book (http,
    https, mailto) is made a real one, opened in a new tab; a link within
    it is kept in acc, found once the chapter is shown *)
@@ -758,14 +779,14 @@ in
            val () = _node_attr(doc, idx, "href", data, so, sl)
            val () = _node_attr_lit(doc, idx, "target", "_blank")
            val () = _node_attr_lit(doc, idx, "rel", "noopener noreferrer")
-           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0)
+           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0, false)
          in acc end
          else acc)
       else let
         (* announced and reached from the keyboard as a link *)
         val () = _node_attr_lit(doc, idx, "role", "link")
         val () = _node_attr_lit(doc, idx, "tabindex", "0")
-      in imgs_link(idx, e, so, sl, acc) end
+      in imgs_link(idx, e, so, sl, _noteref(data, attrs), acc) end
     end
 end
 
@@ -992,7 +1013,7 @@ fn _frag_copy {lb,l:agz}{n:pos}{ho,h,f:nat | f == 0 || ho + h + 1 + f <= n}
    with the chapter and fragment it leads to *)
 fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}
   (s: int, z: int z, no: int no, dl: int dl, cur: Int,
-   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl): void = let
+   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl, note: bool): void = let
   val h = src_end(data, so, sl)
   val ch = (if h <= 0 then cur
     else (case+ book_find_relative(s, z, no, dl, data, n, so, h) of
@@ -1002,7 +1023,7 @@ fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so
   val fr = $A.alloc<byte>(f + 1)
   val () = _frag_copy(data, n, so, h, fr, f)
 in
-  if ch >= 0 then _links_push(s0, e0, ch, fr, f) else $A.free<byte>(fr)
+  if ch >= 0 then _links_push(s0, e0, ch, fr, f, note) else $A.free<byte>(fr)
 end
 
 (* The images xs of the chapter data[0, n), chapter cur, and its links *)
@@ -1014,8 +1035,8 @@ fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:
   | ~imgs_cons(idx, so, sl, tl) => let
       val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
     in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
-  | ~imgs_link(s0, e0, so, sl, tl) => let
-      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl)
+  | ~imgs_link(s0, e0, so, sl, note, tl) => let
+      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl, note)
     in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
 
 (* The chapters from spine itemref i down to the first, onto acc: each
@@ -1942,36 +1963,211 @@ implement reader_anchor () = _anchor_now()
 (* The link covering content node i, if any: followed (a link within
    the book, remembering where the reader was); true when there is one,
    also for a link out of the book, which the browser opens *)
-fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
+fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, bool, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
   case+ x of
-  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, @(a0, 0)) end
-  | @links_cons(s0, e0, ch, fr, f, rest) =>
+  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, false, @(a0, 0)) end
+  | @links_cons(s0, e0, ch, fr, f, note, rest) =>
     if (if s0 <= i then i < e0 else false) then let
       val c = ch
+      val nt = note
       val b = $A.alloc<byte>(f + 1)
       val () = _frag_dup(fr, b, f + 1, 0)
       val ff = f
       prval () = fold@(x)
-    in @((if c < 0 then 2 else 1), c, @(b, ff)) end
+    in @((if c < 0 then 2 else 1), c, nt, @(b, ff)) end
     else let
       val r = _link_find(rest, i)
       prval () = fold@(x)
     in r end
 
+(* ============================================================
+   Notes: a note's reference opens the note over the page
+   ============================================================ *)
+
+(* The note shown over the page: its chapter and fragment, for "Go to
+   note" *)
+datavtype note_tgt =
+  | {l:agz}{f:nat | f <= 200} NoteTgt of (Int, $A.arr(byte, l, f + 1), int f)
+  | NoNoteTgt of ()
+
+val _note_tgt = ref<note_tgt>(NoNoteTgt())
+
+fn _note_tgt_put (t: note_tgt): void = let
+  var c: note_tgt = t
+  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
+in case+ c of ~NoteTgt(_, a, _) => $A.free<byte>(a) | ~NoNoteTgt() => () end
+
+fn _note_tgt_take (): note_tgt = let
+  var c: note_tgt = NoNoteTgt()
+  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
+in c end
+
+stadef NOTE_CAP = 4096
+macdef _NOTE_CAP = 4096
+
+(* buf[p, q) := data[o + i, o + k) with runs of white space made one
+   space, and none first; at most NOTE_CAP - 1 bytes in all *)
+fun _nt_put {lb,lo:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k}{p:nat | p <= NOTE_CAP} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  if i >= k then p
+  else if p >= _NOTE_CAP - 1 then p
+  else let
+    val c = byte2int0($A.read<byte>(data, o + i))
+  in
+    if c = 32 || c = 9 || c = 10 || c = 13 then
+      (if p = 0 then _nt_put(data, o, k, i + 1, buf, p)
+       else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then _nt_put(data, o, k, i + 1, buf, p)
+       else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in _nt_put(data, o, k, i + 1, buf, p + 1) end)
+    else let
+      val () = $A.set<byte>(buf, p, $A.read<byte>(data, o + i))
+    in _nt_put(data, o, k, i + 1, buf, p + 1) end
+  end
+
+(* A space at buf[p], unless the text so far ends in one: where a block
+   of the note ends *)
+fn _nt_break {lo:agz}{p:nat | p <= NOTE_CAP} (buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  if p = 0 then p
+  else if p >= _NOTE_CAP - 1 then p
+  else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then p
+  else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in p + 1 end
+
+(* The text of the element of nodes whose id is fr[0, f), gathered into
+   buf from p (inside: whether nodes are within it) *)
+fun _nt_nodes {lb,la,lo:agz}{n:pos}{sz:nat}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val p = _nt_node(data, node, fr, f, inside, buf, p)
+    in _nt_nodes(data, rest, fr, f, inside, buf, p) end
+  | $X.xml_nodes_nil() => p
+
+and _nt_node {lb,la,lo:agz}{n:pos}{sz:pos}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
+   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
+   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+  case+ node of
+  | $X.xml_text(off, tlen) => if inside then _nt_put(data, off, tlen, 0, buf, p) else p
+  | $X.xml_element(_, _, attrs, children) => let
+      var _a_id = @[char][2]('i', 'd')
+      val here = (case+ find_attr(data, attrs, _a_id, 2) of
+        | ~xspan_none() => false
+        | ~xspan_at(o, k) => if k = f then _same(data, o, fr, k, 0) else false): bool
+      val q = _nt_nodes(data, children, fr, f, (if inside then true else here), buf, p)
+    in if inside then _nt_break(buf, q) else q end
+
+(* The note's text, decoded, shown in the note overlay, which opens *)
+fn _note_show {lo:agz}{q:nat | q <= NOTE_CAP} (buf: $A.arr(byte, lo, NOTE_CAP), q: int q): void = let
+  val q = (if q > 0 then (if byte2int0($A.get<byte>(buf, q - 1)) = 32 then q - 1 else q) else q): [r:nat | r <= NOTE_CAP] int r
+  val out = $A.alloc<byte>(_NOTE_CAP)
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  val r = decode_text(bb, 0, q, out)
+  val () = $A.drop<byte>(bf, bb)
+  val () = $A.free<byte>($A.thaw<byte>(bf))
+  val () = ui_text_buf("qntx", out, r)
+  val () = layer_open(LNote())
+in ui_focus("qncl") end
+
+(* The note kept in _note_tgt, found in its chapter's XHTML data[0, n):
+   shown over the page, and kept for "Go to note"; when it has no text
+   there, the link is followed instead *)
+fn _note_found {lb:agz}{n:pos} (data: !$A.borrow(byte, lb, n), n: int n): void =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) =>
+    if f <= 0 then let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    else let
+      val buf = $A.alloc<byte>(_NOTE_CAP)
+      val nodes = $X.parse_document(data, n)
+      val q = _nt_nodes(data, nodes, fr, f, false, buf, 0)
+      val () = $X.free_nodes(nodes)
+    in
+      if q > 0 then let
+        val () = _note_show(buf, q)
+      in _note_tgt_put(NoteTgt(ch, fr, f)) end
+      else let
+        val () = $A.free<byte>(buf)
+        val () = _push_position()
+      in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    end
+
+(* The note kept in _note_tgt followed as a link: its chapter could not
+   be read *)
+fn _note_follow (): void =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
+(* Opens the note fr[0, f) of chapter ch over the page (found once its
+   chapter is read); when it cannot be found, the link is followed *)
+fn _note_open {l:agz}{f:pos | f <= 200} (ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
+  val () = _note_tgt_put(NoteTgt(ch, fr, f))
+  val s = book_serial()
+  val ci = (if ch >= 0 then ch else 0): [v:nat] int v
+in
+  case+ book_chapter_get(s, ci) of
+  | ~ChaptersUnknown() => _note_follow()
+  | ~ChapterNone(_) => _note_follow()
+  | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, _, _, _, _) =>
+    (case+ piece_new(ch_csz) of
+     | ~NoPiece() => _note_follow()
+     | ~Piece(car, cbuf) => let
+         val _ = book_read(s, fsz_s, ch_d, cbuf, ch_csz)
+         val @(cf, cb) = $A.freeze<byte>(cbuf)
+         val dp = $DC.decompress(cb, ch_csz, ch_method)
+         val () = $A.drop<byte>(cf, cb)
+         val () = piece_free(car, $A.thaw<byte>(cf))
+       in
+         $P.discard<int>($P.and_then<Int><int>($P.vow(dp), lam(h) => let
+           val () = (case+ take_content(h) of
+             | ~NoContentBytes() => _note_follow()
+             | ~ContentBytes(xar, xhtml, xn) => let
+                 val @(xf, xb) = $A.freeze<byte>(xhtml)
+                 val () = _note_found(xb, xn)
+                 val () = $A.drop<byte>(xf, xb)
+               in piece_free(xar, $A.thaw<byte>(xf)) end)
+         in $P.ret<int>(0) end))
+       end)
+end
+
 #pub fun reader_link_at (i: int): bool
 implement reader_link_at (i) = let
   val c = _links_take()
   val+ @LinksCell(x) = c
-  val @(kind, ch, @(b, f)) = _link_find(x, i)
+  val @(kind, ch, note, @(b, f)) = _link_find(x, i)
   prval () = fold@(c)
   val () = _links_put(c)
 in
-  if kind = 1 then let
-    val () = _push_position()
-    val () = $P.discard<int>(_goto_frag(ch, b, f))
-  in true end
+  if kind = 1 then
+    (* a note's reference to a note it names opens the note over the
+       page; any other link is followed *)
+    (if note then (if f > 0 then (if f <= 200 then let
+        val () = _note_open(ch, b, f)
+      in true end
+      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
+      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
+     else let
+       val () = _push_position()
+       val () = $P.discard<int>(_goto_frag(ch, b, f))
+     in true end)
   else let val () = $A.free<byte>(b) in kind = 2 end
 end
+
+(* Goes to the note shown over the page, remembering where the reader
+   was *)
+#pub fun reader_note_go (): void
+implement reader_note_go () =
+  case+ _note_tgt_take() of
+  | ~NoNoteTgt() => ()
+  | ~NoteTgt(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
 
 (* Whether the open book reads right to left *)
 #pub fun reader_rtl (): bool

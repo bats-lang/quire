@@ -825,8 +825,11 @@ in
   else if (if _key_is(b, n, "f") then fl >= 2 else false) then let
       val () = $EV.prevent_default()
     in _search_open() end
-  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then
-    (if reader_link_at(!_focus_link) then () else ())
+  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then let
+    (* the Enter is the link's: a note opened over the page takes the
+       focus to its Close, which the same Enter would otherwise press *)
+    val () = $EV.prevent_default()
+  in if reader_link_at(!_focus_link) then () else () end
   else if _key_is(b, n, "Escape") then
     (if _panels_close() then ui_focus("qcnt")
      else if _shown("qsrn") then _search_end()
@@ -848,6 +851,7 @@ fn _escape_overlay (): bool =
   | Escaped(LContents()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LTypography()) => let val () = ui_focus("qcnt") in true end
   | Escaped(LAnnotations()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LNote()) => let val () = ui_focus("qcnt") in true end
   | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -993,7 +997,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in r end
 
-fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
+fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
   val r = RCons(r, OnEl("qbmk"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
@@ -1029,6 +1033,21 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 5) = let
         else if go >= 0 then let val () = layer_close(LAnnotations()) in _annot_go(go) end
         else if nt >= 0 then annot_ask_note(nt, false)
         else if dl >= 0 then annot_delete_highlight(dl)
+        else ())
+    in 0 end)
+  (* a note opened over the page: gone to, or closed *)
+  val r = RCons(r, OnEl("qnte"), "click", lam(h) => let
+      val t = _target(h)
+      val go = _is(t, "qngo")
+      val close = _is(t, "qncl")
+      val () = _target_free(t)
+      val () = (if go then let
+          val () = layer_close(LNote())
+          val () = reader_note_go()
+        in ui_focus("qcnt") end
+        else if close then let
+          val () = layer_close(LNote())
+        in ui_focus("qcnt") end
         else ())
     in 0 end)
 in r end
