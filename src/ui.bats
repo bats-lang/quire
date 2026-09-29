@@ -37,16 +37,17 @@ fun _put_str {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}{i:nat | i <= sn} .<sn -
     val () = $A.set<byte>(buf, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
   in _put_str(buf, p, s, sl, i + 1) end
 
-(* A numbered id: pre and i's decimal digits *)
-#pub fn nid_make {sn:pos | sn <= 4}{i:nat} (pre: string sn, i: int i)
-  : [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k)
+(* A numbered id: pre (a word, up to 16 bytes, so an id says what it
+   is) and i's decimal digits *)
+#pub fn nid_make {sn:pos | sn <= 16}{i:nat} (pre: string sn, i: int i)
+  : [l:agz][k:pos | k <= 32] @($A.arr(byte, l, k), int k)
 
 implement nid_make(pre, i) = let
-  val buf = $A.alloc<byte>(16)
+  val buf = $A.alloc<byte>(32)
   val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
-  val off = $S.int_to_str(buf, off, 16, i)
+  val off = $S.int_to_str(buf, off, 32, i)
   val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 16, exact, off, off)
+  val buf = $S.copy_arr_region(buf, 0, 32, exact, off, off)
   val () = $A.free<byte>(buf)
 in @(exact, off) end
 
@@ -112,7 +113,7 @@ fun _prefix_is {lb:agz}{n:nat}{sn:nat}{o:nat}{i:nat | i <= sn} .<sn - i>.
   else if byte2int0($A.read<byte>(b, o + i)) <> char2int0(string_get_at(pre, i)) then false
   else _prefix_is(b, n, o, pre, sl, i + 1)
 
-#pub fn nid_parse {lb:agz}{n:nat}{o:nat}{sn:pos | sn <= 4}
+#pub fn nid_parse {lb:agz}{n:nat}{o:nat}{sn:pos | sn <= 16}
   (b: !$A.borrow(byte, lb, n), n: int n, off: int o, pre: string sn): [v:int | v >= ~1] int v
 
 implement nid_parse{lb}{n}{o}{sn}(b, n, off, pre) = let

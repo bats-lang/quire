@@ -148,6 +148,7 @@ fn _reader (): void = let
   val () = ui_attr("qfoo", AHidden, "true")
   val () = ui_el("qfoo", "qfot", TSpan, "pgt")
   val () = ui_el("qfoo", "qfon", TSpan, "pgn")
+  val () = ui_el("qfoo", "footer-page", TSpan, "pgn")
   val () = ui_text_btn("qrvw", "qpbk", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("qpbk")
   val () = ui_el("qrvw", "qsel", TDiv, "seltb")
@@ -191,6 +192,9 @@ fn _toc (): void = let
   val () = ui_named("qtcs", NTablist, "Contents and bookmarks")
   val () = ui_tab("qtcs", "qtct", "Contents", "qtcl", true)
   val () = ui_tab("qtcs", "qtcm", "Bookmarks", "qtbl", false)
+  (* the print pages, for a book that lists them *)
+  val () = ui_tab("qtcs", "pages-tab", "Pages", "pages-list", false)
+  val () = _hide("pages-tab")
   val () = ui_el("qtch", "qtcg", TSpan, "grow")
   val () = ui_icon_btn("qtch", "qtcx", "ibtn", IcClose, "Close")
   val () = ui_el("qtoc", "qtcl", TDiv, "plist")
@@ -198,6 +202,9 @@ fn _toc (): void = let
   val () = ui_el("qtoc", "qtbl", TDiv, "plist")
   val () = ui_labelled("qtbl", NTabpanel, "qtcm")
   val () = _hide("qtbl")
+  val () = ui_el("qtoc", "pages-list", TDiv, "plist")
+  val () = ui_labelled("pages-list", NTabpanel, "pages-tab")
+  val () = _hide("pages-list")
 in _hide("qtoc") end
 
 (* The settings sheet *)

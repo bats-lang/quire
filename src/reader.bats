@@ -532,6 +532,117 @@ fn _track_at (x: Int): [r:nat | r <= 1000] int r = let
 in if tw <= 0 then 0 else _clamp1000((x - tx) * 1000 / tw) end
 
 (* Shows page p of the chapter's t pages *)
+(* The print pages' breaks in the chapter shown (epub:type pagebreak, or
+   role doc-pagebreak), the latest first: each one's content node and its
+   label, the page's number in print *)
+datavtype breaks(int) =
+  | breaks_nil(0) of ()
+  | {k:nat}{i:nat}{l:agz}{m:pos | m <= 16} breaks_cons(k + 1) of (int i, $A.arr(byte, l, m), int m, breaks(k))
+
+fun breaks_free {k:nat} .<k>. (x: breaks(k)): void =
+  case+ x of
+  | ~breaks_nil() => ()
+  | ~breaks_cons(_, a, _, r) => let val () = $A.free<byte>(a) in breaks_free(r) end
+
+datavtype breaks_cell = {k:nat} BreaksCell of breaks(k)
+
+val _breaks = ref<breaks_cell>(BreaksCell(breaks_nil()))
+
+fn _breaks_take (): breaks_cell = let
+  var c: breaks_cell = BreaksCell(breaks_nil())
+  val () = ref_exch_elt<breaks_cell>(_breaks, c)
+in c end
+
+fn _breaks_put (x: breaks_cell): void = let
+  var c: breaks_cell = x
+  val () = ref_exch_elt<breaks_cell>(_breaks, c)
+  val+ ~BreaksCell(old) = c
+in breaks_free(old) end
+
+(* b[j, k) := data[o + j, o + k) *)
+fun _copy_span {lb,l:agz}{n,m:pos}{o,k:nat | o + k <= n; k <= m}{j:nat | j <= k} .<k - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, m), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
+  in _copy_span(data, o, b, k, j + 1) end
+
+(* Content node idx, when it is a print page's break, kept with its
+   label (its title, else its aria-label; at most 16 bytes) *)
+fn _break_check {lb:agz}{n:pos}{sa:nat}{i:nat}
+  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), idx: int i): void = let
+  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _a_role = @[char][4]('r', 'o', 'l', 'e')
+  var _pb1 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _pb2 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _a_title = @[char][5]('t', 'i', 't', 'l', 'e')
+  var _a_label = @[char][10]('a', 'r', 'i', 'a', '-', 'l', 'a', 'b', 'e', 'l')
+  val is_break = (case+ find_attr(data, attrs, _a_type, 9) of
+    | ~xspan_at(o, k) => span_has(data, o, k, _pb1, 9)
+    | ~xspan_none() => (case+ find_attr(data, attrs, _a_role, 4) of
+      | ~xspan_at(o, k) => span_has(data, o, k, _pb2, 9)
+      | ~xspan_none() => false)): bool
+in
+  if ~is_break then ()
+  else let
+    val sp = (case+ find_attr(data, attrs, _a_title, 5) of
+      | ~xspan_none() => find_attr(data, attrs, _a_label, 10)
+      | sp => sp): xspan(n)
+  in
+    case+ sp of
+    | ~xspan_none() => ()
+    | ~xspan_at(o, k) =>
+      if k < 1 then () else if k > 16 then ()
+      else let
+        val b = $A.alloc<byte>(k)
+        val () = _copy_span(data, o, b, k, 0)
+        val+ ~BreaksCell(x) = _breaks_take()
+      in _breaks_put(BreaksCell(breaks_cons(idx, b, k, x))) end
+  end
+end
+
+(* d[p + j, p + k) := u[j, k) *)
+fun _label_to {ls,ld:agz}{ns,nd:pos}{p:nat}{k:nat | k <= ns; p + k <= nd}{j:nat | j <= k} .<k - j>.
+  (u: !$A.arr(byte, ls, ns), d: !$A.arr(byte, ld, nd), p: int p, k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(d, p + j, $A.get<byte>(u, j))
+  in _label_to(u, d, p, k, j + 1) end
+
+(* The label of the latest break at or before page cur of t, copied *)
+fun _break_at {k:nat}{t:pos}{c:nat | c < t} .<k>. (x: !breaks(k), t: int t, cur: int c): [l:agz][m:nat | m <= 16] @($A.arr(byte, l, m + 1), int m) =
+  case+ x of
+  | breaks_nil() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
+  | @breaks_cons(idx, a, m, rest) =>
+    if _page_of_node(idx, t, cur) <= cur then let
+      val b = $A.alloc<byte>(m + 1)
+      val () = _label_to(a, b, 0, m, 0)
+      val mm = m
+      prval () = fold@(x)
+    in @(b, mm) end
+    else let
+      val r = _break_at(rest, t, cur)
+      prval () = fold@(x)
+    in r end
+
+(* The footer's print page: " · page 214", from the latest break at
+   or before the page shown; nothing in a chapter that has none *)
+fn _show_print_page {t:pos}{c:nat | c < t} (t: int t, cur: int c): void = let
+  val cc = _breaks_take()
+  val+ @BreaksCell(x) = cc
+  val @(lab, m) = _break_at(x, t, cur)
+  prval () = fold@(cc)
+  val () = _breaks_put(cc)
+  (* " · page " (9 bytes) and the label (at most 16) *)
+  val b = $A.alloc<byte>(32)
+  val () = $A.set<byte>(b, 0, $A.int2byte(32))
+  val () = $A.set<byte>(b, 1, $A.int2byte(194))
+  val () = $A.set<byte>(b, 2, $A.int2byte(183))
+  val off = _put(b, 3, " page ")
+  val () = _label_to(lab, b, off, m, 0)
+  val () = $A.free<byte>(lab)
+in _set_text_of("footer-page", b, (if m > 0 then off + m else 0): [k:nat | k <= 32] int k) end
+
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
   val () = reading_set(@(p, t, c, tc))
@@ -553,6 +664,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val () = _update_page_indicator()
+  val () = _show_print_page(t, p)
   val () = _scrub_show()
   val () = annot_star()
   val () = _record_position()
@@ -1090,6 +1202,7 @@ and _render_node
       val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
       val () = _frag_check(data, attrs, fr, idx)
       val () = _pass_attrs(doc, data, attrs, idx)
+      val () = _break_check(data, attrs, idx)
       var _t_a = @[char][1]('a')
     in
       if xml_name_eq(data, name_off, name_len, _t_a, 1) then let
@@ -1568,6 +1681,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pics_put(PicsCell(pics_nil()))
+                  val () = _breaks_put(BreaksCell(breaks_nil()))
                   val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
                   val () = _page_book_lang(doc)
                   val fr = _frag_take()
@@ -2206,6 +2320,15 @@ implement reader_goto (ch, pg, anchor) = _goto(ch, pg, anchor)
 #pub fun reader_goto_entry (i: Int): void
 implement reader_goto_entry (i) =
   case+ toc_dest_of(i) of
+  | ~TocNoDest() => ()
+  | ~TocDest(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
+(* Goes to print page i, remembering where the reader was *)
+#pub fun reader_goto_page (i: Int): void
+implement reader_goto_page (i) =
+  case+ toc_page_dest_of(i) of
   | ~TocNoDest() => ()
   | ~TocDest(ch, fr, f) => let
       val () = _push_position()
