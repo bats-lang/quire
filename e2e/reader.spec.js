@@ -476,6 +476,8 @@ test('the time the chapter and the book take to finish is learned from the reade
   await placeChanged(page, before);
   const at = await place(page);
   await expect(footer).toContainText(`(${at.t - at.p} min)`);
+});
+
 test('the page has the book\'s language, or its chapter\'s, so it is hyphenated and read out in it', async ({ page }) => {
   await start(page);
   const lang = () => bookPage(page).getAttribute('lang');
@@ -497,6 +499,8 @@ test('the page has the book\'s language, or its chapter\'s, so it is hyphenated 
   await toLibrary(page);
   await readBook(page, { title: 'Unnamed', author: 'Reader Tests', language: null, rawChapters: chapters(1) });
   expect(await lang()).toBe('und');
+});
+
 test('taps on the page follow the chosen zones: sides, forward or one hand', async ({ page }) => {
   await start(page);
   await readBook(page, book('Zones', 1, 40));
