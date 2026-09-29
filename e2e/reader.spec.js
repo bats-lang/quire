@@ -351,6 +351,29 @@ test('a card shows how far the book has been read', async ({ page }) => {
   expect(await card(page, 'Progress').innerText()).not.toContain('New');
 });
 
+test('the page has the book\'s language, or its chapter\'s, so it is hyphenated and read out in it', async ({ page }) => {
+  await start(page);
+  const lang = () => bookPage(page).getAttribute('lang');
+  await readBook(page, {
+    title: 'Livre', author: 'Reader Tests', language: 'fr',
+    rawChapters: [...chapters(1), { ...chapters(2)[1], lang: 'de-CH' }, ...chapters(3).slice(2)],
+  });
+  expect(await lang()).toBe('fr');
+  // a chapter's own language (on its html element) is that chapter's
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  expect(await lang()).toBe('de-CH');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  expect(await lang()).toBe('fr');
+  // a book that names no language is not taken for English
+  await toLibrary(page);
+  await readBook(page, { title: 'Unnamed', author: 'Reader Tests', language: null, rawChapters: chapters(1) });
+  expect(await lang()).toBe('und');
+});
+
 test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Toggle', 1, 10));
