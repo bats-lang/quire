@@ -186,6 +186,38 @@ and _get_first_text
 implement walk_opf_metadata(data, nodes) =
   _walk_opf_metadata_r(data, nodes, xspan_none(), xspan_none())
 
+(* The text of the OPF's first dc:language *)
+fun _opf_lang_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val r = _opf_lang_node(data, node)
+    in
+      case+ r of
+      | ~xspan_none() => _opf_lang_r(data, rest)
+      | _ => r
+    end
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _opf_lang_node
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, _, children) => let
+    var _c_lang = @[char][11]('d', 'c', ':', 'l', 'a', 'n', 'g', 'u', 'a', 'g', 'e')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_lang, 11) then _get_first_text(children)
+    else _opf_lang_r(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+#pub fn opf_language
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+
+implement opf_language(data, nodes) = _opf_lang_r(data, nodes)
+
 (* ============================================================
    Spine: find Nth idref
    ============================================================ *)

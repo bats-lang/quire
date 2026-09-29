@@ -428,6 +428,27 @@ test('the time the chapter and the book take to finish is learned from the reade
   await placeChanged(page, before);
   const at = await place(page);
   await expect(footer).toContainText(`(${at.t - at.p} min)`);
+test('the page has the book\'s language, or its chapter\'s, so it is hyphenated and read out in it', async ({ page }) => {
+  await start(page);
+  const lang = () => bookPage(page).getAttribute('lang');
+  await readBook(page, {
+    title: 'Livre', author: 'Reader Tests', language: 'fr',
+    rawChapters: [...chapters(1), { ...chapters(2)[1], lang: 'de-CH' }, ...chapters(3).slice(2)],
+  });
+  expect(await lang()).toBe('fr');
+  // a chapter's own language (on its html element) is that chapter's
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  expect(await lang()).toBe('de-CH');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  expect(await lang()).toBe('fr');
+  // a book that names no language is not taken for English
+  await toLibrary(page);
+  await readBook(page, { title: 'Unnamed', author: 'Reader Tests', language: null, rawChapters: chapters(1) });
+  expect(await lang()).toBe('und');
 });
 
 test('the t key shows and hides the bars', async ({ page }) => {

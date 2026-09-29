@@ -208,6 +208,7 @@ function loremParagraph(seed) {
  * @param {string} opts.author - Book author
  * @param {number} opts.chapters - Number of chapters (default 3)
  * @param {number} opts.paragraphsPerChapter - Paragraphs per chapter (default 12)
+ * @param {string|null} opts.language - The OPF's dc:language (default "en"; null leaves it out)
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -223,7 +224,8 @@ export function createEpub(opts = {}) {
   const parasPerChapter = opts.paragraphsPerChapter || 12;
   const coverImage = opts.coverImage || false;
   const svgCover = opts.svgCover || false;
-  const rawChapters = opts.rawChapters || null; // array of {body, images?}
+  const rawChapters = opts.rawChapters || null; // array of {body, images?, lang?}
+  const language = opts.language === undefined ? 'en' : opts.language;
 
   // mimetype must be first entry, stored uncompressed
   const mimetype = 'application/epub+zip';
@@ -257,9 +259,12 @@ export function createEpub(opts = {}) {
     if (rawChapters && rawChapters[i - 1]) {
       // Use raw body content provided by the caller
       const rawBody = rawChapters[i - 1].body;
+      // a chapter's own language, on its html element as EPUBs put it
+      const lang = rawChapters[i - 1].lang;
+      const langAttrs = lang ? ` xml:lang="${lang}" lang="${lang}"` : '';
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
 <head><title>Chapter ${i}</title></head>
 <body>
 ${rawBody}
@@ -339,8 +344,7 @@ ${tocItems}    </ol>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>${title}</dc:title>
     <dc:creator>${author}</dc:creator>
-    <dc:language>en</dc:language>
-    <dc:identifier id="uid">urn:uuid:${crypto.randomUUID()}</dc:identifier>
+${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${crypto.randomUUID()}</dc:identifier>
   </metadata>
   <manifest>
 ${manifestItems}  </manifest>

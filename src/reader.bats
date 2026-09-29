@@ -930,6 +930,45 @@ in
     end
 end
 
+(* Whether data[o + i, o + k) is letters, digits and hyphens *)
+fun _tag_chars {lb:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i): bool =
+  if i >= k then true
+  else let
+    val c = byte2int0($A.read<byte>(data, o + i))
+    val ok = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c = 45
+  in if ok then _tag_chars(data, o, k, i + 1) else false end
+
+(* Whether data[o, o + k) is a plausible language tag *)
+fn _lang_ok {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): bool =
+  if k < 1 then false else if k > 35 then false else _tag_chars(data, o, k, 0)
+
+(* The page's lang: data[o, o + k) *)
+fn _page_lang {ld,lb:agz}{n:pos}{o,k:nat | o + k <= n; k < 65536}
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), o: int o, k: int k): void = let
+  val @(qa, ql) = _node_id(~1)
+  val @(fq, bq) = $A.freeze<byte>(qa)
+  val () = $D.set_attr(doc, bq, ql, "lang", data, o, k)
+  val () = $A.drop<byte>(fq, bq)
+in $A.free<byte>($A.thaw<byte>(fq)) end
+
+(* An html or body element's language (xml:lang, else lang), when it has
+   one, is the page's: the chapter's content goes into the page with no
+   element of its own *)
+fn _root_lang {ld,lb:agz}{n:pos}{sa:nat}
+  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): void = let
+  var _a_xlang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+  var _a_lang = @[char][4]('l', 'a', 'n', 'g')
+  val sp = (case+ find_attr(data, attrs, _a_xlang, 8) of
+    | ~xspan_none() => find_attr(data, attrs, _a_lang, 4)
+    | sp => sp): xspan(n)
+in
+  case+ sp of
+  | ~xspan_none() => ()
+  | ~xspan_at(o, k) => if _lang_ok(data, o, k) then (if k < 65536 then _page_lang(doc, data, o, k) else ()) else ()
+end
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to acc *)
@@ -976,11 +1015,14 @@ and _render_node
     else if xml_name_eq(data, name_off, name_len, _t_link, 4) then acc
     else if xml_name_eq(data, name_off, name_len, _t_style, 5) then acc
     else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
-    (* Transparent: html, body (their children go to the same parent) *)
-    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc, fr)
-    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-      _render_nodes(doc, data, len, pidx, children, acc, fr)
+    (* Transparent: html, body (their children go to the same parent);
+       their language is the page's *)
+    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then let
+      val () = _root_lang(doc, data, attrs)
+    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
+    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then let
+      val () = _root_lang(doc, data, attrs)
+    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
       val () = _add_node(doc, pidx, _next_content_idx(), "br")
@@ -1221,6 +1263,65 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
 (* Whether the book reads right to left *)
 val _rtl = ref<bool>(false)
 
+(* The book's language (its OPF's dc:language), when it is a plausible
+   language tag: 1 to 35 letters, digits and hyphens *)
+datavtype book_lang =
+  | {l:agz}{k:pos | k <= 35} BookLang of ($A.arr(byte, l, 35), int k)
+  | NoBookLang of ()
+
+val _blang = ref<book_lang>(NoBookLang())
+
+fn _blang_put (x: book_lang): void = let
+  var c: book_lang = x
+  val () = ref_exch_elt<book_lang>(_blang, c)
+in case+ c of ~BookLang(a, _) => $A.free<byte>(a) | ~NoBookLang() => () end
+
+fn _blang_take (): book_lang = let
+  var c: book_lang = NoBookLang()
+  val () = ref_exch_elt<book_lang>(_blang, c)
+in c end
+
+(* b[j, k) := data[o + j, o + k) *)
+fun _lang_copy {lb,l:agz}{n:pos}{o,k:nat | o + k <= n; k <= 35}{j:nat | j <= k} .<k - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, 35), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
+  in _lang_copy(data, o, b, k, j + 1) end
+
+(* Keeps the book's language, from its OPF opf_b's nodes *)
+fn _lang_locate {lb:agz}{n:pos}{sz:nat}
+  (opf_b: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): void =
+  case+ opf_language(opf_b, nodes) of
+  | ~xspan_none() => _blang_put(NoBookLang())
+  | ~xspan_at(o, k) =>
+    if _lang_ok(opf_b, o, k) then
+      (if k >= 1 then (if k <= 35 then let
+         val b = $A.alloc<byte>(35)
+         val () = _lang_copy(opf_b, o, b, k, 0)
+       in _blang_put(BookLang(b, k)) end
+       else _blang_put(NoBookLang()))
+       else _blang_put(NoBookLang()))
+    else _blang_put(NoBookLang())
+
+(* The page's lang, before a chapter is shown: the book's, else "und"
+   (undetermined: the app's own "en" is not the book's) *)
+fn _page_book_lang {ld:agz} (doc: !$D.document(ld)): void =
+  case+ _blang_take() of
+  | ~NoBookLang() => let
+      val u = $A.alloc<byte>(3)
+      val () = $A.write_text(u, 0, $A.text_lit("und"), 3)
+      val @(fu, bu) = $A.freeze<byte>(u)
+      val () = _page_lang(doc, bu, 0, 3)
+      val () = $A.drop<byte>(fu, bu)
+      val () = $A.free<byte>($A.thaw<byte>(fu))
+    in _blang_put(NoBookLang()) end
+  | ~BookLang(b, k) => let
+      val @(fb, bb) = $A.freeze<byte>(b)
+      val () = _page_lang(doc, bb, 0, k)
+      val () = $A.drop<byte>(fb, bb)
+    in _blang_put(BookLang($A.thaw<byte>(fb), k)) end
+
 datavtype font_src =
   | {z:pos}{d:nat}{s:pos | d + s <= z; s <= 268435456}{m:int | m == 0 || m == 8}
     FontSrc of (int z, int d, int s, int m)
@@ -1348,6 +1449,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val () = book_spine_set(serial, fsz_s, chs, total)
                val () = toc_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = !_rtl := spine_rtl(opf_b, opf_nodes)
+               val () = _lang_locate(opf_b, opf_nodes)
                val () = _font_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_f, opf_b)
@@ -1401,6 +1503,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
                   val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
+                  val () = _page_book_lang(doc)
                   val fr = _frag_take()
                   val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
                   val () = _frag_put(fr)
