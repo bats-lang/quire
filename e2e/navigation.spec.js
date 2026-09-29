@@ -50,6 +50,30 @@ for (const ncx of [false, true]) {
   });
 }
 
+test('reading on from where a jump landed puts the back button away', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, tocBook(false));
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await entries(page).filter({ hasText: 'The End' }).click();
+  await expect(chapterTitle(page)).toHaveText('The End');
+  await expect(jumpBack(page)).toBeVisible();
+  // turning the page on keeps the new place: nothing to go back to
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  await expect(jumpBack(page)).toBeHidden();
+  // and so does turning back, after another jump
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await entries(page).filter({ hasText: 'The Middle' }).click();
+  await expect(chapterTitle(page)).toHaveText('The Middle');
+  await expect(jumpBack(page)).toBeVisible();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await place(page)).ch).toBe(1);
+  await expect(jumpBack(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
 test('the contents panel closes with Escape and its close button', async ({ page }) => {
   await start(page);
   await readBook(page, tocBook(false));

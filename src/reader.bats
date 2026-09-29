@@ -1778,11 +1778,18 @@ implement reader_pan(dx) =
       val () = $A.drop<byte>(cnt_f, cnt_b)
     in $A.free<byte>($A.thaw<byte>(cnt_f)) end
 
+(* The reader turns the page on or back. Reading on from where a jump
+   landed keeps that place: the positions jumped from are forgotten, and
+   the back button goes *)
 #pub fun page_next(): void
-implement page_next() = _page_next()
+implement page_next() = let
+  val () = reader_stack_clear()
+in _page_next() end
 
 #pub fun page_prev(): void
-implement page_prev() = _page_prev()
+implement page_prev() = let
+  val () = reader_stack_clear()
+in _page_prev() end
 
 #pub fun load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained)
 implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
