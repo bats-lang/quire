@@ -667,6 +667,8 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
         else if _is(t, "qtz0") then let val () = set_taps_set(0) in true end
         else if _is(t, "qtz1") then let val () = set_taps_set(1) in true end
         else if _is(t, "qtz2") then let val () = set_taps_set(2) in true end
+        else if _is(t, "qvk0") then let val () = set_vol_set(0) in true end
+        else if _is(t, "qvk1") then let val () = set_vol_set(1) in true end
         else if _is(t, "qsrs") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
@@ -865,6 +867,14 @@ in
   else if _key_is(b, n, "ArrowLeft") then _left()
   else if _key_is(b, n, "PageUp") then _prev()
   else if _key_is(b, n, " ") then (if shift then _prev() else _next())
+  (* the volume keys, when they turn the page and the browser gives them
+     to the page: down on, up back, and the volume left as it is *)
+  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeDown") else false) then let
+    val () = $EV.prevent_default()
+  in _next() end
+  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeUp") else false) then let
+    val () = $EV.prevent_default()
+  in _prev() end
   else if _key_is(b, n, "Home") then reader_page(0)
   else if _key_is(b, n, "End") then reader_page(1000000)
   else if _key_is(b, n, "b") then annot_bookmark_toggle(reader_anchor())

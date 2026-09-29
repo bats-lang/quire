@@ -127,6 +127,8 @@ fn _settings_chunk (): jchunk =
       val p = jw_int(out, p, set_dim_get())
       val p = jw_lit(out, p, ",\"tapZones\":")
       val p = jw_int(out, p, set_taps_get())
+      val p = jw_lit(out, p, ",\"volumeKeys\":")
+      val p = jw_int(out, p, set_vol_get())
       val p = jw_lit(out, p, ",\"sort\":")
       val p = jw_int(out, p, lib_sort_get())
       val p = jw_lit(out, p, "},\"books\":[")
@@ -546,6 +548,9 @@ in
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "letterSpacing") then let
         val () = (if x >= 0 then (if x <= 12 then set_ls_set(x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "volumeKeys") then let
+        val () = (if x >= 0 then (if x <= 1 then set_vol_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "tapZones") then let
         val () = (if x >= 0 then (if x <= 2 then set_taps_set(x) else ()) else ())

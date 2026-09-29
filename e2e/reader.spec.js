@@ -592,6 +592,27 @@ test('taps on the page follow the chosen zones: sides, forward or one hand', asy
   await expect.poll(bars).toBe(true);
 });
 
+test('the volume keys turn the page when the reader chooses, and are the volume\'s otherwise', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Volume', 1, 30));
+  // Playwright has no volume keys: the keydown a browser that gives them
+  // to the page would send
+  const press = key => page.evaluate(k => document.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })), key);
+  const at = await place(page);
+  // the volume's, to begin with
+  await press('AudioVolumeDown');
+  expect(await place(page)).toEqual(at);
+  await openSettings(page);
+  const vol = dialog(page, 'Typography and theme').getByRole('group', { name: 'Volume keys turn the page' });
+  await expect(vol.getByRole('button', { name: 'Volume' })).toHaveAttribute('aria-pressed', 'true');
+  await vol.getByRole('button', { name: 'Turn pages' }).click();
+  await page.keyboard.press('Escape');
+  await press('AudioVolumeDown');
+  await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
+  await press('AudioVolumeUp');
+  await expect.poll(async () => (await place(page)).p).toBe(at.p);
+});
+
 test('the t key shows and hides the bars', async ({ page }) => {
   await start(page);
   await readBook(page, book('Toggle', 1, 10));
