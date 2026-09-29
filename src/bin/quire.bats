@@ -142,6 +142,12 @@ fn _target_x (t: !target): Int =
   | Target(_, _, x) => x
   | NoTarget() => ~1
 
+(* The y of a pointer event's target record, or -1 *)
+fn _target_y (t: !target): Int =
+  case+ t of
+  | Target(b, n, _) => if n >= 8 then _i32at(b, 4) else ~1
+  | NoTarget() => ~1
+
 fn _target_free (t: target): void =
   case+ t of
   | ~Target(b, _, _) => $A.free<byte>(b)
@@ -658,6 +664,9 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
         else if _is(t, "qhy1") then let val () = set_hyph_set(1) in true end
         else if _is(t, "qdi0") then let val () = set_dim_set(0) in true end
         else if _is(t, "qdi1") then let val () = set_dim_set(1) in true end
+        else if _is(t, "qtz0") then let val () = set_taps_set(0) in true end
+        else if _is(t, "qtz1") then let val () = set_taps_set(1) in true end
+        else if _is(t, "qtz2") then let val () = set_taps_set(2) in true end
         else if _is(t, "qsrs") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
@@ -796,14 +805,30 @@ in page_prev() end
 fn _left (): void = if reader_rtl() then _next() else _prev()
 fn _right (): void = if reader_rtl() then _prev() else _next()
 
-(* The page turns a pointer at x makes: the left quarter back, the right
-   quarter on, between them the bars shown or hidden *)
-fn _zone_click (x: Int): void = let
+(* What a tap at x, y on the page does, by the setting (settings.bats):
+   sides, the left quarter back, the right quarter on, between them the
+   bars shown or hidden; forward, the top eighth the bars, the left
+   quarter back, anywhere else on; one hand, the top third back, the
+   bottom third on, between them the bars. Back and on are the book's:
+   a book read right to left turns the other way *)
+fn _zone_click (x: Int, y: Int): void = let
   val () = ui_measure("qcnt")
   val cx = $DR.get_measure_x()
+  val cy = $DR.get_measure_y()
   val cw = $DR.get_measure_w()
+  val ch = $DR.get_measure_h()
+  val z = set_taps_get()
 in
   if cw <= 0 then ()
+  else if z = 1 then
+    (if (if ch > 0 then y < cy + ch / 8 else false) then _chrome_set(~(!_chrome))
+     else if x < cx + cw / 4 then _left()
+     else _right())
+  else if z = 2 then
+    (if ch <= 0 then _chrome_set(~(!_chrome))
+     else if y < cy + ch / 3 then _prev()
+     else if y > cy + ch - ch / 3 then _next()
+     else _chrome_set(~(!_chrome)))
   else if x < cx + cw / 4 then _left()
   else if x > cx + cw - cw / 4 then _right()
   else _chrome_set(~(!_chrome))
@@ -1087,12 +1112,13 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 10) = let
       val t = _target(h)
       val node = _row_of(t, "c")
       val x = _target_x(t)
+      val y = _target_y(t)
       val () = _target_free(t)
     in
       if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
-      else if x >= 0 then let val () = _zone_click(x) in 0 end else 0
+      else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
