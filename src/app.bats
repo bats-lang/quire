@@ -265,6 +265,18 @@ fn _annotations (): void = let
   val () = ui_el("qanp", "qanl", TDiv, "plist")
 in _hide("qanp") end
 
+(* A note, opened over the page from its reference: its text, a way to
+   the note itself, and Close *)
+fn _note (): void = let
+  val () = ui_el("bats-root", "qnte", TDiv, "sheet")
+  val () = ui_named("qnte", NDialog, "Footnote")
+  val () = ui_el("qnte", "qntx", TDiv, "fntext")
+  val () = ui_el("qnte", "qntb", TDiv, "srow sfoot")
+  val () = ui_text_btn("qntb", "qngo", "link", "Go to note")
+  val () = ui_el("qntb", "qntg", TSpan, "grow")
+  val () = ui_text_btn("qntb", "qncl", "btn", "Close")
+in _hide("qnte") end
+
 (* Makes every element of the app, in the root element bats-root *)
 #pub fn app_build (): void
 
@@ -286,6 +298,7 @@ implement app_build () = let
   val () = _settings()
   val () = _search()
   val () = _annotations()
+  val () = _note()
   val () = _undo_toast()
 in _modal() end
 
