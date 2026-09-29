@@ -243,6 +243,9 @@ runs (10 s, `BACK_SHOWN`) the button goes with its positions, unless a
 later jump has armed a later timeout. It goes sooner when a page is
 turned, the bars are brought up (`_chrome_set`), or a book is opened or
 closed (`reader_stack_clear`).
+`tests/static` holds code that must not type-check (a forged `TIMED`,
+another timeout's proof, the button with nothing to offer), and code
+that must (`_back_offer`); CI runs `tests/static/run.sh`.
 
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
