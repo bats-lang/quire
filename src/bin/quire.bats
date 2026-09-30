@@ -787,7 +787,7 @@ in
   in lib_coll_name_show(j) end
 end
 
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 19) = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 20) = let
   (* import *)
   val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -920,6 +920,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 19) = let
     in 0 end)
   (* the error banner *)
   val r = RCons(r, OnEl("error-dismiss"), "click", lam(_) => let val () = ui_show("error-banner", false) in 0 end)
+  val r = RCons(r, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
   val r = RCons(r, OnEl("library-menu-button"), "click", lam(_) => let
       val () = layer_open(LLibraryMenu())
@@ -937,6 +938,8 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 19) = let
         else if _is(t, "menu-export-backup") then let
           val () = layer_close(LLibraryMenu())
         in backup_export() end
+        (* the page's script asks the browser to install the app *)
+        else if _is(t, "menu-install") then layer_close(LLibraryMenu())
         else if _is(t, "menu-close") then layer_close(LLibraryMenu())
         else if _is(t, "library-menu") then layer_close(LLibraryMenu())
         else ())
@@ -1623,6 +1626,7 @@ implement main0 () = let
   val () = ui_listen_all(r)
   val () = $P.discard<int>(reader_speed_load())
   val () = _hint_load()
+  val () = lib_install_hint_load()
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)

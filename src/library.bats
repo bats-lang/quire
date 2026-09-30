@@ -1845,6 +1845,56 @@ implement lib_grid_get () = !_grid
 #pub fn lib_filter_get (): int
 implement lib_filter_get () = !_filter
 
+(* ============================================================
+   The hint to add Quire to the Home Screen
+   ============================================================ *)
+
+(* On iOS Safari there is no install prompt, and what a page keeps is
+   cleared after 7 days without a visit, but not for an app on the Home
+   Screen. The hint is offered once the library has a book (the
+   stylesheet shows it only under the page's pwa-ios-browser class,
+   which the page's script sets) until it is dismissed; dismissed until
+   the last run's answer is read, so it never shows twice *)
+val _install_hint_dismissed = ref<bool>(true)
+
+fn _install_hint_key (): [l:agz] $A.arr(byte, l, 12) = let
+  val k = $A.alloc<byte>(12)
+  val () = $A.write_text(k, 0, $A.text_lit("install-hint"), 12)
+in k end
+
+fn _install_hint_show (): void =
+  if !_install_hint_dismissed then ui_attr("install-hint", AClass, "ihint")
+  else if lib_count() > 0 then ui_attr("install-hint", AClass, "ihint on")
+  else ui_attr("install-hint", AClass, "ihint")
+
+(* Reads whether the hint was dismissed in an earlier run *)
+#pub fn lib_install_hint_load (): void
+implement lib_install_hint_load () = let
+  val @(kf, kb) = $A.freeze<byte>(_install_hint_key())
+  val p = $IDB.idb_get(kb, 12)
+  val () = release_bytes(kf, kb)
+in
+  $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) => let
+    val () = (case+ take_blob(h) of
+      | ~NoBlobBytes() => !_install_hint_dismissed := false
+      | ~BlobBytes(b, _) => $A.free<byte>(b))
+    val () = _install_hint_show()
+  in $P.ret<int>(0) end))
+end
+
+(* The hint dismissed, for good *)
+#pub fn lib_install_hint_dismiss (): void
+implement lib_install_hint_dismiss () = let
+  val () = !_install_hint_dismissed := true
+  val v = $A.alloc<byte>(1)
+  val () = $A.write_byte(v, 0, 1)
+  val @(vf, vb) = $A.freeze<byte>(v)
+  val @(kf, kb) = $A.freeze<byte>(_install_hint_key())
+  val () = $P.discard<Int>($IDB.idb_put(kb, 12, vb, 1))
+  val () = release_bytes(kf, kb)
+  val () = release_bytes(vf, vb)
+in _install_hint_show() end
+
 (* Renders the library view: the cards of the shelf shown whose title
    or author matches the query, in the sort order *)
 #pub fn lib_render (): void
@@ -1872,6 +1922,7 @@ implement lib_render () = let
   val () = query_put(q)
   val () = ui_show("library-empty", shown = 0)
   val () = _coll_row()
+  val () = _install_hint_show()
 in
   if shown > 0 then ()
   else if has_q then ui_text("library-empty", "No books match")

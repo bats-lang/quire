@@ -254,6 +254,7 @@ in end
    anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion | AHidden
+  | APwaInstall   (* a click on it asks the browser to install the app (the page's script) *)
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
@@ -261,7 +262,7 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
-  | AHidden() => "aria-hidden"
+  | AHidden() => "aria-hidden" | APwaInstall() => "data-pwa-install"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}

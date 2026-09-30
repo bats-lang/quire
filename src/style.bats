@@ -932,7 +932,7 @@ fn _g_0_fonts {r:nat | r >= 1010} (sh: sheet(r, 0)): [q:nat | q >= r - 1010] she
   val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sh end
 
-fn _g_1_shell {r:nat | r >= 5520} (sh: sheet(r, 0)): [q:nat | q >= r - 5520] sheet(q, 0) = let
+fn _g_1_shell {r:nat | r >= 5800} (sh: sheet(r, 0)): [q:nat | q >= r - 5800] sheet(q, 0) = let
   val sh = rule(sh, "body")
   val sh = lay(sh, Margin(), "0")
   val sh = surf(S_fg_bg | sh, 1, 0)
@@ -1072,6 +1072,24 @@ fn _g_1_shell {r:nat | r >= 5520} (sh: sheet(r, 0)): [q:nat | q >= r - 5520] she
   val sh = close(sh)
   val sh = rule(sh, ".seg.vseg")
   val sh = lay(sh, Flex(), "none")
+  val sh = close(sh)
+  (* installing: offered only where the page's script finds the
+     browser can (pwa-can-install), and the hint for iOS Safari
+     (pwa-ios-browser) only there *)
+  val sh = rule(sh, ".pwinst,.ihint")
+  val sh = lay(sh, Display(), "none")
+  val sh = close(sh)
+  val sh = rule(sh, ".pwa-can-install .pwinst")
+  val sh = lay(sh, Display(), "block")
+  val sh = close(sh)
+  val sh = rule(sh, ".pwa-ios-browser .ihint.on")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, Gap(), "12px")
+  val sh = lay(sh, AlignItems(), "center")
+  val sh = lay(sh, Padding(), "12px")
+  val sh = lay(sh, Margin(), "8px 0")
+  val sh = lay(sh, BorderRadius(), "8px")
+  val sh = surf(S_fg_card | sh, 1, 3)
   val sh = close(sh)
   (* the collections, a row of their own under the view's controls *)
   val sh = rule(sh, ".crow")
