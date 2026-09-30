@@ -330,7 +330,7 @@ in
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = sh,
     added = (if ad > 0 then ad else x.added), opened = opn,
     ch = ch, tch = tch, pg = pg, pgs = pgs, anchor = an,
-    fsz = x.fsz, cover = x.cover, done = dn })
+    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx })
 end
 
 (* Library book h1, h2 (when it is there) takes the numbers vs[3, 12) *)

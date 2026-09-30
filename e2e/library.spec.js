@@ -560,3 +560,30 @@ test('the book last opened and not finished is offered to continue, above the re
   await pageShown(page);
   await expect.poll(async () => (await place(page)).p).toBe(2);
 });
+
+test('books of a series are shown with their number, and sorted by series together, in order', async ({ page }) => {
+  await start(page);
+  // EPUB 3's collection, Calibre's series, and a book of none
+  const epub3 = `    <meta property="belongs-to-collection" id="c1">Foundation</meta>
+    <meta refines="#c1" property="collection-type">series</meta>
+    <meta refines="#c1" property="group-position">2</meta>
+`;
+  const calibre = `    <meta name="calibre:series" content="Foundation"/>
+    <meta name="calibre:series_index" content="1.0"/>
+`;
+  await importFiles(page, [
+    epubFile({ title: 'Foundation and Empire', author: 'Asimov', metadata: epub3, rawChapters: chapters(1) }),
+    epubFile({ title: 'Alone', author: 'Nobody', rawChapters: chapters(1) }),
+    epubFile({ title: 'Foundation', author: 'Asimov', metadata: calibre, rawChapters: chapters(1) }),
+  ], 3);
+  await expect(card(page, 'Foundation and Empire')).toContainText('Foundation · 2');
+  await expect(card(page, 'Alone')).not.toContainText('·');
+  const sort = page.getByRole('button', { name: /^Sort:/ });
+  while ((await sort.textContent()) !== 'Sort: Series') await sort.click();
+  await expect.poll(() => titles(page)).toEqual(['Foundation', 'Foundation and Empire', 'Alone']);
+  // kept, and read back
+  await reload(page);
+  await expect(sort).toHaveText('Sort: Series');
+  await expect.poll(() => titles(page)).toEqual(['Foundation', 'Foundation and Empire', 'Alone']);
+  await expect(cards(page).first()).toContainText('Foundation · 1');
+});
