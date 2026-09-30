@@ -303,6 +303,11 @@ fn _open_book {i:int} (i: int i): void =
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
       val () = ui_text("chapter-title", "Loading...")
+      (* no page is shown until this book's is: the last book's stays out
+         of the indicator *)
+      val () = ui_clear("indicator-title")
+      val () = ui_clear("indicator-label")
+      val () = ui_clear("indicator-pages")
       val ch = x.ch
       val pg = x.pg
       val anchor = x.anchor
