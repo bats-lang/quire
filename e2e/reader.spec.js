@@ -463,7 +463,7 @@ test('the page indicator names the chapter, and a long title is cut before the p
   });
   await showChrome(page);
   expect(await place(page)).toMatchObject({ ch: long, p: 1 });
-  const numbers = indicator(page).getByText(/· p\. \d+\/\d+/);
+  const numbers = indicator(page).getByText(/· page \d+ of \d+ in chapter/);
   const box = await numbers.boundingBox();
   const bar = await control(page, 'Next page').boundingBox();
   expect(box.x + box.width).toBeLessThanOrEqual(bar.x + 1);
@@ -475,28 +475,93 @@ test('the page indicator names the chapter, and a long title is cut before the p
 test('while the bars are hidden, a footer says the chapter, the pages left in it and how far into the book the page is', async ({ page }) => {
   await start(page);
   await readBook(page, book('Footer', 2));
-  const footer = page.getByText(/· \d+ pages? left · \d+%|· last page in chapter · \d+%/);
+  const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|last page in chapter)$/);
+  const ofBook = page.locator('[aria-hidden="true"]').getByText(/· (<1|\d+)% of book$/);
   // the bars are up when a book opens; the footer is under them
   await showChrome(page);
-  await expect(footer).toBeHidden();
+  await expect(readout).toBeHidden();
   await page.keyboard.press('t');
-  await expect(footer).toBeVisible();
+  await expect(readout).toBeVisible();
   const { t } = await place(page);
-  await expect(footer).toHaveText(`· ${t - 1} pages left · 0%`);
-  await expect(footer.locator('..')).toHaveText(`Chapter 1\u00a0· ${t - 1} pages left · 0%`);
+  // each number names its scope, on one line
+  await expect(readout).toHaveText(`· ${t - 1} pages left in chapter`);
+  await expect(ofBook).toHaveText('· 0% of book');
+  await expect(readout.locator('..')).toHaveText(`Chapter 1\u00a0· ${t - 1} pages left in chapter\u00a0· 0% of book`);
   // it keeps up with the page, and is not read out twice (the page
   // indicator says the same)
   await page.keyboard.press('ArrowRight');
-  await expect(footer).toContainText(`· ${t - 2} pages left`);
+  await expect(readout).toHaveText(`· ${t - 2} pages left in chapter`);
   await page.keyboard.press('End');
-  await expect(footer).toContainText('· last page in chapter');
+  await expect(readout).toHaveText('· last page in chapter');
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).ch).toBe(2);
-  const pct = +(/(\d+)%/.exec(await footer.textContent())[1]);
+  const pct = +(/(\d+)%/.exec(await ofBook.textContent())[1]);
   expect(pct).toBeGreaterThanOrEqual(45);
   expect(pct).toBeLessThanOrEqual(55);
   expect(await indicator(page).count()).toBe(1);
-  expect(await footer.evaluate(e => e.closest('[aria-hidden="true"]') !== null)).toBe(true);
+  expect(await readout.evaluate(e => e.closest('[aria-hidden="true"]') !== null)).toBe(true);
+});
+
+test('the page indicator says which page of the chapter\'s it is', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Indicated', 2));
+  const { t } = await place(page);
+  await expect(indicator(page)).toHaveText(`Chapter 1\u00a0· page 1 of ${t} in chapter`);
+});
+
+test('a tap on the footer\'s readout shows the next one, which is kept, and turns no page', async ({ page }) => {
+  await start(page);
+  // a cover before the contents' first entry, then two chapters
+  await readBook(page, {
+    title: 'Readouts', author: 'Reader Tests', rawChapters: chapters(3),
+    toc: [{ label: 'One', href: 'chapter2.xhtml' }, { label: 'Two', href: 'chapter3.xhtml' }],
+  });
+  await page.keyboard.press('t');
+  const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|page \d+ of \d+ in chapter|(before )?chapter \d+ of \d+)$/);
+  const { t } = await place(page);
+  await expect(readout).toHaveText(`· ${t - 1} pages left in chapter`);
+  await readout.click();
+  await expect(readout).toHaveText(`· page 1 of ${t} in chapter`);
+  expect(await place(page)).toMatchObject({ p: 1 });
+  // the chapters are the contents' entries: the cover is before them
+  await readout.click();
+  await expect(readout).toHaveText('· before chapter 1 of 2');
+  // the times are not offered before the reading speed is known
+  await readout.click();
+  await expect(readout).toHaveText(`· ${t - 1} pages left in chapter`);
+  await readout.click();
+  await readout.click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe('One');
+  await expect(readout).toHaveText('· chapter 1 of 2');
+  // the choice is kept
+  await reload(page);
+  await expect(bookPage(page)).toBeVisible();
+  await page.keyboard.press('t');
+  await expect(readout).toHaveText('· chapter 1 of 2');
+  // a tap beside it is the page's: in the middle, it brings the bars up
+  const title = readout.locator('..').locator('span').first();
+  const box = await title.boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await expect(readout).toBeHidden();
+});
+
+test('the book\'s percentage is never 0% once reading has begun', async ({ page }) => {
+  await start(page);
+  // a short first chapter before a long one: its second page is well
+  // under 1% of the book
+  await readBook(page, {
+    title: 'Begun', author: 'Reader Tests',
+    rawChapters: [{ body: chapterBody(1, 6) }, { body: chapterBody(2, 1200) }],
+  });
+  await page.keyboard.press('t');
+  const ofBook = page.locator('[aria-hidden="true"]').getByText(/· (<1|\d+)% of book$/);
+  await expect(ofBook).toHaveText('· 0% of book');
+  const before = await place(page);
+  await page.keyboard.press('ArrowRight');
+  await placeChanged(page, before);
+  await expect(ofBook).toHaveText('· <1% of book');
 });
 
 test('the time the chapter and the book take to finish is learned from the reader\'s own speed', async ({ page }) => {
@@ -504,9 +569,14 @@ test('the time the chapter and the book take to finish is learned from the reade
   await start(page);
   await readBook(page, book('Timed', 3, 60));
   await page.keyboard.press('t');
-  const footer = page.getByText(/· \d+ pages? left/);
-  // not guessed before it is known
-  await expect(footer).not.toContainText('min');
+  const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|page \d+ of \d+ in chapter|chapter \d+ of \d+|.* min left in (chapter|book))$/);
+  // not guessed before it is known: the readouts are the pages and the
+  // chapter only
+  for (let k = 0; k < 3; k++) {
+    await expect(readout).not.toContainText('min');
+    await readout.click();
+  }
+  await expect(readout).toContainText('pages left in chapter');
   // a page a minute, for a dozen pages
   for (let k = 0; k < 12; k++) {
     const before = await place(page);
@@ -516,7 +586,14 @@ test('the time the chapter and the book take to finish is learned from the reade
   }
   const { p, t } = await place(page);
   const left = t - p;
-  await expect(footer).toContainText(`${left} page${left === 1 ? '' : 's'} left (${left} min)`);
+  await expect(readout).toHaveText(`· ${left} page${left === 1 ? '' : 's'} left in chapter`);
+  for (let k = 0; k < 3; k++) await readout.click();
+  await expect(readout).toHaveText(`· ${left} min left in chapter`);
+  await readout.click();
+  await expect(readout).toHaveText(/· (\d+ h )?\d+ min left in book$/);
+  await readout.click();
+  await expect(readout).toContainText('pages left in chapter');
+  for (let k = 0; k < 3; k++) await readout.click();
   // the book's time, with the bars up, by the scrubber
   await page.keyboard.press('t');
   await expect(page.getByText(/^\d+% · (\d+ h )?\d+ min left$/)).toBeVisible();
@@ -527,7 +604,7 @@ test('the time the chapter and the book take to finish is learned from the reade
   await page.keyboard.press('ArrowRight');
   await placeChanged(page, before);
   const at = await place(page);
-  await expect(footer).toContainText(`(${at.t - at.p} min)`);
+  await expect(readout).toHaveText(`· ${at.t - at.p} min left in chapter`);
 });
 
 test('the page has the book\'s language, or its chapter\'s, so it is hyphenated and read out in it', async ({ page }) => {
@@ -641,7 +718,7 @@ test('the place is kept when the app is hidden and then closed', async ({ page }
   await reload(page);
   // back in the book, on its page, without the library in between
   await expect(bookPage(page)).toBeVisible();
-  await expect(indicator(page)).toContainText('p.');
+  await expect(indicator(page)).toContainText('in chapter');
   await expect.poll(() => place(page)).toEqual(at);
 });
 
@@ -657,14 +734,14 @@ test('a reload in the middle of a book comes back to that page, and one in the l
   const top = (await startsOnPage(page))[0];
   await reload(page);
   await expect(bookPage(page)).toBeVisible();
-  await expect(indicator(page)).toContainText('p.');
+  await expect(indicator(page)).toContainText('in chapter');
   await expect.poll(() => place(page)).toEqual(at);
   expect(await onPage(page, top)).toBe(true);
   // the library is never shown on the way
   await expect(librarySearch(page)).toBeHidden();
   // again, straight after
   await reload(page);
-  await expect(indicator(page)).toContainText('p.');
+  await expect(indicator(page)).toContainText('in chapter');
   await expect.poll(() => place(page)).toEqual(at);
   // left for the library: a reload stays there
   await toLibrary(page);
@@ -686,7 +763,7 @@ test('a reload in a real book comes back to its page', async ({ page }) => {
   const at = await place(page);
   const top = (await startsOnPage(page))[0];
   await reload(page);
-  await expect(indicator(page)).toContainText('p.');
+  await expect(indicator(page)).toContainText('in chapter');
   // the same page, with the same text at its top (the chapter's page
   // count may settle once its illustration has loaded)
   await expect.poll(async () => { const { ch, p } = await place(page); return { ch, p }; }).toEqual({ ch: at.ch, p: at.p });

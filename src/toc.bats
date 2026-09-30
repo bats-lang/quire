@@ -569,6 +569,39 @@ implement toc_dest_of (i) = let
 in r end
 
 (* ============================================================
+   Which chapter of how many: by the contents' top-level entries
+   ============================================================ *)
+
+(* The top-level entries of t (from i on), and the ordinal (from 1) of
+   the last one at or before chapter ch: its entry leads to a chapter
+   at or before ch; 0 when none does *)
+fun _tops {k:nat} .<k>. (t: !toc(k), ch: int, n: int, cur: int): @(int, int) =
+  case+ t of
+  | toc_nil() => @(n, cur)
+  | @toc_cons(_, _, v, c, _, _, rest) =>
+    if v = 0 then let
+      val cur2 = (if c >= 0 then (if c <= ch then n + 1 else cur) else cur): int
+      val r = _tops(rest, ch, n + 1, cur2)
+      prval () = fold@(t)
+    in r end
+    else let
+      val r = _tops(rest, ch, n, cur)
+      prval () = fold@(t)
+    in r end
+
+(* The chapter ch (from 0) is in, as the contents' top-level entry it is
+   under (from 1; 0 before the first), and how many there are *)
+#pub fn toc_chapter_of (ch: int): @(int, int)
+
+implement toc_chapter_of (ch) = let
+  val c = _take()
+  val+ @TocCell(t, _) = c
+  val @(m, n) = _tops(t, ch, 0, 0)
+  prval () = fold@(c)
+  val () = _put(c)
+in @(n, m) end
+
+(* ============================================================
    The print pages
    ============================================================ *)
 

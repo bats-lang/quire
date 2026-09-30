@@ -147,7 +147,8 @@ fn _reader (): void = let
   val () = ui_el("qrvw", "qfoo", TDiv, "foot")
   val () = ui_attr("qfoo", AHidden, "true")
   val () = ui_el("qfoo", "qfot", TSpan, "pgt")
-  val () = ui_el("qfoo", "qfon", TSpan, "pgn")
+  val () = ui_el("qfoo", "qfon", TSpan, "rdo")
+  val () = ui_el("qfoo", "footer-book", TSpan, "pgn")
   val () = ui_el("qfoo", "footer-page", TSpan, "pgn")
   val () = ui_text_btn("qrvw", "qpbk", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("qpbk")
@@ -170,6 +171,10 @@ fn _reader (): void = let
   val () = ui_el("qrbb", "qpgi", TDiv, "pinfo")
   val () = ui_named("qpgi", NStatus, "Page")
   val () = ui_el("qpgi", "qpgt", TSpan, "pgt")
+  (* " · page ", which a phone's bar has no room for, nor for the title:
+     there they are left to screen readers, and the title is in the top
+     bar *)
+  val () = ui_el("qpgi", "qpgw", TSpan, "pgw")
   val () = ui_el("qpgi", "qpgn", TSpan, "pgn")
   val () = ui_icon_btn("qrbb", "qnxt", "ibtn", IcNext, "Next page")
   (* scrubber *)

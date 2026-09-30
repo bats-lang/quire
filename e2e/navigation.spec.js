@@ -166,8 +166,8 @@ for (const ncx of [false, true]) {
     await readBook(page, { title: ncx ? 'Paged NCX' : 'Paged', author: 'Nav Tests', rawChapters: [{ body: body(1) }, { body: body(2) }], pageList, ncx });
     // the footer names the print page the page is on
     await page.keyboard.press('t');
-    const footerPage = page.getByText(/^ · page \d+$/);
-    await expect(footerPage).toHaveText(' · page 1');
+    const footerPage = page.getByText(/^ · page \d+ in print$/);
+    await expect(footerPage).toHaveText(' · page 1 in print');
     // the Pages tab lists them; one is gone to, with the way back
     await showChrome(page);
     await control(page, 'Contents').click();
@@ -181,7 +181,7 @@ for (const ncx of [false, true]) {
     await expect(contents(page)).toBeHidden();
     await expect.poll(async () => (await place(page)).ch).toBe(2);
     await page.keyboard.press('t');
-    await expect(footerPage).toHaveText(' · page 5');
+    await expect(footerPage).toHaveText(' · page 5 in print');
     await expect(jumpBack(page)).toBeVisible();
   });
 }
