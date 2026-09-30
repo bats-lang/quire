@@ -397,7 +397,7 @@ in
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = sh,
     added = (if ad > 0 then ad else x.added), opened = opn,
     ch = ch, tch = tch, pg = pg, pgs = pgs, anchor = an,
-    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx, cols = (if co >= 0 then co else x.cols) })
+    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx, cols = (if co >= 0 then co else x.cols), rmin = x.rmin, rpg = x.rpg, fin = x.fin })
 end
 
 (* Library book h1, h2 (when it is there) takes the numbers vs[3, 12) *)

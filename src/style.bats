@@ -1245,7 +1245,7 @@ fn _g_1_shell {r:nat | r >= 6300} (sh: sheet(r, 0)): [q:nat | q >= r - 6300] she
   val sh = close(sh)
 in sh end
 
-fn _g_2_overlays {r:nat | r >= 3900} (sh: sheet(r, 0)): [q:nat | q >= r - 3900] sheet(q, 0) = let
+fn _g_2_overlays {r:nat | r >= 4100} (sh: sheet(r, 0)): [q:nat | q >= r - 4100] sheet(q, 0) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sh = rule(sh, ".imview")
@@ -1357,6 +1357,17 @@ fn _g_2_overlays {r:nat | r >= 3900} (sh: sheet(r, 0)): [q:nat | q >= r - 3900] 
   val sh = surf(S_muted_card | sh, 2, 3)
   val sh = lay(sh, Padding(), "8px 0")
   val sh = lay(sh, FontStyle(), "italic")
+  val sh = close(sh)
+  (* the reading statistics: a label and its number a line *)
+  val sh = rule(sh, ".srow")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, JustifyContent(), "space-between")
+  val sh = lay(sh, Gap(), "16px")
+  val sh = lay(sh, Padding(), "8px 0")
+  val sh = surf(S_muted_card | sh, 2, 3)
+  val sh = close(sh)
+  val sh = rule(sh, ".srow b")
+  val sh = surf(S_fg_card | sh, 1, 3)
   val sh = close(sh)
   val sh = rule(sh, ".mta")
   val sh = lay(sh, MinHeight(), "120px")
