@@ -715,3 +715,17 @@ test('the library menu says whether the browser keeps the books, and more when a
   await expect(dialog(page, 'Your books are kept')).toContainText('until you remove them');
   expect(errors).toEqual([]);
 });
+
+test('an EPUB the system opens with the installed app is imported', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'launchQueue', { value: { setConsumer: f => { window.consume = f; } }, configurable: true });
+  });
+  const errors = await start(page);
+  const bytes = (await import('node:fs')).readFileSync(epubFile({ title: 'Opened From Files', author: 'System' })).toString('base64');
+  await page.evaluate(b64 => {
+    const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    window.consume({ files: [{ getFile: () => Promise.resolve(new File([data], 'opened.epub', { type: 'application/epub+zip' })) }] });
+  }, bytes);
+  await expect(card(page, 'Opened From Files')).toBeVisible({ timeout: 30000 });
+  expect(errors).toEqual([]);
+});

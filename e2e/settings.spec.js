@@ -137,6 +137,8 @@ test('Atkinson Hyperlegible can be chosen, and is fetched only then', async ({ p
 });
 
 test('the themes change the colours, the choice is kept, and auto follows the system', async ({ page }) => {
+  // midday: at night, auto is the night theme whatever the system asks
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
   await start(page);
   await readBook(page, { title: 'Colours', author: 'Settings Tests', rawChapters: chapters(1, 5) });
   const bg = async () => (await colours(page)).bg.join(',');
@@ -248,4 +250,36 @@ test.describe('auto at night', () => {
     await page.keyboard.press('ArrowRight');
     await expect.poll(theme).toContain('th-light');
   });
+});
+
+test('in the Android app, the screen: full screen, the rotation locked and the brightness', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.calls = [];
+    const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      StatusBar: { hide: call('hide'), show: call('show') },
+      ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+      ScreenBrightness: { setBrightness: call('brightness') },
+    } };
+  });
+  await start(page);
+  await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  const full = sheet(page).getByRole('button', { name: 'Full screen', exact: true });
+  const lock = sheet(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  const brightness = sheet(page).getByRole('combobox', { name: 'Brightness' });
+  await full.click();
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await lock.click();
+  await expect(lock).toHaveAttribute('aria-pressed', 'true');
+  await brightness.selectOption({ label: '25%' });
+  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['hide', 'lock', 'brightness']);
+});
+
+test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Tabbed', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  await expect(sheet(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
+  await expect(sheet(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
 });
