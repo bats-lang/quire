@@ -76,7 +76,7 @@ fn _i32at {l:agz}{n:nat}{p:nat | p + 4 <= n} (b: !$A.arr(byte, l, n), p: int p):
 in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
 
 (* The number n of the target id pre<n> of a pointer event, or -1 *)
-fn _target_num {sn:pos | sn <= 4} (h: $EV.event_payload, pre: string sn): [v:int | v >= ~1] int v =
+fn _target_num {sn:pos | sn <= 16} (h: $EV.event_payload, pre: string sn): [v:int | v >= ~1] int v =
   case+ take_blob(h) of
   | ~NoBlobBytes() => ~1
   | ~BlobBytes(b, n) => let
@@ -522,7 +522,7 @@ fn _book_action {i:int} (i: int i, act: int): void =
    ============================================================ *)
 
 fn _settings_changed (): void = let
-  val () = set_apply(lib_sort_get())
+  val () = set_apply(lib_state_get())
 in if !_view = 1 then reader_relayout() else () end
 
 fn _clamp {lo,hi:int | lo <= hi} (v: Int, lo: int lo, hi: int hi): [r:int | lo <= r; r <= hi] int r =
@@ -705,7 +705,7 @@ in
     in back_settings() end, lam () => ())
 end
 
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 18) = let
   (* import *)
   val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -723,17 +723,32 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   (* the cards: open, and the book menu *)
   val r = RCons(r, OnEl("book-list"), "click", lam(h) => let
       val t = _target(h)
-      val i = _row_of(t, "k")
-      val m = _row_of(t, "km")
+      val i = _row_of(t, "book")
+      val m = _row_of(t, "book-more")
       val () = _target_free(t)
     in
       if i >= 0 then let val () = _open_book(i) in 0 end
       else if m >= 0 then let val () = _menu_open(m) in 0 end
       else 0
     end)
+  (* the view: which books, as a list or a grid; kept with the settings *)
+  val r = RCons(r, OnEl("library-view"), "click", lam(h) => let
+      val t = _target(h)
+      val f = (if _is(t, "filter-books-all") then 0 else if _is(t, "filter-unread") then 1
+        else if _is(t, "filter-reading") then 2 else if _is(t, "filter-finished") then 3 else ~1): int
+      val g = (if _is(t, "view-list") then 0 else if _is(t, "view-grid") then 1 else ~1): int
+      val () = _target_free(t)
+      val () = (if f >= 0 then lib_filter_set(f) else if g >= 0 then lib_grid_set(g) else ())
+    in if f >= 0 || g >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
+  (* the book to continue: opened *)
+  val r = RCons(r, OnEl("continue-list"), "click", lam(h) => let
+      val t = _target(h)
+      val i = _row_of(t, "continue")
+      val () = _target_free(t)
+    in if i >= 0 then let val () = _open_book(i) in 0 end else 0 end)
   val r = RCons(r, OnEl("book-list"), "contextmenu", lam(h) => let
       val () = $EV.prevent_default()
-      val i = _target_num(h, "k")
+      val i = _target_num(h, "book")
     in if i >= 0 then let val () = _menu_open(i) in 0 end else 0 end)
   val r = RCons(r, OnEl("card-menu"), "click", lam(h) => let
       val t = _target(h)
@@ -763,7 +778,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
       val o = (if o >= 3 then 0 else o + 1): int
       val () = lib_sort(o)
       val () = lib_sort_label(o)
-      val () = set_apply(o)
+      val () = set_apply(lib_state_get())
     in let val () = lib_render() in 0 end end)
   val r = RCons(r, OnEl("shelf-button"), "click", lam(_) => let
       val s = lib_shelf_get()
@@ -1460,7 +1475,7 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
   (* a tap on the footer's readout shows the next, and keeps it *)
   val r = RCons(r, OnEl("footer-readout"), "click", lam(_) => let
       val () = reader_readout_next()
-      val () = set_save(lib_sort_get())
+      val () = set_save(lib_state_get())
     in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
@@ -1500,11 +1515,11 @@ implement main0 () = let
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
-  val p = $P.and_then<int><int>(set_load(), lam(sort) => let
-      val () = lib_sort_label(sort)
+  val p = $P.and_then<int><int>(set_load(), lam(st) => let
+      val () = lib_sort_label($AR.band_int_int(st, 7))
     in
       $P.and_then<int><int>(lib_load(), lam(_) => let
-        val () = lib_sort(sort)
+        val () = lib_state_set(st)
         val () = lib_render()
       in _view_restore() end)
     end)

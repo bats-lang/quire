@@ -416,7 +416,7 @@ implement set_load () = let
   val @(qf, qb) = $A.freeze<byte>(q)
   val @(q1, q2) = $A.borrow_split<byte>(qf, qb, 28)
   val () = !_sys_dark := ($MEDIA.match_media(q1, 28) > 0)
-  val () = $MEDIA.listen_media(q1, 28, 60, lam(m) => let
+  val () = $MEDIA.listen_media(q1, 28, ui_media_listener(), lam(m) => let
       val () = !_sys_dark := (m > 0)
       val () = _apply_theme()
     in 0 end)
@@ -438,7 +438,8 @@ in
         val margin = _in($AR.low_byte(byte2int0($A.get<byte>(b, 4))), 0, 4, 2)
         val font = _in($AR.low_byte(byte2int0($A.get<byte>(b, 5))), 0, 3, 0)
         val theme = _in($AR.low_byte(byte2int0($A.get<byte>(b, 6))), 0, 5, 0)
-        val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 3, 0)
+        (* the library's view: its sort order, grid and filter (lib_state_get) *)
+        val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 63, 0)
         (* "S2" has the rest; "S1" had none, and they are the defaults *)
         val s2 = (if n >= 13 then byte2int0($A.get<byte>(b, 1)) = 50 else false): bool
         val align = (if n >= 13 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 8))), 0, 1, 0) else 0) else 0): set_align

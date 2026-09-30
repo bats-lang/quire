@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
-  openSettings, colours, reload,
+  openSettings, colours, reload, place, pageShown,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -482,4 +482,81 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
     'No information about nonvisual reading is available',
     'Conformance', 'No information is available',
   ]);
+});
+
+// A larger library: which books, as a list or a grid, and the one to
+// continue
+const show = page => page.getByRole('group', { name: 'Show' });
+const continueReading = page => page.getByRole('region', { name: 'Continue reading' });
+
+test('the library shows all, unread, reading or finished books, and the choice is kept', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Untouched', author: 'A', rawChapters: chapters(1, 3) }),
+    epubFile({ title: 'Begun', author: 'B', rawChapters: chapters(2, 20) }),
+    epubFile({ title: 'Ended', author: 'C', rawChapters: chapters(1, 3) }),
+  ], 3);
+  await openBook(page, 'Begun');
+  await toLibrary(page);
+  await openBook(page, 'Ended');
+  await page.keyboard.press('End');
+  await toLibrary(page);
+  await show(page).getByRole('button', { name: 'Unread' }).click();
+  await expect.poll(() => titles(page)).toEqual(['Untouched']);
+  await show(page).getByRole('button', { name: 'Reading' }).click();
+  await expect.poll(() => titles(page)).toEqual(['Begun']);
+  await show(page).getByRole('button', { name: 'Finished' }).click();
+  await expect.poll(() => titles(page)).toEqual(['Ended']);
+  await expect(show(page).getByRole('button', { name: 'Finished' })).toHaveAttribute('aria-pressed', 'true');
+  await reload(page);
+  await expect.poll(() => titles(page)).toEqual(['Ended']);
+  await show(page).getByRole('button', { name: 'All' }).click();
+  await expect(cards(page)).toHaveCount(3);
+});
+
+test('the library is a list or a grid of covers, kept with the settings', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Grid One', author: 'A', coverImage: true, rawChapters: chapters(1) }),
+    epubFile({ title: 'Grid Two', author: 'B', rawChapters: chapters(1) }),
+  ], 2);
+  const view = page.getByRole('group', { name: 'View' });
+  const list = page.getByRole('region', { name: 'Books' });
+  expect(await list.evaluate(e => getComputedStyle(e).display)).toBe('flex');
+  await view.getByRole('button', { name: 'Grid' }).click();
+  await expect(view.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('grid');
+  // the covers stand upright, as tall as 3 to their 2
+  const cover = card(page, 'Grid One').locator('img');
+  const box = await cover.boundingBox();
+  expect(box.height / box.width).toBeCloseTo(1.5, 1);
+  await reload(page);
+  await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('grid');
+  await view.getByRole('button', { name: 'List' }).click();
+  await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('flex');
+});
+
+test('the book last opened and not finished is offered to continue, above the rest', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Earlier', author: 'A', rawChapters: chapters(2, 20) }),
+    epubFile({ title: 'Later', author: 'B', rawChapters: chapters(2, 20) }),
+  ], 2);
+  await expect(continueReading(page)).toBeHidden();
+  await openBook(page, 'Earlier');
+  await toLibrary(page);
+  await openBook(page, 'Later');
+  await page.keyboard.press('ArrowRight');
+  await toLibrary(page);
+  await expect(continueReading(page)).toBeVisible();
+  await expect(continueReading(page).getByRole('button')).toHaveCount(1);
+  await expect(continueReading(page)).toContainText('Later');
+  // not while searching
+  await librarySearch(page).fill('Earl');
+  await expect(continueReading(page)).toBeHidden();
+  await librarySearch(page).fill('');
+  // it opens the book where it was left
+  await continueReading(page).getByRole('button').click();
+  await pageShown(page);
+  await expect.poll(async () => (await place(page)).p).toBe(2);
 });

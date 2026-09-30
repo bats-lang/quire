@@ -819,8 +819,8 @@ implement mime_str (code) =
   else if code = 5 then "image/webp" else "application/octet-stream"
 
 (* Shows the cover of the book with this id (stored under 'c') in
-   element k<i>c, unless the view was rendered again since gen *)
-fn _show_cover {i:nat} (i: int i, h1: int, h2: int, code: int, gen: int): void = let
+   element base<i>-cover, unless the view was rendered again since gen *)
+fn _show_cover {nb:pos | nb <= 16}{i:nat} (base: string nb, i: int i, h1: int, h2: int, code: int, gen: int): void = let
   val key = lib_key(99, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(key)
   val p = $IDB.idb_get(kb, 15)
@@ -838,7 +838,7 @@ in
         val ma = $A.alloc<byte>(ml)
         val () = $A.write_text(ma, 0, $A.text_lit(mime), ml)
         val @(mf, mb) = $A.freeze<byte>(ma)
-        val @(ia, il) = nid_make2("k", i, "c")
+        val @(ia, il) = nid_make2(base, i, "-cover")
         val @(if_, ib) = $A.freeze<byte>(ia)
         val @(df, db) = $A.freeze<byte>(buf)
         val () = $BDOM.set_image_src(ib, il, db, n, mb, ml)
@@ -1010,87 +1010,107 @@ in
       in $P.ret<int>(0) end))
 end
 
-(* Card i for book b: cover, title, author, progress *)
-fn _card {i:nat} (b: !book, i: int i, gen: int): void = let
+(* Card i for book b: cover, title, author, progress; its elements'
+   ids are base<i> (the card), base<i>-cover and so on, in row
+   rowp<i> under parent, with its More button (morep<i>) when more *)
+fn _card {i:nat}{nb,nr,nm,np:pos | nb <= 16; nr <= 16; nm <= 16; np < 256}
+  (b: !book, i: int i, gen: int, base: string nb, rowp: string nr, morep: string nm,
+   parent: string np, more: bool): void = let
   val+ Book(t, tn, a, an, x) = b
   (* the row: the card, which opens the book, then its More button,
      which opens the book menu; the row is named by the book's title *)
-  val @(ri, rl) = nid_make("kr", i)
-  val () = ui_add_n("book-list", ri, rl, TDiv)
-  val @(ri, rl) = nid_make("kr", i)
+  val @(ri, rl) = nid_make(rowp, i)
+  val () = ui_add_n(parent, ri, rl, TDiv)
+  val @(ri, rl) = nid_make(rowp, i)
   val () = ui_attr_n(ri, rl, AClass, "cardrow")
-  val @(pi, pl) = nid_make("kr", i)
-  val @(ci, cl) = nid_make("k", i)
+  val @(pi, pl) = nid_make(rowp, i)
+  val @(ci, cl) = nid_make(base, i)
   val () = ui_btn_nn(pi, pl, ci, cl, "card")
-  val @(pi, pl) = nid_make("kr", i)
-  val @(mi, ml) = nid_make("km", i)
-  val () = ui_icon_btn_nn(pi, pl, mi, ml, "cmore", IcMore, "Book menu")
-  val @(ri, rl) = nid_make("kr", i)
-  val @(ti, tl) = nid_make2("k", i, "t")
+  val () = (if more then let
+      val @(pi, pl) = nid_make(rowp, i)
+      val @(mi, ml) = nid_make(morep, i)
+    in ui_icon_btn_nn(pi, pl, mi, ml, "cmore", IcMore, "Book menu") end else ())
+  val @(ri, rl) = nid_make(rowp, i)
+  val @(ti, tl) = nid_make2(base, i, "-title")
   val () = ui_labelled_nn(ri, rl, NGroup, ti, tl)
   (* cover: decorative, the title is beside it *)
-  val @(pi, pl) = nid_make("k", i)
-  val @(vi, vl) = nid_make2("k", i, "c")
+  val @(pi, pl) = nid_make(base, i)
+  val @(vi, vl) = nid_make2(base, i, "-cover")
   val () = ui_img_nn(pi, pl, vi, vl, (if x.cover > 0 then "cov" else "cov cov0"): [k:pos | k < 256] string k)
-  val () = (if x.cover > 0 then _show_cover(i, x.h1, x.h2, x.cover, gen) else ())
+  val () = (if x.cover > 0 then _show_cover(base, i, x.h1, x.h2, x.cover, gen) else ())
   (* title, author *)
-  val @(pi, pl) = nid_make("k", i)
-  val @(ti, tl) = nid_make2("k", i, "i")
+  val @(pi, pl) = nid_make(base, i)
+  val @(ti, tl) = nid_make2(base, i, "-info")
   val () = ui_add_nn(pi, pl, ti, tl, TDiv)
-  val @(ti, tl) = nid_make2("k", i, "i")
+  val @(ti, tl) = nid_make2(base, i, "-info")
   val () = ui_attr_n(ti, tl, AClass, "cinfo")
-  val @(pi, pl) = nid_make2("k", i, "i")
-  val @(ti, tl) = nid_make2("k", i, "t")
+  val @(pi, pl) = nid_make2(base, i, "-info")
+  val @(ti, tl) = nid_make2(base, i, "-title")
   val () = ui_add_nn(pi, pl, ti, tl, TDiv)
-  val @(ti, tl) = nid_make2("k", i, "t")
+  val @(ti, tl) = nid_make2(base, i, "-title")
   val () = ui_attr_n(ti, tl, AClass, "bt")
   val tb = $A.alloc<byte>(tn)
   val () = _copy(t, tn, tb, 0, 0)
-  val @(ti, tl) = nid_make2("k", i, "t")
+  val @(ti, tl) = nid_make2(base, i, "-title")
   val () = ui_text_n_buf(ti, tl, tb, tn)
-  val @(pi, pl) = nid_make2("k", i, "i")
-  val @(ai, al) = nid_make2("k", i, "a")
+  val @(pi, pl) = nid_make2(base, i, "-info")
+  val @(ai, al) = nid_make2(base, i, "-author")
   val () = ui_add_nn(pi, pl, ai, al, TDiv)
-  val @(ai, al) = nid_make2("k", i, "a")
+  val @(ai, al) = nid_make2(base, i, "-author")
   val () = ui_attr_n(ai, al, AClass, "ba")
   val ab = $A.alloc<byte>(an)
   val () = _copy(a, an, ab, 0, 0)
-  val @(ai, al) = nid_make2("k", i, "a")
+  val @(ai, al) = nid_make2(base, i, "-author")
   val () = ui_text_n_buf(ai, al, ab, an)
   (* progress *)
-  val @(pi, pl) = nid_make2("k", i, "i")
-  val @(gi, gl) = nid_make2("k", i, "p")
+  val @(pi, pl) = nid_make2(base, i, "-info")
+  val @(gi, gl) = nid_make2(base, i, "-progress")
   val () = ui_add_nn(pi, pl, gi, gl, TDiv)
-  val @(gi, gl) = nid_make2("k", i, "p")
+  val @(gi, gl) = nid_make2(base, i, "-progress")
   val () = ui_attr_n(gi, gl, AClass, "prog")
   val per = _progress(x)
 in
   if x.done > 0 then let
-    val @(gi, gl) = nid_make2("k", i, "p")
+    val @(gi, gl) = nid_make2(base, i, "-progress")
   in ui_text_n(gi, gl, "Done") end
   else if x.opened <= 0 then let
-    val @(gi, gl) = nid_make2("k", i, "p")
+    val @(gi, gl) = nid_make2(base, i, "-progress")
   in ui_text_n(gi, gl, "New") end
   else let
-    val @(pi, pl) = nid_make2("k", i, "p")
-    val @(bi, bl) = nid_make2("k", i, "b")
+    val @(pi, pl) = nid_make2(base, i, "-progress")
+    val @(bi, bl) = nid_make2(base, i, "-bar")
     val () = ui_add_nn(pi, pl, bi, bl, TDiv)
-    val @(bi, bl) = nid_make2("k", i, "b")
+    val @(bi, bl) = nid_make2(base, i, "-bar")
     val () = ui_attr_n(bi, bl, AClass, "pbar")
-    val @(pi, pl) = nid_make2("k", i, "b")
-    val @(fi, fl) = nid_make2("k", i, "f")
+    val @(pi, pl) = nid_make2(base, i, "-bar")
+    val @(fi, fl) = nid_make2(base, i, "-fill")
     val () = ui_add_nn(pi, pl, fi, fl, TDiv)
-    val @(fi, fl) = nid_make2("k", i, "f")
+    val @(fi, fl) = nid_make2(base, i, "-fill")
     val () = ui_attr_n(fi, fl, AClass, "pfill")
-    val @(fi, fl) = nid_make2("k", i, "f")
+    val @(fi, fl) = nid_make2(base, i, "-fill")
     val () = ui_place_n(fi, fl, PWidth, per * 10)
-    val @(pi, pl) = nid_make2("k", i, "p")
-    val @(xi, xl) = nid_make2("k", i, "x")
+    val @(pi, pl) = nid_make2(base, i, "-progress")
+    val @(xi, xl) = nid_make2(base, i, "-percent")
     val () = ui_add_nn(pi, pl, xi, xl, TSpan)
     val pb = $A.alloc<byte>(16)
     val k = _percent(pb, per)
-    val @(xi, xl) = nid_make2("k", i, "x")
+    val @(xi, xl) = nid_make2(base, i, "-percent")
   in ui_text_n_buf(xi, xl, pb, k) end
+end
+
+(* The library's view: its cards (0 a list, 1 a grid of covers), and
+   which books it shows (0 all, 1 unread, 2 reading, 3 finished) *)
+val _grid = ref<int>(0)
+val _filter = ref<int>(0)
+
+(* Whether a book with numbers x passes the filter *)
+fn _passes (x: bnums): bool = let
+  val f = !_filter
+in
+  if f = 1 then x.opened <= 0
+  else if f = 2 then (if x.opened > 0 then x.done <= 0 else false)
+  else if f = 3 then x.done > 0
+  else true
 end
 
 fun _cards {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, shelf: int, q: !query, gen: int, shown: int): int =
@@ -1098,9 +1118,71 @@ fun _cards {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, shelf: int, q: !query,
   | books_nil() => shown
   | books_cons(b, rest) => let
       val+ Book(_, _, _, _, x) = b
-      val vis = (if x.shelf = shelf then _matches(b, q) else false): bool
-      val () = (if vis then _card(b, i, gen) else ())
+      val vis = (if x.shelf = shelf then (if _passes(x) then _matches(b, q) else false) else false): bool
+      val () = (if vis then _card(b, i, gen, "book", "book-row", "book-more", "book-list", true) else ())
     in _cards(rest, i + 1, shelf, q, gen, (if vis then shown + 1 else shown)) end
+
+(* The book to continue: the one on the shelf opened last and not
+   finished: its index, or -1 (best is the one so far, opened at
+   latest_opened) *)
+fun _latest {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, best: int, latest_opened: Int): int =
+  case+ bs of
+  | books_nil() => best
+  | books_cons(b, rest) => let
+      val+ Book(_, _, _, _, x) = b
+      val better = (if x.shelf = 0 then (if x.done <= 0 then (if x.opened > 0 then x.opened > latest_opened else false) else false) else false): bool
+    in if better then _latest(rest, i + 1, i, x.opened) else _latest(rest, i + 1, best, latest_opened) end
+
+(* Card i of bs, into the Continue reading section *)
+fun _continue_card {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, want: int, gen: int): void =
+  case+ bs of
+  | books_nil() => ()
+  | books_cons(b, rest) =>
+    if i = want then _card(b, i, gen, "continue", "continue-row", "continue-more", "continue-list", false)
+    else _continue_card(rest, i + 1, want, gen)
+
+(* The view's controls, pressed as the view is *)
+fn _view_show (): void = let
+  val g = !_grid
+  val f = !_filter
+  val () = (if g = 1 then ui_attr("book-list", AClass, "list grid") else ui_attr("book-list", AClass, "list"))
+  val () = (if g = 1 then ui_attr("view-grid", APressed, "true") else ui_attr("view-grid", APressed, "false"))
+  val () = (if g = 1 then ui_attr("view-list", APressed, "false") else ui_attr("view-list", APressed, "true"))
+  val () = (if f = 0 then ui_attr("filter-books-all", APressed, "true") else ui_attr("filter-books-all", APressed, "false"))
+  val () = (if f = 1 then ui_attr("filter-unread", APressed, "true") else ui_attr("filter-unread", APressed, "false"))
+  val () = (if f = 2 then ui_attr("filter-reading", APressed, "true") else ui_attr("filter-reading", APressed, "false"))
+in if f = 3 then ui_attr("filter-finished", APressed, "true") else ui_attr("filter-finished", APressed, "false") end
+
+(* The library's view state, kept with the settings: its sort order
+   (below 8), plus 8 for a grid, plus 16 times the filter *)
+#pub fn lib_state_get (): int
+implement lib_state_get () = !_sort_order + 8 * !_grid + 16 * !_filter
+
+(* Sets the view from a kept state (sorts, but does not render) *)
+#pub fn lib_state_set (st: int): void
+implement lib_state_set (st) = let
+  val st = (if st >= 0 then (if st < 64 then st else 0) else 0): int
+  val () = !_grid := $AR.band_int_int(st / 8, 1)
+  val () = !_filter := $AR.band_int_int(st / 16, 3)
+  val () = _view_show()
+in lib_sort($AR.band_int_int(st, 7)) end
+
+#pub fn lib_grid_set (g: int): void
+implement lib_grid_set (g) = let
+  val () = !_grid := (if g = 1 then 1 else 0)
+  val () = _view_show()
+in lib_render() end
+
+#pub fn lib_filter_set (f: int): void
+implement lib_filter_set (f) = let
+  val () = !_filter := (if f >= 0 then (if f <= 3 then f else 0) else 0)
+  val () = _view_show()
+in lib_render() end
+
+#pub fn lib_grid_get (): int
+implement lib_grid_get () = !_grid
+#pub fn lib_filter_get (): int
+implement lib_filter_get () = !_filter
 
 (* Renders the library view: the cards of the shelf shown whose title
    or author matches the query, in the sort order *)
@@ -1110,19 +1192,29 @@ implement lib_render () = let
   val () = !_render_gen := !_render_gen + 1
   val gen = !_render_gen
   val () = ui_clear("book-list")
+  val () = ui_clear("continue-list")
+  val () = _view_show()
   val shelf = !_shelf
   val q = query_take()
+  val has_q = (case+ q of QuerySome(_, _) => true | QueryNone() => false): bool
   val c = lib_take()
   val+ @LibCell(bs, k) = c
   val shown = _cards(bs, 0, shelf, q, gen, 0)
+  (* the book to continue, above the rest: on the shelf, unsearched, and
+     unless only unread or finished books are shown *)
+  val want = (if shelf = 0 then (if ~has_q then (if !_filter = 0 || !_filter = 2 then _latest(bs, 0, ~1, 0) else ~1) else ~1) else ~1): int
+  val () = (if want >= 0 then _continue_card(bs, 0, want, gen) else ())
   prval () = fold@(c)
   val () = lib_put(c)
-  val has_q = (case+ q of QuerySome(_, _) => true | QueryNone() => false): bool
+  val () = ui_show("continue-reading", want >= 0)
   val () = query_put(q)
   val () = ui_show("library-empty", shown = 0)
 in
   if shown > 0 then ()
   else if has_q then ui_text("library-empty", "No books match")
+  else if !_filter = 1 then ui_text("library-empty", "No unread books")
+  else if !_filter = 2 then ui_text("library-empty", "No books being read")
+  else if !_filter = 3 then ui_text("library-empty", "No finished books")
   else if shelf = 1 then ui_text("library-empty", "No hidden books")
   else if shelf = 2 then ui_text("library-empty", "No archived books")
   else if shelf = 3 then ui_text("library-empty", "The Trash is empty")

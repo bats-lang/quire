@@ -135,6 +135,10 @@ fn _settings_chunk (): jchunk =
       val p = jw_int(out, p, set_flow_get())
       val p = jw_lit(out, p, ",\"sort\":")
       val p = jw_int(out, p, lib_sort_get())
+      val p = jw_lit(out, p, ",\"libraryGrid\":")
+      val p = jw_int(out, p, lib_grid_get())
+      val p = jw_lit(out, p, ",\"libraryFilter\":")
+      val p = jw_int(out, p, lib_filter_get())
       val p = jw_lit(out, p, "},\"books\":[")
     in JChunk(ow, out, p) end
 
@@ -553,6 +557,12 @@ in
       else if jr_key_is(kb, k, "letterSpacing") then let
         val () = (if x >= 0 then (if x <= 12 then set_ls_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "libraryGrid") then let
+        val () = (if x >= 0 then (if x <= 1 then lib_state_set(lib_sort_get() + 8 * x + 16 * lib_filter_get()) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
+      else if jr_key_is(kb, k, "libraryFilter") then let
+        val () = (if x >= 0 then (if x <= 3 then lib_state_set(lib_sort_get() + 8 * lib_grid_get() + 16 * x) else ()) else ())
+      in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "scrolled") then let
         val () = (if x >= 0 then (if x <= 1 then set_flow_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
@@ -635,7 +645,7 @@ in
     val () = $A.free<Int>(vs)
     val () = lib_sort(sort)
     val () = lib_sort_label(sort)
-    val () = set_apply(sort)
+    val () = set_apply(lib_state_get())
     val () = set_sliders()
     val () = lib_save()
     val () = lib_render()

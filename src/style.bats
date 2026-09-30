@@ -730,7 +730,7 @@ in Sheet(b) end
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
-  | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside
+  | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
   | Appearance
 
 fn _prop_name (p: prop): [k:pos | k <= 16] string k =
@@ -760,6 +760,7 @@ fn _prop_name (p: prop): [k:pos | k <= 16] string k =
   | ColumnFill() => "column-fill" | ColumnGap() => "column-gap"
   | ColumnWidth() => "column-width" | BreakAfter() => "break-after"
   | BreakInside() => "break-inside" | Appearance() => "appearance"
+  | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
 fn lay {r:nat}{st:nat | st == 1 || st == 3}{sv:nat | sv + 18 <= r}
@@ -931,7 +932,7 @@ fn _g_0_fonts {r:nat | r >= 1010} (sh: sheet(r, 0)): [q:nat | q >= r - 1010] she
   val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sh end
 
-fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] sheet(q, 0) = let
+fn _g_1_shell {r:nat | r >= 5400} (sh: sheet(r, 0)): [q:nat | q >= r - 5400] sheet(q, 0) = let
   val sh = rule(sh, "body")
   val sh = lay(sh, Margin(), "0")
   val sh = surf(S_fg_bg | sh, 1, 0)
@@ -1061,6 +1062,52 @@ fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] she
   val sh = rule(sh, ".list")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
+  val sh = close(sh)
+  (* the library's view controls: which books, list or grid *)
+  val sh = rule(sh, ".lview")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, FlexWrap(), "wrap")
+  val sh = lay(sh, Gap(), "8px")
+  val sh = lay(sh, Margin(), "8px 0")
+  val sh = close(sh)
+  val sh = rule(sh, ".seg.vseg")
+  val sh = lay(sh, Flex(), "none")
+  val sh = close(sh)
+  val sh = rule(sh, ".conth")
+  val sh = lay(sh, FontWeight(), "600")
+  val sh = lay(sh, MarginTop(), "8px")
+  val sh = close(sh)
+  (* a grid of covers, the title and progress under each *)
+  val sh = rule(sh, ".list.grid")
+  val sh = lay(sh, Display(), "grid")
+  (* no rows given, the columns as many as fit *)
+  val sh = lay(sh, GridTemplate(), "none/repeat(auto-fill,minmax(150px,1fr))")
+  val sh = lay(sh, Gap(), "12px")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .cardrow")
+  val sh = lay(sh, Position(), "relative")
+  val sh = lay(sh, Margin(), "0")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .card")
+  val sh = lay(sh, FlexDirection(), "column")
+  val sh = lay(sh, AlignItems(), "stretch")
+  val sh = lay(sh, TextAlign(), "center")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .cov")
+  val sh = lay(sh, Width(), "100%")
+  val sh = lay(sh, Height(), "auto")
+  val sh = lay(sh, AspectRatio(), "2/3")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .cmore")
+  val sh = lay(sh, Position(), "absolute")
+  val sh = lay(sh, Top(), "6px")
+  val sh = lay(sh, Right(), "6px")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .pbar")
+  val sh = lay(sh, MaxWidth(), "none")
+  val sh = close(sh)
+  val sh = rule(sh, ".grid .prog")
+  val sh = lay(sh, JustifyContent(), "center")
   val sh = close(sh)
   val sh = rule(sh, ".cardrow")
   val sh = lay(sh, Display(), "flex")
