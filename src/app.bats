@@ -177,6 +177,12 @@ fn _reader (): void = let
   val () = ui_el("footer", "footer-page", TSpan, "pgn")
   val () = ui_text_btn("reader", "jump-back", "pback", "\xE2\x86\xA9 Back")
   val () = _hide("jump-back")
+  (* the first book's hint on turning pages: read out as it shows, and
+     taps go through it to the page *)
+  val () = ui_el("reader", "turn-hint", TDiv, "hint")
+  val () = ui_role("turn-hint", RStatus)
+  val () = ui_text("turn-hint", "Swipe or tap the sides to turn the page")
+  val () = _hide("turn-hint")
   (* scrolled, the chapter's last screen goes on to the next *)
   val () = ui_text_btn("reader", "next-chapter", "pback nextch", "Next chapter \xE2\x86\x92")
   val () = _hide("next-chapter")

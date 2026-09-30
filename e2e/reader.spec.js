@@ -977,3 +977,22 @@ test('back to pages, the chapter is turned across again', async ({ page }) => {
   await expect.poll(async () => (await place(page)).p).toBe(2);
   expect(await bookPage(page).evaluate(e => e.scrollTop)).toBe(0);
 });
+
+test('the first book opened says once how to turn the page', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('First Book', 2));
+  const hint = page.getByRole('status').filter({ hasText: 'Swipe or tap the sides to turn the page' });
+  await expect(hint).toBeVisible();
+  // taps go through it: the page still turns, and it goes
+  await page.keyboard.press('ArrowRight');
+  await expect(hint).toBeHidden();
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  // not again: another book, or after a reload
+  await toLibrary(page);
+  await readBook(page, book('Second Book', 2));
+  await expect(bookPage(page)).toBeVisible();
+  await expect(hint).toBeHidden();
+  await reload(page);
+  await expect(bookPage(page)).toBeVisible();
+  await expect(hint).toBeHidden();
+});
