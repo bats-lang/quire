@@ -137,6 +137,8 @@ test('Atkinson Hyperlegible can be chosen, and is fetched only then', async ({ p
 });
 
 test('the themes change the colours, the choice is kept, and auto follows the system', async ({ page }) => {
+  // midday: at night, auto is the night theme whatever the system asks
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
   await start(page);
   await readBook(page, { title: 'Colours', author: 'Settings Tests', rawChapters: chapters(1, 5) });
   const bg = async () => (await colours(page)).bg.join(',');
