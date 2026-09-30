@@ -1342,7 +1342,7 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
     in 0 end)
 in r end
 
-fn _wire_reader {n:nat} (r: regs(n)): regs(n + 12) = let
+fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
   val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
   val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
   val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
@@ -1423,6 +1423,11 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 12) = let
               in $P.ret<int>(0) end))
           in 0 end
         end)
+  (* a tap on the footer's readout shows the next, and keeps it *)
+  val r = RCons(r, OnEl("qfon"), "click", lam(_) => let
+      val () = reader_readout_next()
+      val () = set_save(lib_sort_get())
+    in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
   val r = RCons(r, OnGestures("qrvw"), "gestures", lam(h) => let

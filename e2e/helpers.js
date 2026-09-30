@@ -160,7 +160,7 @@ export async function openBook(page, text) {
     nothing */
 export async function pageShown(page) {
   await expect(bookPage(page)).toBeVisible();
-  await expect(indicator(page)).toContainText('p.');
+  await expect(indicator(page)).toContainText('in chapter');
 }
 
 /** Imports one book made from opts and opens it */
@@ -176,7 +176,7 @@ export async function readBook(page, opts) {
     and so is a chapter the contents do not name), else the title */
 export async function place(page) {
   const t = await indicator(page).textContent();
-  const m = /^(.*)\s· p\. (\d+)\/(\d+)$/.exec(t.trim());
+  const m = /^(.*)\s· page (\d+) of (\d+) in chapter$/.exec(t.trim());
   expect(m, `page indicator "${t}"`).not.toBeNull();
   const n = /(\d+)$/.exec(m[1]);
   return { ch: n ? +n[1] : m[1], p: +m[2], t: +m[3] };

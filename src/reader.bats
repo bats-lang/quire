@@ -23,6 +23,7 @@ staload "layer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
+staload "settings.sats"
 staload "annot.sats"
 staload "entity.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -216,75 +217,158 @@ fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
   val cp = (if t > 0 then p * 1000 / t else 0): Int
 in _thousandth(b + _of_thousandth(cp, w), tot) end
 
-(* "last page in chapter", "1 page left" or "N pages left" at b[p, r),
-   and r *)
-fn _left_text {l:agz}{p:nat | p + 22 <= 96}{v:nat}
-  (b: !$A.arr(byte, l, 96), p: int p, left: int v): [r:nat | r <= p + 22] int r =
-  if left = 0 then _put(b, p, "last page in chapter")
-  else let
-    val off = $S.int_to_str(b, p, 96, left)
-  in if left = 1 then _put(b, off, " page left") else _put(b, off, " pages left") end
+(* The pages of the rest of the book after chapter ci, in pages of
+   chapter ci (t of them), by the chapters' sizes; -1 when that is not
+   known *)
+fn _rest_pages (ci: Int, t: Int): Int = let
+  val @(bs, w, tot) = book_weights(book_serial(), ci)
+  val after = tot - bs - w
+in
+  if w <= 0 then ~1 else if after <= 0 then 0
+  (* after * t / w, in two steps so it fits *)
+  else if after / w > 10000 then ~1
+  else (after / w) * t + (after - (after / w) * w) * t / w
+end
 
-(* " (12 min)" at b[p, r), the time the pages left take, when some are
-   left and the speed is known (mins >= 0) *)
-fn _left_time {l:agz}{p:nat | p + 33 <= 96}
-  (b: !$A.arr(byte, l, 96), p: int p, left: Int, mins: Int): [r:nat | r <= p + 33] int r =
-  if left <= 0 then p
-  else if mins < 0 then p
-  else let
-    val off = _put(b, p, " (")
-    val off = _put_dur(b, off, 96, mins)
-  in _put(b, off, ")") end
+(* The footer's readouts (the setting rd), each naming its scope: 0 the
+   pages left in the chapter, 1 the page of the chapter's pages, 2 the
+   chapter of the book's, 3 the time left in the chapter, 4 in the book.
+   The times are there only once the reading speed is known. *)
+fn _readout_ok (m: int, p: Int, t: Int, ci: Int): bool =
+  if m = 3 then _spd_known()
+  else if m = 4 then (if _spd_known() then _rest_pages(ci, t) >= 0 else false)
+  else m >= 0 && m <= 2
 
-(* The running footer, shown while the bars are hidden: the chapter's
-   title in qfot, then in qfon how many pages are left in the chapter and
-   how far into the book the page is: " · 8 pages left · 32%" *)
-fn _show_footer {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
+(* The readout shown: the one chosen, or pages left when it cannot be *)
+fn _readout_shown (p: Int, t: Int, ci: Int): [m:nat | m <= 4] int m = let
+  val m = set_rd_get()
+in if _readout_ok(m, p, t, ci) then m else 0 end
+
+(* The readout after m: the next one that can be shown *)
+fn _readout_after {m:nat | m <= 4} (m: int m, p: Int, t: Int, ci: Int): [r:nat | r <= 4] int r = let
+  val a = (if m < 4 then m + 1 else 0): [a:nat | a <= 4] int a
+in
+  if _readout_ok(a, p, t, ci) then a
+  else let
+    val b = (if a < 4 then a + 1 else 0): [b:nat | b <= 4] int b
+  in if _readout_ok(b, p, t, ci) then b else 0 end
+end
+
+(* " · " (5 bytes, from a no-break space, 0xC2 0xA0, since a space
+   would be dropped at the start of its box, and the middle dot, 0xC2
+   0xB7) at b[p, p + 5) *)
+fn _put_sep {l:agz}{n:pos}{p:nat | p + 5 <= n}
+  (b: !$A.arr(byte, l, n), p: int p): int(p + 5) = let
+  val () = $A.set<byte>(b, p, $A.int2byte(194))
+  val () = $A.set<byte>(b, p + 1, $A.int2byte(160))
+  val () = $A.set<byte>(b, p + 2, $A.int2byte(194))
+  val () = $A.set<byte>(b, p + 3, $A.int2byte(183))
+in _put(b, p + 4, " ") end
+
+(* "13 of 75 in chapter", for page p (from 0) of t, at b[p0, r) *)
+fn _put_page_of {l:agz}{p0:nat | p0 + 40 <= 64}
+  (b: !$A.arr(byte, l, 64), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 37] int r = let
+  val off = $S.int_to_str(b, p0, 64, p + 1)
+  val off = _put(b, off, " of ")
+  val off = $S.int_to_str(b, off, 64, t)
+in _put(b, off, " in chapter") end
+
+(* Readout m for page p of t in chapter c (from 1; 0 when none is
+   known) of tc, at b[p0, r) *)
+fn _put_readout {l:agz}{p0:nat | p0 + 50 <= 64}{m:nat | m <= 4}
+  (b: !$A.arr(byte, l, 64), p0: int p0, m: int m, p: Int, t: Int, c: Int, tc: Int)
+  : [r:nat | r <= p0 + 50] int r = let
+  val ci = (if c > 0 then c - 1 else 0): Int
+  val left = (if t > p + 1 then t - p - 1 else 0): Int
+in
+  if m = 1 then _put_page_of(b, _put(b, p0, "page "), p, t)
+  else if m = 2 then let
+    (* by the contents' top-level entries; by the spine's items when
+       the contents have none *)
+    val @(n, k) = toc_chapter_of(ci)
+    val @(n, k) = (if k > 0 then @(n, k) else @(c, tc)): @(int, int)
+    val n = g1ofg0(n)
+    val k = g1ofg0(k)
+  in
+    if n <= 0 then let
+      val off = _put(b, p0, "before chapter 1 of ")
+    in $S.int_to_str(b, off, 64, k) end
+    else let
+      val off = _put(b, p0, "chapter ")
+      val off = $S.int_to_str(b, off, 64, n)
+      val off = _put(b, off, " of ")
+    in $S.int_to_str(b, off, 64, k) end
+  end
+  else if m = 3 then let
+    val off = _put_dur(b, p0, 64, _spd_minutes(left))
+  in _put(b, off, " left in chapter") end
+  else if m = 4 then let
+    val rest = _rest_pages(ci, t)
+    val more = (if rest > 0 then rest else 0): Int
+    val off = _put_dur(b, p0, 64, _spd_minutes(left + more))
+  in _put(b, off, " left in book") end
+  else if left = 0 then _put(b, p0, "last page in chapter")
+  else let
+    val off = $S.int_to_str(b, p0, 64, left)
+  in
+    if left = 1 then _put(b, off, " page left in chapter")
+    else _put(b, off, " pages left in chapter")
+  end
+end
+
+(* The percentage of thousandth pm at b[p, r): "<1" rather than "0"
+   once reading has begun *)
+fn _put_pct {l:agz}{p:nat | p <= 5}{v:nat | v <= 1000}
+  (b: !$A.arr(byte, l, 32), p: int p, pm: int v, begun: bool): [r:nat | r <= p + 11] int r =
+  if pm >= 10 then $S.int_to_str(b, p, 32, pm / 10)
+  else if begun then _put(b, p, "<1")
+  else _put(b, p, "0")
+
+(* The running footer, shown while the bars are hidden, on one line: the
+   chapter's title in qfot; in qfon the readout, which a tap on it turns
+   to the next; and in footer-book how far into the book the page is,
+   never "0%" once reading has begun:
+   "Title · 8 pages left in chapter · 32% of book" *)
+fn _show_footer {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
   val () = (if chapter > 0 then toc_title_in("qfot", chapter - 1) else ())
-  val left = (if total > cur_page + 1 then total - cur_page - 1 else 0): [v:nat] int v
-  val pm = _permille((if chapter > 0 then chapter - 1 else 0), cur_page, total)
-  (* the no-break space and the dot (4 bytes), " " (1), the count (at
-     most 11), " pages left" (11) or " page left" or "last page in
-     chapter" (22), " (" and the time they take (at most 30) and ")",
-     " · " (4), the percentage (at most 11) and "%" *)
-  val b = $A.alloc<byte>(96)
-  val () = $A.set<byte>(b, 0, $A.int2byte(194))
-  val () = $A.set<byte>(b, 1, $A.int2byte(160))
-  val () = $A.set<byte>(b, 2, $A.int2byte(194))
-  val () = $A.set<byte>(b, 3, $A.int2byte(183))
-  val off = _put(b, 4, " ")
-  val off = _left_text(b, off, left)
-  val off = _left_time(b, off, left, _spd_minutes(left))
-  val () = $A.set<byte>(b, off, $A.int2byte(32))
-  val () = $A.set<byte>(b, off + 1, $A.int2byte(194))
-  val () = $A.set<byte>(b, off + 2, $A.int2byte(183))
-  val off = _put(b, off + 3, " ")
-  val off = $S.int_to_str(b, off, 96, pm / 10)
-  val off = _put(b, off, "%")
-in _set_text_of("qfon", b, off) end
+  val ci = (if chapter > 0 then chapter - 1 else 0): Int
+  val b = $A.alloc<byte>(64)
+  val off = _put_sep(b, 0)
+  val off = _put_readout(b, off, _readout_shown(cur_page, total, ci), cur_page, total, chapter, tc)
+  val () = _set_text_of("qfon", b, off)
+  val pm = _permille(ci, cur_page, total)
+  (* " · ", the percentage (at most 11) and "% of book" *)
+  val b = $A.alloc<byte>(32)
+  val off = _put_sep(b, 0)
+  val off = _put_pct(b, off, pm, ci > 0 || cur_page > 0)
+  val off = _put(b, off, "% of book")
+in _set_text_of("footer-book", b, off) end
 
 (* The page indicator: the chapter's title (its contents entry's label,
-   else "Chapter" and its number) in qpgt, then " · p. M/T" in qpgn, which
-   always shows in full while a long title is cut *)
-fn _show_indicator {p,t,c:nat} (cur_page: int p, total: int t, chapter: int c): void = let
+   else "Chapter" and its number) in qpgt, then " · page " in qpgw and
+   "M of T in chapter" in qpgn, which always shows in full while a long
+   title is cut *)
+fn _show_indicator {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
   val () = (if chapter > 0 then toc_title_in("qpgt", chapter - 1) else ())
-  (* " · p. " (8 bytes: a no-break space, 0xC2 0xA0, since a space
-     would be dropped at the start of its box; the middle dot, 0xC2
-     0xB7), M (at most 11), "/" and T (at most 11) *)
-  val tbuf = $A.alloc<byte>(32)
-  val () = $A.set<byte>(tbuf, 0, $A.int2byte(194))
-  val () = $A.set<byte>(tbuf, 1, $A.int2byte(160))
-  val () = $A.set<byte>(tbuf, 2, $A.int2byte(194))
-  val () = $A.set<byte>(tbuf, 3, $A.int2byte(183))
-  val off = _put(tbuf, 4, " p. ")
-  val off = $S.int_to_str(tbuf, off, 32, cur_page + 1)
-  val off = _put(tbuf, off, "/")
-  val off = $S.int_to_str(tbuf, off, 32, total)
-  val () = _set_text_of("qpgn", tbuf, off)
-in _show_footer(cur_page, total, chapter) end
+  val () = ui_text("qpgw", "\xC2\xA0\xC2\xB7 page ")
+  val b = $A.alloc<byte>(64)
+  val off = _put_page_of(b, 0, cur_page, total)
+  val () = _set_text_of("qpgn", b, off)
+in _show_footer(cur_page, total, chapter, tc) end
+
+(* A tap on the footer's readout: the next one, which is kept with the
+   settings *)
+#pub fn reader_readout_next (): void
+
+implement reader_readout_next () =
+  case+ reading_get() of
+  | @(p, t, c, tc) => let
+      val ci = (if c > 0 then c - 1 else 0): Int
+      val () = set_rd_set(_readout_after(_readout_shown(p, t, ci), p, t, ci))
+    in _show_footer(p, t, c, tc) end
 
 fn _update_page_indicator(): void =
-  case+ reading_get() of @(p, t, c, _) => _show_indicator(p, t, c)
+  case+ reading_get() of @(p, t, c, tc) => _show_indicator(p, t, c, tc)
 
 (* The page's width, as it was last measured *)
 val _page_w = ref<int>(0)
@@ -475,12 +559,8 @@ fn _scrub_show (): void =
       val ci = (if c > 0 then c - 1 else 0): Int
       val v = _permille(ci, p, t)
       val () = _scrub_at(v)
-      val @(bs, w, tot) = book_weights(book_serial(), ci)
-      val after = tot - bs - w
       val left = (if p + 1 < t then t - p - 1 else 0): Int
-      (* pages of the rest: after * t / w, in two steps so it fits *)
-      val rest = (if w <= 0 then ~1 else if after <= 0 then 0
-        else if after / w > 10000 then ~1 else (after / w) * t + (after - (after / w) * w) * t / w): Int
+      val rest = _rest_pages(ci, t)
       val mins = (if rest < 0 then ~1 else _spd_minutes(left + rest)): Int
     in
       if mins < 0 then ()
@@ -625,7 +705,13 @@ fun _break_at {k:nat}{t:pos}{c:nat | c < t} .<k>. (x: !breaks(k), t: int t, cur:
       prval () = fold@(x)
     in r end
 
-(* The footer's print page: " · page 214", from the latest break at
+(* " in print" after the label, which ends at b[p]; the text's end, or
+   0 (nothing shown) when there is no label *)
+fn _in_print {l:agz}{p:nat | p <= 25}{m:nat}
+  (b: !$A.arr(byte, l, 40), p: int p, m: int m): [k:nat | k <= 40] int k =
+  if m > 0 then _put(b, p, " in print") else 0
+
+(* The footer's print page: " · page 214 in print", from the latest break at
    or before the page shown; nothing in a chapter that has none *)
 fn _show_print_page {t:pos}{c:nat | c < t} (t: int t, cur: int c): void = let
   val cc = _breaks_take()
@@ -633,15 +719,15 @@ fn _show_print_page {t:pos}{c:nat | c < t} (t: int t, cur: int c): void = let
   val @(lab, m) = _break_at(x, t, cur)
   prval () = fold@(cc)
   val () = _breaks_put(cc)
-  (* " · page " (9 bytes) and the label (at most 16) *)
-  val b = $A.alloc<byte>(32)
+  (* " · page " (9 bytes), the label (at most 16) and " in print" *)
+  val b = $A.alloc<byte>(40)
   val () = $A.set<byte>(b, 0, $A.int2byte(32))
   val () = $A.set<byte>(b, 1, $A.int2byte(194))
   val () = $A.set<byte>(b, 2, $A.int2byte(183))
   val off = _put(b, 3, " page ")
   val () = _label_to(lab, b, off, m, 0)
   val () = $A.free<byte>(lab)
-in _set_text_of("footer-page", b, (if m > 0 then off + m else 0): [k:nat | k <= 32] int k) end
+in _set_text_of("footer-page", b, _in_print(b, off + m, m)) end
 
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let

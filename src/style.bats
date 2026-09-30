@@ -1110,7 +1110,7 @@ fn _g_2_overlays {r:nat | r >= 3425} (sh: sheet(r, 0)): [q:nat | q >= r - 3425] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 6221} (sh: sheet(r, 0)): [q:nat | q >= r - 6221] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 6300} (sh: sheet(r, 0)): [q:nat | q >= r - 6300] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1168,8 +1168,16 @@ fn _g_3_reader {r:nat | r >= 6221} (sh: sheet(r, 0)): [q:nat | q >= r - 6221] sh
   val sh = lay(sh, TextOverflow(), "ellipsis")
   val sh = lay(sh, MinWidth(), "0")
   val sh = close(sh)
-  val sh = rule(sh, ".pgn")
+  val sh = rule(sh, ".pgn,.pgw")
   val sh = lay(sh, Flex(), "none")
+  val sh = lay(sh, WhiteSpace(), "pre")
+  val sh = close(sh)
+  (* the footer's readout, the one part of it a tap reaches: a tap on
+     it shows the next *)
+  val sh = rule(sh, ".rdo")
+  val sh = lay(sh, Flex(), "none")
+  val sh = lay(sh, PointerEvents(), "auto")
+  val sh = lay(sh, Cursor(), "pointer")
   val sh = close(sh)
   (* a link out of the app, in a bar: a control's box, not a text link *)
   val sh = rule(sh, ".linkout")
@@ -1637,7 +1645,7 @@ fn _g_4_panels {r:nat | r >= 4685} (sh: sheet(r, 0)): [q:nat | q >= r - 4685] sh
   val sh = close(sh)
 in sh end
 
-fn _g_5_media {r:nat | r >= 284} (sh: sheet(r, 0)): [q:nat | q >= r - 284] sheet(q, 0) = let
+fn _g_5_media {r:nat | r >= 430} (sh: sheet(r, 0)): [q:nat | q >= r - 430] sheet(q, 0) = let
   val sh = media(sh, "(max-width:480px)")
   val sh = rule(sh, ".lib")
   val sh = lay(sh, PaddingLeft(), "10px")
@@ -1657,6 +1665,16 @@ fn _g_5_media {r:nat | r >= 284} (sh: sheet(r, 0)): [q:nat | q >= r - 284] sheet
   val sh = close(sh)
   val sh = rule(sh, ".bar>.sfield")
   val sh = lay(sh, Order(), "3")
+  val sh = close(sh)
+  (* the page indicator's title and " · page ": read out, not shown
+     (the title is in the top bar, and the pages show in full, "1 of 12
+     in chapter") *)
+  val sh = rule(sh, ".pinfo .pgt,.pgw")
+  val sh = lay(sh, Position(), "absolute")
+  val sh = lay(sh, Width(), "1px")
+  val sh = lay(sh, Height(), "1px")
+  val sh = lay(sh, Margin(), "-1px")
+  val sh = lay(sh, Overflow(), "hidden")
   val sh = close(sh)
   val sh = media_end(sh)
 in sh end
