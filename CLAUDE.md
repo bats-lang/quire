@@ -64,7 +64,8 @@ window has no arena to allocate from.
 `src/pages.bats` holds it. `page_arena(q, t)` is the arena of page q of
 a chapter of t pages, with no piece out; it exists only for
 `0 <= q < t`. `window(p, t)` holds exactly the arenas of pages p - 2 to
-p + 2. `window_forward` turns it into `window(p + 1, t)` by releasing
+p + 2 (scrolled, a page is a screenful, so the window counts those).
+`window_forward` turns it into `window(p + 1, t)` by releasing
 page p - 2's arena and making page p + 3's (`window_back` is the mirror
 image), so keeping any other arena does not type-check. Each arena is
 4 MiB (`PAGE_BYTES`).

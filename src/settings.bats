@@ -33,6 +33,7 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
              anywhere else on), 2 one hand (the top third back, the
              bottom third on, between them the bars)
    vol       0 the volume keys are the volume's, 1 they turn the page
+   flow      0 pages (turned across), 1 scrolled (down the chapter)
    rd        the footer's readout: 0 pages left in the chapter, 1 the
              page of the chapter's pages, 2 the chapter of the book's,
              3 the time left in the chapter, 4 in the book
@@ -53,17 +54,18 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 #pub typedef set_taps = [v:nat | v <= 2] int v
 #pub typedef set_vol = [v:nat | v <= 1] int v
 #pub typedef set_rd = [v:nat | v <= 4] int v
+#pub typedef set_flow = [v:nat | v <= 1] int v
 
 typedef settings = @{
   size = set_size, lh = set_lh, margin = set_margin, font = set_font, theme = set_theme,
-  align = set_align, hyph = set_hyph, ps = set_ps, ls = set_ls, ws = set_ws, dim = set_dim, taps = set_taps, vol = set_vol, rd = set_rd
+  align = set_align, hyph = set_hyph, ps = set_ps, ls = set_ls, ws = set_ws, dim = set_dim, taps = set_taps, vol = set_vol, rd = set_rd, flow = set_flow
 }
 
 (* The defaults: text ragged (WCAG 1.4.8: not justified) and
    hyphenated, the paragraph spacing the page always had, and images
    dimmed in the dark theme *)
 fn _defaults (): settings =
-  @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0, align = 0, hyph = 1, ps = 8, ls = 0, ws = 0, dim = 1, taps = 0, vol = 0, rd = 0 }
+  @{ size = 18, lh = 16, margin = 2, font = 0, theme = 0, align = 0, hyph = 1, ps = 8, ls = 0, ws = 0, dim = 1, taps = 0, vol = 0, rd = 0, flow = 0 }
 
 val _set = ref<settings>(_defaults())
 (* Whether the system asks for a dark theme (for auto) *)
@@ -97,6 +99,8 @@ implement set_taps_get () = (!_set).taps
 implement set_vol_get () = (!_set).vol
 #pub fn set_rd_get (): set_rd
 implement set_rd_get () = (!_set).rd
+#pub fn set_flow_get (): set_flow
+implement set_flow_get () = (!_set).flow
 
 (* ============================================================
    Applying
@@ -149,6 +153,10 @@ fn _put_dim {l:agz}{p:nat | p + 80 <= 512}
   (buf: !$A.arr(byte, l, 512), p: int p, d: set_dim): [r:nat | r <= p + 80] int r =
   if d = 1 then _puts(buf, p, ".th-dark .caf img,.th-night .caf img,.th-grey .caf img{filter:brightness(.8)}") else p
 
+fn _put_flow {l:agz}{p:nat | p + 48 <= 512}
+  (buf: !$A.arr(byte, l, 512), p: int p, f: set_flow): [r:nat | r <= p + 48] int r =
+  if f = 1 then _puts(buf, p, ".caf{overflow:hidden auto;column-width:auto}") else p
+
 (* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
   val x = !_set
@@ -176,6 +184,8 @@ fn _apply_type (): void = let
   val off = _puts(buf, off, "em}")
   (* a bright picture glares on the dark theme's ground *)
   val off = _put_dim(buf, off, x.dim)
+  (* scrolled: the chapter down the page, not in columns across *)
+  val off = _put_flow(buf, off, x.flow)
 in ui_text_buf("style-type", buf, off) end
 
 (* Whether the theme shown is dark, light or sepia: the root's class *)
@@ -216,6 +226,8 @@ fn _show_controls (): void = let
   val () = _pressed("theme-dark", x.theme = 3)
   val () = _pressed("theme-night", x.theme = 4)
   val () = _pressed("theme-grey", x.theme = 5)
+  val () = _pressed("layout-pages", x.flow = 0)
+  val () = _pressed("layout-scroll", x.flow = 1)
   val () = _pressed("align-ragged", x.align = 0)
   val () = _pressed("align-justified", x.align = 1)
   val () = _pressed("hyphens-on", x.hyph = 1)
@@ -242,11 +254,11 @@ in ui_text_buf("word-value", buf, off) end
    ============================================================ *)
 
 (* "S2", then size, lh, margin, font, theme, the library's sort order,
-   align, hyph, ps, ls, ws, dim, taps, vol and rd, a byte each. ("S1" was
+   align, hyph, ps, ls, ws, dim, taps, vol, rd and flow, a byte each. ("S1" was
    the first 8.) *)
 fn _save (sort: int): void = let
   val x = !_set
-  val buf = $A.alloc<byte>(17)
+  val buf = $A.alloc<byte>(18)
   val () = $A.write_byte(buf, 0, 83)
   val () = $A.write_byte(buf, 1, 50)
   val () = $A.write_byte(buf, 2, x.size)
@@ -264,13 +276,14 @@ fn _save (sort: int): void = let
   val () = $A.write_byte(buf, 14, x.taps)
   val () = $A.write_byte(buf, 15, x.vol)
   val () = $A.write_byte(buf, 16, x.rd)
+  val () = $A.write_byte(buf, 17, x.flow)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val ka = $A.alloc<byte>(3)
   val () = $A.write_byte(ka, 0, 115) (* s *)
   val () = $A.write_byte(ka, 1, 101) (* e *)
   val () = $A.write_byte(ka, 2, 116) (* t *)
   val @(kf, kb) = $A.freeze<byte>(ka)
-  val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 17))
+  val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 18))
   val () = $A.drop<byte>(kf, kb)
   val () = $A.free<byte>($A.thaw<byte>(kf))
   val () = $A.drop<byte>(bf, bb)
@@ -326,33 +339,35 @@ implement set_show () = let
 in set_sliders() end
 
 #pub fn set_size_set (v: set_size): void
-implement set_size_set (v) = let val x = !_set in !_set := @{ size = v, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_size_set (v) = let val x = !_set in !_set := @{ size = v, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_lh_set (v: set_lh): void
-implement set_lh_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = v, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_lh_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = v, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_margin_set (v: set_margin): void
-implement set_margin_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = v, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_margin_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = v, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_font_set (v: set_font): void
-implement set_font_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = v, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_font_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = v, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_theme_set (v: set_theme): void
-implement set_theme_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = v, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_theme_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = v, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_align_set (v: set_align): void
-implement set_align_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = v, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_align_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = v, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_hyph_set (v: set_hyph): void
-implement set_hyph_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = v, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_hyph_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = v, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_ps_set (v: set_ps): void
-implement set_ps_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = v, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_ps_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = v, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_ls_set (v: set_ls): void
-implement set_ls_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = v, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_ls_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = v, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_dim_set (v: set_dim): void
-implement set_dim_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = v, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_dim_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = v, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_taps_set (v: set_taps): void
-implement set_taps_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = v, vol = x.vol, rd = x.rd } end
+implement set_taps_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = v, vol = x.vol, rd = x.rd, flow = x.flow } end
 #pub fn set_vol_set (v: set_vol): void
-implement set_vol_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = v, rd = x.rd } end
+implement set_vol_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = v, rd = x.rd, flow = x.flow } end
 #pub fn set_ws_set (v: set_ws): void
+#pub fn set_flow_set (v: set_flow): void
+implement set_flow_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = v } end
 #pub fn set_rd_set (v: set_rd): void
-implement set_rd_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = v } end
-implement set_ws_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = v, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd } end
+implement set_rd_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = x.ws, dim = x.dim, taps = x.taps, vol = x.vol, rd = v, flow = x.flow } end
+implement set_ws_set (v) = let val x = !_set in !_set := @{ size = x.size, lh = x.lh, margin = x.margin, font = x.font, theme = x.theme, align = x.align, hyph = x.hyph, ps = x.ps, ls = x.ls, ws = v, dim = x.dim, taps = x.taps, vol = x.vol, rd = x.rd, flow = x.flow } end
 
 (* The defaults. Private: the settings go back to them only by
    set_reset, which offers the ones they replace back *)
@@ -432,9 +447,10 @@ in
         val taps = (if n >= 15 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 14))), 0, 2, 0) else 0) else 0): set_taps
         val vol = (if n >= 16 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 15))), 0, 1, 0) else 0) else 0): set_vol
         val rd = (if n >= 17 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 16))), 0, 4, 0) else 0) else 0): set_rd
+        val flow = (if n >= 18 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 17))), 0, 1, 0) else 0) else 0): set_flow
         val () = $A.free<byte>(b)
         val () = !_set := @{ size = size, lh = lh, margin = margin, font = font, theme = theme,
-          align = align, hyph = hyph, ps = ps, ls = ls, ws = ws, dim = dim, taps = taps, vol = vol, rd = rd }
+          align = align, hyph = hyph, ps = ps, ls = ls, ws = ws, dim = dim, taps = taps, vol = vol, rd = rd, flow = flow }
         val () = set_show()
       in $P.ret<int>(sort) end)
 end
