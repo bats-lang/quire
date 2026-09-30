@@ -8,7 +8,7 @@ import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles, indicator, chapterBody, oneColumn,
+  importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -1039,4 +1039,109 @@ test('two columns show a spread, turned as one and numbered as two pages; auto s
   const { width, height } = page.viewportSize();
   const wide = width > height && width >= 960;
   await expect(indicator(page)).toHaveText(wide ? /· pages \d+–\d+ of \d+ in chapter$/ : /· page \d+ of \d+ in chapter$/);
+});
+
+// Reading aloud, by the page's script (pwa): here with a speech engine
+// that says each sentence only when the test says it has been spoken
+async function fakeSpeech(page) {
+  await page.addInitScript(() => {
+    window.spoken = [];
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    const voices = [
+      { name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true },
+      { name: 'Narrator', lang: 'en-GB', voiceURI: 'narrator-en', default: false },
+      { name: 'Lecteur', lang: 'fr-FR', voiceURI: 'lecteur-fr', default: false },
+    ];
+    const synth = {
+      current: null,
+      getVoices: () => voices,
+      speak(u) { window.spoken.push({ text: u.text, rate: u.rate, voice: u.voice && u.voice.name }); this.current = u; },
+      cancel() { const u = this.current; this.current = null; if (u && u.onerror) u.onerror({ error: 'interrupted' }); },
+      addEventListener() {},
+    };
+    Object.defineProperty(window, 'speechSynthesis', { value: synth });
+    window.sentenceSpoken = () => { const u = synth.current; synth.current = null; if (u && u.onend) u.onend({}); };
+  });
+}
+const spoken = page => page.evaluate(() => window.spoken);
+const readAloud = page => control(page, 'Read aloud');
+
+test('read aloud reads the page from its top, the sentence read marked, turning the page as it goes, and pauses', async ({ page }) => {
+  await fakeSpeech(page);
+  await start(page);
+  await readBook(page, book('Spoken', 2, 12));
+  await showChrome(page);
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
+  await readAloud(page).click();
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await spoken(page)).length).toBe(1);
+  expect((await spoken(page))[0].text).toBe('Part 1');
+  expect(await page.evaluate(() => CSS.highlights.has('pwa-spoken'))).toBe(true);
+  // sentence after sentence, the page turned when the next is not on it
+  const first = await place(page);
+  for (let k = 0; k < 40 && (await place(page)).p === first.p; k++) {
+    await page.evaluate(() => window.sentenceSpoken());
+    await page.waitForTimeout(50);
+  }
+  expect((await place(page)).p).toBe(first.p + 1);
+  // the sentence the turn was for, said once the page has turned
+  const before = (await spoken(page)).length;
+  await expect.poll(async () => (await spoken(page)).length).toBe(before + 1);
+  const said = (await spoken(page)).map(s => s.text);
+  expect(said[1]).toMatch(/^Para 1\.0 /);
+  expect(said[2]).toMatch(/^Para 1\.1 /);
+  // what is read next is on the page shown
+  const last = said[said.length - 1].slice(0, 9);
+  expect(await visibleText(page)).toContain(last);
+  // paused: nothing more is said
+  await showChrome(page);
+  await readAloud(page).click();
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => CSS.highlights.has('pwa-spoken'))).toBe(false);
+  const n = (await spoken(page)).length;
+  await page.evaluate(() => window.sentenceSpoken());
+  await page.waitForTimeout(200);
+  expect((await spoken(page)).length).toBe(n);
+  // and goes on where it was
+  await readAloud(page).click();
+  await expect.poll(async () => (await spoken(page)).length).toBe(n + 1);
+  expect((await spoken(page))[n].text).toBe(said[said.length - 1]);
+});
+
+test('read aloud goes on into the next chapter, from a selection, at the speed and in the voice chosen', async ({ page }) => {
+  await fakeSpeech(page);
+  await start(page);
+  await readBook(page, { title: 'Chaptered', author: 'Reader Tests', rawChapters: [
+    { body: '<p>One. Two!</p>' }, { body: '<p>Three? Four.</p>' },
+  ] });
+  // the speed and voice, in the typography panel
+  await openSettings(page);
+  const panel = dialog(page, 'Typography and theme');
+  await panel.getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
+  const voice = panel.getByRole('combobox', { name: 'Voice' });
+  await voice.focus();
+  await expect(voice.locator('option')).toHaveText(['Automatic', 'Reader', 'Narrator']);
+  await voice.selectOption({ label: 'Narrator' });
+  await page.keyboard.press('Escape');
+  // from a selection: the sentence it starts in
+  await selectText(page, 5, 7);
+  await selectionButton(page, 'Read from here').click();
+  await expect.poll(async () => (await spoken(page)).length).toBe(1);
+  expect(await spoken(page)).toEqual([{ text: 'Two!', rate: 1.5, voice: 'Narrator' }]);
+  // on into the next chapter
+  await page.evaluate(() => window.sentenceSpoken());
+  await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['Two!', 'Three?']);
+  await expect(chapterTitle(page)).toHaveText('Chapter 2');
+  // the choices are kept
+  await reload(page);
+  await openSettings(page);
+  await expect(dialog(page, 'Typography and theme').getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
+});
+
+test('without speech in the browser, read aloud is not offered', async ({ page }) => {
+  await page.addInitScript(() => { delete window.speechSynthesis; delete window.SpeechSynthesisUtterance; });
+  await start(page);
+  await readBook(page, book('Silent', 1));
+  await showChrome(page);
+  await expect(readAloud(page)).toBeHidden();
 });

@@ -255,6 +255,11 @@ in end
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion | AHidden
   | APwaInstall   (* a click on it asks the browser to install the app (the page's script) *)
+  (* reading aloud, by the page's script: a click on APwaSpeak reads the
+     element it names from its page, or pauses; on APwaSpeakSelection,
+     from the selection; APwaSpeechNext is clicked to turn the page, and
+     the page's script fills and keeps the speed and voice choices *)
+  | APwaSpeak | APwaSpeakSelection | APwaSpeechNext | APwaSpeechRate | APwaSpeechVoice
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
@@ -263,6 +268,9 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
   | AHidden() => "aria-hidden" | APwaInstall() => "data-pwa-install"
+  | APwaSpeak() => "data-pwa-speak" | APwaSpeakSelection() => "data-pwa-speak-selection"
+  | APwaSpeechNext() => "data-pwa-speech-next" | APwaSpeechRate() => "data-pwa-speech-rate"
+  | APwaSpeechVoice() => "data-pwa-speech-voice"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}
@@ -493,14 +501,14 @@ fn _dbutton {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
 in _dattr(doc, ib, inn, "class", cls) end
 
 #pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
-  | IcContents | IcNotes | IcFont | IcMore
+  | IcContents | IcNotes | IcFont | IcMore | IcSpeak
 
 fn _glyph (ic: icon): [k:pos | k < 256] string k =
   case+ ic of
   | IcBack() => "\xE2\x86\x90" | IcClose() => "\xE2\x9C\x95" | IcGear() => "\xE2\x9A\x99"
   | IcStar() => "\xE2\x98\x86" | IcSearch() => "\xF0\x9F\x94\x8D" | IcPrev() => "\xE2\x80\xB9"
   | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
-  | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE"
+  | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE" | IcSpeak() => "\xF0\x9F\x94\x8A"
 
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
@@ -734,6 +742,7 @@ in release_bytes(if_, ib) end
    Search (type=search) or a multi-line text area. *)
 (* A search field, a text area, or one line of text (a name) *)
 #pub datatype field = FSearch | FText | FLine
+  | FChoice   (* a choice among options the page's script puts in it *)
 
 #pub fn ui_field {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nn:pos | nn < 256}
   (parent: string np, id: string ni, f: field, cls: string nc, name: string nn): void
@@ -744,6 +753,7 @@ implement ui_field(parent, id, f, cls, name) = let
         val () = _add_s(parent, id, "input")
       in _sattr(id, "type", "search") end
     | FText() => _add_s(parent, id, "textarea")
+    | FChoice() => _add_s(parent, id, "select")
     | FLine() => let
         val () = _add_s(parent, id, "input")
         val () = _sattr(id, "type", "text")
