@@ -534,20 +534,38 @@ in
   in if w >= 0 then w else v end
 end
 
-(* The page, of the chapter's t, that content node i is on (the page
-   shown now is cur); cur when it is not in the chapter *)
-fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c): [p:nat | p < t] int p =
-  if ~_measure_node(i) then cur
-  else if _scrolled() then let
-    (* its offset down the chapter, in screenfuls *)
+(* Scrolled, the screenful of t shown with the chapter scrolled down by
+   top: the nearest whole step, and the last at the bottom, where the
+   browser stops a scroll short of a whole step. A place kept, a hand
+   scroll and a node's screen are all counted this way *)
+fn _screen_at {t:pos} (top: Int, bottom: Int, t: int t): [p:nat | p < t] int p = let
+  val step = _step()
+  val p = (if top >= bottom - 2 then t - 1 else if top > 0 then (top + step / 2) / step else 0): Int
+in if p <= 0 then 0 else if p >= t then t - 1 else p end
+
+(* Scrolled, how far down the chapter content node i starts (the page
+   shown now is cur), and how far the chapter can be scrolled: ~1 for
+   the first when the node is not in the chapter *)
+fn _node_down_by {i:int} (i: int i, cur: Int): @(Int, Int) =
+  if i < 0 then @(~1, 0)
+  else if ~_measure_node(i) then @(~1, 0)
+  else let
     val y = $DR.get_measure_y()
     val () = _measure_lit("page")
     val cy = $DR.get_measure_y()
+    (* the page's height as it is now, which its screens are counted by *)
+    val () = !_page_h := $DR.get_measure_h()
     val bottom = $DR.get_measure_scroll_h() - $DR.get_measure_h()
     val off = _scroll_top(cur) + (y - cy)
-    (* the last screen is scrolled to the bottom, short of a whole step *)
-    val p = (if off >= bottom then t - 1 else if off > 0 then off / _step() else 0): Int
-  in if p < 0 then 0 else if p >= t then t - 1 else p end
+  in @((if off > 0 then off else 0), bottom) end
+
+(* The page, of the chapter's t, that content node i is on (the page
+   shown now is cur); cur when it is not in the chapter *)
+fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c): [p:nat | p < t] int p =
+  if _scrolled() then let
+    val @(off, bottom) = _node_down_by(i, cur)
+  in if off < 0 then cur else _screen_at(off, bottom, t) end
+  else if ~_measure_node(i) then cur
   else let
     val x = $DR.get_measure_x()
     val () = _measure_lit("page")
@@ -842,8 +860,10 @@ fn _place_shown {t:pos}{p:nat | p < t}{c,tc:nat}
   val () = ui_show("next-chapter", (if _scrolled() then (if p + 1 >= t then c < tc else false) else false))
 in _record_position() end
 
-fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
-  (p: int p, t: int t, c: int c, tc: int tc): void = let
+(* Shows page p of t, scrolled down by top when scrolled (the page's
+   own step otherwise) *)
+fn _show_page_down {t:pos}{p:nat | p < t}{c,tc:nat}
+  (p: int p, t: int t, c: int c, tc: int tc, top: Int): void = let
   val () = reading_set(@(p, t, c, tc))
   val () = window_show(p, t)
   val page = p
@@ -855,10 +875,13 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val cw = $DR.get_measure_w()
   val () = !_page_w := cw
   val () = !_page_h := $DR.get_measure_h()
-  val () = (if _scrolled() then $SC.set_scroll_top(cnt_b, 4, page * _step())
+  val () = (if _scrolled() then $SC.set_scroll_top(cnt_b, 4, (if top >= 0 then top else page * _step()))
     else $SC.set_scroll_left(cnt_b, 4, page * cw))
   val () = release_bytes(cnt_f, cnt_b)
 in _place_shown(p, t, c, tc) end
+
+fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
+  (p: int p, t: int t, c: int c, tc: int tc): void = _show_page_down(p, t, c, tc, ~1)
 
 (* ============================================================
    Content tree rendering (XHTML → DOM nodes)
@@ -1906,7 +1929,14 @@ end
 fn _show_target (pg: Int, anchor: Int): void =
   case+ reading_get() of
   | @(cur, t, c, tc) =>
-    if anchor >= 0 then _show_page(_page_of_node(anchor, t, cur), t, c, tc)
+    (* scrolled, the node itself at the top of the screen *)
+    if anchor >= 0 then (if _scrolled() then let
+        val @(off, bottom) = _node_down_by(anchor, cur)
+      in
+        if off < 0 then _show_page(cur, t, c, tc)
+        else _show_page_down(_screen_at(off, bottom, t), t, c, tc, (if off < bottom then off else bottom))
+      end
+      else _show_page(_page_of_node(anchor, t, cur), t, c, tc))
     else if pg < 0 then _show_page(t - 1, t, c, tc)
     else if pg >= t then _show_page(t - 1, t, c, tc)
     else _show_page(pg, t, c, tc)
@@ -1922,6 +1952,17 @@ fn _show_target (pg: Int, anchor: Int): void =
 (* The node the place was restored to, or -1 once a page is turned *)
 val _settle_anchor = ref<Int>(~1)
 val _settle_gen = ref<int>(0)
+
+(* What keeps the reader's place on page page of total when the chapter
+   is laid out again, as _show_target takes it (a page, a node): the
+   node the place was restored to, while it holds; scrolled, the
+   chapter's end for a reader on its last screen past the first (the
+   browser stops that screen short of a whole step, so the node at its
+   top starts on the screen before); else the node at the page's top *)
+fn _place_kept (page: Int, total: Int): @(Int, Int) =
+  if !_settle_anchor >= 0 then @(page, !_settle_anchor)
+  else if _scrolled() && page > 0 && page >= total - 1 then @(~1, ~1)
+  else @(page, !_anchor_last)
 
 (* How many pages the chapter has now, as it is laid out *)
 fn _pages_now (): Int = let
@@ -1947,9 +1988,9 @@ fun _settle {n:nat} .<n>. (gen: int, n: int n): void =
           in
             if now <= 0 then ()
             else if now <> t then let
-              val a = (if a >= 0 then a else !_anchor_last): Int
+              val @(pg, a) = _place_kept(p, t)
               val () = _measure_pagination()
-            in _show_target(p, a) end
+            in _show_target(pg, a) end
             else if moved then _show_target(p, a)
             else ()
           end)
@@ -2155,8 +2196,7 @@ end
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
 fn _relayout (): void = let
-  val anchor = (if !_settle_anchor >= 0 then !_settle_anchor else !_anchor_last): Int
-  val pg = (case+ reading_get() of @(p, _, _, _) => p): Int
+  val @(pg, anchor) = (case+ reading_get() of @(p, t, _, _) => _place_kept(p, t)): @(Int, Int)
   val () = _measure_pagination()
 in _show_target(pg, anchor) end
 
@@ -2526,10 +2566,6 @@ implement reader_pan(dx) =
       val () = $SC.set_scroll_left(cnt_b, 4, p * !_page_w - dx)
     in release_bytes(cnt_f, cnt_b) end
 
-(* Page q of t, q kept to the chapter's pages *)
-fn _page_in {t:pos} (q: Int, t: int t): [p:nat | p < t] int p =
-  if q <= 0 then 0 else if q >= t then t - 1 else q
-
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)
 #pub fn reader_scrolled (): void
@@ -2538,14 +2574,10 @@ implement reader_scrolled () =
   if ~_scrolled() then ()
   else case+ reading_get() of
   | @(p, t, c, tc) => let
-      val step = _step()
       val top = _scroll_top(p)
-      (* the bottom is the last screen, though the browser stops a
-         scroll there short of a whole step *)
       val () = _measure_lit("page")
       val bottom = $DR.get_measure_scroll_h() - $DR.get_measure_h()
-      val q = (if top >= bottom - 2 then t - 1 else _page_in((if top > 0 then (top + step / 2) / step else 0), t)): [q:int] int q
-      val q = _page_in(q, t)
+      val q = _screen_at(top, bottom, t)
     in
       if q = p then ()
       (* the reader moved: a restored place no longer holds them *)

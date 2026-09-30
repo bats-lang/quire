@@ -952,8 +952,9 @@ test('scrolled, the chapter scrolls down: a turn scrolls a screenful, and the pl
   const at = await pct(page);
   await reload(page);
   await expect(view).toBeVisible();
-  await expect.poll(() => pct(page)).toBeGreaterThan(at - 10);
-  expect(await pct(page)).toBeLessThan(at + 10);
+  // the chapter is shown before its layout is final, and the place is
+  // found again once it is: within a screenful of where it was
+  await expect.poll(async () => Math.abs(await pct(page) - at)).toBeLessThan(10);
   // the last screen goes on to the next chapter
   await page.keyboard.press('End');
   await expect.poll(() => pct(page)).toBe(100);
