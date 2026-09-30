@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
-  openSettings, colours, reload, place,
+  openSettings, colours, reload, place, pageShown,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -557,5 +557,6 @@ test('the book last opened and not finished is offered to continue, above the re
   await librarySearch(page).fill('');
   // it opens the book where it was left
   await continueReading(page).getByRole('button').click();
+  await pageShown(page);
   await expect.poll(async () => (await place(page)).p).toBe(2);
 });
