@@ -273,3 +273,46 @@ test('a bookmark is deleted from the bookmarks tab', async ({ page }) => {
   await showChrome(page);
   await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
 });
+
+// Sharing, by the page's script (pwa): here with a share sheet that
+// keeps what it is given
+async function fakeShare(page) {
+  await page.addInitScript(() => {
+    window.shared = [];
+    navigator.canShare = d => !!d.files;
+    navigator.share = async d => {
+      const files = await Promise.all((d.files || []).map(async f => ({ name: f.name, type: f.type, text: await f.text() })));
+      window.shared.push({ text: d.text, files });
+    };
+  });
+}
+const shared = page => page.evaluate(() => window.shared);
+
+test('a selection is shared with its book, and the highlights and notes as the exported file', async ({ page }) => {
+  await fakeShare(page);
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Share').click();
+  await expect.poll(() => shared(page)).toEqual([{ text: '“Para 1.0”\n— Annotations Tests, Marked Up', files: [] }]);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Note').click();
+  await writeNote(page, 'Shared note');
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Share', exact: true }).click();
+  await expect.poll(async () => (await shared(page)).length).toBe(2);
+  const [file] = (await shared(page))[1].files;
+  expect(file).toMatchObject({ name: 'quire-annotations.md', type: 'text/markdown' });
+  expect(file.text).toMatch(/^# Marked Up\n## Annotations Tests\n/);
+  expect(file.text).toMatch(/> Para 1\.0[^\n]*\n\n— Annotations Tests, \*Marked Up\*, Chapter 1\n\n\*\*Note:\*\* Shared note/);
+});
+
+test('where nothing can be shared, Share is not offered', async ({ page }) => {
+  await page.addInitScript(() => { delete Navigator.prototype.share; delete navigator.share; });
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await expect(selection(page).getByRole('button', { name: 'Share', exact: true })).toBeHidden();
+  await openPanel(page);
+  await expect(panel(page).getByRole('button', { name: 'Share', exact: true })).toBeHidden();
+});

@@ -260,6 +260,9 @@ in end
      from the selection; APwaSpeechNext is clicked to turn the page, and
      the page's script fills and keeps the speed and voice choices *)
   | APwaSpeak | APwaSpeakSelection | APwaSpeechNext | APwaSpeechRate | APwaSpeechVoice
+  (* sharing, by the page's script: the selection, cited by the element
+     named; or the element named's text as a file, named *)
+  | APwaShareSelection | APwaShareFile | APwaShareName
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
@@ -271,6 +274,8 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | APwaSpeak() => "data-pwa-speak" | APwaSpeakSelection() => "data-pwa-speak-selection"
   | APwaSpeechNext() => "data-pwa-speech-next" | APwaSpeechRate() => "data-pwa-speech-rate"
   | APwaSpeechVoice() => "data-pwa-speech-voice"
+  | APwaShareSelection() => "data-pwa-share-selection" | APwaShareFile() => "data-pwa-share-file"
+  | APwaShareName() => "data-pwa-share-name"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}
