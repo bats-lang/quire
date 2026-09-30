@@ -14,8 +14,8 @@ src = open(path).read()
 pal = {}
 for t, role, c in re.findall(r"PAL(\d)_(\w+)\(\d, \w+, 0x([0-9a-f]{6})\)", src):
     pal[(int(t), role)] = int(c, 16)
-THEMES = (0, 1, 2)
-NAMES = {0: "light", 1: "sepia", 2: "dark"}
+THEMES = (0, 1, 2, 3, 4)
+NAMES = {0: "light", 1: "sepia", 2: "dark", 3: "night", 4: "grey"}
 
 # Text on a ground (SURF, 4.5:1) and control edges (EDGEP, 3:1)
 SURFS = [("fg", "bg"), ("fg", "card"), ("fg", "line"), ("fg", "hl"), ("muted", "bg"),
@@ -27,7 +27,9 @@ EDGES = [("edge", "card"), ("accent", "card"), ("barfg", "bar")]
 # Each theme's hue families: the first is its neutrals' tint
 FAM = {0: ((25, 50), (135, 165), (-15, 15)),
        1: ((25, 50), (25, 50), (-15, 15)),
-       2: ((25, 50), (130, 160), (-15, 15))}
+       2: ((25, 50), (130, 160), (-15, 15)),
+       3: ((25, 50), (25, 50), (-15, 15)),
+       4: ((25, 50), (130, 160), (-15, 15))}
 NEUTRALS = ["bg", "fg", "muted", "card", "line", "edge", "bar", "barfg", "barhi"]
 OTHERS = ["accent", "accentfg", "hl", "banner", "bannerfg", "mark", "markfg", "danger"]
 ROLES = ["bg", "fg", "muted", "card", "line", "edge", "bar", "barfg", "accent", "accentfg",

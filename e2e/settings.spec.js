@@ -89,7 +89,15 @@ test('a book\'s images are dimmed in the dark theme, unless that is turned off',
   await expect.poll(filter).toBe('none');
   await choose(page, 'Dark');
   await expect.poll(filter).toBe('brightness(0.8)');
-  const dim = sheet(page).getByRole('group', { name: 'Dim images in the dark theme' });
+  // and in the other dark-ground themes
+  await choose(page, 'Night');
+  await expect.poll(filter).toBe('brightness(0.8)');
+  await choose(page, 'Grey');
+  await expect.poll(filter).toBe('brightness(0.8)');
+  await choose(page, 'Sepia');
+  await expect.poll(filter).toBe('none');
+  await choose(page, 'Dark');
+  const dim = sheet(page).getByRole('group', { name: 'Dim images in the dark themes' });
   await expect(dim.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
   await dim.getByRole('button', { name: 'Off' }).click();
   await expect.poll(filter).toBe('none');
@@ -145,6 +153,38 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   await expect.poll(bg).toBe(light);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect.poll(bg).toBe(dark.bg.join(','));
+});
+
+test('the night theme is warm and dim, the grey one between dark and light, and both are kept', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Evening', author: 'Settings Tests', rawChapters: chapters(1, 5) });
+  const lum = ([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  await openSettings(page);
+  await choose(page, 'Dark');
+  const dark = await colours(page);
+  await choose(page, 'Night');
+  await expect.poll(async () => (await colours(page)).bg.join(',')).not.toBe(dark.bg.join(','));
+  const night = await colours(page);
+  // a dark ground, not black, and text low in blue and dimmer than the
+  // dark theme's
+  expect(lum(night.bg)).toBeLessThan(60);
+  expect(Math.max(...night.bg)).toBeGreaterThan(17);
+  expect(night.fg[0] - night.fg[2]).toBeGreaterThan(30);
+  expect(lum(night.fg)).toBeLessThan(lum(dark.fg));
+  await choose(page, 'Grey');
+  await expect.poll(async () => (await colours(page)).bg.join(',')).not.toBe(night.bg.join(','));
+  const grey = await colours(page);
+  const [r, g, b] = grey.bg;
+  expect(r).toBe(g);
+  expect(g).toBe(b);
+  expect(lum(grey.bg)).toBeGreaterThan(lum(dark.bg));
+  expect(lum(grey.bg)).toBeLessThan(100);
+  await expect(sheet(page).getByRole('button', { name: 'Grey', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // kept after a reload, which comes back to the book
+  await page.keyboard.press('Escape');
+  await reload(page);
+  await expect(bookPage(page)).toBeVisible();
+  await expect.poll(async () => (await colours(page)).bg.join(',')).toBe(grey.bg.join(','));
 });
 
 test('reset puts the defaults back', async ({ page }) => {

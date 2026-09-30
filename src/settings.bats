@@ -20,13 +20,13 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
    lh        line spacing in tenths, 12 to 24
    margin    page margins, 0 (narrow) to 4 (wide)
    font      0 Literata, 1 Inter, 2 the book's own
-   theme     0 auto (the system's), 1 light, 2 sepia, 3 dark
+   theme     0 auto (the system's), 1 light, 2 sepia, 3 dark, 4 night, 5 grey
    align     0 ragged, 1 justified
    hyph      0 no hyphenation, 1 hyphenated
    ps        space after a paragraph in tenths of an em, 0 to 20
    ls        letter spacing in hundredths of an em, 0 to 12
    ws        word spacing in hundredths of an em, 0 to 16
-   dim       0 a book's images as they are, 1 dimmed in the dark theme
+   dim       0 a book's images as they are, 1 dimmed in the dark themes
    taps      what a tap on the page does, where: 0 sides (the left
              quarter back, the right on, between them the bars), 1
              forward (the top band the bars, the left quarter back,
@@ -43,7 +43,7 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 #pub typedef set_lh = [v:int | 12 <= v; v <= 24] int v
 #pub typedef set_margin = [v:nat | v <= 4] int v
 #pub typedef set_font = [v:nat | v <= 2] int v
-#pub typedef set_theme = [v:nat | v <= 3] int v
+#pub typedef set_theme = [v:nat | v <= 5] int v
 #pub typedef set_align = [v:nat | v <= 1] int v
 #pub typedef set_hyph = [v:nat | v <= 1] int v
 #pub typedef set_ps = [v:nat | v <= 20] int v
@@ -145,9 +145,9 @@ fn _put_hyph {l:agz}{p:nat | p + 6 <= 512}
   (buf: !$A.arr(byte, l, 512), p: int p, h: set_hyph): [r:nat | r <= p + 6] int r =
   if h = 1 then _puts(buf, p, "auto") else _puts(buf, p, "manual")
 
-fn _put_dim {l:agz}{p:nat | p + 40 <= 512}
-  (buf: !$A.arr(byte, l, 512), p: int p, d: set_dim): [r:nat | r <= p + 40] int r =
-  if d = 1 then _puts(buf, p, ".th-dark .caf img{filter:brightness(.8)}") else p
+fn _put_dim {l:agz}{p:nat | p + 80 <= 512}
+  (buf: !$A.arr(byte, l, 512), p: int p, d: set_dim): [r:nat | r <= p + 80] int r =
+  if d = 1 then _puts(buf, p, ".th-dark .caf img,.th-night .caf img,.th-grey .caf img{filter:brightness(.8)}") else p
 
 (* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
@@ -183,7 +183,9 @@ fn _apply_theme (): void = let
   val t = (!_set).theme
   val t = (if t = 0 then (if !_sys_dark then 3 else 1) else t): set_theme
 in
-  if t = 3 then ui_attr("bats-root", AClass, "app th-dark")
+  if t = 5 then ui_attr("bats-root", AClass, "app th-grey")
+  else if t = 4 then ui_attr("bats-root", AClass, "app th-night")
+  else if t = 3 then ui_attr("bats-root", AClass, "app th-dark")
   else if t = 2 then ui_attr("bats-root", AClass, "app th-sepia")
   else ui_attr("bats-root", AClass, "app th-light")
 end
@@ -212,6 +214,8 @@ fn _show_controls (): void = let
   val () = _pressed("theme-light", x.theme = 1)
   val () = _pressed("theme-sepia", x.theme = 2)
   val () = _pressed("theme-dark", x.theme = 3)
+  val () = _pressed("theme-night", x.theme = 4)
+  val () = _pressed("theme-grey", x.theme = 5)
   val () = _pressed("align-ragged", x.align = 0)
   val () = _pressed("align-justified", x.align = 1)
   val () = _pressed("hyphens-on", x.hyph = 1)
@@ -415,7 +419,7 @@ in
         val lh = _in($AR.low_byte(byte2int0($A.get<byte>(b, 3))), 12, 24, 16)
         val margin = _in($AR.low_byte(byte2int0($A.get<byte>(b, 4))), 0, 4, 2)
         val font = _in($AR.low_byte(byte2int0($A.get<byte>(b, 5))), 0, 2, 0)
-        val theme = _in($AR.low_byte(byte2int0($A.get<byte>(b, 6))), 0, 3, 0)
+        val theme = _in($AR.low_byte(byte2int0($A.get<byte>(b, 6))), 0, 5, 0)
         val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 3, 0)
         (* "S2" has the rest; "S1" had none, and they are the defaults *)
         val s2 = (if n >= 13 then byte2int0($A.get<byte>(b, 1)) = 50 else false): bool
