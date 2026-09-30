@@ -16,6 +16,7 @@ staload "epub_xml.sats"
 staload "book.sats"
 staload "paths.sats"
 staload "ui.sats"
+staload "mem.sats"
 
 (* A label's and a fragment's most bytes *)
 #define LBL 200
@@ -113,8 +114,7 @@ fn _find {z:pos}{l:agz}{m:pos | m <= 1048576}{k:nat | k <= m}
     val () = $A.free<byte>(buf)
     val @(f, b) = $A.freeze<byte>(exact)
     val hit = book_find_entry(s, z, b, k)
-    val () = $A.drop<byte>(f, b)
-    val () = $A.free<byte>($A.thaw<byte>(f))
+    val () = release_bytes(f, b)
   in hit end
 
 (* The entry of book s (z bytes) that href opf_b[ho, ho + hl) names,

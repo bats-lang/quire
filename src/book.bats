@@ -14,6 +14,7 @@
 
 staload "pages.sats"
 staload "paths.sats"
+staload "mem.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
    [d, d + s) in the n-byte file, its method m, and its name [no, no + nl)
@@ -685,8 +686,7 @@ implement book_find_relative (s, z, dno, dl, data, n, ho, h) =
       val () = $A.free<byte>(buf)
       val @(f, b) = $A.freeze<byte>(exact)
       val hit = book_find_entry(s, z, b, k)
-      val () = $A.drop<byte>(f, b)
-      val () = $A.free<byte>($A.thaw<byte>(f))
+      val () = release_bytes(f, b)
     in hit end
   end
 

@@ -23,6 +23,7 @@ staload "import.sats"
 staload "reader.sats"
 staload "toc.sats"
 staload "annot.sats"
+staload "mem.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -223,10 +224,8 @@ fn _view_save (key: int): void = let
   val @(bf, bb) = $A.freeze<byte>(b)
   val @(kf, kb) = $A.freeze<byte>(_view_key())
   val () = $P.discard<Int>($IDB.idb_put(kb, 4, bb, 4))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(bf, bb)
-in $A.free<byte>($A.thaw<byte>(bf)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(bf, bb) end
 
 fn _show_library (): void = let
   val () = !_view := 0
@@ -281,8 +280,7 @@ in k end
 fn _hint_load (): void = let
   val @(kf, kb) = $A.freeze<byte>(_hint_key())
   val p = $IDB.idb_get(kb, 4)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) => let
     val () = (case+ take_blob(h) of
@@ -304,10 +302,8 @@ fn _hint_offer (): void =
     val @(vf, vb) = $A.freeze<byte>(v)
     val @(kf, kb) = $A.freeze<byte>(_hint_key())
     val () = $P.discard<Int>($IDB.idb_put(kb, 4, vb, 1))
-    val () = $A.drop<byte>(kf, kb)
-    val () = $A.free<byte>($A.thaw<byte>(kf))
-    val () = $A.drop<byte>(vf, vb)
-    val () = $A.free<byte>($A.thaw<byte>(vf))
+    val () = release_bytes(kf, kb)
+    val () = release_bytes(vf, vb)
     val () = ui_show("turn-hint", true)
   in
     $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(8000)), lam(_) => let
@@ -329,8 +325,7 @@ fn _show_reader (): void = let
   val () = $A.write_byte(a, 1, 114)
   val @(f, b) = $A.freeze<byte>(a)
   val () = $NAV.push_state(b, 2)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
+  val () = release_bytes(f, b)
   val () = _chrome_set(true)
 in ui_focus("page") end
 
@@ -380,8 +375,7 @@ fn _open_book {i:int} (i: int i): void =
 fn _view_restore (): $P.promise(int, $P.Chained) = let
   val @(kf, kb) = $A.freeze<byte>(_view_key())
   val p = $IDB.idb_get(kb, 4)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) => let
     val key = (case+ take_blob(h) of
@@ -415,8 +409,7 @@ fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val k = lib_key(c, h1, h2)
   val @(f, b) = $A.freeze<byte>(k)
   val () = $P.discard<Int>($IDB.idb_delete(b, 15))
-  val () = $A.drop<byte>(f, b)
-in $A.free<byte>($A.thaw<byte>(f)) end
+in release_bytes(f, b) end
 
 (* Archives book i: its record is kept and its file deleted. The file
    goes only when the Undo offer does: until then Undo puts the book
@@ -724,8 +717,7 @@ fn _copy_selection (): void =
         val () = $DC.blob_free(b)
         val @(f, bb) = $A.freeze<byte>(a)
         val () = $P.discard<Int>($P.vow($CB.clipboard_write(bb, n)))
-        val () = $A.drop<byte>(f, bb)
-      in $A.free<byte>($A.thaw<byte>(f)) end
+      in release_bytes(f, bb) end
     end
 
 (* Exports the open book's annotations *)
@@ -985,8 +977,7 @@ fn _search_run (): void = let
   val () = $A.write_text(a, 0, $A.text_lit("search-field"), 12)
   val @(f, b) = $A.freeze<byte>(a)
   val r = $DR.read_input_value(b, 12)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
+  val () = release_bytes(f, b)
 in
   case+ r of
   | ~$R.none() => reader_search($A.alloc<byte>(1), 0)

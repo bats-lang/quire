@@ -14,6 +14,7 @@ staload "book.sats"
 staload "modal.sats"
 staload "undo.sats"
 staload "epub_xml.sats"
+staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
@@ -402,8 +403,7 @@ fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val k = lib_key(c, h1, h2)
   val @(f, b) = $A.freeze<byte>(k)
   val () = $P.discard<Int>($IDB.idb_delete(b, 15))
-  val () = $A.drop<byte>(f, b)
-in $A.free<byte>($A.thaw<byte>(f)) end
+in release_bytes(f, b) end
 
 (* Sets book i's shelf, and keeps and shows the library *)
 #pub fn lib_set_shelf {i:int} (i: int i, shelf: Int): void
@@ -623,23 +623,17 @@ in
   case+ piece_new(n) of
   | ~NoPiece() => let prval () = fold@(c) in lib_put(c) end
   | ~Piece(ow, out) => let
-      val () = $A.write_byte(out, 0, 81) (* Q *)
-      val () = $A.write_byte(out, 1, 76) (* L *)
-      val () = $A.write_byte(out, 2, 66) (* B *)
-      val () = $A.write_byte(out, 3, 49) (* 1 *)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB1"), 4)
       val m = _ser(out, 4, bs)
       prval () = fold@(c)
       val () = lib_put(c)
       val @(f, b) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(f, b, m)
       val ka = $A.alloc<byte>(3)
-      val () = $A.write_byte(ka, 0, 108) (* l *)
-      val () = $A.write_byte(ka, 1, 105) (* i *)
-      val () = $A.write_byte(ka, 2, 98)  (* b *)
+      val () = $A.write_text(ka, 0, $A.text_lit("lib"), 3)
       val @(kf, kb) = $A.freeze<byte>(ka)
       val () = $P.discard<Int>($IDB.idb_put(kb, 3, used, m))
-      val () = $A.drop<byte>(kf, kb)
-      val () = $A.free<byte>($A.thaw<byte>(kf))
+      val () = release_bytes(kf, kb)
       val b = $A.borrow_join<byte>(f, used, rest)
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end
@@ -713,8 +707,7 @@ implement lib_load () = let
   val () = $A.write_byte(ka, 2, 98)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_get(kb, 3)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_content(h) of
@@ -824,8 +817,7 @@ fn _show_cover {nb:pos | nb <= 16}{i:nat} (base: string nb, i: int i, h1: int, h
   val key = lib_key(99, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(key)
   val p = $IDB.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_content(h) of
@@ -844,10 +836,8 @@ in
         val () = $BDOM.set_image_src(ib, il, db, n, mb, ml)
         val () = $A.drop<byte>(df, db)
         val () = piece_free(ow, $A.thaw<byte>(df))
-        val () = $A.drop<byte>(if_, ib)
-        val () = $A.free<byte>($A.thaw<byte>(if_))
-        val () = $A.drop<byte>(mf, mb)
-        val () = $A.free<byte>($A.thaw<byte>(mf))
+        val () = release_bytes(if_, ib)
+        val () = release_bytes(mf, mb)
       in $P.ret<int>(0) end))
 end
 
@@ -949,8 +939,7 @@ implement lib_a11y_show (h1, h2) = let
   val key = lib_key(121, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(key)
   val p = $IDB.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_content(h) of
@@ -983,8 +972,7 @@ implement lib_show_cover_in (id, h1, h2, code) = let
   val key = lib_key(99, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(key)
   val p = $IDB.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_content(h) of
@@ -1003,10 +991,8 @@ in
         val () = $BDOM.set_image_src(ib, il, db, n, mb, ml)
         val () = $A.drop<byte>(df, db)
         val () = piece_free(ow, $A.thaw<byte>(df))
-        val () = $A.drop<byte>(if_, ib)
-        val () = $A.free<byte>($A.thaw<byte>(if_))
-        val () = $A.drop<byte>(mf, mb)
-        val () = $A.free<byte>($A.thaw<byte>(mf))
+        val () = release_bytes(if_, ib)
+        val () = release_bytes(mf, mb)
       in $P.ret<int>(0) end))
 end
 
