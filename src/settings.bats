@@ -149,7 +149,7 @@ fn _put_dim {l:agz}{p:nat | p + 40 <= 512}
   (buf: !$A.arr(byte, l, 512), p: int p, d: set_dim): [r:nat | r <= p + 40] int r =
   if d = 1 then _puts(buf, p, ".th-dark .caf img{filter:brightness(.8)}") else p
 
-(* The reader's typography as CSS, in style element qdyn *)
+(* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
   val x = !_set
   val buf = $A.alloc<byte>(512)
@@ -176,7 +176,7 @@ fn _apply_type (): void = let
   val off = _puts(buf, off, "em}")
   (* a bright picture glares on the dark theme's ground *)
   val off = _put_dim(buf, off, x.dim)
-in ui_text_buf("qdyn", buf, off) end
+in ui_text_buf("style-type", buf, off) end
 
 (* Whether the theme shown is dark, light or sepia: the root's class *)
 fn _apply_theme (): void = let
@@ -196,42 +196,42 @@ fn _show_controls (): void = let
   val x = !_set
   val buf = $A.alloc<byte>(32)
   val off = $S.int_to_str(buf, 0, 32, x.size)
-  val () = ui_text_buf("qfsv", buf, off)
+  val () = ui_text_buf("size-value", buf, off)
   val buf = $A.alloc<byte>(32)
   val off = $S.int_to_str(buf, 0, 32, x.lh / 10)
   val off = _puts(buf, off, ".")
   val off = $S.int_to_str(buf, off, 32, $AR.band_g1($AR.low_byte(x.lh - (x.lh / 10) * 10), 15))
-  val () = ui_text_buf("qlhv", buf, off)
+  val () = ui_text_buf("line-height-value", buf, off)
   val buf = $A.alloc<byte>(32)
   val off = $S.int_to_str(buf, 0, 32, x.margin + 1)
-  val () = ui_text_buf("qmgv", buf, off)
-  val () = _pressed("qff0", x.font = 0)
-  val () = _pressed("qff1", x.font = 1)
-  val () = _pressed("qff2", x.font = 2)
-  val () = _pressed("qth0", x.theme = 0)
-  val () = _pressed("qth1", x.theme = 1)
-  val () = _pressed("qth2", x.theme = 2)
-  val () = _pressed("qth3", x.theme = 3)
-  val () = _pressed("qal0", x.align = 0)
-  val () = _pressed("qal1", x.align = 1)
-  val () = _pressed("qhy1", x.hyph = 1)
-  val () = _pressed("qhy0", x.hyph = 0)
-  val () = _pressed("qdi1", x.dim = 1)
-  val () = _pressed("qdi0", x.dim = 0)
-  val () = _pressed("qtz0", x.taps = 0)
-  val () = _pressed("qtz1", x.taps = 1)
-  val () = _pressed("qtz2", x.taps = 2)
-  val () = _pressed("qvk1", x.vol = 1)
-  val () = _pressed("qvk0", x.vol = 0)
+  val () = ui_text_buf("margins-value", buf, off)
+  val () = _pressed("font-literata", x.font = 0)
+  val () = _pressed("font-inter", x.font = 1)
+  val () = _pressed("font-book", x.font = 2)
+  val () = _pressed("theme-auto", x.theme = 0)
+  val () = _pressed("theme-light", x.theme = 1)
+  val () = _pressed("theme-sepia", x.theme = 2)
+  val () = _pressed("theme-dark", x.theme = 3)
+  val () = _pressed("align-ragged", x.align = 0)
+  val () = _pressed("align-justified", x.align = 1)
+  val () = _pressed("hyphens-on", x.hyph = 1)
+  val () = _pressed("hyphens-off", x.hyph = 0)
+  val () = _pressed("dim-on", x.dim = 1)
+  val () = _pressed("dim-off", x.dim = 0)
+  val () = _pressed("taps-sides", x.taps = 0)
+  val () = _pressed("taps-forward", x.taps = 1)
+  val () = _pressed("taps-one-hand", x.taps = 2)
+  val () = _pressed("volume-keys-turn", x.vol = 1)
+  val () = _pressed("volume-keys-off", x.vol = 0)
   val buf = $A.alloc<byte>(32)
   val off = _put_tenths(buf, 0, 32, x.ps)
-  val () = ui_text_buf("qpsv", buf, off)
+  val () = ui_text_buf("paragraph-value", buf, off)
   val buf = $A.alloc<byte>(32)
   val off = _put_hundredths(buf, 0, 32, x.ls)
-  val () = ui_text_buf("qlsv", buf, off)
+  val () = ui_text_buf("letter-value", buf, off)
   val buf = $A.alloc<byte>(32)
   val off = _put_hundredths(buf, 0, 32, x.ws)
-in ui_text_buf("qwsv", buf, off) end
+in ui_text_buf("word-value", buf, off) end
 
 (* ============================================================
    Storage: key "set"
@@ -280,22 +280,22 @@ implement set_sliders () = let
   val x = !_set
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.size)
-  val () = ui_range("qsr1", "qsl1", "Size", "qfsr", "12", "32", "qfsv", a, k)
+  val () = ui_range("size-row", "size-label", "Size", "size-range", "12", "32", "size-value", a, k)
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.lh)
-  val () = ui_range("qsr2", "qsl2", "Line spacing", "qlhr", "12", "24", "qlhv", a, k)
+  val () = ui_range("line-height-row", "line-height-label", "Line spacing", "line-height-range", "12", "24", "line-height-value", a, k)
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.margin)
-  val () = ui_range("qsr3", "qsl3", "Margins", "qmgr", "0", "4", "qmgv", a, k)
+  val () = ui_range("margins-row", "margins-label", "Margins", "margins-range", "0", "4", "margins-value", a, k)
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.ps)
-  val () = ui_range("qsr4", "qsl4", "Paragraph spacing", "qpsr", "0", "20", "qpsv", a, k)
+  val () = ui_range("paragraph-row", "paragraph-label", "Paragraph spacing", "paragraph-range", "0", "20", "paragraph-value", a, k)
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.ls)
-  val () = ui_range("qsr5", "qsl5", "Letter spacing", "qlsr", "0", "12", "qlsv", a, k)
+  val () = ui_range("letter-row", "letter-label", "Letter spacing", "letter-range", "0", "12", "letter-value", a, k)
   val a = $A.alloc<byte>(16)
   val k = $S.int_to_str(a, 0, 16, x.ws)
-  val () = ui_range("qsr6", "qsl6", "Word spacing", "qwsr", "0", "16", "qwsv", a, k)
+  val () = ui_range("word-row", "word-label", "Word spacing", "word-range", "0", "16", "word-value", a, k)
 in _show_controls() end
 
 (* Applies the settings (and shows them in the panel), then saves them

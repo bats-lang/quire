@@ -318,7 +318,7 @@ fn _on_page (i: Int): bool =
     | ~$R.err(_) => false
     | ~$R.ok(v) => if v <= 0 then false else let
         val x = $DR.get_measure_x()
-        val () = ui_measure("qcnt")
+        val () = ui_measure("page")
         val cx = $DR.get_measure_x()
         val cw = $DR.get_measure_w()
       in if x >= cx then x < cx + cw else false end
@@ -353,11 +353,11 @@ in r end
 
 implement annot_star () =
   if _here() >= 0 then let
-    val () = ui_text("qbmk", "\xE2\x98\x85")
-  in ui_attr("qbmk", APressed, "true") end
+    val () = ui_text("bookmark-button", "\xE2\x98\x85")
+  in ui_attr("bookmark-button", APressed, "true") end
   else let
-    val () = ui_text("qbmk", "\xE2\x98\x86")
-  in ui_attr("qbmk", APressed, "false") end
+    val () = ui_text("bookmark-button", "\xE2\x98\x86")
+  in ui_attr("bookmark-button", APressed, "false") end
 
 (* xs without its i-th annotation *)
 fun _remove {k:nat} .<k>. (xs: ann(k), i: int): [j:nat | j <= k] @(ann(j), int j) =
@@ -591,7 +591,7 @@ implement annot_note_show (i) = let
   val @(b, nl) = _note_at(xs, i)
   prval () = fold@(c)
   val () = _put(c)
-in ui_text_buf("qmta", b, nl) end
+in ui_text_buf("dialog-note", b, nl) end
 
 (* Deletes annotation i. Private: outside this module an annotation
    goes only by annot_delete_highlight or annot_delete_bookmark, which
@@ -696,10 +696,10 @@ implement annot_delete_bookmark (i) =
 
 (* The note in the dialog's text area, kept as annotation i's *)
 fn _note_save (i: int): void = let
-  val a = $A.alloc<byte>(4)
-  val () = $A.write_text(a, 0, $A.text_lit("qmta"), 4)
+  val a = $A.alloc<byte>(11)
+  val () = $A.write_text(a, 0, $A.text_lit("dialog-note"), 11)
   val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 4)
+  val r = $DR.read_input_value(b, 11)
   val () = $A.drop<byte>(f, b)
   val () = $A.free<byte>($A.thaw<byte>(f))
 in
@@ -778,7 +778,7 @@ in r end
    ============================================================ *)
 
 (* A child element of numbered parent pre1<i>, numbered pre2<i> *)
-fn _child {s1,s2:pos | s1 <= 4; s2 <= 4}{i:nat}{nc:pos | nc < 256}
+fn _child {s1,s2:pos | s1 <= 16; s2 <= 16}{i:nat}{nc:pos | nc < 256}
   (pre1: string s1, pre2: string s2, i: int i, t: tag, cls: string nc): void = let
   val @(pa, pl) = nid_make(pre1, i)
   val @(ca, cl) = nid_make(pre2, i)
@@ -787,21 +787,21 @@ fn _child {s1,s2:pos | s1 <= 4; s2 <= 4}{i:nat}{nc:pos | nc < 256}
 in ui_attr_n(ca, cl, AClass, cls) end
 
 (* A button child named by what is put in it *)
-fn _child_btn {s1,s2:pos | s1 <= 4; s2 <= 4}{i:nat}{nc:pos | nc < 256}
+fn _child_btn {s1,s2:pos | s1 <= 16; s2 <= 16}{i:nat}{nc:pos | nc < 256}
   (pre1: string s1, pre2: string s2, i: int i, cls: string nc): void = let
   val @(pa, pl) = nid_make(pre1, i)
   val @(ca, cl) = nid_make(pre2, i)
 in ui_btn_nn(pa, pl, ca, cl, cls) end
 
 (* A button child named by its label *)
-fn _child_text_btn {s1,s2:pos | s1 <= 4; s2 <= 4}{i:nat}{nc:pos | nc < 256}{nl:pos | nl < 256}
+fn _child_text_btn {s1,s2:pos | s1 <= 16; s2 <= 16}{i:nat}{nc:pos | nc < 256}{nl:pos | nl < 256}
   (pre1: string s1, pre2: string s2, i: int i, cls: string nc, label: string nl): void = let
   val @(pa, pl) = nid_make(pre1, i)
   val @(ca, cl) = nid_make(pre2, i)
 in ui_text_btn_nn(pa, pl, ca, cl, cls, label) end
 
 (* Element pre<i>'s text: a[0, k) *)
-fn _text_of {sn:pos | sn <= 4}{i:nat}{l:agz}{m:pos}{k:nat | k < m; k < 65536}
+fn _text_of {sn:pos | sn <= 16}{i:nat}{l:agz}{m:pos}{k:nat | k < m; k < 65536}
   (pre: string sn, i: int i, a: !$A.arr(byte, l, m), k: int k): void = let
   val b = $A.alloc<byte>(k + 1)
   val () = _dup(a, b, k, 0)
@@ -810,38 +810,38 @@ in ui_text_n_buf(ia, il, b, k) end
 
 (* The heading of chapter ch's annotations, in the list lst *)
 fn _heading {ni:pos | ni < 256}{c:nat} (lst: string ni, ch: int c): void = let
-  val @(ga, gl) = nid_make("qg", ch)
+  val @(ga, gl) = nid_make("annot-group", ch)
   val () = ui_add_n(lst, ga, gl, TDiv)
-  val @(ga, gl) = nid_make("qg", ch)
+  val @(ga, gl) = nid_make("annot-group", ch)
   val () = ui_attr_n(ga, gl, AClass, "grp")
   val @(lb, lk) = toc_label_of(ch)
-  val @(ga, gl) = nid_make("qg", ch)
+  val @(ga, gl) = nid_make("annot-group", ch)
 in ui_text_n_buf(ga, gl, lb, lk) end
 
 (* One row of the annotations list: highlight i *)
 fn _hrow {i:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl < t2; nl < 65536}
   (i: int i, t: !$A.arr(byte, l1, t1), tl: int tl, n: !$A.arr(byte, l2, t2), nl: int nl): void = let
-  val @(ra, rl) = nid_make("qr", i)
-  val () = ui_add_n("qanl", ra, rl, TDiv)
-  val @(ra, rl) = nid_make("qr", i)
+  val @(ra, rl) = nid_make("highlight-row", i)
+  val () = ui_add_n("annotations-list", ra, rl, TDiv)
+  val @(ra, rl) = nid_make("highlight-row", i)
   val () = ui_attr_n(ra, rl, AClass, "hrow")
-  val () = _child_btn("qr", "qa", i, "hgo")
-  val () = _child("qa", "qq", i, TSpan, "hq")
-  val () = _text_of("qq", i, t, tl)
+  val () = _child_btn("highlight-row", "highlight-go", i, "hgo")
+  val () = _child("highlight-go", "highlight-quote", i, TSpan, "hq")
+  val () = _text_of("highlight-quote", i, t, tl)
   val () = (if nl > 0 then let
-      val () = _child("qa", "qo", i, TSpan, "hn")
-    in _text_of("qo", i, n, nl) end else ())
-  val () = _child("qr", "qw", i, TDiv, "hbtns")
-  val () = (if nl > 0 then _child_text_btn("qw", "qn", i, "hbtn", "Edit note")
-    else _child_text_btn("qw", "qn", i, "hbtn", "Add note"))
-in _child_text_btn("qw", "qd", i, "hbtn", "Delete") end
+      val () = _child("highlight-go", "highlight-note", i, TSpan, "hn")
+    in _text_of("highlight-note", i, n, nl) end else ())
+  val () = _child("highlight-row", "highlight-tools", i, TDiv, "hbtns")
+  val () = (if nl > 0 then _child_text_btn("highlight-tools", "highlight-edit", i, "hbtn", "Edit note")
+    else _child_text_btn("highlight-tools", "highlight-edit", i, "hbtn", "Add note"))
+in _child_text_btn("highlight-tools", "highlight-delete", i, "hbtn", "Delete") end
 
 fun _hrows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i, last: Int): int =
   case+ xs of
   | ann_nil() => i
   | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, n, nl, rest) => let
       val () = (if kd = 1 then let
-          val () = (if c <> last then (if c >= 0 then _heading("qanl", c) else ()) else ())
+          val () = (if c <> last then (if c >= 0 then _heading("annotations-list", c) else ()) else ())
         in _hrow(i, t, tl, n, nl) end else ())
       val last2 = (if kd = 1 then c else last): Int
       val r = _hrows(rest, i + 1, last2)
@@ -861,7 +861,7 @@ fun _count_kind {k:nat} .<k>. (xs: !ann(k), kd: Int): int =
 #pub fn annot_render (): void
 
 implement annot_render () = let
-  val () = ui_clear("qanl")
+  val () = ui_clear("annotations-list")
   val c = _take()
   val+ @AnnCell(xs, _) = c
   val n = _count_kind(xs, 1)
@@ -870,28 +870,28 @@ implement annot_render () = let
   val () = _put(c)
 in
   if n = 0 then let
-    val () = ui_add("qanl", "qane", TDiv)
-    val () = ui_class("qane", "empty")
-  in ui_text("qane", "No highlights yet. Select text to highlight it.") end
+    val () = ui_add("annotations-list", "annotations-empty", TDiv)
+    val () = ui_class("annotations-empty", "empty")
+  in ui_text("annotations-empty", "No highlights yet. Select text to highlight it.") end
   else ()
 end
 
 (* One row of the bookmarks list: bookmark i *)
 fn _brow {i:nat}{c:nat}{l1:agz}{t1:pos}{tl:nat | tl < t1; tl < 65536}
   (i: int i, ch: int c, t: !$A.arr(byte, l1, t1), tl: int tl): void = let
-  val @(ra, rl) = nid_make("qbr", i)
-  val () = ui_add_n("qtbl", ra, rl, TDiv)
-  val @(ra, rl) = nid_make("qbr", i)
+  val @(ra, rl) = nid_make("bookmark-row", i)
+  val () = ui_add_n("bookmarks-list", ra, rl, TDiv)
+  val @(ra, rl) = nid_make("bookmark-row", i)
   val () = ui_attr_n(ra, rl, AClass, "hrow")
-  val () = _child_btn("qbr", "qb", i, "hgo")
-  val () = _child("qb", "qy", i, TSpan, "bt")
+  val () = _child_btn("bookmark-row", "bookmark-go", i, "hgo")
+  val () = _child("bookmark-go", "bookmark-title", i, TSpan, "bt")
   val @(lb, lk) = toc_label_of(ch)
-  val @(ya, yl) = nid_make("qy", i)
+  val @(ya, yl) = nid_make("bookmark-title", i)
   val () = ui_text_n_buf(ya, yl, lb, lk)
   val () = (if tl > 0 then let
-      val () = _child("qb", "qz", i, TSpan, "snip")
-    in _text_of("qz", i, t, tl) end else ())
-in _child_text_btn("qbr", "qx", i, "hbtn", "Delete") end
+      val () = _child("bookmark-go", "bookmark-snippet", i, TSpan, "snip")
+    in _text_of("bookmark-snippet", i, t, tl) end else ())
+in _child_text_btn("bookmark-row", "bookmark-delete", i, "hbtn", "Delete") end
 
 fun _brows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i): void =
   case+ xs of
@@ -906,7 +906,7 @@ fun _brows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i): void =
 #pub fn annot_render_bookmarks (): void
 
 implement annot_render_bookmarks () = let
-  val () = ui_clear("qtbl")
+  val () = ui_clear("bookmarks-list")
   val c = _take()
   val+ @AnnCell(xs, _) = c
   val n = _count_kind(xs, 0)
@@ -915,9 +915,9 @@ implement annot_render_bookmarks () = let
   val () = _put(c)
 in
   if n = 0 then let
-    val () = ui_add("qtbl", "qtbe", TDiv)
-    val () = ui_class("qtbe", "empty")
-  in ui_text("qtbe", "No bookmarks yet. Tap the star to add one.") end
+    val () = ui_add("bookmarks-list", "bookmarks-empty", TDiv)
+    val () = ui_class("bookmarks-empty", "empty")
+  in ui_text("bookmarks-empty", "No bookmarks yet. Tap the star to add one.") end
   else ()
 end
 

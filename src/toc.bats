@@ -483,16 +483,16 @@ fun _current {k:nat} .<k>. (t: !toc(k), ch: int, i: int, best: int): int =
 fn _level_class {v:nat | v <= 3} (v: int v): [n:pos | n < 256] string n =
   if v = 0 then "pi" else if v = 1 then "pi pi1" else if v = 2 then "pi pi2" else "pi pi3"
 
-(* A row of the list: button qe<i> with the label lb[0, ll) *)
+(* A row of the list: button toc-row<i> with the label lb[0, ll) *)
 fn _row {l:agz}{m:pos}{ll:pos | ll <= LBL; ll <= m}{i:nat}{v:nat | v <= 3}
   (i: int i, v: int v, lb: !$A.arr(byte, l, m), ll: int ll, cur: bool): void = let
-  val @(ri, rl) = nid_make("qe", i)
-  val () = ui_btn_n("qtcl", ri, rl, _level_class(v))
-  val @(ri, rl) = nid_make("qe", i)
+  val @(ri, rl) = nid_make("toc-row", i)
+  val () = ui_btn_n("contents-list", ri, rl, _level_class(v))
+  val @(ri, rl) = nid_make("toc-row", i)
   val () = (if cur then ui_attr_n(ri, rl, ACurrent, "true") else ui_attr_n(ri, rl, ACurrent, "false"))
   val tb = $A.alloc<byte>(ll)
   val () = _dup(lb, tb, ll, 0)
-  val @(ri, rl) = nid_make("qe", i)
+  val @(ri, rl) = nid_make("toc-row", i)
 in ui_text_n_buf(ri, rl, tb, ll) end
 
 fun _rows {k:nat}{i:nat} .<k>. (t: !toc(k), i: int i, cur: int): void =
@@ -526,7 +526,7 @@ fun _chapter_rows {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc, cur: int)
 #pub fn toc_render {tc:nat} (ch: int, tc: int tc): void
 
 implement toc_render (ch, tc) = let
-  val () = ui_clear("qtcl")
+  val () = ui_clear("contents-list")
   val c = _take()
   val+ @TocCell(t, k) = c
   val cur = _current(t, ch, 0, ~1)
@@ -694,7 +694,7 @@ end
 (* The chapter's title in the reader's top bar *)
 #pub fn toc_title {c:nat} (ch: int c): void
 
-implement toc_title (ch) = toc_title_in("qcht", ch)
+implement toc_title (ch) = toc_title_in("chapter-title", ch)
 
 (* The label of the entry at index i of t, copied; none when there is
    no such entry *)
