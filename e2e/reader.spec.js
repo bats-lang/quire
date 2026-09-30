@@ -426,6 +426,47 @@ test('a book read right to left turns the other way', async ({ page }) => {
   await expect.poll(async () => (await place(page)).p).toBe(1);
 });
 
+// A right-to-left book that does not say so in its spine: a Hebrew
+// story (test/fixtures/strikerville-he.epub, its language "he", its
+// pages dir="rtl"), read as Readium reads it
+test('a Hebrew book whose spine does not say reads right to left: its text, its columns and its turns', async ({ page }) => {
+  await start(page);
+  await importFiles(page, ['test/fixtures/strikerville-he.epub'], 1);
+  await openBook(page, 'ההגנה על שובתיה');
+  await expect(bookPage(page)).toBeVisible();
+  expect(await bookPage(page).evaluate(e => getComputedStyle(e).direction)).toBe('rtl');
+  // on to the story (past its title page and contents), to the left
+  // (the title page and the contents are named alike: turned, then waited for)
+  for (let k = 0; k < 6 && (await place(page)).t < 4; k++) {
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(400);
+  }
+  expect(await place(page)).toMatchObject({ p: 1 });
+  expect((await place(page)).t).toBeGreaterThanOrEqual(4);
+  // on: to the left, by key, by a tap on the left side, and back
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  const box = await bookPage(page).boundingBox();
+  await page.mouse.click(box.x + 10, box.y + box.height / 2);
+  await expect.poll(async () => (await place(page)).p).toBe(3);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  // the paragraphs run right to left, their lines ending on the left
+  const p = bookPage(page).locator('p').nth(3);
+  expect(await p.evaluate(e => getComputedStyle(e).direction)).toBe('rtl');
+  // a spread starts on the right: its first page's text is right of the
+  // page's middle, the next page's left of it
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' }).getByRole('button', { name: 'Two', exact: true }).click();
+  await page.keyboard.press('Escape');
+  const firstOnScreen = await bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    const r = [...doc.querySelectorAll('p')].flatMap(e => [...e.getClientRects()]).filter(r => r.width > 0 && r.right > c.left && r.left < c.right);
+    return r.length ? { first: r[0].left >= c.left + c.width / 2 - 1, last: r[r.length - 1].right <= c.left + c.width / 2 + 1 } : null;
+  });
+  expect(firstOnScreen).toEqual({ first: true, last: true });
+});
+
 test('a book\'s own font is used when chosen', async ({ page }) => {
   await start(page);
   const font = (await import('node:fs')).readFileSync('assets/fonts/inter-latin.woff2');
@@ -897,6 +938,35 @@ test.describe('on a touch screen', () => {
     expect(offsets[1] - offsets[0]).toBeGreaterThan(30);
     expect(offsets[2]).toBe(offsets[0]);
     expect((await place(page)).p).toBe(1);
+  });
+  test('right to left, a swipe to the right turns on, the page following the finger from the next one on the left', async ({ page }) => {
+    await start(page);
+    await readBook(page, { ...book('Swiped Leftward', 1, 20), rtl: true });
+    const box = await bookPage(page).boundingBox();
+    const y = box.y + box.height / 2;
+    const mid = box.x + box.width / 2;
+    // held part way to the right: what shows is to the left of the page
+    // at rest (the next one)
+    const offsets = await bookPage(page).evaluate(async (el, [mid, y]) => {
+      const ev = (type, x) => el.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 11, pointerType: 'touch', isPrimary: true, clientX: x, clientY: y,
+      }));
+      const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const rest = el.scrollLeft;
+      ev('pointerdown', mid - 60);
+      for (const dx of [20, 40, 60]) { await frame(); ev('pointermove', mid - 60 + dx); }
+      await frame(); await frame();
+      const held = el.scrollLeft;
+      ev('pointercancel', mid);
+      await frame();
+      return [rest, held];
+    }, [mid, y]);
+    expect(offsets[0] - offsets[1]).toBeGreaterThan(30);
+    // a flick to the right: the next page; to the left: back
+    await drag(page, across(mid - 60, mid + 60, y, 4), 16);
+    await expect.poll(async () => (await place(page)).p).toBe(2);
+    await drag(page, across(mid + 60, mid - 60, y, 4), 16);
+    await expect.poll(async () => (await place(page)).p).toBe(1);
   });
 });
 

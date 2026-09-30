@@ -1596,7 +1596,9 @@ fn _g_3_reader {r:nat | r >= 7000} (sh: sheet(r, 0)): [q:nat | q >= r - 7000] sh
   val sh = lay(sh, Margin(), "1em auto")
   val sh = lay(sh, FontStyle(), "italic")
   val sh = close(sh)
-  val sh = rule(sh, ".caf.rtl>*")
+  (* right to left, the page itself: its columns go on to the left, and
+     a spread's first page is the right one *)
+  val sh = rule(sh, ".caf.rtl")
   val sh = lay(sh, Direction(), "rtl")
   val sh = close(sh)
   val sh = rule(sh, ".caf figure")

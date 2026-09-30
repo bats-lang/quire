@@ -525,9 +525,12 @@ end
    scrolled): on the page shown, when that is the page's width *)
 fn _starts_in {i:nat} (i: int i, lo: int, hi: int): bool =
   if ~_measure_node(i) then false
-  else let
-    val x = (if _scrolled() then $DR.get_measure_y() else $DR.get_measure_x()): int
-  in x >= lo && x < hi end
+  else if _scrolled() then let val y = $DR.get_measure_y() in y >= lo && y < hi end
+  (* right to left, a node starts at its right edge *)
+  else if !_rtl then let
+    val xr = $DR.get_measure_x() + $DR.get_measure_w()
+  in xr > lo + 1 && xr <= hi + 1 end
+  else let val x = $DR.get_measure_x() in x >= lo && x < hi end
 
 (* The first of content nodes i to i + j that starts on the page, [lo,
    hi) across; -1 when none does *)
@@ -596,6 +599,7 @@ fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c):
   else if ~_measure_node(i) then cur
   else let
     val x = $DR.get_measure_x()
+    val xr = x + $DR.get_measure_w()
     val () = _measure_lit("page")
     val cx = $DR.get_measure_x()
     val cw = $DR.get_measure_w()
@@ -603,8 +607,10 @@ fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c):
     if cw <= 0 then cur
     else let
       (* within a pixel or two of the page's edge is on it, as _anchor_now
-         takes a node there (columns can fall between pixels) *)
-      val d = x - cx + 2
+         takes a node there (columns can fall between pixels); right to
+         left, the pages go on to the left, and a node starts at its
+         right edge *)
+      val d = (if !_rtl then cx + cw - xr + 2 else x - cx + 2): Int
       (* whole pages from the one shown, rounded down *)
       val k = (if d >= 0 then d / cw else ~((cw - 1 - d) / cw)): Int
       val p = cur + k
@@ -910,7 +916,8 @@ fn _show_page_down {t:pos}{p:nat | p < t}{c,tc:nat}
   val () = !_page_w := cw
   val () = !_page_h := $DR.get_measure_h()
   val () = (if _scrolled() then $SC.set_scroll_top(cnt_b, 4, (if top >= 0 then top else page * _step()))
-    else $SC.set_scroll_left(cnt_b, 4, page * cw))
+    (* right to left, the pages go on to the left: a scroll below 0 *)
+    else $SC.set_scroll_left(cnt_b, 4, (if !_rtl then ~(page * cw) else page * cw)))
   val () = release_bytes(cnt_f, cnt_b)
 in _place_shown(p, t, c, tc) end
 
@@ -2595,7 +2602,8 @@ implement reader_pan(dx) =
       val cnt_narr = $A.alloc<byte>(4)
       val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
       val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
-      val () = $SC.set_scroll_left(cnt_b, 4, p * !_page_w - dx)
+      val at = (if !_rtl then ~(p * !_page_w) else p * !_page_w): int
+      val () = $SC.set_scroll_left(cnt_b, 4, at - dx)
     in release_bytes(cnt_f, cnt_b) end
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser

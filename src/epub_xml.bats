@@ -796,7 +796,8 @@ fun _spine_rtl_r
     in if r >= 0 then r else _spine_rtl_r(data, rest) end
   | $X.xml_nodes_nil() => ~1
 
-(* 1 or 0 at a <spine>, -1 when the node has none *)
+(* At a <spine>: 1 right to left, 0 left to right, 2 when it does not
+   say (or says "default"); -1 when the node has none *)
 and _spine_rtl
   {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): int =
@@ -807,22 +808,60 @@ and _spine_rtl
     if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
       var _c_ppd = @[char][26]('p', 'a', 'g', 'e', '-', 'p', 'r', 'o', 'g', 'r', 'e', 's', 's', 'i', 'o', 'n', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n')
       var _c_rtl = @[char][3]('r', 't', 'l')
+      var _c_ltr = @[char][3]('l', 't', 'r')
     in
+      (* 2: none said, or "default" *)
       case+ _find_attr_val(data, attrs, _c_ppd, 26) of
-      | ~xspan_at(vo, vk) => if xml_name_eq(data, vo, vk, _c_rtl, 3) then 1 else 0
-      | ~xspan_none() => 0
+      | ~xspan_at(vo, vk) => if xml_name_eq(data, vo, vk, _c_rtl, 3) then 1
+          else if xml_name_eq(data, vo, vk, _c_ltr, 3) then 0 else 2
+      | ~xspan_none() => 2
     end
     else _spine_rtl_r(data, children)
   end
   | $X.xml_text(_, _) => ~1
 
-(* Whether the book reads right to left (its spine's
-   page-progression-direction) *)
+(* Where a language tag's primary subtag ends in data[o, o + k): at its
+   first '-' or '_' *)
+fun _subtag_end {lb:agz}{n:pos}{o,k:nat | o + k <= n}{j:nat | j <= k} .<k - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, j: int j): [e:nat | e <= k] int e =
+  if j >= k then k
+  else let
+    val c = byte2int0($A.read<byte>(data, o + j))
+  in if c = 45 || c = 95 then j else _subtag_end(data, o, k, j + 1) end
+
+(* Whether the language tag data[o, o + k) is of a language written right
+   to left: Arabic, Hebrew (and its old code iw), Persian, Urdu,
+   Yiddish (and ji), Pashto, Sindhi, Uyghur, Dhivehi, Kashmiri, Central
+   Kurdish, Syriac, Aramaic *)
+fn _lang_rtl {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): bool = let
+  val @(o, k) = _trim_front(data, o, k)
+  val e = _subtag_end(data, o, k, 0)
+in
+  _span_is(data, o, e, "ar") || _span_is(data, o, e, "he") || _span_is(data, o, e, "iw")
+  || _span_is(data, o, e, "fa") || _span_is(data, o, e, "ur") || _span_is(data, o, e, "yi")
+  || _span_is(data, o, e, "ji") || _span_is(data, o, e, "ps") || _span_is(data, o, e, "sd")
+  || _span_is(data, o, e, "ug") || _span_is(data, o, e, "dv") || _span_is(data, o, e, "ks")
+  || _span_is(data, o, e, "ckb") || _span_is(data, o, e, "syr") || _span_is(data, o, e, "arc")
+end
+
+(* Whether the book reads right to left: as its spine's
+   page-progression-direction says; when that says nothing, or
+   "default" (the reading system's choice), when its language is
+   written right to left, as Readium does *)
 #pub fn spine_rtl
   {lb:agz}{n:pos}{sz:nat}
   (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): bool
 
-implement spine_rtl (data, nodes) = _spine_rtl_r(data, nodes) = 1
+implement spine_rtl (data, nodes) = let
+  val r = _spine_rtl_r(data, nodes)
+in
+  if r = 1 then true
+  else if r = 0 then false
+  else case+ _opf_lang_r(data, nodes) of
+    | ~xspan_at(o, k) => _lang_rtl(data, o, k)
+    | ~xspan_none() => false
+end
 
 (* The href of the first manifest item that is a font *)
 fun _font_item_r
