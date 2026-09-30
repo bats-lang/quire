@@ -2711,6 +2711,48 @@ in
        in true end)
 end
 
+(* The book's language's primary subtag ("fr" of "fr-CA"), lower case,
+   in b[0, k) of 3 bytes: when it is 2 or 3 letters; else "en" *)
+#pub fun reader_lang_code (): [l:agz][k:pos | k <= 3] @($A.arr(byte, l, 3), int k)
+
+fun _subtag_len {l:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k} .<k - i>.
+  (a: !$A.arr(byte, l, n), k: int k, i: int i): [j:nat | j <= k] int j =
+  if i >= k then i
+  else if byte2int0($A.get<byte>(a, i)) = 45 then i
+  else _subtag_len(a, k, i + 1)
+
+(* Byte i of a[0, j), in lower case, when it is a letter; else -1 *)
+fn _lower_letter {l:agz}{n:pos}{i:nat | i < n} (a: !$A.arr(byte, l, n), i: int i): int = let
+  val c = byte2int0($A.get<byte>(a, i))
+  val lc = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): int
+in if lc < 97 then ~1 else if lc > 122 then ~1 else lc end
+
+implement reader_lang_code () = let
+  val c = _blang_take()
+  (* the primary subtag's letters, lower case, and how many; 0 when it is
+     not 2 or 3 letters *)
+  val @(r, c0, c1, c2) = (case+ c of
+    | @BookLang(a, k) => let
+        val j = _subtag_len(a, k, 0)
+        val res = (if j < 2 then @(0, 0, 0, 0) else if j > 3 then @(0, 0, 0, 0)
+          else let
+            val x0 = _lower_letter(a, 0)
+            val x1 = _lower_letter(a, 1)
+            val x2 = (if j = 3 then (if k >= 3 then _lower_letter(a, 2) else ~1) else 0): int
+          in
+            if x0 < 0 then @(0, 0, 0, 0) else if x1 < 0 then @(0, 0, 0, 0)
+            else if x2 < 0 then @(0, 0, 0, 0) else @(j, x0, x1, x2)
+          end): @(int, int, int, int)
+        prval () = fold@(c)
+      in res end
+    | NoBookLang() => @(0, 0, 0, 0)): @(int, int, int, int)
+  val () = _blang_put(c)
+  val o = $A.alloc<byte>(3)
+  val () = $A.set<byte>(o, 0, $A.int2byte($AR.low_byte(if r >= 2 then c0 else 101)))
+  val () = $A.set<byte>(o, 1, $A.int2byte($AR.low_byte(if r >= 2 then c1 else 110)))
+  val () = $A.set<byte>(o, 2, $A.int2byte($AR.low_byte(if r = 3 then c2 else 0)))
+in if r = 3 then @(o, 3) else @(o, 2) end
+
 #pub fun reader_link_at (i: int): bool
 implement reader_link_at (i) = let
   val c = _links_take()

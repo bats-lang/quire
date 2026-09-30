@@ -147,6 +147,22 @@ test('Copy puts the selected text on the clipboard', async ({ page, context }) =
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Para 1.0');
 });
 
+test('Look up opens the selection in a dictionary of the book\'s language, in a new tab', async ({ page }) => {
+  await start(page);
+  await readBook(page, { ...book, title: 'Livre', language: 'fr-CA' });
+  await selectText(page, 0, 8);
+  const toolbar = page.getByRole('toolbar', { name: 'Selection' });
+  const look = toolbar.getByRole('link', { name: 'Look up' });
+  await expect(look).toHaveAttribute('href', 'https://fr.wiktionary.org/wiki/Special:Search?search=Para%201.0');
+  await expect(look).toHaveAttribute('target', '_blank');
+  await expect(look).toHaveAttribute('rel', /noopener/);
+  // it follows the selection, and a book with no language is looked up in English
+  await toLibrary(page);
+  await readBook(page, { ...book, title: 'Plain', language: null });
+  await selectText(page, 5, 8);
+  await expect(look).toHaveAttribute('href', 'https://en.wiktionary.org/wiki/Special:Search?search=1.0');
+});
+
 test('a note that is cancelled leaves nothing behind', async ({ page }) => {
   await start(page);
   await readBook(page, book);

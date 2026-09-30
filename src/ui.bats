@@ -558,6 +558,9 @@ datatype control =
   | {nl:pos | nl < 256} CMenuItem of (string nl)
   | CHarmItem of harm
   | {nl,nx:pos | nl < 256; nx < 256} CTab of (string nl, string nx, bool)
+  (* a link out of the app, named by its text, opened in a new tab and
+     told nothing of the app; its href is set by ui_https_href *)
+  | {nc,nl:pos | nc < 256; nl < 256} CLinkOut of (string nc, string nl)
 
 (* Control c as element ib, the last child of pb *)
 fn _control {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}
@@ -572,6 +575,12 @@ fn _control {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}
       val () = _dattr(doc, ib, inn, "aria-label", name)
     in _dtext(doc, ib, inn, _glyph(ic)) end
   | CNamedByContent(cls) => _dbutton(doc, pb, pn, ib, inn, cls)
+  | CLinkOut(cls, label) => let
+      val () = $D.add_element(doc, pb, pn, ib, inn, "a")
+      val () = _dattr(doc, ib, inn, "class", cls)
+      val () = _dattr(doc, ib, inn, "target", "_blank")
+      val () = _dattr(doc, ib, inn, "rel", "noopener noreferrer")
+    in _dtext(doc, ib, inn, label) end
   | CMenuItem(label) => let
       val () = _dbutton(doc, pb, pn, ib, inn, "mi")
       val () = _dattr(doc, ib, inn, "role", "menuitem")
@@ -669,6 +678,32 @@ implement ui_btn_nn(parent, pn, id, inn, cls) = _control_nn(parent, pn, id, inn,
   (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc, label: string nl): void
 
 implement ui_text_btn_nn(parent, pn, id, inn, cls, label) = _control_nn(parent, pn, id, inn, CText(cls, label))
+
+(* A link out of the app, showing label (its name) *)
+#pub fn ui_link_out {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nl:pos | nl < 256}
+  (parent: string np, id: string ni, cls: string nc, label: string nl): void
+
+implement ui_link_out(parent, id, cls, label) = _control_s(parent, id, CLinkOut(cls, label))
+
+(* Whether a[i, sl) is s[i, sl) (a has at least sl bytes) *)
+fun _prefix {l:agz}{n:pos}{sl:nat | sl <= n}{i:nat | i <= sl} .<sl - i>.
+  (a: !$A.arr(byte, l, n), s: string sl, sl: int sl, i: int i): bool =
+  if i >= sl then true
+  else if byte2int0($A.get<byte>(a, i)) <> char2int0(string_get_at(s, i)) then false
+  else _prefix(a, s, sl, i + 1)
+
+(* Whether a[0, k) starts with "https://" *)
+fn _is_https {l:agz}{n:pos}{k:nat | k <= n} (a: !$A.arr(byte, l, n), k: int k): bool =
+  if k < 8 then false
+  else _prefix(a, "https://", 8, 0)
+
+(* The href of a link out (ui_link_out) id: a[0, k), only when it is an
+   https URL; otherwise the link is left as it was *)
+#pub fn ui_https_href {ni:pos | ni < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
+  (id: string ni, a: $A.arr(byte, l, n), k: int k): void
+
+implement ui_https_href (id, a, k) =
+  if _is_https(a, k) then _sattr_buf(id, "href", a, k) else $A.free<byte>(a)
 
 (* An item of a menu, named by its label *)
 #pub fn ui_menuitem {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}

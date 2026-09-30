@@ -537,6 +537,124 @@ fn _has_selection (): bool =
   | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
 
 (* The selected text, to the clipboard *)
+(* Look up: the selection's first 64 bytes (cut where a character
+   begins), trimmed, as a Wiktionary search in the book's language:
+   "https://fr.wiktionary.org/wiki/Special:Search?search=..." *)
+fn _hexdig (v: int): int = if v < 10 then 48 + v else 55 + v
+
+(* out[p, r) := a[i, k) percent-encoded (letters, digits and -_.~ as
+   they are, a space as %20) *)
+fun _pct {l,lo:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k}{p:nat | p + 3 * (k - i) <= 256} .<k - i>.
+  (a: !$A.arr(byte, l, n), k: int k, i: int i, out: !$A.arr(byte, lo, 256), p: int p): [r:nat | r <= 256] int r =
+  if i >= k then p
+  else let
+    val c = byte2int0($A.get<byte>(a, i))
+    val plain = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
+      || c = 45 || c = 95 || c = 46 || c = 126
+  in
+    if plain then let
+      val () = $A.set<byte>(out, p, $A.int2byte($AR.low_byte(c)))
+    in _pct(a, k, i + 1, out, p + 1) end
+    else let
+      val b = (if c >= 0 then c else c + 256): int
+      val () = $A.set<byte>(out, p, $A.int2byte(37))
+      val () = $A.set<byte>(out, p + 1, $A.int2byte($AR.low_byte(_hexdig(b / 16))))
+      val () = $A.set<byte>(out, p + 2, $A.int2byte($AR.low_byte(_hexdig(b - (b / 16) * 16))))
+    in _pct(a, k, i + 1, out, p + 3) end
+  end
+
+fun _ws_start {l:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k} .<k - i>.
+  (a: !$A.arr(byte, l, n), k: int k, i: int i): [j:nat | j <= k] int j =
+  if i >= k then i
+  else let val c = byte2int0($A.get<byte>(a, i)) in
+    if c = 32 || c = 9 || c = 10 || c = 13 then _ws_start(a, k, i + 1) else i
+  end
+
+fun _ws_end {l:agz}{n:pos}{s:nat}{k:nat | s <= k; k <= n} .<k - s>.
+  (a: !$A.arr(byte, l, n), s: int s, k: int k): [e:nat | s <= e; e <= k] int e =
+  if k <= s then k
+  else let val c = byte2int0($A.get<byte>(a, k - 1)) in
+    if c = 32 || c = 9 || c = 10 || c = 13 then _ws_end(a, s, k - 1) else k
+  end
+
+(* The first j <= e (from s) where a character begins: a byte that is
+   not 0x80 to 0xBF *)
+fun _char_start {l:agz}{n:pos}{s,e:nat | s <= e; e < n} .<e - s>.
+  (a: !$A.arr(byte, l, n), s: int s, e: int e): [j:nat | s <= j; j <= e] int j =
+  if e <= s then e
+  else let val c = byte2int0($A.get<byte>(a, e)) in
+    if c >= 128 && c < 192 then _char_start(a, s, e - 1) else e
+  end
+
+(* The end of a[s, e), cut to at most 64 bytes where a character begins *)
+fn _cut {l:agz}{n:pos}{s,e:nat | s <= e; e <= n}
+  (a: !$A.arr(byte, l, n), s: int s, e: int e): [j:nat | s <= j; j <= e; j - s <= 64] int j =
+  if e - s <= 64 then e
+  else _char_start(a, s, s + 64)
+
+(* w[0, e - s) := a[s, e), at most 64 bytes *)
+fun _copy_bytes {l,lw:agz}{n:pos}{s,e:nat | s <= e; e <= n; e - s <= 64}{j:nat | j <= e - s} .<e - s - j>.
+  (a: !$A.arr(byte, l, n), s: int s, e: int e, w: !$A.arr(byte, lw, 65), j: int j): void =
+  if s + j >= e then ()
+  else let
+    val () = $A.set<byte>(w, j, $A.get<byte>(a, s + j))
+  in _copy_bytes(a, s, e, w, j + 1) end
+
+fn _copy_word {l,lw:agz}{n:pos}{s,e:nat | s <= e; e <= n}
+  (a: !$A.arr(byte, l, n), s: int s, e: int e, w: !$A.arr(byte, lw, 65)): [m:nat | m <= 64] int m =
+  if e - s > 64 then 0
+  else let val () = _copy_bytes(a, s, e, w, 0) in e - s end
+
+(* out[p, p + sl) := s *)
+fun _put_lit_at {lo:agz}{sl:nat}{p:nat | p + sl <= 256}{i:nat | i <= sl} .<sl - i>.
+  (out: !$A.arr(byte, lo, 256), p: int p, s: string sl, sl: int sl, i: int i): void =
+  if i >= sl then ()
+  else let
+    val () = $A.set<byte>(out, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
+  in _put_lit_at(out, p, s, sl, i + 1) end
+
+fn _put_lit {lo:agz}{sl:nat}{p:nat | p + sl <= 256}
+  (out: !$A.arr(byte, lo, 256), p: int p, s: string sl): int(p + sl) = let
+  val sl = g1u2i(string1_length(s))
+  val () = _put_lit_at(out, p, s, sl, 0)
+in p + sl end
+
+fn _put_arr {lo,la:agz}{p:nat | p + 3 <= 256}{k:pos | k <= 3}
+  (out: !$A.arr(byte, lo, 256), p: int p, a: !$A.arr(byte, la, 3), k: int k): int(p + k) = let
+  val () = $A.set<byte>(out, p, $A.get<byte>(a, 0))
+  val () = $A.set<byte>(out, p + 1, $A.get<byte>(a, 1))
+  val () = (if k = 3 then $A.set<byte>(out, p + 2, $A.get<byte>(a, 2)) else ())
+in p + k end
+
+fn _lookup_update (): void =
+  case+ $DR.get_selection_text() of
+  | ~$R.none() => ()
+  | ~$R.some(bl) => let
+      val n = $DC.blob_len(bl)
+    in
+      if n <= 0 then $DC.blob_free(bl)
+      else if n > 4096 then $DC.blob_free(bl)
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(bl, 0, a, n)
+        val () = $DC.blob_free(bl)
+        val s0 = _ws_start(a, n, 0)
+        val e0 = _ws_end(a, s0, n)
+        val e1 = _cut(a, s0, e0)
+        val w = $A.alloc<byte>(65)
+        val m = _copy_word(a, s0, e1, w)
+        val () = $A.free<byte>(a)
+        val out = $A.alloc<byte>(256)
+        val p = _put_lit(out, 0, "https://")
+        val @(lg, lk) = reader_lang_code()
+        val p = _put_arr(out, p, lg, lk)
+        val () = $A.free<byte>(lg)
+        val p = _put_lit(out, p, ".wiktionary.org/wiki/Special:Search?search=")
+        val q = _pct(w, m, 0, out, p)
+        val () = $A.free<byte>(w)
+      in if q > 0 then ui_https_href("selection-lookup", out, q) else $A.free<byte>(out) end
+    end
+
 fn _copy_selection (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
@@ -1139,7 +1257,11 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
   val r = RCons(r, OnDocument(), "selectionchange", lam(_) =>
-      if !_view = 1 then let val () = ui_show("qsel", _has_selection()) in 0 end else 0)
+      if !_view = 1 then let
+        val sel = _has_selection()
+        val () = ui_show("qsel", sel)
+        val () = (if sel then _lookup_update() else ())
+      in 0 end else 0)
   val r = RCons(r, OnEl("qsel"), "click", lam(h) => let
       val t = _target(h)
       val hl = _is(t, "qslh")

@@ -156,6 +156,9 @@ fn _reader (): void = let
   val () = ui_text_btn("qsel", "qslh", "btn", "Highlight")
   val () = ui_text_btn("qsel", "qsln", "btn", "Note")
   val () = ui_text_btn("qsel", "qslc", "btn", "Copy")
+  (* the selection looked up in a dictionary of the book's language (its
+     href follows the selection) *)
+  val () = ui_link_out("qsel", "selection-lookup", "btn linkout", "Look up")
   val () = ui_text_btn("qsel", "qsls", "btn", "Search")
   val () = _hide("qsel")
   val () = ui_el("qrvw", "qrbb", TDiv, "bot")
