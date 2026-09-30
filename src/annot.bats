@@ -23,6 +23,7 @@ staload "undo.sats"
 staload "library.sats"
 staload "toc.sats"
 staload "jsonio.sats"
+staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
@@ -171,17 +172,14 @@ in
   case+ piece_new(n) of
   | ~NoPiece() => ()
   | ~Piece(ow, out) => let
-      val () = $A.write_byte(out, 0, 81) (* Q *)
-      val () = $A.write_byte(out, 1, 65) (* A *)
-      val () = $A.write_byte(out, 2, 49) (* 1 *)
+      val () = $A.write_text(out, 0, $A.text_lit("QA1"), 3)
       val () = $A.write_byte(out, 3, 10)
       val m = _ser(out, 4, xs)
       val @(f, b) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(f, b, m)
       val @(kf, kb) = $A.freeze<byte>(lib_key(97, h1, h2))
       val () = $P.discard<Int>($IDB.idb_put(kb, 15, used, m))
-      val () = $A.drop<byte>(kf, kb)
-      val () = $A.free<byte>($A.thaw<byte>(kf))
+      val () = release_bytes(kf, kb)
       val b = $A.borrow_join<byte>(f, used, rest)
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end
@@ -256,8 +254,7 @@ implement annot_load (h1, h2) = let
   val () = _put(AnnCell(ann_nil(), 0))
   val @(kf, kb) = $A.freeze<byte>(_key())
   val p = $IDB.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_content(h) of
@@ -294,10 +291,8 @@ fun _marks {k:nat} .<k>. (xs: !ann(k), ch: int): void =
            val @(sf, sb) = $A.freeze<byte>(sa)
            val @(ef, eb) = $A.freeze<byte>(ea)
            val () = $BDOM.mark_range(_mark_set(kd), sb, sl, so, eb, el, eo)
-           val () = $A.drop<byte>(ef, eb)
-           val () = $A.free<byte>($A.thaw<byte>(ef))
-           val () = $A.drop<byte>(sf, sb)
-         in $A.free<byte>($A.thaw<byte>(sf)) end else ()) else ()) else ()) else ())
+           val () = release_bytes(ef, eb)
+         in release_bytes(sf, sb) end else ()) else ()) else ()) else ())
       val () = _marks(rest, ch)
       prval () = fold@(xs)
     in end
@@ -327,8 +322,7 @@ fn _on_page (i: Int): bool =
     val @(ia, il) = nid_pad3("c", i)
     val @(fi, bi) = $A.freeze<byte>(ia)
     val r = $DR.measure(bi, il)
-    val () = $A.drop<byte>(fi, bi)
-    val () = $A.free<byte>($A.thaw<byte>(fi))
+    val () = release_bytes(fi, bi)
   in
     case+ r of
     | ~$R.err(_) => false
@@ -434,8 +428,7 @@ fn _node_words (i: Int): [l:agz][t:nat | t <= 120] @($A.arr(byte, l, 121), int t
     val @(ia, il) = nid_pad3("c", i)
     val @(fi, bi) = $A.freeze<byte>(ia)
     val r = $DR.read_text_content(bi, il)
-    val () = $A.drop<byte>(fi, bi)
-    val () = $A.free<byte>($A.thaw<byte>(fi))
+    val () = release_bytes(fi, bi)
   in
     case+ r of
     | ~$R.none() => let val a0 = $A.alloc<byte>(121) in @(a0, 0) end
@@ -487,8 +480,7 @@ in
     val () = $DC.blob_free(b)
     val @(f, bb) = $A.freeze<byte>(a)
     val v = nid_parse(bb, n, 0, "c")
-    val () = $A.drop<byte>(f, bb)
-    val () = $A.free<byte>($A.thaw<byte>(f))
+    val () = release_bytes(f, bb)
   in v end
 end
 
@@ -722,8 +714,7 @@ fn _note_save (i: int): void = let
   val () = $A.write_text(a, 0, $A.text_lit("dialog-note"), 11)
   val @(f, b) = $A.freeze<byte>(a)
   val r = $DR.read_input_value(b, 11)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
+  val () = release_bytes(f, b)
 in
   case+ r of
   | ~$R.none() => let
@@ -1150,10 +1141,8 @@ in
       val () = $A.write_text(na, 0, $A.text_lit("quire-annotations.md"), 20)
       val @(nf, nb) = $A.freeze<byte>(na)
       val () = $BL.download_blob(used, q, mb, 13, nb, 20)
-      val () = $A.drop<byte>(nf, nb)
-      val () = $A.free<byte>($A.thaw<byte>(nf))
-      val () = $A.drop<byte>(mf, mb)
-      val () = $A.free<byte>($A.thaw<byte>(mf))
+      val () = release_bytes(nf, nb)
+      val () = release_bytes(mf, mb)
       val b = $A.borrow_join<byte>(f, used, rest)
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end

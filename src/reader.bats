@@ -26,6 +26,7 @@ staload "toc.sats"
 staload "settings.sats"
 staload "annot.sats"
 staload "entity.sats"
+staload "mem.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -107,10 +108,8 @@ fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.set_text(doc, bi, ni, bb, 0, k)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(fb, bb)
-  val () = $A.free<byte>($A.thaw<byte>(fb))
-  val () = $A.drop<byte>(fi, bi)
-in $A.free<byte>($A.thaw<byte>(fi)) end
+  val () = release_bytes(fb, bb)
+in release_bytes(fi, bi) end
 
 (* ============================================================
    Reading speed: minutes per page, learned from the pages turned on
@@ -145,10 +144,8 @@ end
 
 fn _spd_key (): [l:agz] $A.arr(byte, l, 3) = let
   val k = $A.alloc<byte>(3)
-  val () = $A.write_byte(k, 0, 115) (* s *)
-  val () = $A.write_byte(k, 1, 112) (* p *)
-  val () = $A.write_byte(k, 2, 100) (* d *)
-in k end
+  val () = $A.write_text(k, 0, $A.text_lit("spd"), 3)
+  in k end
 
 (* Stores the speed under "spd": the minutes and the pages, 4 bytes each *)
 fn _spd_save (): void = let
@@ -158,10 +155,8 @@ fn _spd_save (): void = let
   val @(bf, bb) = $A.freeze<byte>(b)
   val @(kf, kb) = $A.freeze<byte>(_spd_key())
   val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 8))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(bf, bb)
-in $A.free<byte>($A.thaw<byte>(bf)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(bf, bb) end
 
 (* A page turned on: counted, and every 10 pages kept. Past 2000 pages
    both halve, so the speed follows the reader's lately *)
@@ -420,8 +415,7 @@ fn _measure_lit {ni:pos | ni < 256} (id: string ni): void = let
   val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
   val @(fi, bi) = $A.freeze<byte>(ia)
   val _ = $R.discard<int><int>($DR.measure(bi, ni))
-  val () = $A.drop<byte>(fi, bi)
-in $A.free<byte>($A.thaw<byte>(fi)) end
+in release_bytes(fi, bi) end
 
 (* Measures content node i: whether it is in the page. The page answers
    1 for an element it measured and 0 for an id it has no element for (a
@@ -432,8 +426,7 @@ fn _measure_node {i:nat} (i: int i): bool = let
   val @(ia, il) = _num_id("c", i, 3)
   val @(fi, bi) = $A.freeze<byte>(ia)
   val r = $DR.measure(bi, il)
-  val () = $A.drop<byte>(fi, bi)
-  val () = $A.free<byte>($A.thaw<byte>(fi))
+  val () = release_bytes(fi, bi)
 in
   case+ r of
   | ~$R.ok(v) => v > 0
@@ -455,8 +448,7 @@ fn _node_at (x: int, y: int): [v:int | v >= ~1] int v =
         val () = $DC.blob_free(b)
         val @(f, bb) = $A.freeze<byte>(a)
         val v = nid_parse(bb, n, 0, "c")
-        val () = $A.drop<byte>(f, bb)
-        val () = $A.free<byte>($A.thaw<byte>(f))
+        val () = release_bytes(f, bb)
       in v end
     end
 
@@ -592,19 +584,14 @@ fn _count_pages (): [v:int] int v =
 
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
-  val () = $A.set<byte>(cnt_narr, 0, int2byte0(112)) (* p *)
-  val () = $A.set<byte>(cnt_narr, 1, int2byte0(97)) (* a *)
-  val () = $A.set<byte>(cnt_narr, 2, int2byte0(103)) (* g *)
-  val () = $A.set<byte>(cnt_narr, 3, int2byte0(101)) (* e *)
+  val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
   val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
   (* back to the first page, which the reading position now names *)
   (* both ways: a switch between pages and scrolled leaves the other *)
   val () = $SC.set_scroll_top(cnt_b, 4, 0)
   val () = $SC.set_scroll_left(cnt_b, 4, 0)
   val mr = $DR.measure(cnt_b, 4)
-  val () = $A.drop<byte>(cnt_f, cnt_b)
-  val cnt_tmp = $A.thaw<byte>(cnt_f)
-  val () = $A.free<byte>(cnt_tmp)
+  val () = release_bytes(cnt_f, cnt_b)
   val _ = $R.discard<int><int>(mr)
   (* The page's widths, checked here: the chapter has scroll width /
      width pages, and at least one *)
@@ -861,10 +848,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val () = window_show(p, t)
   val page = p
   val cnt_narr = $A.alloc<byte>(4)
-  val () = $A.set<byte>(cnt_narr, 0, int2byte0(112)) (* p *)
-  val () = $A.set<byte>(cnt_narr, 1, int2byte0(97)) (* a *)
-  val () = $A.set<byte>(cnt_narr, 2, int2byte0(103)) (* g *)
-  val () = $A.set<byte>(cnt_narr, 3, int2byte0(101)) (* e *)
+  val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
   val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
   val mr = $DR.measure(cnt_b, 4)
   val _ = $R.discard<int><int>(mr)
@@ -873,9 +857,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val () = !_page_h := $DR.get_measure_h()
   val () = (if _scrolled() then $SC.set_scroll_top(cnt_b, 4, page * _step())
     else $SC.set_scroll_left(cnt_b, 4, page * cw))
-  val () = $A.drop<byte>(cnt_f, cnt_b)
-  val cnt_tmp = $A.thaw<byte>(cnt_f)
-  val () = $A.free<byte>(cnt_tmp)
+  val () = release_bytes(cnt_f, cnt_b)
 in _place_shown(p, t, c, tc) end
 
 (* ============================================================
@@ -904,10 +886,8 @@ fn _add_node {ld:agz}{q:int | q >= ~1}{i:nat}{tl:pos | tl < 256}
   val @(fp, bp) = $A.freeze<byte>(pa)
   val @(fc, bc) = $A.freeze<byte>(ca)
   val () = $D.add_element(doc, bp, pl, bc, cl, tag)
-  val () = $A.drop<byte>(fc, bc)
-  val () = $A.free<byte>($A.thaw<byte>(fc))
-  val () = $A.drop<byte>(fp, bp)
-in $A.free<byte>($A.thaw<byte>(fp)) end
+  val () = release_bytes(fc, bc)
+in release_bytes(fp, bp) end
 
 (* Element id's text: data[off, off + k) decoded *)
 fn _set_decoded {ld,li,lb:agz}{ni:pos | ni < 256}{n:pos}{o,k:nat | o + k <= n; k < 65536; k > 0}
@@ -917,8 +897,7 @@ fn _set_decoded {ld,li,lb:agz}{ni:pos | ni < 256}{n:pos}{o,k:nat | o + k <= n; k
   val q = decode_text(data, off, k, buf)
   val @(f, b) = $A.freeze<byte>(buf)
   val () = $D.set_text(doc, bi, il, b, 0, q)
-  val () = $A.drop<byte>(f, b)
-in $A.free<byte>($A.thaw<byte>(f)) end
+in release_bytes(f, b) end
 
 (* Content node idx's text: data[off, off + k), its character
    references decoded *)
@@ -929,8 +908,7 @@ fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
   val () = (if k <= 0 then $D.set_text(doc, bi, il, data, off, k)
     else if has_reference(data, off, k) then _set_decoded(doc, bi, il, data, off, k)
     else $D.set_text(doc, bi, il, data, off, k))
-  val () = $A.drop<byte>(fi, bi)
-in $A.free<byte>($A.thaw<byte>(fi)) end
+in release_bytes(fi, bi) end
 
 (* Whether data[p] starts a UTF-8 character (is not 10xxxxxx) *)
 fn _utf8_start {lb:agz}{n:pos}{p:nat | p < n}
@@ -954,8 +932,7 @@ fn _node_attr {ld,lb:agz}{n:pos}{i:nat}{nl:pos | nl < 256}{o,k:nat | o + k <= n;
   val @(ia, il) = _node_id(idx)
   val @(fi, bi) = $A.freeze<byte>(ia)
   val () = $D.set_attr(doc, bi, il, name, data, off, k)
-  val () = $A.drop<byte>(fi, bi)
-in $A.free<byte>($A.thaw<byte>(fi)) end
+in release_bytes(fi, bi) end
 
 (* Content node idx's attribute name: the literal v *)
 fn _node_attr_lit {ld:agz}{i:nat}{nl:pos | nl < 256}{vl:pos | vl < 256}
@@ -965,8 +942,7 @@ fn _node_attr_lit {ld:agz}{i:nat}{nl:pos | nl < 256}{vl:pos | vl < 256}
   val () = $A.write_text(va, 0, $A.text_lit(v), vl)
   val @(fv, bv) = $A.freeze<byte>(va)
   val () = _node_attr(doc, idx, name, bv, 0, vl)
-  val () = $A.drop<byte>(fv, bv)
-in $A.free<byte>($A.thaw<byte>(fv)) end
+in release_bytes(fv, bv) end
 
 (* Content nodes are numbered from 0 in each chapter *)
 val _content_n = ref<[n:nat] int n>(0)
@@ -1291,8 +1267,7 @@ fn _page_lang {ld,lb:agz}{n:pos}{o,k:nat | o + k <= n; k < 65536}
   val @(qa, ql) = _node_id(~1)
   val @(fq, bq) = $A.freeze<byte>(qa)
   val () = $D.set_attr(doc, bq, ql, "lang", data, o, k)
-  val () = $A.drop<byte>(fq, bq)
-in $A.free<byte>($A.thaw<byte>(fq)) end
+in release_bytes(fq, bq) end
 
 (* An html or body element's language (xml:lang, else lang), when it has
    one, is the page's: the chapter's content goes into the page with no
@@ -1491,10 +1466,8 @@ fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
   val @(ida, idk) = _src_id(idx, vw)
   val @(fi, bi) = $A.freeze<byte>(ida)
   val () = $BDOM.set_image_src(bi, idk, data, nd, bm, ml)
-  val () = $A.drop<byte>(fi, bi)
-  val () = $A.free<byte>($A.thaw<byte>(fi))
-  val () = $A.drop<byte>(fm, bm)
-in $A.free<byte>($A.thaw<byte>(fm)) end
+  val () = release_bytes(fi, bi)
+in release_bytes(fm, bm) end
 
 (* Content node idx's image, the entry named path[0, k) of the book's
    z-byte file (book s): shown now when it is stored, once decompressed when it
@@ -1632,8 +1605,7 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
                     ch_buf, prefix_len, full_len, ch_len)
           val @(chf, chb) = $A.freeze<byte>(ch_buf)
           val hit = book_find_entry(s, z, chb, full_len)
-          val () = $A.drop<byte>(chf, chb)
-          val () = $A.free<byte>($A.thaw<byte>(chf))
+          val () = release_bytes(chf, chb)
         in
           case+ hit of
           | ~EntryMiss() => ChapterMissing(acc)
@@ -1699,8 +1671,7 @@ fn _page_book_lang {ld:agz} (doc: !$D.document(ld)): void =
       val () = $A.write_text(u, 0, $A.text_lit("und"), 3)
       val @(fu, bu) = $A.freeze<byte>(u)
       val () = _page_lang(doc, bu, 0, 3)
-      val () = $A.drop<byte>(fu, bu)
-      val () = $A.free<byte>($A.thaw<byte>(fu))
+      val () = release_bytes(fu, bu)
     in _blang_put(NoBookLang()) end
   | ~BookLang(b, k) => let
       val @(fb, bb) = $A.freeze<byte>(b)
@@ -1782,8 +1753,7 @@ in
                val url = $BL.create_blob_url(b, n, mb, 8)
                val () = $A.drop<byte>(f, b)
                val () = piece_free(par, $A.thaw<byte>(f))
-               val () = $A.drop<byte>(mf, mb)
-               val () = $A.free<byte>($A.thaw<byte>(mf))
+               val () = release_bytes(mf, mb)
                val () = (case+ url of
                  | ~$R.none() => ()
                  | ~$R.some(ub) => let
@@ -1884,8 +1854,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val @(qa, ql) = _node_id(~1)
                   val @(fq, bq) = $A.freeze<byte>(qa)
                   val () = $D.remove_children(doc, bq, ql)
-                  val () = $A.drop<byte>(fq, bq)
-                  val () = $A.free<byte>($A.thaw<byte>(fq))
+                  val () = release_bytes(fq, bq)
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pics_put(PicsCell(pics_nil()))
@@ -2552,14 +2521,10 @@ implement reader_pan(dx) =
   else case+ reading_get() of
   | @(p, _, _, _) => let
       val cnt_narr = $A.alloc<byte>(4)
-      val () = $A.set<byte>(cnt_narr, 0, int2byte0(112)) (* p *)
-      val () = $A.set<byte>(cnt_narr, 1, int2byte0(97)) (* a *)
-      val () = $A.set<byte>(cnt_narr, 2, int2byte0(103)) (* g *)
-      val () = $A.set<byte>(cnt_narr, 3, int2byte0(101)) (* e *)
+      val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
       val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
       val () = $SC.set_scroll_left(cnt_b, 4, p * !_page_w - dx)
-      val () = $A.drop<byte>(cnt_f, cnt_b)
-    in $A.free<byte>($A.thaw<byte>(cnt_f)) end
+    in release_bytes(cnt_f, cnt_b) end
 
 (* Page q of t, q kept to the chapter's pages *)
 fn _page_in {t:pos} (q: Int, t: int t): [p:nat | p < t] int p =
@@ -2726,8 +2691,7 @@ in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
 implement reader_speed_load () = let
   val @(kf, kb) = $A.freeze<byte>(_spd_key())
   val p = $IDB.idb_get(kb, 3)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_blob(h) of
@@ -2829,8 +2793,7 @@ fn _note_show {lo:agz}{q:nat | q <= NOTE_CAP} (buf: $A.arr(byte, lo, NOTE_CAP), 
   val out = $A.alloc<byte>(_NOTE_CAP)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val r = decode_text(bb, 0, q, out)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
+  val () = release_bytes(bf, bb)
   val () = ui_text_buf("footnote-text", out, r)
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
@@ -2939,8 +2902,7 @@ in
      | ~$R.some(@(z, _, _, _, _, _)) => let
          val @(fb, bb) = $A.freeze<byte>(b)
          val () = _show_image(book_serial(), z, 0, true, !_load_gen, bb, k)
-         val () = $A.drop<byte>(fb, bb)
-         val () = $A.free<byte>($A.thaw<byte>(fb))
+         val () = release_bytes(fb, bb)
          val () = layer_open(LImage())
          val () = ui_focus("image-close")
        in true end)
@@ -3110,10 +3072,8 @@ in
           val @(fa, fb) = $A.freeze<byte>(ia)
           val @(ga, gb) = $A.freeze<byte>(ja)
           val () = $BDOM.mark_range(2, fb, il, o, gb, jl, o + query_len)
-          val () = $A.drop<byte>(ga, gb)
-          val () = $A.free<byte>($A.thaw<byte>(ga))
-          val () = $A.drop<byte>(fa, fb)
-        in $A.free<byte>($A.thaw<byte>(fa)) end else ()) else ())
+          val () = release_bytes(ga, gb)
+        in release_bytes(fa, fb) end else ()) else ())
     in $P.ret<int>(0) end))
   end
 end

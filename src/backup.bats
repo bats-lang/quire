@@ -20,6 +20,7 @@ staload "library.sats"
 staload "settings.sats"
 staload "annot.sats"
 staload "jsonio.sats"
+staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -226,10 +227,8 @@ in
         val () = $A.write_text(na, 0, $A.text_lit("quire-backup.json"), 17)
         val @(nf, nb) = $A.freeze<byte>(na)
         val () = $BL.download_blob(b, s, mb, 16, nb, 17)
-        val () = $A.drop<byte>(nf, nb)
-        val () = $A.free<byte>($A.thaw<byte>(nf))
-        val () = $A.drop<byte>(mf, mb)
-        val () = $A.free<byte>($A.thaw<byte>(mf))
+        val () = release_bytes(nf, nb)
+        val () = release_bytes(mf, mb)
         val () = $A.drop<byte>(f, b)
       in piece_free(ow, $A.thaw<byte>(f)) end)
 end
@@ -246,8 +245,7 @@ fun _export_seq {i,c:nat | i <= c} .<c - i>. (i: int i, c: int c, first: bool): 
         val () = _push(_book_chunk(i, x, first))
         val @(kf, kb) = $A.freeze<byte>(lib_key(97, x.h1, x.h2))
         val p = $IDB.idb_get(kb, 15)
-        val () = $A.drop<byte>(kf, kb)
-        val () = $A.free<byte>($A.thaw<byte>(kf))
+        val () = release_bytes(kf, kb)
       in
         $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) => let
           val () = (case+ take_content(h) of
@@ -304,18 +302,14 @@ fun _orphan_rd {lb,lv:agz}{n:int | n >= 4 + 4 * ONUMS}{j:nat | j <= ONUMS} .<ONU
 (* Stores vs[3, 12) (a book's numbers from a backup) under its "o" key *)
 fn _orphan_put {lv:agz} (h1: int, h2: int, vs: !$A.arr(Int, lv, 12)): void = let
   val a = $A.alloc<byte>(4 + 4 * ONUMS)
-  val () = $A.write_byte(a, 0, 81) (* Q *)
-  val () = $A.write_byte(a, 1, 79) (* O *)
-  val () = $A.write_byte(a, 2, 49) (* 1 *)
+  val () = $A.write_text(a, 0, $A.text_lit("QO1"), 3)
   val () = $A.write_byte(a, 3, 10)
   val () = _orphan_wr(a, vs, 0)
   val @(af, ab) = $A.freeze<byte>(a)
   val @(kf, kb) = $A.freeze<byte>(lib_key(111, h1, h2))
   val () = $P.discard<Int>($IDB.idb_put(kb, 15, ab, 4 + 4 * ONUMS))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(af, ab)
-in $A.free<byte>($A.thaw<byte>(af)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(af, ab) end
 
 (* v in [lo, hi], or d *)
 fn _in (v: Int, lo: Int, hi: Int, d: Int): Int = if v < lo then d else if v > hi then d else v
@@ -356,8 +350,7 @@ end
 implement backup_claim (h1, h2) = let
   val @(kf, kb) = $A.freeze<byte>(lib_key(111, h1, h2))
   val p = $IDB.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_blob(h) of
@@ -373,8 +366,7 @@ in
         val () = $A.free<Int>(vs)
         val @(kf, kb) = $A.freeze<byte>(lib_key(111, h1, h2))
         val () = $P.discard<Int>($IDB.idb_delete(kb, 15))
-        val () = $A.drop<byte>(kf, kb)
-        val () = $A.free<byte>($A.thaw<byte>(kf))
+        val () = release_bytes(kf, kb)
       in $P.ret<int>(0) end))
 end
 
@@ -662,8 +654,7 @@ fn _qbfi_count (): int = let
   val () = $A.write_text(ia, 0, $A.text_lit("backup-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
   val c = $BF.file_count(fb, 11)
-  val () = $A.drop<byte>(fz, fb)
-  val () = $A.free<byte>($A.thaw<byte>(fz))
+  val () = release_bytes(fz, fb)
 in c end
 
 fn _qbfi_open (): $P.promise_pending(Int) = let
@@ -671,8 +662,7 @@ fn _qbfi_open (): $P.promise_pending(Int) = let
   val () = $A.write_text(ia, 0, $A.text_lit("backup-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
   val p = $BF.file_open_at(fb, 11, 0)
-  val () = $A.drop<byte>(fz, fb)
-  val () = $A.free<byte>($A.thaw<byte>(fz))
+  val () = release_bytes(fz, fb)
 in p end
 
 (* Restores the backup picked in the file input backup-file *)

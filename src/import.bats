@@ -21,6 +21,7 @@ staload "epub_xml.sats"
 staload "entity.sats"
 staload "library.sats"
 staload "backup.sats"
+staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -191,8 +192,7 @@ fn _store_a11y {lb:agz}{n:pos}
   val tmp = $A.alloc<byte>(sk + 1)
   val q = decode_text(data, so, sk, tmp)
   val buf = $A.alloc<byte>(q + 6)
-  val () = $A.write_byte(buf, 0, 89) (* Y *)
-  val () = $A.write_byte(buf, 1, 49) (* 1 *)
+  val () = $A.write_text(buf, 0, $A.text_lit("Y1"), 2)
   val () = $A.write_i32(buf, 2, flags)
   val () = _put_after_head(tmp, buf, q, 0)
   val () = $A.free<byte>(tmp)
@@ -200,10 +200,8 @@ fn _store_a11y {lb:agz}{n:pos}
   val key = lib_key(121, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(key)
   val () = $P.discard<Int>($IDB.idb_put(kb, 15, bb, q + 6))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(bf, bb)
-in $A.free<byte>($A.thaw<byte>(bf)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(bf, bb) end
 
 (* The cover, the entry named dir(opf) + href, stored under 'c' for book
    (h1, h2); its type code, 0 when there is none *)
@@ -233,8 +231,7 @@ in
       val @(ef, eb) = $A.freeze<byte>(exact)
       val code = mime_code_of(eb, k)
       val got = book_zip_read(s, z, eb, k)
-      val () = $A.drop<byte>(ef, eb)
-      val () = $A.free<byte>($A.thaw<byte>(ef))
+      val () = release_bytes(ef, eb)
     in
       case+ got of
       | ~ZipMissing() => 0
@@ -244,8 +241,7 @@ in
           val key = lib_key(99, h1, h2)
           val @(kf, kb) = $A.freeze<byte>(key)
           val () = $P.discard<Int>($IDB.idb_put(kb, 15, cb, cs))
-          val () = $A.drop<byte>(kf, kb)
-          val () = $A.free<byte>($A.thaw<byte>(kf))
+          val () = release_bytes(kf, kb)
           val () = $A.drop<byte>(cf, cb)
           val () = piece_free(ar, $A.thaw<byte>(cf))
         in code end
@@ -262,8 +258,7 @@ in
                 val key = lib_key(99, h1, h2)
                 val @(kf, kb) = $A.freeze<byte>(key)
                 val () = $P.discard<Int>($IDB.idb_put(kb, 15, bb2, n2))
-                val () = $A.drop<byte>(kf, kb)
-                val () = $A.free<byte>($A.thaw<byte>(kf))
+                val () = release_bytes(kf, kb)
                 val () = $A.drop<byte>(f2, bb2)
                 val () = piece_free(ar2, $A.thaw<byte>(f2))
               in $P.ret<int>(0) end))
@@ -309,8 +304,7 @@ in
     val key = lib_key(98, h1, h2)
     val @(kf, kb) = $A.freeze<byte>(key)
     val () = book_idb_put(kb, 15)
-    val () = $A.drop<byte>(kf, kb)
-    val () = $A.free<byte>($A.thaw<byte>(kf))
+    val () = release_bytes(kf, kb)
     val @(to, tl) = (case+ title of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
     val @(ao, al) = (case+ author of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
   in
@@ -341,8 +335,7 @@ fn _open_archive {z:pos} (s: int, z: int z, mode: int, idx: Int, h1: Int, h2: In
   val ca = $S.from_char_array(cc, 22)
   val @(cf, cb) = $A.freeze<byte>(ca)
   val cont = book_zip_read(s, z, cb, 22)
-  val () = $A.drop<byte>(cf, cb)
-  val () = $A.free<byte>($A.thaw<byte>(cf))
+  val () = release_bytes(cf, cb)
 in
   case+ cont of
   | ~ZipMissing() => let val () = book_abandon(s) in $P.ret<Int>(~3) end
@@ -387,8 +380,7 @@ in
                 val () = piece_free(dar, $A.thaw<byte>(df))
                 val @(pf, pbb) = $A.freeze<byte>(pb)
                 val oe = book_zip_read(s, z, pbb, ol)
-                val () = $A.drop<byte>(pf, pbb)
-                val () = $A.free<byte>($A.thaw<byte>(pf))
+                val () = release_bytes(pf, pbb)
                 val () = (if mode <> MODE_OPEN then _stage("Reading metadata", 60) else ())
               in
                 case+ oe of
@@ -560,8 +552,7 @@ fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): voi
         val () = $A.write_text(ia, 0, $A.text_lit("import-file"), 11)
         val @(fz, fb) = $A.freeze<byte>(ia)
         val p = $BF.file_open_at(fb, 11, i)
-        val () = $A.drop<byte>(fz, fb)
-        val () = $A.free<byte>($A.thaw<byte>(fz))
+        val () = release_bytes(fz, fb)
       in p end
       else $BF.dropped_open_at(i)): $P.promise_pending(Int)
   in
@@ -579,8 +570,7 @@ implement import_picked () = let
   val () = $A.write_text(ia, 0, $A.text_lit("import-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
   val c = $BF.file_count(fb, 11)
-  val () = $A.drop<byte>(fz, fb)
-  val () = $A.free<byte>($A.thaw<byte>(fz))
+  val () = release_bytes(fz, fb)
 in _import_seq(0, 0, c) end
 
 (* Imports the files of the last drop *)
@@ -606,8 +596,7 @@ implement open_stored (key, h1, h2) = let
   val k = lib_key(98, h1, h2)
   val @(kf, kb) = $A.freeze<byte>(k)
   val p = $FI.idb_get(kb, 15)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><Int>($P.vow(p), lam(h) =>
     case+ $FI.claim(h) of

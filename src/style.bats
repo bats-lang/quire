@@ -1359,7 +1359,7 @@ fn _g_2_overlays {r:nat | r >= 3620} (sh: sheet(r, 0)): [q:nat | q >= r - 3620] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 6460} (sh: sheet(r, 0)): [q:nat | q >= r - 6460] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 6800} (sh: sheet(r, 0)): [q:nat | q >= r - 6800] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1625,6 +1625,21 @@ fn _g_3_reader {r:nat | r >= 6460} (sh: sheet(r, 0)): [q:nat | q >= r - 6460] sh
   val sh = close(sh)
   (* scrolled, on the chapter's last screen: at the right, apart from
      Back at the left *)
+  (* the hint on turning pages, over the page's middle *)
+  val sh = rule(sh, ".hint")
+  val sh = lay(sh, Position(), "absolute")
+  val sh = lay(sh, Left(), "16px")
+  val sh = lay(sh, Right(), "16px")
+  val sh = lay(sh, Top(), "45%")
+  val sh = lay(sh, Width(), "fit-content")
+  val sh = lay(sh, Margin(), "0 auto")
+  val sh = lay(sh, ZIndex(), "4")
+  val sh = surf(S_accentfg_accent | sh, 9, 8)
+  val sh = lay(sh, BorderRadius(), "22px")
+  val sh = lay(sh, Padding(), "10px 18px")
+  val sh = lay(sh, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
+  val sh = lay(sh, PointerEvents(), "none")
+  val sh = close(sh)
   val sh = rule(sh, ".nextch")
   val sh = lay(sh, Left(), "auto")
   val sh = lay(sh, Right(), "12px")

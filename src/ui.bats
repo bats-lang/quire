@@ -16,6 +16,7 @@ staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 #use result as R
+staload "mem.sats"
 
 (* ============================================================
    Ids
@@ -150,10 +151,8 @@ fn _add_s {np,ni:pos | np < 256; ni < 256}{tl:pos | tl < 256}
   val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val () = _with_doc(pb, pn, ib, inn, tag)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 (* A new element <tag id=id> as the last child of parent *)
 #pub fn ui_add {np,ni:pos | np < 256; ni < 256}
@@ -171,10 +170,8 @@ implement ui_add_n(parent, id, inn, t) = let
   val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
   val @(if_, ib) = $A.freeze<byte>(id)
   val () = _with_doc(pb, pn, ib, inn, _tag_name(t))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
-  val () = $A.drop<byte>(pf, pb)
-in $A.free<byte>($A.thaw<byte>(pf)) end
+  val () = release_bytes(if_, ib)
+in release_bytes(pf, pb) end
 
 (* A new element with a numbered id under a numbered parent *)
 #pub fn ui_add_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}
@@ -184,10 +181,8 @@ implement ui_add_nn(parent, pn, id, inn, t) = let
   val @(pf, pb) = $A.freeze<byte>(parent)
   val @(if_, ib) = $A.freeze<byte>(id)
   val () = _with_doc(pb, pn, ib, inn, _tag_name(t))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
+  val () = release_bytes(if_, ib)
+  val () = release_bytes(pf, pb)
 in end
 
 
@@ -200,8 +195,7 @@ implement ui_clear(id) = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.remove_children(doc, ib, inn)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+in release_bytes(if_, ib) end
 
 (* ============================================================
    Attributes
@@ -224,10 +218,8 @@ fn _sattr {ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
   val () = _attr_b(ib, inn, name, vb, 0, vn)
-  val () = $A.drop<byte>(vf, vb)
-  val () = $A.free<byte>($A.thaw<byte>(vf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(vf, vb)
+in release_bytes(if_, ib) end
 
 fn _sattr_n {l:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
   (id: $A.arr(byte, l, ni), inn: int ni, name: string nl, v: string nv): void = let
@@ -235,10 +227,8 @@ fn _sattr_n {l:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
   val @(if_, ib) = $A.freeze<byte>(id)
   val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
   val () = _attr_b(ib, inn, name, vb, 0, vn)
-  val () = $A.drop<byte>(vf, vb)
-  val () = $A.free<byte>($A.thaw<byte>(vf))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
+  val () = release_bytes(vf, vb)
+  val () = release_bytes(if_, ib)
 in end
 
 fn _sattr_buf {ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
@@ -247,20 +237,16 @@ fn _sattr_buf {ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:pos | k <= 
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val @(bf, bb) = $A.freeze<byte>(buf)
   val () = _attr_b(ib, inn, name, bb, 0, k)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(bf, bb)
+in release_bytes(if_, ib) end
 
 fn _sattr_n_buf {li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
   (id: $A.arr(byte, li, ni), inn: int ni, name: string nl, buf: $A.arr(byte, l, n), k: int k): void = let
   val @(if_, ib) = $A.freeze<byte>(id)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val () = _attr_b(ib, inn, name, bb, 0, k)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
+  val () = release_bytes(bf, bb)
+  val () = release_bytes(if_, ib)
 in end
 
 (* The attributes other code may set. There is no style: the one inline
@@ -401,10 +387,8 @@ implement ui_text(id, t) = let
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
   val () = _text_b(ib, inn, tb, 0, tn)
-  val () = $A.drop<byte>(tf, tb)
-  val () = $A.free<byte>($A.thaw<byte>(tf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(tf, tb)
+in release_bytes(if_, ib) end
 
 #pub fn ui_text_n {l:agz}{ni:pos | ni < 256}{nt:pos | nt < 256} (id: $A.arr(byte, l, ni), inn: int ni, t: string nt): void
 
@@ -413,10 +397,8 @@ implement ui_text_n(id, inn, t) = let
   val @(if_, ib) = $A.freeze<byte>(id)
   val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
   val () = _text_b(ib, inn, tb, 0, tn)
-  val () = $A.drop<byte>(tf, tb)
-  val () = $A.free<byte>($A.thaw<byte>(tf))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
+  val () = release_bytes(tf, tb)
+  val () = release_bytes(if_, ib)
 in end
 
 (* The text of element id: buf[0, k) *)
@@ -428,10 +410,8 @@ implement ui_text_buf(id, buf, k) = let
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val @(bf, bb) = $A.freeze<byte>(buf)
   val () = _text_b(ib, inn, bb, 0, k)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(bf, bb)
+in release_bytes(if_, ib) end
 
 #pub fn ui_text_n_buf {li:agz}{ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
   (id: $A.arr(byte, li, ni), inn: int ni, buf: $A.arr(byte, l, n), k: int k): void
@@ -440,10 +420,8 @@ implement ui_text_n_buf(id, inn, buf, k) = let
   val @(if_, ib) = $A.freeze<byte>(id)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val () = _text_b(ib, inn, bb, 0, k)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
+  val () = release_bytes(bf, bb)
+  val () = release_bytes(if_, ib)
 in end
 
 (* The text of element id: data[off, off + k) of a borrow *)
@@ -453,8 +431,7 @@ in end
 implement ui_text_n_b(id, inn, tb, off, k) = let
   val @(if_, ib) = $A.freeze<byte>(id)
   val () = _text_b(ib, inn, tb, off, k)
-  val () = $A.drop<byte>(if_, ib)
-  val () = $A.free<byte>($A.thaw<byte>(if_))
+  val () = release_bytes(if_, ib)
 in end
 
 (* The text of element id: a long literal (under 64 KiB) *)
@@ -468,10 +445,8 @@ implement ui_text_long(id, t) = let
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val @(tf, tb) = $A.freeze<byte>(ta)
   val () = _text_b(ib, inn, tb, 0, tn)
-  val () = $A.drop<byte>(tf, tb)
-  val () = $A.free<byte>($A.thaw<byte>(tf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(tf, tb)
+in release_bytes(if_, ib) end
 
 (* ============================================================
    Controls, images and roles. These are the only ways to make a
@@ -492,24 +467,21 @@ fn _dattr {l,li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
   val vn = _len(v)
   val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
   val () = $D.set_attr(doc, ib, inn, name, vb, 0, vn)
-  val () = $A.drop<byte>(vf, vb)
-in $A.free<byte>($A.thaw<byte>(vf)) end
+in release_bytes(vf, vb) end
 
 fn _dtext {l,li:agz}{ni:pos | ni < 256}{nt:pos | nt < 256}
   (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, t: string nt): void = let
   val tn = _len(t)
   val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
   val () = $D.set_text(doc, ib, inn, tb, 0, tn)
-  val () = $A.drop<byte>(tf, tb)
-in $A.free<byte>($A.thaw<byte>(tf)) end
+in release_bytes(tf, tb) end
 
 (* An attribute with the empty value (alt="") *)
 fn _dempty {l,li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}
   (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, name: string nl): void = let
   val @(vf, vb) = $A.freeze<byte>($A.alloc<byte>(1))
   val () = $D.set_attr(doc, ib, inn, name, vb, 0, 0)
-  val () = $A.drop<byte>(vf, vb)
-in $A.free<byte>($A.thaw<byte>(vf)) end
+in release_bytes(vf, vb) end
 
 (* A button element ib in pb, of class cls *)
 fn _dbutton {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
@@ -605,10 +577,8 @@ fn _control_s {np,ni:pos | np < 256; ni < 256} (parent: string np, id: string ni
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = _control(doc, pb, pn, ib, inn, c)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 fn _control_n {np:pos | np < 256}{l:agz}{ni:pos | ni < 256}
   (parent: string np, id: $A.arr(byte, l, ni), inn: int ni, c: control): void = let
@@ -618,10 +588,8 @@ fn _control_n {np:pos | np < 256}{l:agz}{ni:pos | ni < 256}
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = _control(doc, pb, pn, ib, inn, c)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 fn _control_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}
   (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, c: control): void = let
@@ -630,10 +598,8 @@ fn _control_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
   val () = _control(doc, pb, pn, ib, inn, c)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 (* A new element with its class *)
 #pub fn ui_el {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
@@ -746,10 +712,8 @@ implement ui_img(parent, id, cls) = let
   val () = _dattr(doc, ib, inn, "class", cls)
   val () = _dempty(doc, ib, inn, "alt")
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 #pub fn ui_img_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
   (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc): void
@@ -762,10 +726,8 @@ implement ui_img_nn(parent, pn, id, inn, cls) = let
   val () = _dattr(doc, ib, inn, "class", cls)
   val () = _dempty(doc, ib, inn, "alt")
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(pf, pb)
-  val () = $A.free<byte>($A.thaw<byte>(pf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(pf, pb)
+in release_bytes(if_, ib) end
 
 (* A text field named name, which is also what it shows while empty.
    Search (type=search) or a multi-line text area. *)
@@ -842,10 +804,8 @@ implement ui_labelled_nn(id, inn, r, by, bn) = let
   val () = _dmodal(doc, ib, inn, r)
   val () = $D.set_attr(doc, ib, inn, "aria-labelledby", bb, 0, bn)
   val () = $D.destroy(doc)
-  val () = $A.drop<byte>(bf, bb)
-  val () = $A.free<byte>($A.thaw<byte>(bf))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+  val () = release_bytes(bf, bb)
+in release_bytes(if_, ib) end
 
 (* Role r for element id, named by the text of element by *)
 #pub fn ui_labelled {ni:pos | ni < 256}{nb:pos | nb < 256} (id: string ni, r: named, by: string nb): void
@@ -891,8 +851,7 @@ fn _listen1 {ne:pos | ne < 256}
         val inn = _len(id)
         val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
         val () = $EV.listen(ib, inn, eb, en, lid, cb)
-        val () = $A.drop<byte>(if_, ib)
-      in $A.free<byte>($A.thaw<byte>(if_)) end
+      in release_bytes(if_, ib) end
     | OnDocument() => $EV.listen_document(eb, en, lid, cb)
     | OnWindow() => $EV.listen_window(eb, en, lid, cb)
     | OnExternalFiles() => $EV.listen_external_files(lid, cb)
@@ -900,10 +859,8 @@ fn _listen1 {ne:pos | ne < 256}
         val inn = _len(id)
         val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
         val () = $EV.listen_gestures(ib, inn, lid, cb)
-        val () = $A.drop<byte>(if_, ib)
-      in $A.free<byte>($A.thaw<byte>(if_)) end)
-  val () = $A.drop<byte>(ef, eb)
-in $A.free<byte>($A.thaw<byte>(ef)) end
+      in release_bytes(if_, ib) end)
+in release_bytes(ef, eb) end
 
 (* Registers r's listeners, each with its position as its id; the
    number registered *)
@@ -931,8 +888,7 @@ implement ui_measure(id) = let
   val inn = _len(id)
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val _ = $R.discard<int><int>($DR.measure(ib, inn))
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+in release_bytes(if_, ib) end
 
 #pub fn ui_focus {ni:pos | ni < 256} (id: string ni): void
 
@@ -940,7 +896,6 @@ implement ui_focus(id) = let
   val inn = _len(id)
   val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
   val () = $BDOM.focus_node(ib, inn)
-  val () = $A.drop<byte>(if_, ib)
-in $A.free<byte>($A.thaw<byte>(if_)) end
+in release_bytes(if_, ib) end
 
 end (* #target wasm *)

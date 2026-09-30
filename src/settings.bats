@@ -12,6 +12,7 @@
 staload "ui.sats"
 staload "undo.sats"
 staload "book.sats"
+staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
@@ -282,15 +283,11 @@ fn _save (sort: int): void = let
   val () = $A.write_byte(buf, 17, x.flow)
   val @(bf, bb) = $A.freeze<byte>(buf)
   val ka = $A.alloc<byte>(3)
-  val () = $A.write_byte(ka, 0, 115) (* s *)
-  val () = $A.write_byte(ka, 1, 101) (* e *)
-  val () = $A.write_byte(ka, 2, 116) (* t *)
+  val () = $A.write_text(ka, 0, $A.text_lit("set"), 3)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 18))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(bf, bb)
-in $A.free<byte>($A.thaw<byte>(bf)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(bf, bb) end
 
 (* The panel's sliders, made again at the settings' values (after they
    are loaded, reset or restored; not while one is being moved) *)
@@ -408,8 +405,7 @@ implement set_load () = let
   val () = $A.write_byte(ka, 2, 116)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_get(kb, 3)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
   (* The system's dark mode, for the auto theme, and its changes *)
   val q = $A.alloc<byte>(30)
   val () = $A.write_text(q, 0, $A.text_lit("(prefers-color-scheme: dark)"), 28)
@@ -421,8 +417,7 @@ implement set_load () = let
       val () = _apply_theme()
     in 0 end)
   val qb = $A.borrow_join<byte>(qf, q1, q2)
-  val () = $A.drop<byte>(qf, qb)
-  val () = $A.free<byte>($A.thaw<byte>(qf))
+  val () = release_bytes(qf, qb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) =>
     case+ take_blob(h) of

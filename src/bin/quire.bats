@@ -23,6 +23,7 @@ staload "import.sats"
 staload "reader.sats"
 staload "toc.sats"
 staload "annot.sats"
+staload "mem.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -223,10 +224,8 @@ fn _view_save (key: int): void = let
   val @(bf, bb) = $A.freeze<byte>(b)
   val @(kf, kb) = $A.freeze<byte>(_view_key())
   val () = $P.discard<Int>($IDB.idb_put(kb, 4, bb, 4))
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
-  val () = $A.drop<byte>(bf, bb)
-in $A.free<byte>($A.thaw<byte>(bf)) end
+  val () = release_bytes(kf, kb)
+in release_bytes(bf, bb) end
 
 fn _show_library (): void = let
   val () = !_view := 0
@@ -267,6 +266,51 @@ in
   else ()
 end
 
+(* The hint on turning pages, shown once, on the first book opened
+   (a brief tip in context, not a tour): whether it has been shown,
+   true until the last run's answer is read, so it never shows twice *)
+val _hint_seen = ref<bool>(true)
+
+fn _hint_key (): [l:agz] $A.arr(byte, l, 4) = let
+  val k = $A.alloc<byte>(4)
+  val () = $A.write_text(k, 0, $A.text_lit("hint"), 4)
+in k end
+
+(* Reads whether the hint was shown in an earlier run *)
+fn _hint_load (): void = let
+  val @(kf, kb) = $A.freeze<byte>(_hint_key())
+  val p = $IDB.idb_get(kb, 4)
+  val () = release_bytes(kf, kb)
+in
+  $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) => let
+    val () = (case+ take_blob(h) of
+      | ~NoBlobBytes() => !_hint_seen := false
+      | ~BlobBytes(b, _) => $A.free<byte>(b))
+  in $P.ret<int>(0) end))
+end
+
+fn _hint_hide (): void = ui_show("turn-hint", false)
+
+(* Shows the hint, the first time a book is opened: it goes at the first
+   turn, or after 8 seconds *)
+fn _hint_offer (): void =
+  if !_hint_seen then ()
+  else let
+    val () = !_hint_seen := true
+    val v = $A.alloc<byte>(1)
+    val () = $A.write_byte(v, 0, 1)
+    val @(vf, vb) = $A.freeze<byte>(v)
+    val @(kf, kb) = $A.freeze<byte>(_hint_key())
+    val () = $P.discard<Int>($IDB.idb_put(kb, 4, vb, 1))
+    val () = release_bytes(kf, kb)
+    val () = release_bytes(vf, vb)
+    val () = ui_show("turn-hint", true)
+  in
+    $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(8000)), lam(_) => let
+      val () = _hint_hide()
+    in $P.ret<int>(0) end))
+  end
+
 fn _show_reader (): void = let
   val () = !_view := 1
   val () = ui_show("library", false)
@@ -281,8 +325,7 @@ fn _show_reader (): void = let
   val () = $A.write_byte(a, 1, 114)
   val @(f, b) = $A.freeze<byte>(a)
   val () = $NAV.push_state(b, 2)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
+  val () = release_bytes(f, b)
   val () = _chrome_set(true)
 in ui_focus("page") end
 
@@ -299,6 +342,7 @@ fn _open_book {i:int} (i: int i): void =
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
+      val () = _hint_offer()
       val () = reader_stack_clear()
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
@@ -331,8 +375,7 @@ fn _open_book {i:int} (i: int i): void =
 fn _view_restore (): $P.promise(int, $P.Chained) = let
   val @(kf, kb) = $A.freeze<byte>(_view_key())
   val p = $IDB.idb_get(kb, 4)
-  val () = $A.drop<byte>(kf, kb)
-  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = release_bytes(kf, kb)
 in
   $P.and_then<Int><int>($P.vow(p), lam(h) => let
     val key = (case+ take_blob(h) of
@@ -366,8 +409,7 @@ fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
   val k = lib_key(c, h1, h2)
   val @(f, b) = $A.freeze<byte>(k)
   val () = $P.discard<Int>($IDB.idb_delete(b, 15))
-  val () = $A.drop<byte>(f, b)
-in $A.free<byte>($A.thaw<byte>(f)) end
+in release_bytes(f, b) end
 
 (* Archives book i: its record is kept and its file deleted. The file
    goes only when the Undo offer does: until then Undo puts the book
@@ -675,8 +717,7 @@ fn _copy_selection (): void =
         val () = $DC.blob_free(b)
         val @(f, bb) = $A.freeze<byte>(a)
         val () = $P.discard<Int>($P.vow($CB.clipboard_write(bb, n)))
-        val () = $A.drop<byte>(f, bb)
-      in $A.free<byte>($A.thaw<byte>(f)) end
+      in release_bytes(f, bb) end
     end
 
 (* Exports the open book's annotations *)
@@ -936,8 +977,7 @@ fn _search_run (): void = let
   val () = $A.write_text(a, 0, $A.text_lit("search-field"), 12)
   val @(f, b) = $A.freeze<byte>(a)
   val r = $DR.read_input_value(b, 12)
-  val () = $A.drop<byte>(f, b)
-  val () = $A.free<byte>($A.thaw<byte>(f))
+  val () = release_bytes(f, b)
 in
   case+ r of
   | ~$R.none() => reader_search($A.alloc<byte>(1), 0)
@@ -992,10 +1032,12 @@ fn _panels_close (): bool = layer_close_all()
 
 (* A page turn: the bars hide *)
 fn _next (): void = let
+  val () = _hint_hide()
   val () = (if !_chrome then _chrome_set(false) else ())
 in page_next() end
 
 fn _prev (): void = let
+  val () = _hint_hide()
   val () = (if !_chrome then _chrome_set(false) else ())
 in page_prev() end
 
@@ -1393,8 +1435,8 @@ in r end
 
 fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
   val r = RCons(r, OnEl("back-to-library"), "click", lam(_) => let val () = _show_library() in 0 end)
-  val r = RCons(r, OnEl("previous-page"), "click", lam(_) => let val () = page_prev() in 0 end)
-  val r = RCons(r, OnEl("next-page"), "click", lam(_) => let val () = page_next() in 0 end)
+  val r = RCons(r, OnEl("previous-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
+  val r = RCons(r, OnEl("next-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
   val r = RCons(r, OnEl("page"), "click", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
@@ -1512,6 +1554,7 @@ implement main0 () = let
     in 0 end)
   val () = ui_listen_all(r)
   val () = $P.discard<int>(reader_speed_load())
+  val () = _hint_load()
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
