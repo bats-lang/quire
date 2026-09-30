@@ -330,6 +330,30 @@ fn _show_reader (): void = let
 in ui_focus("page") end
 
 (* Opens library book i where it was left *)
+(* src[0, n) copied to dst[o, o + n) *)
+fun _copy_from_to {ls,ld:agz}{ms,md:nat}{n:nat | n <= ms}{o:nat | o + n <= md}{j:nat | j <= n} .<n - j>.
+  (src: !$A.arr(byte, ls, ms), n: int n, dst: !$A.arr(byte, ld, md), o: int o, j: int j): void =
+  if j >= n then ()
+  else let val () = $A.set<byte>(dst, o + j, $A.get<byte>(src, j)) in _copy_from_to(src, n, dst, o, j + 1) end
+
+fn _copy_into {ls,ld:agz}{ms,md:nat}{n:nat | n <= ms}{o:nat | o + n <= md}
+  (src: !$A.arr(byte, ls, ms), n: int n, dst: !$A.arr(byte, ld, md), o: int o): void =
+  _copy_from_to(src, n, dst, o, 0)
+
+(* A shared selection's citation, book i's: "Author, Title" (as the
+   export's) *)
+fn _citation_set {i:int} (i: int i): void = let
+  val @(t, tn) = lib_text(i, 0)
+  val @(a, an) = lib_text(i, 1)
+  val b = $A.alloc<byte>(520)
+  val () = _copy_into(a, an, b, 0)
+  val () = $A.set<byte>(b, an, $A.int2byte(44))
+  val () = $A.set<byte>(b, an + 1, $A.int2byte(32))
+  val () = _copy_into(t, tn, b, an + 2)
+  val () = $A.free<byte>(t)
+  val () = $A.free<byte>(a)
+in ui_text_buf("share-citation", b, an + 2 + tn) end
+
 fn _open_book {i:int} (i: int i): void =
   case+ lib_nums(i) of
   | ~$R.none() => ()
@@ -343,6 +367,7 @@ fn _open_book {i:int} (i: int i): void =
     else let
       val () = _show_reader()
       val () = _hint_offer()
+      val () = _citation_set(i)
       val () = reader_stack_clear()
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
@@ -720,12 +745,13 @@ fn _copy_selection (): void =
       in release_bytes(f, bb) end
     end
 
-(* Exports the open book's annotations *)
-fn _export (): void = let
+(* Exports the open book's annotations: downloaded, or to be shared
+   (the page's script shares them once this click's listener is done) *)
+fn _export (share: bool): void = let
   val i = lib_index_of_key(open_key_get())
   val @(t, tn) = lib_text(i, 0)
   val @(a, an) = lib_text(i, 1)
-in annot_export(t, tn, a, an) end
+in annot_export(t, tn, a, an, share) end
 
 (* Goes to annotation i, remembering where the reader was *)
 fn _annot_go (i: int): void = let
@@ -1453,11 +1479,13 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
       val dl = _row_of(t, "highlight-delete")
       val close = _is(t, "annotations-close")
       val ex = _is(t, "annotations-export")
+      val sh = _is(t, "annotations-share")
       val filter = (if _is(t, "filter-all") then ~1 else if _is(t, "filter-yellow") then 0
         else if _is(t, "filter-orange") then 1 else if _is(t, "filter-underlined") then 2 else ~2): int
       val () = _target_free(t)
       val () = (if close then layer_close(LAnnotations())
-        else if ex then _export()
+        else if ex then _export(false)
+        else if sh then _export(true)
         else if filter >= ~1 then annot_filter_set(filter)
         else if go >= 0 then let val () = layer_close(LAnnotations()) in _annot_go(go) end
         else if nt >= 0 then annot_ask_note(nt, false)

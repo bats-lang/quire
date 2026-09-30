@@ -1104,12 +1104,34 @@ fun _md {l,l1,l2:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 3600 * j + 64 <= n}{m1,
       prval () = fold@(xs)
     in q end
 
-(* Downloads the highlights and notes as a Markdown file, headed by the
-   book's title t[0, tn) and author a[0, an) *)
-#pub fn annot_export {l1,l2:agz}{m1,m2:pos}{tn:nat | tn < m1; tn < 256}{an:nat | an < m2; an < 256}
-  (t: $A.arr(byte, l1, m1), tn: int tn, a: $A.arr(byte, l2, m2), an: int an): void
+(* The Markdown file used[0, q) downloaded *)
+fn _md_download {lu:agz}{q:pos} (used: !$A.borrow(byte, lu, q), q: int q): void = let
+  val ma = $A.alloc<byte>(13)
+  val () = $A.write_text(ma, 0, $A.text_lit("text/markdown"), 13)
+  val @(mf, mb) = $A.freeze<byte>(ma)
+  val na = $A.alloc<byte>(20)
+  val () = $A.write_text(na, 0, $A.text_lit("quire-annotations.md"), 20)
+  val @(nf, nb) = $A.freeze<byte>(na)
+  val () = $BL.download_blob(used, q, mb, 13, nb, 20)
+  val () = release_bytes(nf, nb)
+in release_bytes(mf, mb) end
 
-implement annot_export (t, tn, a, an) = let
+(* The Markdown file used[0, q) put where the page's script shares it
+   from (annotations-share-text), when it fits; else downloaded *)
+fn _md_share {lu:agz}{q:pos} (used: !$A.borrow(byte, lu, q), q: int q): void =
+  if q >= 65536 then _md_download(used, q)
+  else let
+    val id = $A.alloc<byte>(22)
+    val () = $A.write_text(id, 0, $A.text_lit("annotations-share-text"), 22)
+  in ui_text_n_b(id, 22, used, 0, q) end
+
+(* The highlights and notes as a Markdown file, headed by the book's
+   title t[0, tn) and author a[0, an): downloaded, or, to be shared,
+   put where the page's script shares it from *)
+#pub fn annot_export {l1,l2:agz}{m1,m2:pos}{tn:nat | tn < m1; tn < 256}{an:nat | an < m2; an < 256}
+  (t: $A.arr(byte, l1, m1), tn: int tn, a: $A.arr(byte, l2, m2), an: int an, share: bool): void
+
+implement annot_export (t, tn, a, an, share) = let
   val c = _take()
   val+ @AnnCell(xs, k) = c
   val n = 1024 + 3600 * k
@@ -1134,15 +1156,7 @@ in
       val q = _lit(out, q, "---\n*Exported from Quire*\n")
       val @(f, b) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(f, b, q)
-      val ma = $A.alloc<byte>(13)
-      val () = $A.write_text(ma, 0, $A.text_lit("text/markdown"), 13)
-      val @(mf, mb) = $A.freeze<byte>(ma)
-      val na = $A.alloc<byte>(20)
-      val () = $A.write_text(na, 0, $A.text_lit("quire-annotations.md"), 20)
-      val @(nf, nb) = $A.freeze<byte>(na)
-      val () = $BL.download_blob(used, q, mb, 13, nb, 20)
-      val () = release_bytes(nf, nb)
-      val () = release_bytes(mf, mb)
+      val () = (if share then _md_share(used, q) else _md_download(used, q))
       val b = $A.borrow_join<byte>(f, used, rest)
       val () = $A.drop<byte>(f, b)
     in piece_free(ow, $A.thaw<byte>(f)) end
