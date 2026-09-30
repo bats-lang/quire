@@ -536,7 +536,7 @@ in
         val () = (if x >= 0 then (if x <= 4 then set_margin_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "font") then let
-        val () = (if x >= 0 then (if x <= 2 then set_font_set(x) else ()) else ())
+        val () = (if x >= 0 then (if x <= 3 then set_font_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "theme") then let
         val () = (if x >= 0 then (if x <= 5 then set_theme_set(x) else ()) else ())

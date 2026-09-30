@@ -831,6 +831,7 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
       val changed = (if _is(t, "font-literata") then let val () = set_font_set(0) in true end
         else if _is(t, "font-inter") then let val () = set_font_set(1) in true end
         else if _is(t, "font-book") then let val () = set_font_set(2) in true end
+        else if _is(t, "font-atkinson") then let val () = set_font_set(3) in true end
         else if _is(t, "theme-auto") then let val () = set_theme_set(0) in true end
         else if _is(t, "theme-light") then let val () = set_theme_set(1) in true end
         else if _is(t, "theme-sepia") then let val () = set_theme_set(2) in true end

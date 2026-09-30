@@ -920,10 +920,15 @@ in sh end
    The stylesheet
    ============================================================ *)
 
-fn _g_0_fonts {r:nat | r >= 403} (sh: sheet(r, 0)): [q:nat | q >= r - 403] sheet(q, 0) = let
+fn _g_0_fonts {r:nat | r >= 1010} (sh: sheet(r, 0)): [q:nat | q >= r - 1010] sheet(q, 0) = let
   val () = raw(sh, "@font-face{font-family:Literata;src:url(literata-latin.woff2) format('woff2');font-style:normal;font-weight:200 900;font-display:swap}")
   val () = raw(sh, "@font-face{font-family:Literata;src:url(literata-italic-latin.woff2) format('woff2');font-style:italic;font-weight:200 900;font-display:swap}")
   val () = raw(sh, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:swap}")
+  (* fetched only when chosen: a face is loaded once text uses it *)
+  val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-normal.woff2) format('woff2');font-style:normal;font-weight:400;font-display:swap}")
+  val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-normal.woff2) format('woff2');font-style:normal;font-weight:700;font-display:swap}")
+  val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-italic.woff2) format('woff2');font-style:italic;font-weight:400;font-display:swap}")
+  val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sh end
 
 fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] sheet(q, 0) = let
