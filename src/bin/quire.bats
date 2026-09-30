@@ -834,6 +834,8 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
         else if _is(t, "theme-light") then let val () = set_theme_set(1) in true end
         else if _is(t, "theme-sepia") then let val () = set_theme_set(2) in true end
         else if _is(t, "theme-dark") then let val () = set_theme_set(3) in true end
+        else if _is(t, "theme-night") then let val () = set_theme_set(4) in true end
+        else if _is(t, "theme-grey") then let val () = set_theme_set(5) in true end
         else if _is(t, "align-ragged") then let val () = set_align_set(0) in true end
         else if _is(t, "align-justified") then let val () = set_align_set(1) in true end
         else if _is(t, "hyphens-off") then let val () = set_hyph_set(0) in true end
@@ -1216,6 +1218,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       val row = _row_of(t, "toc-row")
       val bgo = _row_of(t, "bookmark-go")
       val bdl = _row_of(t, "bookmark-delete")
+      val bnt = _row_of(t, "bookmark-edit")
       val pgo = _row_of(t, "page-row")
       val () = (if _is(t, "contents-close") then layer_close(LContents())
         else if _is(t, "contents-tab") then _toc_open()
@@ -1226,6 +1229,7 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
         in reader_goto_page(pgo) end
         else if bgo >= 0 then let val () = layer_close(LContents()) in _annot_go(bgo) end
         else if bdl >= 0 then annot_delete_bookmark(bdl)
+        else if bnt >= 0 then annot_ask_note(bnt, false)
         else if row >= 0 then let
           val () = layer_close(LContents())
         in reader_goto_entry(row) end
@@ -1270,12 +1274,16 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
   val r = RCons(r, OnEl("selection-toolbar"), "click", lam(h) => let
       val t = _target(h)
       val hl = _is(t, "selection-highlight")
+      val orange = _is(t, "selection-orange")
+      val under = _is(t, "selection-underline")
       val nt = _is(t, "selection-note")
       val cp = _is(t, "selection-copy")
       val sr = _is(t, "selection-search")
       val () = _target_free(t)
-      val () = (if hl then let val _ = annot_highlight() in () end
-        else if nt then annot_ask_note(annot_highlight(), true)
+      val () = (if hl then let val _ = annot_highlight(0) in () end
+        else if orange then let val _ = annot_highlight(1) in () end
+        else if under then let val _ = annot_highlight(2) in () end
+        else if nt then annot_ask_note(annot_highlight(0), true)
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
@@ -1291,9 +1299,12 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
       val dl = _row_of(t, "highlight-delete")
       val close = _is(t, "annotations-close")
       val ex = _is(t, "annotations-export")
+      val filter = (if _is(t, "filter-all") then ~1 else if _is(t, "filter-yellow") then 0
+        else if _is(t, "filter-orange") then 1 else if _is(t, "filter-underlined") then 2 else ~2): int
       val () = _target_free(t)
       val () = (if close then layer_close(LAnnotations())
         else if ex then _export()
+        else if filter >= ~1 then annot_filter_set(filter)
         else if go >= 0 then let val () = layer_close(LAnnotations()) in _annot_go(go) end
         else if nt >= 0 then annot_ask_note(nt, false)
         else if dl >= 0 then annot_delete_highlight(dl)

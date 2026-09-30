@@ -28,6 +28,22 @@ test('no two elements share an id', async ({ page }) => {
   expect(dups).toEqual([]);
 });
 
+// the palette's contrast is proven (style.bats); axe checks each theme
+// as the browser draws it
+test('every theme passes the audit', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Themed', author: 'Axe', rawChapters: chapters(2) })], 1);
+  await cards(page).first().click();
+  await expect(bookPage(page)).toBeVisible();
+  await clickControl(page, 'Typography');
+  for (const name of ['Light', 'Sepia', 'Dark', 'Night', 'Grey']) {
+    const button = page.getByRole('button', { name, exact: true });
+    await button.click();
+    await expect(button).toHaveAttribute('aria-pressed', 'true');
+    expect(await audit(page), name).toEqual([]);
+  }
+});
+
 test('no view has accessibility violations', async ({ page }) => {
   await start(page);
   expect(await audit(page)).toEqual([]);

@@ -37,7 +37,8 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 #define AMAX 400
 #define SLOT 2440
 
-(* Each annotation: its kind (0 a bookmark, 1 a highlight), chapter, the
+(* Each annotation: its kind (0 a bookmark; a highlight: 1 yellow, 2
+   orange, 3 underlined), chapter, the
    node and offset it starts at and those it ends at, the page it was
    made on, when (epoch minutes), its text t[0, tl) (a highlight's
    quote, a bookmark's first words) and its note n[0, nl) *)
@@ -73,6 +74,19 @@ fn _put (c: ann_cell): void = let
   val () = ref_exch_elt<ann_cell>(_cell, cur)
   val+ ~AnnCell(xs, _) = cur
 in ann_free(xs) end
+
+(* Whether an annotation of kind kd is a highlight *)
+fn _is_highlight (kd: int): bool = kd >= 1
+
+(* A highlight's style: 0 yellow, 1 orange, 2 underlined (a kind this
+   version does not know is shown yellow) *)
+fn _style_of (kd: int): [s:nat | s <= 2] int s =
+  if kd = 2 then 1 else if kd = 3 then 2 else 0
+
+(* The mark set a highlight of kind kd is shown in: the stylesheet's
+   ::highlight(bats-mark-1), 3 or 4 (2 is the search's) *)
+fn _mark_set (kd: int): int =
+  if kd = 2 then 3 else if kd = 3 then 4 else 1
 
 (* dst[j, k) := src[j, k) *)
 fun _dup {ls,ld:agz}{ns,nd:pos}{k:nat | k <= ns; k <= nd}{j:nat | j <= k} .<k - j>.
@@ -273,13 +287,13 @@ fun _marks {k:nat} .<k>. (xs: !ann(k), ch: int): void =
   case+ xs of
   | ann_nil() => ()
   | @ann_cons(kd, c, sn, so, en, eo, _, _, _, _, _, _, rest) => let
-      val () = (if kd = 1 then (if c = ch then
+      val () = (if _is_highlight(kd) then (if c = ch then
         (if sn >= 0 then (if en >= 0 then let
            val @(sa, sl) = nid_pad3("c", sn)
            val @(ea, el) = nid_pad3("c", en)
            val @(sf, sb) = $A.freeze<byte>(sa)
            val @(ef, eb) = $A.freeze<byte>(ea)
-           val () = $BDOM.mark_range(1, sb, sl, so, eb, el, eo)
+           val () = $BDOM.mark_range(_mark_set(kd), sb, sl, so, eb, el, eo)
            val () = $A.drop<byte>(ef, eb)
            val () = $A.free<byte>($A.thaw<byte>(ef))
            val () = $A.drop<byte>(sf, sb)
@@ -297,6 +311,8 @@ fn _chapter (): [c:nat] int c =
 
 implement annot_marks () = let
   val () = $BDOM.clear_marks(1)
+  val () = $BDOM.clear_marks(3)
+  val () = $BDOM.clear_marks(4)
   val c = _take()
   val+ @AnnCell(xs, _) = c
   val () = _marks(xs, _chapter())
@@ -501,11 +517,12 @@ fn _index_of (ch: Int, sn: Int, so: Int): int = let
   val () = _put(c)
 in r end
 
-(* The selection, as a highlight of the chapter shown: its index, or -1
-   when nothing is selected in the chapter's text *)
-#pub fn annot_highlight (): int
+(* The selection, as a highlight of the chapter shown in style (0
+   yellow, 1 orange, 2 underlined): its index, or -1 when nothing is
+   selected in the chapter's text *)
+#pub fn annot_highlight {s:nat | s <= 2} (style: int s): int
 
-implement annot_highlight () = let
+implement annot_highlight (style) = let
   val @(so_b, eo_b) = $DR.get_selection_range()
   val so = $DR.get_measure_x()
   val eo = $DR.get_measure_y()
@@ -523,7 +540,7 @@ in
         val () = $A.free<byte>(t0)
         val ch = _chapter()
         val pg = (case+ reading_get() of @(p, _, _, _) => p): Int
-        val () = _add(1, ch, sn, so, en, eo, pg, t, tl, $A.alloc<byte>(1), 0)
+        val () = _add(1 + style, ch, sn, so, en, eo, pg, t, tl, $A.alloc<byte>(1), 0)
         val () = annot_marks()
       in _index_of(ch, sn, so) end)
 end
@@ -694,6 +711,11 @@ implement annot_delete_highlight (i) =
 implement annot_delete_bookmark (i) =
   _delete_undoable(i, "Bookmark deleted", lam () => annot_render_bookmarks())
 
+(* Both lists, after a note changed: the highlights' and the bookmarks' *)
+fn _lists_render (): void = let
+  val () = annot_render()
+in annot_render_bookmarks() end
+
 (* The note in the dialog's text area, kept as annotation i's *)
 fn _note_save (i: int): void = let
   val a = $A.alloc<byte>(11)
@@ -707,7 +729,7 @@ in
   | ~$R.none() => let
       val e = $A.alloc<byte>(1)
       val () = annot_note_set(i, e, 0)
-    in annot_render() end
+    in _lists_render() end
   | ~$R.some(v) => let
       val n = $DC.blob_len(v)
     in
@@ -715,7 +737,7 @@ in
         val () = $DC.blob_free(v)
         val e = $A.alloc<byte>(1)
         val () = annot_note_set(i, e, 0)
-      in annot_render() end
+      in _lists_render() end
       else if n > 65536 then let
         val () = $DC.blob_free(v)
       in end
@@ -724,7 +746,7 @@ in
         val () = $DC.blob_read(v, 0, a, n)
         val () = $DC.blob_free(v)
         val () = annot_note_set(i, a, n)
-      in annot_render() end
+      in _lists_render() end
     end
 end
 
@@ -738,7 +760,7 @@ implement annot_ask_note (i, fresh) =
   if i < 0 then ()
   else let
     val () = modal_open(QNote(), "Note", lam () => _note_save(i),
-      lam () => if fresh then let val () = _drop(i) in annot_render() end else ())
+      lam () => if fresh then let val () = _drop(i) in _lists_render() end else ())
     val () = modal_textarea()
   in annot_note_show(i) end
 
@@ -819,14 +841,23 @@ fn _heading {ni:pos | ni < 256}{c:nat} (lst: string ni, ch: int c): void = let
 in ui_text_n_buf(ga, gl, lb, lk) end
 
 (* One row of the annotations list: highlight i *)
-fn _hrow {i:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl < t2; nl < 65536}
-  (i: int i, t: !$A.arr(byte, l1, t1), tl: int tl, n: !$A.arr(byte, l2, t2), nl: int nl): void = let
+fn _hrow {i:nat}{s:nat | s <= 2}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl < t2; nl < 65536}
+  (i: int i, style: int s, t: !$A.arr(byte, l1, t1), tl: int tl, n: !$A.arr(byte, l2, t2), nl: int nl): void = let
   val @(ra, rl) = nid_make("highlight-row", i)
   val () = ui_add_n("annotations-list", ra, rl, TDiv)
   val @(ra, rl) = nid_make("highlight-row", i)
   val () = ui_attr_n(ra, rl, AClass, "hrow")
   val () = _child_btn("highlight-row", "highlight-go", i, "hgo")
-  val () = _child("highlight-go", "highlight-quote", i, TSpan, "hq")
+  (* its style, in words (not by colour alone), then its quote as it
+     is marked on the page *)
+  val () = _child("highlight-go", "highlight-style", i, TSpan, "hstyle")
+  val @(sa, sl) = nid_make("highlight-style", i)
+  val () = (if style = 1 then ui_text_n(sa, sl, "Orange")
+    else if style = 2 then ui_text_n(sa, sl, "Underlined")
+    else ui_text_n(sa, sl, "Yellow"))
+  val () = (if style = 1 then _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-orange")
+    else if style = 2 then _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-under")
+    else _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-yellow"))
   val () = _text_of("highlight-quote", i, t, tl)
   val () = (if nl > 0 then let
       val () = _child("highlight-go", "highlight-note", i, TSpan, "hn")
@@ -836,49 +867,87 @@ fn _hrow {i:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl
     else _child_text_btn("highlight-tools", "highlight-edit", i, "hbtn", "Add note"))
 in _child_text_btn("highlight-tools", "highlight-delete", i, "hbtn", "Delete") end
 
+(* The style the annotations list shows: -1 every one, else 0 yellow,
+   1 orange, 2 underlined *)
+val _filter = ref<int>(~1)
+
+(* Whether a highlight of kind kd is listed *)
+fn _listed (kd: int): bool =
+  if ~_is_highlight(kd) then false
+  else if !_filter < 0 then true
+  else _style_of(kd) = !_filter
+
 fun _hrows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i, last: Int): int =
   case+ xs of
   | ann_nil() => i
   | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, n, nl, rest) => let
-      val () = (if kd = 1 then let
+      val shown = _listed(kd)
+      val () = (if shown then let
           val () = (if c <> last then (if c >= 0 then _heading("annotations-list", c) else ()) else ())
-        in _hrow(i, t, tl, n, nl) end else ())
-      val last2 = (if kd = 1 then c else last): Int
+        in _hrow(i, _style_of(kd), t, tl, n, nl) end else ())
+      val last2 = (if shown then c else last): Int
       val r = _hrows(rest, i + 1, last2)
       prval () = fold@(xs)
     in r end
 
-fun _count_kind {k:nat} .<k>. (xs: !ann(k), kd: Int): int =
+(* How many of xs pass keep *)
+fun _count_where {k:nat} .<k>. (xs: !ann(k), keep: int -<cloref1> bool): int =
   case+ xs of
   | ann_nil() => 0
   | @ann_cons(d, _, _, _, _, _, _, _, _, _, _, _, rest) => let
       val d0 = d
-      val r = _count_kind(rest, kd)
+      val r = _count_where(rest, keep)
       prval () = fold@(xs)
-    in if d0 = kd then r + 1 else r end
+    in if keep(d0) then r + 1 else r end
 
-(* Fills the annotations list: the highlights, by chapter *)
+(* The filter's buttons, pressed as it is *)
+fn _pressed {ni:pos | ni < 256} (id: string ni, on: bool): void =
+  if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
+
+fn _filter_show (): void = let
+  val f = !_filter
+  val () = _pressed("filter-all", f < 0)
+  val () = _pressed("filter-yellow", f = 0)
+  val () = _pressed("filter-orange", f = 1)
+in _pressed("filter-underlined", f = 2) end
+
+(* Fills the annotations list: the highlights of the style shown, by
+   chapter *)
 #pub fn annot_render (): void
 
 implement annot_render () = let
   val () = ui_clear("annotations-list")
+  val () = _filter_show()
   val c = _take()
   val+ @AnnCell(xs, _) = c
-  val n = _count_kind(xs, 1)
+  val all = _count_where(xs, lam (kd) => _is_highlight(kd))
+  val n = _count_where(xs, lam (kd) => _listed(kd))
   val _ = _hrows(xs, 0, ~1)
   prval () = fold@(c)
   val () = _put(c)
 in
-  if n = 0 then let
+  if all = 0 then let
     val () = ui_add("annotations-list", "annotations-empty", TDiv)
     val () = ui_class("annotations-empty", "empty")
   in ui_text("annotations-empty", "No highlights yet. Select text to highlight it.") end
+  else if n = 0 then let
+    val () = ui_add("annotations-list", "annotations-empty", TDiv)
+    val () = ui_class("annotations-empty", "empty")
+  in ui_text("annotations-empty", "No highlights in this style.") end
   else ()
 end
 
+(* Lists only the highlights of style f (0 yellow, 1 orange, 2
+   underlined), or every one (-1) *)
+#pub fn annot_filter_set (f: int): void
+
+implement annot_filter_set (f) = let
+  val () = !_filter := (if f >= 0 then (if f <= 2 then f else ~1) else ~1)
+in annot_render() end
+
 (* One row of the bookmarks list: bookmark i *)
-fn _brow {i:nat}{c:nat}{l1:agz}{t1:pos}{tl:nat | tl < t1; tl < 65536}
-  (i: int i, ch: int c, t: !$A.arr(byte, l1, t1), tl: int tl): void = let
+fn _brow {i:nat}{c:nat}{l1,l2:agz}{t1,t2:pos}{tl:nat | tl < t1; tl < 65536}{nl:nat | nl < t2; nl < 65536}
+  (i: int i, ch: int c, t: !$A.arr(byte, l1, t1), tl: int tl, n: !$A.arr(byte, l2, t2), nl: int nl): void = let
   val @(ra, rl) = nid_make("bookmark-row", i)
   val () = ui_add_n("bookmarks-list", ra, rl, TDiv)
   val @(ra, rl) = nid_make("bookmark-row", i)
@@ -891,13 +960,19 @@ fn _brow {i:nat}{c:nat}{l1:agz}{t1:pos}{tl:nat | tl < t1; tl < 65536}
   val () = (if tl > 0 then let
       val () = _child("bookmark-go", "bookmark-snippet", i, TSpan, "snip")
     in _text_of("bookmark-snippet", i, t, tl) end else ())
-in _child_text_btn("bookmark-row", "bookmark-delete", i, "hbtn", "Delete") end
+  val () = (if nl > 0 then let
+      val () = _child("bookmark-go", "bookmark-note", i, TSpan, "hn")
+    in _text_of("bookmark-note", i, n, nl) end else ())
+  val () = _child("bookmark-row", "bookmark-tools", i, TDiv, "hbtns")
+  val () = (if nl > 0 then _child_text_btn("bookmark-tools", "bookmark-edit", i, "hbtn", "Edit note")
+    else _child_text_btn("bookmark-tools", "bookmark-edit", i, "hbtn", "Add note"))
+in _child_text_btn("bookmark-tools", "bookmark-delete", i, "hbtn", "Delete") end
 
 fun _brows {k:nat}{i:nat} .<k>. (xs: !ann(k), i: int i): void =
   case+ xs of
   | ann_nil() => ()
-  | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, _, _, rest) => let
-      val () = (if kd = 0 then (if c >= 0 then _brow(i, c, t, tl) else ()) else ())
+  | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, n, nl, rest) => let
+      val () = (if kd = 0 then (if c >= 0 then _brow(i, c, t, tl, n, nl) else ()) else ())
       val () = _brows(rest, i + 1)
       prval () = fold@(xs)
     in end
@@ -909,7 +984,7 @@ implement annot_render_bookmarks () = let
   val () = ui_clear("bookmarks-list")
   val c = _take()
   val+ @AnnCell(xs, _) = c
-  val n = _count_kind(xs, 0)
+  val n = _count_where(xs, lam (kd) => kd = 0)
   val () = _brows(xs, 0)
   prval () = fold@(c)
   val () = _put(c)
@@ -971,6 +1046,13 @@ fn _md_head_if {l:agz}{la:addr}{n:int}{p:nat | p + 206 <= n}
   (out: !$A.arrx(byte, l, n, la), p: int p, c: Int, last: Int): [q:nat | p <= q; q <= p + 206] int q =
   if c <> last then _md_heading(out, p, c) else p
 
+(* A highlight's style after its quote, unless yellow, the usual one *)
+fn _md_style {l:agz}{la:addr}{n:int}{p:nat | p + 22 <= n}{s:nat | s <= 2}
+  (out: !$A.arrx(byte, l, n, la), p: int p, style: int s): [q:nat | p <= q; q <= p + 22] int q =
+  if style = 1 then _lit(out, p, "*Orange highlight*\n\n")
+  else if style = 2 then _lit(out, p, "*Underlined*\n\n")
+  else p
+
 (* The highlights as Markdown at out[p]: each after its chapter's
    heading when it is the chapter's first *)
 (* A highlight's source, after its quote: "— Author, *Title*, Chapter",
@@ -999,7 +1081,21 @@ fun _md {l,l1,l2:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 3600 * j + 64 <= n}{m1,
   case+ xs of
   | ann_nil() => p
   | @ann_cons(kd, c, _, _, _, _, _, _, t, tl, nt, nl, rest) =>
-    if kd <> 1 then let
+    (* a bookmark is exported when it has a note *)
+    if kd = 0 then (if nl > 0 then let
+      val p1 = _md_head_if(out, p, c, last)
+      val p2 = _lit(out, p1, "**Bookmark:** ")
+      val () = _flat_at(t, tl, out, p2, 0)
+      val p3 = _lit(out, p2 + tl, "\n\n")
+      val p4 = _md_note(out, p3, nt, nl)
+      val q = _md(out, p4, rest, c, bt, tn, ba, an)
+      prval () = fold@(xs)
+    in q end
+    else let
+      val q = _md(out, p, rest, last, bt, tn, ba, an)
+      prval () = fold@(xs)
+    in q end)
+    else if ~_is_highlight(kd) then let
       val q = _md(out, p, rest, last, bt, tn, ba, an)
       prval () = fold@(xs)
     in q end
@@ -1008,6 +1104,9 @@ fun _md {l,l1,l2:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 3600 * j + 64 <= n}{m1,
       val p2 = _lit(out, p1, "> ")
       val () = _flat_at(t, tl, out, p2, 0)
       val p3 = _lit(out, p2 + tl, "\n\n")
+      (* the style, unless yellow, the usual one *)
+      val style = _style_of(kd)
+      val p3 = _md_style(out, p3, style)
       val p3 = _md_cite(out, p3, c, bt, tn, ba, an)
       val p4 = _md_note(out, p3, nt, nl)
       val q = _md(out, p4, rest, c, bt, tn, ba, an)
@@ -1067,10 +1166,16 @@ end
 (* The bytes one annotation takes in JSON, at most *)
 #define AJ 15000
 
-fn _kind_json {l:agz}{la:addr}{n:nat}{p:nat | p + 20 <= n}
-  (out: !$A.arrx(byte, l, n, la), p: int p, kd: int): [q:int | p < q; q <= p + 20] int q =
-  if kd = 1 then jw_lit(out, p, "{\"kind\":\"highlight\"")
-  else jw_lit(out, p, "{\"kind\":\"bookmark\"")
+fn _kind_json {l:agz}{la:addr}{n:nat}{p:nat | p + 44 <= n}
+  (out: !$A.arrx(byte, l, n, la), p: int p, kd: int): [q:int | p < q; q <= p + 44] int q =
+  if ~_is_highlight(kd) then jw_lit(out, p, "{\"kind\":\"bookmark\"")
+  else let
+    val style = _style_of(kd)
+  in
+    if style = 1 then jw_lit(out, p, "{\"kind\":\"highlight\",\"style\":\"orange\"")
+    else if style = 2 then jw_lit(out, p, "{\"kind\":\"highlight\",\"style\":\"underline\"")
+    else jw_lit(out, p, "{\"kind\":\"highlight\",\"style\":\"yellow\"")
+  end
 
 fun _json_anns {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + AJ * j + 1 <= n} .<j>.
   (out: !$A.arrx(byte, l, n, la), p: int p, xs: !ann(j), first: bool): [q:nat | q + 1 <= n] int q =
@@ -1142,7 +1247,7 @@ fn _anum {lk:agz}{k:nat | k <= 16} (kb: !$A.arr(byte, lk, 16), k: int k): [i:int
 
 (* A number member's value at v, kept in vs[i] *)
 fn _anum_at {l,lv:agz}{la:addr}{n:nat}{v:nat | v <= n}{i:nat | i < 8}
-  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, vs: !$A.arr(Int, lv, 8), i: int i): [q:int | v <= q; q <= n] int q = let
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, vs: !$A.arr(Int, lv, 9), i: int i): [q:int | v <= q; q <= n] int q = let
   val @(ok, x, q) = jr_int(buf, n, v)
 in
   if ok then let val () = $A.set<Int>(vs, i, x) in q end
@@ -1151,7 +1256,7 @@ end
 
 (* The kind member's value at v ("highlight" or 1 for a highlight) *)
 fn _akind_at {l,lk,lv:agz}{la:addr}{n:nat}{v:nat | v < n}
-  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 8)): [q:int | v < q; q <= n] int q =
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 9)): [q:int | v < q; q <= n] int q =
   if jr_is(buf, n, v, 34) then let
     val @(ok, k, q) = jr_str(buf, n, v, kb, 16)
     val () = $A.set<Int>(vs, 0, (if ok then (if jr_key_is(kb, k, "highlight") then 1 else 0) else 0))
@@ -1161,12 +1266,23 @@ fn _akind_at {l,lk,lv:agz}{la:addr}{n:nat}{v:nat | v < n}
     val () = $A.set<Int>(vs, 0, (if ok then (if x = 1 then 1 else 0) else 0))
   in if q > v then q else jr_skip(buf, n, v + 1) end
 
+(* A highlight's style member's value at v, kept in vs[8]: 0 yellow (and
+   any other), 1 orange, 2 underline *)
+fn _astyle_at {l,lk,lv:agz}{la:addr}{n:nat}{v:nat | v < n}
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 9)): [q:int | v <= q; q <= n] int q =
+  if jr_is(buf, n, v, 34) then let
+    val @(ok, k, q) = jr_str(buf, n, v, kb, 16)
+    val () = $A.set<Int>(vs, 8, (if ok then (if jr_key_is(kb, k, "orange") then 1
+      else if jr_key_is(kb, k, "underline") then 2 else 0) else 0))
+  in q end
+  else jr_skip(buf, n, v)
+
 (* The members of an annotation's object from p, to its closing brace:
-   its numbers into vs, its text into tb[0, tl) and its note into
+   its numbers (and a highlight's style) into vs, its text into tb[0, tl) and its note into
    nb[0, nl) *)
 fun _amem {l,lk,lt,ln,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{tl0:nat | tl0 <= TXT}{nl0:nat | nl0 <= NOTE} .<n - p>.
   (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16),
-   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 8), tl: int tl0, nl: int nl0)
+   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 9), tl: int tl0, nl: int nl0)
   : [q:int | p <= q; q <= n][tl:nat | tl <= TXT][nl:nat | nl <= NOTE] @(bool, int tl, int nl, int q) = let
   val q = jr_ws(buf, n, p)
 in
@@ -1185,6 +1301,7 @@ in
       val @(sok, nl2, e) = jr_str(buf, n, v, nb, NOTE)
     in if sok then _amem(buf, n, e, kb, tb, nb, vs, tl, nl2) else @(false, tl, nl, e) end
     else if jr_key_is(kb, k, "kind") then _amem(buf, n, _akind_at(buf, n, v, kb, vs), kb, tb, nb, vs, tl, nl)
+    else if jr_key_is(kb, k, "style") then _amem(buf, n, _astyle_at(buf, n, v, kb, vs), kb, tb, nb, vs, tl, nl)
     else let
       val i = _anum(kb, k)
     in
@@ -1194,14 +1311,14 @@ in
   end
 end
 
-fun _zero {lv:agz}{i:nat | i <= 8} .<8 - i>. (vs: !$A.arr(Int, lv, 8), i: int i): void =
-  if i >= 8 then () else let val () = $A.set<Int>(vs, i, 0) in _zero(vs, i + 1) end
+fun _zero {lv:agz}{i:nat | i <= 9} .<9 - i>. (vs: !$A.arr(Int, lv, 9), i: int i): void =
+  if i >= 9 then () else let val () = $A.set<Int>(vs, i, 0) in _zero(vs, i + 1) end
 
 (* The annotations of a JSON array's items from p, to its closing
    bracket, onto acc (at most AMAX) *)
 fun _aitems {l,lk,lt,ln,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= AMAX} .<n - p>.
   (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16),
-   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 8), acc: ann(a), a: int a)
+   tb: !$A.arr(byte, lt, TXT), nb: !$A.arr(byte, ln, NOTE), vs: !$A.arr(Int, lv, 9), acc: ann(a), a: int a)
   : [k:nat | k <= AMAX] @(bool, ann(k), int k) = let
   val q = jr_ws(buf, n, p)
 in
@@ -1217,7 +1334,10 @@ in
     else let
       val t = _copy_le(tb, tl)
       val nt = _copy_le(nb, nl)
-      val xs = _insert($A.get<Int>(vs, 0), $A.get<Int>(vs, 1), $A.get<Int>(vs, 2), $A.get<Int>(vs, 3),
+      (* a highlight's kind is its style's *)
+      val kd = $A.get<Int>(vs, 0)
+      val kd = (if kd = 1 then 1 + $A.get<Int>(vs, 8) else kd): Int
+      val xs = _insert(kd, $A.get<Int>(vs, 1), $A.get<Int>(vs, 2), $A.get<Int>(vs, 3),
                  $A.get<Int>(vs, 4), $A.get<Int>(vs, 5), $A.get<Int>(vs, 6), $A.get<Int>(vs, 7),
                  t, tl, nt, nl, acc)
     in _aitems(buf, n, e, kb, tb, nb, vs, xs, a + 1) end
@@ -1238,7 +1358,7 @@ implement annot_json_store (buf, n, p, h1, h2) =
     val kb = $A.alloc<byte>(16)
     val tb = $A.alloc<byte>(TXT)
     val nb = $A.alloc<byte>(NOTE)
-    val vs = $A.alloc<Int>(8)
+    val vs = $A.alloc<Int>(9)
     val @(ok, xs, k) = _aitems(buf, n, p + 1, kb, tb, nb, vs, ann_nil(), 0)
     val () = $A.free<byte>(kb)
     val () = $A.free<byte>(tb)

@@ -163,7 +163,7 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
-  of the three themes. The proof is css's `CONTRAST` over the palette
+  of the five themes. The proof is css's `CONTRAST` over the palette
   (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
