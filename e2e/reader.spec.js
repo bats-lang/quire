@@ -925,3 +925,55 @@ test('Escape closes the overlay opened last, one at a time', async ({ page }) =>
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
 });
+
+// Scrolled: the chapter down the page, a screenful for a page
+const indicatorText = async page => (await indicator(page).textContent()).trim();
+const pct = async page => +(/(\d+)% of chapter$/.exec(await indicatorText(page)) || [0, -1])[1];
+
+test('scrolled, the chapter scrolls down: a turn scrolls a screenful, and the place follows the finger', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Scrolled', 2, 40));
+  await openSettings(page);
+  await page.getByRole('group', { name: 'Layout' }).getByRole('button', { name: 'Scroll' }).click();
+  await page.keyboard.press('Escape');
+  const view = bookPage(page);
+  await expect.poll(() => view.evaluate(e => getComputedStyle(e).overflowY)).toBe('auto');
+  await expect.poll(() => pct(page)).toBe(0);
+  // a turn scrolls down, not across
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => view.evaluate(e => e.scrollTop)).toBeGreaterThan(100);
+  expect(await view.evaluate(e => e.scrollLeft)).toBe(0);
+  await expect.poll(() => pct(page)).toBeGreaterThan(0);
+  // scrolled by hand, the place follows
+  await view.evaluate(e => { e.scrollTop = (e.scrollHeight - e.clientHeight) / 2; });
+  await expect.poll(() => pct(page)).toBeGreaterThan(35);
+  expect(await pct(page)).toBeLessThan(65);
+  // kept with a reload
+  const at = await pct(page);
+  await reload(page);
+  await expect(view).toBeVisible();
+  await expect.poll(() => pct(page)).toBeGreaterThan(at - 10);
+  expect(await pct(page)).toBeLessThan(at + 10);
+  // the last screen goes on to the next chapter
+  await page.keyboard.press('End');
+  await expect.poll(() => pct(page)).toBe(100);
+  await page.getByRole('button', { name: 'Next chapter →' }).click();
+  await expect(indicator(page)).toContainText('Chapter 2');
+  await expect.poll(() => pct(page)).toBe(0);
+});
+
+test('back to pages, the chapter is turned across again', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Paged Again', 2, 40));
+  await openSettings(page);
+  const layout = page.getByRole('group', { name: 'Layout' });
+  await layout.getByRole('button', { name: 'Scroll' }).click();
+  await expect.poll(() => pct(page)).toBe(0);
+  await layout.getByRole('button', { name: 'Pages' }).click();
+  await expect(layout.getByRole('button', { name: 'Pages' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await place(page)).p).toBe(1);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  expect(await bookPage(page).evaluate(e => e.scrollTop)).toBe(0);
+});

@@ -837,6 +837,8 @@ fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
         else if _is(t, "theme-dark") then let val () = set_theme_set(3) in true end
         else if _is(t, "theme-night") then let val () = set_theme_set(4) in true end
         else if _is(t, "theme-grey") then let val () = set_theme_set(5) in true end
+        else if _is(t, "layout-pages") then let val () = set_flow_set(0) in true end
+        else if _is(t, "layout-scroll") then let val () = set_flow_set(1) in true end
         else if _is(t, "align-ragged") then let val () = set_align_set(0) in true end
         else if _is(t, "align-justified") then let val () = set_align_set(1) in true end
         else if _is(t, "hyphens-off") then let val () = set_hyph_set(0) in true end
@@ -1041,11 +1043,13 @@ fn _reader_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
   (* Ctrl or Cmd *)
   val fl = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 10) else 0): int
 in
+  (* the keys that turn the page are the reader's alone: scrolled, the
+     browser would also scroll the focused page by them *)
   if _key_is(b, n, "ArrowRight") then _right()
-  else if _key_is(b, n, "PageDown") then _next()
+  else if _key_is(b, n, "PageDown") then let val () = $EV.prevent_default() in _next() end
   else if _key_is(b, n, "ArrowLeft") then _left()
-  else if _key_is(b, n, "PageUp") then _prev()
-  else if _key_is(b, n, " ") then (if shift then _prev() else _next())
+  else if _key_is(b, n, "PageUp") then let val () = $EV.prevent_default() in _prev() end
+  else if _key_is(b, n, " ") then let val () = $EV.prevent_default() in (if shift then _prev() else _next()) end
   (* the volume keys, when they turn the page and the browser gives them
      to the page: down on, up back, and the volume left as it is *)
   else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeDown") else false) then let
@@ -1054,8 +1058,8 @@ in
   else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeUp") else false) then let
     val () = $EV.prevent_default()
   in _prev() end
-  else if _key_is(b, n, "Home") then reader_page(0)
-  else if _key_is(b, n, "End") then reader_page(1000000)
+  else if _key_is(b, n, "Home") then let val () = $EV.prevent_default() in reader_page(0) end
+  else if _key_is(b, n, "End") then let val () = $EV.prevent_default() in reader_page(1000000) end
   else if _key_is(b, n, "b") then annot_bookmark_toggle(reader_anchor())
   else if _key_is(b, n, "B") then annot_bookmark_toggle(reader_anchor())
   else if _key_is(b, n, "t") then _chrome_set(~(!_chrome))
@@ -1212,7 +1216,10 @@ fn _gestures_start (): void = let
   val () = ref_exch_elt<gcell>(_gestures, c)
 in case+ c of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
 
-fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
+(* The page's scrolls, numbered, so only the last one's rest counts *)
+val _scroll_gen = ref<int>(0)
+
+fn _wire_toc {n:nat} (r: regs(n)): regs(n + 9) = let
   val r = RCons(r, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
   val r = RCons(r, OnEl("contents-panel"), "click", lam(h) => let
       val t = _target(h)
@@ -1238,6 +1245,15 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
       val () = _target_free(t)
     in 0 end)
   val r = RCons(r, OnEl("jump-back"), "click", lam(_) => let val () = reader_back() in 0 end)
+  val r = RCons(r, OnEl("next-chapter"), "click", lam(_) => let val () = page_next() in 0 end)
+  (* scrolled, the place follows the page, once it rests a moment *)
+  val r = RCons(r, OnEl("page"), "scroll", lam(_) => let
+      val () = !_scroll_gen := !_scroll_gen + 1
+      val gen = !_scroll_gen
+      val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(150)), lam(_) => let
+          val () = (if !_scroll_gen = gen then reader_scrolled() else ())
+        in $P.ret<int>(0) end))
+    in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
   val r = RCons(r, OnEl("scrubber-track"), "pointerdown", lam(h) => let
       val x = _event_x(h)

@@ -1571,6 +1571,12 @@ fn _g_3_reader {r:nat | r >= 6460} (sh: sheet(r, 0)): [q:nat | q >= r - 6460] sh
   val sh = lay(sh, Padding(), "8px 16px")
   val sh = lay(sh, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
   val sh = close(sh)
+  (* scrolled, on the chapter's last screen: at the right, apart from
+     Back at the left *)
+  val sh = rule(sh, ".nextch")
+  val sh = lay(sh, Left(), "auto")
+  val sh = lay(sh, Right(), "12px")
+  val sh = close(sh)
   val sh = rule(sh, ".seltb")
   val sh = lay(sh, Position(), "absolute")
   val sh = lay(sh, Left(), "50%")
