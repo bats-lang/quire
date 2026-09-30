@@ -1,5 +1,17 @@
 # quire
 
+## Decisions are made by research, not left to the human
+
+No task is ever "left to the human" unless an agent physically cannot do
+it (a permission it was denied, access it does not have, a secret it
+cannot see). Every other question, design choices included (which
+layout, which wording, which default), is settled by research (what
+other apps do, what their users and reviewers say, what studies and
+guidelines say) and best judgement, written down where it is decided
+(the issue or the PR), and then done. The quality rules below (the
+proofs, the static tests, the e2e suite) still hold: when a choice
+would break one, choose another that keeps it.
+
 ## To do: book memory in a rolling window of page arenas
 
 Partly done: the window exists (`src/pages.bats`), and the buffers a

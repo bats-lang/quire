@@ -532,6 +532,117 @@ fn _track_at (x: Int): [r:nat | r <= 1000] int r = let
 in if tw <= 0 then 0 else _clamp1000((x - tx) * 1000 / tw) end
 
 (* Shows page p of the chapter's t pages *)
+(* The print pages' breaks in the chapter shown (epub:type pagebreak, or
+   role doc-pagebreak), the latest first: each one's content node and its
+   label, the page's number in print *)
+datavtype breaks(int) =
+  | breaks_nil(0) of ()
+  | {k:nat}{i:nat}{l:agz}{m:pos | m <= 16} breaks_cons(k + 1) of (int i, $A.arr(byte, l, m), int m, breaks(k))
+
+fun breaks_free {k:nat} .<k>. (x: breaks(k)): void =
+  case+ x of
+  | ~breaks_nil() => ()
+  | ~breaks_cons(_, a, _, r) => let val () = $A.free<byte>(a) in breaks_free(r) end
+
+datavtype breaks_cell = {k:nat} BreaksCell of breaks(k)
+
+val _breaks = ref<breaks_cell>(BreaksCell(breaks_nil()))
+
+fn _breaks_take (): breaks_cell = let
+  var c: breaks_cell = BreaksCell(breaks_nil())
+  val () = ref_exch_elt<breaks_cell>(_breaks, c)
+in c end
+
+fn _breaks_put (x: breaks_cell): void = let
+  var c: breaks_cell = x
+  val () = ref_exch_elt<breaks_cell>(_breaks, c)
+  val+ ~BreaksCell(old) = c
+in breaks_free(old) end
+
+(* b[j, k) := data[o + j, o + k) *)
+fun _copy_span {lb,l:agz}{n,m:pos}{o,k:nat | o + k <= n; k <= m}{j:nat | j <= k} .<k - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, m), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
+  in _copy_span(data, o, b, k, j + 1) end
+
+(* Content node idx, when it is a print page's break, kept with its
+   label (its title, else its aria-label; at most 16 bytes) *)
+fn _break_check {lb:agz}{n:pos}{sa:nat}{i:nat}
+  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), idx: int i): void = let
+  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _a_role = @[char][4]('r', 'o', 'l', 'e')
+  var _pb1 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _pb2 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _a_title = @[char][5]('t', 'i', 't', 'l', 'e')
+  var _a_label = @[char][10]('a', 'r', 'i', 'a', '-', 'l', 'a', 'b', 'e', 'l')
+  val is_break = (case+ find_attr(data, attrs, _a_type, 9) of
+    | ~xspan_at(o, k) => span_has(data, o, k, _pb1, 9)
+    | ~xspan_none() => (case+ find_attr(data, attrs, _a_role, 4) of
+      | ~xspan_at(o, k) => span_has(data, o, k, _pb2, 9)
+      | ~xspan_none() => false)): bool
+in
+  if ~is_break then ()
+  else let
+    val sp = (case+ find_attr(data, attrs, _a_title, 5) of
+      | ~xspan_none() => find_attr(data, attrs, _a_label, 10)
+      | sp => sp): xspan(n)
+  in
+    case+ sp of
+    | ~xspan_none() => ()
+    | ~xspan_at(o, k) =>
+      if k < 1 then () else if k > 16 then ()
+      else let
+        val b = $A.alloc<byte>(k)
+        val () = _copy_span(data, o, b, k, 0)
+        val+ ~BreaksCell(x) = _breaks_take()
+      in _breaks_put(BreaksCell(breaks_cons(idx, b, k, x))) end
+  end
+end
+
+(* d[p + j, p + k) := u[j, k) *)
+fun _label_to {ls,ld:agz}{ns,nd:pos}{p:nat}{k:nat | k <= ns; p + k <= nd}{j:nat | j <= k} .<k - j>.
+  (u: !$A.arr(byte, ls, ns), d: !$A.arr(byte, ld, nd), p: int p, k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(d, p + j, $A.get<byte>(u, j))
+  in _label_to(u, d, p, k, j + 1) end
+
+(* The label of the latest break at or before page cur of t, copied *)
+fun _break_at {k:nat}{t:pos}{c:nat | c < t} .<k>. (x: !breaks(k), t: int t, cur: int c): [l:agz][m:nat | m <= 16] @($A.arr(byte, l, m + 1), int m) =
+  case+ x of
+  | breaks_nil() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
+  | @breaks_cons(idx, a, m, rest) =>
+    if _page_of_node(idx, t, cur) <= cur then let
+      val b = $A.alloc<byte>(m + 1)
+      val () = _label_to(a, b, 0, m, 0)
+      val mm = m
+      prval () = fold@(x)
+    in @(b, mm) end
+    else let
+      val r = _break_at(rest, t, cur)
+      prval () = fold@(x)
+    in r end
+
+(* The footer's print page: " · page 214", from the latest break at
+   or before the page shown; nothing in a chapter that has none *)
+fn _show_print_page {t:pos}{c:nat | c < t} (t: int t, cur: int c): void = let
+  val cc = _breaks_take()
+  val+ @BreaksCell(x) = cc
+  val @(lab, m) = _break_at(x, t, cur)
+  prval () = fold@(cc)
+  val () = _breaks_put(cc)
+  (* " · page " (9 bytes) and the label (at most 16) *)
+  val b = $A.alloc<byte>(32)
+  val () = $A.set<byte>(b, 0, $A.int2byte(32))
+  val () = $A.set<byte>(b, 1, $A.int2byte(194))
+  val () = $A.set<byte>(b, 2, $A.int2byte(183))
+  val off = _put(b, 3, " page ")
+  val () = _label_to(lab, b, off, m, 0)
+  val () = $A.free<byte>(lab)
+in _set_text_of("footer-page", b, (if m > 0 then off + m else 0): [k:nat | k <= 32] int k) end
+
 fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc): void = let
   val () = reading_set(@(p, t, c, tc))
@@ -553,6 +664,7 @@ fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
   val cnt_tmp = $A.thaw<byte>(cnt_f)
   val () = $A.free<byte>(cnt_tmp)
   val () = _update_page_indicator()
+  val () = _show_print_page(t, p)
   val () = _scrub_show()
   val () = annot_star()
   val () = _record_position()
@@ -1090,6 +1202,7 @@ and _render_node
       val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
       val () = _frag_check(data, attrs, fr, idx)
       val () = _pass_attrs(doc, data, attrs, idx)
+      val () = _break_check(data, attrs, idx)
       var _t_a = @[char][1]('a')
     in
       if xml_name_eq(data, name_off, name_len, _t_a, 1) then let
@@ -1568,6 +1681,7 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
                   val () = !_content_n := 0
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pics_put(PicsCell(pics_nil()))
+                  val () = _breaks_put(BreaksCell(breaks_nil()))
                   val () = (if !_rtl then ui_attr("qcnt", AClass, "caf rtl") else ui_attr("qcnt", AClass, "caf"))
                   val () = _page_book_lang(doc)
                   val fr = _frag_take()
@@ -1620,6 +1734,58 @@ fn _show_target (pg: Int, anchor: Int): void =
     else if pg >= t then _show_page(t - 1, t, c, tc)
     else _show_page(pg, t, c, tc)
 
+(* ============================================================
+   Settling: a chapter's layout can still change after its page is
+   shown (a font arriving, an image loading), and with it the page its
+   place is on. For a while after, the pages are counted again, and when
+   they changed the place is found again: by the node the reader was
+   taken to, until the reader turns a page
+   ============================================================ *)
+
+(* The node the place was restored to, or -1 once a page is turned *)
+val _settle_anchor = ref<Int>(~1)
+val _settle_gen = ref<int>(0)
+
+(* How many pages the chapter has now, as it is laid out *)
+fn _pages_now (): Int = let
+  val () = _measure_lit("qcnt")
+  val cw = $DR.get_measure_w()
+  val sw = $DR.get_measure_scroll_w()
+in if cw > 0 then sw / cw else ~1 end
+
+(* Every quarter second, n more times, while no other chapter has been
+   shown since (gen) *)
+fun _settle {n:nat} .<n>. (gen: int, n: int n): void =
+  if n <= 0 then ()
+  else $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) =>
+    if gen <> !_settle_gen then $P.ret<int>(0)
+    else let
+      val () = (case+ reading_get() of
+        | @(p, t, _, _) => let
+            val now = _pages_now()
+            val a = !_settle_anchor
+            (* the node the reader was taken to, if it is no longer on
+               the page shown *)
+            val moved = (if a < 0 then false else if p >= t then false
+              else _page_of_node(a, t, p) <> p): bool
+          in
+            if now <= 0 then ()
+            else if now <> t then let
+              val a = (if a >= 0 then a else !_anchor_last): Int
+              val () = _measure_pagination()
+            in _show_target(p, a) end
+            else if moved then _show_target(p, a)
+            else ()
+          end)
+      val () = _settle(gen, n - 1)
+    in $P.ret<int>(0) end))
+
+(* Starts settling the page just shown, which anchor (when >= 0) is on *)
+fn _settle_start (anchor: Int): void = let
+  val () = !_settle_anchor := anchor
+  val () = !_settle_gen := !_settle_gen + 1
+in _settle(!_settle_gen, 12) end
+
 (* Loads chapter ch (from 0) and shows its page pg, or the page of
    content node anchor (see _show_target); the promise resolves with 0,
    or below 0 when the chapter cannot be shown *)
@@ -1628,7 +1794,10 @@ fn _goto (ch: Int, pg: Int, anchor: Int): $P.promise(int, $P.Chained) = let
 in
   $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
     if r < 0 then $P.ret<int>(r)
-    else let val () = _show_target(pg, anchor) in $P.ret<int>(0) end)
+    else let
+      val () = _show_target(pg, anchor)
+      val () = _settle_start(anchor)
+    in $P.ret<int>(0) end)
 end
 
 (* Loads chapter ch and shows the page of its element whose id is
@@ -1646,7 +1815,11 @@ fn _goto_frag {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f:
       val () = _frag_put(FragNone())
     in
       if r < 0 then $P.ret<int>(r)
-      else let val () = _show_target(0, !_frag_hit) in $P.ret<int>(0) end
+      else let
+        val a = !_frag_hit
+        val () = _show_target(0, a)
+        val () = _settle_start(a)
+      in $P.ret<int>(0) end
     end)
   end
 
@@ -1782,25 +1955,31 @@ in
 end
 
 (* The next page: in this chapter, else the next chapter's first *)
-fn _page_next(): void =
+fn _page_next(): void = let
+  val () = !_settle_anchor := ~1
+in
   case+ reading_get() of
   | @(p, t, c, tc) =>
     if p + 1 < t then let val () = _spd_turn() in _show_page(p + 1, t, c, tc) end
     else if c < tc then let val () = _spd_turn() in $P.discard<int>(_goto(c, 0, ~1)) end
     else _show_page(p, t, c, tc)
+end
 
 (* The previous page: in this chapter, else the previous chapter's last *)
-fn _page_prev(): void =
+fn _page_prev(): void = let
+  val () = !_settle_anchor := ~1
+in
   case+ reading_get() of
   | @(p, t, c, tc) =>
     if p > 0 then _show_page(p - 1, t, c, tc)
     else if c > 1 then $P.discard<int>(_goto(c - 2, ~1, ~1))
     else _show_page(0, t, c, tc)
+end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
 fn _relayout (): void = let
-  val anchor = !_anchor_last
+  val anchor = (if !_settle_anchor >= 0 then !_settle_anchor else !_anchor_last): Int
   val pg = (case+ reading_get() of @(p, _, _, _) => p): Int
   val () = _measure_pagination()
 in _show_target(pg, anchor) end
@@ -2211,6 +2390,15 @@ implement reader_goto_entry (i) =
       val () = _push_position()
     in $P.discard<int>(_goto_frag(ch, fr, f)) end
 
+(* Goes to print page i, remembering where the reader was *)
+#pub fun reader_goto_page (i: Int): void
+implement reader_goto_page (i) =
+  case+ toc_page_dest_of(i) of
+  | ~TocNoDest() => ()
+  | ~TocDest(ch, fr, f) => let
+      val () = _push_position()
+    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+
 (* Jumps to chapter ch's element fr[0, f), remembering where the reader
    was *)
 #pub fun reader_jump {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f: int f): void
@@ -2522,6 +2710,48 @@ in
          val () = ui_focus("qimx")
        in true end)
 end
+
+(* The book's language's primary subtag ("fr" of "fr-CA"), lower case,
+   in b[0, k) of 3 bytes: when it is 2 or 3 letters; else "en" *)
+#pub fun reader_lang_code (): [l:agz][k:pos | k <= 3] @($A.arr(byte, l, 3), int k)
+
+fun _subtag_len {l:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k} .<k - i>.
+  (a: !$A.arr(byte, l, n), k: int k, i: int i): [j:nat | j <= k] int j =
+  if i >= k then i
+  else if byte2int0($A.get<byte>(a, i)) = 45 then i
+  else _subtag_len(a, k, i + 1)
+
+(* Byte i of a[0, j), in lower case, when it is a letter; else -1 *)
+fn _lower_letter {l:agz}{n:pos}{i:nat | i < n} (a: !$A.arr(byte, l, n), i: int i): int = let
+  val c = byte2int0($A.get<byte>(a, i))
+  val lc = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): int
+in if lc < 97 then ~1 else if lc > 122 then ~1 else lc end
+
+implement reader_lang_code () = let
+  val c = _blang_take()
+  (* the primary subtag's letters, lower case, and how many; 0 when it is
+     not 2 or 3 letters *)
+  val @(r, c0, c1, c2) = (case+ c of
+    | @BookLang(a, k) => let
+        val j = _subtag_len(a, k, 0)
+        val res = (if j < 2 then @(0, 0, 0, 0) else if j > 3 then @(0, 0, 0, 0)
+          else let
+            val x0 = _lower_letter(a, 0)
+            val x1 = _lower_letter(a, 1)
+            val x2 = (if j = 3 then (if k >= 3 then _lower_letter(a, 2) else ~1) else 0): int
+          in
+            if x0 < 0 then @(0, 0, 0, 0) else if x1 < 0 then @(0, 0, 0, 0)
+            else if x2 < 0 then @(0, 0, 0, 0) else @(j, x0, x1, x2)
+          end): @(int, int, int, int)
+        prval () = fold@(c)
+      in res end
+    | NoBookLang() => @(0, 0, 0, 0)): @(int, int, int, int)
+  val () = _blang_put(c)
+  val o = $A.alloc<byte>(3)
+  val () = $A.set<byte>(o, 0, $A.int2byte($AR.low_byte(if r >= 2 then c0 else 101)))
+  val () = $A.set<byte>(o, 1, $A.int2byte($AR.low_byte(if r >= 2 then c1 else 110)))
+  val () = $A.set<byte>(o, 2, $A.int2byte($AR.low_byte(if r = 3 then c2 else 0)))
+in if r = 3 then @(o, 3) else @(o, 2) end
 
 #pub fun reader_link_at (i: int): bool
 implement reader_link_at (i) = let

@@ -708,10 +708,11 @@ in close(sh) end
 (* The rules the guarantees rest on; the only !important in the sheet *)
 fn _base {r:nat | r >= 1400} (sh: sheet(r, 0)): [q:nat | q >= r - 1400] sheet(q, 0) = let
   val () = raw(sh, "[data-hide='1'],[hidden]{display:none!important}")
-  (* 44 x 44 targets: every button and field, and everything given a
-     control's role; links in a book's text are inline targets, which
-     WCAG leaves to the text they sit in *)
-  val () = raw(sh, "button,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=slider],[role=option],[role=switch]")
+  (* 44 x 44 targets: every button and field, everything given a
+     control's role, and the app's links out (ui_link_out); links in a
+     book's text are inline targets, which WCAG leaves to the text they
+     sit in *)
+  val () = raw(sh, "button,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=slider],[role=option],[role=switch],.linkout")
   val () = raw(sh, "{min-height:44px!important;min-width:44px!important;box-sizing:border-box}")
   (* 16px in text fields, so iOS does not zoom into them *)
   val () = raw(sh, "input,select,textarea{font-size:16px!important}")
@@ -1109,7 +1110,7 @@ fn _g_2_overlays {r:nat | r >= 3425} (sh: sheet(r, 0)): [q:nat | q >= r - 3425] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 6221} (sh: sheet(r, 0)): [q:nat | q >= r - 6221] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1169,6 +1170,12 @@ fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sh
   val sh = close(sh)
   val sh = rule(sh, ".pgn")
   val sh = lay(sh, Flex(), "none")
+  val sh = close(sh)
+  (* a link out of the app, in a bar: a control's box, not a text link *)
+  val sh = rule(sh, ".linkout")
+  val sh = lay(sh, Display(), "inline-flex")
+  val sh = lay(sh, AlignItems(), "center")
+  val sh = lay(sh, TextDecoration(), "none")
   val sh = close(sh)
   val sh = rule(sh, ".chrome-off .top,.chrome-off .bot")
   val sh = lay(sh, Display(), "none")
@@ -1363,13 +1370,19 @@ fn _g_3_reader {r:nat | r >= 5979} (sh: sheet(r, 0)): [q:nat | q >= r - 5979] sh
   val sh = lay(sh, BorderRadius(), "10px")
   val sh = lay(sh, Padding(), "4px")
   val sh = lay(sh, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
+  (* no wider than the screen: its items go on a second row instead *)
+  val sh = lay(sh, Width(), "max-content")
+  val sh = lay(sh, MaxWidth(), "calc(100vw - 16px)")
+  val sh = lay(sh, FlexWrap(), "wrap")
+  val sh = lay(sh, JustifyContent(), "center")
   val sh = close(sh)
-  val sh = rule(sh, ".seltb button")
+  val sh = rule(sh, ".seltb button,.seltb a")
   val sh = lay(sh, Padding(), "8px 14px")
   val sh = surf(S_barfg_bar | sh, 7, 6)
   val sh = lay(sh, BorderRadius(), "6px")
+  val sh = lay(sh, WhiteSpace(), "nowrap")
   val sh = close(sh)
-  val sh = rule(sh, ".seltb button:hover")
+  val sh = rule(sh, ".seltb button:hover,.seltb a:hover")
   val sh = surf(S_barfg_barhi | sh, 7, 11)
   val sh = close(sh)
   val sh = rule(sh, ".snavf")

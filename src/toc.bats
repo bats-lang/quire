@@ -50,6 +50,19 @@ datavtype toc_cell =
   | {k:nat} TocCell of (toc(k), int k)
 
 val _cell = ref<toc_cell>(TocCell(toc_nil(), 0))
+(* The book's print pages (its page-list), entries as the contents' *)
+val _pcell = ref<toc_cell>(TocCell(toc_nil(), 0))
+
+fn _ptake (): toc_cell = let
+  var c: toc_cell = TocCell(toc_nil(), 0)
+  val () = ref_exch_elt<toc_cell>(_pcell, c)
+in c end
+
+fn _pput (c: toc_cell): void = let
+  var cur: toc_cell = c
+  val () = ref_exch_elt<toc_cell>(_pcell, cur)
+  val+ ~TocCell(t, _) = cur
+in toc_free(t) end
 
 fn _take (): toc_cell = let
   var c: toc_cell = TocCell(toc_nil(), 0)
@@ -285,18 +298,20 @@ end
 
 (* The entries of nodes, onto acc (newest first): the <li> of a nav
    whose epub:type has toc (mode 0), or each navPoint (mode 1); each one
-   level deeper than the entry it is in *)
+   level deeper than the entry it is in. With pl, the print pages
+   instead: the <li> of a nav whose epub:type has page-list, or each
+   pageTarget *)
 fun _walk_nodes {lb:agz}{n:pos}{sz:nat}{r:nat} .<sz, 1>.
   (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
-   ncx: bool, in_toc: bool, v: Int, acc: raw(n, r)): [r2:nat] raw(n, r2) =
+   ncx: bool, pl: bool, in_toc: bool, v: Int, acc: raw(n, r)): [r2:nat] raw(n, r2) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-    _walk_nodes(data, rest, ncx, in_toc, v, _walk_node(data, node, ncx, in_toc, v, acc))
+    _walk_nodes(data, rest, ncx, pl, in_toc, v, _walk_node(data, node, ncx, pl, in_toc, v, acc))
   | $X.xml_nodes_nil() => acc
 
 and _walk_node {lb:agz}{n:pos}{sz:pos}{r:nat} .<sz, 0>.
   (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
-   ncx: bool, in_toc: bool, v: Int, acc: raw(n, r)): [r2:nat] raw(n, r2) =
+   ncx: bool, pl: bool, in_toc: bool, v: Int, acc: raw(n, r)): [r2:nat] raw(n, r2) =
   case+ node of
   | $X.xml_text(_, _) => acc
   | $X.xml_element(no, nl, attrs, children) => let
@@ -312,20 +327,28 @@ and _walk_node {lb:agz}{n:pos}{sz:pos}{r:nat} .<sz, 0>.
       var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
       var _c_src = @[char][3]('s', 'r', 'c')
       var _c_pl = @[char][8]('p', 'a', 'g', 'e', 'L', 'i', 's', 't')
+      var _c_pt = @[char][10]('p', 'a', 'g', 'e', 'T', 'a', 'r', 'g', 'e', 't')
+      var _c_pgl = @[char][9]('p', 'a', 'g', 'e', '-', 'l', 'i', 's', 't')
     in
       if ncx then
-        (if xml_name_eq(data, no, nl, _c_np, 8) then let
+        (if (if pl then false else xml_name_eq(data, no, nl, _c_np, 8)) then let
            val buf = $A.alloc<byte>(LBL)
            val p = _child_text(data, children, _c_nl, 8, buf, 0)
            val h = _child_attr(data, children, _c_content, 7, _c_src, 3)
            val acc = _entry(buf, p, v, h, acc)
-         in _walk_nodes(data, children, ncx, in_toc, v + 1, acc) end
-         else if xml_name_eq(data, no, nl, _c_pl, 8) then acc
-         else _walk_nodes(data, children, ncx, in_toc, v, acc))
+         in _walk_nodes(data, children, ncx, pl, in_toc, v + 1, acc) end
+         else if (if pl then xml_name_eq(data, no, nl, _c_pt, 10) else false) then let
+           val buf = $A.alloc<byte>(LBL)
+           val p = _child_text(data, children, _c_nl, 8, buf, 0)
+           val h = _child_attr(data, children, _c_content, 7, _c_src, 3)
+         in _entry(buf, p, 0, h, acc) end
+         else if (if pl then false else xml_name_eq(data, no, nl, _c_pl, 8)) then acc
+         else _walk_nodes(data, children, ncx, pl, in_toc, v, acc))
       else if xml_name_eq(data, no, nl, _c_nav, 3) then
         (case+ find_attr(data, attrs, _c_et, 9) of
          | ~xspan_at(to, tk) =>
-           if span_has(data, to, tk, _c_toc, 3) then _walk_nodes(data, children, ncx, true, v, acc)
+           if (if pl then span_has(data, to, tk, _c_pgl, 9) else span_has(data, to, tk, _c_toc, 3)) then
+             _walk_nodes(data, children, ncx, pl, true, v, acc)
            else acc
          | ~xspan_none() => acc)
       else if (if in_toc then xml_name_eq(data, no, nl, _c_li, 2) else false) then let
@@ -333,8 +356,8 @@ and _walk_node {lb:agz}{n:pos}{sz:pos}{r:nat} .<sz, 0>.
         val p = _li_label(data, children, buf)
         val h = _child_attr(data, children, _c_a, 1, _c_href, 4)
         val acc = _entry(buf, p, v, h, acc)
-      in _walk_nodes(data, children, ncx, in_toc, v + 1, acc) end
-      else _walk_nodes(data, children, ncx, in_toc, v, acc)
+      in _walk_nodes(data, children, ncx, pl, in_toc, v + 1, acc) end
+      else _walk_nodes(data, children, ncx, pl, in_toc, v, acc)
     end
 
 (* The chapter the href data[ho, ho + h) names, after the document's
@@ -405,6 +428,7 @@ in p end
 
 implement toc_build (s) = let
   val () = _put(TocCell(toc_nil(), 0))
+  val () = _pput(TocCell(toc_nil(), 0))
 in
   case+ _src_take() of
   | ~TocNone() => $P.ret<int>(0)
@@ -425,10 +449,13 @@ in
            | ~ContentBytes(par, buf, n) => let
                val @(f, b) = $A.freeze<byte>(buf)
                val nodes = $X.parse_document(b, n)
-               val xs = _walk_nodes(b, nodes, ncx, false, 0, raw_nil())
+               val xs = _walk_nodes(b, nodes, ncx, false, false, 0, raw_nil())
+               val ps = _walk_nodes(b, nodes, ncx, true, false, 0, raw_nil())
                val () = $X.free_nodes(nodes)
                val dl = _dir_len(s, z, no, nl)
                val @(t, k) = _resolve(s, z, no, dl, no, b, n, xs, toc_nil(), 0)
+               val @(pt, pk) = _resolve(s, z, no, dl, no, b, n, ps, toc_nil(), 0)
+               val () = _pput(TocCell(pt, pk))
                val () = $A.drop<byte>(f, b)
                val () = piece_free(par, $A.thaw<byte>(f))
                val () = _put(TocCell(t, k))
@@ -539,6 +566,62 @@ implement toc_dest_of (i) = let
            else TocNoDest()): toc_dest
   prval () = fold@(c)
   val () = _put(c)
+in r end
+
+(* ============================================================
+   The print pages
+   ============================================================ *)
+
+(* How many print pages the book lists *)
+#pub fn toc_pages_count (): int
+
+implement toc_pages_count () = let
+  val c = _ptake()
+  val+ @TocCell(_, k) = c
+  val r = k
+  prval () = fold@(c)
+  val () = _pput(c)
+in r end
+
+(* Print page i's row: a button page-row<i> in pages-list, labelled with the page *)
+fn _prow {l:agz}{m:pos}{ll:pos | ll <= LBL; ll <= m}{i:nat}
+  (i: int i, lb: !$A.arr(byte, l, m), ll: int ll): void = let
+  val @(ri, rl) = nid_make("page-row", i)
+  val () = ui_btn_n("pages-list", ri, rl, _level_class(0))
+  val tb = $A.alloc<byte>(ll)
+  val () = _dup(lb, tb, ll, 0)
+  val @(ri, rl) = nid_make("page-row", i)
+in ui_text_n_buf(ri, rl, tb, ll) end
+
+fun _prows {k:nat}{i:nat} .<k>. (t: !toc(k), i: int i): void =
+  case+ t of
+  | toc_nil() => ()
+  | @toc_cons(lb, ll, _, _, _, _, rest) => let
+      val () = _prow(i, lb, ll)
+      val () = _prows(rest, i + 1)
+      prval () = fold@(t)
+    in end
+
+(* The print pages, listed in the contents panel's Pages tab *)
+#pub fn toc_pages_render (): void
+
+implement toc_pages_render () = let
+  val () = ui_clear("pages-list")
+  val c = _ptake()
+  val+ @TocCell(t, _) = c
+  val () = _prows(t, 0)
+  prval () = fold@(c)
+in _pput(c) end
+
+(* Where print page i is *)
+#pub fn toc_page_dest_of (i: Int): toc_dest
+
+implement toc_page_dest_of (i) = let
+  val c = _ptake()
+  val+ @TocCell(t, _) = c
+  val r = _dest_at(t, i)
+  prval () = fold@(c)
+  val () = _pput(c)
 in r end
 
 (* The label of entry i *)
