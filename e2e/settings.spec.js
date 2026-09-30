@@ -121,6 +121,21 @@ test('the fonts can be chosen', async ({ page }) => {
   expect(await style(page, 'fontStyle')).toBe('normal');
 });
 
+test('Atkinson Hyperlegible can be chosen, and is fetched only then', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Legible', author: 'Settings Tests', rawChapters: chapters(1, 5) });
+  const status = () => page.evaluate(() =>
+    [...document.fonts].filter(f => f.family.replace(/["']/g, '') === 'Atkinson Hyperlegible').map(f => f.status));
+  // declared, not loaded
+  expect(await status()).toContain('unloaded');
+  expect(await status()).not.toContain('loaded');
+  await openSettings(page);
+  await choose(page, 'Atkinson');
+  await expect(sheet(page).getByRole('button', { name: 'Atkinson', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => style(page, 'fontFamily')).toMatch(/^["']?Atkinson Hyperlegible/);
+  await expect.poll(status).toContain('loaded');
+});
+
 test('the themes change the colours, the choice is kept, and auto follows the system', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Colours', author: 'Settings Tests', rawChapters: chapters(1, 5) });

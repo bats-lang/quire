@@ -237,6 +237,9 @@ fn _settings (): void = let
   val () = ui_el("font-row", "font-choice", TDiv, "seg")
   val () = ui_text_btn("font-choice", "font-literata", "sbtn", "Literata")
   val () = ui_text_btn("font-choice", "font-inter", "sbtn", "Inter")
+  (* a preference for some readers: not a fix for dyslexia (the evidence
+     for such fonts is weak; letter spacing is the help that has it) *)
+  val () = ui_text_btn("font-choice", "font-atkinson", "sbtn", "Atkinson")
   val () = ui_text_btn("font-choice", "font-book", "sbtn", "Book")
   (* the sliders' rows: their sliders are made at the settings'
      values (set_sliders) *)

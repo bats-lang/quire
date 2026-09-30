@@ -19,7 +19,8 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
    size      font size in px, 12 to 32
    lh        line spacing in tenths, 12 to 24
    margin    page margins, 0 (narrow) to 4 (wide)
-   font      0 Literata, 1 Inter, 2 the book's own
+   font      0 Literata, 1 Inter, 2 the book's own, 3 Atkinson
+             Hyperlegible
    theme     0 auto (the system's), 1 light, 2 sepia, 3 dark, 4 night, 5 grey
    align     0 ragged, 1 justified
    hyph      0 no hyphenation, 1 hyphenated
@@ -43,7 +44,7 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 #pub typedef set_size = [v:int | 12 <= v; v <= 32] int v
 #pub typedef set_lh = [v:int | 12 <= v; v <= 24] int v
 #pub typedef set_margin = [v:nat | v <= 4] int v
-#pub typedef set_font = [v:nat | v <= 2] int v
+#pub typedef set_font = [v:nat | v <= 3] int v
 #pub typedef set_theme = [v:nat | v <= 5] int v
 #pub typedef set_align = [v:nat | v <= 1] int v
 #pub typedef set_hyph = [v:nat | v <= 1] int v
@@ -121,10 +122,11 @@ fn _puts {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}
 fn _margin_px (m: set_margin): [v:nat | v <= 64] int v =
   if m = 0 then 8 else if m = 1 then 16 else if m = 2 then 24 else if m = 3 then 40 else 64
 
-fn _put_font {l:agz}{p:nat | p + 30 <= 512}
-  (buf: !$A.arr(byte, l, 512), p: int p, f: set_font): [q:nat | q <= p + 30] int q =
+fn _put_font {l:agz}{p:nat | p + 34 <= 512}
+  (buf: !$A.arr(byte, l, 512), p: int p, f: set_font): [q:nat | q <= p + 34] int q =
   if f = 0 then _puts(buf, p, "Literata,Georgia,serif")
   else if f = 1 then _puts(buf, p, "Inter,system-ui,sans-serif")
+  else if f = 3 then _puts(buf, p, "'Atkinson Hyperlegible',sans-serif")
   else _puts(buf, p, "var(--bookfont,Georgia),serif")
 
 (* v tenths as a decimal at buf[p, r): 16 -> "1.6" *)
@@ -220,6 +222,7 @@ fn _show_controls (): void = let
   val () = _pressed("font-literata", x.font = 0)
   val () = _pressed("font-inter", x.font = 1)
   val () = _pressed("font-book", x.font = 2)
+  val () = _pressed("font-atkinson", x.font = 3)
   val () = _pressed("theme-auto", x.theme = 0)
   val () = _pressed("theme-light", x.theme = 1)
   val () = _pressed("theme-sepia", x.theme = 2)
@@ -433,7 +436,7 @@ in
         val size = _in($AR.low_byte(byte2int0($A.get<byte>(b, 2))), 12, 32, 18)
         val lh = _in($AR.low_byte(byte2int0($A.get<byte>(b, 3))), 12, 24, 16)
         val margin = _in($AR.low_byte(byte2int0($A.get<byte>(b, 4))), 0, 4, 2)
-        val font = _in($AR.low_byte(byte2int0($A.get<byte>(b, 5))), 0, 2, 0)
+        val font = _in($AR.low_byte(byte2int0($A.get<byte>(b, 5))), 0, 3, 0)
         val theme = _in($AR.low_byte(byte2int0($A.get<byte>(b, 6))), 0, 5, 0)
         val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 3, 0)
         (* "S2" has the rest; "S1" had none, and they are the defaults *)
