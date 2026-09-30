@@ -152,6 +152,13 @@ export const jumpBack = page => page.getByRole('button', { name: '↩ Back' });
 /** Opens the book whose card has text, and waits for its first page */
 export async function openBook(page, text) {
   await card(page, text).click();
+  await pageShown(page);
+}
+
+/** Waits until the book just opened shows its page: the reader is up
+    before its chapter is loaded, and a key pressed until then turns
+    nothing */
+export async function pageShown(page) {
   await expect(bookPage(page)).toBeVisible();
   await expect(indicator(page)).toContainText('p.');
 }

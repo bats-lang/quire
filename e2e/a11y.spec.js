@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import {
   start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control, dialog,
-  selectText, illegible, clickControl,
+  selectText, illegible, clickControl, pageShown,
 } from './helpers.js';
 
 const audit = async page => {
@@ -75,7 +75,7 @@ test('the library\'s controls are reached with Tab and work with Enter', async (
   expect(seen.some(t => t.startsWith('Sort:'))).toBe(true);
   expect(seen.some(t => t.includes('Keyboard Only'))).toBe(true);
   await page.keyboard.press('Enter');
-  await expect(bookPage(page)).toBeVisible();
+  await pageShown(page);
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(2);
 });
