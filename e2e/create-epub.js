@@ -209,6 +209,7 @@ function loremParagraph(seed) {
  * @param {number} opts.chapters - Number of chapters (default 3)
  * @param {number} opts.paragraphsPerChapter - Paragraphs per chapter (default 12)
  * @param {string|null} opts.language - The OPF's dc:language (default "en"; null leaves it out)
+ * @param {string} opts.metadata - More of the OPF's metadata, as XML
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -348,7 +349,7 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
     <dc:title>${title}</dc:title>
     <dc:creator>${author}</dc:creator>
 ${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${crypto.randomUUID()}</dc:identifier>
-  </metadata>
+${opts.metadata || ''}  </metadata>
   <manifest>
 ${manifestItems}  </manifest>
   <spine${opts.ncx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>

@@ -428,3 +428,58 @@ test('a file handed over by the host is imported', async ({ page }) => {
   await expect(card(page, 'Shared With Quire')).toContainText('Smoke Test', { timeout: 30000 });
   expect(errors).toEqual([]);
 });
+
+// EPUB Accessibility 1.1's discovery metadata, shown in the W3C
+// Publishing CG's display guidelines' words
+const infoOf = async (page, title) => {
+  await bookMenu(page, title);
+  await menuItem(page, 'Book info').click();
+  return dialog(page, 'Book info').getByRole('region', { name: 'Accessibility' });
+};
+
+test('Book info shows the book\'s accessibility metadata in plain words', async ({ page }) => {
+  await start(page);
+  const metadata = `    <meta property="schema:accessMode">textual</meta>
+    <meta property="schema:accessMode">visual</meta>
+    <meta property="schema:accessModeSufficient">textual</meta>
+    <meta property="schema:accessibilityFeature">displayTransformability</meta>
+    <meta property="schema:accessibilityFeature">alternativeText</meta>
+    <meta property="schema:accessibilityFeature">tableOfContents</meta>
+    <meta property="schema:accessibilityFeature">structuralNavigation</meta>
+    <meta property="schema:accessibilityHazard">none</meta>
+    <meta property="schema:accessibilitySummary">Images are described; no hazards &amp; no tables.</meta>
+    <link rel="dcterms:conformsTo" href="http://www.idpf.org/epub/a11y/accessibility-20170105.html#wcag-aa"/>
+`;
+  await importFiles(page, [epubFile({ title: 'Accessible', author: 'A', metadata, rawChapters: chapters(1) })], 1);
+  const a11y = await infoOf(page, 'Accessible');
+  await expect(a11y.locator('div div')).toHaveText([
+    'Ways of reading', 'Appearance can be modified', 'Readable in read aloud or dynamic braille', 'Has alternative text',
+    'Conformance', 'This publication meets accepted accessibility standards',
+    'Navigation', 'Table of contents', 'Headings',
+    'Hazards', 'No hazards',
+    'Accessibility summary', 'Images are described; no hazards & no tables.',
+  ]);
+});
+
+test('Book info reads EPUB 2\'s accessibility metadata too, and says when there is none', async ({ page }) => {
+  await start(page);
+  const metadata = `    <meta name="schema:accessibilityHazard" content="noFlashingHazard"/>
+    <meta name="schema:accessibilityHazard" content="sound"/>
+    <meta name="dcterms:conformsTo" content="EPUB Accessibility 1.1 - WCAG 2.1 Level AAA"/>
+`;
+  await importFiles(page, [
+    epubFile({ title: 'Two', author: 'A', metadata, rawChapters: chapters(1) }),
+    epubFile({ title: 'Bare', author: 'B', rawChapters: chapters(1) }),
+  ], 2);
+  let a11y = await infoOf(page, 'Two');
+  await expect(a11y).toContainText('This publication exceeds accepted accessibility standards');
+  await expect(a11y).toContainText('Sounds');
+  await expect(a11y).toContainText('No flashing hazards');
+  await dialog(page, 'Book info').getByRole('button', { name: /Library/ }).click();
+  a11y = await infoOf(page, 'Bare');
+  await expect(a11y.locator('div div')).toHaveText([
+    'Ways of reading', 'No information about appearance modifiability is available',
+    'No information about nonvisual reading is available',
+    'Conformance', 'No information is available',
+  ]);
+});

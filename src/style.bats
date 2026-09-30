@@ -1137,7 +1137,7 @@ fn _g_1_shell {r:nat | r >= 4429} (sh: sheet(r, 0)): [q:nat | q >= r - 4429] she
   val sh = close(sh)
 in sh end
 
-fn _g_2_overlays {r:nat | r >= 3425} (sh: sheet(r, 0)): [q:nat | q >= r - 3425] sheet(q, 0) = let
+fn _g_2_overlays {r:nat | r >= 3620} (sh: sheet(r, 0)): [q:nat | q >= r - 3620] sheet(q, 0) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sh = rule(sh, ".imview")
@@ -1281,6 +1281,18 @@ fn _g_2_overlays {r:nat | r >= 3425} (sh: sheet(r, 0)): [q:nat | q >= r - 3425] 
   val sh = lay(sh, FontFamily(), "Literata,Georgia,serif")
   val sh = lay(sh, FontSize(), "22px")
   val sh = lay(sh, FontWeight(), "bold")
+  val sh = close(sh)
+  (* Book info's accessibility section: its title, and each group's *)
+  val sh = rule(sh, ".a11y")
+  val sh = lay(sh, MarginTop(), "16px")
+  val sh = close(sh)
+  val sh = rule(sh, ".a11yt")
+  val sh = lay(sh, FontWeight(), "600")
+  val sh = lay(sh, FontSize(), "18px")
+  val sh = close(sh)
+  val sh = rule(sh, ".a11yg")
+  val sh = lay(sh, FontWeight(), "600")
+  val sh = lay(sh, MarginTop(), "10px")
   val sh = close(sh)
   val sh = rule(sh, ".irow")
   val sh = lay(sh, Display(), "flex")
