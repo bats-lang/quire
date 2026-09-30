@@ -163,7 +163,7 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   expect(await bg()).toBe(sepia);
   // auto: light, then dark when the system asks for it
   await openSettings(page);
-  await choose(page, 'Auto');
+  await sheet(page).getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Auto', exact: true }).click();
   await page.emulateMedia({ colorScheme: 'light' });
   await expect.poll(bg).toBe(light);
   await page.emulateMedia({ colorScheme: 'dark' });

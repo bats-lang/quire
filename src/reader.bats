@@ -186,6 +186,9 @@ fn _scrolled (): bool = set_flow_get() = 1
 (* The page's height, as it was last measured *)
 val _page_h = ref<int>(0)
 
+(* Whether the book reads right to left *)
+val _rtl = ref<bool>(false)
+
 (* How far a turn scrolls: the page's height, less its paddings (84
    px) and a line's overlap, so no line is lost between screens *)
 fn _step (): [s:pos] int s = let
@@ -282,34 +285,61 @@ fn _put_sep {l:agz}{n:pos}{p:nat | p + 5 <= n}
   val () = $A.set<byte>(b, p + 3, $A.int2byte(183))
 in _put(b, p + 4, " ") end
 
-(* "13 of 75 in chapter", for page p (from 0) of t, at b[p0, r) *)
-fn _put_page_of {l:agz}{p0:nat | p0 + 40 <= 64}
-  (b: !$A.arr(byte, l, 64), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 37] int r = let
-  val off = $S.int_to_str(b, p0, 64, p + 1)
-  val off = _put(b, off, " of ")
-  val off = $S.int_to_str(b, off, 64, t)
-in _put(b, off, " in chapter") end
+(* Measures element id: its box to the measure slots *)
+fn _measure_lit {ni:pos | ni < 256} (id: string ni): void = let
+  val ni = g1u2i(string1_length(id))
+  val ia = $A.alloc<byte>(ni)
+  val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
+  val @(fi, bi) = $A.freeze<byte>(ia)
+  val _ = $R.discard<int><int>($DR.measure(bi, ni))
+in release_bytes(fi, bi) end
+
+(* Whether a screen shows two columns, a spread: the probe the
+   typography's style shows then (settings.bats, _put_cols) *)
+fn _spread (): bool = let
+  val () = _measure_lit("spread-probe")
+in $DR.get_measure_w() > 0 end
+
+(* "13 of 75 in chapter", for page p (from 0) of t, at b[p0, r); for a
+   spread, both of its pages: "25–26 of 150 in chapter" *)
+fn _put_page_of {l:agz}{p0:nat | p0 + 55 <= 96}
+  (b: !$A.arr(byte, l, 96), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 55] int r =
+  if _spread() then let
+    val off = $S.int_to_str(b, p0, 96, 2 * p + 1)
+    (* an en dash *)
+    val off = _put(b, off, "\xE2\x80\x93")
+    val off = $S.int_to_str(b, off, 96, 2 * p + 2)
+    val off = _put(b, off, " of ")
+    val off = $S.int_to_str(b, off, 96, 2 * t)
+  in _put(b, off, " in chapter") end
+  else let
+    val off = $S.int_to_str(b, p0, 96, p + 1)
+    val off = _put(b, off, " of ")
+    val off = $S.int_to_str(b, off, 96, t)
+  in _put(b, off, " in chapter") end
 
 (* "34% of chapter", for page p (from 0) of t, at b[p0, r): scrolled,
    where the screenful shown is in the chapter *)
-fn _put_chapter_pct {l:agz}{p0:nat | p0 + 40 <= 64}
-  (b: !$A.arr(byte, l, 64), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 26] int r = let
+fn _put_chapter_pct {l:agz}{p0:nat | p0 + 40 <= 96}
+  (b: !$A.arr(byte, l, 96), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 26] int r = let
   val pct = (if t <= 1 then 100 else if p <= 0 then 0 else if p >= t - 1 then 100 else p * 100 / (t - 1)): Int
-  val off = $S.int_to_str(b, p0, 64, pct)
+  val off = $S.int_to_str(b, p0, 96, pct)
 in _put(b, off, "% of chapter") end
 
 (* Readout m for page p of t in chapter c (from 1; 0 when none is
    known) of tc, at b[p0, r) *)
-fn _put_readout {l:agz}{p0:nat | p0 + 50 <= 64}{m:nat | m <= 4}
-  (b: !$A.arr(byte, l, 64), p0: int p0, m: int m, p: Int, t: Int, c: Int, tc: Int)
-  : [r:nat | r <= p0 + 50] int r = let
+fn _put_readout {l:agz}{p0:nat | p0 + 70 <= 96}{m:nat | m <= 4}
+  (b: !$A.arr(byte, l, 96), p0: int p0, m: int m, p: Int, t: Int, c: Int, tc: Int)
+  : [r:nat | r <= p0 + 70] int r = let
   val ci = (if c > 0 then c - 1 else 0): Int
+  (* the screens after the one shown (the reading speed is by screens) *)
   val left = (if t > p + 1 then t - p - 1 else 0): Int
 in
   (* scrolled, the chapter's pages are its screenfuls: where the one
      shown is says more than how many there are *)
   if (if m <= 1 then _scrolled() else false) then _put_chapter_pct(b, p0, p, t)
-  else if m = 1 then _put_page_of(b, _put(b, p0, "page "), p, t)
+  else if m = 1 then (if _spread() then _put_page_of(b, _put(b, p0, "pages "), p, t)
+    else _put_page_of(b, _put(b, p0, "page "), p, t))
   else if m = 2 then let
     (* by the contents' top-level entries; by the spine's items when
        the contents have none *)
@@ -320,26 +350,28 @@ in
   in
     if n <= 0 then let
       val off = _put(b, p0, "before chapter 1 of ")
-    in $S.int_to_str(b, off, 64, k) end
+    in $S.int_to_str(b, off, 96, k) end
     else let
       val off = _put(b, p0, "chapter ")
-      val off = $S.int_to_str(b, off, 64, n)
+      val off = $S.int_to_str(b, off, 96, n)
       val off = _put(b, off, " of ")
-    in $S.int_to_str(b, off, 64, k) end
+    in $S.int_to_str(b, off, 96, k) end
   end
   else if m = 3 then let
-    val off = _put_dur(b, p0, 64, _spd_minutes(left))
+    val off = _put_dur(b, p0, 96, _spd_minutes(left))
   in _put(b, off, " left in chapter") end
   else if m = 4 then let
     val rest = _rest_pages(ci, t)
     val more = (if rest > 0 then rest else 0): Int
-    val off = _put_dur(b, p0, 64, _spd_minutes(left + more))
+    val off = _put_dur(b, p0, 96, _spd_minutes(left + more))
   in _put(b, off, " left in book") end
   else if left = 0 then _put(b, p0, "last page in chapter")
   else let
-    val off = $S.int_to_str(b, p0, 64, left)
+    (* a spread's screens are two pages each *)
+    val pages = (if _spread() then 2 * left else left): Int
+    val off = $S.int_to_str(b, p0, 96, pages)
   in
-    if left = 1 then _put(b, off, " page left in chapter")
+    if pages = 1 then _put(b, off, " page left in chapter")
     else _put(b, off, " pages left in chapter")
   end
 end
@@ -360,7 +392,7 @@ fn _put_pct {l:agz}{p:nat | p <= 5}{v:nat | v <= 1000}
 fn _show_footer {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
   val () = (if chapter > 0 then toc_title_in("footer-title", chapter - 1) else ())
   val ci = (if chapter > 0 then chapter - 1 else 0): Int
-  val b = $A.alloc<byte>(64)
+  val b = $A.alloc<byte>(96)
   val off = _put_sep(b, 0)
   val off = _put_readout(b, off, _readout_shown(cur_page, total, ci), cur_page, total, chapter, tc)
   val () = _set_text_of("footer-readout", b, off)
@@ -378,14 +410,15 @@ in _set_text_of("footer-book", b, off) end
    title is cut *)
 (* The indicator's place at b[0, r): "12 of 75 in chapter", or
    scrolled, "34% of chapter" *)
-fn _put_place {l:agz} (b: !$A.arr(byte, l, 64), p: Int, t: Int): [r:nat | r <= 37] int r =
+fn _put_place {l:agz} (b: !$A.arr(byte, l, 96), p: Int, t: Int): [r:nat | r <= 55] int r =
   if _scrolled() then _put_chapter_pct(b, 0, p, t) else _put_page_of(b, 0, p, t)
 
 fn _show_indicator {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
   val () = (if chapter > 0 then toc_title_in("indicator-title", chapter - 1) else ())
   val () = (if _scrolled() then ui_text("indicator-label", "\xC2\xA0\xC2\xB7 ")
+    else if _spread() then ui_text("indicator-label", "\xC2\xA0\xC2\xB7 pages ")
     else ui_text("indicator-label", "\xC2\xA0\xC2\xB7 page "))
-  val b = $A.alloc<byte>(64)
+  val b = $A.alloc<byte>(96)
   val off = _put_place(b, cur_page, total)
   val () = _set_text_of("indicator-pages", b, off)
 in _show_footer(cur_page, total, chapter, tc) end
@@ -408,14 +441,6 @@ fn _update_page_indicator(): void =
 val _page_w = ref<int>(0)
 
 
-(* Measures element id: its box to the measure slots *)
-fn _measure_lit {ni:pos | ni < 256} (id: string ni): void = let
-  val ni = g1u2i(string1_length(id))
-  val ia = $A.alloc<byte>(ni)
-  val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val _ = $R.discard<int><int>($DR.measure(bi, ni))
-in release_bytes(fi, bi) end
 
 (* Measures content node i: whether it is in the page. The page answers
    1 for an element it measured and 0 for an id it has no element for (a
@@ -522,7 +547,10 @@ fn _anchor_now (): [v:int | v >= ~1] int v = let
   val cy = $DR.get_measure_y()
   val cw = $DR.get_measure_w()
   val ch = $DR.get_measure_h()
-  val v = _node_down(cx + cw / 2, cy + 24, 8)
+  (* the first column's middle: of a spread's two, the left one, or the
+     right one in a book read right to left *)
+  val x = (if _spread() then (if !_rtl then cx + 3 * cw / 4 else cx + cw / 4) else cx + cw / 2): int
+  val v = _node_down(x, cy + 24, 8)
   (* across the page, or down it when scrolled *)
   val lo = (if _scrolled() then cy - 1 else cx - 1): int
   val hi = (if _scrolled() then cy + ch else cx + cw): int
@@ -574,7 +602,9 @@ fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c):
   in
     if cw <= 0 then cur
     else let
-      val d = x - cx
+      (* within a pixel or two of the page's edge is on it, as _anchor_now
+         takes a node there (columns can fall between pixels) *)
+      val d = x - cx + 2
       (* whole pages from the one shown, rounded down *)
       val k = (if d >= 0 then d / cw else ~((cw - 1 - d) / cw)): Int
       val p = cur + k
@@ -598,7 +628,9 @@ fn _count_pages (): [v:int] int v =
   else let
     val cw = $DR.get_measure_w()
     val sw = $DR.get_measure_scroll_w()
-  in if cw > 0 then sw / cw else 1 end
+    (* a spread's last screen can hold one column, half a screen: its
+       screens are counted up, past a few pixels of rounding *)
+  in if cw > 8 then (sw + cw - 8) / cw else 1 end
 
 fn _measure_pagination(): void = let
   val cnt_narr = $A.alloc<byte>(4)
@@ -1641,8 +1673,6 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
    The book's own font, for the "Book" font setting
    ============================================================ *)
 
-(* Whether the book reads right to left *)
-val _rtl = ref<bool>(false)
 
 (* The book's language (its OPF's dc:language), when it is a plausible
    language tag: 1 to 35 letters, digits and hyphens *)

@@ -176,10 +176,14 @@ export async function readBook(page, opts) {
     and so is a chapter the contents do not name), else the title */
 export async function place(page) {
   const t = await indicator(page).textContent();
+  const n = s => { const d = /(\d+)$/.exec(s); return d ? +d[1] : s; };
+  // a spread shows two pages a screen, "pages 3–4 of 40": its place is
+  // counted in screens, as a turn is
+  const spread = /^(.*)\s· pages (\d+)–(\d+) of (\d+) in chapter$/.exec(t.trim());
+  if (spread) return { ch: n(spread[1]), p: (+spread[2] + 1) / 2, t: +spread[4] / 2 };
   const m = /^(.*)\s· page (\d+) of (\d+) in chapter$/.exec(t.trim());
   expect(m, `page indicator "${t}"`).not.toBeNull();
-  const n = /(\d+)$/.exec(m[1]);
-  return { ch: n ? +n[1] : m[1], p: +m[2], t: +m[3] };
+  return { ch: n(m[1]), p: +m[2], t: +m[3] };
 }
 
 /** Waits until the page indicator changes from before */
@@ -295,6 +299,16 @@ export async function clickControl(page, name) {
 export async function openSettings(page) {
   await clickControl(page, 'Typography');
   await expect(dialog(page, 'Typography and theme')).toBeVisible();
+}
+
+/** One column a screen, whatever the window: for a test of what a
+    single page shows (a wide window in landscape shows a spread) */
+export async function oneColumn(page) {
+  await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' })
+    .getByRole('button', { name: 'One', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page, 'Typography and theme')).toBeHidden();
 }
 
 /** The visible buttons within root whose text has a contrast ratio
