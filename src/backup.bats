@@ -330,7 +330,7 @@ in
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = sh,
     added = (if ad > 0 then ad else x.added), opened = opn,
     ch = ch, tch = tch, pg = pg, pgs = pgs, anchor = an,
-    fsz = x.fsz, cover = x.cover, done = dn })
+    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx })
 end
 
 (* Library book h1, h2 (when it is there) takes the numbers vs[3, 12) *)
@@ -574,7 +574,7 @@ in
         val () = (if x >= 0 then (if x <= 16 then set_ws_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "sort") then
-        _smem(buf, n, e, kb, (if x >= 0 then (if x <= 3 then x else sort) else sort))
+        _smem(buf, n, e, kb, (if x >= 0 then (if x <= 4 then x else sort) else sort))
       else _smem(buf, n, e, kb, sort)
     end
   end

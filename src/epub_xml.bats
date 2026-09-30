@@ -430,6 +430,85 @@ and _a11y_node
 implement opf_a11y(data, nodes) = _a11y_r(data, nodes, 0, xspan_none())
 
 (* ============================================================
+   Series: EPUB 3's belongs-to-collection and group-position, or
+   Calibre's calibre:series and calibre:series_index
+   ============================================================ *)
+
+(* The whole number at data[o, o + k) (digits before any '.'), 0 when
+   there is none; at most 99999 *)
+fun _whole {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, acc: int): int =
+  if k <= 0 then acc
+  else let
+    val c = byte2int0($A.read<byte>(data, o))
+  in
+    if c = 32 then (if acc = 0 then _whole(data, o + 1, k - 1, acc) else acc)
+    else if c < 48 then acc
+    else if c > 57 then acc
+    else if acc > 9999 then acc
+    else _whole(data, o + 1, k - 1, acc * 10 + (c - 48))
+  end
+
+(* The series found in nodes so far: its name, and its number *)
+fun _series_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), name: xspan(n), num: int): @(xspan(n), int) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(name, num) = _series_node(data, node, name, num)
+    in _series_r(data, rest, name, num) end
+  | $X.xml_nodes_nil() => @(name, num)
+
+and _series_node
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), name: xspan(n), num: int): @(xspan(n), int) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_meta = @[char][4]('m', 'e', 't', 'a')
+    var _c_property = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+    var _c_name = @[char][4]('n', 'a', 'm', 'e')
+    var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then
+      (case+ _find_attr_val(data, attrs, _c_property, 8) of
+       | ~xspan_at(po, pk) =>
+         (case+ _get_first_text(children) of
+          | ~xspan_at(vo, vk) =>
+            if _span_is(data, po, pk, "belongs-to-collection") then
+              (case+ name of
+               | xspan_none() => let val () = xspan_free(name) in @(xspan_at(vo, vk), num) end
+               | _ => @(name, num))
+            else if _span_is(data, po, pk, "group-position") then
+              @(name, (if num = 0 then _whole(data, vo, vk, 0) else num))
+            else @(name, num)
+          | ~xspan_none() => @(name, num))
+       | ~xspan_none() =>
+         (case+ _find_attr_val(data, attrs, _c_name, 4) of
+          | ~xspan_at(po, pk) =>
+            (case+ _find_attr_val(data, attrs, _c_content, 7) of
+             | ~xspan_at(vo, vk) =>
+               if _span_is(data, po, pk, "calibre:series") then
+                 (case+ name of
+                  | xspan_none() => let val () = xspan_free(name) in @(xspan_at(vo, vk), num) end
+                  | _ => @(name, num))
+               else if _span_is(data, po, pk, "calibre:series_index") then
+                 @(name, (if num = 0 then _whole(data, vo, vk, 0) else num))
+               else @(name, num)
+             | ~xspan_none() => @(name, num))
+          | ~xspan_none() => @(name, num)))
+    else _series_r(data, children, name, num)
+  end
+  | $X.xml_text(_, _) => @(name, num)
+
+(* The book's series (its name, when it has one) and its number in it
+   (0 when none is given) *)
+#pub fn opf_series
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): @(xspan(n), int)
+
+implement opf_series(data, nodes) = _series_r(data, nodes, xspan_none(), 0)
+
+(* ============================================================
    Spine: find Nth idref
    ============================================================ *)
 

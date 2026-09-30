@@ -285,11 +285,15 @@ fn _opf_done {z:pos}{lb:agz}{n:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456
   val nodes = $X.parse_document(opf_b, n)
   val @(title, author) = walk_opf_metadata(opf_b, nodes)
   val cover = _cover_of(mode, s, z, no, nl, opf_b, n, nodes, h1, h2)
+  (* its series, for the library's order *)
+  val @(series, sidx0) = opf_series(opf_b, nodes)
+  val sidx = g1ofg0(sidx0)
   (* its accessibility metadata, for Book info *)
   val @(a11y, summary) = opf_a11y(opf_b, nodes)
   val () = (if mode <> MODE_OPEN then _store_a11y(opf_b, a11y, summary, h1, h2) else xspan_free(summary))
   val () = $X.free_nodes(nodes)
   val ok = book_finish(s, z, d, sz, m, no, nl)
+  val @(so, sl) = (case+ series of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
 in
   if ~ok then let
     val () = xspan_free(title)
@@ -309,7 +313,7 @@ in
     val @(ao, al) = (case+ author of ~xspan_at(o, k) => @(o, k) | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n] @(int o, int k)
   in
     if mode = MODE_NEW then let
-      val key = lib_add(h1, h2, opf_b, n, to, tl, ao, al, z, cover, $TM.epoch_minutes())
+      val key = lib_add(h1, h2, opf_b, n, to, tl, ao, al, so, sl, sidx, z, cover, $TM.epoch_minutes())
       (* the record a backup kept for it, if any *)
       val () = (if key > 0 then backup_claim(h1, h2) else ())
     in key end
@@ -317,7 +321,8 @@ in
       val () = lib_update(idx, lam(x) => @{
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = 0, added = x.added, opened = x.opened,
         ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-        fsz = z, cover = (if cover > 0 then (cover: Int) else x.cover), done = x.done })
+        fsz = z, cover = (if cover > 0 then (cover: Int) else x.cover), done = x.done, sidx = sidx })
+      val () = lib_series_set(idx, opf_b, n, so, sl)
     in
       case+ lib_nums(idx) of
       | ~$R.some(x) => x.key

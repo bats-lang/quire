@@ -38,13 +38,16 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
   anchor = Int,    (* the content node at that page's start, -1 none *)
   fsz = Int,       (* the file's bytes *)
   cover = Int,     (* the cover image's type (mime_str), 0 none *)
-  done = Int       (* 1 when the last page was reached *)
+  done = Int,      (* 1 when the last page was reached *)
+  sidx = Int       (* its number in its series, 0 when none is given *)
 }
 
-(* A book: its title and author (1 to 255 bytes) and its numbers *)
+(* A book: its title and author (1 to 255 bytes), its series' name (0
+   to 255 bytes, in an array one longer) and its numbers *)
 #pub datavtype book =
-  | {lt,la:agz}{nt,na:pos | nt < 256; na < 256}
-    Book of ($A.arr(byte, lt, nt), int nt, $A.arr(byte, la, na), int na, bnums)
+  | {lt,la,ls:agz}{nt,na:pos | nt < 256; na < 256}{ns:nat | ns < 256}
+    Book of ($A.arr(byte, lt, nt), int nt, $A.arr(byte, la, na), int na,
+             $A.arr(byte, ls, ns + 1), int ns, bnums)
 
 #pub stadef LIB_MAX = 100000
 
@@ -53,8 +56,9 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
   | {k:nat} books_cons(k + 1) of (book, books(k))
 
 fn book_free (b: book): void = let
-  val+ ~Book(t, _, a, _, _) = b
+  val+ ~Book(t, _, a, _, sr, _, _) = b
   val () = $A.free<byte>(t)
+  val () = $A.free<byte>(sr)
 in $A.free<byte>(a) end
 
 fun books_free {k:nat} .<k>. (bs: books(k)): void =
@@ -185,7 +189,7 @@ fun _find {k:nat}{i:nat} .<k>. (bs: !books(k), h1: int, h2: int, i: int i): [r:i
   case+ bs of
   | books_nil() => ~1
   | books_cons(b, rest) => let
-      val+ Book(_, _, _, _, nums) = b
+      val+ Book(_, _, _, _, _, _, nums) = b
     in if nums.h1 = h1 then (if nums.h2 = h2 then i else _find(rest, h1, h2, i + 1))
        else _find(rest, h1, h2, i + 1) end
 
@@ -204,7 +208,7 @@ fun _find_key {k:nat}{i:nat} .<k>. (bs: !books(k), key: int, i: int i): [r:int |
   case+ bs of
   | books_nil() => ~1
   | books_cons(b, rest) => let
-      val+ Book(_, _, _, _, nums) = b
+      val+ Book(_, _, _, _, _, _, nums) = b
     in if nums.key = key then i else _find_key(rest, key, i + 1) end
 
 #pub fn lib_index_of_key (key: int): [r:int | r >= ~1] int r
@@ -222,7 +226,7 @@ fun _nums_at {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i): $R.option(bnums) =
   case+ bs of
   | books_nil() => $R.none()
   | books_cons(b, rest) =>
-    if i = 0 then let val+ Book(_, _, _, _, nums) = b in $R.some(nums) end
+    if i = 0 then let val+ Book(_, _, _, _, _, _, nums) = b in $R.some(nums) end
     else _nums_at(rest, i - 1)
 
 #pub fn lib_nums {i:int} (i: int i): $R.option(bnums)
@@ -243,7 +247,7 @@ fun _update_at {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, f: (bnums) -<clore
   | books_nil() => ()
   | @books_cons(b, rest) =>
     if i = 0 then let
-      val+ @Book(_, _, _, _, nums) = b
+      val+ @Book(_, _, _, _, _, _, nums) = b
       val () = nums := f(nums)
       prval () = fold@(b)
       prval () = fold@(bs)
@@ -265,8 +269,8 @@ implement lib_update (i, f) =
   in lib_put(c) end
 
 (* Book i's title or author (which: 0 title, 1 author) in a fresh array *)
-fun _copy {ls,ld:agz}{ns,nd:nat}{o:nat | o + ns <= nd}{j:nat | j <= ns} .<ns - j>.
-  (src: !$A.arr(byte, ls, ns), ns: int ns, dst: !$A.arr(byte, ld, nd), o: int o, j: int j): void =
+fun _copy {ls,ld:agz}{ns,ms,nd:nat | ns <= ms}{o:nat | o + ns <= nd}{j:nat | j <= ns} .<ns - j>.
+  (src: !$A.arr(byte, ls, ms), ns: int ns, dst: !$A.arr(byte, ld, nd), o: int o, j: int j): void =
   if j >= ns then ()
   else let
     val () = $A.set<byte>(dst, o + j, $A.get<byte>(src, j))
@@ -278,7 +282,7 @@ fun _text_at {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, which: int)
   | books_nil() => let val a = $A.alloc<byte>(1) in @(a, 0) end
   | books_cons(b, rest) =>
     if i = 0 then let
-      val+ Book(t, tn, a, an, _) = b
+      val+ Book(t, tn, a, an, _, _, _) = b
     in
       if which = 0 then let
         val out = $A.alloc<byte>(tn + 1)
@@ -311,6 +315,33 @@ implement lib_text (i, which) =
 
 (* A book from span [to, to + tl) and [ao, ao + al) of data for its
    title and author: the fallbacks when a span is empty or too long *)
+fun _series_copy {lb,la:agz}{n,na:pos}{o:nat}{m:nat | m < na; o + m <= n}{j:nat | j <= m} .<m - j>.
+  (data: !$A.borrow(byte, lb, n), o: int o, a: !$A.arr(byte, la, na), m: int m, j: int j): void =
+  if j >= m then ()
+  else let
+    val () = $A.set<byte>(a, j, $A.read<byte>(data, o + j))
+  in _series_copy(data, o, a, m, j + 1) end
+
+(* A series' name from data[o, o + k), at most 255 bytes, in an array one
+   longer; empty when there is none *)
+(* " · N" after the name at b[0, p) *)
+fn _series_num {l:agz}{p:nat} (b: !$A.arr(byte, l, p + 20), p: int p, v: Int): [k:nat | k <= p + 20] int k =
+  if v <= 0 then p
+  else if v > 99999 then p
+  else let
+  val () = $A.set<byte>(b, p, $A.int2byte(32))
+  val () = $A.set<byte>(b, p + 1, $A.int2byte(194))
+  val () = $A.set<byte>(b, p + 2, $A.int2byte(183))
+  val () = $A.set<byte>(b, p + 3, $A.int2byte(32))
+in $S.int_to_str(b, p + 4, p + 20, v) end
+
+fn _series_arr {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), n: int n, o: int o, k: int k): [l:agz][m:nat | m < 256] @($A.arr(byte, l, m + 1), int m) = let
+  val m = (if k > 255 then 255 else k): [m:nat | m <= k; m < 256] int m
+  val a = $A.alloc<byte>(m + 1)
+  val () = _series_copy(data, o, a, m, 0)
+in @(a, m) end
+
 fn _span_arr {lb:agz}{n:pos}{o,m:nat | o + m <= n}{fl:pos | fl < 256}
   (data: !$A.borrow(byte, lb, n), n: int n, o: int o, m: int m, fallback: string fl)
   : [l:agz][k:pos | k < 256] @($A.arr(byte, l, k), int k) =
@@ -330,11 +361,12 @@ fn _span_arr {lb:agz}{n:pos}{o,m:nat | o + m <= n}{fl:pos | fl < 256}
 
 (* Adds a book: its id, title and author (spans of data), file size and
    cover type; its key. None when the library is full. *)
-#pub fn lib_add {lb:agz}{n:pos}{to,tl,ao,al:nat | to + tl <= n; ao + al <= n}
+#pub fn lib_add {lb:agz}{n:pos}{to,tl,ao,al,so,sl:nat | to + tl <= n; ao + al <= n; so + sl <= n}
   (h1: Int, h2: Int, data: !$A.borrow(byte, lb, n), n: int n,
-   to: int to, tl: int tl, ao: int ao, al: int al, fsz: Int, cover: Int, now: Int): Int
+   to: int to, tl: int tl, ao: int ao, al: int al, so: int so, sl: int sl, sidx: Int,
+   fsz: Int, cover: Int, now: Int): Int
 
-implement lib_add (h1, h2, data, n, to, tl, ao, al, fsz, cover, now) = let
+implement lib_add (h1, h2, data, n, to, tl, ao, al, so, sl, sidx, fsz, cover, now) = let
   val c = lib_take()
   val+ ~LibCell(bs, k) = c
 in
@@ -346,11 +378,13 @@ in
     val () = !_next_key := key + 1
     val @(t, tn) = _span_arr(data, n, to, tl, "Imported Book")
     val @(a, an) = _span_arr(data, n, ao, al, "Unknown Author")
+    val @(sr, sn) = _series_arr(data, n, so, sl)
     val nums = @{
       key = key, h1 = h1, h2 = h2, shelf = 0, added = now, opened = 0,
-      ch = 0, tch = 0, pg = 0, pgs = 0, anchor = ~1, fsz = fsz, cover = cover, done = 0
+      ch = 0, tch = 0, pg = 0, pgs = 0, anchor = ~1, fsz = fsz, cover = cover, done = 0,
+      sidx = sidx
     }: bnums
-    val () = lib_put(LibCell(books_cons(Book(t, tn, a, an, nums), bs), k + 1))
+    val () = lib_put(LibCell(books_cons(Book(t, tn, a, an, sr, sn, nums), bs), k + 1))
   in key end
 end
 
@@ -369,6 +403,28 @@ in
     val @(x, rest2) = _pull(rest, i - 1)
   in @(x, books_cons(b, rest2)) end
 end
+
+(* Book i's series' name, from data[o, o + k) (its file was imported
+   again) *)
+fun _series_set_at {k:nat}{lb:agz}{n:pos}{o,m:nat | o + m <= n} .<k>.
+  (bs: books(k), i: int, data: !$A.borrow(byte, lb, n), n: int n, o: int o, m: int m): books(k) =
+  case+ bs of
+  | ~books_nil() => books_nil()
+  | ~books_cons(b, rest) =>
+    if i = 0 then let
+      val+ ~Book(t, tn, a, an, sr, _, x) = b
+      val () = $A.free<byte>(sr)
+      val @(sr2, sn2) = _series_arr(data, n, o, m)
+    in books_cons(Book(t, tn, a, an, sr2, sn2, x), rest) end
+    else books_cons(b, _series_set_at(rest, i - 1, data, n, o, m))
+
+#pub fn lib_series_set {lb:agz}{n:pos}{o,m:nat | o + m <= n}
+  (i: int, data: !$A.borrow(byte, lb, n), n: int n, o: int o, m: int m): void
+
+implement lib_series_set (i, data, n, o, m) = let
+  val c = lib_take()
+  val+ ~LibCell(bs, k) = c
+in lib_put(LibCell(_series_set_at(bs, i, data, n, o, m), k)) end
 
 (* Moves book i to the front of the library: the sort is stable, so of
    the books opened in the same minute, the one opened last comes first *)
@@ -412,7 +468,7 @@ implement lib_set_shelf (i, shelf) = let
   val () = lib_update(i, lam(x) => @{
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
     ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-    fsz = x.fsz, cover = x.cover, done = x.done })
+    fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx })
   val () = lib_save()
 in lib_render() end
 
@@ -492,7 +548,7 @@ fun _trash_all {i,k:nat | i <= k} .<k - i>. (i: int i, k: int k): void =
     val () = lib_update(i, lam(x) => @{
       key = x.key, h1 = x.h1, h2 = x.h2, shelf = 3, added = x.added, opened = x.opened,
       ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-      fsz = x.fsz, cover = x.cover, done = x.done })
+      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx })
   in _trash_all(i + 1, k) end
 
 (* Each book of ss put back on its shelf *)
@@ -504,7 +560,7 @@ fun _unshelve {n:nat} .<n>. (ss: shelved(n)): void =
       val () = (if j >= 0 then lib_update(j, lam(x) => @{
           key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
           ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-          fsz = x.fsz, cover = x.cover, done = x.done }) else ())
+          fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx }) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -527,8 +583,8 @@ in lam () => let val () = _unshelve(ss) val () = lib_save() in lib_render() end 
 fn _lower (c: int): int = if c >= 65 then (if c <= 90 then c + 32 else c) else c
 
 (* a[0, an) before b[0, bn), letters in any case *)
-fun _less {la,lb:agz}{an,bn:nat}{i:nat | i <= an} .<an - i>.
-  (a: !$A.arr(byte, la, an), an: int an, b: !$A.arr(byte, lb, bn), bn: int bn, i: int i): int =
+fun _less {la,lb:agz}{an,bn:nat}{na,nb:nat | an <= na; bn <= nb}{i:nat | i <= an} .<an - i>.
+  (a: !$A.arr(byte, la, na), an: int an, b: !$A.arr(byte, lb, nb), bn: int bn, i: int i): int =
   if i >= an then (if i >= bn then 0 else ~1)
   else if i >= bn then 1
   else let
@@ -538,10 +594,20 @@ fun _less {la,lb:agz}{an,bn:nat}{i:nat | i <= an} .<an - i>.
 
 (* Whether x comes before y in order o *)
 fn _before (x: !book, y: !book, o: int): bool = let
-  val+ Book(xt, xtn, xa, xan, xn) = x
-  val+ Book(yt, ytn, ya, yan, yn) = y
+  val+ Book(xt, xtn, xa, xan, xs, xsn, xn) = x
+  val+ Book(yt, ytn, ya, yan, ys, ysn, yn) = y
 in
-  if o = 1 then _less(xt, xtn, yt, ytn, 0) < 0
+  (* by series: each series together, in its numbers' order, then the
+     books of none, by title *)
+  if o = 4 then (if xsn > 0 then (if ysn > 0 then let
+      val c = _less(xs, xsn, ys, ysn, 0)
+    in
+      if c < 0 then true else if c > 0 then false
+      else if xn.sidx <> yn.sidx then xn.sidx < yn.sidx
+      else _less(xt, xtn, yt, ytn, 0) < 0
+    end else true)
+    else (if ysn > 0 then false else _less(xt, xtn, yt, ytn, 0) < 0))
+  else if o = 1 then _less(xt, xtn, yt, ytn, 0) < 0
   else if o = 2 then let
     val c = _less(xa, xan, ya, yan, 0)
   in if c < 0 then true else if c > 0 then false else _less(xt, xtn, yt, ytn, 0) < 0 end
@@ -579,19 +645,19 @@ in lib_put(LibCell(_sort(bs, books_nil(), o), k)) end
    tch, pg, pgs, anchor, fsz, cover | done << 8. At most 560 bytes a
    book. *)
 
-fun _put_bytes {ls,l:agz}{la:addr}{ns:nat}{n:nat}{p:nat | p + ns <= n}{j:nat | j <= ns} .<ns - j>.
-  (src: !$A.arr(byte, ls, ns), ns: int ns, out: !$A.arrx(byte, l, n, la), p: int p, j: int j): void =
+fun _put_bytes {ls,l:agz}{la:addr}{ns,ms:nat | ns <= ms}{n:nat}{p:nat | p + ns <= n}{j:nat | j <= ns} .<ns - j>.
+  (src: !$A.arr(byte, ls, ms), ns: int ns, out: !$A.arrx(byte, l, n, la), p: int p, j: int j): void =
   if j >= ns then ()
   else let
     val () = $A.write_byte(out, p + j, $AR.low_byte(byte2int0($A.get<byte>(src, j))))
   in _put_bytes(src, ns, out, p, j + 1) end
 
-fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 560 * j <= n} .<j>.
+fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 820 * j <= n} .<j>.
   (out: !$A.arrx(byte, l, n, la), p: int p, bs: !books(j)): [q:nat | q <= n] int q =
   case+ bs of
   | books_nil() => p
   | books_cons(b, rest) => let
-      val+ Book(t, tn, a, an, x) = b
+      val+ Book(t, tn, a, an, sr, sn, x) = b
       val () = $A.write_i32(out, p, x.h1)
       val () = $A.write_i32(out, p + 4, x.h2)
       val () = $A.write_byte(out, p + 8, tn)
@@ -610,7 +676,12 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 560 * j <= n} .<j>.
       val () = $A.write_i32(out, q + 28, x.anchor)
       val () = $A.write_i32(out, q + 32, x.fsz)
       val () = $A.write_i32(out, q + 36, x.cover + x.done * 256)
-    in _ser(out, q + 40, rest) end
+      (* QLB2: the series' name and the book's number in it *)
+      val q = q + 40
+      val () = $A.write_byte(out, q, sn)
+      val () = _put_bytes(sr, sn, out, q + 1, 0)
+      val () = $A.write_i32(out, q + 1 + sn, x.sidx)
+    in _ser(out, q + 5 + sn, rest) end
 
 (* Stores the library under "lib" *)
 #pub fn lib_save (): void
@@ -618,12 +689,12 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 560 * j <= n} .<j>.
 implement lib_save () = let
   val c = lib_take()
   val+ @LibCell(bs, k) = c
-  val n = 4 + 560 * k
+  val n = 4 + 820 * k
 in
   case+ piece_new(n) of
   | ~NoPiece() => let prval () = fold@(c) in lib_put(c) end
   | ~Piece(ow, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB1"), 4)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB2"), 4)
       val m = _ser(out, 4, bs)
       prval () = fold@(c)
       val () = lib_put(c)
@@ -649,6 +720,14 @@ fn _i32 {l:agz}{la:addr}{n:nat}{p:nat | p + 4 <= n}
   val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
 in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
 
+(* buf[p, p + m) into out[0, m), out being longer *)
+fun _bytes_of_into {l:agz}{la:addr}{n:nat}{p,m:nat | p + m <= n}{lo:agz}{no:pos | m < no}{j:nat | j <= m} .<m - j>.
+  (buf: !$A.arrx(byte, l, n, la), p: int p, m: int m, out: !$A.arr(byte, lo, no), j: int j): void =
+  if j >= m then ()
+  else let
+    val () = $A.set<byte>(out, j, $A.get<byte>(buf, p + j))
+  in _bytes_of_into(buf, p, m, out, j + 1) end
+
 fun _bytes_of {l:agz}{la:addr}{n:nat}{p,m:nat | p + m <= n}{lo:agz}{j:nat | j <= m} .<m - j>.
   (buf: !$A.arrx(byte, l, n, la), p: int p, m: int m, out: !$A.arr(byte, lo, m), j: int j): void =
   if j >= m then ()
@@ -659,7 +738,7 @@ fun _bytes_of {l:agz}{la:addr}{n:nat}{p,m:nat | p + m <= n}{lo:agz}{j:nat | j <=
 (* The books stored in buf[p, n), read from an earlier run's bytes and
    checked here, once; onto acc (at most LIB_MAX) *)
 fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p>.
-  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, acc: books(a), a: int a)
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, acc: books(a), a: int a, v2: bool)
   : [k:nat | k <= LIB_MAX] @(books(k), int k) =
   if a >= 100000 then @(acc, a)
   else if p + 9 > n then @(acc, a)
@@ -690,9 +769,29 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
           shelf = _i32(buf, r), added = _i32(buf, r + 4), opened = _i32(buf, r + 8),
           ch = _i32(buf, r + 12), tch = _i32(buf, r + 16), pg = _i32(buf, r + 20),
           pgs = _i32(buf, r + 24), anchor = _i32(buf, r + 28), fsz = _i32(buf, r + 32),
-          cover = $AR.low_byte(cd), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cd, 8)), 1)
+          cover = $AR.low_byte(cd), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cd, 8)), 1),
+          sidx = 0
         }: bnums
-      in _parse(buf, n, r + 40, books_cons(Book(t, tn, au, an, nums), acc), a + 1) end
+        (* QLB2 has the series after; QLB1, none *)
+        val r = r + 40
+        val sn = (if v2 then (if r < n then $AR.low_byte(byte2int0($A.get<byte>(buf, r))) else 0) else 0): [m:nat | m < 256] int m
+      in
+        if ~v2 then _parse(buf, n, r, books_cons(Book(t, tn, au, an, $A.alloc<byte>(1), 0, nums), acc), a + 1, v2)
+        else if r + 5 + sn > n then let
+          val () = $A.free<byte>(t)
+          val () = $A.free<byte>(au)
+        in @(acc, a) end
+        else let
+          val sr = $A.alloc<byte>(sn + 1)
+          val () = _bytes_of_into(buf, r + 1, sn, sr, 0)
+          val nums = @{
+            key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = nums.shelf, added = nums.added,
+            opened = nums.opened, ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs,
+            anchor = nums.anchor, fsz = nums.fsz, cover = nums.cover, done = nums.done,
+            sidx = _i32(buf, r + 1 + sn)
+          }: bnums
+        in _parse(buf, n, r + 5 + sn, books_cons(Book(t, tn, au, an, sr, sn, nums), acc), a + 1, v2) end
+      end
     end
   end
 
@@ -702,9 +801,7 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
 
 implement lib_load () = let
   val ka = $A.alloc<byte>(3)
-  val () = $A.write_byte(ka, 0, 108)
-  val () = $A.write_byte(ka, 1, 105)
-  val () = $A.write_byte(ka, 2, 98)
+  val () = $A.write_text(ka, 0, $A.text_lit("lib"), 3)
   val @(kf, kb) = $A.freeze<byte>(ka)
   val p = $IDB.idb_get(kb, 3)
   val () = release_bytes(kf, kb)
@@ -715,9 +812,9 @@ in
     | ~ContentBytes(ow, buf, n) =>
       if n < 4 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) <> 49 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
+      else if (if byte2int0($A.get<byte>(buf, 3)) = 49 then false else byte2int0($A.get<byte>(buf, 3)) <> 50) then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else let
-        val @(bs, k) = _parse(buf, n, 4, books_nil(), 0)
+        val @(bs, k) = _parse(buf, n, 4, books_nil(), 0, byte2int0($A.get<byte>(buf, 3)) = 50)
         val () = piece_free(ow, buf)
         val () = lib_put(LibCell(_sort(bs, books_nil(), !_sort_order), k))
       in $P.ret<int>(k) end)
@@ -766,7 +863,7 @@ fn _matches (b: !book, q: !query): bool =
   case+ q of
   | QueryNone() => true
   | QuerySome(qa, qn) => let
-      val+ Book(t, tn, a, an, _) = b
+      val+ Book(t, tn, a, an, _, _, _) = b
     in if _has(t, tn, qa, qn, 0) then true else _has(a, an, qa, qn, 0) end
 
 (* ============================================================
@@ -996,13 +1093,27 @@ in
       in $P.ret<int>(0) end))
 end
 
+(* The series line of card i: the series' name, and " · N" *)
+fn _card_series {nb:pos | nb <= 16}{i:nat}{l:agz}{m:pos}{sn:pos | sn < m; sn < 256}
+  (base: string nb, i: int i, sr: !$A.arr(byte, l, m), sn: int sn, sidx: Int): void = let
+  val @(pi, pl) = nid_make2(base, i, "-info")
+  val @(si, sl) = nid_make2(base, i, "-series")
+  val () = ui_add_nn(pi, pl, si, sl, TDiv)
+  val @(si, sl) = nid_make2(base, i, "-series")
+  val () = ui_attr_n(si, sl, AClass, "bser")
+  val b = $A.alloc<byte>(sn + 20)
+  val () = _copy(sr, sn, b, 0, 0)
+  val k = _series_num(b, sn, sidx)
+  val @(si, sl) = nid_make2(base, i, "-series")
+in ui_text_n_buf(si, sl, b, k) end
+
 (* Card i for book b: cover, title, author, progress; its elements'
    ids are base<i> (the card), base<i>-cover and so on, in row
    rowp<i> under parent, with its More button (morep<i>) when more *)
 fn _card {i:nat}{nb,nr,nm,np:pos | nb <= 16; nr <= 16; nm <= 16; np < 256}
   (b: !book, i: int i, gen: int, base: string nb, rowp: string nr, morep: string nm,
    parent: string np, more: bool): void = let
-  val+ Book(t, tn, a, an, x) = b
+  val+ Book(t, tn, a, an, sr, sn, x) = b
   (* the row: the card, which opens the book, then its More button,
      which opens the book menu; the row is named by the book's title *)
   val @(ri, rl) = nid_make(rowp, i)
@@ -1048,6 +1159,8 @@ fn _card {i:nat}{nb,nr,nm,np:pos | nb <= 16; nr <= 16; nm <= 16; np < 256}
   val () = _copy(a, an, ab, 0, 0)
   val @(ai, al) = nid_make2(base, i, "-author")
   val () = ui_text_n_buf(ai, al, ab, an)
+  (* its series, and its number in it: "Foundation · 2" *)
+  val () = (if sn > 0 then _card_series(base, i, sr, sn, x.sidx) else ())
   (* progress *)
   val @(pi, pl) = nid_make2(base, i, "-info")
   val @(gi, gl) = nid_make2(base, i, "-progress")
@@ -1103,7 +1216,7 @@ fun _cards {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, shelf: int, q: !query,
   case+ bs of
   | books_nil() => shown
   | books_cons(b, rest) => let
-      val+ Book(_, _, _, _, x) = b
+      val+ Book(_, _, _, _, _, _, x) = b
       val vis = (if x.shelf = shelf then (if _passes(x) then _matches(b, q) else false) else false): bool
       val () = (if vis then _card(b, i, gen, "book", "book-row", "book-more", "book-list", true) else ())
     in _cards(rest, i + 1, shelf, q, gen, (if vis then shown + 1 else shown)) end
@@ -1115,7 +1228,7 @@ fun _latest {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, best: int, latest_ope
   case+ bs of
   | books_nil() => best
   | books_cons(b, rest) => let
-      val+ Book(_, _, _, _, x) = b
+      val+ Book(_, _, _, _, _, _, x) = b
       val better = (if x.shelf = 0 then (if x.done <= 0 then (if x.opened > 0 then x.opened > latest_opened else false) else false) else false): bool
     in if better then _latest(rest, i + 1, i, x.opened) else _latest(rest, i + 1, best, latest_opened) end
 
@@ -1226,6 +1339,7 @@ implement lib_sort_label (o) =
   if o = 1 then ui_text("sort-button", "Sort: Title")
   else if o = 2 then ui_text("sort-button", "Sort: Author")
   else if o = 3 then ui_text("sort-button", "Sort: Date added")
+  else if o = 4 then ui_text("sort-button", "Sort: Series")
   else ui_text("sort-button", "Sort: Last opened")
 
 (* ============================================================

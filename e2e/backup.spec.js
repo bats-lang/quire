@@ -96,16 +96,22 @@ test('a backup restored after a reset brings everything back, and a book importe
   const sepia = await bg(page);
   await bookMenu(page, 'Kept One');
   await menuItem(page, 'Hide').click();
+  // the last sort order, Series
+  const sort = page.getByRole('button', { name: /^Sort:/ });
+  while (await sort.textContent() !== 'Sort: Series') await sort.click();
   const path = rawFile('quire-backup.json', await exportBackup(page));
 
   await factoryReset(page);
   expect(await bg(page)).not.toBe(sepia);
+  // the library's order is its own, not a setting: changed by hand
+  while (await sort.textContent() !== 'Sort: Title') await sort.click();
   // only book one comes back first
   await importFiles(page, [one], 1);
   await restoreBackup(page, path);
   await expect(restored(page)).toContainText('Books restored: 2');
   await restored(page).getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => bg(page)).toBe(sepia);
+  await expect(sort).toHaveText('Sort: Series');
   // book one is hidden again
   await expect(card(page, 'Kept One')).toHaveCount(0);
   // book two, imported after, takes its place and highlight back

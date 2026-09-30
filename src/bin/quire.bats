@@ -816,7 +816,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 18) = let
   (* sort and shelf *)
   val r = RCons(r, OnEl("sort-button"), "click", lam(_) => let
       val o = lib_sort_get()
-      val o = (if o >= 3 then 0 else o + 1): int
+      val o = (if o >= 4 then 0 else o + 1): int
       val () = lib_sort(o)
       val () = lib_sort_label(o)
       val () = set_apply(lib_state_get())
