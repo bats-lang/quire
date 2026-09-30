@@ -78,17 +78,17 @@ implement nid_pad3(pre, i) = let
 in @(exact, off) end
 
 (* A numbered id with a suffix: pre, i's digits, then suf *)
-#pub fn nid_make2 {sn:pos | sn <= 4}{i:nat}{un:pos | un <= 4}
+#pub fn nid_make2 {sn:pos | sn <= 16}{i:nat}{un:pos | un <= 12}
   (pre: string sn, i: int i, suf: string un)
-  : [l:agz][k:pos | k <= 24] @($A.arr(byte, l, k), int k)
+  : [l:agz][k:pos | k <= 40] @($A.arr(byte, l, k), int k)
 
 implement nid_make2(pre, i, suf) = let
-  val buf = $A.alloc<byte>(24)
+  val buf = $A.alloc<byte>(40)
   val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
-  val off = $S.int_to_str(buf, off, 24, i)
+  val off = $S.int_to_str(buf, off, 40, i)
   val off = _put_str(buf, off, suf, g1u2i(string1_length(suf)), 0)
   val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 24, exact, off, off)
+  val buf = $S.copy_arr_region(buf, 0, 40, exact, off, off)
   val () = $A.free<byte>(buf)
 in @(exact, off) end
 
@@ -873,9 +873,10 @@ in _sattr(id, "aria-labelledby", by) end
 (* The app's listeners, as one table: the last added is at its head.
    A listener's id is its position in the table (the first added is 0),
    so no two listeners share an id, and the table's length, which its
-   type carries, bounds the ids below the bridge's 128. The table is
-   registered at once by ui_listen_all; there is no other way to
-   register a listener. *)
+   type carries, bounds the ids below MEDIA_LISTENER, the last of the
+   bridge's 128 slots, which is the media query listener's (listen_media
+   shares the slots). The table is registered at once by ui_listen_all;
+   there is no other way to register a listener. *)
 #pub datatype regs(int) =
   | RNil(0)
   | {n:nat}{e:pos | e < 256} RCons(n + 1) of
@@ -906,7 +907,7 @@ in $A.free<byte>($A.thaw<byte>(ef)) end
 
 (* Registers r's listeners, each with its position as its id; the
    number registered *)
-fun _listen_all {n:nat | n <= 128} .<n>. (r: regs(n)): int n =
+fun _listen_all {n:nat | n <= 127} .<n>. (r: regs(n)): int n =
   case+ r of
   | RNil() => 0
   | RCons(rest, o, ev, cb) => let
@@ -914,7 +915,12 @@ fun _listen_all {n:nat | n <= 128} .<n>. (r: regs(n)): int n =
       val () = _listen1(o, ev, k, cb)
     in k + 1 end
 
-#pub fn ui_listen_all {n:nat | n <= 128} (r: regs(n)): void
+(* The media query listener's slot (settings' system dark mode): the
+   bridge's last, which no listener of the table can have *)
+#pub fn ui_media_listener (): int 127
+implement ui_media_listener () = 127
+
+#pub fn ui_listen_all {n:nat | n <= 127} (r: regs(n)): void
 
 implement ui_listen_all (r) = let val _ = _listen_all(r) in end
 

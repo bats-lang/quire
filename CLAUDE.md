@@ -273,4 +273,6 @@ that must (`_back_offer`); CI runs `tests/static/run.sh`.
 
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
-table's length, in its type, is at most the bridge's 128.
+table's length, in its type, is at most 127: the bridge's last slot
+(of 128) is the media query listener's (`ui_media_listener`), which
+shares the bridge's table, so no listener of the table can take it.
