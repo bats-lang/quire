@@ -687,7 +687,9 @@ test('a reload in a real book comes back to its page', async ({ page }) => {
   const top = (await startsOnPage(page))[0];
   await reload(page);
   await expect(indicator(page)).toContainText('p.');
-  await expect.poll(() => place(page)).toEqual(at);
+  // the same page, with the same text at its top (the chapter's page
+  // count may settle once its illustration has loaded)
+  await expect.poll(async () => { const { ch, p } = await place(page); return { ch, p }; }).toEqual({ ch: at.ch, p: at.p });
   expect(await onPage(page, top)).toBe(true);
 });
 
