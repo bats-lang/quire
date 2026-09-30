@@ -44,9 +44,10 @@ implement main0 () = let
   val () = $A.write_text(assets, p6 + n6 + 1, $A.text_lit(f7), n7)
   val () = $A.write_text(assets, p6 + n6 + n7 + 2, $A.text_lit(f8), n8)
   val () = $A.write_text(assets, p6 + n6 + n7 + n8 + 3, $A.text_lit(f9), n9)
-  val () = $P.create_pwa("Quire", "dev.bats.quire",
+  (* installed, the system opens EPUBs with it and shares them with it *)
+  val () = $P.create_pwa_opening("Quire", "dev.bats.quire",
     "dist/release/quire.wasm", "app.wasm", "dist/pwa",
-    assets, n, n)
+    assets, n, n, "application/epub+zip", ".epub")
   val () = $A.free<byte>(assets)
   val () = println! ("PWA generated in dist/pwa/")
   (* The Capacitor project around it; its id is the one Quire is

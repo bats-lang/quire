@@ -249,3 +249,35 @@ test.describe('auto at night', () => {
     await expect.poll(theme).toContain('th-light');
   });
 });
+
+test('in the Android app, the screen: full screen, the rotation locked and the brightness', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.calls = [];
+    const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      StatusBar: { hide: call('hide'), show: call('show') },
+      ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+      ScreenBrightness: { setBrightness: call('brightness') },
+    } };
+  });
+  await start(page);
+  await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  const full = sheet(page).getByRole('button', { name: 'Full screen', exact: true });
+  const lock = sheet(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  const brightness = sheet(page).getByRole('combobox', { name: 'Brightness' });
+  await full.click();
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await lock.click();
+  await expect(lock).toHaveAttribute('aria-pressed', 'true');
+  await brightness.selectOption({ label: '25%' });
+  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['hide', 'lock', 'brightness']);
+});
+
+test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Tabbed', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  await expect(sheet(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
+  await expect(sheet(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
+});

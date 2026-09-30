@@ -932,7 +932,7 @@ fn _g_0_fonts {r:nat | r >= 1010} (sh: sheet(r, 0)): [q:nat | q >= r - 1010] she
   val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sh end
 
-fn _g_1_shell {r:nat | r >= 6000} (sh: sheet(r, 0)): [q:nat | q >= r - 6000] sheet(q, 0) = let
+fn _g_1_shell {r:nat | r >= 6300} (sh: sheet(r, 0)): [q:nat | q >= r - 6300] sheet(q, 0) = let
   val sh = rule(sh, "body")
   val sh = lay(sh, Margin(), "0")
   val sh = surf(S_fg_bg | sh, 1, 0)
@@ -1074,6 +1074,12 @@ fn _g_1_shell {r:nat | r >= 6000} (sh: sheet(r, 0)): [q:nat | q >= r - 6000] she
   val sh = lay(sh, Flex(), "none")
   val sh = close(sh)
   (* reading aloud: only where the browser speaks (pwa-can-speak) *)
+  val sh = rule(sh, "html:not(.pwa-can-fullscreen) .screenfs,html:not(.pwa-can-lock) .screenlock,html:not(.pwa-can-brightness) .screenbr")
+  val sh = lay(sh, Display(), "none")
+  val sh = close(sh)
+  val sh = rule(sh, "html:not(.pwa-can-fullscreen):not(.pwa-can-lock):not(.pwa-can-brightness) .screenrow")
+  val sh = lay(sh, Display(), "none")
+  val sh = close(sh)
   val sh = rule(sh, "html:not(.pwa-can-share) .share")
   val sh = lay(sh, Display(), "none")
   val sh = close(sh)

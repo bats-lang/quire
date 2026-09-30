@@ -263,6 +263,10 @@ in end
   (* sharing, by the page's script: the selection, cited by the element
      named; or the element named's text as a file, named *)
   | APwaShareSelection | APwaShareFile | APwaShareName
+  (* the screen and the system, by the page's script: full screen, the
+     rotation locked, the brightness chosen; and where the files the
+     system opens with the app, or shares with it, are dropped *)
+  | APwaFullscreen | APwaOrientationLock | APwaBrightness | APwaFileDrop
 
 fn _attr_name (a: attr): [k:pos | k < 256] string k =
   case+ a of
@@ -276,6 +280,8 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | APwaSpeechVoice() => "data-pwa-speech-voice"
   | APwaShareSelection() => "data-pwa-share-selection" | APwaShareFile() => "data-pwa-share-file"
   | APwaShareName() => "data-pwa-share-name"
+  | APwaFullscreen() => "data-pwa-fullscreen" | APwaOrientationLock() => "data-pwa-orientation-lock"
+  | APwaBrightness() => "data-pwa-brightness" | APwaFileDrop() => "data-pwa-file-drop"
 
 (* Attribute a of element id: the literal v (non-empty) *)
 #pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}
