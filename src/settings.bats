@@ -8,12 +8,14 @@
 #use promise as P
 #use result as R
 #use str as S
+#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
 (* The settings, each in its range:
@@ -208,10 +210,34 @@ fn _apply_type (): void = let
   val off = _put_flow(buf, off, x.flow)
 in ui_text_buf("style-type", buf, off) end
 
+(* Whether it is night by the local clock (22:00 to 07:00, iOS Night
+   Shift's default schedule): the page's script (pwa) marks the page
+   pwa-night then, which wasm has no clock of its own to tell (its time
+   is UTC) *)
+fn _night (): bool = let
+  val a = $A.alloc<byte>(21)
+  val () = $A.write_text(a, 0, $A.text_lit(".pwa-night #bats-root"), 21)
+  val @(f, b) = $A.freeze<byte>(a)
+  val @(b1, b2) = $A.borrow_split<byte>(f, b, 21)
+  val r = $DR.query_selector(b1, 21)
+  val b = $A.borrow_join<byte>(f, b1, b2)
+  val () = release_bytes(f, b)
+in
+  case+ r of
+  | ~$R.none() => false
+  | ~$R.some(v) => let val () = $DC.blob_free(v) in true end
+end
+
+(* The theme shown now: auto is Night at night (reading a bright screen
+   at bedtime delays sleep: Chang et al., PNAS 2015), else Dark when the
+   system asks for dark, else Light *)
+val _shown_theme = ref<int>(~1)
+
 (* Whether the theme shown is dark, light or sepia: the root's class *)
 fn _apply_theme (): void = let
   val t = (!_set).theme
-  val t = (if t = 0 then (if !_sys_dark then 3 else 1) else t): set_theme
+  val t = (if t = 0 then (if _night() then 4 else if !_sys_dark then 3 else 1) else t): set_theme
+  val () = !_shown_theme := t
 in
   if t = 5 then ui_attr("bats-root", AClass, "app th-grey")
   else if t = 4 then ui_attr("bats-root", AClass, "app th-night")
@@ -219,6 +245,15 @@ in
   else if t = 2 then ui_attr("bats-root", AClass, "app th-sepia")
   else ui_attr("bats-root", AClass, "app th-light")
 end
+
+(* Auto, the theme again, when the clock has passed into the night or
+   out of it (at a page turn) *)
+#pub fn set_theme_recheck (): void
+implement set_theme_recheck () =
+  if (!_set).theme <> 0 then ()
+  else let
+    val t = (if _night() then 4 else if !_sys_dark then 3 else 1): int
+  in if t = !_shown_theme then () else _apply_theme() end
 
 fn _pressed {ni:pos | ni < 256} (id: string ni, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
