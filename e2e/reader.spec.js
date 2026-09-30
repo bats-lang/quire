@@ -8,7 +8,7 @@ import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles, indicator, chapterBody,
+  importFiles, indicator, chapterBody, oneColumn,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -461,6 +461,7 @@ test('the page indicator names the chapter, and a long title is cut before the p
     title: 'Titled', author: 'Reader Tests', rawChapters: chapters(2),
     toc: [{ label: long, href: 'chapter1.xhtml' }, { label: 'Short', href: 'chapter2.xhtml' }],
   });
+  await oneColumn(page);
   await showChrome(page);
   expect(await place(page)).toMatchObject({ ch: long, p: 1 });
   const numbers = indicator(page).getByText(/· page \d+ of \d+ in chapter/);
@@ -475,6 +476,7 @@ test('the page indicator names the chapter, and a long title is cut before the p
 test('while the bars are hidden, a footer says the chapter, the pages left in it and how far into the book the page is', async ({ page }) => {
   await start(page);
   await readBook(page, book('Footer', 2));
+  await oneColumn(page);
   const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|last page in chapter)$/);
   const ofBook = page.locator('[aria-hidden="true"]').getByText(/· (<1|\d+)% of book$/);
   // the bars are up when a book opens; the footer is under them
@@ -505,6 +507,7 @@ test('while the bars are hidden, a footer says the chapter, the pages left in it
 test('the page indicator says which page of the chapter\'s it is', async ({ page }) => {
   await start(page);
   await readBook(page, book('Indicated', 2));
+  await oneColumn(page);
   const { t } = await place(page);
   await expect(indicator(page)).toHaveText(`Chapter 1\u00a0· page 1 of ${t} in chapter`);
 });
@@ -516,6 +519,7 @@ test('a tap on the footer\'s readout shows the next one, which is kept, and turn
     title: 'Readouts', author: 'Reader Tests', rawChapters: chapters(3),
     toc: [{ label: 'One', href: 'chapter2.xhtml' }, { label: 'Two', href: 'chapter3.xhtml' }],
   });
+  await oneColumn(page);
   await page.keyboard.press('t');
   const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|page \d+ of \d+ in chapter|(before )?chapter \d+ of \d+)$/);
   const { t } = await place(page);
@@ -568,6 +572,7 @@ test('the time the chapter and the book take to finish is learned from the reade
   await page.clock.install();
   await start(page);
   await readBook(page, book('Timed', 3, 60));
+  await oneColumn(page);
   await page.keyboard.press('t');
   const readout = page.locator('[aria-hidden="true"]').getByText(/· (\d+ pages? left in chapter|page \d+ of \d+ in chapter|chapter \d+ of \d+|.* min left in (chapter|book))$/);
   // not guessed before it is known: the readouts are the pages and the
@@ -996,4 +1001,42 @@ test('the first book opened says once how to turn the page', async ({ page }) =>
   await reload(page);
   await expect(bookPage(page)).toBeVisible();
   await expect(hint).toBeHidden();
+});
+
+// Columns: a spread of two pages a screen, as a book lies open
+test('two columns show a spread, turned as one and numbered as two pages; auto shows one on a wide screen turned on its side', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Spread', 2, 40));
+  await openSettings(page);
+  const columns = dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' });
+  await columns.getByRole('button', { name: 'Two', exact: true }).click();
+  await expect(columns.getByRole('button', { name: 'Two', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(indicator(page)).toHaveText(/^Chapter 1 · pages 1–2 of (\d+) in chapter$/);
+  const pages = +/of (\d+) in/.exec(await indicator(page).textContent())[1];
+  expect(pages % 2).toBe(0);
+  // the screen's two halves each hold text
+  const halves = await bookPage(page).evaluate(doc => {
+    const c = doc.getBoundingClientRect();
+    const mid = c.left + c.width / 2;
+    // a paragraph across both columns is a box in each
+    const on = [...doc.querySelectorAll('p')].flatMap(e => [...e.getClientRects()]).filter(r => r.width > 0 && r.right > c.left && r.left < c.right);
+    return [on.some(r => r.right <= mid + 1), on.some(r => r.left >= mid - 1)];
+  });
+  expect(halves).toEqual([true, true]);
+  // a turn is a spread's
+  await page.keyboard.press('ArrowRight');
+  await expect(indicator(page)).toHaveText(`Chapter 1 · pages 3–4 of ${pages} in chapter`);
+  // one column: a page a screen, about twice as many
+  await openSettings(page);
+  await columns.getByRole('button', { name: 'One', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await expect(indicator(page)).toHaveText(/^Chapter 1 · page \d+ of \d+ in chapter$/);
+  // auto: a spread exactly when the window is in landscape and wide
+  await openSettings(page);
+  await columns.getByRole('button', { name: 'Auto', exact: true }).click();
+  await page.keyboard.press('Escape');
+  const { width, height } = page.viewportSize();
+  const wide = width > height && width >= 960;
+  await expect(indicator(page)).toHaveText(wide ? /· pages \d+–\d+ of \d+ in chapter$/ : /· page \d+ of \d+ in chapter$/);
 });

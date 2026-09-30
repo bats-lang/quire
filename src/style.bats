@@ -1387,7 +1387,7 @@ fn _g_2_overlays {r:nat | r >= 3900} (sh: sheet(r, 0)): [q:nat | q >= r - 3900] 
   val sh = close(sh)
 in sh end
 
-fn _g_3_reader {r:nat | r >= 6800} (sh: sheet(r, 0)): [q:nat | q >= r - 6800] sheet(q, 0) = let
+fn _g_3_reader {r:nat | r >= 6900} (sh: sheet(r, 0)): [q:nat | q >= r - 6900] sheet(q, 0) = let
   val sh = rule(sh, ".rv")
   val sh = lay(sh, Display(), "flex")
   val sh = lay(sh, FlexDirection(), "column")
@@ -1496,6 +1496,14 @@ fn _g_3_reader {r:nat | r >= 6800} (sh: sheet(r, 0)): [q:nat | q >= r - 6800] sh
   val sh = lay(sh, FontSize(), "18px")
   val sh = lay(sh, LineHeight(), "1.6")
   val sh = lay(sh, Outline(), "none")
+  val sh = close(sh)
+  (* shown only by the typography's style, for a spread; a point the
+     reader measures, never seen *)
+  val sh = rule(sh, ".sprobe")
+  val sh = lay(sh, Display(), "none")
+  val sh = lay(sh, Position(), "absolute")
+  val sh = lay(sh, Width(), "1px")
+  val sh = lay(sh, Height(), "1px")
   val sh = close(sh)
   val sh = rule(sh, ".caf>*")
   val sh = lay(sh, MaxWidth(), "38rem")

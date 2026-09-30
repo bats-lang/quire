@@ -92,6 +92,11 @@ test('a backup restored after a reset brings everything back, and a book importe
   await expect.poll(() => bg(page)).not.toBe(plain);
   await page.getByRole('button', { name: 'Justified', exact: true }).click();
   await page.keyboard.press('Escape');
+  // the place as the book is left: justified text can move a page's
+  // first paragraph to the page before
+  await expect(page.getByRole('dialog', { name: 'Typography and theme' })).toBeHidden();
+  const left = await place(page);
+  expect(left.ch).toBe(at.ch);
   await toLibrary(page);
   const sepia = await bg(page);
   await bookMenu(page, 'Kept One');
@@ -117,7 +122,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   // book two, imported after, takes its place and highlight back
   await importFiles(page, [two], 1);
   await openBook(page, 'Kept Two');
-  expect(await place(page)).toEqual(at);
+  expect(await place(page)).toEqual(left);
   await expect.poll(() => marks(page)).toEqual(hl);
   // in its style
   expect(await page.evaluate(() => CSS.highlights.has('bats-mark-3'))).toBe(true);
