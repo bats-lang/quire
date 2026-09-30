@@ -696,3 +696,22 @@ test('elsewhere, the Home Screen hint is not shown', async ({ page }) => {
   await importFiles(page, [epubFile({ title: 'Kept', author: 'A' })], 1);
   await expect(page.getByText('Add Quire to your Home Screen')).toBeHidden();
 });
+
+test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }) => {
+  const errors = await start(page);
+  const kept = menuItem(page, 'Your books are kept');
+  const atRisk = menuItem(page, 'Your books may be cleared');
+  // as the page's script finds it: here, at risk
+  await page.evaluate(() => { const c = document.documentElement.classList; c.remove('pwa-storage-kept'); c.add('pwa-storage-at-risk'); });
+  await libraryMenu(page);
+  await expect(kept).toBeHidden();
+  await atRisk.click();
+  await expect(dialog(page, 'Your books may be cleared')).toContainText('Keep your EPUB files');
+  await dialog(page, 'Your books may be cleared').getByRole('button', { name: 'OK' }).click();
+  await page.evaluate(() => document.documentElement.classList.replace('pwa-storage-at-risk', 'pwa-storage-kept'));
+  await libraryMenu(page);
+  await expect(atRisk).toBeHidden();
+  await kept.click();
+  await expect(dialog(page, 'Your books are kept')).toContainText('until you remove them');
+  expect(errors).toEqual([]);
+});

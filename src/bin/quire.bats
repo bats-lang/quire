@@ -940,6 +940,14 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 20) = let
         in backup_export() end
         (* the page's script asks the browser to install the app *)
         else if _is(t, "menu-install") then layer_close(LLibraryMenu())
+        else if _is(t, "menu-storage-kept") then let
+          val () = layer_close(LLibraryMenu())
+          val () = modal_inform("Your books are kept")
+        in modal_text_lit("This browser keeps the books you import until you remove them.") end
+        else if _is(t, "menu-storage-at-risk") then let
+          val () = layer_close(LLibraryMenu())
+          val () = modal_inform("Your books may be cleared")
+        in modal_text_lit("This browser may clear what Quire keeps when it runs short of space. Installing Quire, or reading it more often, makes the browser more likely to keep it. Keep your EPUB files: a backup holds your places, notes and settings, not the books.") end
         else if _is(t, "menu-close") then layer_close(LLibraryMenu())
         else if _is(t, "library-menu") then layer_close(LLibraryMenu())
         else ())

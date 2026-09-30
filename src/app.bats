@@ -117,6 +117,13 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-install", "Install Quire")
   val () = ui_attr("menu-install", AClass, "mi pwinst")
   val () = ui_attr("menu-install", APwaInstall, "y")
+  (* whether the browser keeps the books: shown by the stylesheet under
+     the page's script's mark (pwa-storage-kept or -at-risk), each
+     saying more when clicked *)
+  val () = ui_menuitem("library-menu-box", "menu-storage-kept", "Your books are kept")
+  val () = ui_attr("menu-storage-kept", AClass, "mi stkept")
+  val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
+  val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
   val () = ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
