@@ -2708,6 +2708,15 @@ implement reader_back () = _pop_position()
 #pub fun reader_stack_clear (): void
 implement reader_stack_clear () = _ps_put(PsHidden())
 
+(* A book opened: its first page is read from now, so the first turn
+   counts the minutes since. Back in the library, nothing is being read
+   until the next book opens. *)
+#pub fn reader_timer_start (): void
+implement reader_timer_start () = !_spd_last := $TM.epoch_minutes()
+
+#pub fn reader_timer_stop (): void
+implement reader_timer_stop () = !_spd_last := ~1
+
 (* The scrubber dragged to x: the thumb there, and the title of the
    chapter there in its tip *)
 #pub fun reader_scrub_preview (x: Int): void

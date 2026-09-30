@@ -53,14 +53,11 @@ Key packages used:
 ## Development
 
 ```bash
-# Build WASM app
-bats build --only wasm --repository ../repository-prototype
+# Build the app (wasm) and the PWA generator (native)
+bats build --repository ../repository-prototype
 
-# Build PWA generator (native)
-bats build --only native --repository ../repository-prototype
-
-# Generate PWA shell
-mkdir -p dist/pwa && dist/debug/gen-pwa
+# Generate the PWA (into dist/pwa) and the Android project
+./dist/debug/gen-pwa
 
 # Run the e2e tests (desktop and phone for every area; the layout tests
 # at five screen sizes)

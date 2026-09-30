@@ -244,6 +244,7 @@ fn _show_library (): void = let
   val () = _view_save(~1)
   val () = reader_search_stop()
   val () = reader_stack_clear()
+  val () = reader_timer_stop()
   val () = window_close()
 in lib_render() end
 
@@ -370,6 +371,7 @@ fn _open_book {i:int} (i: int i): void =
       val () = _hint_offer()
       val () = _citation_set(i)
       val () = reader_stack_clear()
+      val () = reader_timer_start()
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
       val () = ui_text("chapter-title", "Loading...")

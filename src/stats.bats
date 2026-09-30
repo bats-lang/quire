@@ -296,8 +296,8 @@ in if g = 60 then ui_attr("stats-goal-60", APressed, "true") else ui_attr("stats
 
 (* The log's days, the latest first, as (day, minutes) pairs, and
    their count *)
-#pub fn stats_days (): [k:nat] @(days(k), int k)
-implement stats_days () = let val xs = !_days in @(xs, _count(xs)) end
+#pub fn stats_days (): [k:nat | k <= 400] @(days(k), int k)
+implement stats_days () = let val xs = _first(!_days, DAYS) in @(xs, _count(xs)) end
 
 (* A restored backup's day: its minutes put where the log has none for
    it (the log keeps what this device read) *)
@@ -313,8 +313,11 @@ fun _merge {k:nat} .<k>. (xs: days(k), d: Int, m: Int): [r:nat] days(r) =
 implement stats_restore_day (d, m) =
   if m <= 0 then ()
   else if d <= 0 then ()
-  else let
-    val () = !_days := _first(_merge(!_days, d, m), DAYS)
-  in _save() end
+  else if m > 1440 then ()
+  else !_days := _first(_merge(!_days, d, m), DAYS)
+
+(* Keeps the days a backup put back *)
+#pub fn stats_restored (): void
+implement stats_restored () = _save()
 
 end (* #target wasm *)
