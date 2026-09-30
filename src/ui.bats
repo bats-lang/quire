@@ -731,7 +731,8 @@ in release_bytes(if_, ib) end
 
 (* A text field named name, which is also what it shows while empty.
    Search (type=search) or a multi-line text area. *)
-#pub datatype field = FSearch | FText
+(* A search field, a text area, or one line of text (a name) *)
+#pub datatype field = FSearch | FText | FLine
 
 #pub fn ui_field {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nn:pos | nn < 256}
   (parent: string np, id: string ni, f: field, cls: string nc, name: string nn): void
@@ -741,7 +742,12 @@ implement ui_field(parent, id, f, cls, name) = let
     | FSearch() => let
         val () = _add_s(parent, id, "input")
       in _sattr(id, "type", "search") end
-    | FText() => _add_s(parent, id, "textarea"))
+    | FText() => _add_s(parent, id, "textarea")
+    | FLine() => let
+        val () = _add_s(parent, id, "input")
+        val () = _sattr(id, "type", "text")
+        val () = _sattr(id, "autocomplete", "off")
+      in _sattr(id, "enterkeyhint", "done") end)
   val () = _sattr(id, "class", cls)
   val () = _sattr(id, "placeholder", name)
 in _sattr(id, "aria-label", name) end

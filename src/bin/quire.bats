@@ -746,7 +746,48 @@ in
     in back_settings() end, lam () => ())
 end
 
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 18) = let
+(* The collections panel for book i, its toggles pressed as the book's
+   collections are *)
+fn _collections_open {i:int} (i: int i): void = let
+  val () = !_menu_idx := i
+  val () = lib_coll_panel(i)
+  val () = layer_open(LCollections())
+in if lib_coll_count() > 0 then ui_focus("collection-put0") else ui_focus("collections-new") end
+
+(* Puts book i in collection j, or takes it out: its toggle and the
+   library follow *)
+fn _collection_put {i:int}{j:int} (i: int i, j: int j): void =
+  if j < 0 then ()
+  else let
+    val () = lib_coll_toggle(i, j)
+    val @(bi, bl) = nid_make("collection-put", j)
+    val () = (if lib_coll_has(i, j) then ui_attr_n(bi, bl, APressed, "true") else ui_attr_n(bi, bl, APressed, "false"))
+  in lib_render() end
+
+(* A new collection, named in the dialog, with book i in it *)
+fn _collection_new {i:int} (i: int i): void = let
+  val () = modal_open(QNewCollection(), "New collection", lam () => let
+      val @(b, k) = modal_name_read()
+      val j = lib_coll_add(b, k)
+      val () = (if j >= 0 then lib_coll_toggle(i, j) else ())
+      val () = lib_coll_panel(i)
+    in lib_render() end, lam () => ())
+in modal_name_field() end
+
+(* The collection shown, named again in the dialog *)
+fn _collection_rename (): void = let
+  val j = lib_coll_shown()
+in
+  if j < 0 then ()
+  else let
+    val () = modal_open(QRenameCollection(), "Rename collection", lam () => let
+        val @(b, k) = modal_name_read()
+      in lib_coll_rename(j, b, k) end, lam () => ())
+    val () = modal_name_field()
+  in lib_coll_name_show(j) end
+end
+
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 19) = let
   (* import *)
   val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -778,7 +819,15 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 18) = let
       val f = (if _is(t, "filter-books-all") then 0 else if _is(t, "filter-unread") then 1
         else if _is(t, "filter-reading") then 2 else if _is(t, "filter-finished") then 3 else ~1): int
       val g = (if _is(t, "view-list") then 0 else if _is(t, "view-grid") then 1 else ~1): int
+      (* the collections: which is shown, and the one shown renamed or
+         deleted *)
+      val cj = _row_of(t, "collection")
+      val call = _is(t, "collection-all")
+      val crename = _is(t, "collection-rename")
+      val cdelete = _is(t, "collection-delete")
       val () = _target_free(t)
+      val () = (if call then lib_coll_show(~1) else if cj >= 0 then lib_coll_show(cj)
+        else if crename then _collection_rename() else if cdelete then lib_coll_delete(lib_coll_shown()) else ())
       val () = (if f >= 0 then lib_filter_set(f) else if g >= 0 then lib_grid_set(g) else ())
     in if f >= 0 || g >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
   (* the book to continue: opened *)
@@ -797,11 +846,27 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 18) = let
       val () = layer_close(LBookMenu())
       val () = (if i >= 0 then
           (if _is(t, "card-menu-info") then _info_open(i)
+           else if _is(t, "card-menu-collections") then _collections_open(i)
            else if _is(t, "card-menu-hide") then _book_action(i, 1)
            else if _is(t, "card-menu-archive") then _book_action(i, 2)
            else if _is(t, "card-menu-trash") then _book_action(i, 3)
            else ()) else ())
     in let val () = _target_free(t) in 0 end end)
+  (* a book's collections: each toggled, a new one, or done (or a
+     click outside) *)
+  val r = RCons(r, OnEl("collections-menu"), "click", lam(h) => let
+      val t = _target(h)
+      val i = !_menu_idx
+      val j = _row_of(t, "collection-put")
+      val made = _is(t, "collections-new")
+      val done = (if _is(t, "collections-done") then true else _is(t, "collections-menu")): bool
+      val () = _target_free(t)
+      val () = (if i < 0 then ()
+        else if j >= 0 then _collection_put(i, j)
+        else if made then _collection_new(i)
+        else if done then layer_close(LCollections())
+        else ())
+    in 0 end)
   (* the info view *)
   val r = RCons(r, OnEl("book-info"), "click", lam(h) => let
       val t = _target(h)

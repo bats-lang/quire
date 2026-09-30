@@ -587,3 +587,67 @@ test('books of a series are shown with their number, and sorted by series togeth
   await expect.poll(() => titles(page)).toEqual(['Foundation', 'Foundation and Empire', 'Alone']);
   await expect(cards(page).first()).toContainText('Foundation · 1');
 });
+
+// Collections: a book's menu puts it in any of them, the library shows
+// one, and one is renamed or deleted (with Undo)
+const collectionRow = page => page.getByRole('group', { name: 'Collection' });
+const collectionsPanel = page => dialog(page, 'Collections');
+
+test('a collection is made from a book\'s menu, shows its books, and is renamed or deleted', async ({ page }) => {
+  const errors = await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Kept One', author: 'A' }),
+    epubFile({ title: 'Kept Two', author: 'B' }),
+    epubFile({ title: 'Left Out', author: 'C' }),
+  ], 3);
+  await expect(collectionRow(page)).toBeHidden();
+  // made from the first book's menu, the book in it
+  await bookMenu(page, 'Kept One');
+  await menuItem(page, 'Collections').click();
+  await expect(collectionsPanel(page).getByText('No collections yet')).toBeVisible();
+  await collectionsPanel(page).getByRole('button', { name: 'New collection' }).click();
+  const name = dialog(page, 'New collection').getByRole('textbox', { name: 'Name' });
+  await expect(name).toBeFocused();
+  await name.fill('  To read  ');
+  await name.press('Enter');
+  const toRead = collectionsPanel(page).getByRole('button', { name: 'To read', exact: true });
+  await expect(toRead).toHaveAttribute('aria-pressed', 'true');
+  await expect(collectionsPanel(page).getByText('No collections yet')).toBeHidden();
+  await collectionsPanel(page).getByRole('button', { name: 'Done' }).click();
+  await expect(collectionsPanel(page)).toBeHidden();
+  // the second one put in with its toggle
+  await bookMenu(page, 'Kept Two');
+  await menuItem(page, 'Collections').click();
+  await expect(toRead).toHaveAttribute('aria-pressed', 'false');
+  await toRead.click();
+  await expect(toRead).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await expect(collectionsPanel(page)).toBeHidden();
+  // the library shows the collection's books only
+  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(card(page, 'Left Out')).toHaveCount(0);
+  await collectionRow(page).getByRole('button', { name: 'All books' }).click();
+  await expect(cards(page)).toHaveCount(3);
+  // kept
+  await reload(page);
+  await collectionRow(page).getByRole('button', { name: 'To read' }).click();
+  await expect(cards(page)).toHaveCount(2);
+  // renamed, the dialog holding its name
+  await page.getByRole('button', { name: 'Rename' }).click();
+  const rename = dialog(page, 'Rename collection').getByRole('textbox', { name: 'Name' });
+  await expect(rename).toHaveValue('To read');
+  await rename.fill('Favourites');
+  await dialog(page, 'Rename collection').getByRole('button', { name: 'Rename' }).click();
+  await expect(collectionRow(page).getByRole('button', { name: 'Favourites' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(cards(page)).toHaveCount(2);
+  // deleted: every book shown, none lost; Undo puts it back with its books
+  await page.getByRole('button', { name: 'Delete collection' }).click();
+  await expect(collectionRow(page)).toBeHidden();
+  await expect(cards(page)).toHaveCount(3);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await collectionRow(page).getByRole('button', { name: 'Favourites' }).click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(card(page, 'Left Out')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
