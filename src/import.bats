@@ -18,6 +18,7 @@ staload "modal.sats"
 staload "book.sats"
 staload "paths.sats"
 staload "epub_xml.sats"
+staload "entity.sats"
 staload "library.sats"
 staload "backup.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -171,6 +172,39 @@ in id end
 #define MODE_NEW 1      (* add a new book to the library *)
 #define MODE_REPLACE 2  (* replace the stored file of library book i *)
 
+(* dst[6 + j, 6 + q) := src[j, q) *)
+fun _put_after_head {ls,ld:agz}{ns,nd:pos}{q:nat | q <= ns; q + 6 <= nd}{j:nat | j <= q} .<q - j>.
+  (src: !$A.arr(byte, ls, ns), dst: !$A.arr(byte, ld, nd), q: int q, j: int j): void =
+  if j >= q then ()
+  else let
+    val () = $A.set<byte>(dst, 6 + j, $A.get<byte>(src, j))
+  in _put_after_head(src, dst, q, j + 1) end
+
+(* The accessibility metadata, stored under 'y' for book (h1, h2): "Y1",
+   its flags (opf_a11y's, 4 bytes), then its summary's text with its
+   references decoded *)
+fn _store_a11y {lb:agz}{n:pos}
+  (data: !$A.borrow(byte, lb, n), flags: int, summary: xspan(n), h1: Int, h2: Int): void = let
+  val @(so, sk) = (case+ summary of
+    | ~xspan_at(o, k) => (if k < 65536 then @(o, k) else @(0, 0))
+    | ~xspan_none() => @(0, 0)): [o,k:nat | o + k <= n; k < 65536] @(int o, int k)
+  val tmp = $A.alloc<byte>(sk + 1)
+  val q = decode_text(data, so, sk, tmp)
+  val buf = $A.alloc<byte>(q + 6)
+  val () = $A.write_byte(buf, 0, 89) (* Y *)
+  val () = $A.write_byte(buf, 1, 49) (* 1 *)
+  val () = $A.write_i32(buf, 2, flags)
+  val () = _put_after_head(tmp, buf, q, 0)
+  val () = $A.free<byte>(tmp)
+  val @(bf, bb) = $A.freeze<byte>(buf)
+  val key = lib_key(121, h1, h2)
+  val @(kf, kb) = $A.freeze<byte>(key)
+  val () = $P.discard<Int>($IDB.idb_put(kb, 15, bb, q + 6))
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+  val () = $A.drop<byte>(bf, bb)
+in $A.free<byte>($A.thaw<byte>(bf)) end
+
 (* The cover, the entry named dir(opf) + href, stored under 'c' for book
    (h1, h2); its type code, 0 when there is none *)
 fn _store_cover {z:pos}{lb:agz}{n:pos}{ho,hl:nat | ho + hl <= n}{ono:nat}{onl:pos | ono + onl <= z; onl < 65536}
@@ -256,6 +290,9 @@ fn _opf_done {z:pos}{lb:agz}{n:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456
   val nodes = $X.parse_document(opf_b, n)
   val @(title, author) = walk_opf_metadata(opf_b, nodes)
   val cover = _cover_of(mode, s, z, no, nl, opf_b, n, nodes, h1, h2)
+  (* its accessibility metadata, for Book info *)
+  val @(a11y, summary) = opf_a11y(opf_b, nodes)
+  val () = (if mode <> MODE_OPEN then _store_a11y(opf_b, a11y, summary, h1, h2) else xspan_free(summary))
   val () = $X.free_nodes(nodes)
   val ok = book_finish(s, z, d, sz, m, no, nl)
 in

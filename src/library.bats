@@ -13,6 +13,7 @@ staload "ui.sats"
 staload "book.sats"
 staload "modal.sats"
 staload "undo.sats"
+staload "epub_xml.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
@@ -441,6 +442,7 @@ fn _delete_book {i:int} (i: int i): void =
       val () = _idb_del(98, x.h1, x.h2)
       val () = _idb_del(99, x.h1, x.h2)
       val () = _idb_del(97, x.h1, x.h2)
+      val () = _idb_del(121, x.h1, x.h2)
     in _remove(i) end
 
 (* The index of the first book in the Trash from i on, or -1 *)
@@ -847,6 +849,132 @@ in
         val () = $A.drop<byte>(mf, mb)
         val () = $A.free<byte>($A.thaw<byte>(mf))
       in $P.ret<int>(0) end))
+end
+
+(* ============================================================
+   Book info's accessibility section: the book's metadata (stored under
+   'y' at import) in the W3C Publishing Community Group's display
+   guidelines' words and order
+   ============================================================ *)
+
+fn _bit (f: int, b: int): bool = $AR.band_int_int(f, b) <> 0
+
+(* Line i of the section, with text t; the next line's number *)
+fn _a11y_line {i:nat}{nt:pos | nt < 256} (i: int i, t: string nt): [j:nat] int j = let
+  val @(a, l) = nid_make("a11y-line", i)
+  val () = ui_add_n("book-info-a11y-list", a, l, TDiv)
+  val @(a, l) = nid_make("a11y-line", i)
+  val () = ui_text_n(a, l, t)
+in i + 1 end
+
+(* A group's heading, as line i *)
+fn _a11y_group {i:nat}{nt:pos | nt < 256} (i: int i, t: string nt): [j:nat] int j = let
+  val j = _a11y_line(i, t)
+  val @(a, l) = nid_make("a11y-line", i)
+  val () = ui_attr_n(a, l, AClass, "a11yg")
+in j end
+
+fn _line_if {i:nat}{nt:pos | nt < 256} (on: bool, i: int i, t: string nt): [j:nat] int j =
+  if on then _a11y_line(i, t) else i
+
+fn _group_if {i:nat}{nt:pos | nt < 256} (on: bool, i: int i, t: string nt): [j:nat] int j =
+  if on then _a11y_group(i, t) else i
+
+(* The line for the first of a, b that holds, else the last *)
+fn _line_of2 {i:nat}{na,nb:pos | na < 256; nb < 256}
+  (a: bool, i: int i, ta: string na, tb: string nb): [j:nat] int j =
+  if a then _a11y_line(i, ta) else _a11y_line(i, tb)
+
+fn _line_of3 {i:nat}{na,nb,nc:pos | na < 256; nb < 256; nc < 256}
+  (a: bool, b: bool, i: int i, ta: string na, tb: string nb, tc: string nc): [j:nat] int j =
+  if a then _a11y_line(i, ta) else _line_of2(b, i, tb, tc)
+
+fn _line_of4 {i:nat}{na,nb,nc,nd:pos | na < 256; nb < 256; nc < 256; nd < 256}
+  (a: bool, b: bool, c: bool, i: int i, ta: string na, tb: string nb, tc: string nc, td: string nd): [j:nat] int j =
+  if a then _a11y_line(i, ta) else _line_of3(b, c, i, tb, tc, td)
+
+(* The statements for flags f, from line i *)
+fn _a11y_lines {i:nat} (f: int, i: int i): [j:nat] int j = let
+  (* Ways of reading and Conformance are shown even with no metadata *)
+  val i = _a11y_group(i, "Ways of reading")
+  val i = _line_of2(_bit(f, A11Y_TRANSFORM), i, "Appearance can be modified",
+    "No information about appearance modifiability is available")
+  val readable = _bit(f, A11Y_SUFF_TEXT) || (_bit(f, A11Y_MODE_TEXT) && ~_bit(f, A11Y_MODE_VISUAL))
+  val i = _line_of3(readable, _bit(f, A11Y_MODE_VISUAL), i, "Readable in read aloud or dynamic braille",
+    "Not fully readable in read aloud or dynamic braille", "No information about nonvisual reading is available")
+  val i = _line_if(_bit(f, A11Y_ALT), i, "Has alternative text")
+  val i = _a11y_group(i, "Conformance")
+  val level = $AR.band_int_int(f / A11Y_LEVEL, 3)
+  val i = _line_of4(level = 3, level = 2, level = 1, i,
+    "This publication exceeds accepted accessibility standards",
+    "This publication meets accepted accessibility standards",
+    "This publication meets minimum accessibility standards", "No information is available")
+  val nav = $AR.band_int_int(f, A11Y_TOC + A11Y_INDEX + A11Y_STRUCT + A11Y_PAGES) <> 0
+  val i = _group_if(nav, i, "Navigation")
+  val i = _line_if(_bit(f, A11Y_TOC), i, "Table of contents")
+  val i = _line_if(_bit(f, A11Y_INDEX), i, "Index")
+  val i = _line_if(_bit(f, A11Y_STRUCT), i, "Headings")
+  val i = _line_if(_bit(f, A11Y_PAGES), i, "Go to page")
+  val rich = $AR.band_int_int(f, A11Y_MATHML + A11Y_LONGDESC + A11Y_TRANSCRIPT + A11Y_CAPTIONS) <> 0
+  val i = _group_if(rich, i, "Rich content")
+  val i = _line_if(_bit(f, A11Y_MATHML), i, "Math as MathML")
+  val i = _line_if(_bit(f, A11Y_LONGDESC), i, "Information-rich images are described by extended descriptions")
+  val i = _line_if(_bit(f, A11Y_TRANSCRIPT), i, "Transcript(s) provided")
+  val i = _line_if(_bit(f, A11Y_CAPTIONS), i, "Videos have closed captions")
+  val hz = $AR.band_int_int(f, A11Y_HZ_NONE + A11Y_HZ_FLASH + A11Y_HZ_MOTION + A11Y_HZ_SOUND
+    + A11Y_HZ_NOFLASH + A11Y_HZ_NOMOTION + A11Y_HZ_NOSOUND + A11Y_HZ_UNKNOWN) <> 0
+  val i = _group_if(hz, i, "Hazards")
+  val i = _line_if(_bit(f, A11Y_HZ_NONE), i, "No hazards")
+  val i = _line_if(_bit(f, A11Y_HZ_FLASH), i, "Flashing content")
+  val i = _line_if(_bit(f, A11Y_HZ_MOTION), i, "Motion simulation")
+  val i = _line_if(_bit(f, A11Y_HZ_SOUND), i, "Sounds")
+  val i = _line_if(_bit(f, A11Y_HZ_NOFLASH), i, "No flashing hazards")
+  val i = _line_if(_bit(f, A11Y_HZ_NOMOTION), i, "No motion simulation hazards")
+  val i = _line_if(_bit(f, A11Y_HZ_NOSOUND), i, "No sound hazards")
+in _line_if(_bit(f, A11Y_HZ_UNKNOWN), i, "The presence of hazards is unknown") end
+
+(* src[6 + j, 6 + k) into dst[j, k) *)
+fun _summary_copy {l,ld:agz}{la:addr}{n:nat}{k:nat | k + 6 <= n}{nd:pos | k <= nd}{j:nat | j <= k} .<k - j>.
+  (src: !$A.arrx(byte, l, n, la), dst: !$A.arr(byte, ld, nd), k: int k, j: int j): void =
+  if j >= k then ()
+  else let
+    val () = $A.set<byte>(dst, j, $A.get<byte>(src, 6 + j))
+  in _summary_copy(src, dst, k, j + 1) end
+
+(* Fills Book info's accessibility section for book (h1, h2) *)
+#pub fn lib_a11y_show (h1: int, h2: int): void
+
+implement lib_a11y_show (h1, h2) = let
+  val () = ui_clear("book-info-a11y-list")
+  val key = lib_key(121, h1, h2)
+  val @(kf, kb) = $A.freeze<byte>(key)
+  val p = $IDB.idb_get(kb, 15)
+  val () = $A.drop<byte>(kf, kb)
+  val () = $A.free<byte>($A.thaw<byte>(kf))
+in
+  $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) =>
+    case+ take_content(h) of
+    | ~NoContentBytes() => let
+        (* imported before this was read *)
+        val _ = _a11y_line(0, "Import this book's file again to see its accessibility information.")
+      in $P.ret<int>(0) end
+    | ~ContentBytes(ow, buf, n) =>
+      if n < 6 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
+      else let
+        val f = _i32(buf, 2)
+        val i = _a11y_lines(f, 0)
+        val k = n - 6
+        val () = (if k > 0 then (if k < 65536 then let
+            val i = _a11y_group(i, "Accessibility summary")
+            val t = $A.alloc<byte>(k)
+            val () = _summary_copy(buf, t, k, 0)
+            val @(a, l) = nid_make("a11y-line", i)
+            val () = ui_add_n("book-info-a11y-list", a, l, TDiv)
+            val @(a, l) = nid_make("a11y-line", i)
+          in ui_text_n_buf(a, l, t, k) end else ()) else ())
+        val () = piece_free(ow, buf)
+      in $P.ret<int>(0) end)
+  )
 end
 
 #pub fn lib_show_cover_in {ni:pos | ni < 256} (id: string ni, h1: int, h2: int, code: int): void

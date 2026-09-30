@@ -493,6 +493,7 @@ fn _info_open {i:int} (i: int i): void =
       val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
       val () = ui_show("book-info-cover", x.cover > 0)
+      val () = lib_a11y_show(x.h1, x.h2)
       val () = layer_open(LBookInfo())
     in ui_focus("book-info-back") end
 

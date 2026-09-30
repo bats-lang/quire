@@ -219,6 +219,217 @@ and _opf_lang_node
 implement opf_language(data, nodes) = _opf_lang_r(data, nodes)
 
 (* ============================================================
+   Accessibility metadata (EPUB Accessibility 1.1): the OPF's
+   schema.org and dcterms:conformsTo properties, as flags
+   ============================================================ *)
+
+(* The flags, a bit each (A11Y_KNOWN when any of these is in the OPF) *)
+#pub macdef A11Y_TRANSFORM = 1        (* accessibilityFeature displayTransformability *)
+#pub macdef A11Y_ALT = 2              (* alternativeText *)
+#pub macdef A11Y_LONGDESC = 4         (* longDescription *)
+#pub macdef A11Y_SUFF_TEXT = 8        (* accessModeSufficient textual *)
+#pub macdef A11Y_MODE_TEXT = 16       (* accessMode textual *)
+#pub macdef A11Y_MODE_VISUAL = 32     (* accessMode visual *)
+#pub macdef A11Y_HZ_NONE = 64         (* accessibilityHazard none *)
+#pub macdef A11Y_HZ_FLASH = 128       (* flashing *)
+#pub macdef A11Y_HZ_MOTION = 256      (* motionSimulation *)
+#pub macdef A11Y_HZ_SOUND = 512       (* sound *)
+#pub macdef A11Y_HZ_NOFLASH = 1024    (* noFlashingHazard *)
+#pub macdef A11Y_HZ_NOMOTION = 2048   (* noMotionSimulationHazard *)
+#pub macdef A11Y_HZ_NOSOUND = 4096    (* noSoundHazard *)
+#pub macdef A11Y_HZ_UNKNOWN = 8192    (* unknown *)
+#pub macdef A11Y_TOC = 16384          (* tableOfContents *)
+#pub macdef A11Y_INDEX = 32768        (* index *)
+#pub macdef A11Y_STRUCT = 65536       (* structuralNavigation *)
+#pub macdef A11Y_PAGES = 131072       (* pageNavigation *)
+#pub macdef A11Y_MATHML = 262144      (* MathML *)
+#pub macdef A11Y_TRANSCRIPT = 524288  (* transcript *)
+#pub macdef A11Y_CAPTIONS = 1048576   (* captions or closedCaptions *)
+#pub macdef A11Y_KNOWN = 2097152
+(* the WCAG level conformsTo names, times A11Y_LEVEL: 1 A, 2 AA, 3 AAA *)
+#pub macdef A11Y_LEVEL = 4194304
+
+(* Whether data[o, o + k) is s *)
+fun _span_is_at {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:nat}{i:nat | i <= sn} .<sn - i>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn, sl: int sn, i: int i): bool =
+  if i >= sl then true
+  else if i >= k then false
+  else if byte2int0($A.read<byte>(data, o + i)) <> char2int0(string_get_at(s, i)) then false
+  else _span_is_at(data, o, k, s, sl, i + 1)
+
+fn _span_is {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:nat}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn): bool = let
+  val sl = g1u2i(string1_length(s))
+in if k <> sl then false else _span_is_at(data, o, k, s, sl, 0) end
+
+(* data[o, o + k) without the white space around it *)
+fun _trim_front {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [o2,k2:nat | o2 + k2 <= n] @(int o2, int k2) =
+  if k <= 0 then @(o, k)
+  else if byte2int0($A.read<byte>(data, o)) <= 32 then _trim_front(data, o + 1, k - 1)
+  else @(o, k)
+
+fun _trim_back {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [k2:nat | k2 <= k] int k2 =
+  if k <= 0 then k
+  else if byte2int0($A.read<byte>(data, o + k - 1)) <= 32 then _trim_back(data, o, k - 1)
+  else k
+
+fn _trim {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [o2,k2:nat | o2 + k2 <= n] @(int o2, int k2) = let
+  val @(o2, k2) = _trim_front(data, o, k)
+  val k3 = _trim_back(data, o2, k2)
+in @(o2, k3) end
+
+(* Whether data[p, p + sl), in lower case, is s (lower case), from j *)
+fun _lower_from {lb:agz}{n:pos}{sn:pos}{p:nat | p + sn <= n}{j:nat | j <= sn} .<sn - j>.
+  (data: !$A.borrow(byte, lb, n), p: int p, s: string sn, sl: int sn, j: int j): bool =
+  if j >= sl then true
+  else let
+    val c = byte2int0($A.read<byte>(data, p + j))
+    val c = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): int
+  in if c <> char2int0(string_get_at(s, j)) then false else _lower_from(data, p, s, sl, j + 1) end
+
+(* Whether data[o, o + k), in lower case, has s (lower case) from i *)
+fun _has_lower {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:pos}{i:nat} .<max(k - i, 0)>.
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn, sl: int sn, i: int i): bool =
+  if i + sl > k then false
+  else if _lower_from(data, o + i, s, sl, 0) then true
+  else _has_lower(data, o, k, s, sl, i + 1)
+
+fn _bor (a: int, b: int): int = $AR.bor_int_int(a, b)
+
+(* The WCAG level a conformance statement or URL names: 3 AAA, 2 AA,
+   1 A, 0 none *)
+fn _wcag_level {lb:agz}{n:pos}{o,k:nat | o + k <= n}
+  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): int =
+  if _has_lower(data, o, k, "aaa", 3, 0) then 3
+  else if _has_lower(data, o, k, "level aa", 8, 0) then 2
+  else if _has_lower(data, o, k, "wcag-aa", 7, 0) then 2
+  else if _has_lower(data, o, k, "level a", 7, 0) then 1
+  else if _has_lower(data, o, k, "wcag-a", 6, 0) then 1
+  else 0
+
+(* v, with the bit that says the book has accessibility metadata *)
+fn _known (v: int): int = _bor(v, A11Y_KNOWN)
+
+(* The flag a property's value v sets *)
+fn _a11y_value {lb:agz}{n:pos}{po,pk,vo,vk:nat | po + pk <= n; vo + vk <= n}
+  (data: !$A.borrow(byte, lb, n), po: int po, pk: int pk, vo: int vo, vk: int vk): int = let
+  val @(vo, vk) = _trim(data, vo, vk)
+in
+  if _span_is(data, po, pk, "schema:accessibilityFeature") then
+    _known(if _span_is(data, vo, vk, "displayTransformability") then A11Y_TRANSFORM
+     else if _span_is(data, vo, vk, "alternativeText") then A11Y_ALT
+     else if _span_is(data, vo, vk, "longDescription") then A11Y_LONGDESC
+     else if _span_is(data, vo, vk, "tableOfContents") then A11Y_TOC
+     else if _span_is(data, vo, vk, "index") then A11Y_INDEX
+     else if _span_is(data, vo, vk, "structuralNavigation") then A11Y_STRUCT
+     else if _span_is(data, vo, vk, "pageNavigation") then A11Y_PAGES
+     else if _span_is(data, vo, vk, "MathML") then A11Y_MATHML
+     else if _span_is(data, vo, vk, "transcript") then A11Y_TRANSCRIPT
+     else if _span_is(data, vo, vk, "closedCaptions") then A11Y_CAPTIONS
+     else if _span_is(data, vo, vk, "captions") then A11Y_CAPTIONS
+     else 0)
+  else if _span_is(data, po, pk, "schema:accessMode") then
+    _known(if _span_is(data, vo, vk, "textual") then A11Y_MODE_TEXT
+     else if _span_is(data, vo, vk, "visual") then A11Y_MODE_VISUAL
+     else 0)
+  else if _span_is(data, po, pk, "schema:accessModeSufficient") then
+    _known(if _span_is(data, vo, vk, "textual") then A11Y_SUFF_TEXT else 0)
+  else if _span_is(data, po, pk, "schema:accessibilityHazard") then
+    _known(if _span_is(data, vo, vk, "none") then A11Y_HZ_NONE
+     else if _span_is(data, vo, vk, "flashing") then A11Y_HZ_FLASH
+     else if _span_is(data, vo, vk, "motionSimulation") then A11Y_HZ_MOTION
+     else if _span_is(data, vo, vk, "sound") then A11Y_HZ_SOUND
+     else if _span_is(data, vo, vk, "noFlashingHazard") then A11Y_HZ_NOFLASH
+     else if _span_is(data, vo, vk, "noMotionSimulationHazard") then A11Y_HZ_NOMOTION
+     else if _span_is(data, vo, vk, "noSoundHazard") then A11Y_HZ_NOSOUND
+     else if _span_is(data, vo, vk, "unknown") then A11Y_HZ_UNKNOWN
+     else 0)
+  else if _span_is(data, po, pk, "dcterms:conformsTo") then
+    _known(_wcag_level(data, vo, vk) * A11Y_LEVEL)
+  else if _span_is(data, po, pk, "schema:accessibilitySummary") then _known(0)
+  else 0
+end
+
+(* The flags of nodes, or'd onto acc, and the summary (the first one) *)
+fun _a11y_r
+  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), acc: int, summary: xspan(n)): @(int, xspan(n)) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(acc, summary) = _a11y_node(data, node, acc, summary)
+    in _a11y_r(data, rest, acc, summary) end
+  | $X.xml_nodes_nil() => @(acc, summary)
+
+and _a11y_node
+  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
+  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), acc: int, summary: xspan(n)): @(int, xspan(n)) =
+  case+ node of
+  | $X.xml_element(name_off, name_len, attrs, children) => let
+    var _c_meta = @[char][4]('m', 'e', 't', 'a')
+    var _c_link = @[char][4]('l', 'i', 'n', 'k')
+    var _c_property = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+    var _c_name = @[char][4]('n', 'a', 'm', 'e')
+    var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+    var _c_rel = @[char][3]('r', 'e', 'l')
+    var _c_href = @[char][4]('h', 'r', 'e', 'f')
+  in
+    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then
+      (* EPUB 3: <meta property="p">v</meta>; EPUB 2: <meta name="p" content="v"/> *)
+      (case+ _find_attr_val(data, attrs, _c_property, 8) of
+       | ~xspan_at(po, pk) =>
+         (case+ _get_first_text(children) of
+          | ~xspan_at(vo, vk) => let
+              val f = _a11y_value(data, po, pk, vo, vk)
+              val is_summary = _span_is(data, po, pk, "schema:accessibilitySummary")
+            in
+              case+ summary of
+              | xspan_none() => if is_summary then let
+                    val () = xspan_free(summary)
+                  in @(_bor(acc, f), xspan_at(vo, vk)) end
+                  else @(_bor(acc, f), summary)
+              | _ => @(_bor(acc, f), summary)
+            end
+          | ~xspan_none() => @(acc, summary))
+       | ~xspan_none() =>
+         (case+ _find_attr_val(data, attrs, _c_name, 4) of
+          | ~xspan_at(po, pk) =>
+            (case+ _find_attr_val(data, attrs, _c_content, 7) of
+             | ~xspan_at(vo, vk) => let
+                 val f = _a11y_value(data, po, pk, vo, vk)
+                 val is_summary = _span_is(data, po, pk, "schema:accessibilitySummary")
+               in
+                 case+ summary of
+                 | xspan_none() => if is_summary then let
+                       val () = xspan_free(summary)
+                     in @(_bor(acc, f), xspan_at(vo, vk)) end
+                     else @(_bor(acc, f), summary)
+                 | _ => @(_bor(acc, f), summary)
+               end
+             | ~xspan_none() => @(acc, summary))
+          | ~xspan_none() => @(acc, summary)))
+    else if xml_name_eq(data, name_off, name_len, _c_link, 4) then
+      (case+ _find_attr_val(data, attrs, _c_rel, 3) of
+       | ~xspan_at(ro, rk) =>
+         (case+ _find_attr_val(data, attrs, _c_href, 4) of
+          | ~xspan_at(ho, hk) => @(_bor(acc, _a11y_value(data, ro, rk, ho, hk)), summary)
+          | ~xspan_none() => @(acc, summary))
+       | ~xspan_none() => @(acc, summary))
+    else _a11y_r(data, children, acc, summary)
+  end
+  | $X.xml_text(_, _) => @(acc, summary)
+
+(* The OPF's accessibility metadata: its flags (the A11Y_ bits), and its
+   accessibilitySummary's text, if any *)
+#pub fn opf_a11y
+  {lb:agz}{n:pos}{sz:nat}
+  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): @(int, xspan(n))
+
+implement opf_a11y(data, nodes) = _a11y_r(data, nodes, 0, xspan_none())
+
+(* ============================================================
    Spine: find Nth idref
    ============================================================ *)
 
