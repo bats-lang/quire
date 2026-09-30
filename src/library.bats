@@ -39,7 +39,8 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
   fsz = Int,       (* the file's bytes *)
   cover = Int,     (* the cover image's type (mime_str), 0 none *)
   done = Int,      (* 1 when the last page was reached *)
-  sidx = Int       (* its number in its series, 0 when none is given *)
+  sidx = Int,      (* its number in its series, 0 when none is given *)
+  cols = Int       (* the collections it is in: collection j is bit j *)
 }
 
 (* A book: its title and author (1 to 255 bytes), its series' name (0
@@ -382,7 +383,7 @@ in
     val nums = @{
       key = key, h1 = h1, h2 = h2, shelf = 0, added = now, opened = 0,
       ch = 0, tch = 0, pg = 0, pgs = 0, anchor = ~1, fsz = fsz, cover = cover, done = 0,
-      sidx = sidx
+      sidx = sidx, cols = 0
     }: bnums
     val () = lib_put(LibCell(books_cons(Book(t, tn, a, an, sr, sn, nums), bs), k + 1))
   in key end
@@ -468,7 +469,7 @@ implement lib_set_shelf (i, shelf) = let
   val () = lib_update(i, lam(x) => @{
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
     ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-    fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx })
+    fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols })
   val () = lib_save()
 in lib_render() end
 
@@ -548,7 +549,7 @@ fun _trash_all {i,k:nat | i <= k} .<k - i>. (i: int i, k: int k): void =
     val () = lib_update(i, lam(x) => @{
       key = x.key, h1 = x.h1, h2 = x.h2, shelf = 3, added = x.added, opened = x.opened,
       ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx })
+      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols })
   in _trash_all(i + 1, k) end
 
 (* Each book of ss put back on its shelf *)
@@ -560,7 +561,7 @@ fun _unshelve {n:nat} .<n>. (ss: shelved(n)): void =
       val () = (if j >= 0 then lib_update(j, lam(x) => @{
           key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
           ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-          fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx }) else ())
+          fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols }) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -637,13 +638,515 @@ implement lib_sort (o) = let
 in lib_put(LibCell(_sort(bs, books_nil(), o), k)) end
 
 (* ============================================================
+   Collections: a reader's own groups of books
+   ============================================================ *)
+
+(* At most COLL_MAX collections, each named by 1 to COLL_NAME bytes (in
+   an array one longer). A book is in collection j when bit j of its
+   cols is set, and can be in any number of them *)
+#pub stadef COLL_MAX = 8
+#pub stadef COLL_NAME = 40
+
+datavtype colls(int) =
+  | colls_nil(0) of ()
+  | {k:nat}{l:agz}{m:pos | m <= COLL_NAME} colls_cons(k + 1) of ($A.arr(byte, l, m + 1), int m, colls(k))
+
+datavtype coll_cell =
+  | {k:nat | k <= COLL_MAX} CollCell of (colls(k), int k)
+
+val _colls = ref<coll_cell>(CollCell(colls_nil(), 0))
+
+(* The collection the library view shows, -1 for none: every book *)
+val _coll_shown = ref<int>(~1)
+
+fun colls_free {k:nat} .<k>. (cs: colls(k)): void =
+  case+ cs of
+  | ~colls_nil() => ()
+  | ~colls_cons(a, _, rest) => let val () = $A.free<byte>(a) in colls_free(rest) end
+
+fn colls_take (): coll_cell = let
+  var c: coll_cell = CollCell(colls_nil(), 0)
+  val () = ref_exch_elt<coll_cell>(_colls, c)
+in c end
+
+fn colls_put (c: coll_cell): void = let
+  var cur: coll_cell = c
+  val () = ref_exch_elt<coll_cell>(_colls, cur)
+  val+ ~CollCell(cs, _) = cur
+in colls_free(cs) end
+
+#pub fn lib_coll_count (): [k:nat | k <= COLL_MAX] int k
+implement lib_coll_count () = let
+  val c = colls_take()
+  val+ CollCell(_, k) = c
+  val () = colls_put(c)
+in k end
+
+(* Where a name typed into b[0, k) starts: past the spaces before it *)
+fun _name_start {l:agz}{m:pos}{k:nat | k <= m}{i:nat | i <= k} .<k - i>.
+  (b: !$A.arr(byte, l, m), k: int k, i: int i): [s:nat | i <= s; s <= k] int s =
+  if i >= k then i
+  else if byte2int0($A.get<byte>(b, i)) <= 32 then _name_start(b, k, i + 1)
+  else i
+
+(* Where it ends: before the spaces after it *)
+fun _name_end {l:agz}{m:pos}{s,e:nat | s <= e; e <= m} .<e - s>.
+  (b: !$A.arr(byte, l, m), s: int s, e: int e): [r:nat | s <= r; r <= e] int r =
+  if e <= s then e
+  else if byte2int0($A.get<byte>(b, e - 1)) <= 32 then _name_end(b, s, e - 1)
+  else e
+
+(* n, or fewer, so that the n bytes from s (of t there) do not end
+   inside a letter: the byte after them does not continue one *)
+fun _name_cut {l:agz}{m:pos}{s,n,t:nat | n <= t; s + t <= m} .<n>.
+  (b: !$A.arr(byte, l, m), s: int s, n: int n, t: int t): [r:nat | r <= n] int r =
+  if n >= t then n
+  else if n <= 0 then 0
+  else let
+    val c = byte2int0($A.get<byte>(b, s + n))
+  in if c >= 128 && c < 192 then _name_cut(b, s, n - 1, t) else n end
+
+fun _copy_from {ls,ld:agz}{ms,nd:nat}{s,n:nat | s + n <= ms; n <= nd}{j:nat | j <= n} .<n - j>.
+  (src: !$A.arr(byte, ls, ms), s: int s, n: int n, dst: !$A.arr(byte, ld, nd), j: int j): void =
+  if j >= n then ()
+  else let
+    val () = $A.set<byte>(dst, j, $A.get<byte>(src, s + j))
+  in _copy_from(src, s, n, dst, j + 1) end
+
+(* t bytes, or a name's most *)
+fn _most {t:nat} (t: int t): [x:nat | x <= t; x <= COLL_NAME] int x = if t > 40 then 40 else t
+
+(* The name typed into b[0, k), made a collection's: without the spaces
+   around it, and cut to COLL_NAME bytes between letters; 0 bytes when
+   nothing is left *)
+fn _coll_name {l:agz}{m:pos}{k:nat | k <= m} (b: !$A.arr(byte, l, m), k: int k)
+  : [la:agz][n:nat | n <= COLL_NAME] @($A.arr(byte, la, n + 1), int n) = let
+  val s = _name_start(b, k, 0)
+  val e = _name_end(b, s, k)
+  val t = e - s
+  val n = _name_cut(b, s, _most(t), t)
+  val a = $A.alloc<byte>(n + 1)
+  val () = _copy_from(b, s, n, a, 0)
+in @(a, n) end
+
+fun _colls_insert {k:nat}{l:agz}{m:pos | m <= COLL_NAME} .<k>.
+  (cs: colls(k), j: int, a: $A.arr(byte, l, m + 1), m: int m): colls(k + 1) =
+  if j <= 0 then colls_cons(a, m, cs)
+  else case+ cs of
+  | ~colls_nil() => colls_cons(a, m, colls_nil())
+  | ~colls_cons(x, xm, rest) => colls_cons(x, xm, _colls_insert(rest, j - 1, a, m))
+
+(* cs without its collection j, and that collection's name *)
+fun _colls_remove {k:pos}{j:nat | j < k} .<k>. (cs: colls(k), j: int j)
+  : [l:agz][m:pos | m <= COLL_NAME] @(colls(k - 1), $A.arr(byte, l, m + 1), int m) = let
+  val+ ~colls_cons(x, xm, rest) = cs
+in
+  if j = 0 then @(rest, x, xm)
+  else let
+    val @(r, a, am) = _colls_remove(rest, j - 1)
+  in @(colls_cons(x, xm, r), a, am) end
+end
+
+(* cs with collection j named a[0, m) instead *)
+fun _colls_rename {k:nat}{l:agz}{m:pos | m <= COLL_NAME} .<k>.
+  (cs: colls(k), j: int, a: $A.arr(byte, l, m + 1), m: int m): colls(k) =
+  case+ cs of
+  | ~colls_nil() => let val () = $A.free<byte>(a) in colls_nil() end
+  | ~colls_cons(x, xm, rest) =>
+    if j = 0 then let val () = $A.free<byte>(x) in colls_cons(a, m, rest) end
+    else colls_cons(x, xm, _colls_rename(rest, j - 1, a, m))
+
+(* Every book's collections, as f makes them from its key and its
+   collections now *)
+fun _map_cols {k:nat} .<k>. (bs: !books(k), f: (Int, Int) -<cloref1> Int): void =
+  case+ bs of
+  | books_nil() => ()
+  | @books_cons(b, rest) => let
+      val+ @Book(_, _, _, _, _, _, x) = b
+      val c = f(x.key, x.cols)
+      val () = x := @{
+        key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = x.opened,
+        ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
+        fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = c }
+      prval () = fold@(b)
+      val () = _map_cols(rest, f)
+      prval () = fold@(bs)
+    in end
+
+fn _map_all_cols (f: (Int, Int) -<cloref1> Int): void = let
+  val c = lib_take()
+  val+ @LibCell(bs, _) = c
+  val () = _map_cols(bs, f)
+  prval () = fold@(c)
+in lib_put(c) end
+
+(* Collection j's bit *)
+fn _bit (j: int): Int = g1ofg0($AR.bsl_int_int(1, j))
+
+(* The bits of cols below j *)
+fn _below (cols: int, j: int): int = $AR.band_int_int(cols, $AR.sub_int_int($AR.bsl_int_int(1, j), 1))
+
+(* cols without bit j, the bits above it moved down one *)
+fn _drop_bit (cols: Int, j: int): Int = let
+  val c = g0ofg1(cols)
+  val hi = $AR.bsl_int_int($AR.bsr_int_int(c, j + 1), j)
+in g1ofg0($AR.add_int_int(_below(c, j), hi)) end
+
+(* cols with a bit j put in (set when on), the bits from j moved up one *)
+fn _put_bit (cols: Int, j: int, on: bool): Int = let
+  val c = g0ofg1(cols)
+  val hi = $AR.bsl_int_int($AR.bsr_int_int(c, j), j + 1)
+  val b = (if on then $AR.bsl_int_int(1, j) else 0): int
+in g1ofg0($AR.add_int_int($AR.add_int_int(_below(c, j), hi), b)) end
+
+(* The keys of the books in collection j, onto acc *)
+datatype keys(int) =
+  | KeysNil(0)
+  | {n:nat} KeysCons(n + 1) of (Int, keys(n))
+
+fun _keys_in {k:nat}{m:nat} .<k>. (bs: !books(k), j: int, acc: keys(m)): [r:nat] keys(r) =
+  case+ bs of
+  | books_nil() => acc
+  | books_cons(b, rest) => let
+      val+ Book(_, _, _, _, _, _, x) = b
+    in
+      if $AR.band_int_int(x.cols, _bit(j)) <> 0 then _keys_in(rest, j, KeysCons(x.key, acc))
+      else _keys_in(rest, j, acc)
+    end
+
+fun _keys_has {n:nat} .<n>. (ks: keys(n), key: Int): bool =
+  case+ ks of
+  | KeysNil() => false
+  | KeysCons(x, rest) => if x = key then true else _keys_has(rest, key)
+
+(* The collection the library view shows, or -1 *)
+#pub fn lib_coll_shown (): int
+implement lib_coll_shown () = !_coll_shown
+
+(* Whether book numbers x are in the collection shown (in any, when
+   none is) *)
+fn _in_shown (x: bnums): bool = let
+  val j = !_coll_shown
+in if j < 0 then true else $AR.band_int_int(x.cols, _bit(j)) <> 0 end
+
+(* The name of a collection just deleted, while its Undo is offered *)
+datavtype coll_gone =
+  | {l:agz}{m:pos | m <= COLL_NAME} CollGone of ($A.arr(byte, l, m + 1), int m)
+  | CollNotGone of ()
+
+val _coll_gone = ref<coll_gone>(CollNotGone())
+(* Whether _coll_gone holds a name *)
+val _coll_gone_held = ref<bool>(false)
+
+fn _gone_take (): coll_gone = let
+  val () = !_coll_gone_held := false
+  var g: coll_gone = CollNotGone()
+  val () = ref_exch_elt<coll_gone>(_coll_gone, g)
+in g end
+
+fn _gone_free (g: coll_gone): void =
+  case+ g of
+  | ~CollGone(a, _) => $A.free<byte>(a)
+  | ~CollNotGone() => ()
+
+fn _gone_put (g: coll_gone): void = let
+  val () = !_coll_gone_held := (case+ g of CollGone(_, _) => true | CollNotGone() => false)
+  var cur: coll_gone = g
+  val () = ref_exch_elt<coll_gone>(_coll_gone, cur)
+in _gone_free(cur) end
+
+(* Makes a collection named by what was typed, b[0, k) (see _coll_name):
+   its number, or -1 when there are COLL_MAX already or no name is
+   left *)
+#pub fn lib_coll_add {l:agz}{m:pos}{k:nat | k <= m} (b: $A.arr(byte, l, m), k: int k): int
+
+implement lib_coll_add (b, k) = let
+  val @(a, n) = _coll_name(b, k)
+  val () = $A.free<byte>(b)
+  (* a deleted collection's Undo would put it back among numbers that
+     have moved on: it is made final first *)
+  val () = (if !_coll_gone_held then undo_close() else ())
+  val c = colls_take()
+  val+ ~CollCell(cs, cn) = c
+in
+  if n <= 0 then let
+    val () = $A.free<byte>(a)
+    val () = colls_put(CollCell(cs, cn))
+  in ~1 end
+  else if cn >= 8 then let
+    val () = $A.free<byte>(a)
+    val () = colls_put(CollCell(cs, cn))
+  in ~1 end
+  else let
+    val () = colls_put(CollCell(_colls_insert(cs, cn, a, n), cn + 1))
+    val () = lib_save()
+  in cn end
+end
+
+(* Names collection j by what was typed, b[0, k) (kept when no name is
+   left) *)
+#pub fn lib_coll_rename {l:agz}{m:pos}{k:nat | k <= m} (j: int, b: $A.arr(byte, l, m), k: int k): void
+
+implement lib_coll_rename (j, b, k) = let
+  val @(a, n) = _coll_name(b, k)
+  val () = $A.free<byte>(b)
+in
+  if n <= 0 then $A.free<byte>(a)
+  else let
+    val c = colls_take()
+    val+ ~CollCell(cs, cn) = c
+    val () = colls_put(CollCell(_colls_rename(cs, j, a, n), cn))
+    val () = lib_save()
+  in lib_render() end
+end
+
+(* Whether a[0, m) and b[0, m) are the same bytes *)
+fun _same {la,lb:agz}{na,nb:nat}{m:nat | m <= na; m <= nb}{j:nat | j <= m} .<m - j>.
+  (a: !$A.arr(byte, la, na), b: !$A.arr(byte, lb, nb), m: int m, j: int j): bool =
+  if j >= m then true
+  else if byte2int0($A.get<byte>(a, j)) <> byte2int0($A.get<byte>(b, j)) then false
+  else _same(a, b, m, j + 1)
+
+(* The number of the collection named a[0, n) in cs (from j), or -1 *)
+fun _colls_find {k:nat}{l:agz}{n:nat} .<k>. (cs: !colls(k), a: !$A.arr(byte, l, n + 1), n: int n, j: int): int =
+  case+ cs of
+  | colls_nil() => ~1
+  | @colls_cons(x, m, rest) => let
+      val hit = (if m = n then _same(x, a, n, 0) else false): bool
+      val r = (if hit then j else _colls_find(rest, a, n, j + 1)): int
+      prval () = fold@(cs)
+    in r end
+
+(* The collection named by b[0, k) (as a name typed is, see _coll_name):
+   its number, made when there is none so named and there is room; -1
+   when there is no room or no name. For a backup's collections *)
+#pub fn lib_coll_find_or_add {l:agz}{m:pos}{k:nat | k <= m} (b: $A.arr(byte, l, m), k: int k): int
+
+implement lib_coll_find_or_add (b, k) = let
+  val @(a, n) = _coll_name(b, k)
+  val c = colls_take()
+  val+ @CollCell(cs, _) = c
+  val j = (if n > 0 then _colls_find(cs, a, n, 0) else ~1): int
+  prval () = fold@(c)
+  val () = colls_put(c)
+  val () = $A.free<byte>(a)
+in if j >= 0 then let val () = $A.free<byte>(b) in j end else lib_coll_add(b, k) end
+
+(* Collection j's name: its bytes (one more) and how many; 0 when there
+   is no collection j *)
+fun _name_copy {k:nat} .<k>. (cs: !colls(k), j: int): [l:agz][n:nat | n <= COLL_NAME] @($A.arr(byte, l, n + 1), int n) =
+  case+ cs of
+  | colls_nil() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
+  | @colls_cons(a, m, rest) =>
+    if j = 0 then let
+      val t = $A.alloc<byte>(m + 1)
+      val () = _copy(a, m, t, 0, 0)
+      val mm = m
+      prval () = fold@(cs)
+    in @(t, mm) end
+    else let
+      val r = _name_copy(rest, j - 1)
+      prval () = fold@(cs)
+    in r end
+
+#pub fn lib_coll_name_copy (j: int): [l:agz][n:nat | n <= COLL_NAME] @($A.arr(byte, l, n + 1), int n)
+
+implement lib_coll_name_copy (j) = let
+  val c = colls_take()
+  val+ @CollCell(cs, _) = c
+  val r = _name_copy(cs, j)
+  prval () = fold@(c)
+  val () = colls_put(c)
+in r end
+
+(* Whether book i is in collection j *)
+#pub fn lib_coll_has {i:int} (i: int i, j: int): bool
+
+implement lib_coll_has (i, j) =
+  if j < 0 then false
+  else case+ lib_nums(i) of
+  | ~$R.none() => false
+  | ~$R.some(x) => $AR.band_int_int(x.cols, _bit(j)) <> 0
+
+(* Puts book i in collection j, or takes it out when it is in it *)
+#pub fn lib_coll_toggle {i:int} (i: int i, j: int): void
+
+implement lib_coll_toggle (i, j) =
+  if j < 0 then ()
+  else if j >= lib_coll_count() then ()
+  else let
+    val on = lib_coll_has(i, j)
+    val () = lib_update(i, lam(x) => @{
+      key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = x.opened,
+      ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
+      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx,
+      cols = (if on then x.cols - _bit(j) else x.cols + _bit(j)) })
+  in lib_save() end
+
+(* Collection j deleted, with an Undo offer that puts it back: its books
+   stay where they are, only the group goes *)
+#pub fn lib_coll_delete (j: int): void
+
+(* Puts collection j back (named as it was), with the books whose keys
+   are ks in it *)
+fn _coll_restore (j: int, ks: [n:nat] keys(n)): void =
+  case+ _gone_take() of
+  | ~CollNotGone() => ()
+  | ~CollGone(a, am) => let
+      val c = colls_take()
+      val+ ~CollCell(cs, cn) = c
+    in
+      if cn >= 8 then let
+        val () = $A.free<byte>(a)
+      in colls_put(CollCell(cs, cn)) end
+      else let
+        val () = colls_put(CollCell(_colls_insert(cs, j, a, am), cn + 1))
+        val () = _map_all_cols(lam(key, cols) => _put_bit(cols, j, _keys_has(ks, key)))
+        val () = lib_save()
+      in lib_render() end
+    end
+
+implement lib_coll_delete (j) = let
+  val j = g1ofg0(j)
+  val c = colls_take()
+  val+ ~CollCell(cs, cn) = c
+in
+  if j < 0 then colls_put(CollCell(cs, cn))
+  else if j >= cn then colls_put(CollCell(cs, cn))
+  else let
+    val @(rest, a, am) = _colls_remove(cs, j)
+    val () = colls_put(CollCell(rest, cn - 1))
+    val lc = lib_take()
+    val+ @LibCell(bs, _) = lc
+    val ks = _keys_in(bs, j, KeysNil())
+    prval () = fold@(lc)
+    val () = lib_put(lc)
+    val () = _map_all_cols(lam(_, cols) => _drop_bit(cols, j))
+    val s = !_coll_shown
+    val () = !_coll_shown := (if s = j then ~1 else if s > j then s - 1 else s)
+    val () = _gone_put(CollGone(a, am))
+    val () = lib_save()
+    val () = lib_render()
+  in undo_offer("Collection deleted", lam () => _coll_restore(j, ks), lam () => _gone_put(CollNotGone())) end
+end
+
+(* Shows collection j's books only, or every book for -1 *)
+#pub fn lib_coll_show (j: int): void
+
+implement lib_coll_show (j) = let
+  val () = !_coll_shown := (if j >= 0 then (if j < lib_coll_count() then j else ~1) else ~1)
+in lib_render() end
+
+(* The library's collection chips: each collection, pressed when it is
+   the one shown *)
+fun _chips {k:nat}{j:nat} .<k>. (cs: !colls(k), j: int j, shown: int): void =
+  case+ cs of
+  | colls_nil() => ()
+  | @colls_cons(a, m, rest) => let
+      val jj = j
+      val @(bi, bl) = nid_make("collection", jj)
+      val () = ui_btn_n("collection-chips", bi, bl, "sbtn")
+      val t = $A.alloc<byte>(m + 1)
+      val () = _copy(a, m, t, 0, 0)
+      val @(bi, bl) = nid_make("collection", jj)
+      val () = ui_text_n_buf(bi, bl, t, m)
+      val @(bi, bl) = nid_make("collection", jj)
+      val () = (if j = shown then ui_attr_n(bi, bl, APressed, "true") else ui_attr_n(bi, bl, APressed, "false"))
+      val () = _chips(rest, j + 1, shown)
+      prval () = fold@(cs)
+    in end
+
+(* The collection row: shown when there is a collection, with every
+   book's chip and each collection's; renaming and deleting are offered
+   for the one shown *)
+fn _coll_row (): void = let
+  val () = ui_clear("collection-chips")
+  val c = colls_take()
+  val+ @CollCell(cs, cn) = c
+  val shown = !_coll_shown
+  val () = ui_text_btn("collection-chips", "collection-all", "sbtn", "All books")
+  val () = (if shown < 0 then ui_attr("collection-all", APressed, "true") else ui_attr("collection-all", APressed, "false"))
+  val () = _chips(cs, 0, shown)
+  val count = cn
+  prval () = fold@(c)
+  val () = colls_put(c)
+  val () = ui_show("collection-row", count > 0)
+  val () = ui_show("collection-rename", shown >= 0)
+in ui_show("collection-delete", shown >= 0) end
+
+(* The collections panel's toggles for a book in the collections cols
+   says *)
+fun _toggles {k:nat}{j:nat} .<k>. (cs: !colls(k), j: int j, cols: Int): void =
+  case+ cs of
+  | colls_nil() => ()
+  | @colls_cons(a, m, rest) => let
+      val jj = j
+      val @(bi, bl) = nid_make("collection-put", jj)
+      val () = ui_btn_n("collections-list", bi, bl, "sbtn")
+      val t = $A.alloc<byte>(m + 1)
+      val () = _copy(a, m, t, 0, 0)
+      val @(bi, bl) = nid_make("collection-put", jj)
+      val () = ui_text_n_buf(bi, bl, t, m)
+      val @(bi, bl) = nid_make("collection-put", jj)
+      val () = (if $AR.band_int_int(cols, _bit(j)) <> 0 then ui_attr_n(bi, bl, APressed, "true") else ui_attr_n(bi, bl, APressed, "false"))
+      val () = _toggles(rest, j + 1, cols)
+      prval () = fold@(cs)
+    in end
+
+(* The collections panel for book i: a toggle for each collection,
+   pressed when the book is in it *)
+#pub fn lib_coll_panel {i:int} (i: int i): void
+
+implement lib_coll_panel (i) = let
+  val () = ui_clear("collections-list")
+  val cols = (case+ lib_nums(i) of ~$R.none() => 0 | ~$R.some(x) => x.cols): Int
+  val c = colls_take()
+  val+ @CollCell(cs, cn) = c
+  val () = _toggles(cs, 0, cols)
+  val count = cn
+  prval () = fold@(c)
+  val () = colls_put(c)
+  val () = ui_show("collections-new", count < 8)
+in ui_show("collections-none", count = 0) end
+
+(* Collection j's name, in the dialog's name field *)
+fun _name_at {k:nat} .<k>. (cs: !colls(k), j: int): void =
+  case+ cs of
+  | colls_nil() => ()
+  | @colls_cons(a, m, rest) =>
+    if j = 0 then let
+      val t = $A.alloc<byte>(m + 1)
+      val () = _copy(a, m, t, 0, 0)
+      val () = modal_name_set(t, m)
+      prval () = fold@(cs)
+    in end
+    else let
+      val () = _name_at(rest, j - 1)
+      prval () = fold@(cs)
+    in end
+
+#pub fn lib_coll_name_show (j: int): void
+
+implement lib_coll_name_show (j) = let
+  val c = colls_take()
+  val+ @CollCell(cs, _) = c
+  val () = _name_at(cs, j)
+  prval () = fold@(c)
+in colls_put(c) end
+
+(* ============================================================
    Storage: key "lib"
    ============================================================ *)
 
-(* "QLB1", then each book: id (2 x i32), title (u8 length, bytes),
+(* "QLB3", the collections (u8 count, then each name: u8 length,
+   bytes), then each book: id (2 x i32), title (u8 length, bytes),
    author (u8 length, bytes), then 10 x i32: shelf, added, opened, ch,
-   tch, pg, pgs, anchor, fsz, cover | done << 8. At most 560 bytes a
-   book. *)
+   tch, pg, pgs, anchor, fsz, cover | done << 8; its series (u8 length,
+   bytes) and its number in it (i32); the collections it is in (i32).
+   At most 824 bytes a book. QLB2 has no collections, before or in the
+   books; QLB1 has no series either. *)
+
+
 
 fun _put_bytes {ls,l:agz}{la:addr}{ns,ms:nat | ns <= ms}{n:nat}{p:nat | p + ns <= n}{j:nat | j <= ns} .<ns - j>.
   (src: !$A.arr(byte, ls, ms), ns: int ns, out: !$A.arrx(byte, l, n, la), p: int p, j: int j): void =
@@ -652,7 +1155,18 @@ fun _put_bytes {ls,l:agz}{la:addr}{ns,ms:nat | ns <= ms}{n:nat}{p:nat | p + ns <
     val () = $A.write_byte(out, p + j, $AR.low_byte(byte2int0($A.get<byte>(src, j))))
   in _put_bytes(src, ns, out, p, j + 1) end
 
-fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 820 * j <= n} .<j>.
+fun _ser_names {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 41 * j <= n} .<j>.
+  (out: !$A.arrx(byte, l, n, la), p: int p, cs: !colls(j)): [q:nat | q <= p + 41 * j] int q =
+  case+ cs of
+  | colls_nil() => p
+  | @colls_cons(a, m, rest) => let
+      val () = $A.write_byte(out, p, m)
+      val () = _put_bytes(a, m, out, p + 1, 0)
+      val q = _ser_names(out, p + 1 + m, rest)
+      prval () = fold@(cs)
+    in q end
+
+fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 824 * j <= n} .<j>.
   (out: !$A.arrx(byte, l, n, la), p: int p, bs: !books(j)): [q:nat | q <= n] int q =
   case+ bs of
   | books_nil() => p
@@ -681,7 +1195,9 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 820 * j <= n} .<j>.
       val () = $A.write_byte(out, q, sn)
       val () = _put_bytes(sr, sn, out, q + 1, 0)
       val () = $A.write_i32(out, q + 1 + sn, x.sidx)
-    in _ser(out, q + 5 + sn, rest) end
+      (* QLB3: the collections it is in *)
+      val () = $A.write_i32(out, q + 5 + sn, x.cols)
+    in _ser(out, q + 9 + sn, rest) end
 
 (* Stores the library under "lib" *)
 #pub fn lib_save (): void
@@ -689,13 +1205,23 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 820 * j <= n} .<j>.
 implement lib_save () = let
   val c = lib_take()
   val+ @LibCell(bs, k) = c
-  val n = 4 + 820 * k
+  val cc = colls_take()
+  val+ @CollCell(cs, cn) = cc
+  val n = 333 + 824 * k
 in
   case+ piece_new(n) of
-  | ~NoPiece() => let prval () = fold@(c) in lib_put(c) end
+  | ~NoPiece() => let
+      prval () = fold@(cc)
+      val () = colls_put(cc)
+      prval () = fold@(c)
+    in lib_put(c) end
   | ~Piece(ow, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB2"), 4)
-      val m = _ser(out, 4, bs)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB3"), 4)
+      val () = $A.write_byte(out, 4, cn)
+      val q = _ser_names(out, 5, cs)
+      prval () = fold@(cc)
+      val () = colls_put(cc)
+      val m = _ser(out, q, bs)
       prval () = fold@(c)
       val () = lib_put(c)
       val @(f, b) = $A.freeze<byte>(out)
@@ -738,7 +1264,7 @@ fun _bytes_of {l:agz}{la:addr}{n:nat}{p,m:nat | p + m <= n}{lo:agz}{j:nat | j <=
 (* The books stored in buf[p, n), read from an earlier run's bytes and
    checked here, once; onto acc (at most LIB_MAX) *)
 fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p>.
-  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, acc: books(a), a: int a, v2: bool)
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, acc: books(a), a: int a, v: int)
   : [k:nat | k <= LIB_MAX] @(books(k), int k) =
   if a >= 100000 then @(acc, a)
   else if p + 9 > n then @(acc, a)
@@ -770,14 +1296,16 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
           ch = _i32(buf, r + 12), tch = _i32(buf, r + 16), pg = _i32(buf, r + 20),
           pgs = _i32(buf, r + 24), anchor = _i32(buf, r + 28), fsz = _i32(buf, r + 32),
           cover = $AR.low_byte(cd), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cd, 8)), 1),
-          sidx = 0
+          sidx = 0, cols = 0
         }: bnums
-        (* QLB2 has the series after; QLB1, none *)
+        (* QLB2 has the series after; QLB3, then the collections; QLB1,
+           neither *)
         val r = r + 40
-        val sn = (if v2 then (if r < n then $AR.low_byte(byte2int0($A.get<byte>(buf, r))) else 0) else 0): [m:nat | m < 256] int m
+        val sn = (if v >= 2 then (if r < n then $AR.low_byte(byte2int0($A.get<byte>(buf, r))) else 0) else 0): [m:nat | m < 256] int m
+        val tail = (if v >= 3 then 9 else 5): [e:int | e == 5 || e == 9] int e
       in
-        if ~v2 then _parse(buf, n, r, books_cons(Book(t, tn, au, an, $A.alloc<byte>(1), 0, nums), acc), a + 1, v2)
-        else if r + 5 + sn > n then let
+        if v < 2 then _parse(buf, n, r, books_cons(Book(t, tn, au, an, $A.alloc<byte>(1), 0, nums), acc), a + 1, v)
+        else if r + tail + sn > n then let
           val () = $A.free<byte>(t)
           val () = $A.free<byte>(au)
         in @(acc, a) end
@@ -788,12 +1316,42 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
             key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = nums.shelf, added = nums.added,
             opened = nums.opened, ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs,
             anchor = nums.anchor, fsz = nums.fsz, cover = nums.cover, done = nums.done,
-            sidx = _i32(buf, r + 1 + sn)
+            sidx = _i32(buf, r + 1 + sn),
+            cols = (if v >= 3 then (if r + 9 + sn <= n then g1ofg0($AR.band_int_int(_i32(buf, r + 5 + sn), 255)) else 0) else 0): Int
           }: bnums
-        in _parse(buf, n, r + 5 + sn, books_cons(Book(t, tn, au, an, sr, sn, nums), acc), a + 1, v2) end
+        in _parse(buf, n, r + tail + sn, books_cons(Book(t, tn, au, an, sr, sn, nums), acc), a + 1, v) end
       end
     end
   end
+
+(* The collections stored in buf[p, n), left of them still to read,
+   after acc's k: where the books start, and the collections *)
+fun _parse_names {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{k:nat | k <= COLL_MAX} .<COLL_MAX - k>.
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, left: int, acc: colls(k), k: int k)
+  : [q:nat | q <= n][r:nat | r <= COLL_MAX] @(int q, colls(r), int r) =
+  if left <= 0 then @(p, acc, k)
+  else if k >= 8 then @(p, acc, k)
+  else if p + 1 > n then @(p, acc, k)
+  else let
+    val m = $AR.low_byte(byte2int0($A.get<byte>(buf, p)))
+  in
+    if m <= 0 then @(p, acc, k)
+    else if m > 40 then @(p, acc, k)
+    else if p + 1 + m > n then @(p, acc, k)
+    else let
+      val a = $A.alloc<byte>(m + 1)
+      val () = _bytes_of_into(buf, p + 1, m, a, 0)
+    in _parse_names(buf, n, p + 1 + m, left - 1, _colls_insert(acc, k, a, m), k + 1) end
+  end
+
+(* The collections of a library stored as version v in buf[0, n),
+   and where its books start *)
+fn _names_of {l:agz}{la:addr}{n:nat | n >= 4}
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int)
+  : [q:nat | q <= n][r:nat | r <= COLL_MAX] @(int q, colls(r), int r) =
+  if v < 3 then @(4, colls_nil(), 0)
+  else if n <= 4 then @(n, colls_nil(), 0)
+  else _parse_names(buf, n, 5, byte2int0($A.get<byte>(buf, 4)), colls_nil(), 0)
 
 (* Reads the library stored under "lib"; the promise resolves with the
    number of books *)
@@ -812,9 +1370,13 @@ in
     | ~ContentBytes(ow, buf, n) =>
       if n < 4 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
-      else if (if byte2int0($A.get<byte>(buf, 3)) = 49 then false else byte2int0($A.get<byte>(buf, 3)) <> 50) then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) > 51 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else let
-        val @(bs, k) = _parse(buf, n, 4, books_nil(), 0, byte2int0($A.get<byte>(buf, 3)) = 50)
+        val v = byte2int0($A.get<byte>(buf, 3)) - 48
+        val @(p, cs, cn) = _names_of(buf, n, v)
+        val () = colls_put(CollCell(cs, cn))
+        val @(bs, k) = _parse(buf, n, p, books_nil(), 0, v)
         val () = piece_free(ow, buf)
         val () = lib_put(LibCell(_sort(bs, books_nil(), !_sort_order), k))
       in $P.ret<int>(k) end)
@@ -1217,7 +1779,7 @@ fun _cards {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, shelf: int, q: !query,
   | books_nil() => shown
   | books_cons(b, rest) => let
       val+ Book(_, _, _, _, _, _, x) = b
-      val vis = (if x.shelf = shelf then (if _passes(x) then _matches(b, q) else false) else false): bool
+      val vis = (if x.shelf = shelf then (if _passes(x) then (if _in_shown(x) then _matches(b, q) else false) else false) else false): bool
       val () = (if vis then _card(b, i, gen, "book", "book-row", "book-more", "book-list", true) else ())
     in _cards(rest, i + 1, shelf, q, gen, (if vis then shown + 1 else shown)) end
 
@@ -1299,18 +1861,21 @@ implement lib_render () = let
   val c = lib_take()
   val+ @LibCell(bs, k) = c
   val shown = _cards(bs, 0, shelf, q, gen, 0)
-  (* the book to continue, above the rest: on the shelf, unsearched, and
-     unless only unread or finished books are shown *)
-  val want = (if shelf = 0 then (if ~has_q then (if !_filter = 0 || !_filter = 2 then _latest(bs, 0, ~1, 0) else ~1) else ~1) else ~1): int
+  (* the book to continue, above the rest: on the shelf, unsearched, in
+     no one collection, and unless only unread or finished books are
+     shown *)
+  val want = (if shelf = 0 then (if ~has_q then (if !_coll_shown < 0 then (if !_filter = 0 || !_filter = 2 then _latest(bs, 0, ~1, 0) else ~1) else ~1) else ~1) else ~1): int
   val () = (if want >= 0 then _continue_card(bs, 0, want, gen) else ())
   prval () = fold@(c)
   val () = lib_put(c)
   val () = ui_show("continue-reading", want >= 0)
   val () = query_put(q)
   val () = ui_show("library-empty", shown = 0)
+  val () = _coll_row()
 in
   if shown > 0 then ()
   else if has_q then ui_text("library-empty", "No books match")
+  else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
   else if !_filter = 1 then ui_text("library-empty", "No unread books")
   else if !_filter = 2 then ui_text("library-empty", "No books being read")
   else if !_filter = 3 then ui_text("library-empty", "No finished books")

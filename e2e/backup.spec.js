@@ -143,3 +143,36 @@ test('the same backup can be restored twice in a row', async ({ page }) => {
   await restoreBackup(page, path);
   await expect(restored(page)).toBeVisible();
 });
+
+test('a backup holds the collections, and restoring it puts each book back in its own', async ({ page }) => {
+  await start(page);
+  const one = epubFile({ title: 'Grouped One', author: 'A' });
+  const two = epubFile({ title: 'Grouped Two', author: 'B' });
+  await importFiles(page, [one, two], 2);
+  for (const [title, collection] of [['Grouped One', 'Poetry'], ['Grouped Two', 'Essays']]) {
+    await bookMenu(page, title);
+    await menuItem(page, 'Collections').click();
+    await dialog(page, 'Collections').getByRole('button', { name: 'New collection' }).click();
+    await dialog(page, 'New collection').getByRole('textbox', { name: 'Name' }).fill(collection);
+    await dialog(page, 'New collection').getByRole('button', { name: 'Create' }).click();
+    await dialog(page, 'Collections').getByRole('button', { name: 'Done' }).click();
+  }
+  const json = await exportBackup(page);
+  const b = JSON.parse(json);
+  expect(b.collections).toEqual(['Poetry', 'Essays']);
+  expect(b.books.find(x => x.title === 'Grouped One').collections).toEqual([0]);
+  expect(b.books.find(x => x.title === 'Grouped Two').collections).toEqual([1]);
+  const path = rawFile('quire-backup.json', json);
+
+  await factoryReset(page);
+  await importFiles(page, [one, two], 2);
+  await restoreBackup(page, path);
+  await restored(page).getByRole('button', { name: 'OK' }).click();
+  const row = page.getByRole('group', { name: 'Collection' });
+  await row.getByRole('button', { name: 'Essays' }).click();
+  await expect(cards(page)).toHaveCount(1);
+  await expect(card(page, 'Grouped Two')).toHaveCount(1);
+  await row.getByRole('button', { name: 'Poetry' }).click();
+  await expect(card(page, 'Grouped One')).toHaveCount(1);
+  await expect(cards(page)).toHaveCount(1);
+});

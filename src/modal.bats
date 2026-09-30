@@ -4,16 +4,22 @@
 
 #include "share/atspre_staload.hats"
 #use array as A
+#use result as R
+#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
+staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload "mem.sats"
 
 (* The questions that lose nothing *)
 #pub datatype question =
   | QInform                  (* a message: OK *)
   | QDuplicate               (* a book already in the library: Skip, Replace *)
   | QNote                    (* a note: Cancel, Save *)
+  | QNewCollection           (* a new collection's name: Cancel, Create *)
+  | QRenameCollection        (* a collection's name: Cancel, Rename *)
 
 (* What the dialog asks. A Harmful question's title, text, second
    button and its red marking all come from its harm (_harm_words,
@@ -60,6 +66,8 @@ fn _buttons (a: ask): @(lit, lit, tone) =
   | Harmless(QInform()) => @("OK", "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
   | Harmless(QNote()) => @("Cancel", "Save", Plain)
+  | Harmless(QNewCollection()) => @("Cancel", "Create", Plain)
+  | Harmless(QRenameCollection()) => @("Cancel", "Rename", Plain)
   | Harmful(h) => let val @(_, _, verb) = _harm_words(h) in @("Cancel", verb, Danger(h)) end
 
 fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void = let
@@ -75,6 +83,7 @@ fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void
   val () = ui_show("dialog-button2", string_get_at(b2, 0) <> '-')
   val () = ui_show("dialog-text", true)
   val () = ui_show("dialog-note", false)
+  val () = ui_show("dialog-name-box", false)
   val () = ui_show("dialog", true)
 in ui_focus("dialog-button1") end
 
@@ -108,6 +117,45 @@ implement modal_textarea () = let
   val () = ui_show("dialog-note", true)
 in ui_focus("dialog-note") end
 
+(* Shows the dialog's name field (for a collection's name), empty,
+   instead of its text. The field is made anew, so nothing typed into
+   an earlier one is left in it *)
+#pub fn modal_name_field (): void
+implement modal_name_field () = let
+  val () = ui_show("dialog-text", false)
+  val () = ui_clear("dialog-name-box")
+  val () = ui_field("dialog-name-box", "dialog-name", FLine, "mname", "Name")
+  val () = ui_show("dialog-name-box", true)
+in ui_focus("dialog-name") end
+
+(* The name field holding b[0, k) *)
+#pub fn modal_name_set {l:agz}{n:pos}{k:pos | k <= n; k < 65536} (b: $A.arr(byte, l, n), k: int k): void
+implement modal_name_set (b, k) = ui_attr_buf("dialog-name", AValue, b, k)
+
+(* What the name field holds: its bytes (at most 1024) and how many *)
+#pub fn modal_name_read (): [l:agz][m:pos][k:nat | k <= m] @($A.arr(byte, l, m), int k)
+implement modal_name_read () = let
+  val a = $A.alloc<byte>(11)
+  val () = $A.write_text(a, 0, $A.text_lit("dialog-name"), 11)
+  val @(f, b) = $A.freeze<byte>(a)
+  val r = $DR.read_input_value(b, 11)
+  val () = release_bytes(f, b)
+in
+  case+ r of
+  | ~$R.none() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
+  | ~$R.some(v) => let
+      val n = $DC.blob_len(v)
+    in
+      if n <= 0 then let val () = $DC.blob_free(v) in let val a0 = $A.alloc<byte>(1) in @(a0, 0) end end
+      else if n > 1024 then let val () = $DC.blob_free(v) in let val a0 = $A.alloc<byte>(1) in @(a0, 0) end end
+      else let
+        val a = $A.alloc<byte>(n)
+        val () = $DC.blob_read(v, 0, a, n)
+        val () = $DC.blob_free(v)
+      in @(a, n) end
+    end
+end
+
 (* Closes the dialog and runs what its answer does: yes for the second
    button (second), no otherwise *)
 fn _answer (second: bool): void = let
@@ -132,9 +180,43 @@ fun _id_is {l:agz}{n:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
 fn _target_is {l:agz}{n:nat}{sn:nat} (b: !$A.arr(byte, l, n), n: int n, s: string sn): bool =
   _id_is(b, n, s, g1u2i(string1_length(s)), 0)
 
-(* The dialog's listener: its buttons and a click outside its box *)
-#pub fn modal_listen {n:nat} (r: regs(n)): regs(n + 1)
-implement modal_listen (r) = RCons(r, OnEl("dialog"), "click", lam(h) =>
+(* Whether a key event's bytes b[0, n) (the key's name, after its
+   length) are Enter's *)
+fn _enter {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): bool =
+  if n <> 7 then false
+  else if byte2int0($A.get<byte>(b, 0)) <> 5 then false
+  else if byte2int0($A.get<byte>(b, 1)) <> 69 then false
+  else if byte2int0($A.get<byte>(b, 2)) <> 110 then false
+  else if byte2int0($A.get<byte>(b, 3)) <> 116 then false
+  else if byte2int0($A.get<byte>(b, 4)) <> 101 then false
+  else byte2int0($A.get<byte>(b, 5)) = 114
+
+(* Whether the open question asks for a name *)
+fn _asks_name (): bool =
+  case+ !_pending of
+  | Pending(Harmless(QNewCollection()), _, _) => true
+  | Pending(Harmless(QRenameCollection()), _, _) => true
+  | _ => false
+
+(* The dialog's listeners: its buttons and a click outside its box; and
+   Enter in its name field, which answers as its second button does
+   (only a question asking for a name has that field) *)
+#pub fn modal_listen {n:nat} (r: regs(n)): regs(n + 2)
+implement modal_listen (r) = let
+  val r = RCons(r, OnEl("dialog-name-box"), "keydown", lam(h) =>
+    case+ take_blob(h) of
+    | ~NoBlobBytes() => 0
+    | ~BlobBytes(b, n) => let
+        val enter = _enter(b, n)
+        val () = $A.free<byte>(b)
+      in
+        if enter && _asks_name() then let
+          val () = $EV.prevent_default()
+          val () = _answer(true)
+        in 0 end
+        else 0
+      end)
+in RCons(r, OnEl("dialog"), "click", lam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(b, n) => let
@@ -145,6 +227,6 @@ implement modal_listen (r) = RCons(r, OnEl("dialog"), "click", lam(h) =>
       if second then let val () = _answer(true) in 0 end
       else if first then let val () = _answer(false) in 0 end
       else 0
-    end)
+    end) end
 
 end (* #target wasm *)

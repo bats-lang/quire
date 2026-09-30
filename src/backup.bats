@@ -140,8 +140,45 @@ fn _settings_chunk (): jchunk =
       val p = jw_int(out, p, lib_grid_get())
       val p = jw_lit(out, p, ",\"libraryFilter\":")
       val p = jw_int(out, p, lib_filter_get())
-      val p = jw_lit(out, p, "},\"books\":[")
+      val p = jw_lit(out, p, "}")
     in JChunk(ow, out, p) end
+
+(* The collections' names, from j of c, each after a comma but the
+   first; at most 243 bytes each *)
+fun _names_json {l:agz}{la:addr}{n:nat}{j:nat | j <= 8}{p:nat | p + 250 * (8 - j) + 32 <= n} .<8 - j>.
+  (out: !$A.arrx(byte, l, n, la), p: int p, j: int j, c: int): [q:nat | q + 32 <= n] int q =
+  if j >= 8 then p
+  else if j >= c then p
+  else let
+    val p = (if j > 0 then jw_lit(out, p, ",") else p): [q:nat | p <= q; q <= p + 1] int q
+    val @(a, an) = lib_coll_name_copy(j)
+    val q = jw_str(out, p, a, an)
+    val () = $A.free<byte>(a)
+  in _names_json(out, q, j + 1, c) end
+
+(* The collections, after the settings, and the books' opening bracket *)
+fn _colls_chunk (): jchunk =
+  case+ piece_new(2100) of
+  | ~NoPiece() => JNone()
+  | ~Piece(ow, out) => let
+      val p = jw_lit(out, 0, ",\"collections\":[")
+      val p = _names_json(out, p, 0, lib_coll_count())
+      val p = jw_lit(out, p, "],\"books\":[")
+    in JChunk(ow, out, p) end
+
+(* The numbers of the collections cols has, from j, after a comma but
+   the first *)
+fun _cols_json {l:agz}{la:addr}{n:nat}{j:nat | j <= 8}{p:nat | p + 2 * (8 - j) <= n} .<8 - j>.
+  (out: !$A.arrx(byte, l, n, la), p: int p, j: int j, cols: int, first: bool): [q:nat | q <= p + 2 * (8 - j)] int q =
+  if j >= 8 then p
+  else if $AR.band_int_int(cols, $AR.bsl_int_int(1, j)) = 0 then _cols_json(out, p, j + 1, cols, first)
+  else if first then let
+    val () = $A.write_byte(out, p, 48 + j)
+  in _cols_json(out, p + 1, j + 1, cols, false) end
+  else let
+    val () = $A.write_byte(out, p, 44)
+    val () = $A.write_byte(out, p + 1, 48 + j)
+  in _cols_json(out, p + 2, j + 1, cols, false) end
 
 fn _lit_chunk {sn:pos | sn <= 16} (s: string sn): jchunk =
   case+ piece_new(16) of
@@ -202,6 +239,9 @@ fn _book_chunk {i:int} (i: int i, x: bnums, first: bool): jchunk =
       val p = jw_int(out, p, x.fsz)
       val p = jw_lit(out, p, ",\"done\":")
       val p = jw_int(out, p, x.done)
+      val p = jw_lit(out, p, ",\"collections\":[")
+      val p = _cols_json(out, p, 0, x.cols, true)
+      val p = jw_lit(out, p, "]")
       val p = jw_lit(out, p, ",\"annotations\":")
     in JChunk(ow, out, p) end
 
@@ -268,27 +308,42 @@ fun _export_seq {i,c:nat | i <= c} .<c - i>. (i: int i, c: int c, first: bool): 
 implement backup_export () = let
   val () = _chunks_put(ChunkCell(chunks_nil(), 0, true))
   val () = _push(_settings_chunk())
+  val () = _push(_colls_chunk())
 in _export_seq(0, lib_count(), true) end
 
 (* ============================================================
    A book's record kept for later: "o" and its id
    ============================================================ *)
 
+(* A book's numbers as a backup is read: vs[0, 3) its id (vs[2] is 1
+   once read), vs[3, 12) its shelf, dates and place (_bnum), vs[12] the
+   collections it is in, as the library numbers them (-1 when the backup
+   does not say); vs[13 + j] the library's number of the backup's
+   collection j (-1 none) *)
+#define VS 24
+#define VMAP 13
+
+(* A book's numbers, before its members are read *)
+fun _zero {lv:agz}{i:nat | i <= 13} .<13 - i>. (vs: !$A.arr(Int, lv, VS), i: int i): void =
+  if i >= 13 then ()
+  else let val () = $A.set<Int>(vs, i, (if i = 10 then ~1 else if i = 12 then ~1 else 0)) in _zero(vs, i + 1) end
+
 (* The record's numbers, in order: shelf, added, opened, chapter,
-   chapters, page, pages, anchor, done *)
-#define ONUMS 9
+   chapters, page, pages, anchor, done, collections (the last not in a
+   record kept by an earlier version, of ONUMS - 1) *)
+#define ONUMS 10
 
 fun _orphan_wr {la,lv:agz}{j:nat | j <= ONUMS} .<ONUMS - j>.
-  (a: !$A.arr(byte, la, 4 + 4 * ONUMS), vs: !$A.arr(Int, lv, 12), j: int j): void =
+  (a: !$A.arr(byte, la, 4 + 4 * ONUMS), vs: !$A.arr(Int, lv, VS), j: int j): void =
   if j >= ONUMS then ()
   else let
     val () = $A.write_i32(a, 4 + 4 * j, $A.get<Int>(vs, 3 + j))
   in _orphan_wr(a, vs, j + 1) end
 
-(* vs[3 + j, 12) := the numbers at b[4 + 4 * j, 4 + 4 * ONUMS) *)
-fun _orphan_rd {lb,lv:agz}{n:int | n >= 4 + 4 * ONUMS}{j:nat | j <= ONUMS} .<ONUMS - j>.
-  (b: !$A.arr(byte, lb, n), vs: !$A.arr(Int, lv, 12), j: int j): void =
-  if j >= ONUMS then ()
+(* vs[3 + j, 3 + c) := the c numbers at b[4 + 4 * j, 4 + 4 * c) *)
+fun _orphan_rd {lb,lv:agz}{c:nat | c <= ONUMS}{n:int | n >= 4 + 4 * c}{j:nat | j <= c} .<c - j>.
+  (b: !$A.arr(byte, lb, n), c: int c, vs: !$A.arr(Int, lv, VS), j: int j): void =
+  if j >= c then ()
   else let
     val o = 4 + 4 * j
     val b0 = $AR.low_byte(byte2int0($A.get<byte>(b, o)))
@@ -297,10 +352,17 @@ fun _orphan_rd {lb,lv:agz}{n:int | n >= 4 + 4 * ONUMS}{j:nat | j <= ONUMS} .<ONU
     val b3 = $AR.low_byte(byte2int0($A.get<byte>(b, o + 3)))
     val hi = (if b3 < 128 then b3 else b3 - 256): Int
     val () = $A.set<Int>(vs, 3 + j, b0 + b1 * 256 + b2 * 65536 + hi * 16777216)
-  in _orphan_rd(b, vs, j + 1) end
+  in _orphan_rd(b, c, vs, j + 1) end
+
+(* A kept record's numbers, b[0, n), into vs: ONUMS of them, or one
+   fewer from an earlier version *)
+fn _orphan_read {lb,lv:agz}{n:int | n >= 4 + 4 * (ONUMS - 1)}
+  (b: !$A.arr(byte, lb, n), n: int n, vs: !$A.arr(Int, lv, VS)): void =
+  if n >= 4 + 4 * ONUMS then _orphan_rd(b, ONUMS, vs, 0)
+  else _orphan_rd(b, ONUMS - 1, vs, 0)
 
 (* Stores vs[3, 12) (a book's numbers from a backup) under its "o" key *)
-fn _orphan_put {lv:agz} (h1: int, h2: int, vs: !$A.arr(Int, lv, 12)): void = let
+fn _orphan_put {lv:agz} (h1: int, h2: int, vs: !$A.arr(Int, lv, VS)): void = let
   val a = $A.alloc<byte>(4 + 4 * ONUMS)
   val () = $A.write_text(a, 0, $A.text_lit("QO1"), 3)
   val () = $A.write_byte(a, 3, 10)
@@ -315,7 +377,7 @@ in release_bytes(af, ab) end
 fn _in (v: Int, lo: Int, hi: Int, d: Int): Int = if v < lo then d else if v > hi then d else v
 
 (* Library book i's numbers set from vs[3, 12) *)
-fn _apply {i:int}{lv:agz} (i: int i, vs: !$A.arr(Int, lv, 12)): void = let
+fn _apply {i:int}{lv:agz} (i: int i, vs: !$A.arr(Int, lv, VS)): void = let
   val sh = _in($A.get<Int>(vs, 3), 0, 2, 0)
   val ad = $A.get<Int>(vs, 4)
   val opn = _in($A.get<Int>(vs, 5), 0, 2147483647, 0)
@@ -325,16 +387,19 @@ fn _apply {i:int}{lv:agz} (i: int i, vs: !$A.arr(Int, lv, 12)): void = let
   val pgs = _in($A.get<Int>(vs, 9), 0, 2147483647, 0)
   val an = _in($A.get<Int>(vs, 10), ~1, 2147483647, ~1)
   val dn = _in($A.get<Int>(vs, 11), 0, 1, 0)
+  (* the collections, when the backup says which: of those there are *)
+  val co = $A.get<Int>(vs, 12)
+  val co = (if co >= 0 then g1ofg0($AR.band_int_int(co, $AR.bsl_int_int(1, lib_coll_count()) - 1)) else ~1): Int
 in
   lib_update(i, lam(x) => @{
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = sh,
     added = (if ad > 0 then ad else x.added), opened = opn,
     ch = ch, tch = tch, pg = pg, pgs = pgs, anchor = an,
-    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx })
+    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx, cols = (if co >= 0 then co else x.cols) })
 end
 
 (* Library book h1, h2 (when it is there) takes the numbers vs[3, 12) *)
-fn _claim_apply {lv:agz} (h1: Int, h2: Int, vs: !$A.arr(Int, lv, 12)): void = let
+fn _claim_apply {lv:agz} (h1: Int, h2: Int, vs: !$A.arr(Int, lv, VS)): void = let
   val i = lib_find(h1, h2)
 in
   if i >= 0 then let
@@ -356,11 +421,12 @@ in
     case+ take_blob(h) of
     | ~NoBlobBytes() => $P.ret<int>(0)
     | ~BlobBytes(b, n) =>
-      if n < 4 + 4 * ONUMS then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
+      if n < 4 + 4 * (ONUMS - 1) then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(b, 1)) <> 79 then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
       else let
-        val vs = $A.alloc<Int>(12)
-        val () = _orphan_rd(b, vs, 0)
+        val vs = $A.alloc<Int>(VS)
+        val () = _zero(vs, 0)
+        val () = _orphan_read(b, n, vs)
         val () = $A.free<byte>(b)
         val () = _claim_apply(h1, h2, vs)
         val () = $A.free<Int>(vs)
@@ -406,7 +472,7 @@ fn _bnum {lk:agz}{k:nat | k <= 16} (kb: !$A.arr(byte, lk, 16), k: int k): [i:int
 
 (* A number (or true or false) at v, kept in vs[i] *)
 fn _num_at {l,lv:agz}{la:addr}{n:nat}{v:nat | v <= n}{i:nat | i < 12}
-  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, vs: !$A.arr(Int, lv, 12), i: int i): [q:int | v <= q; q <= n] int q = let
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, vs: !$A.arr(Int, lv, VS), i: int i): [q:int | v <= q; q <= n] int q = let
   val @(ok, x, q) = jr_int(buf, n, v)
 in
   if ok then let val () = $A.set<Int>(vs, i, x) in q end
@@ -420,7 +486,7 @@ end
 
 (* The id member's value at v: vs[0], vs[1] and vs[2] (1 when read) *)
 fn _id_at {l,lk,lv:agz}{la:addr}{n:nat}{v:nat | v < n}
-  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 12)): [q:int | v < q; q <= n] int q = let
+  (buf: !$A.arrx(byte, l, n, la), n: int n, v: int v, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, VS)): [q:int | v < q; q <= n] int q = let
   val @(ok, k, q) = jr_str(buf, n, v, kb, 16)
 in
   if ~ok then q
@@ -439,10 +505,61 @@ in
   end
 end
 
+(* The collections of a book's array from p, to its closing bracket:
+   acc with each one's bit, as the library numbers them (vs[VMAP + j]
+   for the backup's collection j) *)
+fun _cols_items {l,lv:agz}{la:addr}{n:nat}{p:nat | p <= n} .<n - p>.
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, vs: !$A.arr(Int, lv, VS), acc: int)
+  : [q:int | p <= q; q <= n] @(bool, int, int q) = let
+  val q = jr_ws(buf, n, p)
+in
+  if q >= n then @(false, acc, n)
+  else if jr_is(buf, n, q, 93) then @(true, acc, q + 1)
+  else if jr_is(buf, n, q, 44) then _cols_items(buf, n, q + 1, vs, acc)
+  else let
+    val @(ok, x, e) = jr_int(buf, n, q)
+  in
+    if ~ok then @(false, acc, e)
+    else if e <= q then @(false, acc, e)
+    else let
+      val m = (if x >= 0 then (if x < 8 then $A.get<Int>(vs, VMAP + x) else ~1) else ~1): Int
+      val acc = (if m >= 0 then (if m < 8 then $AR.bor_int_int(acc, $AR.bsl_int_int(1, m)) else acc) else acc): int
+    in _cols_items(buf, n, e, vs, acc) end
+  end
+end
+
+(* The backup's collections from p, to their array's closing bracket,
+   from its j-th: each found in the library by its name, or made there,
+   and its number there kept in vs[VMAP + j] *)
+fun _names_at {l,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{j:nat} .<n - p>.
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, vs: !$A.arr(Int, lv, VS), j: int j)
+  : [q:int | p <= q; q <= n] @(bool, int q) = let
+  val q = jr_ws(buf, n, p)
+in
+  if q >= n then @(false, n)
+  else if jr_is(buf, n, q, 93) then @(true, q + 1)
+  else if jr_is(buf, n, q, 44) then _names_at(buf, n, q + 1, vs, j)
+  else let
+    val sb = $A.alloc<byte>(256)
+    val @(ok, k, e) = jr_str(buf, n, q, sb, 256)
+  in
+    if ~ok then let val () = $A.free<byte>(sb) in @(false, e) end
+    else let
+      val c = lib_coll_find_or_add(sb, k)
+      val () = (if j < 8 then $A.set<Int>(vs, VMAP + j, g1ofg0(c)) else ())
+    in _names_at(buf, n, e, vs, j + 1) end
+  end
+end
+
+(* No collection of the backup's known yet *)
+fun _unmapped {lv:agz}{j:nat | j <= 8} .<8 - j>. (vs: !$A.arr(Int, lv, VS), j: int j): void =
+  if j >= 8 then ()
+  else let val () = $A.set<Int>(vs, VMAP + j, ~1) in _unmapped(vs, j + 1) end
+
 (* A book object's members from p, to its closing brace: its numbers
    into vs, and where its annotations' array is (-1 none) *)
 fun _bmem {l,lk,lv:agz}{la:addr}{n:nat}{p:nat | p <= n}{a0:int | ~1 <= a0; a0 <= n} .<n - p>.
-  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 12), ap: int a0)
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, VS), ap: int a0)
   : [q:int | p <= q; q <= n][a:int | ~1 <= a; a <= n] @(bool, int a, int q) = let
   val q = jr_ws(buf, n, p)
 in
@@ -456,6 +573,12 @@ in
     else if v >= n then @(false, ap, v)
     else if jr_key_is(kb, k, "id") then _bmem(buf, n, _id_at(buf, n, v, kb, vs), kb, vs, ap)
     else if jr_key_is(kb, k, "annotations") then _bmem(buf, n, jr_skip(buf, n, v), kb, vs, v)
+    else if jr_key_is(kb, k, "collections") then
+      (if jr_is(buf, n, v, 91) then let
+         val @(cok, mask, e) = _cols_items(buf, n, v + 1, vs, 0)
+         val () = $A.set<Int>(vs, 12, g1ofg0(mask))
+       in if cok then _bmem(buf, n, e, kb, vs, ap) else @(false, ap, e) end
+       else _bmem(buf, n, jr_skip(buf, n, v), kb, vs, ap))
     else let
       val i = _bnum(kb, k)
     in
@@ -469,7 +592,7 @@ end
    there, else kept under its "o" key; its annotations from the array
    at ap *)
 fn _restore_book {l,lv:agz}{la:addr}{n:nat}{a:int | ~1 <= a; a <= n}
-  (buf: !$A.arrx(byte, l, n, la), n: int n, vs: !$A.arr(Int, lv, 12), ap: int a): bool =
+  (buf: !$A.arrx(byte, l, n, la), n: int n, vs: !$A.arr(Int, lv, VS), ap: int a): bool =
   if $A.get<Int>(vs, 2) <> 1 then false
   else let
     val h1 = $A.get<Int>(vs, 0)
@@ -479,14 +602,10 @@ fn _restore_book {l,lv:agz}{la:addr}{n:nat}{a:int | ~1 <= a; a <= n}
     val () = (if ap >= 0 then let val _ = annot_json_store(buf, n, ap, h1, h2) in () end else ())
   in true end
 
-fun _zero {lv:agz}{i:nat | i <= 12} .<12 - i>. (vs: !$A.arr(Int, lv, 12), i: int i): void =
-  if i >= 12 then ()
-  else let val () = $A.set<Int>(vs, i, (if i = 10 then ~1 else 0)) in _zero(vs, i + 1) end
-
 (* The books of the array's items from p, to its closing bracket, put
    back one by one; how many *)
 fun _bitems {l,lk,lv:agz}{la:addr}{n:nat}{p:nat | p <= n} .<n - p>.
-  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 12), c: int)
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, VS), c: int)
   : [q:int | p <= q; q <= n] @(bool, int, int q) = let
   val q = jr_ws(buf, n, p)
 in
@@ -583,7 +702,7 @@ end
 (* The backup's members from p: whether it is one (its "quire" is 1),
    the books put back, and the sort order *)
 fun _top {l,lk,lv:agz}{la:addr}{n:nat}{p:nat | p <= n} .<n - p>.
-  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, 12),
+  (buf: !$A.arrx(byte, l, n, la), n: int n, p: int p, kb: !$A.arr(byte, lk, 16), vs: !$A.arr(Int, lv, VS),
    quire: bool, books: int, sort: int): @(bool, int, int) = let
   val q = jr_ws(buf, n, p)
 in
@@ -606,6 +725,11 @@ in
       (if jr_is(buf, n, v, 123) then let
          val @(sok, s2, e) = _smem(buf, n, v + 1, kb, sort)
        in if sok then _top(buf, n, e, kb, vs, quire, books, s2) else @(false, books, sort) end
+       else _top(buf, n, jr_skip(buf, n, v), kb, vs, quire, books, sort))
+    else if jr_key_is(kb, k, "collections") then
+      (if jr_is(buf, n, v, 91) then let
+         val @(nok, e) = _names_at(buf, n, v + 1, vs, 0)
+       in if nok then _top(buf, n, e, kb, vs, quire, books, sort) else @(false, books, sort) end
        else _top(buf, n, jr_skip(buf, n, v), kb, vs, quire, books, sort))
     else if jr_key_is(kb, k, "books") then
       (if jr_is(buf, n, v, 91) then let
@@ -631,7 +755,8 @@ in
   else if ~jr_is(buf, n, p, 123) then _say("This file is not a Quire backup.")
   else let
     val kb = $A.alloc<byte>(16)
-    val vs = $A.alloc<Int>(12)
+    val vs = $A.alloc<Int>(VS)
+    val () = _unmapped(vs, 0)
     val @(ok, c, sort) = _top(buf, n, p + 1, kb, vs, false, 0, lib_sort_get())
     val () = $A.free<byte>(kb)
     val () = $A.free<Int>(vs)

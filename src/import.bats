@@ -321,7 +321,7 @@ in
       val () = lib_update(idx, lam(x) => @{
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = 0, added = x.added, opened = x.opened,
         ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-        fsz = z, cover = (if cover > 0 then (cover: Int) else x.cover), done = x.done, sidx = sidx })
+        fsz = z, cover = (if cover > 0 then (cover: Int) else x.cover), done = x.done, sidx = sidx, cols = x.cols })
       val () = lib_series_set(idx, opf_b, n, so, sl)
     in
       case+ lib_nums(idx) of

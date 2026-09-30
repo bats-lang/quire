@@ -932,7 +932,7 @@ fn _g_0_fonts {r:nat | r >= 1010} (sh: sheet(r, 0)): [q:nat | q >= r - 1010] she
   val () = raw(sh, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sh end
 
-fn _g_1_shell {r:nat | r >= 5400} (sh: sheet(r, 0)): [q:nat | q >= r - 5400] sheet(q, 0) = let
+fn _g_1_shell {r:nat | r >= 5520} (sh: sheet(r, 0)): [q:nat | q >= r - 5520] sheet(q, 0) = let
   val sh = rule(sh, "body")
   val sh = lay(sh, Margin(), "0")
   val sh = surf(S_fg_bg | sh, 1, 0)
@@ -1073,6 +1073,14 @@ fn _g_1_shell {r:nat | r >= 5400} (sh: sheet(r, 0)): [q:nat | q >= r - 5400] she
   val sh = rule(sh, ".seg.vseg")
   val sh = lay(sh, Flex(), "none")
   val sh = close(sh)
+  (* the collections, a row of their own under the view's controls *)
+  val sh = rule(sh, ".crow")
+  val sh = lay(sh, Display(), "flex")
+  val sh = lay(sh, FlexWrap(), "wrap")
+  val sh = lay(sh, Gap(), "6px")
+  val sh = lay(sh, Flex(), "1 1 100%")
+  val sh = lay(sh, AlignItems(), "center")
+  val sh = close(sh)
   val sh = rule(sh, ".conth")
   val sh = lay(sh, FontWeight(), "600")
   val sh = lay(sh, MarginTop(), "8px")
@@ -1194,7 +1202,7 @@ fn _g_1_shell {r:nat | r >= 5400} (sh: sheet(r, 0)): [q:nat | q >= r - 5400] she
   val sh = close(sh)
 in sh end
 
-fn _g_2_overlays {r:nat | r >= 3620} (sh: sheet(r, 0)): [q:nat | q >= r - 3620] sheet(q, 0) = let
+fn _g_2_overlays {r:nat | r >= 3900} (sh: sheet(r, 0)): [q:nat | q >= r - 3900] sheet(q, 0) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sh = rule(sh, ".imview")
@@ -1291,6 +1299,21 @@ fn _g_2_overlays {r:nat | r >= 3620} (sh: sheet(r, 0)): [q:nat | q >= r - 3620] 
   val sh = rule(sh, ".mtitle")
   val sh = lay(sh, FontWeight(), "bold")
   val sh = lay(sh, FontSize(), "18px")
+  val sh = close(sh)
+  val sh = rule(sh, ".mname")
+  val sh = lay(sh, Font(), "inherit")
+  val sh = lay(sh, Padding(), "8px")
+  val sh = lay(sh, BorderRadius(), "6px")
+  val sh = close(sh)
+  (* a book's collections, one toggle a line *)
+  val sh = rule(sh, ".seg.cseg")
+  val sh = lay(sh, FlexDirection(), "column")
+  val sh = lay(sh, Margin(), "8px 0")
+  val sh = close(sh)
+  val sh = rule(sh, ".cnone")
+  val sh = surf(S_muted_card | sh, 2, 3)
+  val sh = lay(sh, Padding(), "8px 0")
+  val sh = lay(sh, FontStyle(), "italic")
   val sh = close(sh)
   val sh = rule(sh, ".mta")
   val sh = lay(sh, MinHeight(), "120px")
