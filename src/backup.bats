@@ -558,10 +558,10 @@ in
         val () = (if x >= 0 then (if x <= 12 then set_ls_set(x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "libraryGrid") then let
-        val () = (if x >= 0 then (if x <= 1 then lib_state_set(lib_sort_get() + 4 * x + 8 * lib_filter_get()) else ()) else ())
+        val () = (if x >= 0 then (if x <= 1 then lib_state_set(lib_sort_get() + 8 * x + 16 * lib_filter_get()) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "libraryFilter") then let
-        val () = (if x >= 0 then (if x <= 3 then lib_state_set(lib_sort_get() + 4 * lib_grid_get() + 8 * x) else ()) else ())
+        val () = (if x >= 0 then (if x <= 3 then lib_state_set(lib_sort_get() + 8 * lib_grid_get() + 16 * x) else ()) else ())
       in _smem(buf, n, e, kb, sort) end
       else if jr_key_is(kb, k, "scrolled") then let
         val () = (if x >= 0 then (if x <= 1 then set_flow_set(x) else ()) else ())

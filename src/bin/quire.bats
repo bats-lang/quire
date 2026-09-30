@@ -1516,7 +1516,7 @@ implement main0 () = let
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
   val p = $P.and_then<int><int>(set_load(), lam(st) => let
-      val () = lib_sort_label($AR.band_int_int(st, 3))
+      val () = lib_sort_label($AR.band_int_int(st, 7))
     in
       $P.and_then<int><int>(lib_load(), lam(_) => let
         val () = lib_state_set(st)

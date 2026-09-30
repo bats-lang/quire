@@ -439,7 +439,7 @@ in
         val font = _in($AR.low_byte(byte2int0($A.get<byte>(b, 5))), 0, 3, 0)
         val theme = _in($AR.low_byte(byte2int0($A.get<byte>(b, 6))), 0, 5, 0)
         (* the library's view: its sort order, grid and filter (lib_state_get) *)
-        val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 31, 0)
+        val sort = _in($AR.low_byte(byte2int0($A.get<byte>(b, 7))), 0, 63, 0)
         (* "S2" has the rest; "S1" had none, and they are the defaults *)
         val s2 = (if n >= 13 then byte2int0($A.get<byte>(b, 1)) = 50 else false): bool
         val align = (if n >= 13 then (if s2 then _in($AR.low_byte(byte2int0($A.get<byte>(b, 8))), 0, 1, 0) else 0) else 0): set_align

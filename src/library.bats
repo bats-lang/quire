@@ -1153,19 +1153,19 @@ fn _view_show (): void = let
   val () = (if f = 2 then ui_attr("filter-reading", APressed, "true") else ui_attr("filter-reading", APressed, "false"))
 in if f = 3 then ui_attr("filter-finished", APressed, "true") else ui_attr("filter-finished", APressed, "false") end
 
-(* The library's view state, kept with the settings: its sort order,
-   plus 4 for a grid, plus 8 times the filter *)
+(* The library's view state, kept with the settings: its sort order
+   (below 8), plus 8 for a grid, plus 16 times the filter *)
 #pub fn lib_state_get (): int
-implement lib_state_get () = !_sort_order + 4 * !_grid + 8 * !_filter
+implement lib_state_get () = !_sort_order + 8 * !_grid + 16 * !_filter
 
 (* Sets the view from a kept state (sorts, but does not render) *)
 #pub fn lib_state_set (st: int): void
 implement lib_state_set (st) = let
-  val st = (if st >= 0 then (if st < 32 then st else 0) else 0): int
-  val () = !_grid := $AR.band_int_int(st / 4, 1)
-  val () = !_filter := $AR.band_int_int(st / 8, 3)
+  val st = (if st >= 0 then (if st < 64 then st else 0) else 0): int
+  val () = !_grid := $AR.band_int_int(st / 8, 1)
+  val () = !_filter := $AR.band_int_int(st / 16, 3)
   val () = _view_show()
-in lib_sort($AR.band_int_int(st, 3)) end
+in lib_sort($AR.band_int_int(st, 7)) end
 
 #pub fn lib_grid_set (g: int): void
 implement lib_grid_set (g) = let
