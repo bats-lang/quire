@@ -49,6 +49,8 @@ test('a backup holds the settings, the books, their places and annotations', asy
   await selectionButton(page, 'Note').click();
   await dialog(page, 'Note').getByRole('textbox', { name: 'Note' }).fill('Line one\nwith "quotes" and ünïcode');
   await dialog(page, 'Note').getByRole('button', { name: 'Save' }).click();
+  await selectText(page, 9, 14);
+  await selectionButton(page, 'Underline').click();
   await openSettings(page);
   await page.getByRole('slider', { name: 'Size' }).fill('24');
   await page.getByRole('slider', { name: 'Word spacing' }).fill('10');
@@ -66,8 +68,9 @@ test('a backup holds the settings, the books, their places and annotations', asy
   expect(book).toMatchObject({ title: 'Backed "Up"', author: 'Keeper', shelf: 0, chapter: 0, chapters: 2, done: 0 });
   expect(book.id).toMatch(/^[0-9a-f]{14}$/);
   expect(book.pages).toBeGreaterThan(1);
-  expect(book.annotations).toHaveLength(1);
-  expect(book.annotations[0]).toMatchObject({ kind: 'highlight', chapter: 0, note: 'Line one\nwith "quotes" and ünïcode' });
+  expect(book.annotations).toHaveLength(2);
+  expect(book.annotations[0]).toMatchObject({ kind: 'highlight', style: 'yellow', chapter: 0, note: 'Line one\nwith "quotes" and ünïcode' });
+  expect(book.annotations[1]).toMatchObject({ kind: 'highlight', style: 'underline', chapter: 0, text: 'lorem' });
   expect(errors).toEqual([]);
 });
 
@@ -81,7 +84,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   await expect.poll(async () => (await place(page)).p).toBe(4);
   const at = await place(page);
   await selectText(page, 0, 8);
-  await selectionButton(page, 'Highlight').click();
+  await selectionButton(page, 'Orange').click();
   const hl = await marks(page);
   await openSettings(page);
   const plain = await bg(page);
@@ -110,6 +113,8 @@ test('a backup restored after a reset brings everything back, and a book importe
   await openBook(page, 'Kept Two');
   expect(await place(page)).toEqual(at);
   await expect.poll(() => marks(page)).toEqual(hl);
+  // in its style
+  expect(await page.evaluate(() => CSS.highlights.has('bats-mark-3'))).toBe(true);
   // and the settings came back with the rest
   expect(await bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).textAlign)).toBe('justify');
 });

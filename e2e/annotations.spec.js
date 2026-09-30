@@ -110,6 +110,88 @@ test('the export is Markdown with the book, its highlights and notes', async ({ 
   expect(md).toMatch(/> Para 1\.0[^\n]*\n\n— Annotations Tests, \*Marked Up\*, Chapter 1\n\n\*\*Note:\*\* Exported note/);
 });
 
+// every mark set on the page, with the text of each range in it
+const markSets = page => page.evaluate(() =>
+  Object.fromEntries([...CSS.highlights].map(([name, h]) => [name, [...h].map(r => r.toString())])));
+
+test('a highlight is yellow, orange or underlined: marked so, named in the list, filtered, and kept', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await selectText(page, 9, 14);
+  await selectionButton(page, 'Orange').click();
+  await selectText(page, 15, 20);
+  await selectionButton(page, 'Underline').click();
+  const expected = { 'bats-mark-1': ['Para 1.0'], 'bats-mark-3': ['lorem'], 'bats-mark-4': ['ipsum'] };
+  await expect.poll(() => markSets(page)).toEqual(expected);
+  // each is named by its style in words, not by its colour alone
+  await openPanel(page);
+  const rows = panel(page).getByRole('button', { name: /^(Yellow|Orange|Underlined).+/ });
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(0)).toContainText('Yellow');
+  await expect(rows.nth(1)).toContainText('Orange');
+  await expect(rows.nth(2)).toContainText('Underlined');
+  // one style's are listed on their own
+  const show = panel(page).getByRole('group', { name: 'Show' });
+  await show.getByRole('button', { name: 'Orange' }).click();
+  await expect(show.getByRole('button', { name: 'Orange' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('lorem');
+  await show.getByRole('button', { name: 'Underlined' }).click();
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('ipsum');
+  await show.getByRole('button', { name: 'All' }).click();
+  await expect(rows).toHaveCount(3);
+  await panel(page).getByRole('button', { name: 'Close' }).click();
+  // kept across a reload
+  await toLibrary(page);
+  await reload(page);
+  await openBook(page, 'Marked Up');
+  await expect.poll(() => markSets(page)).toEqual(expected);
+  expect(errors).toEqual([]);
+});
+
+test('the export names a highlight\'s style, unless it is yellow', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await selectText(page, 9, 14);
+  await selectionButton(page, 'Orange').click();
+  await selectText(page, 15, 20);
+  await selectionButton(page, 'Underline').click();
+  await openPanel(page);
+  const download = page.waitForEvent('download');
+  await panel(page).getByRole('button', { name: 'Export', exact: true }).click();
+  const md = readFileSync(await (await download).path(), 'utf8');
+  expect(md).toMatch(/> Para 1\.0\n\n— /);
+  expect(md).toMatch(/> lorem\n\n\*Orange highlight\*\n\n— /);
+  expect(md).toMatch(/> ipsum\n\n\*Underlined\*\n\n— /);
+});
+
+test('a bookmark can have a note, which is listed and exported', async ({ page }) => {
+  await start(page);
+  await readBook(page, book);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  await page.keyboard.press('b');
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await dialog(page, 'Contents').getByRole('tab', { name: 'Bookmarks' }).click();
+  const list = dialog(page, 'Contents').getByRole('tabpanel', { name: 'Bookmarks' });
+  await list.getByRole('button', { name: 'Add note' }).click();
+  await writeNote(page, 'Come back here');
+  await expect(list).toContainText('Come back here');
+  await expect(list.getByRole('button', { name: 'Edit note' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await openPanel(page);
+  const download = page.waitForEvent('download');
+  await panel(page).getByRole('button', { name: 'Export', exact: true }).click();
+  const md = readFileSync(await (await download).path(), 'utf8');
+  expect(md).toMatch(/\*\*Bookmark:\*\* [^\n]+\n\n\*\*Note:\*\* Come back here/);
+});
+
 test('the star bookmarks the page, lists it, and unbookmarks it', async ({ page }) => {
   await start(page);
   await readBook(page, book);

@@ -155,6 +155,9 @@ fn _reader (): void = let
   val () = ui_el("reader", "selection-toolbar", TDiv, "seltb")
   val () = ui_named("selection-toolbar", NToolbar, "Selection")
   val () = ui_text_btn("selection-toolbar", "selection-highlight", "btn", "Highlight")
+  (* the other highlight styles, each one tap *)
+  val () = ui_text_btn("selection-toolbar", "selection-orange", "btn", "Orange")
+  val () = ui_text_btn("selection-toolbar", "selection-underline", "btn", "Underline")
   val () = ui_text_btn("selection-toolbar", "selection-note", "btn", "Note")
   val () = ui_text_btn("selection-toolbar", "selection-copy", "btn", "Copy")
   (* the selection looked up in a dictionary of the book's language (its
@@ -320,6 +323,13 @@ fn _annotations (): void = let
   val () = ui_text("annotations-spacer", "Annotations")
   val () = ui_text_btn("annotations-header", "annotations-export", "btn", "Export")
   val () = ui_icon_btn("annotations-header", "annotations-close", "ibtn", IcClose, "Close")
+  (* which highlights are listed: every one, or one style's *)
+  val () = ui_el("annotations-panel", "annotations-filter", TDiv, "seg afilter")
+  val () = ui_named("annotations-filter", NGroup, "Show")
+  val () = ui_text_btn("annotations-filter", "filter-all", "sbtn", "All")
+  val () = ui_text_btn("annotations-filter", "filter-yellow", "sbtn", "Yellow")
+  val () = ui_text_btn("annotations-filter", "filter-orange", "sbtn", "Orange")
+  val () = ui_text_btn("annotations-filter", "filter-underlined", "sbtn", "Underlined")
   val () = ui_el("annotations-panel", "annotations-list", TDiv, "plist")
 in _hide("annotations-panel") end
 
