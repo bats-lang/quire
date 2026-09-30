@@ -896,6 +896,8 @@ in _record_position() end
    own step otherwise) *)
 fn _show_page_down {t:pos}{p:nat | p < t}{c,tc:nat}
   (p: int p, t: int t, c: int c, tc: int tc, top: Int): void = let
+  (* auto turns to Night when a page turned passes 22:00 *)
+  val () = set_theme_recheck()
   val () = reading_set(@(p, t, c, tc))
   val () = window_show(p, t)
   val page = p

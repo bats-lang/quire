@@ -651,3 +651,67 @@ test('a collection is made from a book\'s menu, shows its books, and is renamed 
   await expect(card(page, 'Left Out')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+// Installing: the page's script (pwa) marks the page pwa-can-install
+// where the browser offers to, and pwa-ios-browser on iOS Safari
+// outside the Home Screen; here the tests mark it
+const markPage = (page, name) => page.evaluate(n => document.documentElement.classList.add(n), name);
+
+test('Install Quire is offered in the library menu only where the browser can install it', async ({ page }) => {
+  const errors = await start(page);
+  await libraryMenu(page);
+  const install = menuItem(page, 'Install Quire');
+  await expect(install).toBeHidden();
+  await page.keyboard.press('Escape');
+  await markPage(page, 'pwa-can-install');
+  await libraryMenu(page);
+  await expect(install).toBeVisible();
+  await expect(install).toHaveAttribute('data-pwa-install', 'y');
+  await install.click();
+  await expect(page.getByRole('menu', { name: 'Library menu' })).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('on iOS Safari, once there is a book, a hint says to add Quire to the Home Screen, until it is dismissed', async ({ page }) => {
+  const errors = await start(page);
+  await markPage(page, 'pwa-ios-browser');
+  const hint = page.getByRole('status').filter({ hasText: 'Add Quire to your Home Screen' });
+  // not before there is a book
+  await expect(hint).toBeHidden();
+  await importFiles(page, [epubFile({ title: 'Kept', author: 'A' })], 1);
+  await expect(hint).toBeVisible();
+  await expect(hint).toContainText('tap Share, then Add to Home Screen');
+  await hint.getByRole('button', { name: 'Got it' }).click();
+  await expect(hint).toBeHidden();
+  // never again
+  await reload(page);
+  await expect(card(page, 'Kept')).toBeVisible();
+  await markPage(page, 'pwa-ios-browser');
+  await expect(hint).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('elsewhere, the Home Screen hint is not shown', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Kept', author: 'A' })], 1);
+  await expect(page.getByText('Add Quire to your Home Screen')).toBeHidden();
+});
+
+test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }) => {
+  const errors = await start(page);
+  const kept = menuItem(page, 'Your books are kept');
+  const atRisk = menuItem(page, 'Your books may be cleared');
+  // as the page's script finds it: here, at risk
+  await page.evaluate(() => { const c = document.documentElement.classList; c.remove('pwa-storage-kept'); c.add('pwa-storage-at-risk'); });
+  await libraryMenu(page);
+  await expect(kept).toBeHidden();
+  await atRisk.click();
+  await expect(dialog(page, 'Your books may be cleared')).toContainText('Keep your EPUB files');
+  await dialog(page, 'Your books may be cleared').getByRole('button', { name: 'OK' }).click();
+  await page.evaluate(() => document.documentElement.classList.replace('pwa-storage-at-risk', 'pwa-storage-kept'));
+  await libraryMenu(page);
+  await expect(atRisk).toBeHidden();
+  await kept.click();
+  await expect(dialog(page, 'Your books are kept')).toContainText('until you remove them');
+  expect(errors).toEqual([]);
+});

@@ -221,3 +221,31 @@ test('reset puts the defaults back', async ({ page }) => {
   expect(await style(page, 'textAlign')).toBe('start');
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });
+
+// Auto by the clock: the page's script (pwa) marks the night by the
+// local time, which the theme follows at the next page turn
+test.describe('auto at night', () => {
+  test.use({ timezoneId: 'Europe/Paris', colorScheme: 'light' });
+  test('auto turns to Night at 22:00 local time, at the next page turn, and back by morning', async ({ page }) => {
+    // 21:58 in Paris (UTC+2 in June)
+    await page.clock.install({ time: new Date('2026-06-01T19:58:00Z') });
+    await start(page);
+    await readBook(page, { title: 'Late', author: 'Settings Tests', rawChapters: chapters(1, 60) });
+    const theme = () => page.evaluate(() => document.getElementById('bats-root').className);
+    expect(await theme()).toContain('th-light');
+    await page.clock.runFor('03:00');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(theme).toContain('th-night');
+    // chosen, a theme is kept at night
+    await openSettings(page);
+    await choose(page, 'Sepia');
+    await expect.poll(theme).toContain('th-sepia');
+    await sheet(page).getByRole('group', { name: 'Theme' }).getByRole('button', { name: 'Auto', exact: true }).click();
+    await expect.poll(theme).toContain('th-night');
+    await page.keyboard.press('Escape');
+    // 07:01
+    await page.clock.runFor('09:00:00');
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(theme).toContain('th-light');
+  });
+});
