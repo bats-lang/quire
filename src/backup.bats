@@ -641,33 +641,33 @@ in
   end
 end
 
-(* The file input qbfi's file count, or the open promise of its first *)
+(* The file input backup-file's file count, or the open promise of its first *)
 fn _qbfi_count (): int = let
-  val ia = $A.alloc<byte>(4)
-  val () = $A.write_text(ia, 0, $A.text_lit("qbfi"), 4)
+  val ia = $A.alloc<byte>(11)
+  val () = $A.write_text(ia, 0, $A.text_lit("backup-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
-  val c = $BF.file_count(fb, 4)
+  val c = $BF.file_count(fb, 11)
   val () = $A.drop<byte>(fz, fb)
   val () = $A.free<byte>($A.thaw<byte>(fz))
 in c end
 
 fn _qbfi_open (): $P.promise_pending(Int) = let
-  val ia = $A.alloc<byte>(4)
-  val () = $A.write_text(ia, 0, $A.text_lit("qbfi"), 4)
+  val ia = $A.alloc<byte>(11)
+  val () = $A.write_text(ia, 0, $A.text_lit("backup-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
-  val p = $BF.file_open_at(fb, 4, 0)
+  val p = $BF.file_open_at(fb, 11, 0)
   val () = $A.drop<byte>(fz, fb)
   val () = $A.free<byte>($A.thaw<byte>(fz))
 in p end
 
-(* Restores the backup picked in the file input qbfi *)
+(* Restores the backup picked in the file input backup-file *)
 #pub fn backup_import (): void
 
 implement backup_import () =
   if _qbfi_count() <= 0 then ()
   else $P.discard<int>($P.and_then<Int><int>($P.vow(_qbfi_open()), lam(h) => let
     (* the file is taken from the input: its choice is cleared *)
-    val () = ui_file_input("qlmi", "qbfi", "Import backup", ".json,application/json", false)
+    val () = ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
   in
     case+ $FI.claim(h) of
     | ~$R.none() => let

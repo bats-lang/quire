@@ -24,9 +24,9 @@ staload "ui.sats"
 
 fn _id (l: layer): [k:pos | k < 256] string k =
   case+ l of
-  | LBookMenu() => "qctx" | LLibraryMenu() => "qlmn" | LBookInfo() => "qinf"
-  | LContents() => "qtoc" | LTypography() => "qspn" | LSearch() => "qsrp"
-  | LAnnotations() => "qanp" | LNote() => "qnte" | LImage() => "qimv"
+  | LBookMenu() => "card-menu" | LLibraryMenu() => "library-menu" | LBookInfo() => "book-info"
+  | LContents() => "contents-panel" | LTypography() => "typography-panel" | LSearch() => "search-panel"
+  | LAnnotations() => "annotations-panel" | LNote() => "footnote" | LImage() => "image-viewer"
 
 fn _n (l: layer): int =
   case+ l of

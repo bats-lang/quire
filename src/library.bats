@@ -888,7 +888,7 @@ fn _card {i:nat} (b: !book, i: int i, gen: int): void = let
   (* the row: the card, which opens the book, then its More button,
      which opens the book menu; the row is named by the book's title *)
   val @(ri, rl) = nid_make("kr", i)
-  val () = ui_add_n("qlst", ri, rl, TDiv)
+  val () = ui_add_n("book-list", ri, rl, TDiv)
   val @(ri, rl) = nid_make("kr", i)
   val () = ui_attr_n(ri, rl, AClass, "cardrow")
   val @(pi, pl) = nid_make("kr", i)
@@ -981,7 +981,7 @@ fun _cards {k:nat}{i:nat} .<k>. (bs: !books(k), i: int i, shelf: int, q: !query,
 implement lib_render () = let
   val () = !_render_gen := !_render_gen + 1
   val gen = !_render_gen
-  val () = ui_clear("qlst")
+  val () = ui_clear("book-list")
   val shelf = !_shelf
   val q = query_take()
   val c = lib_take()
@@ -991,14 +991,14 @@ implement lib_render () = let
   val () = lib_put(c)
   val has_q = (case+ q of QuerySome(_, _) => true | QueryNone() => false): bool
   val () = query_put(q)
-  val () = ui_show("qelb", shown = 0)
+  val () = ui_show("library-empty", shown = 0)
 in
   if shown > 0 then ()
-  else if has_q then ui_text("qelb", "No books match")
-  else if shelf = 1 then ui_text("qelb", "No hidden books")
-  else if shelf = 2 then ui_text("qelb", "No archived books")
-  else if shelf = 3 then ui_text("qelb", "The Trash is empty")
-  else ui_text("qelb", "Import an EPUB file to start reading.")
+  else if has_q then ui_text("library-empty", "No books match")
+  else if shelf = 1 then ui_text("library-empty", "No hidden books")
+  else if shelf = 2 then ui_text("library-empty", "No archived books")
+  else if shelf = 3 then ui_text("library-empty", "The Trash is empty")
+  else ui_text("library-empty", "Import an EPUB file to start reading.")
 end
 
 (* Shows shelf s (0 the shelf, 1 hidden, 2 archived, 3 the Trash) *)
@@ -1007,20 +1007,20 @@ end
 implement lib_shelf_set (s) = let
   val () = !_shelf := s
 in
-  if s = 1 then ui_text("qshf", "Hidden")
-  else if s = 2 then ui_text("qshf", "Archived")
-  else if s = 3 then ui_text("qshf", "Trash")
-  else ui_text("qshf", "Library")
+  if s = 1 then ui_text("shelf-button", "Hidden")
+  else if s = 2 then ui_text("shelf-button", "Archived")
+  else if s = 3 then ui_text("shelf-button", "Trash")
+  else ui_text("shelf-button", "Library")
 end
 
 (* The sort button's label for order o *)
 #pub fn lib_sort_label (o: int): void
 
 implement lib_sort_label (o) =
-  if o = 1 then ui_text("qsrt", "Sort: Title")
-  else if o = 2 then ui_text("qsrt", "Sort: Author")
-  else if o = 3 then ui_text("qsrt", "Sort: Date added")
-  else ui_text("qsrt", "Sort: Last opened")
+  if o = 1 then ui_text("sort-button", "Sort: Title")
+  else if o = 2 then ui_text("sort-button", "Sort: Author")
+  else if o = 3 then ui_text("sort-button", "Sort: Date added")
+  else ui_text("sort-button", "Sort: Last opened")
 
 (* ============================================================
    Dates and sizes, as text

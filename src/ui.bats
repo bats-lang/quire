@@ -538,7 +538,7 @@ fn _glyph (ic: icon): [k:pos | k < 256] string k =
 (* The menu item that asks about h: its id and its label *)
 fn _harm_item (h: harm): @([k:pos | k < 256] string k, [k:pos | k < 256] string k) =
   case+ h of
-  | HEmptyTrash() => @("qlmt", "Empty Trash")
+  | HEmptyTrash() => @("menu-empty-trash", "Empty Trash")
 
 (* The id of h's menu item, for its click: the item asks about h *)
 #pub fn ui_harm_id (h: harm): [k:pos | k < 256] string k

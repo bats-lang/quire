@@ -65,18 +65,18 @@ fn _buttons (a: ask): @(lit, lit, tone) =
 fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void = let
   val () = !_pending := Pending(a, yes, no)
   val @(b1, b2, t) = _buttons(a)
-  val () = ui_text("qmtt", title)
-  val () = ui_text("qmb1", b1)
-  val () = ui_text("qmb2", b2)
+  val () = ui_text("dialog-title", title)
+  val () = ui_text("dialog-button1", b1)
+  val () = ui_text("dialog-button2", b2)
   val () = (case+ t of
-    | Danger(_) => ui_class("qmb2", "btn")
-    | Plain() => ui_class("qmb2", "btn btn-p"))
-  val () = ui_tone("qmb2", t)
-  val () = ui_show("qmb2", string_get_at(b2, 0) <> '-')
-  val () = ui_show("qmtx", true)
-  val () = ui_show("qmta", false)
-  val () = ui_show("qmod", true)
-in ui_focus("qmb1") end
+    | Danger(_) => ui_class("dialog-button2", "btn")
+    | Plain() => ui_class("dialog-button2", "btn btn-p"))
+  val () = ui_tone("dialog-button2", t)
+  val () = ui_show("dialog-button2", string_get_at(b2, 0) <> '-')
+  val () = ui_show("dialog-text", true)
+  val () = ui_show("dialog-note", false)
+  val () = ui_show("dialog", true)
+in ui_focus("dialog-button1") end
 
 (* Opens the dialog asking q, with its title: yes runs on its second
    button, no on its first (or Escape, or a click outside) *)
@@ -92,28 +92,28 @@ implement modal_inform (title) = _show(Harmless(QInform()), title, _none, _none)
 implement modal_confirm (h, yes) = let
   val @(title, text, _) = _harm_words(h)
   val () = _show(Harmful(h), title, yes, _none)
-in ui_text("qmtx", text) end
+in ui_text("dialog-text", text) end
 
 (* The dialog's text: buf[0, k) *)
 #pub fn modal_text {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (buf: $A.arr(byte, l, n), k: int k): void
-implement modal_text (buf, k) = ui_text_buf("qmtx", buf, k)
+implement modal_text (buf, k) = ui_text_buf("dialog-text", buf, k)
 
 #pub fn modal_text_lit {nt:pos | nt < 256} (t: string nt): void
-implement modal_text_lit (t) = ui_text("qmtx", t)
+implement modal_text_lit (t) = ui_text("dialog-text", t)
 
 (* Shows the dialog's text area (for a note) instead of its text *)
 #pub fn modal_textarea (): void
 implement modal_textarea () = let
-  val () = ui_show("qmtx", false)
-  val () = ui_show("qmta", true)
-in ui_focus("qmta") end
+  val () = ui_show("dialog-text", false)
+  val () = ui_show("dialog-note", true)
+in ui_focus("dialog-note") end
 
 (* Closes the dialog and runs what its answer does: yes for the second
    button (second), no otherwise *)
 fn _answer (second: bool): void = let
   val+ Pending(_, yes, no) = !_pending
   val () = !_pending := Pending(AskNothing(), _none, _none)
-  val () = ui_show("qmod", false)
+  val () = ui_show("dialog", false)
 in if second then yes() else no() end
 
 (* Closes the dialog as Escape does: its first answer (no), never its
@@ -134,12 +134,12 @@ fn _target_is {l:agz}{n:nat}{sn:nat} (b: !$A.arr(byte, l, n), n: int n, s: strin
 
 (* The dialog's listener: its buttons and a click outside its box *)
 #pub fn modal_listen {n:nat} (r: regs(n)): regs(n + 1)
-implement modal_listen (r) = RCons(r, OnEl("qmod"), "click", lam(h) =>
+implement modal_listen (r) = RCons(r, OnEl("dialog"), "click", lam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(b, n) => let
-      val second = _target_is(b, n, "qmb2")
-      val first = (if _target_is(b, n, "qmb1") then true else _target_is(b, n, "qmod")): bool
+      val second = _target_is(b, n, "dialog-button2")
+      val first = (if _target_is(b, n, "dialog-button1") then true else _target_is(b, n, "dialog")): bool
       val () = $A.free<byte>(b)
     in
       if second then let val () = _answer(true) in 0 end

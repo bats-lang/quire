@@ -12,6 +12,17 @@ guidelines say) and best judgement, written down where it is decided
 proofs, the static tests, the e2e suite) still hold: when a choice
 would break one, choose another that keeps it.
 
+## Names are words
+
+Element ids, numbered-id prefixes (up to 16 bytes), variables, static
+indices and functions are named by what they are, in words:
+`search-close`, `toc-row12`, `query`, `query_len`, not `qsrz`, `qe`,
+`q`, `qn`. Nothing is short of bytes, and terse names collide: four
+new ids once took existing ones, and a rename of the id `qn` also hit
+a query length of the same name. A loop index (`i`, `j`) or a
+conventional pair (`l` and `n` for an array's location and size) may
+stay short within a few lines.
+
 ## To do: book memory in a rolling window of page arenas
 
 Partly done: the window exists (`src/pages.bats`), and the buffers a
@@ -232,10 +243,10 @@ dialog if one is open, and otherwise closes the top of that stack
 
 The page turns by a horizontal drag, recognized by the gestures package
 (its classifier and drag state machine are proven there): bridge's
-`listen_gestures` on the reader view (`OnGestures("qrvw")`) sends batched
+`listen_gestures` on the reader view (`OnGestures("reader")`) sends batched
 pointer records, `_gesture_batch` in `src/bin/quire.bats` feeds them to
 the recognizer, a pan scrolls the page with the finger (`reader_pan`), a
-commit turns it and a cancel puts it back. The page (`qcnt`, region 1,
+commit turns it and a cancel puts it back. The page (`page`, region 1,
 `data-gesture-region`) takes touch and pen only, so a mouse drag still
 selects text; its CSS touch-action comes from the same axes the region
 is declared with (`page_turn_axes` in `src/style.bats`). A drag's end

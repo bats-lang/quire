@@ -27,7 +27,7 @@ val _serial = ref<int>(0)
 (* How long the toast stays, in milliseconds *)
 #define SHOWN 8000
 
-fn _hide (): void = ui_show("qund", false)
+fn _hide (): void = ui_show("undo-toast", false)
 
 (* The offer shown, made final *)
 fn _settle (): void =
@@ -47,8 +47,8 @@ implement undo_offer (text, undo, final) = let
   val s = !_serial + 1
   val () = !_serial := s
   val () = !_offer := Offer(s, undo, final)
-  val () = ui_text("qunt", text)
-  val () = ui_show("qund", true)
+  val () = ui_text("undo-text", text)
+  val () = ui_show("undo-toast", true)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(SHOWN)), lam(_) =>
     case+ !_offer of
@@ -87,11 +87,11 @@ fun _id_is {l:agz}{n:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
 
 (* The toast's listener: its Undo button *)
 #pub fn undo_listen {n:nat} (r: regs(n)): regs(n + 1)
-implement undo_listen (r) = RCons(r, OnEl("qund"), "click", lam(h) =>
+implement undo_listen (r) = RCons(r, OnEl("undo-toast"), "click", lam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(b, n) => let
-      val hit = _id_is(b, n, "qunb", 4, 0)
+      val hit = _id_is(b, n, "undo-button", 11, 0)
       val () = $A.free<byte>(b)
     in if hit then let val () = _undo() in 0 end else 0 end)
 

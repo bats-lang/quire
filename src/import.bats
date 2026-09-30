@@ -117,25 +117,25 @@ fn _error (): void = let
   val buf = $A.alloc<byte>(512)
   val off = _name_into(buf)
   val off = _puts(buf, off, " could not be imported. Quire supports .epub files without DRM.")
-  val () = ui_text_buf("qert", buf, off)
-  val () = ui_show("qerr", true)
-in ui_show("qimp", false) end
+  val () = ui_text_buf("error-text", buf, off)
+  val () = ui_show("error-banner", true)
+in ui_show("import-progress", false) end
 
 (* The import card: stage text and progress in percent *)
 fn _stage {nt:pos | nt < 256} (t: string nt, pct: [p:nat | p <= 100] int p): void = let
-  val () = ui_show("qimp", true)
-  val () = ui_text("qims", t)
-in ui_place("qimf", PWidth, pct * 10) end
+  val () = ui_show("import-progress", true)
+  val () = ui_text("import-status", t)
+in ui_place("import-fill", PWidth, pct * 10) end
 
 fn _stage_name (): void =
   case+ _name_take() of
   | ~FName(a, n) => let
       val b = $A.alloc<byte>(n)
       val () = _copy_in(a, n, b, 0, 0)
-      val () = ui_text_buf("qimn", b, n)
+      val () = ui_text_buf("import-count", b, n)
     in _name_put(FName(a, n)) end
   | ~NoFName() => let
-      val () = ui_text("qimn", "EPUB")
+      val () = ui_text("import-count", "EPUB")
     in _name_put(NoFName()) end
 
 (* ============================================================
@@ -416,7 +416,7 @@ end
 (* The answer to "already in the library": replace (true) or skip *)
 fn _dup_answer (replace: bool): void = let
   (* skipped: the file's import card goes at once *)
-  val () = (if replace then () else ui_show("qimp", false))
+  val () = (if replace then () else ui_show("import-progress", false))
 in
   case+ _dup_take() of
   | ~Asked(f, n, h1, h2, i, r) => let
@@ -446,7 +446,7 @@ in
       val () = _stage("Adding to library", 90)
       val () = open_key_set(r)
       val () = _library_changed()
-      val () = ui_show("qimp", false)
+      val () = ui_show("import-progress", false)
       val () = _name_put(NoFName())
     in $P.ret<Int>(r) end)
 end
@@ -463,7 +463,7 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
       val () = _name_of(f)
       val () = _stage_name()
       val () = _stage("Reading file", 10)
-      val () = ui_show("qerr", false)
+      val () = ui_show("error-banner", false)
     in
       if n <= 0 then let
         val () = $FI.close(f)
@@ -494,35 +494,35 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
               $P.and_then<Int><Int>($P.vow(p), lam(ans) =>
                 case+ _dup_take() of
                 | ~NoDup() => let
-                    val () = ui_show("qimp", false)
+                    val () = ui_show("import-progress", false)
                   in $P.ret<Int>(~1) end
                 | ~Asked(f2, _, _, _, _, r2) => let
                     val () = $FI.close(f2)
                     val () = $P.resolve<Int>(r2, 1)
-                    val () = ui_show("qimp", false)
+                    val () = ui_show("import-progress", false)
                   in $P.ret<Int>(~1) end
                 | ~Answered(f2, n2, g1, g2, j) =>
                   if ans = 2 then _import_go(f2, n2, g1, g2, j)
                   else let
                     val () = $FI.close(f2)
-                    val () = ui_show("qimp", false)
+                    val () = ui_show("import-progress", false)
                   in $P.ret<Int>(0) end)
             end)
       end
     end
 
-(* Imports files i to c - 1 of source src (0 the file input qfin, 1 the
+(* Imports files i to c - 1 of source src (0 the file input import-file, 1 the
    last drop), one after another *)
 fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): void =
   if i >= c then
     (* the input's files are all read: its choice is cleared *)
-    (if src = 0 then ui_file_input("qibn", "qfin", "Import EPUB", ".epub,application/epub+zip", true) else ())
+    (if src = 0 then ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true) else ())
   else let
     val p = (if src = 0 then let
-        val ia = $A.alloc<byte>(4)
-        val () = $A.write_text(ia, 0, $A.text_lit("qfin"), 4)
+        val ia = $A.alloc<byte>(11)
+        val () = $A.write_text(ia, 0, $A.text_lit("import-file"), 11)
         val @(fz, fb) = $A.freeze<byte>(ia)
-        val p = $BF.file_open_at(fb, 4, i)
+        val p = $BF.file_open_at(fb, 11, i)
         val () = $A.drop<byte>(fz, fb)
         val () = $A.free<byte>($A.thaw<byte>(fz))
       in p end
@@ -534,14 +534,14 @@ fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): voi
       in $P.ret<Int>(0) end)))
   end
 
-(* Imports the files picked in the file input qfin *)
+(* Imports the files picked in the file input import-file *)
 #pub fn import_picked (): void
 
 implement import_picked () = let
-  val ia = $A.alloc<byte>(4)
-  val () = $A.write_text(ia, 0, $A.text_lit("qfin"), 4)
+  val ia = $A.alloc<byte>(11)
+  val () = $A.write_text(ia, 0, $A.text_lit("import-file"), 11)
   val @(fz, fb) = $A.freeze<byte>(ia)
-  val c = $BF.file_count(fb, 4)
+  val c = $BF.file_count(fb, 11)
   val () = $A.drop<byte>(fz, fb)
   val () = $A.free<byte>($A.thaw<byte>(fz))
 in _import_seq(0, 0, c) end

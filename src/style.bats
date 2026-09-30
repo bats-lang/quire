@@ -1227,7 +1227,7 @@ fn _g_3_reader {r:nat | r >= 6300} (sh: sheet(r, 0)): [q:nat | q >= r - 6300] sh
   val sh = lay(sh, BoxSizing(), "border-box")
   val sh = close(sh)
   (* a paragraph's alignment, hyphenation and the space after it are
-     the reader's settings (settings.bats, in qdyn) *)
+     the reader's settings (settings.bats, in style-type) *)
   val sh = rule(sh, ".caf p")
   val sh = lay(sh, Margin(), "0 auto .8em")
   val sh = close(sh)

@@ -230,7 +230,7 @@ in $A.free<byte>($A.thaw<byte>(bf)) end
 
 fn _show_library (): void = let
   val () = !_view := 0
-  val () = ui_show("qrvw", false)
+  val () = ui_show("reader", false)
   (* the screen may sleep again, as it does outside the reader *)
   val () = $WN.keep_awake(false)
   val () = layer_close(LTypography())
@@ -239,7 +239,7 @@ fn _show_library (): void = let
   val () = layer_close(LAnnotations())
   val () = layer_close(LNote())
   val () = layer_close(LImage())
-  val () = ui_show("qllc", true)
+  val () = ui_show("library", true)
   (* a reload now comes back here *)
   val () = _view_save(~1)
   val () = reader_search_stop()
@@ -250,14 +250,14 @@ in lib_render() end
 (* The reader's bars: shown, and hidden again after 5 seconds *)
 fn _chrome_set_off (): void = let
   val () = !_chrome := false
-in ui_attr("qrvw", AClass, "rv chrome-off") end
+in ui_attr("reader", AClass, "rv chrome-off") end
 
 fn _chrome_set (on: bool): void = let
   (* bringing the bars up leaves the place a jump landed on: the back
      button goes *)
   val () = (if on && ~(!_chrome) then reader_stack_clear() else ())
   val () = !_chrome := on
-  val () = (if on then ui_attr("qrvw", AClass, "rv") else ui_attr("qrvw", AClass, "rv chrome-off"))
+  val () = (if on then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
   val () = !_chrome_gen := !_chrome_gen + 1
   val gen = !_chrome_gen
 in
@@ -269,9 +269,9 @@ end
 
 fn _show_reader (): void = let
   val () = !_view := 1
-  val () = ui_show("qllc", false)
+  val () = ui_show("library", false)
   val () = layer_close(LBookInfo())
-  val () = ui_show("qrvw", true)
+  val () = ui_show("reader", true)
   (* A reader does not touch the screen for a page's length: it stays
      awake while the book is open *)
   val () = $WN.keep_awake(true)
@@ -284,7 +284,7 @@ fn _show_reader (): void = let
   val () = $A.drop<byte>(f, b)
   val () = $A.free<byte>($A.thaw<byte>(f))
   val () = _chrome_set(true)
-in ui_focus("qcnt") end
+in ui_focus("page") end
 
 (* Opens library book i where it was left *)
 fn _open_book {i:int} (i: int i): void =
@@ -302,7 +302,7 @@ fn _open_book {i:int} (i: int i): void =
       val () = reader_stack_clear()
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
-      val () = ui_text("qcht", "Loading...")
+      val () = ui_text("chapter-title", "Loading...")
       val ch = x.ch
       val pg = x.pg
       val anchor = x.anchor
@@ -315,8 +315,8 @@ fn _open_book {i:int} (i: int i): void =
         $P.discard<int>($P.and_then<Int><int>(open_stored(x.key, h1, h2), lam(r) =>
           if r < 0 then let
             val () = _show_library()
-            val () = ui_text("qert", "This book's file could not be read. Import it again.")
-            val () = ui_show("qerr", true)
+            val () = ui_text("error-text", "This book's file could not be read. Import it again.")
+            val () = ui_show("error-banner", true)
           in $P.ret<int>(r) end
           else $P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor))))
     end
@@ -434,9 +434,9 @@ fn _menu_open {i:int} (i: int i): void =
   | ~$R.none() => ()
   | ~$R.some(x) => let
       val () = !_menu_idx := i
-      val () = _shelf_labels("qcmh", "qcma", "qcmd", x.shelf)
+      val () = _shelf_labels("card-menu-hide", "card-menu-archive", "card-menu-trash", x.shelf)
       val () = layer_open(LBookMenu())
-    in ui_focus("qcmi") end
+    in ui_focus("card-menu-info") end
 
 (* "N% · Ch C of T" for x in b; its length *)
 fn _progress_text {l:agz} (b: !$A.arr(byte, l, 64), x: bnums): [k:nat | k <= 64] int k = let
@@ -465,31 +465,31 @@ fn _info_open {i:int} (i: int i): void =
   | ~$R.some(x) => let
       val () = !_menu_idx := i
       val @(t, tn) = lib_text(i, 0)
-      val () = ui_text_buf("qint", t, tn)
+      val () = ui_text_buf("book-info-title", t, tn)
       val @(a, an) = lib_text(i, 1)
-      val () = ui_text_buf("qina", a, an)
+      val () = ui_text_buf("book-info-author", a, an)
       (* progress: "N% · chapter C of T" *)
       val b = $A.alloc<byte>(64)
       val off = _progress_text(b, x)
-      val () = ui_text_buf("qivp", b, off)
+      val () = ui_text_buf("info-progress", b, off)
       val d = $A.alloc<byte>(32)
       val dk = date_text(d, x.added)
-      val () = ui_text_buf("qiva", d, dk)
+      val () = ui_text_buf("info-added", d, dk)
       val () = (if x.opened > 0 then let
           val d = $A.alloc<byte>(32)
           val dk = date_text(d, x.opened)
-        in ui_text_buf("qivl", d, dk) end
-        else ui_text("qivl", "Never"))
+        in ui_text_buf("info-last-read", d, dk) end
+        else ui_text("info-last-read", "Never"))
       val z = $A.alloc<byte>(32)
       val zk = size_text(z, x.fsz)
-      val () = ui_text_buf("qivs", z, zk)
-      val () = _shelf_labels("qinh", "qinr", "qind", x.shelf)
-      val () = ui_attr("qinc", ASrc, "data:,")
-      val () = (if x.cover > 0 then lib_show_cover_in("qinc", x.h1, x.h2, x.cover) else ())
+      val () = ui_text_buf("info-size", z, zk)
+      val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", x.shelf)
+      val () = ui_attr("book-info-cover", ASrc, "data:,")
+      val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.h1, x.h2, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
-      val () = ui_show("qinc", x.cover > 0)
+      val () = ui_show("book-info-cover", x.cover > 0)
       val () = layer_open(LBookInfo())
-    in ui_focus("qinx") end
+    in ui_focus("book-info-back") end
 
 (* A book menu or info view action on book i: 1 hide, unhide or (from
    the Trash) restore; 2 archive, or say how to restore; 3 move to the
@@ -701,21 +701,21 @@ end
 
 fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
   (* import *)
-  val r = RCons(r, OnEl("qibn"), "change", lam(_) => let val () = import_picked() in 0 end)
+  val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
-  val r = RCons(r, OnEl("qllc"), "dragover", lam(_) => let
+  val r = RCons(r, OnEl("library"), "dragover", lam(_) => let
       val () = $EV.prevent_default()
-    in let val () = ui_attr("qllc", AClass, "lib drag") in 0 end end)
-  val r = RCons(r, OnEl("qllc"), "dragleave", lam(_) => let
-      val () = ui_attr("qllc", AClass, "lib")
+    in let val () = ui_attr("library", AClass, "lib drag") in 0 end end)
+  val r = RCons(r, OnEl("library"), "dragleave", lam(_) => let
+      val () = ui_attr("library", AClass, "lib")
     in 0 end)
-  val r = RCons(r, OnEl("qllc"), "drop", lam(_) => let
+  val r = RCons(r, OnEl("library"), "drop", lam(_) => let
       val () = $EV.prevent_default()
-      val () = ui_attr("qllc", AClass, "lib")
+      val () = ui_attr("library", AClass, "lib")
       val () = import_dropped()
     in 0 end)
   (* the cards: open, and the book menu *)
-  val r = RCons(r, OnEl("qlst"), "click", lam(h) => let
+  val r = RCons(r, OnEl("book-list"), "click", lam(h) => let
       val t = _target(h)
       val i = _row_of(t, "k")
       val m = _row_of(t, "km")
@@ -725,147 +725,147 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 16) = let
       else if m >= 0 then let val () = _menu_open(m) in 0 end
       else 0
     end)
-  val r = RCons(r, OnEl("qlst"), "contextmenu", lam(h) => let
+  val r = RCons(r, OnEl("book-list"), "contextmenu", lam(h) => let
       val () = $EV.prevent_default()
       val i = _target_num(h, "k")
     in if i >= 0 then let val () = _menu_open(i) in 0 end else 0 end)
-  val r = RCons(r, OnEl("qctx"), "click", lam(h) => let
+  val r = RCons(r, OnEl("card-menu"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
       val () = layer_close(LBookMenu())
       val () = (if i >= 0 then
-          (if _is(t, "qcmi") then _info_open(i)
-           else if _is(t, "qcmh") then _book_action(i, 1)
-           else if _is(t, "qcma") then _book_action(i, 2)
-           else if _is(t, "qcmd") then _book_action(i, 3)
+          (if _is(t, "card-menu-info") then _info_open(i)
+           else if _is(t, "card-menu-hide") then _book_action(i, 1)
+           else if _is(t, "card-menu-archive") then _book_action(i, 2)
+           else if _is(t, "card-menu-trash") then _book_action(i, 3)
            else ()) else ())
     in let val () = _target_free(t) in 0 end end)
   (* the info view *)
-  val r = RCons(r, OnEl("qinf"), "click", lam(h) => let
+  val r = RCons(r, OnEl("book-info"), "click", lam(h) => let
       val t = _target(h)
       val i = !_menu_idx
-      val () = (if _is(t, "qinx") then layer_close(LBookInfo())
+      val () = (if _is(t, "book-info-back") then layer_close(LBookInfo())
         else if i < 0 then ()
-        else if _is(t, "qinh") then let val () = layer_close(LBookInfo()) in _book_action(i, 1) end
-        else if _is(t, "qinr") then let val () = layer_close(LBookInfo()) in _book_action(i, 2) end
-        else if _is(t, "qind") then _book_action(i, 3)
+        else if _is(t, "book-info-hide") then let val () = layer_close(LBookInfo()) in _book_action(i, 1) end
+        else if _is(t, "book-info-archive") then let val () = layer_close(LBookInfo()) in _book_action(i, 2) end
+        else if _is(t, "book-info-trash") then _book_action(i, 3)
         else ())
     in let val () = _target_free(t) in 0 end end)
   (* sort and shelf *)
-  val r = RCons(r, OnEl("qsrt"), "click", lam(_) => let
+  val r = RCons(r, OnEl("sort-button"), "click", lam(_) => let
       val o = lib_sort_get()
       val o = (if o >= 3 then 0 else o + 1): int
       val () = lib_sort(o)
       val () = lib_sort_label(o)
       val () = set_apply(o)
     in let val () = lib_render() in 0 end end)
-  val r = RCons(r, OnEl("qshf"), "click", lam(_) => let
+  val r = RCons(r, OnEl("shelf-button"), "click", lam(_) => let
       val s = lib_shelf_get()
       val () = lib_shelf_set((if s >= 3 then 0 else s + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
-  val r = RCons(r, OnEl("qlsb"), "input", lam(h) => let
+  val r = RCons(r, OnEl("library-search-box"), "input", lam(h) => let
       val @(q, n) = _input_text(h)
-      val () = ui_show("qlsx", n > 0)
+      val () = ui_show("library-search-clear", n > 0)
       val () = lib_query_set(q, n)
     in let val () = lib_render() in 0 end end)
-  val r = RCons(r, OnEl("qlsb"), "click", lam(h) => let
+  val r = RCons(r, OnEl("library-search-box"), "click", lam(h) => let
       val t = _target(h)
-      val clear = _is(t, "qlsx")
+      val clear = _is(t, "library-search-clear")
       val () = _target_free(t)
     in
       if clear then let
-        val () = ui_clear("qlsb")
-        val () = ui_field("qlsb", "qlsq", FSearch, "search", "Search the library")
-        val () = ui_icon_btn("qlsb", "qlsx", "ibtn sclear", IcClose, "Clear search")
-        val () = ui_show("qlsx", false)
+        val () = ui_clear("library-search-box")
+        val () = ui_field("library-search-box", "library-search", FSearch, "search", "Search the library")
+        val () = ui_icon_btn("library-search-box", "library-search-clear", "ibtn sclear", IcClose, "Clear search")
+        val () = ui_show("library-search-clear", false)
         val () = lib_query_set($A.alloc<byte>(1), 0)
         val () = lib_render()
-      in let val () = ui_focus("qlsq") in 0 end end
+      in let val () = ui_focus("library-search") in 0 end end
       else 0
     end)
   (* a backup picked to restore *)
-  val r = RCons(r, OnEl("qlmi"), "change", lam(_) => let
+  val r = RCons(r, OnEl("menu-import-backup"), "change", lam(_) => let
       val () = layer_close(LLibraryMenu())
       val () = backup_import()
     in 0 end)
   (* the error banner *)
-  val r = RCons(r, OnEl("qerx"), "click", lam(_) => let val () = ui_show("qerr", false) in 0 end)
+  val r = RCons(r, OnEl("error-dismiss"), "click", lam(_) => let val () = ui_show("error-banner", false) in 0 end)
   (* the library menu *)
-  val r = RCons(r, OnEl("qlgr"), "click", lam(_) => let
+  val r = RCons(r, OnEl("library-menu-button"), "click", lam(_) => let
       val () = layer_open(LLibraryMenu())
-    in let val () = ui_focus("qlme") in 0 end end)
-  val r = RCons(r, OnEl("qlmn"), "click", lam(h) => let
+    in let val () = ui_focus("menu-export-backup") in 0 end end)
+  val r = RCons(r, OnEl("library-menu"), "click", lam(h) => let
       val t = _target(h)
       val () = (case+ _harm_clicked(t) of
         | ~Some_vt(h) => let
             val () = layer_close(LLibraryMenu())
           in lib_ask_harm(h, lam () => _save_render()) end
         | ~None_vt() =>
-        if _is(t, "qlmr") then let
+        if _is(t, "menu-factory-reset") then let
           val () = layer_close(LLibraryMenu())
         in _factory_reset() end
-        else if _is(t, "qlme") then let
+        else if _is(t, "menu-export-backup") then let
           val () = layer_close(LLibraryMenu())
         in backup_export() end
-        else if _is(t, "qlmc") then layer_close(LLibraryMenu())
-        else if _is(t, "qlmn") then layer_close(LLibraryMenu())
+        else if _is(t, "menu-close") then layer_close(LLibraryMenu())
+        else if _is(t, "library-menu") then layer_close(LLibraryMenu())
         else ())
     in let val () = _target_free(t) in 0 end end)
 in r end
 
 fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
-  val r = RCons(r, OnEl("qset"), "click", lam(_) => let
+  val r = RCons(r, OnEl("typography-button"), "click", lam(_) => let
       val () = layer_open(LTypography())
-    in let val () = ui_focus("qscl") in 0 end end)
-  val r = RCons(r, OnEl("qspn"), "click", lam(h) => let
+    in let val () = ui_focus("typography-close") in 0 end end)
+  val r = RCons(r, OnEl("typography-panel"), "click", lam(h) => let
       val t = _target(h)
-      val changed = (if _is(t, "qff0") then let val () = set_font_set(0) in true end
-        else if _is(t, "qff1") then let val () = set_font_set(1) in true end
-        else if _is(t, "qff2") then let val () = set_font_set(2) in true end
-        else if _is(t, "qth0") then let val () = set_theme_set(0) in true end
-        else if _is(t, "qth1") then let val () = set_theme_set(1) in true end
-        else if _is(t, "qth2") then let val () = set_theme_set(2) in true end
-        else if _is(t, "qth3") then let val () = set_theme_set(3) in true end
-        else if _is(t, "qal0") then let val () = set_align_set(0) in true end
-        else if _is(t, "qal1") then let val () = set_align_set(1) in true end
-        else if _is(t, "qhy0") then let val () = set_hyph_set(0) in true end
-        else if _is(t, "qhy1") then let val () = set_hyph_set(1) in true end
-        else if _is(t, "qdi0") then let val () = set_dim_set(0) in true end
-        else if _is(t, "qdi1") then let val () = set_dim_set(1) in true end
-        else if _is(t, "qtz0") then let val () = set_taps_set(0) in true end
-        else if _is(t, "qtz1") then let val () = set_taps_set(1) in true end
-        else if _is(t, "qtz2") then let val () = set_taps_set(2) in true end
-        else if _is(t, "qvk0") then let val () = set_vol_set(0) in true end
-        else if _is(t, "qvk1") then let val () = set_vol_set(1) in true end
-        else if _is(t, "qsrs") then let
+      val changed = (if _is(t, "font-literata") then let val () = set_font_set(0) in true end
+        else if _is(t, "font-inter") then let val () = set_font_set(1) in true end
+        else if _is(t, "font-book") then let val () = set_font_set(2) in true end
+        else if _is(t, "theme-auto") then let val () = set_theme_set(0) in true end
+        else if _is(t, "theme-light") then let val () = set_theme_set(1) in true end
+        else if _is(t, "theme-sepia") then let val () = set_theme_set(2) in true end
+        else if _is(t, "theme-dark") then let val () = set_theme_set(3) in true end
+        else if _is(t, "align-ragged") then let val () = set_align_set(0) in true end
+        else if _is(t, "align-justified") then let val () = set_align_set(1) in true end
+        else if _is(t, "hyphens-off") then let val () = set_hyph_set(0) in true end
+        else if _is(t, "hyphens-on") then let val () = set_hyph_set(1) in true end
+        else if _is(t, "dim-off") then let val () = set_dim_set(0) in true end
+        else if _is(t, "dim-on") then let val () = set_dim_set(1) in true end
+        else if _is(t, "taps-sides") then let val () = set_taps_set(0) in true end
+        else if _is(t, "taps-forward") then let val () = set_taps_set(1) in true end
+        else if _is(t, "taps-one-hand") then let val () = set_taps_set(2) in true end
+        else if _is(t, "volume-keys-off") then let val () = set_vol_set(0) in true end
+        else if _is(t, "volume-keys-turn") then let val () = set_vol_set(1) in true end
+        else if _is(t, "typography-reset") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
               in _settings_changed() end)
           in false end
         else false): bool
-      val close = _is(t, "qscl")
+      val close = _is(t, "typography-close")
       val () = _target_free(t)
       val () = (if close then layer_close(LTypography()) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val r = RCons(r, OnEl("qsr1"), "input", lam(h) => let
+  val r = RCons(r, OnEl("size-row"), "input", lam(h) => let
       val () = set_size_set(_clamp(_input_num(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("qsr2"), "input", lam(h) => let
+  val r = RCons(r, OnEl("line-height-row"), "input", lam(h) => let
       val () = set_lh_set(_clamp(_input_num(h), 12, 24))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("qsr3"), "input", lam(h) => let
+  val r = RCons(r, OnEl("margins-row"), "input", lam(h) => let
       val () = set_margin_set(_clamp(_input_num(h), 0, 4))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("qsr4"), "input", lam(h) => let
+  val r = RCons(r, OnEl("paragraph-row"), "input", lam(h) => let
       val () = set_ps_set(_clamp(_input_num(h), 0, 20))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("qsr5"), "input", lam(h) => let
+  val r = RCons(r, OnEl("letter-row"), "input", lam(h) => let
       val () = set_ls_set(_clamp(_input_num(h), 0, 12))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("qsr6"), "input", lam(h) => let
+  val r = RCons(r, OnEl("word-row"), "input", lam(h) => let
       val () = set_ws_set(_clamp(_input_num(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
 in r end
@@ -881,17 +881,17 @@ in $DR.get_measure_w() > 0 end
 
 (* The search field, made again holding a[0, k) *)
 fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void =
-  if k > 0 then ui_attr_buf("qsri", AValue, a, k) else $A.free<byte>(a)
+  if k > 0 then ui_attr_buf("search-field", AValue, a, k) else $A.free<byte>(a)
 
 fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
-  val () = ui_clear("qsrh")
-  val () = ui_field("qsrh", "qsri", FSearch, "search", "Search in book")
+  val () = ui_clear("search-header")
+  val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
   val () = _search_value(a, k)
-in ui_icon_btn("qsrh", "qsrx", "ibtn", IcClose, "Close search") end
+in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
 
 fn _search_open (): void = let
   val () = layer_open(LSearch())
-in ui_focus("qsri") end
+in ui_focus("search-field") end
 
 (* Ends the search: the reader goes back to where it was before it
    jumped to a hit *)
@@ -900,16 +900,16 @@ fn _search_end (): void = let
   val () = reader_search_close()
   (* the next search starts afresh: an empty field, no old results *)
   val () = _search_field($A.alloc<byte>(1), 0)
-  val () = ui_clear("qsrl")
-  val () = ui_clear("qsrm")
-in ui_focus("qcnt") end
+  val () = ui_clear("search-results")
+  val () = ui_clear("search-status")
+in ui_focus("page") end
 
 (* Searches for the field's text *)
 fn _search_run (): void = let
-  val a = $A.alloc<byte>(4)
-  val () = $A.write_text(a, 0, $A.text_lit("qsri"), 4)
+  val a = $A.alloc<byte>(12)
+  val () = $A.write_text(a, 0, $A.text_lit("search-field"), 12)
   val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 4)
+  val r = $DR.read_input_value(b, 12)
   val () = $A.drop<byte>(f, b)
   val () = $A.free<byte>($A.thaw<byte>(f))
 in
@@ -981,7 +981,7 @@ fn _right (): void = if reader_rtl() then _prev() else _next()
 (* Whether x is between the sides' zones: in the middle half of the
    page *)
 fn _in_middle (x: Int): bool = let
-  val () = ui_measure("qcnt")
+  val () = ui_measure("page")
   val cx = $DR.get_measure_x()
   val cw = $DR.get_measure_w()
 in
@@ -997,7 +997,7 @@ end
    bottom third on, between them the bars. Back and on are the book's:
    a book read right to left turns the other way *)
 fn _zone_click (x: Int, y: Int): void = let
-  val () = ui_measure("qcnt")
+  val () = ui_measure("page")
   val cx = $DR.get_measure_x()
   val cy = $DR.get_measure_y()
   val cw = $DR.get_measure_w()
@@ -1064,8 +1064,8 @@ in
     val () = $EV.prevent_default()
   in if reader_link_at(!_focus_link) then () else () end
   else if _key_is(b, n, "Escape") then
-    (if _panels_close() then ui_focus("qcnt")
-     else if _shown("qsrn") then _search_end()
+    (if _panels_close() then ui_focus("page")
+     else if _shown("search-nav") then _search_end()
      else if !_chrome then _chrome_set(false) else _show_library())
   else ()
 end
@@ -1079,13 +1079,13 @@ fn _escape_overlay (): bool =
   else case+ layer_escape() of
   | NothingOpen() => false
   | Escaped(LSearch()) => let
-      val () = (if _shown("qsrn") then ui_focus("qcnt") else _search_end())
+      val () = (if _shown("search-nav") then ui_focus("page") else _search_end())
     in true end
-  | Escaped(LContents()) => let val () = ui_focus("qcnt") in true end
-  | Escaped(LTypography()) => let val () = ui_focus("qcnt") in true end
-  | Escaped(LAnnotations()) => let val () = ui_focus("qcnt") in true end
-  | Escaped(LNote()) => let val () = ui_focus("qcnt") in true end
-  | Escaped(LImage()) => let val () = ui_focus("qcnt") in true end
+  | Escaped(LContents()) => let val () = ui_focus("page") in true end
+  | Escaped(LTypography()) => let val () = ui_focus("page") in true end
+  | Escaped(LAnnotations()) => let val () = ui_focus("page") in true end
+  | Escaped(LNote()) => let val () = ui_focus("page") in true end
+  | Escaped(LImage()) => let val () = ui_focus("page") in true end
   | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -1095,10 +1095,10 @@ fn _search_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
 in
   if _key_is(b, n, "Enter") then let
       val () = reader_search_step(if shift then ~1 else 1)
-    in if _shown("qsrn") then let val () = layer_close(LSearch()) in ui_focus("qcnt") end else () end
+    in if _shown("search-nav") then let val () = layer_close(LSearch()) in ui_focus("page") end else () end
   else if _key_is(b, n, "Escape") then let
       val () = layer_close(LSearch())
-    in if _shown("qsrn") then ui_focus("qcnt") else _search_end() end
+    in if _shown("search-nav") then ui_focus("page") else _search_end() end
   else ()
 end
 
@@ -1106,38 +1106,38 @@ end
 fn _toc_open (): void = let
   val () = (case+ reading_get() of
     | @(_, _, c, tc) => toc_render((if c > 0 then c - 1 else 0), tc))
-  val () = ui_attr("qtct", ASelected, "true")
-  val () = ui_attr("qtcm", ASelected, "false")
+  val () = ui_attr("contents-tab", ASelected, "true")
+  val () = ui_attr("bookmarks-tab", ASelected, "false")
   val () = ui_attr("pages-tab", ASelected, "false")
-  val () = ui_show("qtcl", true)
-  val () = ui_show("qtbl", false)
+  val () = ui_show("contents-list", true)
+  val () = ui_show("bookmarks-list", false)
   val () = ui_show("pages-list", false)
   (* the Pages tab only for a book that lists its print pages *)
   val () = ui_show("pages-tab", toc_pages_count() > 0)
   val () = layer_open(LContents())
-in ui_focus("qtcx") end
+in ui_focus("contents-close") end
 
 (* The contents panel, open on its bookmarks tab *)
 fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
-  val () = ui_attr("qtct", ASelected, "false")
-  val () = ui_attr("qtcm", ASelected, "true")
+  val () = ui_attr("contents-tab", ASelected, "false")
+  val () = ui_attr("bookmarks-tab", ASelected, "true")
   val () = ui_attr("pages-tab", ASelected, "false")
-  val () = ui_show("qtcl", false)
+  val () = ui_show("contents-list", false)
   val () = ui_show("pages-list", false)
-in ui_show("qtbl", true) end
+in ui_show("bookmarks-list", true) end
 
 (* The contents panel, open on its print pages' tab *)
 fn _pages_open (): void = let
   val () = toc_pages_render()
-  val () = ui_attr("qtct", ASelected, "false")
-  val () = ui_attr("qtcm", ASelected, "false")
+  val () = ui_attr("contents-tab", ASelected, "false")
+  val () = ui_attr("bookmarks-tab", ASelected, "false")
   val () = ui_attr("pages-tab", ASelected, "true")
-  val () = ui_show("qtcl", false)
-  val () = ui_show("qtbl", false)
+  val () = ui_show("contents-list", false)
+  val () = ui_show("bookmarks-list", false)
 in ui_show("pages-list", true) end
 
-(* The page turn's region: .caf (qcnt), region 1 *)
+(* The page turn's region: .caf (page), region 1 *)
 #define PAGE_REGION 1
 
 (* A drag has ended: the click that follows it is not a tap. The flag
@@ -1205,16 +1205,16 @@ fn _gestures_start (): void = let
 in case+ c of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
 
 fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
-  val r = RCons(r, OnEl("qtcb"), "click", lam(_) => let val () = _toc_open() in 0 end)
-  val r = RCons(r, OnEl("qtoc"), "click", lam(h) => let
+  val r = RCons(r, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
+  val r = RCons(r, OnEl("contents-panel"), "click", lam(h) => let
       val t = _target(h)
-      val row = _row_of(t, "qe")
-      val bgo = _row_of(t, "qb")
-      val bdl = _row_of(t, "qx")
+      val row = _row_of(t, "toc-row")
+      val bgo = _row_of(t, "bookmark-go")
+      val bdl = _row_of(t, "bookmark-delete")
       val pgo = _row_of(t, "page-row")
-      val () = (if _is(t, "qtcx") then layer_close(LContents())
-        else if _is(t, "qtct") then _toc_open()
-        else if _is(t, "qtcm") then _bookmarks_open()
+      val () = (if _is(t, "contents-close") then layer_close(LContents())
+        else if _is(t, "contents-tab") then _toc_open()
+        else if _is(t, "bookmarks-tab") then _bookmarks_open()
         else if _is(t, "pages-tab") then _pages_open()
         else if pgo >= 0 then let
           val () = layer_close(LContents())
@@ -1227,9 +1227,9 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
         else ())
       val () = _target_free(t)
     in 0 end)
-  val r = RCons(r, OnEl("qpbk"), "click", lam(_) => let val () = reader_back() in 0 end)
+  val r = RCons(r, OnEl("jump-back"), "click", lam(_) => let val () = reader_back() in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
-  val r = RCons(r, OnEl("qtrk"), "pointerdown", lam(h) => let
+  val r = RCons(r, OnEl("scrubber-track"), "pointerdown", lam(h) => let
       val x = _event_x(h)
       val () = !_scrubbing := true
       val () = _chrome_set(true)
@@ -1253,39 +1253,39 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 7) = let
 in r end
 
 fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
-  val r = RCons(r, OnEl("qbmk"), "click", lam(_) => let
+  val r = RCons(r, OnEl("bookmark-button"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
   val r = RCons(r, OnDocument(), "selectionchange", lam(_) =>
       if !_view = 1 then let
         val sel = _has_selection()
-        val () = ui_show("qsel", sel)
+        val () = ui_show("selection-toolbar", sel)
         val () = (if sel then _lookup_update() else ())
       in 0 end else 0)
-  val r = RCons(r, OnEl("qsel"), "click", lam(h) => let
+  val r = RCons(r, OnEl("selection-toolbar"), "click", lam(h) => let
       val t = _target(h)
-      val hl = _is(t, "qslh")
-      val nt = _is(t, "qsln")
-      val cp = _is(t, "qslc")
-      val sr = _is(t, "qsls")
+      val hl = _is(t, "selection-highlight")
+      val nt = _is(t, "selection-note")
+      val cp = _is(t, "selection-copy")
+      val sr = _is(t, "selection-search")
       val () = _target_free(t)
       val () = (if hl then let val _ = annot_highlight() in () end
         else if nt then annot_ask_note(annot_highlight(), true)
         else if cp then _copy_selection()
         else if sr then _search_selection()
         else ())
-    in let val () = ui_show("qsel", false) in 0 end end)
-  val r = RCons(r, OnEl("qanb"), "click", lam(_) => let
+    in let val () = ui_show("selection-toolbar", false) in 0 end end)
+  val r = RCons(r, OnEl("annotations-button"), "click", lam(_) => let
       val () = annot_render()
       val () = layer_open(LAnnotations())
-    in let val () = ui_focus("qanc") in 0 end end)
-  val r = RCons(r, OnEl("qanp"), "click", lam(h) => let
+    in let val () = ui_focus("annotations-close") in 0 end end)
+  val r = RCons(r, OnEl("annotations-panel"), "click", lam(h) => let
       val t = _target(h)
-      val go = _row_of(t, "qa")
-      val nt = _row_of(t, "qn")
-      val dl = _row_of(t, "qd")
-      val close = _is(t, "qanc")
-      val ex = _is(t, "qanx")
+      val go = _row_of(t, "highlight-go")
+      val nt = _row_of(t, "highlight-edit")
+      val dl = _row_of(t, "highlight-delete")
+      val close = _is(t, "annotations-close")
+      val ex = _is(t, "annotations-export")
       val () = _target_free(t)
       val () = (if close then layer_close(LAnnotations())
         else if ex then _export()
@@ -1295,33 +1295,33 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
         else ())
     in 0 end)
   (* a note opened over the page: gone to, or closed *)
-  val r = RCons(r, OnEl("qnte"), "click", lam(h) => let
+  val r = RCons(r, OnEl("footnote"), "click", lam(h) => let
       val t = _target(h)
-      val go = _is(t, "qngo")
-      val close = _is(t, "qncl")
+      val go = _is(t, "footnote-go")
+      val close = _is(t, "footnote-close")
       val () = _target_free(t)
       val () = (if go then let
           val () = layer_close(LNote())
           val () = reader_note_go()
-        in ui_focus("qcnt") end
+        in ui_focus("page") end
         else if close then let
           val () = layer_close(LNote())
-        in ui_focus("qcnt") end
+        in ui_focus("page") end
         else ())
     in 0 end)
 in r end
 
 fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
-  val r = RCons(r, OnEl("qsch"), "click", lam(_) => let
+  val r = RCons(r, OnEl("search-button"), "click", lam(_) => let
       val () = (if layer_is_open(LSearch()) then layer_close(LSearch()) else _search_open())
     in 0 end)
   (* the field is made again for a selection's search: its events are
      taken on the panel *)
-  val r = RCons(r, OnEl("qsrp"), "input", lam(_) => let val () = _search_input() in 0 end)
-  val r = RCons(r, OnEl("qsrp"), "click", lam(h) => let
+  val r = RCons(r, OnEl("search-panel"), "input", lam(_) => let val () = _search_input() in 0 end)
+  val r = RCons(r, OnEl("search-panel"), "click", lam(h) => let
       val t = _target(h)
-      val go = _row_of(t, "qh")
-      val close = _is(t, "qsrx")
+      val go = _row_of(t, "search-hit")
+      val close = _is(t, "search-close")
       val () = _target_free(t)
       val () = (if close then _search_end()
         else if go >= 0 then let
@@ -1329,11 +1329,11 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
         in reader_search_go(go) end
         else ())
     in 0 end)
-  val r = RCons(r, OnEl("qsrn"), "click", lam(h) => let
+  val r = RCons(r, OnEl("search-nav"), "click", lam(h) => let
       val t = _target(h)
-      val pv = _is(t, "qsrv")
-      val nx = _is(t, "qsrw")
-      val close = _is(t, "qsrz")
+      val pv = _is(t, "search-previous")
+      val nx = _is(t, "search-next")
+      val close = _is(t, "search-nav-close")
       val () = _target_free(t)
       val () = (if pv then reader_search_step(~1)
         else if nx then reader_search_step(1)
@@ -1343,10 +1343,10 @@ fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
 in r end
 
 fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
-  val r = RCons(r, OnEl("qbbk"), "click", lam(_) => let val () = _show_library() in 0 end)
-  val r = RCons(r, OnEl("qprv"), "click", lam(_) => let val () = page_prev() in 0 end)
-  val r = RCons(r, OnEl("qnxt"), "click", lam(_) => let val () = page_next() in 0 end)
-  val r = RCons(r, OnEl("qcnt"), "click", lam(h) => let
+  val r = RCons(r, OnEl("back-to-library"), "click", lam(_) => let val () = _show_library() in 0 end)
+  val r = RCons(r, OnEl("previous-page"), "click", lam(_) => let val () = page_prev() in 0 end)
+  val r = RCons(r, OnEl("next-page"), "click", lam(_) => let val () = page_next() in 0 end)
+  val r = RCons(r, OnEl("page"), "click", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
       val x = _target_x(t)
@@ -1363,7 +1363,7 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown
      full screen *)
-  val r = RCons(r, OnEl("qcnt"), "contextmenu", lam(h) => let
+  val r = RCons(r, OnEl("page"), "contextmenu", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
       val () = _target_free(t)
@@ -1372,25 +1372,25 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
       else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
       else 0
     end)
-  val r = RCons(r, OnEl("qimv"), "click", lam(h) => let
+  val r = RCons(r, OnEl("image-viewer"), "click", lam(h) => let
       val t = _target(h)
-      val close = _is(t, "qimx")
+      val close = _is(t, "image-close")
       val () = _target_free(t)
     in
       if close then let
         val () = layer_close(LImage())
-      in let val () = ui_focus("qcnt") in 0 end end
+      in let val () = ui_focus("page") in 0 end end
       else 0
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
-  val r = RCons(r, OnEl("qcnt"), "focusin", lam(h) => let
+  val r = RCons(r, OnEl("page"), "focusin", lam(h) => let
       val t = _target(h)
       val node = _row_of(t, "c")
       val () = _target_free(t)
       val () = !_focus_link := node
     in 0 end)
-  val r = RCons(r, OnEl("qcnt"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
+  val r = RCons(r, OnEl("page"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
   val r = RCons(r, OnDocument(), "keydown", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
@@ -1398,13 +1398,13 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
           val esc = _key_is(b, n, "Escape")
           val () = (if (if esc then _escape_overlay() else false) then ()
             else if !_view <> 1 then ()
-            else if _shown("qmod") then ()
+            else if _shown("dialog") then ()
             else if layer_is_open(LSearch()) then _search_key(b, n)
             else _reader_key(b, n))
           val () = $A.free<byte>(b)
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
-  val r = RCons(r, OnEl("qcnt"), "wheel", lam(h) =>
+  val r = RCons(r, OnEl("page"), "wheel", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(b, n) =>
@@ -1424,13 +1424,13 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
           in 0 end
         end)
   (* a tap on the footer's readout shows the next, and keeps it *)
-  val r = RCons(r, OnEl("qfon"), "click", lam(_) => let
+  val r = RCons(r, OnEl("footer-readout"), "click", lam(_) => let
       val () = reader_readout_next()
       val () = set_save(lib_sort_get())
     in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
-  val r = RCons(r, OnGestures("qrvw"), "gestures", lam(h) => let
+  val r = RCons(r, OnGestures("reader"), "gestures", lam(h) => let
       val () = _gesture_batch(h)
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
@@ -1465,7 +1465,7 @@ implement main0 () = let
   val () = $P.discard<int>(reader_speed_load())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
-  val () = ui_show("qllc", false)
+  val () = ui_show("library", false)
   val p = $P.and_then<int><int>(set_load(), lam(sort) => let
       val () = lib_sort_label(sort)
     in
