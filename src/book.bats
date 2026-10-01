@@ -17,114 +17,122 @@ staload "paths.sats"
 staload "mem.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
-   [d, d + s) in the n-byte file, its method m, and its name [no, no + nl)
-   in the book's central directory of c bytes; k entries *)
-#pub datavtype book_entries(n:int, c:int, k:int) =
-  | BookEntriesNil(n, c, 0) of ()
-  | {k:nat}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= c; nl < 65536}
-    BookEntry(n, c, k + 1) of (int d, int s, int m, int no, int nl, book_entries(n, c, k))
+   [data_offset, data_offset + data_size) in the file of file_size
+   bytes, its method, and its name [name_offset, name_offset + name_len)
+   in the book's central directory of directory_size bytes; count
+   entries *)
+#pub datavtype book_entries(file_size:int, directory_size:int, count:int) =
+  | BookEntriesNil(file_size, directory_size, 0) of ()
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
+    BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, book_entries(file_size, directory_size, count))
 
-(* The n-byte file's central directory, at co, kept while the book is
-   open (for its entries' names), and its entries: the archive checked
-   once, when the book is opened (book_begin) *)
-#pub datavtype book_index(n:int) =
-  | {lc:agz}{c:pos | c <= 1048576}{co:nat | co + c <= n}{k:nat}
-    BookIndex(n) of ($A.arr(byte, lc, c), int c, int co, book_entries(n, c, k))
+(* The file's central directory, at directory_offset, kept while the
+   book is open (for its entries' names), and its entries: the archive
+   checked once, when the book is opened (book_begin) *)
+#pub datavtype book_index(file_size:int) =
+  | {directory_loc:agz}{directory_size:pos | directory_size <= 1048576}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}
+    BookIndex(file_size) of ($A.arr(byte, directory_loc, directory_size), int directory_size, int directory_offset, book_entries(file_size, directory_size, count))
 
 (* The book's chapters, in spine order, each found once in its index
    (the first time a chapter is loaded, book_spine_set): a chapter's
-   data [d, d + s) in the n-byte file, its method m, its name
-   [no, no + nl) in the file and the length dl of that name's
-   directory part; missing when its href is empty, over 1 MiB with the
-   OPF's directory, or names no entry; k chapters *)
-#pub datavtype book_chapters(n:int, k:int) =
-  | ChaptersNil(n, 0) of ()
-  | {k:nat}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}{dl:nat | dl <= nl}
-    Chapter(n, k + 1) of (int d, int s, int m, int no, int nl, int dl, book_chapters(n, k))
-  | {k:nat} ChapterMissing(n, k + 1) of (book_chapters(n, k))
+   data [data_offset, data_offset + data_size) in the file of file_size
+   bytes, its method, its name [name_offset, name_offset + name_len) in
+   the file and the length dir_len of that name's directory part;
+   missing when its href is empty, over 1 MiB with the OPF's directory,
+   or names no entry; count chapters *)
+#pub datavtype book_chapters(file_size:int, count:int) =
+  | ChaptersNil(file_size, 0) of ()
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
+  | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
-#pub datavtype book_spine(n:int) =
-  | {k:nat} Spine(n) of (book_chapters(n, k), int k)
-  | NoSpine(n) of ()
+#pub datavtype book_spine(file_size:int) =
+  | {count:nat} Spine(file_size) of (book_chapters(file_size, count), int count)
+  | NoSpine(file_size) of ()
 
-(* The open book's file and its size; its OPF's
-   compressed data [opf_data, opf_data + opf_size) and compression
-   method; the OPF's name [opf_name, opf_name + opf_name_len) in the
-   central directory. The regions are proven inside the file, so the
+(* The open book's file and its size; its OPF's compressed data
+   [data_offset, data_offset + data_size) and compression method; the
+   OPF's name [name_offset, name_offset + name_len) in the file. The regions are proven inside the file, so the
    reader uses them with no check. The book owns its file (a linear
    handle, closed when the book is replaced), and its index. *)
 #pub datavtype open_book =
-  | {n:pos}{d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
-    OpenBook of ($FI.infile(n), int n, book_index(n), book_spine(n), int d, int s, int m, int no, int nl)
-  | {n:pos} Importing of ($FI.infile(n), int n, book_index(n))
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    OpenBook of ($FI.infile(file_size), int file_size, book_index(file_size), book_spine(file_size), int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {file_size:pos} Importing of ($FI.infile(file_size), int file_size, book_index(file_size))
   | NoBook of ()
 
 (* The open book, taken out of its cell, which is left with none: it
    is put back with book_put *)
 #pub fn book_take(): open_book
 
-(* Puts b in the book cell; the book that was there, if any, is closed *)
-#pub fn book_put(b: open_book): void
+(* Puts book in the book cell; the book that was there, if any, is closed *)
+#pub fn book_put(book: open_book): void
 
-(* Opens the n-byte file f as the book being imported, with a new
-   serial, which it returns: its archive is checked here, once, into its
-   index; when it is not an archive (or its central directory is over
-   1 MiB) f is closed and no book is open, so every read with the serial
+(* Opens book_file, of file_size bytes, as the book being imported,
+   with a new serial, which it returns: its archive is checked here,
+   once, into its index; when it is not an archive (or its central
+   directory is over 1 MiB) book_file is closed and no book is open, so every read with the serial
    finds nothing *)
-#pub fn book_begin {n:pos} (f: $FI.infile(n), n: int n): int
+#pub fn book_begin {file_size:pos} (book_file: $FI.infile(file_size), file_size: int file_size): int
 
-(* The book being imported, book s of z bytes, opened with its OPF's
-   regions; false when another book is open *)
-#pub fn book_finish {z:pos}{d:nat}{sz:pos | d + sz <= z; sz <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
-  (s: int, z: int z, d: int d, sz: int sz, m: int m, no: int no, nl: int nl): bool
+(* The book being imported, book `serial` of file_size bytes, opened
+   with its OPF's regions; false when another book is open *)
+#pub fn book_finish {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: int method, name_offset: int name_offset, name_len: int name_len): bool
 
-(* An entry of the n-byte file found by name: its data [d, d + s),
-   method m and name [no, no + nl) *)
-#pub datavtype entry_hit(n:int) =
-  | {d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
-    EntryHit(n) of (int d, int s, int m, int no, int nl)
-  | EntryMiss(n) of ()
+(* An entry of the file found by name: its data
+   [data_offset, data_offset + data_size), method and name
+   [name_offset, name_offset + name_len) *)
+#pub datavtype entry_hit(file_size:int) =
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    EntryHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | EntryMiss(file_size) of ()
 
-(* The entry named name[0, nb) in the index of the open book, when it is
-   book s of z bytes; a miss when there is none or another book is open *)
-#pub fn book_find_entry {z:pos}{lb:agz}{nb:pos}
-  (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): entry_hit(z)
+(* The entry named name[0, name_size) in the index of the open book,
+   when it is book `serial` of file_size bytes; a miss when there is none or another book is open *)
+#pub fn book_find_entry {file_size:pos}{name_loc:agz}{name_size:pos}
+  (serial: int, file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): entry_hit(file_size)
 
-(* The entry of the open book, book s of z bytes, that the path
-   data[ho, ho + h) names relative to a directory: the first dl bytes of
-   the name at dno in the file (such as a chapter's own name, so an
+(* The entry of the open book, book `serial` of file_size bytes, that
+   the path data[href_offset, href_offset + href_len) names relative to
+   a directory: the first dir_len bytes of the name at dir_name_offset
+   in the file (such as a chapter's own name, so an
    href in the chapter is found); "." and ".." are resolved *)
-#pub fn book_find_relative {z:pos}{dno,dl:nat | dno + dl <= z; dl < 65536}{lb:agz}{n:pos}{ho,h:nat | ho + h <= n}
-  (s: int, z: int z, dno: int dno, dl: int dl, data: !$A.borrow(byte, lb, n), n: int n, ho: int ho, h: int h): entry_hit(z)
+#pub fn book_find_relative {file_size:pos}{dir_name_offset,dir_len:nat | dir_name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{href_offset,href_len:nat | href_offset + href_len <= n}
+  (serial: int, file_size: int file_size, dir_name_offset: int dir_name_offset, dir_len: int dir_len, data: !$A.borrow(byte, l, n), n: int n, href_offset: int href_offset, href_len: int href_len): entry_hit(file_size)
 
-(* Keeps chs, k chapters, as the chapters of the open book, when it is
-   book s of z bytes and has none yet; else frees them *)
-#pub fn book_spine_set {z:pos}{k:nat}
-  (s: int, z: int z, chs: book_chapters(z, k), k: int k): void
+(* Keeps chapters, chapter_count of them, as the chapters of the open
+   book, when it is book `serial` of file_size bytes and has none yet; else frees them *)
+#pub fn book_spine_set {file_size:pos}{chapter_count:nat}
+  (serial: int, file_size: int file_size, chapters: book_chapters(file_size, chapter_count), chapter_count: int chapter_count): void
 
-(* Chapter i of the open book, book s *)
+(* Chapter chapter_index of the open book, book `serial` *)
 #pub datavtype chapter_got =
-  | {n:pos}{d:nat}{sz:pos | d + sz <= n; sz <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}{dl:nat | dl <= nl}{k:nat}
-    ChapterGot of (int n, int d, int sz, int m, int no, int nl, int dl, int k)
-  (* The book has k chapters, but not an i-th one that names an entry *)
-  | {k:nat} ChapterNone of (int k)
-  (* The book's chapters are not found yet (or book s is not open) *)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
+    ChapterGot of (int file_size, int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, int chapter_count)
+  (* The book has chapter_count chapters, but not a chapter_index-th one
+     that names an entry *)
+  | {chapter_count:nat} ChapterNone of (int chapter_count)
+  (* The book's chapters are not found yet (or book `serial` is not
+     open) *)
   | ChaptersUnknown of ()
 
-#pub fn book_chapter_get {i:nat} (s: int, i: int i): chapter_got
+#pub fn book_chapter_get {chapter_index:nat} (serial: int, chapter_index: int chapter_index): chapter_got
 
-(* The index of the chapter of the open book, book s, whose entry's name
-   is at no in the file; -1 when none is (or book s is not open) *)
-#pub fn book_chapter_of (s: int, no: int): [v:int | v >= ~1] int v
+(* The index of the chapter of the open book, book `serial`, whose
+   entry's name is at name_offset in the file; -1 when none is (or book
+   `serial` is not open) *)
+#pub fn book_chapter_of (serial: int, name_offset: int): [found:int | found >= ~1] int found
 
-(* Where chapter i of the open book, book s, is in the book, by its
+(* Where chapter chapter_index of the open book, book `serial`, is in
+   the book, by its
    entries' compressed sizes: the sizes of the chapters before it, its
    own, and all of theirs; @(0, 0, 0) when the chapters are unknown *)
-#pub fn book_weights (s: int, i: int): @([b:nat] int b, [w:nat] int w, [t:nat] int t)
+#pub fn book_weights (serial: int, chapter_index: int): @([before:nat] int before, [own:nat] int own, [total:nat] int total)
 
-(* Closes the book being imported, book s, when its import fails *)
-#pub fn book_abandon (s: int): void
+(* Closes the book being imported, book `serial`, when its import fails *)
+#pub fn book_abandon (serial: int): void
 
 (* The serial of the open book: a stage of a load started on one book
    reads only while the same book is open *)
@@ -132,20 +140,20 @@ staload "mem.sats"
 
 (* The open book's size and the OPF's regions in it *)
 #pub typedef book_meta =
-  [n:pos][d:nat][s:pos | d + s <= n; s <= 268435456][m:int | m == 0 || m == 8][no:nat][nl:pos | no + nl <= n; nl < 65536]
-  @(int n, int d, int s, int m, int no, int nl)
+  [file_size:pos][data_offset:nat][data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456][method:int | method == 0 || method == 8][name_offset:nat][name_len:pos | name_offset + name_len <= file_size; name_len < 65536]
+  @(int file_size, int data_offset, int data_size, int method, int name_offset, int name_len)
 
 (* The open book's size and regions, or none when no book is open *)
 #pub fn book_meta_get(): $R.option(book_meta)
 
 (* Stores the open book's file in IndexedDB under key, from the JS side;
    nothing when no book is open *)
-#pub fn book_idb_put {lk:agz}{nk:pos} (key: !$A.borrow(byte, lk, nk), nk: int nk): void
+#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): void
 
-(* out[0, k) := bytes [o, o + k) of the open book, when it is book s of
-   z bytes; false, with out untouched, when another book is open *)
-#pub fn book_read {z:pos}{o,k:nat | o + k <= z}{l:agz}{ow:addr}{m:pos | k <= m}
-  (s: int, z: int z, o: int o, out: !$A.arrx(byte, l, m, ow), k: int k): bool
+(* out[0, read_len) := bytes [offset, offset + read_len) of the open
+   book, when it is book `serial` of file_size bytes; false, with out untouched, when another book is open *)
+#pub fn book_read {file_size:pos}{offset,read_len:nat | offset + read_len <= file_size}{out_loc:agz}{out_owner:addr}{out_size:pos | read_len <= out_size}
+  (serial: int, file_size: int file_size, offset: int offset, out: !$A.arrx(byte, out_loc, out_size, out_owner), read_len: int read_len): bool
 
 (* A decompressed blob's bytes, at most 1 MiB *)
 #pub datavtype blob_bytes =
@@ -157,32 +165,32 @@ staload "mem.sats"
    (the book's data, checked here once) *)
 #pub fn take_blob (handle: Int): blob_bytes
 
-(* The arena a piece of n bytes at la came from: the current page's
-   (lent out of the reader's window, see pages.bats), or an arena of its
-   own when the page has no room for it *)
-#pub datavtype piece_owner(n:int, la:addr) =
-  | {u:nat | u <= PAGE_BYTES}{q,t:int | 0 <= q; q < t}
-    OwnerPage(n, la) of ($A.arena(byte, la, PAGE_BYTES, u, 1), int q, int t, int u)
-  | OwnerOwn(n, la) of ($A.arena(byte, la, n, n, 1))
+(* The arena a piece of piece_size bytes at arena_loc came from: the
+   current page's (lent out of the reader's window, see pages.bats), or
+   an arena of its own when the page has no room for it *)
+#pub datavtype piece_owner(piece_size:int, arena_loc:addr) =
+  | {used:nat | used <= PAGE_BYTES}{page,pages:int | 0 <= page; page < pages}
+    OwnerPage(piece_size, arena_loc) of ($A.arena(byte, arena_loc, PAGE_BYTES, used, 1), int page, int pages, int used)
+  | OwnerOwn(piece_size, arena_loc) of ($A.arena(byte, arena_loc, piece_size, piece_size, 1))
 
-(* n bytes of the book's content (an entry's data, a decompressed OPF or
-   chapter, an image), which can be larger than alloc's 1 MiB, held only
-   while it is parsed: a piece of the current page's arena when it fits
+(* piece_size bytes of the book's content (an entry's data, a
+   decompressed OPF or chapter, an image), which can be larger than
+   alloc's 1 MiB, held only while it is parsed: a piece of the current page's arena when it fits
    there, else the one piece of an arena of its own; freed with
    piece_free *)
-#pub datavtype piece(n:int) =
-  | {la,l:agz} Piece(n) of (piece_owner(n, la), $A.arrx(byte, l, n, la))
-  | NoPiece(n) of ()
+#pub datavtype piece(piece_size:int) =
+  | {arena_loc,piece_loc:agz} Piece(piece_size) of (piece_owner(piece_size, arena_loc), $A.arrx(byte, piece_loc, piece_size, arena_loc))
+  | NoPiece(piece_size) of ()
 
-(* A piece of n bytes, or none when the memory cannot be had *)
-#pub fn piece_new {n:pos | n <= 268435456} (n: int n): piece(n)
+(* A piece of piece_size bytes, or none when the memory cannot be had *)
+#pub fn piece_new {piece_size:pos | piece_size <= 268435456} (piece_size: int piece_size): piece(piece_size)
 
-#pub fn piece_free {la,l:agz}{n:pos}
-  (ar: piece_owner(n, la), p: $A.arrx(byte, l, n, la)): void
+#pub fn piece_free {arena_loc,piece_loc:agz}{piece_size:pos}
+  (owner: piece_owner(piece_size, arena_loc), piece: $A.arrx(byte, piece_loc, piece_size, arena_loc)): void
 
 (* Decompressed content, read whole into a piece *)
 #pub datavtype content_bytes =
-  | {la,l:agz}{n:pos} ContentBytes of (piece_owner(n, la), $A.arrx(byte, l, n, la), int n)
+  | {arena_loc,piece_loc:agz}{content_size:pos} ContentBytes of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
   | NoContentBytes of ()
 
 (* The content a decompress promise resolved with, read whole and
@@ -190,547 +198,555 @@ staload "mem.sats"
    piece can be had for it *)
 #pub fn take_content (handle: Int): content_bytes
 
-(* An entry of a z-byte archive, read by ranges: its compressed bytes
-   (in a piece), method, where they are [d, d + s) and where its
-   name is [no, no + nl), both proven inside the archive *)
-#pub datavtype zip_got(z:int) =
-  | {la,l:agz}{s:pos | s <= 268435456}{m:int | m == 0 || m == 8}{d:nat | d + s <= z}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
-    ZipGot(z) of (piece_owner(s, la), $A.arrx(byte, l, s, la), int s, int m, int d, int no, int nl)
-  | ZipMissing(z) of ()
+(* An entry of an archive of file_size bytes, read by ranges: its
+   compressed bytes (in a piece), method, where they are
+   [data_offset, data_offset + data_size) and where its name is
+   [name_offset, name_offset + name_len), both proven inside the
+   archive *)
+#pub datavtype zip_got(file_size:int) =
+  | {arena_loc,piece_loc:agz}{data_size:pos | data_size <= 268435456}{method:int | method == 0 || method == 8}{data_offset:nat | data_offset + data_size <= file_size}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    ZipGot(file_size) of (piece_owner(data_size, arena_loc), $A.arrx(byte, piece_loc, data_size, arena_loc), int data_size, int method, int data_offset, int name_offset, int name_len)
+  | ZipMissing(file_size) of ()
 
-(* index_read on the open book, when it is book s of z bytes; missing
+(* index_read on the open book, when it is book `serial` of file_size
+   bytes; missing
    when another book is open *)
-#pub fn book_zip_read {z:pos}{lb:agz}{nb:pos}
-  (s: int, z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z)
+#pub fn book_zip_read {file_size:pos}{name_loc:agz}{name_size:pos}
+  (serial: int, file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size)
 
 val _book = ref<open_book>(NoBook())
 
 val _book_serial = ref<int>(0)
 
-fun book_entries_free {n,c:int}{k:nat} .<k>. (es: book_entries(n, c, k)): void =
-  case+ es of
+fun book_entries_free {file_size,directory_size:int}{count:nat} .<count>. (entries: book_entries(file_size, directory_size, count)): void =
+  case+ entries of
   | ~BookEntriesNil() => ()
   | ~BookEntry(_, _, _, _, _, rest) => book_entries_free(rest)
 
-fn book_index_free {n:int} (ix: book_index(n)): void = let
-  val+ ~BookIndex(cd, _, _, es) = ix
-  val () = book_entries_free(es)
-in $A.free<byte>(cd) end
+fn book_index_free {file_size:int} (index: book_index(file_size)): void = let
+  val+ ~BookIndex(directory, _, _, entries) = index
+  val () = book_entries_free(entries)
+in $A.free<byte>(directory) end
 
-(* es reversed onto acc *)
-fun book_entries_rev {n,c:int}{k,a:nat} .<k>.
-  (es: book_entries(n, c, k), acc: book_entries(n, c, a)): book_entries(n, c, k + a) =
-  case+ es of
-  | ~BookEntriesNil() => acc
-  | ~BookEntry(d, sz, m, no, nl, rest) => book_entries_rev(rest, BookEntry(d, sz, m, no, nl, acc))
+(* entries reversed onto reversed *)
+fun book_entries_rev {file_size,directory_size:int}{count,reversed_count:nat} .<count>.
+  (entries: book_entries(file_size, directory_size, count), reversed: book_entries(file_size, directory_size, reversed_count)): book_entries(file_size, directory_size, count + reversed_count) =
+  case+ entries of
+  | ~BookEntriesNil() => reversed
+  | ~BookEntry(data_offset, data_size, method, name_offset, name_len, rest) => book_entries_rev(rest, BookEntry(data_offset, data_size, method, name_offset, name_len, reversed))
 
-(* The entries of rs whose local header (read from f) is one and whose
-   data is inside the file and fits a piece, onto acc (newest first) *)
-fun book_entries_of {n:pos}{c:int}{k,a:nat} .<k>.
-  (f: !$FI.infile(n), n: int n, rs: $Z.zip_refs(n, c, k), acc: book_entries(n, c, a))
-  : [j:nat] book_entries(n, c, j) =
-  case+ rs of
-  | ~$Z.zip_refs_nil() => acc
-  | ~$Z.zip_refs_cons(h, cs, m, u, no, nl, rest) => let
-      val hdr = $A.alloc<byte>(30)
-      val () = $FI.file_read(f, h, hdr, 30)
-      val sp = $Z.find_data_at(hdr, h, cs, m, u, n)
-      val () = $A.free<byte>(hdr)
+(* The entries of refs whose local header (read from book_file) is one
+   and whose data is inside the file and fits a piece, onto found
+   (newest first) *)
+fun book_entries_of {file_size:pos}{directory_size:int}{count,found_count:nat} .<count>.
+  (book_file: !$FI.infile(file_size), file_size: int file_size, refs: $Z.zip_refs(file_size, directory_size, count), found: book_entries(file_size, directory_size, found_count))
+  : [total_count:nat] book_entries(file_size, directory_size, total_count) =
+  case+ refs of
+  | ~$Z.zip_refs_nil() => found
+  | ~$Z.zip_refs_cons(header_offset, compressed_size, method, uncompressed_size, name_offset, name_len, rest) => let
+      val header = $A.alloc<byte>(30)
+      val () = $FI.file_read(book_file, header_offset, header, 30)
+      val span = $Z.find_data_at(header, header_offset, compressed_size, method, uncompressed_size, file_size)
+      val () = $A.free<byte>(header)
     in
-      case+ sp of
-      | ~$R.none() => book_entries_of(f, n, rest, acc)
-      | ~$R.some(~$Z.zip_span_mk(d, dsz, dm, _)) =>
-        if dsz <= 0 then book_entries_of(f, n, rest, acc)
-        else if dsz > 268435456 then book_entries_of(f, n, rest, acc)
-        else book_entries_of(f, n, rest, BookEntry(d, dsz, dm, no, nl, acc))
+      case+ span of
+      | ~$R.none() => book_entries_of(book_file, file_size, rest, found)
+      | ~$R.some(~$Z.zip_span_mk(data_offset, data_size, data_method, _)) =>
+        if data_size <= 0 then book_entries_of(book_file, file_size, rest, found)
+        else if data_size > 268435456 then book_entries_of(book_file, file_size, rest, found)
+        else book_entries_of(book_file, file_size, rest, BookEntry(data_offset, data_size, data_method, name_offset, name_len, found))
     end
 
-(* The n-byte file's index: its archive's end, central directory and
+(* The file's index: its archive's end, central directory and
    every entry's local header, checked once; none when it is not an
    archive or its directory is over 1 MiB *)
-fn book_index_make {n:pos} (f: !$FI.infile(n), n: int n): $R.option(book_index(n)) = let
-  val t = (if n < 65557 then n else 65557): [t:pos | t <= n; t <= 65557] int t
-  val tail = $A.alloc<byte>(t)
-  val () = $FI.file_read(f, n - t, tail, t)
-  val found = $Z.find_cd(tail, t, n)
+fn book_index_make {file_size:pos} (book_file: !$FI.infile(file_size), file_size: int file_size): $R.option(book_index(file_size)) = let
+  val tail_len = (if file_size < 65557 then file_size else 65557): [tail_len:pos | tail_len <= file_size; tail_len <= 65557] int tail_len
+  val tail = $A.alloc<byte>(tail_len)
+  val () = $FI.file_read(book_file, file_size - tail_len, tail, tail_len)
+  val found = $Z.find_cd(tail, tail_len, file_size)
   val () = $A.free<byte>(tail)
 in
   case+ found of
   | ~$R.none() => $R.none()
-  | ~$R.some(dir) => let
-      val c = $Z.cd_size(dir)
-      val co = $Z.cd_offset(dir)
+  | ~$R.some(end_record) => let
+      val directory_size = $Z.cd_size(end_record)
+      val directory_offset = $Z.cd_offset(end_record)
     in
-      if c > 1048576 then let
-        val+ ~$Z.zip_cd_mk(_, _, _) = dir
+      if directory_size > 1048576 then let
+        val+ ~$Z.zip_cd_mk(_, _, _) = end_record
       in $R.none() end
       else let
-        val cd = $A.alloc<byte>(c)
-        val () = $FI.file_read(f, co, cd, c)
-        val refs = $Z.cd_refs(cd, dir, n)
-        val+ ~$Z.zip_cd_mk(_, _, _) = dir
+        val directory = $A.alloc<byte>(directory_size)
+        val () = $FI.file_read(book_file, directory_offset, directory, directory_size)
+        val refs = $Z.cd_refs(directory, end_record, file_size)
+        val+ ~$Z.zip_cd_mk(_, _, _) = end_record
       in
         case+ refs of
         | ~$R.none() => let
-            val () = $A.free<byte>(cd)
+            val () = $A.free<byte>(directory)
           in $R.none() end
-        | ~$R.some(rs) => let
-            val es = book_entries_of(f, n, rs, BookEntriesNil())
-          in $R.some(BookIndex(cd, c, co, book_entries_rev(es, BookEntriesNil()))) end
+        | ~$R.some(entry_refs) => let
+            val entries = book_entries_of(book_file, file_size, entry_refs, BookEntriesNil())
+          in $R.some(BookIndex(directory, directory_size, directory_offset, book_entries_rev(entries, BookEntriesNil()))) end
       end
     end
 end
 
-(* An entry found by name: its data [d, d + s), method m, and its name
-   [no, no + nl) in the n-byte file *)
-datavtype book_hit(n:int) =
-  | {d:nat}{s:pos | d + s <= n; s <= 268435456}{m:int | m == 0 || m == 8}{no:nat}{nl:pos | no + nl <= n; nl < 65536}
-    BookHit(n) of (int d, int s, int m, int no, int nl)
-  | BookMiss(n) of ()
+(* An entry found by name: its data [data_offset, data_offset +
+   data_size), method, and its name [name_offset, name_offset +
+   name_len) in the file *)
+datavtype book_hit(file_size:int) =
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    BookHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | BookMiss(file_size) of ()
 
-(* The first of es named name[0, nb) in cd, whose names are at co in
-   the file *)
-fun book_find {n:int}{lc:agz}{c:pos}{co:nat | co + c <= n}{k:nat}{lb:agz}{nb:pos} .<k>.
-  (cd: !$A.arr(byte, lc, c), co: int co, es: !book_entries(n, c, k),
-   name: !$A.borrow(byte, lb, nb), nb: int nb): book_hit(n) =
-  case+ es of
+(* The first of entries named name[0, name_size) in directory, whose
+   names are at directory_offset in the file *)
+fun book_find {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos} .<count>.
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) =
+  case+ entries of
   | BookEntriesNil() => BookMiss()
-  | @BookEntry(d, sz, m, no, nl, rest) =>
-    if $Z.cd_name_eq(cd, no, nl, name, nb) then let
-      val r = BookHit(d, sz, m, co + no, nl)
-      prval () = fold@(es)
-    in r end
+  | @BookEntry(data_offset, data_size, method, name_offset, name_len, rest) =>
+    if $Z.cd_name_eq(directory, name_offset, name_len, name, name_size) then let
+      val hit = BookHit(data_offset, data_size, method, directory_offset + name_offset, name_len)
+      prval () = fold@(entries)
+    in hit end
     else let
-      val r = book_find(cd, co, rest, name, nb)
-      prval () = fold@(es)
-    in r end
+      val hit = book_find(directory, directory_offset, rest, name, name_size)
+      prval () = fold@(entries)
+    in hit end
 
-(* The entry named name[0, nb) of the z-byte file f, found in its
-   index ix, its data read into a piece; missing when there is none, or
+(* The entry named name[0, name_size) of book_file, found in its
+   index, its data read into a piece; missing when there is none, or
    when no piece can be had for the data *)
-fn index_read {z:pos}{lb:agz}{nb:pos}
-  (f: !$FI.infile(z), ix: !book_index(z), z: int z, name: !$A.borrow(byte, lb, nb), nb: int nb): zip_got(z) = let
-  val+ @BookIndex(cd, _, co, es) = ix
-  val hit = book_find(cd, co, es, name, nb)
-  prval () = fold@(ix)
+fn index_read {file_size:pos}{name_loc:agz}{name_size:pos}
+  (book_file: !$FI.infile(file_size), index: !book_index(file_size), file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size) = let
+  val+ @BookIndex(directory, _, directory_offset, entries) = index
+  val hit = book_find(directory, directory_offset, entries, name, name_size)
+  prval () = fold@(index)
 in
   case+ hit of
   | ~BookMiss() => ZipMissing()
-  | ~BookHit(d, cs, m, no, nl) =>
-    (case+ piece_new(cs) of
+  | ~BookHit(data_offset, compressed_size, method, name_offset, name_len) =>
+    (case+ piece_new(compressed_size) of
      | ~NoPiece() => ZipMissing()
-     | ~Piece(ar, buf) => let
-         val () = $FI.file_read(f, d, buf, cs)
-       in ZipGot(ar, buf, cs, m, d, no, nl) end)
+     | ~Piece(owner, data) => let
+         val () = $FI.file_read(book_file, data_offset, data, compressed_size)
+       in ZipGot(owner, data, compressed_size, method, data_offset, name_offset, name_len) end)
 end
 
-fun book_chapters_free {n:int}{k:nat} .<k>. (chs: book_chapters(n, k)): void =
-  case+ chs of
+fun book_chapters_free {file_size:int}{count:nat} .<count>. (chapters: book_chapters(file_size, count)): void =
+  case+ chapters of
   | ~ChaptersNil() => ()
   | ~Chapter(_, _, _, _, _, _, rest) => book_chapters_free(rest)
   | ~ChapterMissing(rest) => book_chapters_free(rest)
 
-fn book_spine_free {n:int} (sp: book_spine(n)): void =
-  case+ sp of
-  | ~Spine(chs, _) => book_chapters_free(chs)
+fn book_spine_free {file_size:int} (spine: book_spine(file_size)): void =
+  case+ spine of
+  | ~Spine(chapters, _) => book_chapters_free(chapters)
   | ~NoSpine() => ()
 
-(* Chapter i of chs, of the book's k *)
-fun book_chapter_at {n:pos}{j:nat}{i:nat}{k:nat} .<j>.
-  (chs: !book_chapters(n, j), n: int n, i: int i, k: int k): chapter_got =
-  case+ chs of
-  | ChaptersNil() => ChapterNone(k)
-  | @Chapter(d, sz, m, no, nl, dl, rest) =>
-    if i = 0 then let
-      val r = ChapterGot(n, d, sz, m, no, nl, dl, k)
-      prval () = fold@(chs)
-    in r end
+(* Chapter chapter_index of chapters, of the book's chapter_count *)
+fun book_chapter_at {file_size:pos}{remaining:nat}{chapter_index:nat}{chapter_count:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index, chapter_count: int chapter_count): chapter_got =
+  case+ chapters of
+  | ChaptersNil() => ChapterNone(chapter_count)
+  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, rest) =>
+    if chapter_index = 0 then let
+      val got = ChapterGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len, chapter_count)
+      prval () = fold@(chapters)
+    in got end
     else let
-      val r = book_chapter_at(rest, n, i - 1, k)
-      prval () = fold@(chs)
-    in r end
+      val got = book_chapter_at(rest, file_size, chapter_index - 1, chapter_count)
+      prval () = fold@(chapters)
+    in got end
   | @ChapterMissing(rest) =>
-    if i = 0 then let
-      prval () = fold@(chs)
-    in ChapterNone(k) end
+    if chapter_index = 0 then let
+      prval () = fold@(chapters)
+    in ChapterNone(chapter_count) end
     else let
-      val r = book_chapter_at(rest, n, i - 1, k)
-      prval () = fold@(chs)
-    in r end
+      val got = book_chapter_at(rest, file_size, chapter_index - 1, chapter_count)
+      prval () = fold@(chapters)
+    in got end
 
 implement book_take() = let
-  var b: open_book = NoBook()
-  val () = ref_exch_elt<open_book>(_book, b)
-in b end
+  var book: open_book = NoBook()
+  val () = ref_exch_elt<open_book>(_book, book)
+in book end
 
-implement book_put(b) = let
-  var cur: open_book = b
-  val () = ref_exch_elt<open_book>(_book, cur)
+implement book_put(book) = let
+  var previous: open_book = book
+  val () = ref_exch_elt<open_book>(_book, previous)
 in
-  case+ cur of
-  | ~OpenBook(f, _, ix, sp, _, _, _, _, _) => let
-      val () = book_index_free(ix)
-      val () = book_spine_free(sp)
-    in $FI.close(f) end
-  | ~Importing(f, _, ix) => let
-      val () = book_index_free(ix)
-    in $FI.close(f) end
+  case+ previous of
+  | ~OpenBook(book_file, _, index, spine, _, _, _, _, _) => let
+      val () = book_index_free(index)
+      val () = book_spine_free(spine)
+    in $FI.close(book_file) end
+  | ~Importing(book_file, _, index) => let
+      val () = book_index_free(index)
+    in $FI.close(book_file) end
   | ~NoBook() => ()
 end
 
 implement book_serial() = !_book_serial
 
 implement book_meta_get() = let
-  val b = book_take()
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, n, _, _, d, sz, m, no, nl) => let
-      val r = @(n, d, sz, m, no, nl)
-      prval () = fold@(b)
-      val () = book_put(b)
-    in $R.some(r) end
-  | _ => let val () = book_put(b) in $R.none() end
+  case+ book of
+  | @OpenBook(_, file_size, _, _, data_offset, data_size, method, name_offset, name_len) => let
+      val meta = @(file_size, data_offset, data_size, method, name_offset, name_len)
+      prval () = fold@(book)
+      val () = book_put(book)
+    in $R.some(meta) end
+  | _ => let val () = book_put(book) in $R.none() end
 end
 
-implement book_idb_put (key, nk) = let
-  val b = book_take()
+implement book_idb_put (key, key_size) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(f, _, _, _, _, _, _, _, _) => let
-      val p = $FI.idb_put(key, nk, f)
-      val () = $P.discard<Int>(p)
-      prval () = fold@(b)
-    in book_put(b) end
-  | _ => book_put(b)
+  case+ book of
+  | @OpenBook(book_file, _, _, _, _, _, _, _, _) => let
+      val stored = $FI.idb_put(key, key_size, book_file)
+      val () = $P.discard<Int>(stored)
+      prval () = fold@(book)
+    in book_put(book) end
+  | _ => book_put(book)
 end
 
-implement book_read {z}{o,k}{l}{ow}{m} (s, z, o, out, k) = let
-  val b = book_take()
+implement book_read {file_size}{offset,read_len}{out_loc}{out_owner}{out_size} (serial, file_size, offset, out, read_len) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(f, n, _, _, _, _, _, _, _) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val () = $FI.file_read(f, o, out, k)
-         prval () = fold@(b)
-         val () = book_put(b)
+  case+ book of
+  | @OpenBook(book_file, open_size, _, _, _, _, _, _, _) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val () = $FI.file_read(book_file, offset, out, read_len)
+         prval () = fold@(book)
+         val () = book_put(book)
        in true end
-       else let prval () = fold@(b); val () = book_put(b) in false end)
-    else let prval () = fold@(b); val () = book_put(b) in false end
-  | @Importing(f, n, _) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val () = $FI.file_read(f, o, out, k)
-         prval () = fold@(b)
-         val () = book_put(b)
+       else let prval () = fold@(book); val () = book_put(book) in false end)
+    else let prval () = fold@(book); val () = book_put(book) in false end
+  | @Importing(book_file, open_size, _) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val () = $FI.file_read(book_file, offset, out, read_len)
+         prval () = fold@(book)
+         val () = book_put(book)
        in true end
-       else let prval () = fold@(b); val () = book_put(b) in false end)
-    else let prval () = fold@(b); val () = book_put(b) in false end
-  | NoBook() => let val () = book_put(b) in false end
+       else let prval () = fold@(book); val () = book_put(book) in false end)
+    else let prval () = fold@(book); val () = book_put(book) in false end
+  | NoBook() => let val () = book_put(book) in false end
 end
 
 implement take_blob (handle) =
   case+ $DC.blob_claim(handle) of
   | ~$R.none() => NoBlobBytes()
-  | ~$R.some(b) => let
-      val n = $DC.blob_len(b)
+  | ~$R.some(blob) => let
+      val blob_len = $DC.blob_len(blob)
     in
-      if n <= 0 then let val () = $DC.blob_free(b) in NoBlobBytes() end
-      else if n > 1048576 then let val () = $DC.blob_free(b) in NoBlobBytes() end
+      if blob_len <= 0 then let val () = $DC.blob_free(blob) in NoBlobBytes() end
+      else if blob_len > 1048576 then let val () = $DC.blob_free(blob) in NoBlobBytes() end
       else let
-        val buf = $A.alloc<byte>(n)
-        val () = $DC.blob_read(b, 0, buf, n)
-        val () = $DC.blob_free(b)
-      in BlobBytes(buf, n) end
+        val blob_data = $A.alloc<byte>(blob_len)
+        val () = $DC.blob_read(blob, 0, blob_data, blob_len)
+        val () = $DC.blob_free(blob)
+      in BlobBytes(blob_data, blob_len) end
     end
 
-implement piece_new (n) =
-  case+ page_lend(n) of
-  | ~PageLent(ar, p, q, t, u) => Piece(OwnerPage(ar, q, t, u), p)
+implement piece_new (piece_size) =
+  case+ page_lend(piece_size) of
+  | ~PageLent(arena, piece, page, pages, used) => Piece(OwnerPage(arena, page, pages, used), piece)
   | ~NoLend() =>
-    (case+ $A.arena_create<byte>(n) of
+    (case+ $A.arena_create<byte>(piece_size) of
      | ~$A.arena_none() => NoPiece()
-     | ~$A.arena_some(ar) => let
-         val p = $A.arena_alloc<byte>(ar, n)
-       in Piece(OwnerOwn(ar), p) end)
+     | ~$A.arena_some(arena) => let
+         val piece = $A.arena_alloc<byte>(arena, piece_size)
+       in Piece(OwnerOwn(arena), piece) end)
 
-implement piece_free (owner, p) =
+implement piece_free (owner, piece) =
   case+ owner of
-  | ~OwnerPage(ar, q, t, u) => page_give_back(ar, p, q, t, u)
-  | ~OwnerOwn(ar) => let
-      val () = $A.arena_return<byte>(ar, p)
-    in $A.arena_destroy<byte>(ar) end
+  | ~OwnerPage(arena, page, pages, used) => page_give_back(arena, piece, page, pages, used)
+  | ~OwnerOwn(arena) => let
+      val () = $A.arena_return<byte>(arena, piece)
+    in $A.arena_destroy<byte>(arena) end
 
 implement take_content (handle) =
   case+ $DC.blob_claim(handle) of
   | ~$R.none() => NoContentBytes()
-  | ~$R.some(b) => let
-      val n = $DC.blob_len(b)
+  | ~$R.some(blob) => let
+      val content_size = $DC.blob_len(blob)
     in
-      if n <= 0 then let val () = $DC.blob_free(b) in NoContentBytes() end
-      else if n > 268435456 then let val () = $DC.blob_free(b) in NoContentBytes() end
-      else (case+ piece_new(n) of
-        | ~NoPiece() => let val () = $DC.blob_free(b) in NoContentBytes() end
-        | ~Piece(ar, p) => let
-            val () = $DC.blob_read(b, 0, p, n)
-            val () = $DC.blob_free(b)
-          in ContentBytes(ar, p, n) end)
+      if content_size <= 0 then let val () = $DC.blob_free(blob) in NoContentBytes() end
+      else if content_size > 268435456 then let val () = $DC.blob_free(blob) in NoContentBytes() end
+      else (case+ piece_new(content_size) of
+        | ~NoPiece() => let val () = $DC.blob_free(blob) in NoContentBytes() end
+        | ~Piece(owner, piece) => let
+            val () = $DC.blob_read(blob, 0, piece, content_size)
+            val () = $DC.blob_free(blob)
+          in ContentBytes(owner, piece, content_size) end)
     end
 
-implement book_begin {n} (f, n) = let
+implement book_begin {file_size} (book_file, file_size) = let
   val () = !_book_serial := !_book_serial + 1
-  val () = (case+ book_index_make(f, n) of
-    | ~$R.some(ix) => book_put(Importing(f, n, ix))
+  val () = (case+ book_index_make(book_file, file_size) of
+    | ~$R.some(index) => book_put(Importing(book_file, file_size, index))
     | ~$R.none() => let
-        val () = $FI.close(f)
+        val () = $FI.close(book_file)
       in book_put(NoBook()) end)
 in !_book_serial end
 
-implement book_zip_read {z}{lb}{nb} (s, z, name, nb) = let
-  val b = book_take()
+implement book_zip_read {file_size}{name_loc}{name_size} (serial, file_size, name, name_size) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(f, n, ix, _, _, _, _, _, _) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val r = index_read(f, ix, z, name, nb)
-         prval () = fold@(b)
-         val () = book_put(b)
-       in r end
-       else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end)
-    else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end
-  | @Importing(f, n, ix) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val r = index_read(f, ix, z, name, nb)
-         prval () = fold@(b)
-         val () = book_put(b)
-       in r end
-       else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end)
-    else let prval () = fold@(b); val () = book_put(b) in ZipMissing() end
-  | NoBook() => let val () = book_put(b) in ZipMissing() end
+  case+ book of
+  | @OpenBook(book_file, open_size, index, _, _, _, _, _, _) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val got = index_read(book_file, index, file_size, name, name_size)
+         prval () = fold@(book)
+         val () = book_put(book)
+       in got end
+       else let prval () = fold@(book); val () = book_put(book) in ZipMissing() end)
+    else let prval () = fold@(book); val () = book_put(book) in ZipMissing() end
+  | @Importing(book_file, open_size, index) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val got = index_read(book_file, index, file_size, name, name_size)
+         prval () = fold@(book)
+         val () = book_put(book)
+       in got end
+       else let prval () = fold@(book); val () = book_put(book) in ZipMissing() end)
+    else let prval () = fold@(book); val () = book_put(book) in ZipMissing() end
+  | NoBook() => let val () = book_put(book) in ZipMissing() end
 end
 
-implement book_finish (s, z, d, sz, m, no, nl) = let
-  val b = book_take()
+implement book_finish (serial, file_size, data_offset, data_size, method, name_offset, name_len) = let
+  val book = book_take()
 in
-  case+ b of
-  | ~Importing(f, n, ix) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val () = book_put(OpenBook(f, n, ix, NoSpine(), d, sz, m, no, nl))
+  case+ book of
+  | ~Importing(book_file, open_size, index) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val () = book_put(OpenBook(book_file, open_size, index, NoSpine(), data_offset, data_size, method, name_offset, name_len))
        in true end
-       else let val () = book_put(Importing(f, n, ix)) in false end)
-    else let val () = book_put(Importing(f, n, ix)) in false end
-  | _ => let val () = book_put(b) in false end
+       else let val () = book_put(Importing(book_file, open_size, index)) in false end)
+    else let val () = book_put(Importing(book_file, open_size, index)) in false end
+  | _ => let val () = book_put(book) in false end
 end
 
-implement book_find_entry {z}{lb}{nb} (s, z, name, nb) = let
-  val b = book_take()
+implement book_find_entry {file_size}{name_loc}{name_size} (serial, file_size, name, name_size) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, n, ix, _, _, _, _, _, _) =>
-    if s = !_book_serial then
-      (if n = z then let
-         val+ @BookIndex(cd, _, co, es) = ix
-         val hit = book_find(cd, co, es, name, nb)
-         prval () = fold@(ix)
-         prval () = fold@(b)
-         val () = book_put(b)
+  case+ book of
+  | @OpenBook(_, open_size, index, _, _, _, _, _, _) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then let
+         val+ @BookIndex(directory, _, directory_offset, entries) = index
+         val hit = book_find(directory, directory_offset, entries, name, name_size)
+         prval () = fold@(index)
+         prval () = fold@(book)
+         val () = book_put(book)
        in
          case+ hit of
-         | ~BookHit(d, sz, m, no, nl) => EntryHit(d, sz, m, no, nl)
+         | ~BookHit(data_offset, data_size, method, name_offset, name_len) => EntryHit(data_offset, data_size, method, name_offset, name_len)
          | ~BookMiss() => EntryMiss()
        end
-       else let prval () = fold@(b); val () = book_put(b) in EntryMiss() end)
-    else let prval () = fold@(b); val () = book_put(b) in EntryMiss() end
-  | _ => let val () = book_put(b) in EntryMiss() end
+       else let prval () = fold@(book); val () = book_put(book) in EntryMiss() end)
+    else let prval () = fold@(book); val () = book_put(book) in EntryMiss() end
+  | _ => let val () = book_put(book) in EntryMiss() end
 end
 
-implement book_spine_set {z}{k} (s, z, chs, k) = let
-  val b = book_take()
+implement book_spine_set {file_size}{chapter_count} (serial, file_size, chapters, chapter_count) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, n, _, sp, _, _, _, _, _) =>
-    if s = !_book_serial then
-      (if n = z then
-         (case+ sp of
+  case+ book of
+  | @OpenBook(_, open_size, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then
+      (if open_size = file_size then
+         (case+ spine of
           | NoSpine() => let
-              val () = book_spine_free(sp)
-              val () = sp := Spine(chs, k)
-              prval () = fold@(b)
-            in book_put(b) end
+              val () = book_spine_free(spine)
+              val () = spine := Spine(chapters, chapter_count)
+              prval () = fold@(book)
+            in book_put(book) end
           | Spine(_, _) => let
-              prval () = fold@(b)
-              val () = book_put(b)
-            in book_chapters_free(chs) end)
+              prval () = fold@(book)
+              val () = book_put(book)
+            in book_chapters_free(chapters) end)
        else let
-         prval () = fold@(b)
-         val () = book_put(b)
-       in book_chapters_free(chs) end)
+         prval () = fold@(book)
+         val () = book_put(book)
+       in book_chapters_free(chapters) end)
     else let
-      prval () = fold@(b)
-      val () = book_put(b)
-    in book_chapters_free(chs) end
+      prval () = fold@(book)
+      val () = book_put(book)
+    in book_chapters_free(chapters) end
   | _ => let
-      val () = book_put(b)
-    in book_chapters_free(chs) end
+      val () = book_put(book)
+    in book_chapters_free(chapters) end
 end
 
-implement book_chapter_get {i} (s, i) = let
-  val b = book_take()
+implement book_chapter_get {chapter_index} (serial, chapter_index) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, n, _, sp, _, _, _, _, _) =>
-    if s = !_book_serial then let
-      val r = (case+ sp of
-        | @Spine(chs, k) => let
-            val r = book_chapter_at(chs, n, i, k)
-            prval () = fold@(sp)
-          in r end
+  case+ book of
+  | @OpenBook(_, open_size, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val got = (case+ spine of
+        | @Spine(chapters, chapter_count) => let
+            val got = book_chapter_at(chapters, open_size, chapter_index, chapter_count)
+            prval () = fold@(spine)
+          in got end
         | NoSpine() => ChaptersUnknown()): chapter_got
-      prval () = fold@(b)
-      val () = book_put(b)
-    in r end
-    else let prval () = fold@(b); val () = book_put(b) in ChaptersUnknown() end
-  | _ => let val () = book_put(b) in ChaptersUnknown() end
+      prval () = fold@(book)
+      val () = book_put(book)
+    in got end
+    else let prval () = fold@(book); val () = book_put(book) in ChaptersUnknown() end
+  | _ => let val () = book_put(book) in ChaptersUnknown() end
 end
 
-(* The index, from i, of the first chapter of chs whose name is at no *)
-fun book_chapter_find {n:pos}{j:nat}{i:nat} .<j>.
-  (chs: !book_chapters(n, j), no: int, i: int i): [v:int | v >= ~1] int v =
-  case+ chs of
+(* The index, from chapter_index, of the first of chapters whose name
+   is at name_offset *)
+fun book_chapter_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), name_offset: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
+  case+ chapters of
   | ChaptersNil() => ~1
-  | @Chapter(_, _, _, cno, _, _, rest) =>
-    if cno = no then let prval () = fold@(chs) in i end
+  | @Chapter(_, _, _, chapter_name_offset, _, _, rest) =>
+    if chapter_name_offset = name_offset then let prval () = fold@(chapters) in chapter_index end
     else let
-      val r = book_chapter_find(rest, no, i + 1)
-      prval () = fold@(chs)
-    in r end
+      val found = book_chapter_find(rest, name_offset, chapter_index + 1)
+      prval () = fold@(chapters)
+    in found end
   | @ChapterMissing(rest) => let
-      val r = book_chapter_find(rest, no, i + 1)
-      prval () = fold@(chs)
-    in r end
+      val found = book_chapter_find(rest, name_offset, chapter_index + 1)
+      prval () = fold@(chapters)
+    in found end
 
-implement book_chapter_of (s, no) = let
-  val b = book_take()
+implement book_chapter_of (serial, name_offset) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
-    if s = !_book_serial then let
-      val r = (case+ sp of
-        | @Spine(chs, _) => let
-            val r = book_chapter_find(chs, no, 0)
-            prval () = fold@(sp)
-          in r end
-        | NoSpine() => ~1): [v:int | v >= ~1] int v
-      prval () = fold@(b)
-      val () = book_put(b)
-    in r end
-    else let prval () = fold@(b); val () = book_put(b) in ~1 end
-  | _ => let val () = book_put(b) in ~1 end
+  case+ book of
+  | @OpenBook(_, _, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val found = (case+ spine of
+        | @Spine(chapters, _) => let
+            val found = book_chapter_find(chapters, name_offset, 0)
+            prval () = fold@(spine)
+          in found end
+        | NoSpine() => ~1): [found:int | found >= ~1] int found
+      prval () = fold@(book)
+      val () = book_put(book)
+    in found end
+    else let prval () = fold@(book); val () = book_put(book) in ~1 end
+  | _ => let val () = book_put(book) in ~1 end
 end
 
-(* The sizes of chs: of the chapters before chapter i, of chapter i,
-   and of all of them, added to acc *)
-fun book_weigh {n:pos}{j:nat} .<j>.
-  (chs: !book_chapters(n, j), i: int, b: Nat, w: Nat, t: Nat): @(Nat, Nat, Nat) =
-  case+ chs of
-  | ChaptersNil() => @(b, w, t)
-  | @Chapter(_, sz, _, _, _, _, rest) => let
-      val r = (if i > 0 then book_weigh(rest, i - 1, b + sz, w, t + sz)
-               else if i = 0 then book_weigh(rest, i - 1, b, sz, t + sz)
-               else book_weigh(rest, i - 1, b, w, t + sz)): @(Nat, Nat, Nat)
-      prval () = fold@(chs)
-    in r end
+(* The sizes of chapters: of the chapters before chapter chapter_index,
+   of that chapter, and of all of them, added to before, own and
+   total *)
+fun book_weigh {file_size:pos}{remaining:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), chapter_index: int, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
+  case+ chapters of
+  | ChaptersNil() => @(before, own, total)
+  | @Chapter(_, data_size, _, _, _, _, rest) => let
+      val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, before + data_size, own, total + data_size)
+        else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, before, data_size, total + data_size)
+        else book_weigh(rest, chapter_index - 1, before, own, total + data_size)): @(Nat, Nat, Nat)
+      prval () = fold@(chapters)
+    in weights end
   | @ChapterMissing(rest) => let
-      val r = book_weigh(rest, i - 1, b, w, t)
-      prval () = fold@(chs)
-    in r end
+      val weights = book_weigh(rest, chapter_index - 1, before, own, total)
+      prval () = fold@(chapters)
+    in weights end
 
-implement book_weights (s, i) = let
-  val b = book_take()
+implement book_weights (serial, chapter_index) = let
+  val book = book_take()
 in
-  case+ b of
-  | @OpenBook(_, _, _, sp, _, _, _, _, _) =>
-    if s = !_book_serial then let
-      val r = (case+ sp of
-        | @Spine(chs, _) => let
-            val r = book_weigh(chs, i, 0, 0, 0)
-            prval () = fold@(sp)
-          in r end
+  case+ book of
+  | @OpenBook(_, _, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val weights = (case+ spine of
+        | @Spine(chapters, _) => let
+            val weights = book_weigh(chapters, chapter_index, 0, 0, 0)
+            prval () = fold@(spine)
+          in weights end
         | NoSpine() => @(0, 0, 0)): @(Nat, Nat, Nat)
-      prval () = fold@(b)
-      val () = book_put(b)
-    in r end
-    else let prval () = fold@(b); val () = book_put(b) in @(0, 0, 0) end
-  | _ => let val () = book_put(b) in @(0, 0, 0) end
+      prval () = fold@(book)
+      val () = book_put(book)
+    in weights end
+    else let prval () = fold@(book); val () = book_put(book) in @(0, 0, 0) end
+  | _ => let val () = book_put(book) in @(0, 0, 0) end
 end
 
-implement book_find_relative (s, z, dno, dl, data, n, ho, h) =
-  if h <= 0 then EntryMiss()
+implement book_find_relative (serial, file_size, dir_name_offset, dir_len, data, n, href_offset, href_len) =
+  if href_len <= 0 then EntryMiss()
   (* a path of 64 KiB or more names no zip entry: the book's data,
      checked here *)
-  else if h >= 65536 then EntryMiss()
+  else if href_len >= 65536 then EntryMiss()
   else let
-    val m = dl + h
-    val buf = $A.alloc<byte>(m)
-    val _ = book_read(s, z, dno, buf, dl)
-    val () = $S.copy_from_borrow(data, ho, n, buf, dl, m, h)
-    val k = path_norm(buf, m)
+    val path_size = dir_len + href_len
+    val path = $A.alloc<byte>(path_size)
+    val _ = book_read(serial, file_size, dir_name_offset, path, dir_len)
+    val () = $S.copy_from_borrow(data, href_offset, n, path, dir_len, path_size, href_len)
+    val resolved_len = path_norm(path, path_size)
   in
-    if k <= 0 then let val () = $A.free<byte>(buf) in EntryMiss() end
+    if resolved_len <= 0 then let val () = $A.free<byte>(path) in EntryMiss() end
     else let
-      val exact = $A.alloc<byte>(k)
-      val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
-      val () = $A.free<byte>(buf)
-      val @(f, b) = $A.freeze<byte>(exact)
-      val hit = book_find_entry(s, z, b, k)
-      val () = release_bytes(f, b)
+      val exact = $A.alloc<byte>(resolved_len)
+      val path = $S.copy_arr_region(path, 0, path_size, exact, resolved_len, resolved_len)
+      val () = $A.free<byte>(path)
+      val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
+      val hit = book_find_entry(serial, file_size, exact_bytes, resolved_len)
+      val () = release_bytes(exact_frozen, exact_bytes)
     in hit end
   end
 
-implement book_abandon (s) =
-  if s = !_book_serial then let
-    val b = book_take()
+implement book_abandon (serial) =
+  if serial = !_book_serial then let
+    val book = book_take()
   in
-    case+ b of
-    | ~Importing(f, _, ix) => let
-        val () = book_index_free(ix)
-      in $FI.close(f) end
-    | _ => book_put(b)
+    case+ book of
+    | ~Importing(book_file, _, index) => let
+        val () = book_index_free(index)
+      in $FI.close(book_file) end
+    | _ => book_put(book)
   end
   else ()
 
 (* The reader's font size in px: 8 to 48, the range the A- and A+
    buttons step through. *)
-#pub typedef font_px = [s:int | 8 <= s; s <= 48] int s
+#pub typedef font_px = [px:int | 8 <= px; px <= 48] int px
 
 #pub fun font_get(): font_px
 
-#pub fun font_set(s: font_px): void
+#pub fun font_set(px: font_px): void
 
 val _font = ref<font_px>(16)
 
 implement font_get() = !_font
 
-implement font_set(s) = !_font := s
+implement font_set(px) = !_font := px
 
-(* Where the reader is: page p of the chapter's t pages (at least one),
-   in chapter c (counted from 1; 0 before one loads) of the book's tc.
+(* Where the reader is: page `page` of the chapter's `pages` (at least
+   one), in chapter `chapter` (counted from 1; 0 before one loads) of
+   the book's `chapters`.
    A flat tuple, kept in its ref: a datatype's value is allocated on
    every change and never freed. *)
 #pub typedef reading =
-  [t:pos][p:nat | p < t][c,tc:nat] @(int p, int t, int c, int tc)
+  [pages:pos][page:nat | page < pages][chapter,chapters:nat] @(int page, int pages, int chapter, int chapters)
 
 #pub fun reading_get(): reading
 
-#pub fun reading_set(r: reading): void
+#pub fun reading_set(place: reading): void
 
 val _reading = ref<reading>(@(0, 1, 0, 0))
 
 implement reading_get() = !_reading
 
-implement reading_set(r) = !_reading := r
+implement reading_set(place) = !_reading := place
 
 end (* #target wasm *)

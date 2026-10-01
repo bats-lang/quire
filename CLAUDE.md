@@ -61,14 +61,14 @@ window has no arena to allocate from.
 
 ### The window today
 
-`src/pages.bats` holds it. `page_arena(q, t)` is the arena of page q of
-a chapter of t pages, with no piece out; it exists only for
-`0 <= q < t`. `window(p, t)` holds exactly the arenas of pages p - 2 to
-p + 2 (scrolled, a page is a screenful, so the window counts those).
-`window_forward` turns it into `window(p + 1, t)` by releasing
-page p - 2's arena and making page p + 3's (`window_back` is the mirror
-image), so keeping any other arena does not type-check. Each arena is
-4 MiB (`PAGE_BYTES`).
+`src/pages.bats` holds it. `page_arena(page, pages)` is the arena of
+that page of a chapter of that many pages, with no piece out; it exists
+only for `0 <= page < pages`. `window(page, pages)` holds exactly the
+arenas of pages page - 2 to page + 2 (scrolled, a page is a screenful,
+so the window counts those). `window_forward` turns it into
+`window(page + 1, pages)` by releasing page - 2's arena and making
+page + 3's (`window_back` is the mirror image), so keeping any other
+arena does not type-check. Each arena is 4 MiB (`PAGE_BYTES`).
 
 The reader's window lives in a `ref` taken out and put back with
 `ref_exch_elt`, since it is linear. `_show_page` moves it to the page
