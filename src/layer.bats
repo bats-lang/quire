@@ -23,6 +23,8 @@ staload "ui.sats"
   | LImage         (* a book's image, full screen *)
   | LCollections   (* a book's collections *)
   | LStats         (* the reading statistics *)
+  | LDictionaries  (* the dictionaries: imported, listed and removed *)
+  | LDictionary    (* a word looked up in a dictionary *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   case+ overlay of
@@ -30,12 +32,13 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   | LContents() => "contents-panel" | LTypography() => "typography-panel" | LSearch() => "search-panel"
   | LAnnotations() => "annotations-panel" | LNote() => "footnote" | LImage() => "image-viewer"
   | LCollections() => "collections-menu" | LStats() => "stats-panel"
+  | LDictionaries() => "dictionaries-panel" | LDictionary() => "dictionary-panel"
 
 fn _number (overlay: layer): int =
   case+ overlay of
   | LBookMenu() => 0 | LLibraryMenu() => 1 | LBookInfo() => 2 | LContents() => 3
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
-  | LCollections() => 9 | LStats() => 10
+  | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
 
 (* The open overlays, the last opened first *)
 datatype layers(int) =

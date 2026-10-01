@@ -101,7 +101,11 @@ page's arena, or the one piece of an arena sized to it, so it has no
 * each image's bytes (`_show_image` in `src/reader.bats`);
 * a book's annotations while a backup is written (`annot_json`), each
   book's part of the backup, and the whole file (`backup_export`);
-* a backup file while it is restored (`backup_import`).
+* a backup file while it is restored (`backup_import`);
+* a dictionary's .idx and .syn while it is imported, and its table
+  (`_index_read`, `_table_store` in `src/dictionary.bats`); an article
+  read from a .dict, or the dictzip chunks that hold it and their
+  inflated bytes (`_article`, `_article_dz`).
 
 Each piece lives only while it is parsed or written: nothing is kept
 between page turns yet, since pages are CSS columns of the chapter's
@@ -123,6 +127,23 @@ With `alloc`:
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
+
+### Offline dictionaries
+
+`src/dictionary.bats` keeps the StarDict dictionaries Look up reads
+without a connection (`src/stardict.bats` reads their bytes: the
+.ifo's keys, the headwords' order, an article as text). Like an EPUB,
+a dictionary's files never enter wasm memory to stay: they are stored
+from the JS side (file-input's `idb_put`) and read back by ranges. Its
+import checks the .ifo and the .idx's size, every record of the .idx
+and .syn, and a .dict.dz's chunk table, and stores a table ('X') of
+every 64th headword of each with where its record is; a lookup
+binary-searches it and reads one block of records. An article is
+shown as text only (`article_text`): HTML and XDXF tags are dropped,
+never put in the DOM. The list of dictionaries (`dicts`) is stored
+under "dicts"; a removal is offered back by the Undo toast, and its
+files are deleted when the offer is made final. The backup lists the
+dictionaries' names and languages, not their files.
 
 ### The archive is checked once
 

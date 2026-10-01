@@ -774,6 +774,37 @@ implement ui_field(parent, id, field_kind, class_name, name) = let
   val () = _set_attr(id, "placeholder", name)
 in _set_attr(id, "aria-label", name) end
 
+(* In document: option id_bytes chosen, when selected *)
+fn _document_selected {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, selected: bool): void =
+  if selected then _document_attr(document, id_bytes, id_len, "selected", "selected") else ()
+
+(* An option of the choice (FChoice) select_id, as its last: its value
+   value[0, value_len), named by the label it shows,
+   label[0, label_len); chosen when selected *)
+#pub fn ui_option {select_len:pos | select_len < 256}{id_loc,value_loc,label_loc:agz}{id_len:pos | id_len < 256}
+  {value_size,label_size:pos}{value_len:pos | value_len <= value_size; value_len < 256}{label_len:pos | label_len <= label_size; label_len < 256}
+  (select_id: string select_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len,
+   value: $A.arr(byte, value_loc, value_size), value_len: int value_len,
+   label: $A.arr(byte, label_loc, label_size), label_len: int label_len, selected: bool): void
+
+implement ui_option(select_id, id, id_len, value, value_len, label, label_len, selected) = let
+  val select_len = _length(select_id)
+  val @(select_frozen, select_bytes) = $A.freeze<byte>(_literal_bytes(select_id, select_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val @(label_frozen, label_bytes) = $A.freeze<byte>(label)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.add_element(document, select_bytes, select_len, id_bytes, id_len, "option")
+  val () = $D.set_attr(document, id_bytes, id_len, "value", value_bytes, 0, value_len)
+  val () = $D.set_text(document, id_bytes, id_len, label_bytes, 0, label_len)
+  val () = _document_selected(document, id_bytes, id_len, selected)
+  val () = $D.destroy(document)
+  val () = release_bytes(label_frozen, label_bytes)
+  val () = release_bytes(value_frozen, value_bytes)
+  val () = release_bytes(id_frozen, id_bytes)
+in release_bytes(select_frozen, select_bytes) end
+
 (* Roles that need no name *)
 #pub datatype role = RMain | RStatus | RAlert | RTooltip | RHeading
 

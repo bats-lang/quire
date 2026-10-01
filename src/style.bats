@@ -1329,7 +1329,9 @@ fn _overlays {left:nat | left >= 4100} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Left(), "50%")
   val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 112px)")
   val sheet = centre_x(sheet)
-  val sheet = lay(sheet, ZIndex(), "18")
+  (* over the overlays (a panel that removes something offers it back
+     here, while it is still open) *)
+  val sheet = lay(sheet, ZIndex(), "21")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "12px")
   val sheet = lay(sheet, AlignItems(), "center")
@@ -1834,7 +1836,7 @@ fn _reader {left:nat | left >= 7000} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5100} (sheet: sheet(left, 0)): [after:nat | after >= left - 5100] sheet(after, 0) = let
+fn _panels {left:nat | left >= 5160} (sheet: sheet(left, 0)): [after:nat | after >= left - 5160] sheet(after, 0) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2012,6 +2014,10 @@ fn _panels {left:nat | left >= 5100} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, MaxHeight(), "50vh")
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, LineHeight(), "1.5")
+  val sheet = close(sheet)
+  (* a dictionary's article, as text: its line breaks kept *)
+  val sheet = rule(sheet, ".dart")
+  val sheet = lay(sheet, WhiteSpace(), "pre-wrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
