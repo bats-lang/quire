@@ -43,6 +43,22 @@ export function chapters(n, paras = 20, tag = 'Para') {
   return Array.from({ length: n }, (_, k) => ({ body: chapterBody(k + 1, paras, tag) }));
 }
 
+/** Chapter i's body in Japanese: a heading and n paragraphs long
+    enough to fill several pages set vertically, each starting with a
+    findable tag (段落 i.k) */
+export function japaneseChapterBody(i, n = 20) {
+  let body = `<h1>第${i}章</h1>`;
+  for (let k = 0; k < n; k++) {
+    body += `<p>段落 ${i}.${k} ` + '吾輩は猫である。名前はまだ無い。どこで生れたかとんと見当がつかぬ。'.repeat(6) + '</p>';
+  }
+  return body;
+}
+
+/** Chapters 1..n made by japaneseChapterBody */
+export function japaneseChapters(n, paras = 20) {
+  return Array.from({ length: n }, (_, k) => ({ body: japaneseChapterBody(k + 1, paras) }));
+}
+
 /** A book with the print edition's pages (a page-list): chapters 1 and 2
     each hold three page breaks, the first before their first paragraph
     (pages 1-3 and 4-6), and chapter 3 has none */

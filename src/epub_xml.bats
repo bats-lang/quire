@@ -872,6 +872,55 @@ in
     | ~xspan_none() => false
 end
 
+(* Whether the language tag data[offset, offset + language_len) is
+   Chinese, Japanese or Korean, which a book read right to left sets
+   vertically *)
+fn _language_east_asian {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len): bool = let
+  val @(offset, language_len) = _trim_front(data, offset, language_len)
+  val subtag_len = _subtag_end(data, offset, language_len, 0)
+in _span_is(data, offset, subtag_len, "ja") || _span_is(data, offset, subtag_len, "zh") || _span_is(data, offset, subtag_len, "ko") end
+
+(* Whether the language tag data[offset, offset + language_len) is
+   Mongolian in its traditional script (mn-Mong), which is set
+   vertically, its lines going on to the right *)
+fn _language_mongolian_script {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len): bool = let
+  val @(offset, language_len) = _trim_front(data, offset, language_len)
+  val subtag_len = _subtag_end(data, offset, language_len, 0)
+in
+  if ~_span_is(data, offset, subtag_len, "mn") then false
+  else if subtag_len + 5 > language_len then false
+  else let
+    val script_offset = offset + subtag_len + 1
+    val script_end = _subtag_end(data, script_offset, language_len - subtag_len - 1, 0)
+  in
+    _span_is(data, script_offset, script_end, "Mong") || _span_is(data, script_offset, script_end, "mong") || _span_is(data, script_offset, script_end, "MONG")
+  end
+end
+
+(* How the book is set, as Readium decides it from its OPF (the book's
+   own CSS is not used): 1 vertically with its lines going on to the
+   left (vertical-rl), when its spine reads right to left and its
+   language is Chinese, Japanese or Korean; 2 vertically with its lines
+   going on to the right (vertical-lr), when it is Mongolian in its
+   traditional script and its spine does not read right to left; else 0,
+   horizontally *)
+#pub fn spine_vertical
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): int
+
+implement spine_vertical (data, nodes) = let
+  val direction = _spine_rtl_nodes(data, nodes)
+in
+  case+ _opf_language_nodes(data, nodes) of
+  | ~xspan_at(language_offset, language_len) =>
+    if direction = 1 then (if _language_east_asian(data, language_offset, language_len) then 1 else 0)
+    else if _language_mongolian_script(data, language_offset, language_len) then 2
+    else 0
+  | ~xspan_none() => 0
+end
+
 (* The href of the first manifest item that is a font *)
 fun _font_item_nodes
   {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
