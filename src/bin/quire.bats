@@ -25,6 +25,7 @@ staload "toc.sats"
 staload "annot.sats"
 staload "mem.sats"
 staload "stats.sats"
+staload "dictionary.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -239,6 +240,7 @@ fn _show_library (): void = let
   val () = layer_close(LAnnotations())
   val () = layer_close(LNote())
   val () = layer_close(LImage())
+  val () = layer_close(LDictionary())
   val () = ui_show("library", true)
   (* a reload now comes back here *)
   val () = _view_save(~1)
@@ -723,6 +725,28 @@ fn _put_array {out_loc,code_loc:agz}{at:nat | at + 3 <= 256}{code_len:pos | code
   val () = (if code_len = 3 then $A.set<byte>(out, at + 2, $A.get<byte>(code, 2)) else ())
 in at + code_len end
 
+(* copy[0, url_len) := url[0, url_len) *)
+fun _copy_url {url_loc,copy_loc:agz}{url_len:nat | url_len <= 256}{i:nat | i <= url_len} .<url_len - i>.
+  (url: !$A.arr(byte, url_loc, 256), copy: !$A.arr(byte, copy_loc, 256), url_len: int url_len, i: int i): void =
+  if i >= url_len then ()
+  else let
+    val () = $A.set<byte>(copy, i, $A.get<byte>(url, i))
+  in _copy_url(url, copy, url_len, i + 1) end
+
+(* The dictionary panel's "Look up online": url[0, url_len), copied *)
+fn _online_href {url_loc:agz}{url_len:nat | url_len <= 256} (url: !$A.arr(byte, url_loc, 256), url_len: int url_len): void =
+  if url_len <= 0 then ()
+  else let
+    val copy = $A.alloc<byte>(256)
+    val () = _copy_url(url, copy, url_len, 0)
+  in ui_https_href("dictionary-online", copy, url_len) end
+
+(* Look up follows the selection: its link to the online dictionary,
+   and, when a dictionary the reader imported for the book's language
+   has the word, the button that shows it there instead (the dictionary
+   panel's "Look up online" keeps the link). A dictionary whose files
+   are still being read looks the selection up again once they are
+   (dict_when_read) *)
 fn _lookup_update (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
@@ -745,10 +769,14 @@ fn _lookup_update (): void =
         val at = _put_literal(out, 0, "https://")
         val @(language, language_len) = reader_lang_code()
         val at = _put_array(out, at, language, language_len)
-        val () = $A.free<byte>(language)
         val at = _put_literal(out, at, ".wiktionary.org/wiki/Special:Search?search=")
         val url_len = _percent_encode(word, word_len, 0, out, at)
+        val found = dict_find(language, language_len, word, word_len)
+        val () = $A.free<byte>(language)
         val () = $A.free<byte>(word)
+        val () = ui_show("selection-define", found)
+        val () = ui_show("selection-lookup", ~found)
+        val () = _online_href(out, url_len)
       in if url_len > 0 then ui_https_href("selection-lookup", out, url_len) else $A.free<byte>(out) end
     end
 
@@ -837,7 +865,7 @@ in
   in lib_coll_name_show(collection) end
 end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 21) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1000,6 +1028,11 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 21) = let
           val () = stats_show()
           val () = layer_open(LStats())
         in ui_focus("stats-done") end
+        else if _is(clicked, "menu-dictionaries") then let
+          val () = layer_close(LLibraryMenu())
+          val @(code, code_len) = reader_lang_code()
+          val () = dict_panel_open(code, code_len)
+        in $A.free<byte>(code) end
         else if _is(clicked, "menu-close") then layer_close(LLibraryMenu())
         else if _is(clicked, "library-menu") then layer_close(LLibraryMenu())
         else ())
@@ -1021,6 +1054,21 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 21) = let
         in stats_show() end
         else if done then layer_close(LStats())
         else ())
+    in 0 end)
+  (* the dictionaries: one removed, or done (or a click outside) *)
+  val listeners = RCons(listeners, OnEl("dictionaries-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val removed = _row_of(clicked, "drop-dictionary")
+      val done = (if _is(clicked, "dictionaries-done") then true else _is(clicked, "dictionaries-panel")): bool
+      val () = _target_free(clicked)
+      val () = (if removed >= 0 then dict_remove(removed)
+        else if done then layer_close(LDictionaries())
+        else ())
+    in 0 end)
+  (* a dictionary's files picked to import (the input is made again to
+     be cleared: its events are taken on its box) *)
+  val listeners = RCons(listeners, OnEl("dictionary-import"), "change", lam(_) => let
+      val () = dict_import_picked()
     in 0 end)
 in listeners end
 
@@ -1303,6 +1351,7 @@ fn _escape_overlay (): bool =
   | Escaped(LAnnotations()) => let val () = ui_focus("page") in true end
   | Escaped(LNote()) => let val () = ui_focus("page") in true end
   | Escaped(LImage()) => let val () = ui_focus("page") in true end
+  | Escaped(LDictionary()) => let val () = ui_focus("page") in true end
   | Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -1483,7 +1532,7 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in listeners end
 
-fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 6) = let
+fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
   val listeners = RCons(listeners, OnEl("bookmark-button"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
@@ -1501,6 +1550,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 6) = let
       val note = _is(clicked, "selection-note")
       val copy = _is(clicked, "selection-copy")
       val search = _is(clicked, "selection-search")
+      val define = _is(clicked, "selection-define")
       val () = _target_free(clicked)
       val () = (if highlight then let val _ = annot_highlight(0) in () end
         else if orange then let val _ = annot_highlight(1) in () end
@@ -1508,8 +1558,17 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 6) = let
         else if note then annot_ask_note(annot_highlight(0), true)
         else if copy then _copy_selection()
         else if search then _search_selection()
+        else if define then dict_show()
         else ())
     in let val () = ui_show("selection-toolbar", false) in 0 end end)
+  (* a word's dictionary entry: closed, or looked up online instead *)
+  val listeners = RCons(listeners, OnEl("dictionary-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val close = _is(clicked, "dictionary-close")
+      val online = _is(clicked, "dictionary-online")
+      val () = _target_free(clicked)
+      val () = (if close then layer_close(LDictionary()) else if online then layer_close(LDictionary()) else ())
+    in if close then let val () = ui_focus("page") in 0 end else 0 end)
   val listeners = RCons(listeners, OnEl("annotations-button"), "click", lam(_) => let
       val () = annot_render()
       val () = layer_open(LAnnotations())
@@ -1706,6 +1765,8 @@ implement main0 () = let
   val () = _hint_load()
   val () = lib_install_hint_load()
   val () = stats_load()
+  val () = $P.discard<int>(dict_load())
+  val () = dict_when_read(lam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)

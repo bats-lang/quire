@@ -36,6 +36,7 @@ NAMERS = {name: (0,) for name in (
     'ui_clear', 'ui_attr', 'ui_attr_buf', 'ui_place', 'ui_class', 'ui_show',
     'ui_text', 'ui_text_buf', 'ui_text_long', 'ui_tone', 'ui_role',
     'ui_named', 'ui_measure', 'ui_focus', 'ui_harm_item', 'OnEl', 'OnGestures',
+    'ui_option',
 )}
 NAMERS['ui_labelled'] = (0, 2)
 NAMERS['_is'] = (1,)

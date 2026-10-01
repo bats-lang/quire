@@ -23,6 +23,12 @@ implement app_import_input () =
 implement app_backup_input () =
   ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
 
+(* The dictionaries' file input, with no file chosen: a dictionary's
+   files are picked together *)
+#pub fn app_dictionary_input (): void
+implement app_dictionary_input () =
+  ui_file_input("dictionary-import", "dictionary-file", "Import dictionary", ".ifo,.idx,.dict,.dz,.syn", true)
+
 (* The library's search field, empty, and its (hidden) clear button *)
 #pub fn app_library_search (): void
 implement app_library_search () = let
@@ -168,6 +174,44 @@ fn _stats (): void = let
   val () = ui_text_btn("stats-box", "stats-done", "btn btn-p", "Done")
 in _hide("stats-panel") end
 
+(* The dictionaries Look up reads without a connection: each one's
+   name and language with Remove, and the import of another (its
+   language chosen first, then its files) *)
+fn _dictionaries (): void = let
+  val () = ui_el("bats-root", "dictionaries-panel", TDiv, "ovl")
+  val () = ui_el("dictionaries-panel", "dictionaries-box", TDiv, "menu")
+  val () = ui_labelled("dictionaries-box", NDialog, "dictionaries-title")
+  val () = ui_el("dictionaries-box", "dictionaries-title", TDiv, "mtitle")
+  val () = ui_text("dictionaries-title", "Dictionaries")
+  val () = ui_el("dictionaries-box", "dictionaries-none", TDiv, "cnone")
+  val () = ui_text("dictionaries-none", "No dictionaries yet")
+  val () = ui_add("dictionaries-box", "dictionaries-list", TDiv)
+  val () = ui_el("dictionaries-box", "dictionary-language-row", TDiv, "srow")
+  val () = ui_el("dictionary-language-row", "dictionary-language-label", TSpan, "slabel")
+  val () = ui_text("dictionary-language-label", "Language")
+  val () = ui_field("dictionary-language-row", "dictionary-language", FChoice, "ssel", "Dictionary language")
+  val () = ui_el("dictionaries-box", "dictionary-import", TDiv, "mi btn")
+  val () = app_dictionary_input()
+  val () = ui_el("dictionaries-box", "dictionaries-status", TDiv, "cnone")
+  val () = ui_role("dictionaries-status", RStatus)
+  val () = ui_text_btn("dictionaries-box", "dictionaries-done", "btn btn-p", "Done")
+in _hide("dictionaries-panel") end
+
+(* A word looked up in a dictionary, over the page: the headword, its
+   article (as text), the dictionary's name, the same word looked up
+   online, and Close *)
+fn _dictionary (): void = let
+  val () = ui_el("bats-root", "dictionary-panel", TDiv, "sheet")
+  val () = ui_named("dictionary-panel", NDialog, "Dictionary")
+  val () = ui_el("dictionary-panel", "dictionary-word", TDiv, "mtitle")
+  val () = ui_el("dictionary-panel", "dictionary-article", TDiv, "fntext dart")
+  val () = ui_el("dictionary-panel", "dictionary-source", TDiv, "hstyle")
+  val () = ui_el("dictionary-panel", "dictionary-bar", TDiv, "srow sfoot")
+  val () = ui_link_out("dictionary-bar", "dictionary-online", "btn linkout", "Look up online")
+  val () = ui_el("dictionary-bar", "dictionary-spacer", TSpan, "grow")
+  val () = ui_text_btn("dictionary-bar", "dictionary-close", "btn", "Close")
+in _hide("dictionary-panel") end
+
 (* The library menu (the gear) *)
 fn _library_menu (): void = let
   val () = ui_el("bats-root", "library-menu", TDiv, "ovl")
@@ -186,6 +230,7 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
   val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
+  val () = ui_menuitem("library-menu-box", "menu-dictionaries", "Dictionaries")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
   val () = app_backup_input()
@@ -313,6 +358,10 @@ fn _reader (): void = let
   val () = ui_add("selection-toolbar", "share-citation", TSpan)
   val () = _hide("share-citation")
   val () = ui_attr("selection-read", APwaSpeakSelection, "page")
+  (* the selection looked up in a dictionary the reader imported, shown
+     instead of the online one below when it has the word *)
+  val () = ui_text_btn("selection-toolbar", "selection-define", "btn", "Look up")
+  val () = _hide("selection-define")
   (* the selection looked up in a dictionary of the book's language (its
      href follows the selection) *)
   val () = ui_link_out("selection-toolbar", "selection-lookup", "btn linkout", "Look up")
@@ -589,6 +638,8 @@ implement app_build () = let
   val () = _annotations()
   val () = _note()
   val () = _image_viewer()
+  val () = _dictionaries()
+  val () = _dictionary()
   val () = _undo_toast()
 in _modal() end
 
