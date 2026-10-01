@@ -14,7 +14,6 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 #use sha256 as SHA
 
 staload "book.sats"
@@ -672,7 +671,7 @@ in _save() end
 
 (* out[0, count) := the blob's first count bytes *)
 fn _blob_read {blob_size:nat}{l:agz}{n:pos}{count:nat | count <= blob_size; count <= n} (blob: !$BD.dblob(blob_size), out: !$A.arr(byte, l, n), count: int count): void =
-  if count > 0 then $DC.blob_read(blob, 0, out, count) else ()
+  if count > 0 then $BD.blob_read(blob, 0, out, count) else ()
 
 (* text_len, or less, so that text[0, text_len) ends before a
    character's start *)
@@ -688,11 +687,11 @@ fn _utf8_cut {l:agz}{n:pos}{text_len:nat | text_len < n} (text: !$A.arr(byte, l,
    a UTF-8 character's start) in a new array of most + 1 bytes, with
    their count *)
 fn _blob_text {blob_size:nat}{most:pos | most <= 2000} (blob: $BD.dblob(blob_size), most: int most): [l:agz][text_len:nat | text_len <= most] @($A.arr(byte, l, most + 1), int text_len) = let
-  val blob_len = $DC.blob_len(blob)
+  val blob_len = $BD.blob_len(blob)
   val read_len = (if blob_len < most then blob_len else most): [read_len:nat | read_len <= most; read_len <= blob_size] int read_len
   val text = $A.alloc<byte>(most + 1)
   val () = _blob_read(blob, text, read_len)
-  val () = $DC.blob_free(blob)
+  val () = $BD.blob_free(blob)
   val text_len = _utf8_cut(text, read_len)
 in @(text, text_len) end
 
@@ -748,14 +747,14 @@ end
 (* The number of a content node id id[0, id_len) ("c" and digits), or
    -1 *)
 fn _node_number {blob_size:nat} (blob: $BD.dblob(blob_size)): [number:int | number >= ~1] int number = let
-  val id_len = $DC.blob_len(blob)
+  val id_len = $BD.blob_len(blob)
 in
-  if id_len <= 1 then let val () = $DC.blob_free(blob) in ~1 end
-  else if id_len > 16 then let val () = $DC.blob_free(blob) in ~1 end
+  if id_len <= 1 then let val () = $BD.blob_free(blob) in ~1 end
+  else if id_len > 16 then let val () = $BD.blob_free(blob) in ~1 end
   else let
     val id = $A.alloc<byte>(id_len)
-    val () = $DC.blob_read(blob, 0, id, id_len)
-    val () = $DC.blob_free(blob)
+    val () = $BD.blob_read(blob, 0, id, id_len)
+    val () = $BD.blob_free(blob)
     val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
     val number = nid_parse(id_bytes, id_len, 0, "c")
     val () = release_bytes(id_frozen, id_bytes)
@@ -1014,20 +1013,20 @@ in
       val () = annot_note_set(index, empty, 0)
     in _lists_render() end
   | ~$R.some(blob) => let
-      val value_len = $DC.blob_len(blob)
+      val value_len = $BD.blob_len(blob)
     in
       if value_len <= 0 then let
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_free(blob)
         val empty = $A.alloc<byte>(1)
         val () = annot_note_set(index, empty, 0)
       in _lists_render() end
       else if value_len > 65536 then let
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_free(blob)
       in end
       else let
         val value_bytes = $A.alloc<byte>(value_len)
-        val () = $DC.blob_read(blob, 0, value_bytes, value_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, value_bytes, value_len)
+        val () = $BD.blob_free(blob)
         val () = annot_note_set(index, value_bytes, value_len)
       in _lists_render() end
     end

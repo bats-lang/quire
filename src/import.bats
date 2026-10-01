@@ -10,8 +10,6 @@
 #use sha256 as SHA
 #use str as S
 #use xml-tree as X
-#use wasm.bats-packages.dev/decompress as DC
-#use wasm.bats-packages.dev/file-input as FI
 
 staload "ui.sats"
 staload "modal.sats"
@@ -27,6 +25,7 @@ staload "app.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* ============================================================
    What the open book is
@@ -72,18 +71,18 @@ fn _at_most_200 {name_len:pos} (name_len: int name_len): [kept_len:pos | kept_le
   if name_len > 200 then 200 else name_len
 
 (* Keeps book_file's name (its first 200 bytes) for the banner *)
-fn _keep_name_of {file_size:nat} (book_file: !$FI.infile(file_size)): void =
+fn _keep_name_of {file_size:nat} (book_file: !$BF.infile(file_size)): void =
   case+ $BF.file_name(book_file) of
   | ~$R.none() => _kept_name_put(NoKeptName())
   | ~$R.some(blob) => let
-      val name_len = $DC.blob_len(blob)
+      val name_len = $BD.blob_len(blob)
     in
-      if name_len <= 0 then let val () = $DC.blob_free(blob) in _kept_name_put(NoKeptName()) end
+      if name_len <= 0 then let val () = $BD.blob_free(blob) in _kept_name_put(NoKeptName()) end
       else let
         val kept_len = _at_most_200(name_len)
         val name_bytes = $A.alloc<byte>(kept_len)
-        val () = $DC.blob_read(blob, 0, name_bytes, kept_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, name_bytes, kept_len)
+        val () = $BD.blob_free(blob)
       in _kept_name_put(KeptName(name_bytes, kept_len)) end
     end
 
@@ -147,15 +146,15 @@ fn _stage_name (): void =
    ============================================================ *)
 
 fun _hash_loop {l:agz}{file_size:nat}{offset:nat | offset <= file_size} .<file_size - offset>.
-  (book_file: !$FI.infile(file_size), file_size: int file_size, offset: int offset, hasher: !$SHA.ctx, chunk: !$A.arr(byte, l, 1048576)): void =
+  (book_file: !$BF.infile(file_size), file_size: int file_size, offset: int offset, hasher: !$SHA.ctx, chunk: !$A.arr(byte, l, 1048576)): void =
   if offset >= file_size then ()
   else let
     val chunk_len = (if file_size - offset < 1048576 then file_size - offset else 1048576): [chunk_len:pos | chunk_len <= 1048576; offset + chunk_len <= file_size] int chunk_len
-    val () = $FI.file_read(book_file, offset, chunk, chunk_len)
+    val () = $BF.file_read(book_file, offset, chunk, chunk_len)
     val () = $SHA.update(hasher, chunk, chunk_len)
   in _hash_loop(book_file, file_size, offset + chunk_len, hasher, chunk) end
 
-fn _file_id {file_size:nat} (book_file: !$FI.infile(file_size), file_size: int file_size): @(Int, Int) = let
+fn _file_id {file_size:nat} (book_file: !$BF.infile(file_size), file_size: int file_size): @(Int, Int) = let
   val hasher = $SHA.init()
   val chunk = $A.alloc<byte>(1048576)
   val () = _hash_loop(book_file, file_size, 0, hasher, chunk)
@@ -250,7 +249,7 @@ in
         in code end
         else let
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
-          val decompressing = $DC.decompress(cover_bytes, cover_size, cover_method)
+          val decompressing = decompress(cover_bytes, cover_size, cover_method)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
           val () = $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(content_handle) =>
@@ -353,7 +352,7 @@ in
   | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~3) end
   | ~ZipGot(container_owner, container_data, container_size, container_method, _, _, _) => let
       val @(data_frozen, data_bytes) = $A.freeze<byte>(container_data)
-      val decompressing = $DC.decompress(data_bytes, container_size, container_method)
+      val decompressing = decompress(data_bytes, container_size, container_method)
       val () = $A.drop<byte>(data_frozen, data_bytes)
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
@@ -399,7 +398,7 @@ in
                 | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~7) end
                 | ~ZipGot(opf_owner, opf_data, opf_compressed_size, opf_method, opf_offset, opf_name_offset, opf_name_len) => let
                     val @(opf_data_frozen, opf_data_bytes) = $A.freeze<byte>(opf_data)
-                    val opf_decompressing = $DC.decompress(opf_data_bytes, opf_compressed_size, opf_method)
+                    val opf_decompressing = decompress(opf_data_bytes, opf_compressed_size, opf_method)
                     val () = $A.drop<byte>(opf_data_frozen, opf_data_bytes)
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
@@ -429,8 +428,8 @@ end
    by the answer, and there is no id that could name a resolver no
    longer there. *)
 datavtype duplicate =
-  | {file_size:pos} Asked of ($FI.infile(file_size), int file_size, Int, Int, Int, $P.resolver(Int))
-  | {file_size:pos} Answered of ($FI.infile(file_size), int file_size, Int, Int, Int)
+  | {file_size:pos} Asked of ($BF.infile(file_size), int file_size, Int, Int, Int, $P.resolver(Int))
+  | {file_size:pos} Answered of ($BF.infile(file_size), int file_size, Int, Int, Int)
   | NoDuplicate of ()
 
 val _duplicate = ref<duplicate>(NoDuplicate())
@@ -448,9 +447,9 @@ fn _duplicate_put (waiting: duplicate): void = let
 in
   case+ previous of
   | ~Asked(book_file, _, _, _, _, resolver) => let
-      val () = $FI.close(book_file)
+      val () = $BF.file_close(book_file)
     in $P.resolve<Int>(resolver, 1) end
-  | ~Answered(book_file, _, _, _, _) => $FI.close(book_file)
+  | ~Answered(book_file, _, _, _, _) => $BF.file_close(book_file)
   | ~NoDuplicate() => ()
 end
 
@@ -474,7 +473,7 @@ in lib_render() end
 
 (* Imports the file_size-byte book_file with id (id_high, id_low) as a
    new book (library_index < 0) or over library book library_index *)
-fn _import_go {file_size:pos} (book_file: $FI.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(Int, $P.Chained) = let
+fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(Int, $P.Chained) = let
   val () = _stage("Opening archive", 30)
   val serial = book_begin(book_file, file_size)
   val mode = (if library_index < 0 then MODE_NEW else MODE_REPLACE): int
@@ -493,13 +492,13 @@ in
 end
 
 (* Imports book_file, of file_size bytes, whose name is kept *)
-fn _import_file {file_size:nat} (book_file: $FI.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) = let
+fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) = let
   val () = _stage_name()
   val () = _stage("Reading file", 10)
   val () = ui_show("error-banner", false)
 in
   if file_size <= 0 then let
-    val () = $FI.close(book_file)
+    val () = $BF.file_close(book_file)
     val () = _error()
   in $P.ret<Int>(~1) end
   else let
@@ -530,14 +529,14 @@ in
                 val () = ui_show("import-progress", false)
               in $P.ret<Int>(~1) end
             | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
-                val () = $FI.close(waiting_file)
+                val () = $BF.file_close(waiting_file)
                 val () = $P.resolve<Int>(waiting_resolver, 1)
                 val () = ui_show("import-progress", false)
               in $P.ret<Int>(~1) end
             | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
               if answer = 2 then _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
               else let
-                val () = $FI.close(waiting_file)
+                val () = $BF.file_close(waiting_file)
                 val () = ui_show("import-progress", false)
               in $P.ret<Int>(0) end)
         end)
@@ -546,13 +545,13 @@ end
 
 (* Imports the file an open promise resolved with (its handle) *)
 fn _import_handle (handle: Int): $P.promise(Int, $P.Chained) =
-  case+ $FI.claim(handle) of
+  case+ $BF.file_claim(handle) of
   | ~$R.none() => let
       val () = _kept_name_put(NoKeptName())
       val () = _error()
     in $P.ret<Int>(~1) end
   | ~$R.some(book_file) => let
-      val file_size = $FI.size(book_file)
+      val file_size = $BF.file_size(book_file)
       val () = _keep_name_of(book_file)
     in _import_file(book_file, file_size) end
 
@@ -561,7 +560,7 @@ fn _import_handle (handle: Int): $P.promise(Int, $P.Chained) =
    title there. The promise resolves as an import's does: the book's
    key, 0 when it was already in the library and kept, or below 0 *)
 #pub fn import_fetched {file_size:nat}{l:agz}{n:pos}{name_len:nat | name_len <= n}
-  (book_file: $FI.infile(file_size), file_size: int file_size, name: !$A.arr(byte, l, n), name_len: int name_len): $P.promise(Int, $P.Chained)
+  (book_file: $BF.infile(file_size), file_size: int file_size, name: !$A.arr(byte, l, n), name_len: int name_len): $P.promise(Int, $P.Chained)
 
 implement import_fetched (book_file, file_size, name, name_len) = let
   val () = (if name_len <= 0 then _kept_name_put(NoKeptName())
@@ -628,16 +627,16 @@ implement import_external (handle) = $P.discard<Int>(_import_handle(handle))
 implement open_stored (key, id_high, id_low) = let
   val file_key = lib_key(98, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(file_key)
-  val stored = $FI.idb_get(key_bytes, 15)
+  val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
   $P.and_then<Int><Int>($P.vow(stored), lam(handle) =>
-    case+ $FI.claim(handle) of
+    case+ $BF.file_claim(handle) of
     | ~$R.none() => $P.ret<Int>(~1)
     | ~$R.some(book_file) => let
-        val file_size = $FI.size(book_file)
+        val file_size = $BF.file_size(book_file)
       in
-        if file_size <= 0 then let val () = $FI.close(book_file) in $P.ret<Int>(~1) end
+        if file_size <= 0 then let val () = $BF.file_close(book_file) in $P.ret<Int>(~1) end
         else let
           val serial = book_begin(book_file, file_size)
         in

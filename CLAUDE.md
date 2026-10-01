@@ -129,11 +129,12 @@ With `alloc`:
   65536 bytes as a zip name is) and a title buffer (`tbuf`).
 * `src/reader.bats`: the OPF's name (for its directory), the chapter
   path (`ch_buf`), and title and text copies (`exact`, `tbuf`).
-* The EPUB file itself never stays in wasm memory: file-input keeps it
-  on the JS side, it is read by ranges, and it is saved to and restored
-  from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`). Only a book got
-  from a catalogue passes through, in an arena piece, since the bridge's
-  fetch hands its bytes to wasm and `file_store` takes them back.
+* The EPUB file itself never stays in wasm memory: bridge's file module
+  keeps it on the JS side, it is read by ranges, and it is saved to and
+  restored from IndexedDB there (`$BF.file_idb_put`, `$BF.file_idb_get`).
+  Only a book got from a catalogue passes through, in an arena piece,
+  since the bridge's fetch hands its bytes to wasm and `$BF.file_store`
+  takes them back.
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
@@ -144,9 +145,9 @@ With `alloc`:
 without a connection (`src/stardict.bats` reads their bytes: the
 .ifo's keys, the headwords' order, an article as text). Like an EPUB,
 a dictionary's files never enter wasm memory to stay: they are stored
-from the JS side (file-input's `idb_put`) and read back by ranges. Its
-import checks the .ifo and the .idx's size, every record of the .idx
-and .syn, and a .dict.dz's chunk table, and stores a table ('X') of
+from the JS side (bridge's `$BF.file_idb_put`) and read back by
+ranges. Its import checks the .ifo and the .idx's size, every record
+of the .idx and .syn, and a .dict.dz's chunk table, and stores a table ('X') of
 every 64th headword of each with where its record is; a lookup
 binary-searches it and reads one block of records. An article is
 shown as text only (`article_text`): HTML and XDXF tags are dropped,
@@ -207,7 +208,7 @@ with Get; its next and previous pages; its search template
 description that holds one, fetched after the page. Every address is
 resolved against the page's own (`src/url.bats`, RFC 3986). Get
 fetches the EPUB acquisition link (an EPUB 3 one first), puts its
-bytes on the JS side (file-input's `file_store`) and imports them as a
+bytes on the JS side (bridge's `$BF.file_store`) and imports them as a
 picked file is (`import_fetched`), so a book already there is asked
 about. Where the fetch fails (in a browser, a page without CORS), Get
 gives way to a download link (`ui_download_nn`) "then import it". A

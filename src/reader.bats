@@ -9,9 +9,7 @@
 #use result as R
 #use str as S
 #use xml-tree as X
-#use wasm.bats-packages.dev/decompress as DC
 #use wasm.bats-packages.dev/dom as D
-#use wasm.bats-packages.dev/file-input as FI
 #use widget as W
 
 staload "epub_xml.sats"
@@ -37,6 +35,8 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 
 fn _apply_diff_list(diffs: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
@@ -473,14 +473,14 @@ fn _node_at (x: int, y: int): [node:int | node >= ~1] int node =
   case+ $DR.element_at_point(x, y) of
   | ~$R.none() => ~1
   | ~$R.some(blob) => let
-      val blob_len = $DC.blob_len(blob)
+      val blob_len = $BD.blob_len(blob)
     in
-      if blob_len <= 0 then let val () = $DC.blob_free(blob) in ~1 end
-      else if blob_len > 16 then let val () = $DC.blob_free(blob) in ~1 end
+      if blob_len <= 0 then let val () = $BD.blob_free(blob) in ~1 end
+      else if blob_len > 16 then let val () = $BD.blob_free(blob) in ~1 end
       else let
         val id_text = $A.alloc<byte>(blob_len)
-        val () = $DC.blob_read(blob, 0, id_text, blob_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, id_text, blob_len)
+        val () = $BD.blob_free(blob)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(id_text)
         val node = nid_parse(id_bytes, blob_len, 0, "c")
         val () = release_bytes(id_frozen, id_bytes)
@@ -1600,7 +1600,7 @@ in
     in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
     else let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-      val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+      val decompressing = decompress(compressed_bytes, compressed_size, method)
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
       val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
       val decompressing = $P.vow(decompressing)
@@ -1848,7 +1848,7 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, method)
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
@@ -1867,15 +1867,15 @@ in
                val () = (case+ url_made of
                  | ~$R.none() => ()
                  | ~$R.some(url_blob) => let
-                     val url_len = $DC.blob_len(url_blob)
+                     val url_len = $BD.blob_len(url_blob)
                    in
                      (* the host's URL, checked here *)
-                     if url_len <= 0 then $DC.blob_free(url_blob)
-                     else if url_len >= 2000 then $DC.blob_free(url_blob)
+                     if url_len <= 0 then $BD.blob_free(url_blob)
+                     else if url_len >= 2000 then $BD.blob_free(url_blob)
                      else let
                        val url = $A.alloc<byte>(url_len)
-                       val () = $DC.blob_read(url_blob, 0, url, url_len)
-                       val () = $DC.blob_free(url_blob)
+                       val () = $BD.blob_read(url_blob, 0, url, url_len)
+                       val () = $BD.blob_free(url_blob)
                        val () = _font_style(url, url_len)
                      in $A.free<byte>(url) end
                    end)
@@ -1895,7 +1895,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
      | ~Piece(compressed_owner, opf_compressed) => let
          val _ = book_read(serial, file_size, opf_data_start, opf_compressed, opf_compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(opf_compressed)
-         val decompressing = $DC.decompress(compressed_bytes, opf_compressed_size, opf_method)
+         val decompressing = decompress(compressed_bytes, opf_compressed_size, opf_method)
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          val decompressing = $P.vow(decompressing)
@@ -1940,7 +1940,7 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
       | ~Piece(compressed_owner, compressed) => let
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-              val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+              val decompressing = decompress(compressed_bytes, compressed_size, method)
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
 
@@ -2617,7 +2617,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
            val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-           val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+           val decompressing = decompress(compressed_bytes, compressed_size, method)
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
@@ -2996,7 +2996,7 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, method)
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in

@@ -9,7 +9,6 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "book.sats"
@@ -18,6 +17,7 @@ staload "library.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The days kept: a little over a year *)
 #define DAYS 400
@@ -66,14 +66,14 @@ in
   case+ found of
   | ~$R.none() => 0
   | ~$R.some(blob) => let
-      val id_len = $DC.blob_len(blob)
+      val id_len = $BD.blob_len(blob)
     in
-      if id_len <= 15 then let val () = $DC.blob_free(blob) in 0 end
-      else if id_len > 24 then let val () = $DC.blob_free(blob) in 0 end
+      if id_len <= 15 then let val () = $BD.blob_free(blob) in 0 end
+      else if id_len > 24 then let val () = $BD.blob_free(blob) in 0 end
       else let
         val id_bytes = $A.alloc<byte>(id_len)
-        val () = $DC.blob_read(blob, 0, id_bytes, id_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, id_bytes, id_len)
+        val () = $BD.blob_free(blob)
         val minutes = _digits_value(id_bytes, id_len, 15, 0)
         val () = $A.free<byte>(id_bytes)
       in if minutes < 0 then 0 else if minutes > 2880 then 0 else minutes - 1440 end

@@ -11,7 +11,6 @@
 #use arith as AR
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/file-input as FI
 
 staload "ui.sats"
 staload "modal.sats"
@@ -1163,29 +1162,29 @@ implement backup_import () =
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in
-    case+ $FI.claim(handle) of
+    case+ $BF.file_claim(handle) of
     | ~$R.none() => let
         val () = _say("The backup could not be read.")
       in $P.ret<int>(0) end
     | ~$R.some(file) => let
-        val file_size = $FI.size(file)
+        val file_size = $BF.file_size(file)
       in
         if file_size <= 0 then let
-          val () = $FI.close(file)
+          val () = $BF.file_close(file)
           val () = _say("This file is not a Quire backup.")
         in $P.ret<int>(0) end
         else if file_size > BACKUP_MAX_BYTES then let
-          val () = $FI.close(file)
+          val () = $BF.file_close(file)
           val () = _say("This file is too large to be a Quire backup.")
         in $P.ret<int>(0) end
         else (case+ piece_new(file_size) of
           | ~NoPiece() => let
-              val () = $FI.close(file)
+              val () = $BF.file_close(file)
               val () = _say("The backup could not be read: there is not enough memory.")
             in $P.ret<int>(0) end
           | ~Piece(owner, out) => let
-              val () = $FI.file_read(file, 0, out, file_size)
-              val () = $FI.close(file)
+              val () = $BF.file_read(file, 0, out, file_size)
+              val () = $BF.file_close(file)
               val () = _restore(out, file_size)
               val () = piece_free(owner, out)
             in $P.ret<int>(0) end)
