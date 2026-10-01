@@ -37,15 +37,15 @@ staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 
-fn _apply_diff_list(dl: $W.diff_list): void = let
+fn _apply_diff_list(diffs: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.apply_list(doc, dl)
+  val () = $D.apply_list(doc, diffs)
   val () = $D.destroy(doc)
 in end
 
-fn _apply_diff(d: $W.diff): void = let
+fn _apply_diff(diff: $W.diff): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.apply(doc, d)
+  val () = $D.apply(doc, diff)
   val () = $D.destroy(doc)
 in end
 
@@ -55,62 +55,62 @@ in end
 
 (* Stash slots: 21=current_page (0-indexed), 22=total_pages, 23=current_chapter (1-indexed), 24=total_chapters *)
 
-(* s's bytes at buf[p, p + sn) *)
-fun _put_str {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}{i:nat | i <= sn} .<sn - i>.
-  (buf: !$A.arr(byte, l, n), p: int p, s: string sn, sl: int sn, i: int i): int(p + sn) =
-  if i >= sl then p + sl
+(* text's bytes at buf[at, at + text_len) *)
+fun _put_string {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
+  (buf: !$A.arr(byte, l, n), at: int at, text: string text_len, text_len: int text_len, i: int i): int(at + text_len) =
+  if i >= text_len then at + text_len
   else let
-    val () = $A.set<byte>(buf, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
-  in _put_str(buf, p, s, sl, i + 1) end
+    val () = $A.set<byte>(buf, at + i, $A.int2byte($AR.byte_of_char(string_get_at(text, i))))
+  in _put_string(buf, at, text, text_len, i + 1) end
 
-fn _put {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}
-  (buf: !$A.arr(byte, l, n), p: int p, s: string sn): int(p + sn) =
-  _put_str(buf, p, s, g1u2i(string1_length(s)), 0)
+fn _put {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}
+  (buf: !$A.arr(byte, l, n), at: int at, text: string text_len): int(at + text_len) =
+  _put_string(buf, at, text, g1u2i(string1_length(text)), 0)
 
-(* The text of buf[0, k); frees buf *)
-fn _prefix_text {l:agz}{n:pos | n <= 1048576}{k:pos | k <= n}
-  (buf: $A.arr(byte, l, n), n: int n, k: int k): $A.text(k) = let
-  val exact = $A.alloc<byte>(k)
-  val buf = $S.copy_arr_region(buf, 0, n, exact, k, k)
+(* The text of buf[0, text_len); frees buf *)
+fn _prefix_text {l:agz}{n:pos | n <= 1048576}{text_len:pos | text_len <= n}
+  (buf: $A.arr(byte, l, n), n: int n, text_len: int text_len): $A.text(text_len) = let
+  val exact = $A.alloc<byte>(text_len)
+  val buf = $S.copy_arr_region(buf, 0, n, exact, text_len, text_len)
   val () = $A.free<byte>(buf)
-  val txt = arr_to_text(exact, k)
+  val text = arr_to_text(exact, text_len)
   val () = $A.free<byte>(exact)
-in txt end
+in text end
 
-(* pre, then i's decimal digits zero-padded to at least w: an element
-   id that stays distinct for every i *)
-fn _num_id {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
-  (pre: string sn, i: int i, w: int w): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
-  (* z zeros at buf[p, p + z) *)
-  fun zeros {l:agz}{p,z:nat | p + z <= 16} .<z>.
-    (buf: !$A.arr(byte, l, 16), p: int p, z: int z): int(p + z) =
-    if z = 0 then p
-    else let val () = $A.set<byte>(buf, p, $A.int2byte(48)) in zeros(buf, p + 1, z - 1) end
-  val z = (if i < 10 then w - 1 else if i < 100 then w - 2 else 0): [z:nat | z <= 2] int z
+(* id_prefix, then number's decimal digits zero-padded to at least width:
+   an element id that stays distinct for every number *)
+fn _number_id {prefix_len:pos | prefix_len <= 3}{number:nat}{width:int | width == 2 || width == 3}
+  (id_prefix: string prefix_len, number: int number, width: int width): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) = let
+  (* zero_count zeros at buf[at, at + zero_count) *)
+  fun zeros {l:agz}{at,zero_count:nat | at + zero_count <= 16} .<zero_count>.
+    (buf: !$A.arr(byte, l, 16), at: int at, zero_count: int zero_count): int(at + zero_count) =
+    if zero_count = 0 then at
+    else let val () = $A.set<byte>(buf, at, $A.int2byte(48)) in zeros(buf, at + 1, zero_count - 1) end
+  val zero_count = (if number < 10 then width - 1 else if number < 100 then width - 2 else 0): [zero_count:nat | zero_count <= 2] int zero_count
   val buf = $A.alloc<byte>(16)
-  val off = _put(buf, 0, pre)
-  val off = zeros(buf, off, z)
-  val off = $S.int_to_str(buf, off, 16, i)
-  val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 16, exact, off, off)
+  val offset = _put(buf, 0, id_prefix)
+  val offset = zeros(buf, offset, zero_count)
+  val offset = $S.int_to_str(buf, offset, 16, number)
+  val exact = $A.alloc<byte>(offset)
+  val buf = $S.copy_arr_region(buf, 0, 16, exact, offset, offset)
   val () = $A.free<byte>(buf)
-in @(exact, off) end
+in @(exact, offset) end
 
-(* The text of the element whose id is the literal id: buf[0, k), copied
+(* The text of the element whose id is the literal id: buf[0, text_len), copied
    from the buffer (no text or diff is built, so nothing is allocated);
    frees buf *)
-fn _set_text_of {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
-  (id: string ni, buf: $A.arr(byte, l, n), k: int k): void = let
-  val ni = g1u2i(string1_length(id))
-  val ia = $A.alloc<byte>(ni)
-  val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val @(fb, bb) = $A.freeze<byte>(buf)
+fn _set_text_of {id_len:pos | id_len < 256}{l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+  (id: string id_len, buf: $A.arr(byte, l, n), text_len: int text_len): void = let
+  val id_len = g1u2i(string1_length(id))
+  val id_buf = $A.alloc<byte>(id_len)
+  val () = $A.write_text(id_buf, 0, $A.text_lit(id), id_len)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id_buf)
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(buf)
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.set_text(doc, bi, ni, bb, 0, k)
+  val () = $D.set_text(doc, id_bytes, id_len, text_bytes, 0, text_len)
   val () = $D.destroy(doc)
-  val () = release_bytes(fb, bb)
-in release_bytes(fi, bi) end
+  val () = release_bytes(text_frozen, text_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
 (* ============================================================
    Reading speed: minutes per page, learned from the pages turned on
@@ -119,71 +119,71 @@ in release_bytes(fi, bi) end
 (* The minutes and the pages counted: a page turned on within 3 minutes
    of the one before counts, with the minutes between them; a longer
    pause does not *)
-val _spd_min = ref<Int>(0)
-val _spd_pages = ref<Int>(0)
+val _speed_minutes = ref<Int>(0)
+val _speed_pages = ref<Int>(0)
 (* The minute of the last page turned on, or -1 *)
-val _spd_last = ref<Int>(~1)
+val _speed_last_minute = ref<Int>(~1)
 (* The open book's minutes and pages read since its place was last kept *)
-val _book_min = ref<Int>(0)
+val _book_minutes = ref<Int>(0)
 val _book_pages = ref<Int>(0)
 
 (* Whether the speed is known: 10 pages over 2 minutes at least *)
-fn _spd_known (): bool = !_spd_pages >= 10 && !_spd_min >= 2
+fn _speed_known (): bool = !_speed_pages >= 10 && !_speed_minutes >= 2
 
-(* The minutes n pages take, at the speed learned; -1 when it is not
+(* The minutes page_count pages take, at the speed learned; -1 when it is not
    known *)
-fn _spd_minutes (n: Int): Int = let
-  val m = !_spd_min
-  val g = !_spd_pages
+fn _minutes_for_pages (page_count: Int): Int = let
+  val minutes = !_speed_minutes
+  val pages = !_speed_pages
 in
-  if ~_spd_known() then ~1
-  else if n <= 0 then 0
-  else if g <= 0 then ~1
-  (* n * m fits an int: the minutes counted are at most 3 a page, and
+  if ~_speed_known() then ~1
+  else if page_count <= 0 then 0
+  else if pages <= 0 then ~1
+  (* page_count * minutes fits an int: the minutes counted are at most 3 a page, and
      the pages at most 2000 *)
-  else if n > 100000 then ~1
-  else if m > 6000 then ~1
-  else n * m / g
+  else if page_count > 100000 then ~1
+  else if minutes > 6000 then ~1
+  else page_count * minutes / pages
 end
 
-fn _spd_key (): [l:agz] $A.arr(byte, l, 3) = let
-  val k = $A.alloc<byte>(3)
-  val () = $A.write_text(k, 0, $A.text_lit("spd"), 3)
-  in k end
+fn _speed_key (): [l:agz] $A.arr(byte, l, 3) = let
+  val key = $A.alloc<byte>(3)
+  val () = $A.write_text(key, 0, $A.text_lit("spd"), 3)
+  in key end
 
 (* Stores the speed under "spd": the minutes and the pages, 4 bytes each *)
-fn _spd_save (): void = let
-  val b = $A.alloc<byte>(8)
-  val () = $A.write_i32(b, 0, !_spd_min)
-  val () = $A.write_i32(b, 4, !_spd_pages)
-  val @(bf, bb) = $A.freeze<byte>(b)
-  val @(kf, kb) = $A.freeze<byte>(_spd_key())
-  val () = $P.discard<Int>($IDB.idb_put(kb, 3, bb, 8))
-  val () = release_bytes(kf, kb)
-in release_bytes(bf, bb) end
+fn _speed_save (): void = let
+  val data = $A.alloc<byte>(8)
+  val () = $A.write_i32(data, 0, !_speed_minutes)
+  val () = $A.write_i32(data, 4, !_speed_pages)
+  val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
+  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8))
+  val () = release_bytes(key_frozen, key_bytes)
+in release_bytes(data_frozen, data_bytes) end
 
 (* A page turned on: counted, and every 10 pages kept. Past 2000 pages
    both halve, so the speed follows the reader's lately *)
-fn _spd_turn (): void = let
+fn _speed_turn (): void = let
   val now = $TM.epoch_minutes()
-  val last = !_spd_last
-  val () = !_spd_last := now
+  val last = !_speed_last_minute
+  val () = !_speed_last_minute := now
 in
   if last < 0 then ()
   else if now < last then ()
   else if now - last > 3 then ()
   else let
-    val () = !_spd_min := !_spd_min + (now - last)
-    val () = !_spd_pages := !_spd_pages + 1
+    val () = !_speed_minutes := !_speed_minutes + (now - last)
+    val () = !_speed_pages := !_speed_pages + 1
     (* the reading log's day, and the open book's time, kept with its
        place (_record_position) *)
     val () = stats_add(now - last)
-    val () = !_book_min := !_book_min + (now - last)
+    val () = !_book_minutes := !_book_minutes + (now - last)
     val () = !_book_pages := !_book_pages + 1
-    val () = (if !_spd_pages > 2000 then let
-        val () = !_spd_min := !_spd_min / 2
-      in !_spd_pages := !_spd_pages / 2 end else ())
-  in if !_spd_pages - (!_spd_pages / 10) * 10 = 0 then _spd_save() else () end
+    val () = (if !_speed_pages > 2000 then let
+        val () = !_speed_minutes := !_speed_minutes / 2
+      in !_speed_pages := !_speed_pages / 2 end else ())
+  in if !_speed_pages - (!_speed_pages / 10) * 10 = 0 then _speed_save() else () end
 end
 
 (* Whether the chapter is scrolled down (the Layout setting), not turned
@@ -193,244 +193,244 @@ end
 fn _scrolled (): bool = set_flow_get() = 1
 
 (* The page's height, as it was last measured *)
-val _page_h = ref<int>(0)
+val _page_height = ref<int>(0)
 
 (* Whether the book reads right to left *)
-val _rtl = ref<bool>(false)
+val _right_to_left = ref<bool>(false)
 
 (* How far a turn scrolls: the page's height, less its paddings (84
    px) and a line's overlap, so no line is lost between screens *)
-fn _step (): [s:pos] int s = let
-  val h = g1ofg0(!_page_h)
-in if h > 240 then h - 120 else 120 end
+fn _step (): [step:pos] int step = let
+  val height = g1ofg0(!_page_height)
+in if height > 240 then height - 120 else 120 end
 
 (* A content node of the chapter, and how far below the
    page's top it is when the chapter is scrolled to its top: where it is
    now says how far the chapter is scrolled, which the page does not
    tell *)
 val _probe = ref<Int>(~1)
-val _probe_y = ref<Int>(0)
+val _probe_offset = ref<Int>(0)
 
-(* d minutes, as "<1 min", "12 min" or "3 h 20 min", at b[p, r) *)
-fn _put_dur {l:agz}{n:pos}{p:nat | p + 30 <= n}
-  (b: !$A.arr(byte, l, n), p: int p, n: int n, d: Int): [r:nat | r <= p + 30] int r =
-  if d < 1 then _put(b, p, "<1 min")
-  else if d < 60 then let
-    val off = $S.int_to_str(b, p, n, d)
-  in _put(b, off, " min") end
+(* The minutes, as "<1 min", "12 min" or "3 h 20 min", at buf[at, end_at) *)
+fn _put_duration {l:agz}{n:pos}{at:nat | at + 30 <= n}
+  (buf: !$A.arr(byte, l, n), at: int at, n: int n, minutes: Int): [end_at:nat | end_at <= at + 30] int end_at =
+  if minutes < 1 then _put(buf, at, "<1 min")
+  else if minutes < 60 then let
+    val offset = $S.int_to_str(buf, at, n, minutes)
+  in _put(buf, offset, " min") end
   else let
-    val off = $S.int_to_str(b, p, n, d / 60)
-    val off = _put(b, off, " h ")
-    val off = $S.int_to_str(b, off, n, d - (d / 60) * 60)
-  in _put(b, off, " min") end
+    val offset = $S.int_to_str(buf, at, n, minutes / 60)
+    val offset = _put(buf, offset, " h ")
+    val offset = $S.int_to_str(buf, offset, n, minutes - (minutes / 60) * 60)
+  in _put(buf, offset, " min") end
 
 (* Where a page is in the book, by the chapters' sizes, in thousandths *)
 
-fn _clamp1000 (v: Int): [r:nat | r <= 1000] int r =
-  if v <= 0 then 0 else if v >= 1000 then 1000 else v
+fn _clamp1000 (value: Int): [clamped:nat | clamped <= 1000] int clamped =
+  if value <= 0 then 0 else if value >= 1000 then 1000 else value
 
-(* The thousandth of the book at size position x of its tot *)
-fn _thousandth (x: Int, tot: Int): [r:nat | r <= 1000] int r =
-  if tot <= 0 then 0
-  (* x * 1000 fits an int *)
-  else if tot < 2000000 then _clamp1000(x * 1000 / tot)
-  else _clamp1000(x / (tot / 1000))
+(* The thousandth of the book at a size position, of its total *)
+fn _thousandth (position: Int, total: Int): [thousandth:nat | thousandth <= 1000] int thousandth =
+  if total <= 0 then 0
+  (* position * 1000 fits an int *)
+  else if total < 2000000 then _clamp1000(position * 1000 / total)
+  else _clamp1000(position / (total / 1000))
 
-(* The size position of thousandth v of tot *)
-fn _of_thousandth (v: Int, tot: Int): Int =
-  if tot < 2000000 then tot * v / 1000 else (tot / 1000) * v
+(* The size position of a thousandth of total *)
+fn _of_thousandth (thousandth: Int, total: Int): Int =
+  if total < 2000000 then total * thousandth / 1000 else (total / 1000) * thousandth
 
-(* Where page p of t in chapter c (from 0) is in the book *)
-fn _permille (c: Int, p: Int, t: Int): [r:nat | r <= 1000] int r = let
-  val @(b, w, tot) = book_weights(book_serial(), c)
-  val cp = (if t > 0 then p * 1000 / t else 0): Int
-in _thousandth(b + _of_thousandth(cp, w), tot) end
+(* Where a page of page_count in a chapter (from 0) is in the book *)
+fn _permille (chapter: Int, page: Int, page_count: Int): [thousandth:nat | thousandth <= 1000] int thousandth = let
+  val @(size_before, chapter_size, book_size) = book_weights(book_serial(), chapter)
+  val page_thousandth = (if page_count > 0 then page * 1000 / page_count else 0): Int
+in _thousandth(size_before + _of_thousandth(page_thousandth, chapter_size), book_size) end
 
-(* The pages of the rest of the book after chapter ci, in pages of
-   chapter ci (t of them), by the chapters' sizes; -1 when that is not
+(* The pages of the rest of the book after a chapter (chapter_index), in
+   its pages (page_count of them), by the chapters' sizes; -1 when that is not
    known *)
-fn _rest_pages (ci: Int, t: Int): Int = let
-  val @(bs, w, tot) = book_weights(book_serial(), ci)
-  val after = tot - bs - w
+fn _rest_pages (chapter_index: Int, page_count: Int): Int = let
+  val @(size_before, chapter_size, book_size) = book_weights(book_serial(), chapter_index)
+  val size_after = book_size - size_before - chapter_size
 in
-  if w <= 0 then ~1 else if after <= 0 then 0
-  (* after * t / w, in two steps so it fits *)
-  else if after / w > 10000 then ~1
-  else (after / w) * t + (after - (after / w) * w) * t / w
+  if chapter_size <= 0 then ~1 else if size_after <= 0 then 0
+  (* size_after * page_count / chapter_size, in two steps so it fits *)
+  else if size_after / chapter_size > 10000 then ~1
+  else (size_after / chapter_size) * page_count + (size_after - (size_after / chapter_size) * chapter_size) * page_count / chapter_size
 end
 
 (* The footer's readouts (the setting rd), each naming its scope: 0 the
    pages left in the chapter, 1 the page of the chapter's pages, 2 the
    chapter of the book's, 3 the time left in the chapter, 4 in the book.
    The times are there only once the reading speed is known. *)
-fn _readout_ok (m: int, p: Int, t: Int, ci: Int): bool =
-  if m = 3 then _spd_known()
-  else if m = 4 then (if _spd_known() then _rest_pages(ci, t) >= 0 else false)
-  else m >= 0 && m <= 2
+fn _readout_ok (readout: int, page: Int, page_count: Int, chapter_index: Int): bool =
+  if readout = 3 then _speed_known()
+  else if readout = 4 then (if _speed_known() then _rest_pages(chapter_index, page_count) >= 0 else false)
+  else readout >= 0 && readout <= 2
 
 (* The readout shown: the one chosen, or pages left when it cannot be *)
-fn _readout_shown (p: Int, t: Int, ci: Int): [m:nat | m <= 4] int m = let
-  val m = set_rd_get()
-in if _readout_ok(m, p, t, ci) then m else 0 end
+fn _readout_shown (page: Int, page_count: Int, chapter_index: Int): [readout:nat | readout <= 4] int readout = let
+  val readout = set_rd_get()
+in if _readout_ok(readout, page, page_count, chapter_index) then readout else 0 end
 
-(* The readout after m: the next one that can be shown *)
-fn _readout_after {m:nat | m <= 4} (m: int m, p: Int, t: Int, ci: Int): [r:nat | r <= 4] int r = let
-  val a = (if m < 4 then m + 1 else 0): [a:nat | a <= 4] int a
+(* The readout after the one given: the next one that can be shown *)
+fn _readout_after {readout:nat | readout <= 4} (readout: int readout, page: Int, page_count: Int, chapter_index: Int): [next_readout:nat | next_readout <= 4] int next_readout = let
+  val next = (if readout < 4 then readout + 1 else 0): [next:nat | next <= 4] int next
 in
-  if _readout_ok(a, p, t, ci) then a
+  if _readout_ok(next, page, page_count, chapter_index) then next
   else let
-    val b = (if a < 4 then a + 1 else 0): [b:nat | b <= 4] int b
-  in if _readout_ok(b, p, t, ci) then b else 0 end
+    val after_next = (if next < 4 then next + 1 else 0): [after_next:nat | after_next <= 4] int after_next
+  in if _readout_ok(after_next, page, page_count, chapter_index) then after_next else 0 end
 end
 
 (* " · " (5 bytes, from a no-break space, 0xC2 0xA0, since a space
    would be dropped at the start of its box, and the middle dot, 0xC2
-   0xB7) at b[p, p + 5) *)
-fn _put_sep {l:agz}{n:pos}{p:nat | p + 5 <= n}
-  (b: !$A.arr(byte, l, n), p: int p): int(p + 5) = let
-  val () = $A.set<byte>(b, p, $A.int2byte(194))
-  val () = $A.set<byte>(b, p + 1, $A.int2byte(160))
-  val () = $A.set<byte>(b, p + 2, $A.int2byte(194))
-  val () = $A.set<byte>(b, p + 3, $A.int2byte(183))
-in _put(b, p + 4, " ") end
+   0xB7) at buf[at, at + 5) *)
+fn _put_separator {l:agz}{n:pos}{at:nat | at + 5 <= n}
+  (buf: !$A.arr(byte, l, n), at: int at): int(at + 5) = let
+  val () = $A.set<byte>(buf, at, $A.int2byte(194))
+  val () = $A.set<byte>(buf, at + 1, $A.int2byte(160))
+  val () = $A.set<byte>(buf, at + 2, $A.int2byte(194))
+  val () = $A.set<byte>(buf, at + 3, $A.int2byte(183))
+in _put(buf, at + 4, " ") end
 
 (* Measures element id: its box to the measure slots *)
-fn _measure_lit {ni:pos | ni < 256} (id: string ni): void = let
-  val ni = g1u2i(string1_length(id))
-  val ia = $A.alloc<byte>(ni)
-  val () = $A.write_text(ia, 0, $A.text_lit(id), ni)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val _ = $R.discard<int><int>($DR.measure(bi, ni))
-in release_bytes(fi, bi) end
+fn _measure_literal {id_len:pos | id_len < 256} (id: string id_len): void = let
+  val id_len = g1u2i(string1_length(id))
+  val id_buf = $A.alloc<byte>(id_len)
+  val () = $A.write_text(id_buf, 0, $A.text_lit(id), id_len)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id_buf)
+  val _ = $R.discard<int><int>($DR.measure(id_bytes, id_len))
+in release_bytes(id_frozen, id_bytes) end
 
 (* Whether a screen shows two columns, a spread: the probe the
    typography's style shows then (settings.bats, _put_cols) *)
 fn _spread (): bool = let
-  val () = _measure_lit("spread-probe")
+  val () = _measure_literal("spread-probe")
 in $DR.get_measure_w() > 0 end
 
-(* "13 of 75 in chapter", for page p (from 0) of t, at b[p0, r); for a
+(* "13 of 75 in chapter", for a page (from 0) of page_count, at buf[at, end_at); for a
    spread, both of its pages: "25–26 of 150 in chapter" *)
-fn _put_page_of {l:agz}{p0:nat | p0 + 55 <= 96}
-  (b: !$A.arr(byte, l, 96), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 55] int r =
+fn _put_page_of {l:agz}{at:nat | at + 55 <= 96}
+  (buf: !$A.arr(byte, l, 96), at: int at, page: Int, page_count: Int): [end_at:nat | end_at <= at + 55] int end_at =
   if _spread() then let
-    val off = $S.int_to_str(b, p0, 96, 2 * p + 1)
+    val offset = $S.int_to_str(buf, at, 96, 2 * page + 1)
     (* an en dash *)
-    val off = _put(b, off, "\xE2\x80\x93")
-    val off = $S.int_to_str(b, off, 96, 2 * p + 2)
-    val off = _put(b, off, " of ")
-    val off = $S.int_to_str(b, off, 96, 2 * t)
-  in _put(b, off, " in chapter") end
+    val offset = _put(buf, offset, "\xE2\x80\x93")
+    val offset = $S.int_to_str(buf, offset, 96, 2 * page + 2)
+    val offset = _put(buf, offset, " of ")
+    val offset = $S.int_to_str(buf, offset, 96, 2 * page_count)
+  in _put(buf, offset, " in chapter") end
   else let
-    val off = $S.int_to_str(b, p0, 96, p + 1)
-    val off = _put(b, off, " of ")
-    val off = $S.int_to_str(b, off, 96, t)
-  in _put(b, off, " in chapter") end
+    val offset = $S.int_to_str(buf, at, 96, page + 1)
+    val offset = _put(buf, offset, " of ")
+    val offset = $S.int_to_str(buf, offset, 96, page_count)
+  in _put(buf, offset, " in chapter") end
 
-(* "34% of chapter", for page p (from 0) of t, at b[p0, r): scrolled,
+(* "34% of chapter", for a page (from 0) of page_count, at buf[at, end_at): scrolled,
    where the screenful shown is in the chapter *)
-fn _put_chapter_pct {l:agz}{p0:nat | p0 + 40 <= 96}
-  (b: !$A.arr(byte, l, 96), p0: int p0, p: Int, t: Int): [r:nat | r <= p0 + 26] int r = let
-  val pct = (if t <= 1 then 100 else if p <= 0 then 0 else if p >= t - 1 then 100 else p * 100 / (t - 1)): Int
-  val off = $S.int_to_str(b, p0, 96, pct)
-in _put(b, off, "% of chapter") end
+fn _put_chapter_percent {l:agz}{at:nat | at + 40 <= 96}
+  (buf: !$A.arr(byte, l, 96), at: int at, page: Int, page_count: Int): [end_at:nat | end_at <= at + 26] int end_at = let
+  val percent = (if page_count <= 1 then 100 else if page <= 0 then 0 else if page >= page_count - 1 then 100 else page * 100 / (page_count - 1)): Int
+  val offset = $S.int_to_str(buf, at, 96, percent)
+in _put(buf, offset, "% of chapter") end
 
-(* Readout m for page p of t in chapter c (from 1; 0 when none is
-   known) of tc, at b[p0, r) *)
-fn _put_readout {l:agz}{p0:nat | p0 + 70 <= 96}{m:nat | m <= 4}
-  (b: !$A.arr(byte, l, 96), p0: int p0, m: int m, p: Int, t: Int, c: Int, tc: Int)
-  : [r:nat | r <= p0 + 70] int r = let
-  val ci = (if c > 0 then c - 1 else 0): Int
+(* The readout given, for a page of page_count in a chapter (from 1; 0 when none is
+   known) of chapter_count, at buf[at, end_at) *)
+fn _put_readout {l:agz}{at:nat | at + 70 <= 96}{readout:nat | readout <= 4}
+  (buf: !$A.arr(byte, l, 96), at: int at, readout: int readout, page: Int, page_count: Int, chapter: Int, chapter_count: Int)
+  : [end_at:nat | end_at <= at + 70] int end_at = let
+  val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
   (* the screens after the one shown (the reading speed is by screens) *)
-  val left = (if t > p + 1 then t - p - 1 else 0): Int
+  val left = (if page_count > page + 1 then page_count - page - 1 else 0): Int
 in
   (* scrolled, the chapter's pages are its screenfuls: where the one
      shown is says more than how many there are *)
-  if (if m <= 1 then _scrolled() else false) then _put_chapter_pct(b, p0, p, t)
-  else if m = 1 then (if _spread() then _put_page_of(b, _put(b, p0, "pages "), p, t)
-    else _put_page_of(b, _put(b, p0, "page "), p, t))
-  else if m = 2 then let
+  if (if readout <= 1 then _scrolled() else false) then _put_chapter_percent(buf, at, page, page_count)
+  else if readout = 1 then (if _spread() then _put_page_of(buf, _put(buf, at, "pages "), page, page_count)
+    else _put_page_of(buf, _put(buf, at, "page "), page, page_count))
+  else if readout = 2 then let
     (* by the contents' top-level entries; by the spine's items when
        the contents have none *)
-    val @(n, k) = toc_chapter_of(ci)
-    val @(n, k) = (if k > 0 then @(n, k) else @(c, tc)): @(int, int)
-    val n = g1ofg0(n)
-    val k = g1ofg0(k)
+    val @(chapter_number, chapter_total) = toc_chapter_of(chapter_index)
+    val @(chapter_number, chapter_total) = (if chapter_total > 0 then @(chapter_number, chapter_total) else @(chapter, chapter_count)): @(int, int)
+    val chapter_number = g1ofg0(chapter_number)
+    val chapter_total = g1ofg0(chapter_total)
   in
-    if n <= 0 then let
-      val off = _put(b, p0, "before chapter 1 of ")
-    in $S.int_to_str(b, off, 96, k) end
+    if chapter_number <= 0 then let
+      val offset = _put(buf, at, "before chapter 1 of ")
+    in $S.int_to_str(buf, offset, 96, chapter_total) end
     else let
-      val off = _put(b, p0, "chapter ")
-      val off = $S.int_to_str(b, off, 96, n)
-      val off = _put(b, off, " of ")
-    in $S.int_to_str(b, off, 96, k) end
+      val offset = _put(buf, at, "chapter ")
+      val offset = $S.int_to_str(buf, offset, 96, chapter_number)
+      val offset = _put(buf, offset, " of ")
+    in $S.int_to_str(buf, offset, 96, chapter_total) end
   end
-  else if m = 3 then let
-    val off = _put_dur(b, p0, 96, _spd_minutes(left))
-  in _put(b, off, " left in chapter") end
-  else if m = 4 then let
-    val rest = _rest_pages(ci, t)
+  else if readout = 3 then let
+    val offset = _put_duration(buf, at, 96, _minutes_for_pages(left))
+  in _put(buf, offset, " left in chapter") end
+  else if readout = 4 then let
+    val rest = _rest_pages(chapter_index, page_count)
     val more = (if rest > 0 then rest else 0): Int
-    val off = _put_dur(b, p0, 96, _spd_minutes(left + more))
-  in _put(b, off, " left in book") end
-  else if left = 0 then _put(b, p0, "last page in chapter")
+    val offset = _put_duration(buf, at, 96, _minutes_for_pages(left + more))
+  in _put(buf, offset, " left in book") end
+  else if left = 0 then _put(buf, at, "last page in chapter")
   else let
     (* a spread's screens are two pages each *)
     val pages = (if _spread() then 2 * left else left): Int
-    val off = $S.int_to_str(b, p0, 96, pages)
+    val offset = $S.int_to_str(buf, at, 96, pages)
   in
-    if pages = 1 then _put(b, off, " page left in chapter")
-    else _put(b, off, " pages left in chapter")
+    if pages = 1 then _put(buf, offset, " page left in chapter")
+    else _put(buf, offset, " pages left in chapter")
   end
 end
 
-(* The percentage of thousandth pm at b[p, r): "<1" rather than "0"
+(* The percentage of a thousandth at buf[at, end_at): "<1" rather than "0"
    once reading has begun *)
-fn _put_pct {l:agz}{p:nat | p <= 5}{v:nat | v <= 1000}
-  (b: !$A.arr(byte, l, 32), p: int p, pm: int v, begun: bool): [r:nat | r <= p + 11] int r =
-  if pm >= 10 then $S.int_to_str(b, p, 32, pm / 10)
-  else if begun then _put(b, p, "<1")
-  else _put(b, p, "0")
+fn _put_percent {l:agz}{at:nat | at <= 5}{thousandth:nat | thousandth <= 1000}
+  (buf: !$A.arr(byte, l, 32), at: int at, thousandth: int thousandth, begun: bool): [end_at:nat | end_at <= at + 11] int end_at =
+  if thousandth >= 10 then $S.int_to_str(buf, at, 32, thousandth / 10)
+  else if begun then _put(buf, at, "<1")
+  else _put(buf, at, "0")
 
 (* The running footer, shown while the bars are hidden, on one line: the
    chapter's title in footer-title; in footer-readout the readout, which a tap on it turns
    to the next; and in footer-book how far into the book the page is,
    never "0%" once reading has begun:
    "Title · 8 pages left in chapter · 32% of book" *)
-fn _show_footer {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
+fn _show_footer {current_page,total,chapter,chapter_count:nat} (current_page: int current_page, total: int total, chapter: int chapter, chapter_count: int chapter_count): void = let
   val () = (if chapter > 0 then toc_title_in("footer-title", chapter - 1) else ())
-  val ci = (if chapter > 0 then chapter - 1 else 0): Int
-  val b = $A.alloc<byte>(96)
-  val off = _put_sep(b, 0)
-  val off = _put_readout(b, off, _readout_shown(cur_page, total, ci), cur_page, total, chapter, tc)
-  val () = _set_text_of("footer-readout", b, off)
-  val pm = _permille(ci, cur_page, total)
+  val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
+  val buf = $A.alloc<byte>(96)
+  val offset = _put_separator(buf, 0)
+  val offset = _put_readout(buf, offset, _readout_shown(current_page, total, chapter_index), current_page, total, chapter, chapter_count)
+  val () = _set_text_of("footer-readout", buf, offset)
+  val thousandth = _permille(chapter_index, current_page, total)
   (* " · ", the percentage (at most 11) and "% of book" *)
-  val b = $A.alloc<byte>(32)
-  val off = _put_sep(b, 0)
-  val off = _put_pct(b, off, pm, ci > 0 || cur_page > 0)
-  val off = _put(b, off, "% of book")
-in _set_text_of("footer-book", b, off) end
+  val buf = $A.alloc<byte>(32)
+  val offset = _put_separator(buf, 0)
+  val offset = _put_percent(buf, offset, thousandth, chapter_index > 0 || current_page > 0)
+  val offset = _put(buf, offset, "% of book")
+in _set_text_of("footer-book", buf, offset) end
 
 (* The page indicator: the chapter's title (its contents entry's label,
    else "Chapter" and its number) in indicator-title, then " · page " in indicator-label and
    "M of T in chapter" in indicator-pages, which always shows in full while a long
    title is cut *)
-(* The indicator's place at b[0, r): "12 of 75 in chapter", or
+(* The indicator's place at buf[0, end_at): "12 of 75 in chapter", or
    scrolled, "34% of chapter" *)
-fn _put_place {l:agz} (b: !$A.arr(byte, l, 96), p: Int, t: Int): [r:nat | r <= 55] int r =
-  if _scrolled() then _put_chapter_pct(b, 0, p, t) else _put_page_of(b, 0, p, t)
+fn _put_place {l:agz} (buf: !$A.arr(byte, l, 96), page: Int, page_count: Int): [end_at:nat | end_at <= 55] int end_at =
+  if _scrolled() then _put_chapter_percent(buf, 0, page, page_count) else _put_page_of(buf, 0, page, page_count)
 
-fn _show_indicator {p,t,c,tc:nat} (cur_page: int p, total: int t, chapter: int c, tc: int tc): void = let
+fn _show_indicator {current_page,total,chapter,chapter_count:nat} (current_page: int current_page, total: int total, chapter: int chapter, chapter_count: int chapter_count): void = let
   val () = (if chapter > 0 then toc_title_in("indicator-title", chapter - 1) else ())
   val () = (if _scrolled() then ui_text("indicator-label", "\xC2\xA0\xC2\xB7 ")
     else if _spread() then ui_text("indicator-label", "\xC2\xA0\xC2\xB7 pages ")
     else ui_text("indicator-label", "\xC2\xA0\xC2\xB7 page "))
-  val b = $A.alloc<byte>(96)
-  val off = _put_place(b, cur_page, total)
-  val () = _set_text_of("indicator-pages", b, off)
-in _show_footer(cur_page, total, chapter, tc) end
+  val buf = $A.alloc<byte>(96)
+  val offset = _put_place(buf, current_page, total)
+  val () = _set_text_of("indicator-pages", buf, offset)
+in _show_footer(current_page, total, chapter, chapter_count) end
 
 (* A tap on the footer's readout: the next one, which is kept with the
    settings *)
@@ -438,192 +438,192 @@ in _show_footer(cur_page, total, chapter, tc) end
 
 implement reader_readout_next () =
   case+ reading_get() of
-  | @(p, t, c, tc) => let
-      val ci = (if c > 0 then c - 1 else 0): Int
-      val () = set_rd_set(_readout_after(_readout_shown(p, t, ci), p, t, ci))
-    in _show_footer(p, t, c, tc) end
+  | @(page, page_count, chapter, chapter_count) => let
+      val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
+      val () = set_rd_set(_readout_after(_readout_shown(page, page_count, chapter_index), page, page_count, chapter_index))
+    in _show_footer(page, page_count, chapter, chapter_count) end
 
 fn _update_page_indicator(): void =
-  case+ reading_get() of @(p, t, c, tc) => _show_indicator(p, t, c, tc)
+  case+ reading_get() of @(page, page_count, chapter, chapter_count) => _show_indicator(page, page_count, chapter, chapter_count)
 
 (* The page's width, as it was last measured *)
-val _page_w = ref<int>(0)
+val _page_width = ref<int>(0)
 
 
 
-(* Measures content node i: whether it is in the page. The page answers
+(* Measures a content node: whether it is in the page. The page answers
    1 for an element it measured and 0 for an id it has no element for (a
    text node's number), with every measure slot 0, so only 1 is one: a
    number with no element would otherwise start at the page's left edge,
    and a place anchored there would be the chapter's first page *)
-fn _measure_node {i:nat} (i: int i): bool = let
-  val @(ia, il) = _num_id("c", i, 3)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val r = $DR.measure(bi, il)
-  val () = release_bytes(fi, bi)
+fn _measure_node {node:nat} (node: int node): bool = let
+  val @(node_id, node_id_len) = _number_id("c", node, 3)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
+  val measured = $DR.measure(id_bytes, node_id_len)
+  val () = release_bytes(id_frozen, id_bytes)
 in
-  case+ r of
-  | ~$R.ok(v) => v > 0
+  case+ measured of
+  | ~$R.ok(found) => found > 0
   | ~$R.err(_) => false
 end
 
 (* The content node at x, y (its number), or -1 *)
-fn _node_at (x: int, y: int): [v:int | v >= ~1] int v =
+fn _node_at (x: int, y: int): [node:int | node >= ~1] int node =
   case+ $DR.element_at_point(x, y) of
   | ~$R.none() => ~1
-  | ~$R.some(b) => let
-      val n = $DC.blob_len(b)
+  | ~$R.some(blob) => let
+      val blob_len = $DC.blob_len(blob)
     in
-      if n <= 0 then let val () = $DC.blob_free(b) in ~1 end
-      else if n > 16 then let val () = $DC.blob_free(b) in ~1 end
+      if blob_len <= 0 then let val () = $DC.blob_free(blob) in ~1 end
+      else if blob_len > 16 then let val () = $DC.blob_free(blob) in ~1 end
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(b, 0, a, n)
-        val () = $DC.blob_free(b)
-        val @(f, bb) = $A.freeze<byte>(a)
-        val v = nid_parse(bb, n, 0, "c")
-        val () = release_bytes(f, bb)
-      in v end
+        val id_text = $A.alloc<byte>(blob_len)
+        val () = $DC.blob_read(blob, 0, id_text, blob_len)
+        val () = $DC.blob_free(blob)
+        val @(id_frozen, id_bytes) = $A.freeze<byte>(id_text)
+        val node = nid_parse(id_bytes, blob_len, 0, "c")
+        val () = release_bytes(id_frozen, id_bytes)
+      in node end
     end
 
 (* The first content node down the middle of the page, from y, in steps
-   of 40 px, j more times *)
-fun _node_down {j:nat} .<j>. (x: int, y: int, j: int j): [v:int | v >= ~1] int v = let
-  val v = _node_at(x, y)
-in if v >= 0 then v else if j <= 0 then ~1 else _node_down(x, y + 40, j - 1) end
+   of 40 px, tries more times *)
+fun _node_down {tries:nat} .<tries>. (x: int, y: int, tries: int tries): [node:int | node >= ~1] int node = let
+  val node = _node_at(x, y)
+in if node >= 0 then node else if tries <= 0 then ~1 else _node_down(x, y + 40, tries - 1) end
 
-(* The first of content nodes i to i + j that has an element *)
-fun _first_element {i:nat}{j:nat} .<j>. (i: int i, j: int j): [v:int | v >= ~1] int v =
-  if _measure_node(i) then i
-  else if j <= 0 then ~1
-  else _first_element(i + 1, j - 1)
+(* The first of content nodes node to node + more that has an element *)
+fun _first_element {node:nat}{more:nat} .<more>. (node: int node, more: int more): [node:int | node >= ~1] int node =
+  if _measure_node(node) then node
+  else if more <= 0 then ~1
+  else _first_element(node + 1, more - 1)
 
 (* The probe: the chapter's first content node with an element (found
    by its id, not by what is on top of the page, which may be a panel),
    and its offset below the page's top, measured with the chapter
    scrolled to its top *)
 fn _probe_set (): void = let
-  val () = _measure_lit("page")
-  val cy = $DR.get_measure_y()
-  val v = _first_element(0, 60)
+  val () = _measure_literal("page")
+  val page_top = $DR.get_measure_y()
+  val node = _first_element(0, 60)
 in
-  if v < 0 then !_probe := ~1
-  else if ~_measure_node(v) then !_probe := ~1
+  if node < 0 then !_probe := ~1
+  else if ~_measure_node(node) then !_probe := ~1
   else let
-    val () = !_probe := v
-  in !_probe_y := $DR.get_measure_y() - cy end
+    val () = !_probe := node
+  in !_probe_offset := $DR.get_measure_y() - page_top end
 end
 
 (* How far the chapter is scrolled down now: from where the probe is;
-   the page's scroll for page p when there is no probe *)
-fn _scroll_top (p: Int): Int = let
-  val v = !_probe
+   the page's scroll for the page when there is no probe *)
+fn _scroll_top (page: Int): Int = let
+  val node = !_probe
 in
-  if v < 0 then p * _step()
+  if node < 0 then page * _step()
   else let
-    val () = _measure_lit("page")
-    val cy = $DR.get_measure_y()
-    val v = (if v > 0 then v else 0): [v:nat] int v
+    val () = _measure_literal("page")
+    val page_top = $DR.get_measure_y()
+    val node = (if node > 0 then node else 0): [node:nat] int node
   in
-    if ~_measure_node(v) then p * _step()
-    else !_probe_y - ($DR.get_measure_y() - cy)
+    if ~_measure_node(node) then page * _step()
+    else !_probe_offset - ($DR.get_measure_y() - page_top)
   end
 end
 
-(* Whether content node i starts in [lo, hi) across the page (down it,
+(* Whether a content node starts in [low, high) across the page (down it,
    scrolled): on the page shown, when that is the page's width *)
-fn _starts_in {i:nat} (i: int i, lo: int, hi: int): bool =
-  if ~_measure_node(i) then false
-  else if _scrolled() then let val y = $DR.get_measure_y() in y >= lo && y < hi end
+fn _starts_in {node:nat} (node: int node, low: int, high: int): bool =
+  if ~_measure_node(node) then false
+  else if _scrolled() then let val y = $DR.get_measure_y() in y >= low && y < high end
   (* right to left, a node starts at its right edge *)
-  else if !_rtl then let
-    val xr = $DR.get_measure_x() + $DR.get_measure_w()
-  in xr > lo + 1 && xr <= hi + 1 end
-  else let val x = $DR.get_measure_x() in x >= lo && x < hi end
+  else if !_right_to_left then let
+    val right_edge = $DR.get_measure_x() + $DR.get_measure_w()
+  in right_edge > low + 1 && right_edge <= high + 1 end
+  else let val x = $DR.get_measure_x() in x >= low && x < high end
 
-(* The first of content nodes i to i + j that starts on the page, [lo,
-   hi) across; -1 when none does *)
-fun _first_start {i:nat}{j:nat} .<j>. (i: int i, j: int j, lo: int, hi: int): [v:int | v >= ~1] int v =
-  if _starts_in(i, lo, hi) then i
-  else if j <= 0 then ~1
-  else _first_start(i + 1, j - 1, lo, hi)
+(* The first of content nodes node to node + more that starts on the page, [low,
+   high) across; -1 when none does *)
+fun _first_start {node:nat}{more:nat} .<more>. (node: int node, more: int more, low: int, high: int): [node:int | node >= ~1] int node =
+  if _starts_in(node, low, high) then node
+  else if more <= 0 then ~1
+  else _first_start(node + 1, more - 1, low, high)
 
 (* The content node the page shown starts with (its number), or -1: the
    first element down the middle of the page from its first line, or,
    when that one began on a page before (a paragraph carried over), the
    first of the next 40 that begins on this one, so that the page it
    names is this page *)
-fn _anchor_now (): [v:int | v >= ~1] int v = let
-  val () = _measure_lit("page")
-  val cx = $DR.get_measure_x()
-  val cy = $DR.get_measure_y()
-  val cw = $DR.get_measure_w()
-  val ch = $DR.get_measure_h()
+fn _anchor_now (): [node:int | node >= ~1] int node = let
+  val () = _measure_literal("page")
+  val page_left = $DR.get_measure_x()
+  val page_top = $DR.get_measure_y()
+  val page_width = $DR.get_measure_w()
+  val page_height = $DR.get_measure_h()
   (* the first column's middle: of a spread's two, the left one, or the
      right one in a book read right to left *)
-  val x = (if _spread() then (if !_rtl then cx + 3 * cw / 4 else cx + cw / 4) else cx + cw / 2): int
-  val v = _node_down(x, cy + 24, 8)
+  val x = (if _spread() then (if !_right_to_left then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
+  val node = _node_down(x, page_top + 24, 8)
   (* across the page, or down it when scrolled *)
-  val lo = (if _scrolled() then cy - 1 else cx - 1): int
-  val hi = (if _scrolled() then cy + ch else cx + cw): int
+  val low = (if _scrolled() then page_top - 1 else page_left - 1): int
+  val high = (if _scrolled() then page_top + page_height else page_left + page_width): int
 in
-  if v < 0 then v
-  else if _starts_in(v, lo, hi) then v
+  if node < 0 then node
+  else if _starts_in(node, low, high) then node
   else let
-    val w = _first_start(v + 1, 40, lo, hi)
-  in if w >= 0 then w else v end
+    val first_starting = _first_start(node + 1, 40, low, high)
+  in if first_starting >= 0 then first_starting else node end
 end
 
-(* Scrolled, the screenful of t shown with the chapter scrolled down by
+(* Scrolled, the screenful of page_count shown with the chapter scrolled down by
    top: the nearest whole step, and the last at the bottom, where the
    browser stops a scroll short of a whole step. A place kept, a hand
    scroll and a node's screen are all counted this way *)
-fn _screen_at {t:pos} (top: Int, bottom: Int, t: int t): [p:nat | p < t] int p = let
+fn _screen_at {page_count:pos} (top: Int, bottom: Int, page_count: int page_count): [screen:nat | screen < page_count] int screen = let
   val step = _step()
-  val p = (if top >= bottom - 2 then t - 1 else if top > 0 then (top + step / 2) / step else 0): Int
-in if p <= 0 then 0 else if p >= t then t - 1 else p end
+  val screen = (if top >= bottom - 2 then page_count - 1 else if top > 0 then (top + step / 2) / step else 0): Int
+in if screen <= 0 then 0 else if screen >= page_count then page_count - 1 else screen end
 
-(* Scrolled, how far down the chapter content node i starts (the page
-   shown now is cur), and how far the chapter can be scrolled: ~1 for
+(* Scrolled, how far down the chapter a content node starts (the page
+   shown now is current), and how far the chapter can be scrolled: ~1 for
    the first when the node is not in the chapter *)
-fn _node_down_by {i:int} (i: int i, cur: Int): @(Int, Int) =
-  if i < 0 then @(~1, 0)
-  else if ~_measure_node(i) then @(~1, 0)
+fn _node_down_by {node:int} (node: int node, current: Int): @(Int, Int) =
+  if node < 0 then @(~1, 0)
+  else if ~_measure_node(node) then @(~1, 0)
   else let
-    val y = $DR.get_measure_y()
-    val () = _measure_lit("page")
-    val cy = $DR.get_measure_y()
+    val node_top = $DR.get_measure_y()
+    val () = _measure_literal("page")
+    val page_top = $DR.get_measure_y()
     (* the page's height as it is now, which its screens are counted by *)
-    val () = !_page_h := $DR.get_measure_h()
+    val () = !_page_height := $DR.get_measure_h()
     val bottom = $DR.get_measure_scroll_h() - $DR.get_measure_h()
-    val off = _scroll_top(cur) + (y - cy)
-  in @((if off > 0 then off else 0), bottom) end
+    val offset = _scroll_top(current) + (node_top - page_top)
+  in @((if offset > 0 then offset else 0), bottom) end
 
-(* The page, of the chapter's t, that content node i is on (the page
-   shown now is cur); cur when it is not in the chapter *)
-fn _page_of_node {t:pos}{c:nat | c < t}{i:nat} (i: int i, t: int t, cur: int c): [p:nat | p < t] int p =
+(* The page, of the chapter's page_count, that a content node is on (the page
+   shown now is current); current when it is not in the chapter *)
+fn _page_of_node {page_count:pos}{current:nat | current < page_count}{node:nat} (node: int node, page_count: int page_count, current: int current): [page:nat | page < page_count] int page =
   if _scrolled() then let
-    val @(off, bottom) = _node_down_by(i, cur)
-  in if off < 0 then cur else _screen_at(off, bottom, t) end
-  else if ~_measure_node(i) then cur
+    val @(offset, bottom) = _node_down_by(node, current)
+  in if offset < 0 then current else _screen_at(offset, bottom, page_count) end
+  else if ~_measure_node(node) then current
   else let
-    val x = $DR.get_measure_x()
-    val xr = x + $DR.get_measure_w()
-    val () = _measure_lit("page")
-    val cx = $DR.get_measure_x()
-    val cw = $DR.get_measure_w()
+    val node_left = $DR.get_measure_x()
+    val node_right = node_left + $DR.get_measure_w()
+    val () = _measure_literal("page")
+    val page_left = $DR.get_measure_x()
+    val page_width = $DR.get_measure_w()
   in
-    if cw <= 0 then cur
+    if page_width <= 0 then current
     else let
       (* within a pixel or two of the page's edge is on it, as _anchor_now
          takes a node there (columns can fall between pixels); right to
          left, the pages go on to the left, and a node starts at its
          right edge *)
-      val d = (if !_rtl then cx + cw - xr + 2 else x - cx + 2): Int
+      val distance = (if !_right_to_left then page_left + page_width - node_right + 2 else node_left - page_left + 2): Int
       (* whole pages from the one shown, rounded down *)
-      val k = (if d >= 0 then d / cw else ~((cw - 1 - d) / cw)): Int
-      val p = cur + k
-    in if p < 0 then 0 else if p >= t then t - 1 else p end
+      val pages_away = (if distance >= 0 then distance / page_width else ~((page_width - 1 - distance) / page_width)): Int
+      val page = current + pages_away
+    in if page < 0 then 0 else if page >= page_count then page_count - 1 else page end
   end
 
 (* The content node at the top of the page last shown: what a new
@@ -633,69 +633,69 @@ val _anchor_last = ref<Int>(~1)
 
 (* The chapter's pages as it is laid out (the page just measured):
    across, its scroll width over its width; scrolled, its screenfuls *)
-fn _count_pages (): [v:int] int v =
+fn _count_pages (): [count:int] int count =
   if _scrolled() then let
-    val h = $DR.get_measure_h()
-    val sh = $DR.get_measure_scroll_h()
-    val extra = sh - h
+    val height = $DR.get_measure_h()
+    val scroll_height = $DR.get_measure_scroll_h()
+    val extra = scroll_height - height
     val step = _step()
-  in if h <= 0 then 1 else if extra <= 0 then 1 else 1 + (extra + step - 1) / step end
+  in if height <= 0 then 1 else if extra <= 0 then 1 else 1 + (extra + step - 1) / step end
   else let
-    val cw = $DR.get_measure_w()
-    val sw = $DR.get_measure_scroll_w()
+    val page_width = $DR.get_measure_w()
+    val scroll_width = $DR.get_measure_scroll_w()
     (* a spread's last screen can hold one column, half a screen: its
        screens are counted up, past a few pixels of rounding *)
-  in if cw > 8 then (sw + cw - 8) / cw else 1 end
+  in if page_width > 8 then (scroll_width + page_width - 8) / page_width else 1 end
 
 fn _measure_pagination(): void = let
-  val cnt_narr = $A.alloc<byte>(4)
-  val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
-  val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
+  val page_id = $A.alloc<byte>(4)
+  val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+  val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
   (* back to the first page, which the reading position now names *)
   (* both ways: a switch between pages and scrolled leaves the other *)
-  val () = $SC.set_scroll_top(cnt_b, 4, 0)
-  val () = $SC.set_scroll_left(cnt_b, 4, 0)
-  val mr = $DR.measure(cnt_b, 4)
-  val () = release_bytes(cnt_f, cnt_b)
-  val _ = $R.discard<int><int>(mr)
+  val () = $SC.set_scroll_top(page_id_bytes, 4, 0)
+  val () = $SC.set_scroll_left(page_id_bytes, 4, 0)
+  val measured = $DR.measure(page_id_bytes, 4)
+  val () = release_bytes(page_id_frozen, page_id_bytes)
+  val _ = $R.discard<int><int>(measured)
   (* The page's widths, checked here: the chapter has scroll width /
      width pages, and at least one *)
-  val cw = $DR.get_measure_w()
-  val () = !_page_w := cw
-  val () = !_page_h := $DR.get_measure_h()
+  val page_width = $DR.get_measure_w()
+  val () = !_page_width := page_width
+  val () = !_page_height := $DR.get_measure_h()
   val total = _count_pages()
-  val t = (if total > 1 then total else 1): [t:pos] int t
+  val page_count = (if total > 1 then total else 1): [page_count:pos] int page_count
   val () = (if _scrolled() then _probe_set() else ())
   val () = (case+ reading_get() of
-    | @(_, _, c, tc) => reading_set(@(0, t, c, tc)))
-  val () = window_show(0, t)
+    | @(_, _, chapter, chapter_count) => reading_set(@(0, page_count, chapter, chapter_count)))
+  val () = window_show(0, page_count)
 in _update_page_indicator() end
 
 
 (* The position read to the open book's record in the library, which is
    then stored *)
 fn _record_position (): void = let
-  val i = lib_index_of_key(open_key_get())
+  val book_index = lib_index_of_key(open_key_get())
   val anchor = _anchor_now()
   val () = !_anchor_last := anchor
   val now = $TM.epoch_minutes()
 in
   case+ reading_get() of
-  | @(p, t, c, tc) =>
-    if i < 0 then ()
+  | @(page, page_count, chapter, chapter_count) =>
+    if book_index < 0 then ()
     else let
-      val ch = (if c > 0 then c - 1 else 0): Int
-      val at_end = (if tc > 0 then (if c >= tc then p + 1 >= t else false) else false): bool
-      val bm = !_book_min
-      val bp = !_book_pages
-      val () = !_book_min := 0
+      val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
+      val at_end = (if chapter_count > 0 then (if chapter >= chapter_count then page + 1 >= page_count else false) else false): bool
+      val minutes_read = !_book_minutes
+      val pages_read = !_book_pages
+      val () = !_book_minutes := 0
       val () = !_book_pages := 0
-      val () = lib_update(i, lam(x) => @{
-        key = x.key, id_high = x.id_high, id_low = x.id_low, shelf = x.shelf, added = x.added, opened = now,
-        chapter = ch, chapters = (if tc > 0 then (tc: Int) else x.chapters), page = p, pages = t, anchor = anchor,
-        file_size = x.file_size, cover = x.cover, done = (if at_end then 1 else x.done), series_number = x.series_number, collections = x.collections,
-        minutes_read = x.minutes_read + bm, pages_read = x.pages_read + bp, finished_at = (if at_end then (if x.finished_at > 0 then x.finished_at else now) else x.finished_at) })
-      val () = lib_touch(i)
+      val () = lib_update(book_index, lam(record) => @{
+        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
+        chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
+        file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
+        minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at) })
+      val () = lib_touch(book_index)
     in lib_save() end
 end
 
@@ -706,17 +706,17 @@ end
 
 
 
-(* The scrubber at v: its thumb, its fill and the percentage *)
-fn _scrub_at {v:nat | v <= 1000} (v: int v): void = let
-  val () = ui_place("scrubber-thumb", PLeft, v)
-  val () = ui_place("scrubber-fill", PWidth, v)
-  val b = $A.alloc<byte>(16)
-  val off = $S.int_to_str(b, 0, 16, v / 10)
-  val off = _put(b, off, "%")
-  val () = ui_text_buf("scrubber-percent", b, off)
-  val b = $A.alloc<byte>(16)
-  val off = $S.int_to_str(b, 0, 16, v / 10)
-in ui_attr_buf("scrubber-track", AValueNow, b, off) end
+(* The scrubber at thousandth: its thumb, its fill and the percentage *)
+fn _scrub_at {thousandth:nat | thousandth <= 1000} (thousandth: int thousandth): void = let
+  val () = ui_place("scrubber-thumb", PLeft, thousandth)
+  val () = ui_place("scrubber-fill", PWidth, thousandth)
+  val buf = $A.alloc<byte>(16)
+  val offset = $S.int_to_str(buf, 0, 16, thousandth / 10)
+  val offset = _put(buf, offset, "%")
+  val () = ui_text_buf("scrubber-percent", buf, offset)
+  val buf = $A.alloc<byte>(16)
+  val offset = $S.int_to_str(buf, 0, 16, thousandth / 10)
+in ui_attr_buf("scrubber-track", AValueNow, buf, offset) end
 
 (* The scrubber at the page shown, its percentage with the time the rest
    of the book takes, when the speed is known: its pages are the pages
@@ -724,61 +724,61 @@ in ui_attr_buf("scrubber-track", AValueNow, b, off) end
    chapter's pages *)
 fn _scrub_show (): void =
   case+ reading_get() of
-  | @(p, t, c, _) => let
-      val ci = (if c > 0 then c - 1 else 0): Int
-      val v = _permille(ci, p, t)
-      val () = _scrub_at(v)
-      val left = (if p + 1 < t then t - p - 1 else 0): Int
-      val rest = _rest_pages(ci, t)
-      val mins = (if rest < 0 then ~1 else _spd_minutes(left + rest)): Int
+  | @(page, page_count, chapter, _) => let
+      val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
+      val thousandth = _permille(chapter_index, page, page_count)
+      val () = _scrub_at(thousandth)
+      val left = (if page + 1 < page_count then page_count - page - 1 else 0): Int
+      val rest = _rest_pages(chapter_index, page_count)
+      val minutes = (if rest < 0 then ~1 else _minutes_for_pages(left + rest)): Int
     in
-      if mins < 0 then ()
+      if minutes < 0 then ()
       else let
-        val b = $A.alloc<byte>(64)
-        val off = $S.int_to_str(b, 0, 64, v / 10)
-        val off = _put(b, off, "% \xC2\xB7 ")
-        val off = _put_dur(b, off, 64, mins)
-        val off = _put(b, off, " left")
-      in ui_text_buf("scrubber-percent", b, off) end
+        val buf = $A.alloc<byte>(64)
+        val offset = $S.int_to_str(buf, 0, 64, thousandth / 10)
+        val offset = _put(buf, offset, "% \xC2\xB7 ")
+        val offset = _put_duration(buf, offset, 64, minutes)
+        val offset = _put(buf, offset, " left")
+      in ui_text_buf("scrubber-percent", buf, offset) end
     end
 
 (* A tick on the scrubber where each chapter after the first starts *)
-fun _ticks {i,tc:nat} .<max(tc - i, 0)>. (i: int i, tc: int tc): void =
-  if i >= tc then ()
+fun _ticks {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i, chapter_count: int chapter_count): void =
+  if i >= chapter_count then ()
   else let
-    val @(b, _, tot) = book_weights(book_serial(), i)
-    val @(ki, kl) = nid_make("scrubber-tick", i)
-    val () = ui_add_n("scrubber-ticks", ki, kl, TDiv)
-    val @(ki, kl) = nid_make("scrubber-tick", i)
-    val () = ui_attr_n(ki, kl, AClass, "tick")
-    val v = _thousandth(b, tot)
-    val @(ki, kl) = nid_make("scrubber-tick", i)
-    val () = ui_place_n(ki, kl, PLeft, v)
-  in _ticks(i + 1, tc) end
+    val @(size_before, _, book_size) = book_weights(book_serial(), i)
+    val @(tick_id, tick_id_len) = nid_make("scrubber-tick", i)
+    val () = ui_add_n("scrubber-ticks", tick_id, tick_id_len, TDiv)
+    val @(tick_id, tick_id_len) = nid_make("scrubber-tick", i)
+    val () = ui_attr_n(tick_id, tick_id_len, AClass, "tick")
+    val thousandth = _thousandth(size_before, book_size)
+    val @(tick_id, tick_id_len) = nid_make("scrubber-tick", i)
+    val () = ui_place_n(tick_id, tick_id_len, PLeft, thousandth)
+  in _ticks(i + 1, chapter_count) end
 
-fn _ticks_show {tc:nat} (tc: int tc): void = let
+fn _ticks_show {chapter_count:nat} (chapter_count: int chapter_count): void = let
   val () = ui_clear("scrubber-ticks")
-in _ticks(1, tc) end
+in _ticks(1, chapter_count) end
 
-(* The chapter, of tc, at thousandth v of the book, and the thousandth
+(* The chapter, of chapter_count, at a thousandth of the book, and the thousandth
    of the chapter *)
-fun _chapter_at {i,tc:nat} .<max(tc - i, 0)>. (v: Int, i: int i, tc: int tc): @([c:nat] int c, [r:nat | r <= 1000] int r) =
-  if i >= tc then @(0, 0)
+fun _chapter_at {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (thousandth: Int, i: int i, chapter_count: int chapter_count): @([chapter:nat] int chapter, [chapter_thousandth:nat | chapter_thousandth <= 1000] int chapter_thousandth) =
+  if i >= chapter_count then @(0, 0)
   else let
-    val @(b, w, tot) = book_weights(book_serial(), i)
-    val x = _of_thousandth(v, tot)
+    val @(size_before, chapter_size, book_size) = book_weights(book_serial(), i)
+    val position = _of_thousandth(thousandth, book_size)
   in
-    if (if x < b + w then true else i + 1 >= tc) then
-      @(i, _thousandth(x - b, w))
-    else _chapter_at(v, i + 1, tc)
+    if (if position < size_before + chapter_size then true else i + 1 >= chapter_count) then
+      @(i, _thousandth(position - size_before, chapter_size))
+    else _chapter_at(thousandth, i + 1, chapter_count)
   end
 
 (* The thousandth of the book at x on the scrubber's track *)
-fn _track_at (x: Int): [r:nat | r <= 1000] int r = let
-  val () = _measure_lit("scrubber-track")
-  val tx = $DR.get_measure_x()
-  val tw = $DR.get_measure_w()
-in if tw <= 0 then 0 else _clamp1000((x - tx) * 1000 / tw) end
+fn _track_at (x: Int): [thousandth:nat | thousandth <= 1000] int thousandth = let
+  val () = _measure_literal("scrubber-track")
+  val track_left = $DR.get_measure_x()
+  val track_width = $DR.get_measure_w()
+in if track_width <= 0 then 0 else _clamp1000((x - track_left) * 1000 / track_width) end
 
 (* Shows page p of the chapter's t pages *)
 (* The print pages' breaks in the chapter shown (epub:type pagebreak, or
@@ -786,285 +786,284 @@ in if tw <= 0 then 0 else _clamp1000((x - tx) * 1000 / tw) end
    label, the page's number in print *)
 datavtype breaks(int) =
   | breaks_nil(0) of ()
-  | {k:nat}{i:nat}{l:agz}{m:pos | m <= 16} breaks_cons(k + 1) of (int i, $A.arr(byte, l, m), int m, breaks(k))
+  | {count:nat}{node:nat}{l:agz}{label_len:pos | label_len <= 16} breaks_cons(count + 1) of (int node, $A.arr(byte, l, label_len), int label_len, breaks(count))
 
-fun breaks_free {k:nat} .<k>. (x: breaks(k)): void =
-  case+ x of
+fun breaks_free {count:nat} .<count>. (entries: breaks(count)): void =
+  case+ entries of
   | ~breaks_nil() => ()
-  | ~breaks_cons(_, a, _, r) => let val () = $A.free<byte>(a) in breaks_free(r) end
+  | ~breaks_cons(_, label, _, rest) => let val () = $A.free<byte>(label) in breaks_free(rest) end
 
-datavtype breaks_cell = {k:nat} BreaksCell of breaks(k)
+datavtype breaks_cell = {count:nat} BreaksCell of breaks(count)
 
 val _breaks = ref<breaks_cell>(BreaksCell(breaks_nil()))
 
 fn _breaks_take (): breaks_cell = let
-  var c: breaks_cell = BreaksCell(breaks_nil())
-  val () = ref_exch_elt<breaks_cell>(_breaks, c)
-in c end
+  var cell: breaks_cell = BreaksCell(breaks_nil())
+  val () = ref_exch_elt<breaks_cell>(_breaks, cell)
+in cell end
 
-fn _breaks_put (x: breaks_cell): void = let
-  var c: breaks_cell = x
-  val () = ref_exch_elt<breaks_cell>(_breaks, c)
-  val+ ~BreaksCell(old) = c
+fn _breaks_put (new_cell: breaks_cell): void = let
+  var cell: breaks_cell = new_cell
+  val () = ref_exch_elt<breaks_cell>(_breaks, cell)
+  val+ ~BreaksCell(old) = cell
 in breaks_free(old) end
 
-(* b[j, k) := data[o + j, o + k) *)
-fun _copy_span {lb,l:agz}{n,m:pos}{o,k:nat | o + k <= n; k <= m}{j:nat | j <= k} .<k - j>.
-  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, m), k: int k, j: int j): void =
-  if j >= k then ()
+(* label[j, label_len) := data[start + j, start + label_len) *)
+fun _copy_span {data_location,label_location:agz}{data_size,label_size:pos}{start,label_len:nat | start + label_len <= data_size; label_len <= label_size}{j:nat | j <= label_len} .<label_len - j>.
+  (data: !$A.borrow(byte, data_location, data_size), start: int start, label: !$A.arr(byte, label_location, label_size), label_len: int label_len, j: int j): void =
+  if j >= label_len then ()
   else let
-    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
-  in _copy_span(data, o, b, k, j + 1) end
+    val () = $A.set<byte>(label, j, $A.read<byte>(data, start + j))
+  in _copy_span(data, start, label, label_len, j + 1) end
 
-(* Content node idx, when it is a print page's break, kept with its
+(* A content node, when it is a print page's break, kept with its
    label (its title, else its aria-label; at most 16 bytes) *)
-fn _break_check {lb:agz}{n:pos}{sa:nat}{i:nat}
-  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), idx: int i): void = let
-  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
-  var _a_role = @[char][4]('r', 'o', 'l', 'e')
-  var _pb1 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
-  var _pb2 = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
-  var _a_title = @[char][5]('t', 'i', 't', 'l', 'e')
-  var _a_label = @[char][10]('a', 'r', 'i', 'a', '-', 'l', 'a', 'b', 'e', 'l')
-  val is_break = (case+ find_attr(data, attrs, _a_type, 9) of
-    | ~xspan_at(o, k) => span_has(data, o, k, _pb1, 9)
-    | ~xspan_none() => (case+ find_attr(data, attrs, _a_role, 4) of
-      | ~xspan_at(o, k) => span_has(data, o, k, _pb2, 9)
+fn _break_check {l:agz}{n:pos}{attr_count:nat}{node:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), node: int node): void = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _pagebreak_type = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _pagebreak_role = @[char][9]('p', 'a', 'g', 'e', 'b', 'r', 'e', 'a', 'k')
+  var _attr_title = @[char][5]('t', 'i', 't', 'l', 'e')
+  var _attr_label = @[char][10]('a', 'r', 'i', 'a', '-', 'l', 'a', 'b', 'e', 'l')
+  val is_break = (case+ find_attr(data, attrs, _attr_type, 9) of
+    | ~xspan_at(start, span_len) => span_has(data, start, span_len, _pagebreak_type, 9)
+    | ~xspan_none() => (case+ find_attr(data, attrs, _attr_role, 4) of
+      | ~xspan_at(start, span_len) => span_has(data, start, span_len, _pagebreak_role, 9)
       | ~xspan_none() => false)): bool
 in
   if ~is_break then ()
   else let
-    val sp = (case+ find_attr(data, attrs, _a_title, 5) of
-      | ~xspan_none() => find_attr(data, attrs, _a_label, 10)
-      | sp => sp): xspan(n)
+    val span = (case+ find_attr(data, attrs, _attr_title, 5) of
+      | ~xspan_none() => find_attr(data, attrs, _attr_label, 10)
+      | span => span): xspan(n)
   in
-    case+ sp of
+    case+ span of
     | ~xspan_none() => ()
-    | ~xspan_at(o, k) =>
-      if k < 1 then () else if k > 16 then ()
+    | ~xspan_at(start, span_len) =>
+      if span_len < 1 then () else if span_len > 16 then ()
       else let
-        val b = $A.alloc<byte>(k)
-        val () = _copy_span(data, o, b, k, 0)
-        val+ ~BreaksCell(x) = _breaks_take()
-      in _breaks_put(BreaksCell(breaks_cons(idx, b, k, x))) end
+        val label = $A.alloc<byte>(span_len)
+        val () = _copy_span(data, start, label, span_len, 0)
+        val+ ~BreaksCell(older) = _breaks_take()
+      in _breaks_put(BreaksCell(breaks_cons(node, label, span_len, older))) end
   end
 end
 
-(* d[p + j, p + k) := u[j, k) *)
-fun _label_to {ls,ld:agz}{ns,nd:pos}{p:nat}{k:nat | k <= ns; p + k <= nd}{j:nat | j <= k} .<k - j>.
-  (u: !$A.arr(byte, ls, ns), d: !$A.arr(byte, ld, nd), p: int p, k: int k, j: int j): void =
-  if j >= k then ()
+(* target[at + j, at + label_len) := label[j, label_len) *)
+fun _label_to {label_location,target_location:agz}{label_size,target_size:pos}{at:nat}{label_len:nat | label_len <= label_size; at + label_len <= target_size}{j:nat | j <= label_len} .<label_len - j>.
+  (label: !$A.arr(byte, label_location, label_size), target: !$A.arr(byte, target_location, target_size), at: int at, label_len: int label_len, j: int j): void =
+  if j >= label_len then ()
   else let
-    val () = $A.set<byte>(d, p + j, $A.get<byte>(u, j))
-  in _label_to(u, d, p, k, j + 1) end
+    val () = $A.set<byte>(target, at + j, $A.get<byte>(label, j))
+  in _label_to(label, target, at, label_len, j + 1) end
 
-(* The label of the latest break at or before page cur of t, copied *)
-fun _break_at {k:nat}{t:pos}{c:nat | c < t} .<k>. (x: !breaks(k), t: int t, cur: int c): [l:agz][m:nat | m <= 16] @($A.arr(byte, l, m + 1), int m) =
-  case+ x of
-  | breaks_nil() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
-  | @breaks_cons(idx, a, m, rest) =>
-    if _page_of_node(idx, t, cur) <= cur then let
-      val b = $A.alloc<byte>(m + 1)
-      val () = _label_to(a, b, 0, m, 0)
-      val mm = m
-      prval () = fold@(x)
-    in @(b, mm) end
+(* The label of the latest break at or before page current of page_count, copied *)
+fun _break_at {count:nat}{page_count:pos}{current:nat | current < page_count} .<count>. (break_list: !breaks(count), page_count: int page_count, current: int current): [l:agz][label_len:nat | label_len <= 16] @($A.arr(byte, l, label_len + 1), int label_len) =
+  case+ break_list of
+  | breaks_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | @breaks_cons(node, label, label_len, rest) =>
+    if _page_of_node(node, page_count, current) <= current then let
+      val copy = $A.alloc<byte>(label_len + 1)
+      val () = _label_to(label, copy, 0, label_len, 0)
+      val copy_len = label_len
+      prval () = fold@(break_list)
+    in @(copy, copy_len) end
     else let
-      val r = _break_at(rest, t, cur)
-      prval () = fold@(x)
-    in r end
+      val found = _break_at(rest, page_count, current)
+      prval () = fold@(break_list)
+    in found end
 
-(* " in print" after the label, which ends at b[p]; the text's end, or
+(* " in print" after the label, which ends at buf[label_end]; the text's end, or
    0 (nothing shown) when there is no label *)
-fn _in_print {l:agz}{p:nat | p <= 25}{m:nat}
-  (b: !$A.arr(byte, l, 40), p: int p, m: int m): [k:nat | k <= 40] int k =
-  if m > 0 then _put(b, p, " in print") else 0
+fn _in_print {l:agz}{label_end:nat | label_end <= 25}{label_len:nat}
+  (buf: !$A.arr(byte, l, 40), label_end: int label_end, label_len: int label_len): [end_at:nat | end_at <= 40] int end_at =
+  if label_len > 0 then _put(buf, label_end, " in print") else 0
 
 (* The footer's print page: " · page 214 in print", from the latest break at
    or before the page shown; nothing in a chapter that has none *)
-fn _show_print_page {t:pos}{c:nat | c < t} (t: int t, cur: int c): void = let
-  val cc = _breaks_take()
-  val+ @BreaksCell(x) = cc
-  val @(lab, m) = _break_at(x, t, cur)
-  prval () = fold@(cc)
-  val () = _breaks_put(cc)
+fn _show_print_page {page_count:pos}{current:nat | current < page_count} (page_count: int page_count, current: int current): void = let
+  val cell = _breaks_take()
+  val+ @BreaksCell(break_list) = cell
+  val @(label, label_len) = _break_at(break_list, page_count, current)
+  prval () = fold@(cell)
+  val () = _breaks_put(cell)
   (* " · page " (9 bytes), the label (at most 16) and " in print" *)
-  val b = $A.alloc<byte>(40)
-  val () = $A.set<byte>(b, 0, $A.int2byte(32))
-  val () = $A.set<byte>(b, 1, $A.int2byte(194))
-  val () = $A.set<byte>(b, 2, $A.int2byte(183))
-  val off = _put(b, 3, " page ")
-  val () = _label_to(lab, b, off, m, 0)
-  val () = $A.free<byte>(lab)
-in _set_text_of("footer-page", b, _in_print(b, off + m, m)) end
+  val buf = $A.alloc<byte>(40)
+  val () = $A.set<byte>(buf, 0, $A.int2byte(32))
+  val () = $A.set<byte>(buf, 1, $A.int2byte(194))
+  val () = $A.set<byte>(buf, 2, $A.int2byte(183))
+  val offset = _put(buf, 3, " page ")
+  val () = _label_to(label, buf, offset, label_len, 0)
+  val () = $A.free<byte>(label)
+in _set_text_of("footer-page", buf, _in_print(buf, offset + label_len, label_len)) end
 
-(* Page p of t is the one shown: the reader's place, and everything that
+(* A page of page_count is the one shown: the reader's place, and everything that
    says it, without moving the page *)
-fn _place_shown {t:pos}{p:nat | p < t}{c,tc:nat}
-  (p: int p, t: int t, c: int c, tc: int tc): void = let
-  val () = reading_set(@(p, t, c, tc))
-  val () = window_show(p, t)
+fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
+  (page: int page, page_count: int page_count, chapter: int chapter, chapter_count: int chapter_count): void = let
+  val () = reading_set(@(page, page_count, chapter, chapter_count))
+  val () = window_show(page, page_count)
   val () = _update_page_indicator()
-  val () = _show_print_page(t, p)
+  val () = _show_print_page(page_count, page)
   val () = _scrub_show()
   val () = annot_star()
   (* scrolled, the last screen offers the next chapter *)
-  val () = ui_show("next-chapter", (if _scrolled() then (if p + 1 >= t then c < tc else false) else false))
+  val () = ui_show("next-chapter", (if _scrolled() then (if page + 1 >= page_count then chapter < chapter_count else false) else false))
 in _record_position() end
 
-(* Shows page p of t, scrolled down by top when scrolled (the page's
+(* Shows a page of page_count, scrolled down by top when scrolled (the page's
    own step otherwise) *)
-fn _show_page_down {t:pos}{p:nat | p < t}{c,tc:nat}
-  (p: int p, t: int t, c: int c, tc: int tc, top: Int): void = let
+fn _show_page_down {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
+  (page: int page, page_count: int page_count, chapter: int chapter, chapter_count: int chapter_count, top: Int): void = let
   (* auto turns to Night when a page turned passes 22:00 *)
   val () = set_theme_recheck()
-  val () = reading_set(@(p, t, c, tc))
-  val () = window_show(p, t)
-  val page = p
-  val cnt_narr = $A.alloc<byte>(4)
-  val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
-  val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
-  val mr = $DR.measure(cnt_b, 4)
-  val _ = $R.discard<int><int>(mr)
-  val cw = $DR.get_measure_w()
-  val () = !_page_w := cw
-  val () = !_page_h := $DR.get_measure_h()
-  val () = (if _scrolled() then $SC.set_scroll_top(cnt_b, 4, (if top >= 0 then top else page * _step()))
+  val () = reading_set(@(page, page_count, chapter, chapter_count))
+  val () = window_show(page, page_count)
+  val page_id = $A.alloc<byte>(4)
+  val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+  val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
+  val measured = $DR.measure(page_id_bytes, 4)
+  val _ = $R.discard<int><int>(measured)
+  val page_width = $DR.get_measure_w()
+  val () = !_page_width := page_width
+  val () = !_page_height := $DR.get_measure_h()
+  val () = (if _scrolled() then $SC.set_scroll_top(page_id_bytes, 4, (if top >= 0 then top else page * _step()))
     (* right to left, the pages go on to the left: a scroll below 0 *)
-    else $SC.set_scroll_left(cnt_b, 4, (if !_rtl then ~(page * cw) else page * cw)))
-  val () = release_bytes(cnt_f, cnt_b)
-in _place_shown(p, t, c, tc) end
+    else $SC.set_scroll_left(page_id_bytes, 4, (if !_right_to_left then ~(page * page_width) else page * page_width)))
+  val () = release_bytes(page_id_frozen, page_id_bytes)
+in _place_shown(page, page_count, chapter, chapter_count) end
 
-fn _show_page {t:pos}{p:nat | p < t}{c,tc:nat}
-  (p: int p, t: int t, c: int c, tc: int tc): void = _show_page_down(p, t, c, tc, ~1)
+fn _show_page {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
+  (page: int page, page_count: int page_count, chapter: int chapter, chapter_count: int chapter_count): void = _show_page_down(page, page_count, chapter, chapter_count, ~1)
 
 (* ============================================================
    Content tree rendering (XHTML → DOM nodes)
    ============================================================ *)
 
 (* Content nodes are numbered from 0 in each chapter *)
-val _content_n = ref<[n:nat] int n>(0)
+val _content_count = ref<[count:nat] int count>(0)
 
 (* Content node i's element: id "c" and i's digits, with op run on its
    id as a borrow *)
-(* The id of content node i (or of the content area page, for ~1) in a
+(* The id of a content node (or of the content area page, for ~1) in a
    fresh array; with its length *)
-fn _node_id {q:int | q >= ~1} (i: int q): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) =
-  if i < 0 then let
-    val a = $A.alloc<byte>(4)
-    val () = $A.write_text(a, 0, $A.text_lit("page"), 4)
-  in @(a, 4) end
-  else _num_id("c", i, 3)
+fn _node_id {node:int | node >= ~1} (node: int node): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if node < 0 then let
+    val page_id = $A.alloc<byte>(4)
+    val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+  in @(page_id, 4) end
+  else _number_id("c", node, 3)
 
-(* A new element <tag> for content node idx, the last child of node pidx *)
-fn _add_node {ld:agz}{q:int | q >= ~1}{i:nat}{tl:pos | tl < 256}
-  (doc: !$D.document(ld), pidx: int q, idx: int i, tag: string tl): void = let
-  val @(pa, pl) = _node_id(pidx)
-  val @(ca, cl) = _node_id(idx)
-  val @(fp, bp) = $A.freeze<byte>(pa)
-  val @(fc, bc) = $A.freeze<byte>(ca)
-  val () = $D.add_element(doc, bp, pl, bc, cl, tag)
-  val () = release_bytes(fc, bc)
-in release_bytes(fp, bp) end
+(* A new element <tag> for a content node, the last child of the node parent *)
+fn _add_node {doc_location:agz}{parent:int | parent >= ~1}{node:nat}{tag_len:pos | tag_len < 256}
+  (doc: !$D.document(doc_location), parent: int parent, node: int node, tag: string tag_len): void = let
+  val @(parent_id, parent_id_len) = _node_id(parent)
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+  val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+  val () = $D.add_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, tag)
+  val () = release_bytes(node_frozen, node_bytes)
+in release_bytes(parent_frozen, parent_bytes) end
 
-(* Element id's text: data[off, off + k) decoded *)
-fn _set_decoded {ld,li,lb:agz}{ni:pos | ni < 256}{n:pos}{o,k:nat | o + k <= n; k < 65536; k > 0}
-  (doc: !$D.document(ld), bi: !$A.borrow(byte, li, ni), il: int ni,
-   data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
-  val buf = $A.alloc<byte>(k)
-  val q = decode_text(data, off, k, buf)
-  val @(f, b) = $A.freeze<byte>(buf)
-  val () = $D.set_text(doc, bi, il, b, 0, q)
-in release_bytes(f, b) end
+(* Element id's text: data[offset, offset + text_len) decoded *)
+fn _set_decoded {doc_location,id_location,data_location:agz}{id_len:pos | id_len < 256}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size; text_len < 65536; text_len > 0}
+  (doc: !$D.document(doc_location), id_bytes: !$A.borrow(byte, id_location, id_len), id_len: int id_len,
+   data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len): void = let
+  val buf = $A.alloc<byte>(text_len)
+  val decoded_len = decode_text(data, offset, text_len, buf)
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(buf)
+  val () = $D.set_text(doc, id_bytes, id_len, text_bytes, 0, decoded_len)
+in release_bytes(text_frozen, text_bytes) end
 
-(* Content node idx's text: data[off, off + k), its character
+(* A content node's text: data[offset, offset + text_len), its character
    references decoded *)
-fn _node_text {ld,lb:agz}{n:pos}{i:nat}{o,k:nat | o + k <= n; k < 65536}
-  (doc: !$D.document(ld), idx: int i, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
-  val @(ia, il) = _node_id(idx)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val () = (if k <= 0 then $D.set_text(doc, bi, il, data, off, k)
-    else if has_reference(data, off, k) then _set_decoded(doc, bi, il, data, off, k)
-    else $D.set_text(doc, bi, il, data, off, k))
-in release_bytes(fi, bi) end
+fn _node_text {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset + text_len <= n; text_len < 65536}
+  (doc: !$D.document(doc_location), node: int node, data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): void = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
+  val () = (if text_len <= 0 then $D.set_text(doc, id_bytes, node_id_len, data, offset, text_len)
+    else if has_reference(data, offset, text_len) then _set_decoded(doc, id_bytes, node_id_len, data, offset, text_len)
+    else $D.set_text(doc, id_bytes, node_id_len, data, offset, text_len))
+in release_bytes(id_frozen, id_bytes) end
 
-(* Whether data[p] starts a UTF-8 character (is not 10xxxxxx) *)
-fn _utf8_start {lb:agz}{n:pos}{p:nat | p < n}
-  (data: !$A.borrow(byte, lb, n), p: int p): bool =
-  $AR.band_int_int(byte2int0($A.read<byte>(data, p)), 192) <> 128
+(* Whether data[at] starts a UTF-8 character (is not 10xxxxxx) *)
+fn _utf8_start {l:agz}{n:pos}{at:nat | at < n}
+  (data: !$A.borrow(byte, l, n), at: int at): bool =
+  $AR.band_int_int(byte2int0($A.read<byte>(data, at)), 192) <> 128
 
-(* The length of the longest prefix of data[off, off + k), k of 64 KiB
+(* The length of the longest prefix of data[offset, offset + text_len), text_len of 64 KiB
    or more, under 64 KiB (a text op's limit) that ends before a UTF-8
    character's start, so no character is split; 65535 when the data is
    not UTF-8 there *)
-fn _text_cut {lb:agz}{n:pos}{o,k:nat | o + k <= n; k >= 65536}
-  (data: !$A.borrow(byte, lb, n), off: int o, k: int k): [c:int | 65533 <= c; c <= 65535] int c =
-  if _utf8_start(data, off + 65535) then 65535
-  else if _utf8_start(data, off + 65534) then 65534
-  else if _utf8_start(data, off + 65533) then 65533
+fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65533 <= cut; cut <= 65535] int cut =
+  if _utf8_start(data, offset + 65535) then 65535
+  else if _utf8_start(data, offset + 65534) then 65534
+  else if _utf8_start(data, offset + 65533) then 65533
   else 65535
 
-(* Content node idx's attribute name: data[off, off + k) *)
-fn _node_attr {ld,lb:agz}{n:pos}{i:nat}{nl:pos | nl < 256}{o,k:nat | o + k <= n; k < 65536}
-  (doc: !$D.document(ld), idx: int i, name: string nl, data: !$A.borrow(byte, lb, n), off: int o, k: int k): void = let
-  val @(ia, il) = _node_id(idx)
-  val @(fi, bi) = $A.freeze<byte>(ia)
-  val () = $D.set_attr(doc, bi, il, name, data, off, k)
-in release_bytes(fi, bi) end
+(* A content node's attribute name: data[offset, offset + value_len) *)
+fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{name_len:pos | name_len < 256}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
+  (doc: !$D.document(doc_location), node: int node, name: string name_len, data: !$A.borrow(byte, l, n), offset: int offset, value_len: int value_len): void = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
+  val () = $D.set_attr(doc, id_bytes, node_id_len, name, data, offset, value_len)
+in release_bytes(id_frozen, id_bytes) end
 
-(* Content node idx's attribute name: the literal v *)
-fn _node_attr_lit {ld:agz}{i:nat}{nl:pos | nl < 256}{vl:pos | vl < 256}
-  (doc: !$D.document(ld), idx: int i, name: string nl, v: string vl): void = let
-  val vl = g1u2i(string1_length(v))
-  val va = $A.alloc<byte>(vl)
-  val () = $A.write_text(va, 0, $A.text_lit(v), vl)
-  val @(fv, bv) = $A.freeze<byte>(va)
-  val () = _node_attr(doc, idx, name, bv, 0, vl)
-in release_bytes(fv, bv) end
+(* A content node's attribute name: the literal value *)
+fn _node_attr_literal {doc_location:agz}{node:nat}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
+  (doc: !$D.document(doc_location), node: int node, name: string name_len, value: string value_len): void = let
+  val value_len = g1u2i(string1_length(value))
+  val value_buf = $A.alloc<byte>(value_len)
+  val () = $A.write_text(value_buf, 0, $A.text_lit(value), value_len)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value_buf)
+  val () = _node_attr(doc, node, name, value_bytes, 0, value_len)
+in release_bytes(value_frozen, value_bytes) end
 
 (* Content nodes are numbered from 0 in each chapter *)
-val _content_n = ref<[n:nat] int n>(0)
+val _content_count = ref<[count:nat] int count>(0)
 
 (* Get next content node index and increment counter *)
-fn _next_content_idx(): [n:nat] int n = let
-  val n = !_content_n
-  val () = !_content_n := n + 1
-in n end
+fn _next_content_node(): [node:nat] int node = let
+  val node = !_content_count
+  val () = !_content_count := node + 1
+in node end
 
-(* Text data[off, off + k) as spans, the last children of content node
-   pidx: one span per piece under 64 KiB (a text op's limit), split
+(* Text data[offset, offset + text_len) as spans, the last children of content node
+   parent: one span per piece under 64 KiB (a text op's limit), split
    where a UTF-8 character starts *)
-fun _text_spans {ld,lb:agz}{n:pos}{q:int | q >= ~1}{o,k:nat | o + k <= n} .<k>.
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), pidx: int q, off: int o, k: int k): void = let
-  val idx = _next_content_idx()
-  val () = _add_node(doc, pidx, idx, "span")
+fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len): void = let
+  val node = _next_content_node()
+  val () = _add_node(doc, parent, node, "span")
 in
-  if k < 65536 then _node_text(doc, idx, data, off, k)
+  if text_len < 65536 then _node_text(doc, node, data, offset, text_len)
   else let
-    val c = _text_cut(data, off, k)
-    val () = _node_text(doc, idx, data, off, c)
-  in _text_spans(doc, data, pidx, off + c, k - c) end
+    val cut = _text_cut(data, offset, text_len)
+    val () = _node_text(doc, node, data, offset, cut)
+  in _text_spans(doc, data, parent, offset + cut, text_len - cut) end
 end
 
-(* Whether data[o + i, o + k) is all white space *)
-fun _blank {lb:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i): bool =
-  if i >= k then true
-  else if byte2int0($A.read<byte>(data, o + i)) > 32 then false
-  else _blank(data, o, k, i + 1)
+(* Whether data[offset + i, offset + text_len) is all white space *)
+fun _blank {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, i: int i): bool =
+  if i >= text_len then true
+  else if byte2int0($A.read<byte>(data, offset + i)) > 32 then false
+  else _blank(data, offset, text_len, i + 1)
 
-(* The numbers _text_spans would give text of k bytes, taken *)
-fun _skip_spans {k:nat} .<k>. (off: int, k: int k): void = let
-  val _ = _next_content_idx()
-in if k < 65536 then () else _skip_spans(off, k - 65533) end
+(* The numbers _text_spans would give text of text_len bytes, taken *)
+fun _skip_spans {text_len:nat} .<text_len>. (offset: int, text_len: int text_len): void = let
+  val _ = _next_content_node()
+in if text_len < 65536 then () else _skip_spans(offset, text_len - 65533) end
 
 (* The tag an XHTML element is shown as: itself when it is one quire
    shows, a span for a, b, i, u and s, and a div for anything else *)
 fn _tag_of
-  {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), name_off: int o, name_len: int k): [tl:pos | tl < 256] string tl = let
-  fn is {np:pos} (data: !$A.borrow(byte, lb, n), pat: &(@[char][np]), np: int np): bool =
-    xml_name_eq(data, name_off, name_len, pat, np)
+  {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): [tag_len:pos | tag_len < 256] string tag_len = let
+  fn is {pattern_len:pos} (data: !$A.borrow(byte, l, n), pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
+    xml_name_eq(data, name_offset, name_len, pattern, pattern_len)
   var p_ = @[char][1]('p')
   var h1 = @[char][2]('h', '1')
   var h2 = @[char][2]('h', '2')
@@ -1075,7 +1074,7 @@ fn _tag_of
   var span = @[char][4]('s', 'p', 'a', 'n')
   var em = @[char][2]('e', 'm')
   var strong = @[char][6]('s', 't', 'r', 'o', 'n', 'g')
-  var bq = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var blockquote = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
   var pre = @[char][3]('p', 'r', 'e')
   var code = @[char][4]('c', 'o', 'd', 'e')
   var ul = @[char][2]('u', 'l')
@@ -1095,7 +1094,7 @@ fn _tag_of
   var u_ = @[char][1]('u')
   var s_ = @[char][1]('s')
   var figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
-  var figcap = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var figcaption = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
   var table = @[char][5]('t', 'a', 'b', 'l', 'e')
   var tr = @[char][2]('t', 'r')
   var td = @[char][2]('t', 'd')
@@ -1120,7 +1119,7 @@ in
   else if is(data, h3, 2) then "h3" else if is(data, h4, 2) then "h4"
   else if is(data, h5, 2) then "h5" else if is(data, h6, 2) then "h6"
   else if is(data, span, 4) then "span" else if is(data, em, 2) then "em"
-  else if is(data, strong, 6) then "strong" else if is(data, bq, 10) then "blockquote"
+  else if is(data, strong, 6) then "strong" else if is(data, blockquote, 10) then "blockquote"
   else if is(data, pre, 3) then "pre" else if is(data, code, 4) then "code"
   else if is(data, ul, 2) then "ul" else if is(data, ol, 2) then "ol"
   else if is(data, li, 2) then "li" else if is(data, section, 7) then "section"
@@ -1137,7 +1136,7 @@ in
   else if is(data, dd, 2) then "dd" else if is(data, caption, 7) then "caption"
   else if is(data, tfoot, 5) then "tfoot" else if is(data, samp, 4) then "samp"
   else if is(data, var_, 3) then "var" else if is(data, big, 3) then "span"
-  else if is(data, figure, 6) then "figure" else if is(data, figcap, 10) then "figcaption"
+  else if is(data, figure, 6) then "figure" else if is(data, figcaption, 10) then "figcaption"
   else if is(data, table, 5) then "table" else if is(data, tr, 2) then "tr"
   else if is(data, td, 2) then "td" else if is(data, th, 2) then "th"
   else if is(data, thead, 5) then "thead" else if is(data, tbody, 5) then "tbody"
@@ -1146,342 +1145,342 @@ end
 
 (* The fragment a jump leads to: the id of an element of the chapter
    loading; its content node is found as the chapter is rendered *)
-datavtype frag =
-  | {l:agz}{n,f:pos | f < n} FragSome of ($A.arr(byte, l, n), int f)
-  | FragNone of ()
+datavtype fragment =
+  | {l:agz}{n,id_len:pos | id_len < n} FragmentSome of ($A.arr(byte, l, n), int id_len)
+  | FragmentNone of ()
 
-val _frag = ref<frag>(FragNone())
-val _frag_hit = ref<Int>(~1)
+val _fragment = ref<fragment>(FragmentNone())
+val _fragment_node = ref<Int>(~1)
 
-fn _frag_free (f: frag): void =
-  case+ f of
-  | ~FragSome(a, _) => $A.free<byte>(a)
-  | ~FragNone() => ()
+fn _fragment_free (fragment: fragment): void =
+  case+ fragment of
+  | ~FragmentSome(id, _) => $A.free<byte>(id)
+  | ~FragmentNone() => ()
 
-fn _frag_take (): frag = let
-  var c: frag = FragNone()
-  val () = ref_exch_elt<frag>(_frag, c)
-in c end
+fn _fragment_take (): fragment = let
+  var cell: fragment = FragmentNone()
+  val () = ref_exch_elt<fragment>(_fragment, cell)
+in cell end
 
-fn _frag_put (f: frag): void = let
-  var c: frag = f
-  val () = ref_exch_elt<frag>(_frag, c)
-in _frag_free(c) end
+fn _fragment_put (fragment: fragment): void = let
+  var cell: fragment = fragment
+  val () = ref_exch_elt<fragment>(_fragment, cell)
+in _fragment_free(cell) end
 
-(* dst[j, k) := src[j, k) *)
-fun _frag_dup {ls,ld:agz}{ns,nd:pos}{k:nat | k <= ns; k <= nd}{j:nat | j <= k} .<k - j>.
-  (src: !$A.arr(byte, ls, ns), dst: !$A.arr(byte, ld, nd), k: int k, j: int j): void =
-  if j >= k then ()
+(* target[j, id_len) := source[j, id_len) *)
+fun _fragment_duplicate {source_location,target_location:agz}{source_size,target_size:pos}{id_len:nat | id_len <= source_size; id_len <= target_size}{j:nat | j <= id_len} .<id_len - j>.
+  (source: !$A.arr(byte, source_location, source_size), target: !$A.arr(byte, target_location, target_size), id_len: int id_len, j: int j): void =
+  if j >= id_len then ()
   else let
-    val () = $A.set<byte>(dst, j, $A.get<byte>(src, j))
-  in _frag_dup(src, dst, k, j + 1) end
+    val () = $A.set<byte>(target, j, $A.get<byte>(source, j))
+  in _fragment_duplicate(source, target, id_len, j + 1) end
 
-(* Whether data[o, o + k) is a[0, k) *)
-fun _same {lb,la:agz}{n:pos}{f:pos}{o,k:nat | o + k <= n; k <= f}{i:nat | i <= k} .<k - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, a: !$A.arr(byte, la, f), k: int k, i: int i): bool =
-  if i >= k then true
-  else if byte2int0($A.read<byte>(data, o + i)) <> byte2int0($A.get<byte>(a, i)) then false
-  else _same(data, o, a, k, i + 1)
+(* Whether data[offset, offset + id_len) is id[0, id_len) *)
+fun _same {data_location,id_location:agz}{data_size:pos}{id_size:pos}{offset,id_len:nat | offset + id_len <= data_size; id_len <= id_size}{i:nat | i <= id_len} .<id_len - i>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, id: !$A.arr(byte, id_location, id_size), id_len: int id_len, i: int i): bool =
+  if i >= id_len then true
+  else if byte2int0($A.read<byte>(data, offset + i)) <> byte2int0($A.get<byte>(id, i)) then false
+  else _same(data, offset, id, id_len, i + 1)
 
-(* Notes content node idx as the fragment's, when its id is fr *)
-fn _frag_check {lb:agz}{n:pos}{sa:nat}{i:nat}
-  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), fr: !frag, idx: int i): void =
-  case+ fr of
-  | FragNone() => ()
-  | FragSome(a, f) => let
-      var _a_id = @[char][2]('i', 'd')
+(* Notes a content node as the fragment's, when its id is the fragment *)
+fn _fragment_check {l:agz}{n:pos}{attr_count:nat}{node:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), fragment: !fragment, node: int node): void =
+  case+ fragment of
+  | FragmentNone() => ()
+  | FragmentSome(id, id_len) => let
+      var _attr_id = @[char][2]('i', 'd')
     in
-      case+ find_attr(data, attrs, _a_id, 2) of
-      | ~xspan_at(o, k) =>
-        if k <> f then ()
-        else if _same(data, o, a, k, 0) then (if !_frag_hit < 0 then !_frag_hit := idx else ())
+      case+ find_attr(data, attrs, _attr_id, 2) of
+      | ~xspan_at(start, span_len) =>
+        if span_len <> id_len then ()
+        else if _same(data, start, id, span_len, 0) then (if !_fragment_node < 0 then !_fragment_node := node else ())
         else ()
       | ~xspan_none() => ()
     end
 
-(* The <img> elements of a chapter being rendered, k of them: each one's
-   content node and its src attribute, the span [so, so + sl) of the
+(* The <img> elements of a chapter being rendered, count of them: each one's
+   content node and its src attribute, the span [src_start, src_start + src_len) of the
    chapter's n bytes *)
-datavtype imgs(n:int, int) =
-  | imgs_nil(n, 0) of ()
-  | {k:nat}{i:nat}{so,sl:nat | so + sl <= n}
-    imgs_cons(n, k + 1) of (int i, int so, int sl, imgs(n, k))
-  (* A link within the book: the content nodes [s, e) it covers, its
-     href [so, so + sl), found once the chapter is shown, and whether it
+datavtype images(n:int, int) =
+  | images_nil(n, 0) of ()
+  | {count:nat}{node:nat}{src_start,src_len:nat | src_start + src_len <= n}
+    images_cons(n, count + 1) of (int node, int src_start, int src_len, images(n, count))
+  (* A link within the book: the content nodes [first_node, end_node) it covers, its
+     href [src_start, src_start + src_len), found once the chapter is shown, and whether it
      is a note's reference *)
-  | {k:nat}{s,e:nat}{so,sl:nat | so + sl <= n}
-    imgs_link(n, k + 1) of (int s, int e, int so, int sl, bool, imgs(n, k))
+  | {count:nat}{first_node,end_node:nat}{src_start,src_len:nat | src_start + src_len <= n}
+    images_link(n, count + 1) of (int first_node, int end_node, int src_start, int src_len, bool, images(n, count))
 
-(* The links of the chapter shown: the content nodes [s, e) each covers,
+(* The links of the chapter shown: the content nodes [first_node, end_node) each covers,
    the chapter (-1 for a link out of the book, which the browser opens)
-   and fragment fr[0, f) it leads to, and whether it is a note's
+   and fragment fragment[0, fragment_len) it leads to, and whether it is a note's
    reference (epub:type noteref, or role doc-noteref) *)
 datavtype links(int) =
   | links_nil(0) of ()
-  | {k:nat}{l:agz}{f:nat | f <= 200}
-    links_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, f + 1), int f, bool, links(k))
+  | {count:nat}{l:agz}{fragment_len:nat | fragment_len <= 200}
+    links_cons(count + 1) of (Int, Int, Int, $A.arr(byte, l, fragment_len + 1), int fragment_len, bool, links(count))
 
-fun links_free {k:nat} .<k>. (x: links(k)): void =
-  case+ x of
+fun links_free {count:nat} .<count>. (entries: links(count)): void =
+  case+ entries of
   | ~links_nil() => ()
-  | ~links_cons(_, _, _, a, _, _, r) => let val () = $A.free<byte>(a) in links_free(r) end
+  | ~links_cons(_, _, _, fragment, _, _, rest) => let val () = $A.free<byte>(fragment) in links_free(rest) end
 
-datavtype links_cell = {k:nat} LinksCell of links(k)
+datavtype links_cell = {count:nat} LinksCell of links(count)
 
 val _links = ref<links_cell>(LinksCell(links_nil()))
 
 fn _links_take (): links_cell = let
-  var c: links_cell = LinksCell(links_nil())
-  val () = ref_exch_elt<links_cell>(_links, c)
-in c end
+  var cell: links_cell = LinksCell(links_nil())
+  val () = ref_exch_elt<links_cell>(_links, cell)
+in cell end
 
-fn _links_put (c: links_cell): void = let
-  var cur: links_cell = c
-  val () = ref_exch_elt<links_cell>(_links, cur)
-  val+ ~LinksCell(x) = cur
-in links_free(x) end
+fn _links_put (new_cell: links_cell): void = let
+  var cell: links_cell = new_cell
+  val () = ref_exch_elt<links_cell>(_links, cell)
+  val+ ~LinksCell(old) = cell
+in links_free(old) end
 
-fn _links_push {l:agz}{f:nat | f <= 200} (s: Int, e: Int, ch: Int, fr: $A.arr(byte, l, f + 1), f: int f, note: bool): void = let
-  val+ ~LinksCell(x) = _links_take()
-in _links_put(LinksCell(links_cons(s, e, ch, fr, f, note, x))) end
+fn _links_push {l:agz}{fragment_len:nat | fragment_len <= 200} (first_node: Int, end_node: Int, chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len, note: bool): void = let
+  val+ ~LinksCell(rest) = _links_take()
+in _links_put(LinksCell(links_cons(first_node, end_node, chapter, fragment, fragment_len, note, rest))) end
 
-(* Whether data[o, o + k) starts with pat *)
-fn _starts {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool =
-  if k < np then false else xml_name_eq(data, o, np, pat, np)
+(* Whether data[offset, offset + span_len) starts with pattern *)
+fn _starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
+  if span_len < pattern_len then false else xml_name_eq(data, offset, pattern_len, pattern, pattern_len)
 
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan *)
-fun _pass_attrs {ld,lb:agz}{n:pos}{sa:nat}{i:nat} .<sa>.
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa), idx: int i): void =
+fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_count>.
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
   case+ attrs of
   | $X.xml_attrs_nil() => ()
-  | $X.xml_attrs_cons(ao, al, vo, vl, rest) => let
+  | $X.xml_attrs_cons(name_offset, name_len, value_offset, value_len, rest) => let
       var _dir = @[char][3]('d', 'i', 'r')
       var _lang = @[char][4]('l', 'a', 'n', 'g')
-      var _xlang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+      var _xml_lang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
       var _title = @[char][5]('t', 'i', 't', 'l', 'e')
       var _colspan = @[char][7]('c', 'o', 'l', 's', 'p', 'a', 'n')
       var _rowspan = @[char][7]('r', 'o', 'w', 's', 'p', 'a', 'n')
-      val () = (if vl >= 65536 then ()
-        else if xml_name_eq(data, ao, al, _dir, 3) then _node_attr(doc, idx, "dir", data, vo, vl)
-        else if xml_name_eq(data, ao, al, _lang, 4) then _node_attr(doc, idx, "lang", data, vo, vl)
-        else if xml_name_eq(data, ao, al, _xlang, 8) then _node_attr(doc, idx, "lang", data, vo, vl)
-        else if xml_name_eq(data, ao, al, _title, 5) then _node_attr(doc, idx, "title", data, vo, vl)
-        else if xml_name_eq(data, ao, al, _colspan, 7) then _node_attr(doc, idx, "colspan", data, vo, vl)
-        else if xml_name_eq(data, ao, al, _rowspan, 7) then _node_attr(doc, idx, "rowspan", data, vo, vl)
+      val () = (if value_len >= 65536 then ()
+        else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, "dir", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _lang, 4) then _node_attr(doc, node, "lang", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _xml_lang, 8) then _node_attr(doc, node, "lang", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _title, 5) then _node_attr(doc, node, "title", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _colspan, 7) then _node_attr(doc, node, "colspan", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _rowspan, 7) then _node_attr(doc, node, "rowspan", data, value_offset, value_len)
         else ())
-    in _pass_attrs(doc, data, rest, idx) end
+    in _pass_attrs(doc, data, rest, node) end
 
 (* Whether an <a> is a note's reference: its epub:type names noteref, or
    its role is doc-noteref *)
-fn _noteref {lb:agz}{n:pos}{sa:nat}
-  (data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): bool = let
-  var _a_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
-  var _a_role = @[char][4]('r', 'o', 'l', 'e')
-  var _nr1 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
-  var _nr2 = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
-  val t = (case+ find_attr(data, attrs, _a_type, 9) of
+fn _noteref {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _noteref_type = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  var _noteref_role = @[char][7]('n', 'o', 't', 'e', 'r', 'e', 'f')
+  val by_type = (case+ find_attr(data, attrs, _attr_type, 9) of
     | ~xspan_none() => false
-    | ~xspan_at(o, k) => span_has(data, o, k, _nr1, 7)): bool
+    | ~xspan_at(start, span_len) => span_has(data, start, span_len, _noteref_type, 7)): bool
 in
-  if t then true
-  else (case+ find_attr(data, attrs, _a_role, 4) of
+  if by_type then true
+  else (case+ find_attr(data, attrs, _attr_role, 4) of
     | ~xspan_none() => false
-    | ~xspan_at(o, k) => span_has(data, o, k, _nr2, 7))
+    | ~xspan_at(start, span_len) => span_has(data, start, span_len, _noteref_role, 7))
 end
 
-(* An <a> element, content nodes [idx, e): a link out of the book (http,
+(* An <a> element, content nodes [first_node, end_node): a link out of the book (http,
    https, mailto) is made a real one, opened in a new tab; a link within
-   it is kept in acc, found once the chapter is shown *)
-fn _link {ld,lb:agz}{n:pos}{sa:nat}{i,e:nat}{k:nat}
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa),
-   idx: int i, e: int e, acc: imgs(n, k)): [k2:nat] imgs(n, k2) = let
+   it is kept in found, found once the chapter is shown *)
+fn _link {doc_location,l:agz}{n:pos}{attr_count:nat}{first_node,end_node:nat}{found_count:nat}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count),
+   first_node: int first_node, end_node: int end_node, found: images(n, found_count)): [new_count:nat] images(n, new_count) = let
   var _href = @[char][4]('h', 'r', 'e', 'f')
 in
   case+ find_attr(data, attrs, _href, 4) of
-  | ~xspan_none() => acc
-  | ~xspan_at(so, sl) => let
+  | ~xspan_none() => found
+  | ~xspan_at(href_start, href_len) => let
       var _http = @[char][7]('h', 't', 't', 'p', ':', '/', '/')
       var _https = @[char][8]('h', 't', 't', 'p', 's', ':', '/', '/')
       var _mailto = @[char][7]('m', 'a', 'i', 'l', 't', 'o', ':')
-      val out = (if _starts(data, so, sl, _http, 7) then true
-        else if _starts(data, so, sl, _https, 8) then true
-        else _starts(data, so, sl, _mailto, 7)): bool
+      val outside = (if _starts(data, href_start, href_len, _http, 7) then true
+        else if _starts(data, href_start, href_len, _https, 8) then true
+        else _starts(data, href_start, href_len, _mailto, 7)): bool
     in
-      if out then
-        (if sl < 65536 then let
-           val () = _node_attr(doc, idx, "href", data, so, sl)
-           val () = _node_attr_lit(doc, idx, "target", "_blank")
-           val () = _node_attr_lit(doc, idx, "rel", "noopener noreferrer")
-           val () = _links_push(idx, e, ~1, $A.alloc<byte>(1), 0, false)
-         in acc end
-         else acc)
+      if outside then
+        (if href_len < 65536 then let
+           val () = _node_attr(doc, first_node, "href", data, href_start, href_len)
+           val () = _node_attr_literal(doc, first_node, "target", "_blank")
+           val () = _node_attr_literal(doc, first_node, "rel", "noopener noreferrer")
+           val () = _links_push(first_node, end_node, ~1, $A.alloc<byte>(1), 0, false)
+         in found end
+         else found)
       else let
         (* announced and reached from the keyboard as a link *)
-        val () = _node_attr_lit(doc, idx, "role", "link")
-        val () = _node_attr_lit(doc, idx, "tabindex", "0")
-      in imgs_link(idx, e, so, sl, _noteref(data, attrs), acc) end
+        val () = _node_attr_literal(doc, first_node, "role", "link")
+        val () = _node_attr_literal(doc, first_node, "tabindex", "0")
+      in images_link(first_node, end_node, href_start, href_len, _noteref(data, attrs), found) end
     end
 end
 
-(* Whether data[o + i, o + k) is letters, digits and hyphens *)
-fun _tag_chars {lb:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k} .<k - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i): bool =
-  if i >= k then true
+(* Whether data[offset + i, offset + tag_len) is letters, digits and hyphens *)
+fun _tag_chars {l:agz}{n:pos}{offset,tag_len:nat | offset + tag_len <= n}{i:nat | i <= tag_len} .<tag_len - i>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, tag_len: int tag_len, i: int i): bool =
+  if i >= tag_len then true
   else let
-    val c = byte2int0($A.read<byte>(data, o + i))
-    val ok = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57) || c = 45
-  in if ok then _tag_chars(data, o, k, i + 1) else false end
+    val char_code = byte2int0($A.read<byte>(data, offset + i))
+    val ok = (char_code >= 97 && char_code <= 122) || (char_code >= 65 && char_code <= 90) || (char_code >= 48 && char_code <= 57) || char_code = 45
+  in if ok then _tag_chars(data, offset, tag_len, i + 1) else false end
 
-(* Whether data[o, o + k) is a plausible language tag *)
-fn _lang_ok {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): bool =
-  if k < 1 then false else if k > 35 then false else _tag_chars(data, o, k, 0)
+(* Whether data[offset, offset + tag_len) is a plausible language tag *)
+fn _lang_ok {l:agz}{n:pos}{offset,tag_len:nat | offset + tag_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, tag_len: int tag_len): bool =
+  if tag_len < 1 then false else if tag_len > 35 then false else _tag_chars(data, offset, tag_len, 0)
 
-(* The page's lang: data[o, o + k) *)
-fn _page_lang {ld,lb:agz}{n:pos}{o,k:nat | o + k <= n; k < 65536}
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), o: int o, k: int k): void = let
-  val @(qa, ql) = _node_id(~1)
-  val @(fq, bq) = $A.freeze<byte>(qa)
-  val () = $D.set_attr(doc, bq, ql, "lang", data, o, k)
-in release_bytes(fq, bq) end
+(* The page's lang: data[offset, offset + lang_len) *)
+fn _page_lang {doc_location,l:agz}{n:pos}{offset,lang_len:nat | offset + lang_len <= n; lang_len < 65536}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), offset: int offset, lang_len: int lang_len): void = let
+  val @(page_id, page_id_len) = _node_id(~1)
+  val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
+  val () = $D.set_attr(doc, page_id_bytes, page_id_len, "lang", data, offset, lang_len)
+in release_bytes(page_id_frozen, page_id_bytes) end
 
 (* An html or body element's language (xml:lang, else lang), when it has
    one, is the page's: the chapter's content goes into the page with no
    element of its own *)
-fn _root_lang {ld,lb:agz}{n:pos}{sa:nat}
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), attrs: !$X.xml_attr_list(n, sa)): void = let
-  var _a_xlang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
-  var _a_lang = @[char][4]('l', 'a', 'n', 'g')
-  val sp = (case+ find_attr(data, attrs, _a_xlang, 8) of
-    | ~xspan_none() => find_attr(data, attrs, _a_lang, 4)
-    | sp => sp): xspan(n)
+fn _root_lang {doc_location,l:agz}{n:pos}{attr_count:nat}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): void = let
+  var _attr_xml_lang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+  var _attr_lang = @[char][4]('l', 'a', 'n', 'g')
+  val span = (case+ find_attr(data, attrs, _attr_xml_lang, 8) of
+    | ~xspan_none() => find_attr(data, attrs, _attr_lang, 4)
+    | span => span): xspan(n)
 in
-  case+ sp of
+  case+ span of
   | ~xspan_none() => ()
-  | ~xspan_at(o, k) => if _lang_ok(data, o, k) then (if k < 65536 then _page_lang(doc, data, o, k) else ()) else ()
+  | ~xspan_at(start, span_len) => if _lang_ok(data, start, span_len) then (if span_len < 65536 then _page_lang(doc, data, start, span_len) else ()) else ()
 end
 
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
-   elements met are added to acc *)
+   elements met are added to found *)
 fun _render_nodes
-  {ld,lb:agz}{n:pos}{sz:nat}{q:int | q >= ~1}{k:nat} .<sz, 1>.
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, nodes: !$X.xml_node_list(n, sz), acc: imgs(n, k), fr: !frag): [k2:nat] imgs(n, k2) =
+  {doc_location,l:agz}{n:pos}{tree_size:nat}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 1>.
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), data_len: int n,
+   parent: int parent, nodes: !$X.xml_node_list(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val acc = _render_node(doc, data, len, pidx, node, acc, fr)
-    in _render_nodes(doc, data, len, pidx, rest, acc, fr) end
-  | $X.xml_nodes_nil() => acc
+      val found = _render_node(doc, data, data_len, parent, node, found, fragment)
+    in _render_nodes(doc, data, data_len, parent, rest, found, fragment) end
+  | $X.xml_nodes_nil() => found
 
 and _render_node
-  {ld,lb:agz}{n:pos}{sz:pos}{q:int | q >= ~1}{k:nat} .<sz, 0>.
-  (doc: !$D.document(ld), data: !$A.borrow(byte, lb, n), len: int n,
-   pidx: int q, node: !$X.xml_node(n, sz), acc: imgs(n, k), fr: !frag): [k2:nat] imgs(n, k2) =
+  {doc_location,l:agz}{n:pos}{tree_size:pos}{parent:int | parent >= ~1}{found_count:nat} .<tree_size, 0>.
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), data_len: int n,
+   parent: int parent, node: !$X.xml_node(n, tree_size), found: images(n, found_count), fragment: !fragment): [new_count:nat] images(n, new_count) =
   case+ node of
-  | $X.xml_text(off, tlen) => let
+  | $X.xml_text(offset, text_len) => let
       (* white space between the page's blocks takes its numbers but
          makes no element: it would be a line of its own *)
-      val () = (if pidx < 0 then (if _blank(data, off, tlen, 0) then _skip_spans(off, tlen)
-          else _text_spans(doc, data, pidx, off, tlen))
-        else _text_spans(doc, data, pidx, off, tlen))
-    in acc end
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _t_head = @[char][4]('h', 'e', 'a', 'd')
-    var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
-    var _t_meta = @[char][4]('m', 'e', 't', 'a')
-    var _t_link = @[char][4]('l', 'i', 'n', 'k')
-    var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
-    var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
-    var _t_html = @[char][4]('h', 't', 'm', 'l')
-    var _t_body = @[char][4]('b', 'o', 'd', 'y')
-    var _t_br = @[char][2]('b', 'r')
-    var _t_hr = @[char][2]('h', 'r')
-    var _t_img = @[char][3]('i', 'm', 'g')
-    var _t_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+      val () = (if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
+          else _text_spans(doc, data, parent, offset, text_len))
+        else _text_spans(doc, data, parent, offset, text_len))
+    in found end
+  | $X.xml_element(name_offset, name_len, attrs, children) => let
+    var _tag_head = @[char][4]('h', 'e', 'a', 'd')
+    var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
+    var _tag_meta = @[char][4]('m', 'e', 't', 'a')
+    var _tag_link = @[char][4]('l', 'i', 'n', 'k')
+    var _tag_style = @[char][5]('s', 't', 'y', 'l', 'e')
+    var _tag_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+    var _tag_html = @[char][4]('h', 't', 'm', 'l')
+    var _tag_body = @[char][4]('b', 'o', 'd', 'y')
+    var _tag_br = @[char][2]('b', 'r')
+    var _tag_hr = @[char][2]('h', 'r')
+    var _tag_img = @[char][3]('i', 'm', 'g')
+    var _tag_image = @[char][5]('i', 'm', 'a', 'g', 'e')
   in
     (* Skipped: head, title, meta, link, style, script *)
-    if xml_name_eq(data, name_off, name_len, _t_head, 4) then acc
-    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then acc
-    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then acc
-    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then acc
-    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then acc
-    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then acc
+    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then found
+    else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then found
+    else if xml_name_eq(data, name_offset, name_len, _tag_meta, 4) then found
+    else if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then found
+    else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then found
+    else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then found
     (* Transparent: html, body (their children go to the same parent);
        their language is the page's *)
-    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then let
+    else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then let
       val () = _root_lang(doc, data, attrs)
-    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
-    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then let
+    in _render_nodes(doc, data, data_len, parent, children, found, fragment) end
+    else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then let
       val () = _root_lang(doc, data, attrs)
-    in _render_nodes(doc, data, len, pidx, children, acc, fr) end
+    in _render_nodes(doc, data, data_len, parent, children, found, fragment) end
     (* Void: br, hr, img *)
-    else if xml_name_eq(data, name_off, name_len, _t_br, 2) then let
-      val () = _add_node(doc, pidx, _next_content_idx(), "br")
-    in acc end
-    else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then let
-      val () = _add_node(doc, pidx, _next_content_idx(), "hr")
-    in acc end
-    else if xml_name_eq(data, name_off, name_len, _t_img, 3) then let
+    else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
+      val () = _add_node(doc, parent, _next_content_node(), "br")
+    in found end
+    else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
+      val () = _add_node(doc, parent, _next_content_node(), "hr")
+    in found end
+    else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
-      val idx = _next_content_idx()
-      val () = _add_node(doc, pidx, idx, "img")
-      val () = _node_attr_lit(doc, idx, "src", "data:,")
-      var _a_alt = @[char][3]('a', 'l', 't')
-      val () = (case+ find_attr(data, attrs, _a_alt, 3) of
-        | ~xspan_at(ao, al) =>
-          if al < 65536 then _node_attr(doc, idx, "alt", data, ao, al)
-          else _node_attr(doc, idx, "alt", data, ao, _text_cut(data, ao, al))
-        | ~xspan_none() => _node_attr_lit(doc, idx, "alt", "image")): void
-      var _a_src = @[char][3]('s', 'r', 'c')
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, "img")
+      val () = _node_attr_literal(doc, content_node, "src", "data:,")
+      var _attr_alt = @[char][3]('a', 'l', 't')
+      val () = (case+ find_attr(data, attrs, _attr_alt, 3) of
+        | ~xspan_at(alt_start, alt_len) =>
+          if alt_len < 65536 then _node_attr(doc, content_node, "alt", data, alt_start, alt_len)
+          else _node_attr(doc, content_node, "alt", data, alt_start, _text_cut(data, alt_start, alt_len))
+        | ~xspan_none() => _node_attr_literal(doc, content_node, "alt", "image")): void
+      var _attr_src = @[char][3]('s', 'r', 'c')
     in
-      case+ find_attr(data, attrs, _a_src, 3) of
-      | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
-      | ~xspan_none() => acc
+      case+ find_attr(data, attrs, _attr_src, 3) of
+      | ~xspan_at(src_start, src_len) => images_cons(content_node, src_start, src_len, found)
+      | ~xspan_none() => found
     end
     (* An SVG <image> (a cover page's usual form): shown as an <img>,
        its source xlink:href, or href *)
-    else if xml_name_eq(data, name_off, name_len, _t_image, 5) then let
-      val idx = _next_content_idx()
-      val () = _add_node(doc, pidx, idx, "img")
-      val () = _node_attr_lit(doc, idx, "src", "data:,")
-      val () = _node_attr_lit(doc, idx, "alt", "image")
-      var _a_xhref = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
-      var _a_href = @[char][4]('h', 'r', 'e', 'f')
+    else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then let
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, "img")
+      val () = _node_attr_literal(doc, content_node, "src", "data:,")
+      val () = _node_attr_literal(doc, content_node, "alt", "image")
+      var _attr_xlink_href = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
+      var _attr_href = @[char][4]('h', 'r', 'e', 'f')
     in
-      case+ find_attr(data, attrs, _a_xhref, 10) of
-      | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
-      | ~xspan_none() => (case+ find_attr(data, attrs, _a_href, 4) of
-        | ~xspan_at(so, sl) => imgs_cons(idx, so, sl, acc)
-        | ~xspan_none() => acc)
+      case+ find_attr(data, attrs, _attr_xlink_href, 10) of
+      | ~xspan_at(src_start, src_len) => images_cons(content_node, src_start, src_len, found)
+      | ~xspan_none() => (case+ find_attr(data, attrs, _attr_href, 4) of
+        | ~xspan_at(src_start, src_len) => images_cons(content_node, src_start, src_len, found)
+        | ~xspan_none() => found)
     end
     else let
-      val idx = _next_content_idx()
-      val () = _add_node(doc, pidx, idx, _tag_of(data, name_off, name_len))
-      val () = _frag_check(data, attrs, fr, idx)
-      val () = _pass_attrs(doc, data, attrs, idx)
-      val () = _break_check(data, attrs, idx)
-      var _t_a = @[char][1]('a')
+      val content_node = _next_content_node()
+      val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
+      val () = _fragment_check(data, attrs, fragment, content_node)
+      val () = _pass_attrs(doc, data, attrs, content_node)
+      val () = _break_check(data, attrs, content_node)
+      var _tag_a = @[char][1]('a')
     in
-      if xml_name_eq(data, name_off, name_len, _t_a, 1) then let
-        val acc = _render_nodes(doc, data, len, idx, children, acc, fr)
-      in _link(doc, data, attrs, idx, !_content_n, acc) end
-      else _render_nodes(doc, data, len, idx, children, acc, fr)
+      if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
+        val found = _render_nodes(doc, data, data_len, content_node, children, found, fragment)
+      in _link(doc, data, attrs, content_node, !_content_count, found) end
+      else _render_nodes(doc, data, data_len, content_node, children, found, fragment)
     end
   end
 
-(* The length of the directory part of the name [no, no + nl) of the
+(* The length of the directory part of the name [name_offset, name_offset + name_len) of the
    file: up to and including its last '/', 0 when it has none *)
-fn _opf_prefix_len {z:pos}{no:nat}{nl:pos | no + nl <= z; nl < 65536}
-  (s: int, z: int z, no: int no, nl: int nl): [p:nat | p <= nl] int p = let
-  val buf = $A.alloc<byte>(nl)
-  val _ = book_read(s, z, no, buf, nl)
-  val p = path_dir_end(buf, nl)
+fn _opf_prefix_len {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len): [dir_len:nat | dir_len <= name_len] int dir_len = let
+  val buf = $A.alloc<byte>(name_len)
+  val _ = book_read(serial, file_size, name_offset, buf, name_len)
+  val dir_len = path_dir_end(buf, name_len)
   val () = $A.free<byte>(buf)
-in p end
+in dir_len end
 
 (* ============================================================
    Images: read from the book, shown in the chapter's <img> elements
@@ -1489,208 +1488,208 @@ in p end
 
 (* Counts chapter loads: an image whose bytes arrive after another
    chapter began loading is not shown (its element is gone) *)
-val _load_gen = ref<int>(0)
+val _load_generation = ref<int>(0)
 
 (* The image viewer's image's id, "image-full" *)
-fn _viewer_id (): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) = let
-  val a = $A.alloc<byte>(10)
-  val () = $A.write_text(a, 0, $A.text_lit("image-full"), 10)
-in @(a, 10) end
+fn _viewer_id (): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) = let
+  val id = $A.alloc<byte>(10)
+  val () = $A.write_text(id, 0, $A.text_lit("image-full"), 10)
+in @(id, 10) end
 
-(* The id of the image an image's bytes go to: content node idx's, or
+(* The id of the image an image's bytes go to: the content node's, or
    the viewer's *)
-fn _src_id {i:nat} (idx: int i, vw: bool): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k) =
-  if vw then _viewer_id() else _num_id("c", idx, 3)
+fn _src_id {node:nat} (node: int node, in_viewer: bool): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  if in_viewer then _viewer_id() else _number_id("c", node, 3)
 
 (* The images of the chapter shown: each one's content node and the
-   path of its entry in the book, path[0, k) *)
-datavtype pics(int) =
-  | pics_nil(0) of ()
-  | {k:nat}{l:agz}{m:pos | m < 65536} pics_cons(k + 1) of (int, $A.arr(byte, l, m), int m, pics(k))
+   path of its entry in the book, path[0, path_len) *)
+datavtype pictures(int) =
+  | pictures_nil(0) of ()
+  | {count:nat}{l:agz}{path_len:pos | path_len < 65536} pictures_cons(count + 1) of (int, $A.arr(byte, l, path_len), int path_len, pictures(count))
 
-fun pics_free {k:nat} .<k>. (x: pics(k)): void =
-  case+ x of
-  | ~pics_nil() => ()
-  | ~pics_cons(_, a, _, r) => let val () = $A.free<byte>(a) in pics_free(r) end
+fun pictures_free {count:nat} .<count>. (entries: pictures(count)): void =
+  case+ entries of
+  | ~pictures_nil() => ()
+  | ~pictures_cons(_, path, _, rest) => let val () = $A.free<byte>(path) in pictures_free(rest) end
 
-datavtype pics_cell = {k:nat} PicsCell of pics(k)
+datavtype pictures_cell = {count:nat} PicturesCell of pictures(count)
 
-val _pics = ref<pics_cell>(PicsCell(pics_nil()))
+val _pictures = ref<pictures_cell>(PicturesCell(pictures_nil()))
 
-fn _pics_take (): pics_cell = let
-  var c: pics_cell = PicsCell(pics_nil())
-  val () = ref_exch_elt<pics_cell>(_pics, c)
-in c end
+fn _pictures_take (): pictures_cell = let
+  var cell: pictures_cell = PicturesCell(pictures_nil())
+  val () = ref_exch_elt<pictures_cell>(_pictures, cell)
+in cell end
 
-fn _pics_put (x: pics_cell): void = let
-  var c: pics_cell = x
-  val () = ref_exch_elt<pics_cell>(_pics, c)
-  val+ ~PicsCell(old) = c
-in pics_free(old) end
+fn _pictures_put (new_cell: pictures_cell): void = let
+  var cell: pictures_cell = new_cell
+  val () = ref_exch_elt<pictures_cell>(_pictures, cell)
+  val+ ~PicturesCell(old) = cell
+in pictures_free(old) end
 
-fn _pics_push {l:agz}{k:pos | k < 65536} (idx: int, a: $A.arr(byte, l, k), k: int k): void = let
-  val+ ~PicsCell(x) = _pics_take()
-in _pics_put(PicsCell(pics_cons(idx, a, k, x))) end
+fn _pictures_push {l:agz}{path_len:pos | path_len < 65536} (node: int, path: $A.arr(byte, l, path_len), path_len: int path_len): void = let
+  val+ ~PicturesCell(rest) = _pictures_take()
+in _pictures_put(PicturesCell(pictures_cons(node, path, path_len, rest))) end
 
-(* Content node idx's image (or the viewer's, when vw): the nd bytes of
+(* A content node's image (or the viewer's, when in_viewer): the n bytes of
    data, of type mime *)
-fn _set_src {i:nat}{ld:agz}{nd:pos}{sn:pos | sn <= 24}
-  (idx: int i, vw: bool, data: !$A.borrow(byte, ld, nd), nd: int nd, mime: string sn): void = let
-  val ml = g1u2i(string1_length(mime))
-  val mb = $A.alloc<byte>(ml)
-  val _ = _put(mb, 0, mime)
-  val @(fm, bm) = $A.freeze<byte>(mb)
-  (* content node idx's image, or the image viewer's (image-full) *)
-  val @(ida, idk) = _src_id(idx, vw)
-  val @(fi, bi) = $A.freeze<byte>(ida)
-  val () = $BDOM.set_image_src(bi, idk, data, nd, bm, ml)
-  val () = release_bytes(fi, bi)
-in release_bytes(fm, bm) end
+fn _set_src {node:nat}{l:agz}{n:pos}{mime_len:pos | mime_len <= 24}
+  (node: int node, in_viewer: bool, data: !$A.borrow(byte, l, n), n: int n, mime: string mime_len): void = let
+  val mime_len = g1u2i(string1_length(mime))
+  val mime_buf = $A.alloc<byte>(mime_len)
+  val _ = _put(mime_buf, 0, mime)
+  val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime_buf)
+  (* the content node's image, or the image viewer's (image-full) *)
+  val @(image_id, image_id_len) = _src_id(node, in_viewer)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(image_id)
+  val () = $BDOM.set_image_src(id_bytes, image_id_len, data, n, mime_bytes, mime_len)
+  val () = release_bytes(id_frozen, id_bytes)
+in release_bytes(mime_frozen, mime_bytes) end
 
-(* Content node idx's image, the entry named path[0, k) of the book's
-   z-byte file (book s): shown now when it is stored, once decompressed when it
-   is deflated (unless chapter load gen is no longer the latest); not at
+(* A content node's image, the entry named path[0, path_len) of the book's
+   file_size-byte file (book serial): shown now when it is stored, once decompressed when it
+   is deflated (unless chapter load generation is no longer the latest); not at
    all when it is missing *)
-fn _show_image {z:pos}{i:nat}{lp:agz}{k:pos}
-  (s: int, z: int z, idx: int i, vw: bool, gen: int,
-   path: !$A.borrow(byte, lp, k), k: int k): void = let
-  val mime = mime_of(path, k)
+fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
+  (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
+   path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
+  val mime = mime_of(path, path_len)
 in
-  case+ book_zip_read(s, z, path, k) of
+  case+ book_zip_read(serial, file_size, path, path_len) of
   | ~ZipMissing() => ()
-  | ~ZipGot(ar, buf, cs, m, _, _, _) =>
-    if m = 0 then let
-      val @(f, b) = $A.freeze<byte>(buf)
-      val () = _set_src(idx, vw, b, cs, mime)
-      val () = $A.drop<byte>(f, b)
-    in piece_free(ar, $A.thaw<byte>(f)) end
+  | ~ZipGot(owner, compressed, compressed_size, method, _, _, _) =>
+    if method = 0 then let
+      val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+      val () = _set_src(node, in_viewer, compressed_bytes, compressed_size, mime)
+      val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+    in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
     else let
-      val @(f, b) = $A.freeze<byte>(buf)
-      val dp = $DC.decompress(b, cs, m)
-      val () = $A.drop<byte>(f, b)
-      val () = piece_free(ar, $A.thaw<byte>(f))
-      val dp = $P.vow(dp)
+      val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+      val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+      val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+      val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
+      val decompressing = $P.vow(decompressing)
     in
-      $P.discard<int>($P.and_then<Int><int>(dp, lam(h) =>
-        case+ take_content(h) of
+      $P.discard<int>($P.and_then<Int><int>(decompressing, lam(handle) =>
+        case+ take_content(handle) of
         | ~NoContentBytes() => $P.ret<int>(~1)
-        | ~ContentBytes(ar2, buf2, n2) => let
-            val @(f2, b2) = $A.freeze<byte>(buf2)
-            val () = (if !_load_gen = gen then _set_src(idx, vw, b2, n2, mime) else ())
-            val () = $A.drop<byte>(f2, b2)
-            val () = piece_free(ar2, $A.thaw<byte>(f2))
+        | ~ContentBytes(content_owner, content, content_len) => let
+            val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
+            val () = (if !_load_generation = generation then _set_src(node, in_viewer, content_bytes, content_len, mime) else ())
+            val () = $A.drop<byte>(content_frozen, content_bytes)
+            val () = piece_free(content_owner, $A.thaw<byte>(content_frozen))
           in $P.ret<int>(0) end))
     end
 end
 
-(* The image of content node idx, whose src is data[so, so + sl): the
+(* The image of a content node, whose src is data[src_start, src_start + src_len): the
    entry that src names relative to the chapter's directory (the first
-   dl bytes of the chapter's name, at no in the file) *)
-fn _load_image {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}{i:nat}
-  (s: int, z: int z, no: int no, dl: int dl,
-   data: !$A.borrow(byte, lb, n), n: int n, idx: int i, so: int so, sl: int sl, gen: int): void = let
-  val h = src_end(data, so, sl)
+   dir_len bytes of the chapter's name, at name_offset in the file) *)
+fn _load_image {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <= n}{node:nat}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   data: !$A.borrow(byte, l, n), n: int n, node: int node, src_start: int src_start, src_len: int src_len, generation: int): void = let
+  val path_end = src_end(data, src_start, src_len)
 in
   (* An src of 65536 bytes or more names no zip entry (a zip name is
      shorter): the book's data, checked here *)
-  if h <= 0 then ()
-  else if h >= 65536 then ()
+  if path_end <= 0 then ()
+  else if path_end >= 65536 then ()
   else let
-    val m = dl + h
-    val buf = $A.alloc<byte>(m)
-    val _ = book_read(s, z, no, buf, dl)
-    val () = $S.copy_from_borrow(data, so, n, buf, dl, m, h)
-    val k = path_norm(buf, m)
+    val joined_len = dir_len + path_end
+    val buf = $A.alloc<byte>(joined_len)
+    val _ = book_read(serial, file_size, name_offset, buf, dir_len)
+    val () = $S.copy_from_borrow(data, src_start, n, buf, dir_len, joined_len, path_end)
+    val path_len = path_norm(buf, joined_len)
   in
-    if k <= 0 then $A.free<byte>(buf)
+    if path_len <= 0 then $A.free<byte>(buf)
     else let
-      val exact = $A.alloc<byte>(k)
-      val buf = $S.copy_arr_region(buf, 0, m, exact, k, k)
+      val exact = $A.alloc<byte>(path_len)
+      val buf = $S.copy_arr_region(buf, 0, joined_len, exact, path_len, path_len)
       val () = $A.free<byte>(buf)
-      val @(fz, bv) = $A.freeze<byte>(exact)
-      val () = _show_image(s, z, idx, false, gen, bv, k)
-      val () = $A.drop<byte>(fz, bv)
+      val @(path_frozen, path_bytes) = $A.freeze<byte>(exact)
+      val () = _show_image(serial, file_size, node, false, generation, path_bytes, path_len)
+      val () = $A.drop<byte>(path_frozen, path_bytes)
       (* kept, so the image can be shown again in the viewer *)
-    in if k < 65536 then _pics_push(idx, $A.thaw<byte>(fz), k) else $A.free<byte>($A.thaw<byte>(fz)) end
+    in if path_len < 65536 then _pictures_push(node, $A.thaw<byte>(path_frozen), path_len) else $A.free<byte>($A.thaw<byte>(path_frozen)) end
   end
 end
 
-(* The length of the fragment after the '#' at h of an href of hl
+(* The length of the fragment after the '#' at path_end of an href of href_len
    bytes: 0 when there is none, or it is over 200 bytes *)
-fn _frag_len {hl,h:nat | h <= hl} (hl: int hl, h: int h): [f:nat | f <= 200; f == 0 || f == hl - h - 1] int f =
-  if hl - h - 1 <= 0 then 0
-  else if hl - h - 1 > 200 then 0
-  else hl - h - 1
+fn _fragment_len {href_len,path_end:nat | path_end <= href_len} (href_len: int href_len, path_end: int path_end): [fragment_len:nat | fragment_len <= 200; fragment_len == 0 || fragment_len == href_len - path_end - 1] int fragment_len =
+  if href_len - path_end - 1 <= 0 then 0
+  else if href_len - path_end - 1 > 200 then 0
+  else href_len - path_end - 1
 
-(* fr[0, f) := data[ho + h + 1, ho + h + 1 + f) *)
-fn _frag_copy {lb,l:agz}{n:pos}{ho,h,f:nat | f == 0 || ho + h + 1 + f <= n}
-  (data: !$A.borrow(byte, lb, n), n: int n, ho: int ho, h: int h, fr: !$A.arr(byte, l, f + 1), f: int f): void =
-  if f > 0 then $S.copy_from_borrow(data, ho + h + 1, n, fr, 0, f + 1, f) else ()
+(* fragment[0, fragment_len) := data[href_start + path_end + 1, href_start + path_end + 1 + fragment_len) *)
+fn _fragment_copy {data_location,fragment_location:agz}{data_size:pos}{href_start,path_end,fragment_len:nat | fragment_len == 0 || href_start + path_end + 1 + fragment_len <= data_size}
+  (data: !$A.borrow(byte, data_location, data_size), data_size: int data_size, href_start: int href_start, path_end: int path_end, fragment: !$A.arr(byte, fragment_location, fragment_len + 1), fragment_len: int fragment_len): void =
+  if fragment_len > 0 then $S.copy_from_borrow(data, href_start + path_end + 1, data_size, fragment, 0, fragment_len + 1, fragment_len) else ()
 
-(* The link to data[so, so + sl) from content nodes [s, e) of chapter
-   cur, whose directory is the first dl bytes of the name at no: kept
+(* The link to data[href_start, href_start + href_len) from content nodes [first_node, end_node) of chapter
+   current, whose directory is the first dir_len bytes of the name at name_offset: kept
    with the chapter and fragment it leads to *)
-fn _link_resolve {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{so,sl:nat | so + sl <= n}
-  (s: int, z: int z, no: int no, dl: int dl, cur: Int,
-   data: !$A.borrow(byte, lb, n), n: int n, s0: Int, e0: Int, so: int so, sl: int sl, note: bool): void = let
-  val h = src_end(data, so, sl)
-  val ch = (if h <= 0 then cur
-    else (case+ book_find_relative(s, z, no, dl, data, n, so, h) of
-      | ~EntryHit(_, _, _, eno, _) => book_chapter_of(s, eno)
+fn _link_resolve {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{href_start,href_len:nat | href_start + href_len <= n}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len, current: Int,
+   data: !$A.borrow(byte, l, n), n: int n, first_node: Int, end_node: Int, href_start: int href_start, href_len: int href_len, note: bool): void = let
+  val path_end = src_end(data, href_start, href_len)
+  val chapter = (if path_end <= 0 then current
+    else (case+ book_find_relative(serial, file_size, name_offset, dir_len, data, n, href_start, path_end) of
+      | ~EntryHit(_, _, _, entry_name_offset, _) => book_chapter_of(serial, entry_name_offset)
       | ~EntryMiss() => ~1)): Int
-  val f = _frag_len(sl, h)
-  val fr = $A.alloc<byte>(f + 1)
-  val () = _frag_copy(data, n, so, h, fr, f)
+  val fragment_len = _fragment_len(href_len, path_end)
+  val fragment = $A.alloc<byte>(fragment_len + 1)
+  val () = _fragment_copy(data, n, href_start, path_end, fragment, fragment_len)
 in
-  if ch >= 0 then _links_push(s0, e0, ch, fr, f, note) else $A.free<byte>(fr)
+  if chapter >= 0 then _links_push(first_node, end_node, chapter, fragment, fragment_len, note) else $A.free<byte>(fragment)
 end
 
-(* The images xs of the chapter data[0, n), chapter cur, and its links *)
-fun _load_images {z:pos}{no,dl:nat | no + dl <= z; dl < 65536}{lb:agz}{n:pos}{k:nat} .<k>.
-  (s: int, z: int z, no: int no, dl: int dl,
-   data: !$A.borrow(byte, lb, n), n: int n, xs: imgs(n, k), gen: int, cur: Int): void =
-  case+ xs of
-  | ~imgs_nil() => ()
-  | ~imgs_cons(idx, so, sl, tl) => let
-      val () = _load_image(s, z, no, dl, data, n, idx, so, sl, gen)
-    in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
-  | ~imgs_link(s0, e0, so, sl, note, tl) => let
-      val () = _link_resolve(s, z, no, dl, cur, data, n, s0, e0, so, sl, note)
-    in _load_images(s, z, no, dl, data, n, tl, gen, cur) end
+(* The images found of the chapter data[0, n), chapter current, and its links *)
+fun _load_images {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{count:nat} .<count>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   data: !$A.borrow(byte, l, n), n: int n, found: images(n, count), generation: int, current: Int): void =
+  case+ found of
+  | ~images_nil() => ()
+  | ~images_cons(node, src_start, src_len, rest) => let
+      val () = _load_image(serial, file_size, name_offset, dir_len, data, n, node, src_start, src_len, generation)
+    in _load_images(serial, file_size, name_offset, dir_len, data, n, rest, generation, current) end
+  | ~images_link(first_node, end_node, src_start, src_len, note, rest) => let
+      val () = _link_resolve(serial, file_size, name_offset, dir_len, current, data, n, first_node, end_node, src_start, src_len, note)
+    in _load_images(serial, file_size, name_offset, dir_len, data, n, rest, generation, current) end
 
-(* The chapters from spine itemref i down to the first, onto acc: each
+(* The chapters from spine itemref item down to the first, onto found: each
    href, after the OPF's directory (prefix_len bytes of the name at
-   opf_no), found in book s's index; the OPF's data checked here, once *)
-fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
-  {lb:agz}{n:pos}{sz:nat}{i:int | i >= ~1}{a:nat} .<i + 1>.
-  (s: int, z: int z, opf_no: int ono, prefix_len: int pl,
-   opf_b: !$A.borrow(byte, lb, n), dc_sz: int n, nodes: !$X.xml_node_list(n, sz),
-   i: int i, acc: book_chapters(z, a)): book_chapters(z, a + i + 1) =
-  if i < 0 then acc
+   opf_name_offset), found in book serial's index; the OPF's data checked here, once *)
+fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{tree_size:nat}{item:int | item >= ~1}{found_count:nat} .<item + 1>.
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size),
+   item: int item, found: book_chapters(file_size, found_count)): book_chapters(file_size, found_count + item + 1) =
+  if item < 0 then found
   else let
-    val ch = (case+ find_chapter_href_n(opf_b, dc_sz, nodes, i) of
-      | ~xspan_none() => ChapterMissing(acc)
-      | ~xspan_at(ch_off, ch_len) =>
-        if ch_len <= 0 then ChapterMissing(acc)
-        else if prefix_len + ch_len > 1048576 then ChapterMissing(acc)
+    val chapters = (case+ find_chapter_href_n(opf_bytes, opf_size, nodes, item) of
+      | ~xspan_none() => ChapterMissing(found)
+      | ~xspan_at(href_offset, href_len) =>
+        if href_len <= 0 then ChapterMissing(found)
+        else if prefix_len + href_len > 1048576 then ChapterMissing(found)
         else let
-          val full_len = prefix_len + ch_len
-          val ch_buf = $A.alloc<byte>(full_len)
+          val path_len = prefix_len + href_len
+          val path_buf = $A.alloc<byte>(path_len)
           (* The prefix read from the file at the OPF's name, then the
              chapter href from the OPF *)
-          val _ = book_read(s, z, opf_no, ch_buf, prefix_len)
-          val () = $S.copy_from_borrow(opf_b, ch_off, dc_sz,
-                    ch_buf, prefix_len, full_len, ch_len)
-          val @(chf, chb) = $A.freeze<byte>(ch_buf)
-          val hit = book_find_entry(s, z, chb, full_len)
-          val () = release_bytes(chf, chb)
+          val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
+          val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
+                    path_buf, prefix_len, path_len, href_len)
+          val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
+          val hit = book_find_entry(serial, file_size, path_bytes, path_len)
+          val () = release_bytes(path_frozen, path_bytes)
         in
           case+ hit of
-          | ~EntryMiss() => ChapterMissing(acc)
-          | ~EntryHit(d, cs, m, no, nl) =>
-              Chapter(d, cs, m, no, nl, _opf_prefix_len(s, z, no, nl), acc)
-        end): book_chapters(z, a + 1)
-  in _spine_chapters(s, z, opf_no, prefix_len, opf_b, dc_sz, nodes, i - 1, ch) end
+          | ~EntryMiss() => ChapterMissing(found)
+          | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
+              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len), found)
+        end): book_chapters(file_size, found_count + 1)
+  in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item - 1, chapters) end
 
 (* ============================================================
    The book's own font, for the "Book" font setting
@@ -1700,150 +1699,150 @@ fun _spine_chapters {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}
 (* The book's language (its OPF's dc:language), when it is a plausible
    language tag: 1 to 35 letters, digits and hyphens *)
 datavtype book_lang =
-  | {l:agz}{k:pos | k <= 35} BookLang of ($A.arr(byte, l, 35), int k)
+  | {l:agz}{lang_len:pos | lang_len <= 35} BookLang of ($A.arr(byte, l, 35), int lang_len)
   | NoBookLang of ()
 
-val _blang = ref<book_lang>(NoBookLang())
+val _book_lang = ref<book_lang>(NoBookLang())
 
-fn _blang_put (x: book_lang): void = let
-  var c: book_lang = x
-  val () = ref_exch_elt<book_lang>(_blang, c)
-in case+ c of ~BookLang(a, _) => $A.free<byte>(a) | ~NoBookLang() => () end
+fn _book_lang_put (lang: book_lang): void = let
+  var cell: book_lang = lang
+  val () = ref_exch_elt<book_lang>(_book_lang, cell)
+in case+ cell of ~BookLang(tag, _) => $A.free<byte>(tag) | ~NoBookLang() => () end
 
-fn _blang_take (): book_lang = let
-  var c: book_lang = NoBookLang()
-  val () = ref_exch_elt<book_lang>(_blang, c)
-in c end
+fn _book_lang_take (): book_lang = let
+  var cell: book_lang = NoBookLang()
+  val () = ref_exch_elt<book_lang>(_book_lang, cell)
+in cell end
 
-(* b[j, k) := data[o + j, o + k) *)
-fun _lang_copy {lb,l:agz}{n:pos}{o,k:nat | o + k <= n; k <= 35}{j:nat | j <= k} .<k - j>.
-  (data: !$A.borrow(byte, lb, n), o: int o, b: !$A.arr(byte, l, 35), k: int k, j: int j): void =
-  if j >= k then ()
+(* lang[j, lang_len) := data[offset + j, offset + lang_len) *)
+fun _lang_copy {data_location,lang_location:agz}{data_size:pos}{offset,lang_len:nat | offset + lang_len <= data_size; lang_len <= 35}{j:nat | j <= lang_len} .<lang_len - j>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, lang: !$A.arr(byte, lang_location, 35), lang_len: int lang_len, j: int j): void =
+  if j >= lang_len then ()
   else let
-    val () = $A.set<byte>(b, j, $A.read<byte>(data, o + j))
-  in _lang_copy(data, o, b, k, j + 1) end
+    val () = $A.set<byte>(lang, j, $A.read<byte>(data, offset + j))
+  in _lang_copy(data, offset, lang, lang_len, j + 1) end
 
-(* Keeps the book's language, from its OPF opf_b's nodes *)
-fn _lang_locate {lb:agz}{n:pos}{sz:nat}
-  (opf_b: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): void =
-  case+ opf_language(opf_b, nodes) of
-  | ~xspan_none() => _blang_put(NoBookLang())
-  | ~xspan_at(o, k) =>
-    if _lang_ok(opf_b, o, k) then
-      (if k >= 1 then (if k <= 35 then let
-         val b = $A.alloc<byte>(35)
-         val () = _lang_copy(opf_b, o, b, k, 0)
-       in _blang_put(BookLang(b, k)) end
-       else _blang_put(NoBookLang()))
-       else _blang_put(NoBookLang()))
-    else _blang_put(NoBookLang())
+(* Keeps the book's language, from its OPF opf_bytes's nodes *)
+fn _lang_locate {l:agz}{n:pos}{tree_size:nat}
+  (opf_bytes: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): void =
+  case+ opf_language(opf_bytes, nodes) of
+  | ~xspan_none() => _book_lang_put(NoBookLang())
+  | ~xspan_at(offset, lang_len) =>
+    if _lang_ok(opf_bytes, offset, lang_len) then
+      (if lang_len >= 1 then (if lang_len <= 35 then let
+         val lang = $A.alloc<byte>(35)
+         val () = _lang_copy(opf_bytes, offset, lang, lang_len, 0)
+       in _book_lang_put(BookLang(lang, lang_len)) end
+       else _book_lang_put(NoBookLang()))
+       else _book_lang_put(NoBookLang()))
+    else _book_lang_put(NoBookLang())
 
 (* The page's lang, before a chapter is shown: the book's, else "und"
    (undetermined: the app's own "en" is not the book's) *)
-fn _page_book_lang {ld:agz} (doc: !$D.document(ld)): void =
-  case+ _blang_take() of
+fn _page_book_lang {doc_location:agz} (doc: !$D.document(doc_location)): void =
+  case+ _book_lang_take() of
   | ~NoBookLang() => let
-      val u = $A.alloc<byte>(3)
-      val () = $A.write_text(u, 0, $A.text_lit("und"), 3)
-      val @(fu, bu) = $A.freeze<byte>(u)
-      val () = _page_lang(doc, bu, 0, 3)
-      val () = release_bytes(fu, bu)
-    in _blang_put(NoBookLang()) end
-  | ~BookLang(b, k) => let
-      val @(fb, bb) = $A.freeze<byte>(b)
-      val () = _page_lang(doc, bb, 0, k)
-      val () = $A.drop<byte>(fb, bb)
-    in _blang_put(BookLang($A.thaw<byte>(fb), k)) end
+      val undetermined = $A.alloc<byte>(3)
+      val () = $A.write_text(undetermined, 0, $A.text_lit("und"), 3)
+      val @(undetermined_frozen, undetermined_bytes) = $A.freeze<byte>(undetermined)
+      val () = _page_lang(doc, undetermined_bytes, 0, 3)
+      val () = release_bytes(undetermined_frozen, undetermined_bytes)
+    in _book_lang_put(NoBookLang()) end
+  | ~BookLang(lang, lang_len) => let
+      val @(lang_frozen, lang_bytes) = $A.freeze<byte>(lang)
+      val () = _page_lang(doc, lang_bytes, 0, lang_len)
+      val () = $A.drop<byte>(lang_frozen, lang_bytes)
+    in _book_lang_put(BookLang($A.thaw<byte>(lang_frozen), lang_len)) end
 
-datavtype font_src =
-  | {z:pos}{d:nat}{s:pos | d + s <= z; s <= 268435456}{m:int | m == 0 || m == 8}
-    FontSrc of (int z, int d, int s, int m)
+datavtype font_source =
+  | {file_size:pos}{data_start:nat}{compressed_size:pos | data_start + compressed_size <= file_size; compressed_size <= 268435456}{method:int | method == 0 || method == 8}
+    FontSource of (int file_size, int data_start, int compressed_size, int method)
   | FontNone of ()
 
-val _font = ref<font_src>(FontNone())
+val _font = ref<font_source>(FontNone())
 
-fn _font_put (f: font_src): void = let
-  var c: font_src = f
-  val () = ref_exch_elt<font_src>(_font, c)
-in case+ c of ~FontSrc(_, _, _, _) => () | ~FontNone() => () end
+fn _font_put (font: font_source): void = let
+  var cell: font_source = font
+  val () = ref_exch_elt<font_source>(_font, cell)
+in case+ cell of ~FontSource(_, _, _, _) => () | ~FontNone() => () end
 
-fn _font_take (): font_src = let
-  var c: font_src = FontNone()
-  val () = ref_exch_elt<font_src>(_font, c)
-in c end
+fn _font_take (): font_source = let
+  var cell: font_source = FontNone()
+  val () = ref_exch_elt<font_source>(_font, cell)
+in cell end
 
-(* The book's first embedded font, named in the OPF opf_b[0, n) (whose
-   directory is the first pl bytes of the name at opf_no) *)
-fn _font_locate {z:pos}{ono:nat}{pl:nat | ono + pl <= z; pl < 65536}{lb:agz}{n:pos}{sz:nat}
-  (s: int, z: int z, opf_no: int ono, pl: int pl,
-   opf_b: !$A.borrow(byte, lb, n), n: int n, nodes: !$X.xml_node_list(n, sz)): void =
-  case+ find_font_href(opf_b, nodes) of
+(* The book's first embedded font, named in the OPF opf_bytes[0, n) (whose
+   directory is the first dir_len bytes of the name at opf_name_offset) *)
+fn _font_locate {file_size:pos}{opf_name_offset:nat}{dir_len:nat | opf_name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{tree_size:nat}
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, dir_len: int dir_len,
+   opf_bytes: !$A.borrow(byte, l, n), n: int n, nodes: !$X.xml_node_list(n, tree_size)): void =
+  case+ find_font_href(opf_bytes, nodes) of
   | ~xspan_none() => _font_put(FontNone())
-  | ~xspan_at(ho, hl) =>
-    (case+ book_find_relative(s, z, opf_no, pl, opf_b, n, ho, hl) of
-     | ~EntryHit(d, cs, m, _, _) => _font_put(FontSrc(z, d, cs, m))
+  | ~xspan_at(href_start, href_len) =>
+    (case+ book_find_relative(serial, file_size, opf_name_offset, dir_len, opf_bytes, n, href_start, href_len) of
+     | ~EntryHit(data_start, compressed_size, method, _, _) => _font_put(FontSource(file_size, data_start, compressed_size, method))
      | ~EntryMiss() => _font_put(FontNone()))
 
-(* b[p + j, p + k) := u[j, k) *)
-fun _copy_at {ls,ld:agz}{ns,nd:pos}{p:nat}{k:nat | k <= ns; p + k <= nd}{j:nat | j <= k} .<k - j>.
-  (u: !$A.arr(byte, ls, ns), b: !$A.arr(byte, ld, nd), p: int p, k: int k, j: int j): void =
-  if j >= k then ()
+(* target[at + j, at + source_len) := source[j, source_len) *)
+fun _copy_at {source_location,target_location:agz}{source_size,target_size:pos}{at:nat}{source_len:nat | source_len <= source_size; at + source_len <= target_size}{j:nat | j <= source_len} .<source_len - j>.
+  (source: !$A.arr(byte, source_location, source_size), target: !$A.arr(byte, target_location, target_size), at: int at, source_len: int source_len, j: int j): void =
+  if j >= source_len then ()
   else let
-    val () = $A.set<byte>(b, p + j, $A.get<byte>(u, j))
-  in _copy_at(u, b, p, k, j + 1) end
+    val () = $A.set<byte>(target, at + j, $A.get<byte>(source, j))
+  in _copy_at(source, target, at, source_len, j + 1) end
 
-(* The style that names the font at the blob URL u[0, k) QuireBook, the
+(* The style that names the font at the blob URL url[0, url_len) QuireBook, the
    family the "Book" setting asks for *)
-fn _font_style {k:pos | k < 2000}{l:agz}{m:pos | k <= m} (u: !$A.arr(byte, l, m), k: int k): void = let
-  val n = k + 80
-  val b = $A.alloc<byte>(n)
-  val off = _put(b, 0, "@font-face{font-family:QuireBook;src:url(")
-  val () = _copy_at(u, b, off, k, 0)
-  val off = _put(b, off + k, ")}.caf{--bookfont:QuireBook}")
-in ui_text_buf("style-fonts", b, off) end
+fn _font_style {url_len:pos | url_len < 2000}{l:agz}{url_size:pos | url_len <= url_size} (url: !$A.arr(byte, l, url_size), url_len: int url_len): void = let
+  val style_len = url_len + 80
+  val style = $A.alloc<byte>(style_len)
+  val offset = _put(style, 0, "@font-face{font-family:QuireBook;src:url(")
+  val () = _copy_at(url, style, offset, url_len, 0)
+  val offset = _put(style, offset + url_len, ")}.caf{--bookfont:QuireBook}")
+in ui_text_buf("style-fonts", style, offset) end
 
 (* Makes the font found by _font_locate the book font (or none) *)
-fn _font_load (s: int): $P.promise(int, $P.Chained) = let
+fn _font_load (serial: int): $P.promise(int, $P.Chained) = let
   val () = ui_clear("style-fonts")
 in
   case+ _font_take() of
   | ~FontNone() => $P.ret<int>(0)
-  | ~FontSrc(z, d, cs, m) =>
-    (case+ piece_new(cs) of
+  | ~FontSource(file_size, data_start, compressed_size, method) =>
+    (case+ piece_new(compressed_size) of
      | ~NoPiece() => $P.ret<int>(0)
-     | ~Piece(car, cbuf) => let
-         val _ = book_read(s, z, d, cbuf, cs)
-         val @(cf, cb) = $A.freeze<byte>(cbuf)
-         val dp = $DC.decompress(cb, cs, m)
-         val () = $A.drop<byte>(cf, cb)
-         val () = piece_free(car, $A.thaw<byte>(cf))
+     | ~Piece(compressed_owner, compressed) => let
+         val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+         val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<Int><int>($P.vow(dp), lam(h) =>
-           case+ take_content(h) of
+         $P.and_then<Int><int>($P.vow(decompressing), lam(handle) =>
+           case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(0)
-           | ~ContentBytes(par, buf, n) => let
-               val ma = $A.alloc<byte>(8)
-               val _ = _put(ma, 0, "font/otf")
-               val @(mf, mb) = $A.freeze<byte>(ma)
-               val @(f, b) = $A.freeze<byte>(buf)
-               val url = $BL.create_blob_url(b, n, mb, 8)
-               val () = $A.drop<byte>(f, b)
-               val () = piece_free(par, $A.thaw<byte>(f))
-               val () = release_bytes(mf, mb)
-               val () = (case+ url of
+           | ~ContentBytes(font_owner, font, font_len) => let
+               val mime_buf = $A.alloc<byte>(8)
+               val _ = _put(mime_buf, 0, "font/otf")
+               val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime_buf)
+               val @(font_frozen, font_bytes) = $A.freeze<byte>(font)
+               val url_made = $BL.create_blob_url(font_bytes, font_len, mime_bytes, 8)
+               val () = $A.drop<byte>(font_frozen, font_bytes)
+               val () = piece_free(font_owner, $A.thaw<byte>(font_frozen))
+               val () = release_bytes(mime_frozen, mime_bytes)
+               val () = (case+ url_made of
                  | ~$R.none() => ()
-                 | ~$R.some(ub) => let
-                     val k = $DC.blob_len(ub)
+                 | ~$R.some(url_blob) => let
+                     val url_len = $DC.blob_len(url_blob)
                    in
                      (* the host's URL, checked here *)
-                     if k <= 0 then $DC.blob_free(ub)
-                     else if k >= 2000 then $DC.blob_free(ub)
+                     if url_len <= 0 then $DC.blob_free(url_blob)
+                     else if url_len >= 2000 then $DC.blob_free(url_blob)
                      else let
-                       val ua = $A.alloc<byte>(k)
-                       val () = $DC.blob_read(ub, 0, ua, k)
-                       val () = $DC.blob_free(ub)
-                       val () = _font_style(ua, k)
-                     in $A.free<byte>(ua) end
+                       val url = $A.alloc<byte>(url_len)
+                       val () = $DC.blob_read(url_blob, 0, url, url_len)
+                       val () = $DC.blob_free(url_blob)
+                       val () = _font_style(url, url_len)
+                     in $A.free<byte>(url) end
                    end)
              in $P.ret<int>(0) end)
        end)
@@ -1854,104 +1853,104 @@ end
 fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
   case+ book_meta_get() of
   | ~$R.none() => $P.ret<int>(~1)
-  | ~$R.some(@(fsz_s, opf_doff, opf_csz, opf_comp, opf_name_off, opf_name_len)) =>
+  | ~$R.some(@(file_size, opf_data_start, opf_compressed_size, opf_method, opf_name_offset, opf_name_len)) =>
     (* The OPF's compressed bytes, read at their span into a piece *)
-    (case+ piece_new(opf_csz) of
+    (case+ piece_new(opf_compressed_size) of
      | ~NoPiece() => $P.ret<int>(~1)
-     | ~Piece(car, opf_cbuf) => let
-         val _ = book_read(serial, fsz_s, opf_doff, opf_cbuf, opf_csz)
-         val @(ocf, ocb) = $A.freeze<byte>(opf_cbuf)
-         val dc_p = $DC.decompress(ocb, opf_csz, opf_comp)
-         val () = $A.drop<byte>(ocf, ocb)
-         val () = piece_free(car, $A.thaw<byte>(ocf))
-         val dc_p = $P.vow(dc_p)
+     | ~Piece(compressed_owner, opf_compressed) => let
+         val _ = book_read(serial, file_size, opf_data_start, opf_compressed, opf_compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(opf_compressed)
+         val decompressing = $DC.decompress(compressed_bytes, opf_compressed_size, opf_method)
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+         val decompressing = $P.vow(decompressing)
        in
-         $P.and_then<Int><int>(dc_p, lam(dc_handle) =>
-           case+ take_content(dc_handle) of
+         $P.and_then<Int><int>(decompressing, lam(handle) =>
+           case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(~2)
-           | ~ContentBytes(par, opf_buf, dc_sz) => let
-               val @(opf_f, opf_b) = $A.freeze<byte>(opf_buf)
-               val opf_nodes = $X.parse_document(opf_b, dc_sz)
-               val total = count_spine_items(opf_b, opf_nodes)
+           | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
+               val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_buf)
+               val opf_nodes = $X.parse_document(opf_bytes, opf_size)
+               val total = count_spine_items(opf_bytes, opf_nodes)
                (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
                   prefixes chapter hrefs *)
-               val prefix_len = _opf_prefix_len(serial, fsz_s, opf_name_off, opf_name_len)
-               val chs = _spine_chapters(serial, fsz_s, opf_name_off, prefix_len,
-                           opf_b, dc_sz, opf_nodes, total - 1, ChaptersNil())
-               val () = book_spine_set(serial, fsz_s, chs, total)
-               val () = toc_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
-               val () = !_rtl := spine_rtl(opf_b, opf_nodes)
-               val () = _lang_locate(opf_b, opf_nodes)
-               val () = _font_locate(serial, fsz_s, opf_name_off, prefix_len, opf_b, dc_sz, opf_nodes)
+               val prefix_len = _opf_prefix_len(serial, file_size, opf_name_offset, opf_name_len)
+               val chapters = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
+                           opf_bytes, opf_size, opf_nodes, total - 1, ChaptersNil())
+               val () = book_spine_set(serial, file_size, chapters, total)
+               val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
+               val () = !_right_to_left := spine_rtl(opf_bytes, opf_nodes)
+               val () = _lang_locate(opf_bytes, opf_nodes)
+               val () = _font_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
-               val () = $A.drop<byte>(opf_f, opf_b)
-               val () = piece_free(par, $A.thaw<byte>(opf_f))
+               val () = $A.drop<byte>(opf_frozen, opf_bytes)
+               val () = piece_free(opf_owner, $A.thaw<byte>(opf_frozen))
              in $P.ret<int>(total) end)
        end)
 
-(* Shows chapter chapter_idx of book serial, from its chapters *)
-fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise(int, $P.Chained) =
-  case+ book_chapter_get(serial, chapter_idx) of
+(* Shows chapter chapter_index of book serial, from its chapters *)
+fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
+  case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() => $P.ret<int>(~1)
-  | ~ChapterNone(total_ch) => let
+  | ~ChapterNone(chapter_count) => let
       val () = (case+ reading_get() of
-        | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
+        | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in $P.ret<int>(~4) end
-  | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, ch_no, _, ch_dl, total_ch) => let
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, chapter_count) => let
       val () = (case+ reading_get() of
-        | @(p, t, c, _) => reading_set(@(p, t, c, total_ch)))
+        | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
-      case+ piece_new(ch_csz) of
+      case+ piece_new(compressed_size) of
       | ~NoPiece() => $P.ret<int>(~5)
-      | ~Piece(ccar, ch_comp) => let
-              val _ = book_read(serial, fsz_s, ch_d, ch_comp, ch_csz)
-              val @(ccf, ccb) = $A.freeze<byte>(ch_comp)
-              val ch_dc_p = $DC.decompress(ccb, ch_csz, ch_method)
-              val () = $A.drop<byte>(ccf, ccb)
-              val () = piece_free(ccar, $A.thaw<byte>(ccf))
+      | ~Piece(compressed_owner, compressed) => let
+              val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+              val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+              val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+              val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+              val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
 
-              val ch_dc_p = $P.vow(ch_dc_p)
+              val decompressing = $P.vow(decompressing)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<Int><int>(ch_dc_p, lam(ch_dc_handle) => let
-                val ch_dc = take_content(ch_dc_handle)
+              $P.and_then<Int><int>(decompressing, lam(handle) => let
+                val content = take_content(handle)
               in
-                case+ ch_dc of
+                case+ content of
                 | ~NoContentBytes() => $P.ret<int>(~6)
-                | ~ContentBytes(xar, ch_xhtml, ch_dc_sz) => let
+                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
 
                   (* Parse XHTML with xml-tree *)
-                  val @(xf, xb) = $A.freeze<byte>(ch_xhtml)
-                  val nodes = $X.parse_document(xb, ch_dc_sz)
+                  val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                  val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
 
                   (* Clear the content area, then render the XHTML tree
                      into it: one document for the chapter *)
                   val doc = $D.open_document($A.text_lit("bats-root"), 9)
-                  val @(qa, ql) = _node_id(~1)
-                  val @(fq, bq) = $A.freeze<byte>(qa)
-                  val () = $D.remove_children(doc, bq, ql)
-                  val () = release_bytes(fq, bq)
-                  val () = !_content_n := 0
+                  val @(page_id, page_id_len) = _node_id(~1)
+                  val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
+                  val () = $D.remove_children(doc, page_id_bytes, page_id_len)
+                  val () = release_bytes(page_id_frozen, page_id_bytes)
+                  val () = !_content_count := 0
                   val () = _links_put(LinksCell(links_nil()))
-                  val () = _pics_put(PicsCell(pics_nil()))
+                  val () = _pictures_put(PicturesCell(pictures_nil()))
                   val () = _breaks_put(BreaksCell(breaks_nil()))
-                  val () = (if !_rtl then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf"))
+                  val () = (if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf"))
                   val () = _page_book_lang(doc)
-                  val fr = _frag_take()
-                  val imgs = _render_nodes(doc, xb, ch_dc_sz, ~1, nodes, imgs_nil(), fr)
-                  val () = _frag_put(fr)
+                  val fragment = _fragment_take()
+                  val found = _render_nodes(doc, xhtml_bytes, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
                   (* Its images, named relative to the chapter's directory *)
-                  val () = _load_images(serial, fsz_s, ch_no, ch_dl, xb, ch_dc_sz, imgs, gen, chapter_idx)
-                  val () = $A.drop<byte>(xf, xb)
-                  val () = piece_free(xar, $A.thaw<byte>(xf))
+                  val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, chapter_index)
+                  val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+                  val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
 
                   val () = (case+ reading_get() of
-                    | @(p, t, _, tc) => reading_set(@(p, t, chapter_idx + 1, tc)))
+                    | @(page, page_count, _, chapter_count) => reading_set(@(page, page_count, chapter_index + 1, chapter_count)))
                   (* The chapter's title in the top bar *)
-                  val () = toc_title(chapter_idx)
-                  val () = (case+ reading_get() of @(_, _, _, tc) => _ticks_show(tc))
+                  val () = toc_title(chapter_index)
+                  val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
                   val () = _measure_pagination()
                   val () = annot_marks()
                 in $P.ret<int>(0) end
@@ -1959,40 +1958,40 @@ fn _chapter_open {i:nat} (serial: int, chapter_idx: int i, gen: int): $P.promise
             end
     end
 
-(* Loads chapter chapter_idx: first the book's chapters, from its OPF,
+(* Loads chapter chapter_index: first the book's chapters, from its OPF,
    when they are not found yet *)
-fn _load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained) = let
+fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(int, $P.Chained) = let
   val serial = book_serial()
-  val () = !_load_gen := !_load_gen + 1
-  val gen = !_load_gen
+  val () = !_load_generation := !_load_generation + 1
+  val generation = !_load_generation
 in
-  case+ book_chapter_get(serial, chapter_idx) of
+  case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() =>
-    $P.and_then<int><int>(_spine_build(serial), lam(r) =>
-      if r < 0 then $P.ret<int>(r)
+    $P.and_then<int><int>(_spine_build(serial), lam(result) =>
+      if result < 0 then $P.ret<int>(result)
       else $P.and_then<int><int>(toc_build(serial), lam(_) =>
-        $P.and_then<int><int>(_font_load(serial), lam(_) => _chapter_open(serial, chapter_idx, gen))))
-  | ~ChapterNone(_) => _chapter_open(serial, chapter_idx, gen)
-  | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_idx, gen)
+        $P.and_then<int><int>(_font_load(serial), lam(_) => _chapter_open(serial, chapter_index, generation))))
+  | ~ChapterNone(_) => _chapter_open(serial, chapter_index, generation)
+  | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
 end
 
 (* Shows the page of the chapter just loaded that target names: the
-   page content node anchor is on (anchor >= 0), else page pg (the last
-   when pg is -1 or past the chapter's end) *)
-fn _show_target (pg: Int, anchor: Int): void =
+   page content node anchor is on (anchor >= 0), else page page (the last
+   when page is -1 or past the chapter's end) *)
+fn _show_target (page: Int, anchor: Int): void =
   case+ reading_get() of
-  | @(cur, t, c, tc) =>
+  | @(current, page_count, chapter, chapter_count) =>
     (* scrolled, the node itself at the top of the screen *)
     if anchor >= 0 then (if _scrolled() then let
-        val @(off, bottom) = _node_down_by(anchor, cur)
+        val @(offset, bottom) = _node_down_by(anchor, current)
       in
-        if off < 0 then _show_page(cur, t, c, tc)
-        else _show_page_down(_screen_at(off, bottom, t), t, c, tc, (if off < bottom then off else bottom))
+        if offset < 0 then _show_page(current, page_count, chapter, chapter_count)
+        else _show_page_down(_screen_at(offset, bottom, page_count), page_count, chapter, chapter_count, (if offset < bottom then offset else bottom))
       end
-      else _show_page(_page_of_node(anchor, t, cur), t, c, tc))
-    else if pg < 0 then _show_page(t - 1, t, c, tc)
-    else if pg >= t then _show_page(t - 1, t, c, tc)
-    else _show_page(pg, t, c, tc)
+      else _show_page(_page_of_node(anchor, page_count, current), page_count, chapter, chapter_count))
+    else if page < 0 then _show_page(page_count - 1, page_count, chapter, chapter_count)
+    else if page >= page_count then _show_page(page_count - 1, page_count, chapter, chapter_count)
+    else _show_page(page, page_count, chapter, chapter_count)
 
 (* ============================================================
    Settling: a chapter's layout can still change after its page is
@@ -2004,7 +2003,7 @@ fn _show_target (pg: Int, anchor: Int): void =
 
 (* The node the place was restored to, or -1 once a page is turned *)
 val _settle_anchor = ref<Int>(~1)
-val _settle_gen = ref<int>(0)
+val _settle_generation = ref<int>(0)
 
 (* What keeps the reader's place on page page of total when the chapter
    is laid out again, as _show_target takes it (a page, a node): the
@@ -2019,76 +2018,76 @@ fn _place_kept (page: Int, total: Int): @(Int, Int) =
 
 (* How many pages the chapter has now, as it is laid out *)
 fn _pages_now (): Int = let
-  val () = _measure_lit("page")
-  val cw = $DR.get_measure_w()
-in if cw > 0 then _count_pages() else ~1 end
+  val () = _measure_literal("page")
+  val page_width = $DR.get_measure_w()
+in if page_width > 0 then _count_pages() else ~1 end
 
-(* Every quarter second, n more times, while no other chapter has been
-   shown since (gen) *)
-fun _settle {n:nat} .<n>. (gen: int, n: int n): void =
-  if n <= 0 then ()
+(* Every quarter second, so many more times, while no other chapter has been
+   shown since (generation) *)
+fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
+  if times <= 0 then ()
   else $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) =>
-    if gen <> !_settle_gen then $P.ret<int>(0)
+    if generation <> !_settle_generation then $P.ret<int>(0)
     else let
       val () = (case+ reading_get() of
-        | @(p, t, _, _) => let
-            val now = _pages_now()
-            val a = !_settle_anchor
+        | @(page, page_count, _, _) => let
+            val count_now = _pages_now()
+            val anchor = !_settle_anchor
             (* the node the reader was taken to, if it is no longer on
                the page shown *)
-            val moved = (if a < 0 then false else if p >= t then false
-              else _page_of_node(a, t, p) <> p): bool
+            val moved = (if anchor < 0 then false else if page >= page_count then false
+              else _page_of_node(anchor, page_count, page) <> page): bool
           in
-            if now <= 0 then ()
-            else if now <> t then let
-              val @(pg, a) = _place_kept(p, t)
+            if count_now <= 0 then ()
+            else if count_now <> page_count then let
+              val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
-            in _show_target(pg, a) end
-            else if moved then _show_target(p, a)
+            in _show_target(target_page, target_anchor) end
+            else if moved then _show_target(page, anchor)
             else ()
           end)
-      val () = _settle(gen, n - 1)
+      val () = _settle(generation, times - 1)
     in $P.ret<int>(0) end))
 
 (* Starts settling the page just shown, which anchor (when >= 0) is on *)
 fn _settle_start (anchor: Int): void = let
   val () = !_settle_anchor := anchor
-  val () = !_settle_gen := !_settle_gen + 1
-in _settle(!_settle_gen, 12) end
+  val () = !_settle_generation := !_settle_generation + 1
+in _settle(!_settle_generation, 12) end
 
-(* Loads chapter ch (from 0) and shows its page pg, or the page of
+(* Loads a chapter (from 0) and shows its page, or the page of
    content node anchor (see _show_target); the promise resolves with 0,
    or below 0 when the chapter cannot be shown *)
-fn _goto (ch: Int, pg: Int, anchor: Int): $P.promise(int, $P.Chained) = let
-  val ch = (if ch >= 0 then ch else 0): [v:nat] int v
+fn _goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained) = let
+  val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
-    if r < 0 then $P.ret<int>(r)
+  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+    if result < 0 then $P.ret<int>(result)
     else let
-      val () = _show_target(pg, anchor)
+      val () = _show_target(page, anchor)
       val () = _settle_start(anchor)
     in $P.ret<int>(0) end)
 end
 
-(* Loads chapter ch and shows the page of its element whose id is
-   fr[0, f) (the first page when there is none); frees fr *)
-fn _goto_frag {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f: int f): $P.promise(int, $P.Chained) =
-  if f <= 0 then let
-    val () = $A.free<byte>(fr)
-  in _goto(ch, 0, ~1) end
+(* Loads a chapter and shows the page of its element whose id is
+   fragment[0, fragment_len) (the first page when there is none); frees fragment *)
+fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: Int, fragment: $A.arr(byte, l, n), fragment_len: int fragment_len): $P.promise(int, $P.Chained) =
+  if fragment_len <= 0 then let
+    val () = $A.free<byte>(fragment)
+  in _goto(chapter, 0, ~1) end
   else let
-    val () = _frag_put(FragSome(fr, f))
-    val () = !_frag_hit := ~1
-    val ch = (if ch >= 0 then ch else 0): [v:nat] int v
+    val () = _fragment_put(FragmentSome(fragment, fragment_len))
+    val () = !_fragment_node := ~1
+    val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
   in
-    $P.and_then<int><int>(_load_chapter(ch), lam(r) => let
-      val () = _frag_put(FragNone())
+    $P.and_then<int><int>(_load_chapter(chapter), lam(result) => let
+      val () = _fragment_put(FragmentNone())
     in
-      if r < 0 then $P.ret<int>(r)
+      if result < 0 then $P.ret<int>(result)
       else let
-        val a = !_frag_hit
-        val () = _show_target(0, a)
-        val () = _settle_start(a)
+        val anchor = !_fragment_node
+        val () = _show_target(0, anchor)
+        val () = _settle_start(anchor)
       in $P.ret<int>(0) end
     end)
   end
@@ -2097,35 +2096,35 @@ fn _goto_frag {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f:
    result), the latest first: the back button returns to them *)
 datavtype pstack(int) =
   | ps_nil(0) of ()
-  | {k:nat} ps_cons(k + 1) of (Int, Int, Int, pstack(k))
+  | {count:nat} ps_cons(count + 1) of (Int, Int, Int, pstack(count))
 
-fun ps_free {k:nat} .<k>. (p: pstack(k)): void =
-  case+ p of
+fun ps_free {count:nat} .<count>. (positions: pstack(count)): void =
+  case+ positions of
   | ~ps_nil() => ()
-  | ~ps_cons(_, _, _, r) => ps_free(r)
+  | ~ps_cons(_, _, _, rest) => ps_free(rest)
 
-(* The first j of p *)
-fun ps_keep {k:nat}{j:nat} .<k>. (p: pstack(k), j: int j): [m:nat] pstack(m) =
-  case+ p of
+(* The first kept of positions *)
+fun ps_keep {count:nat}{kept:nat} .<count>. (positions: pstack(count), kept: int kept): [kept_count:nat] pstack(kept_count) =
+  case+ positions of
   | ~ps_nil() => ps_nil()
-  | ~ps_cons(c, g, a, r) =>
-    if j <= 0 then let val () = ps_free(r) in ps_nil() end
-    else ps_cons(c, g, a, ps_keep(r, j - 1))
+  | ~ps_cons(chapter, page, anchor, rest) =>
+    if kept <= 0 then let val () = ps_free(rest) in ps_nil() end
+    else ps_cons(chapter, page, anchor, ps_keep(rest, kept - 1))
 
 (* How long the back button stays after a jump, in milliseconds *)
 #define BACK_SHOWN 10000
 
-(* TIMED(g): a timeout numbered g is armed, which will run the action
-   _timed_arm was given, with g. Its constructor is local to _timed_arm,
-   so nothing else can make one *)
+(* TIMED(timeout): the timeout of that number is armed, which will run the
+   action _timed_arm was given, with the number. Its constructor is local
+   to _timed_arm, so nothing else can make one *)
 local
-dataprop TIMED_(int) = {g:int} TimedArmed(g) of ()
+dataprop TIMED_(int) = {timeout:int} TimedArmed(timeout) of ()
 in
 stadef TIMED = TIMED_
 
-fn _timed_arm {g:int} (g: int g, done: (Int) -<cloref1> void): (TIMED(g) | void) = let
+fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<cloref1> void): (TIMED(timeout) | void) = let
   val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => let
-      val () = done(g)
+      val () = done(timeout)
     in $P.ret<int>(0) end))
 in (TimedArmed() | ()) end
 end
@@ -2136,91 +2135,91 @@ end
    never shown without a pending timeout that takes it away *)
 datavtype ps_cell =
   | PsHidden of ()
-  | {k:pos}{g:int} PsShown of (TIMED(g) | int g, pstack(k))
+  | {count:pos}{timeout:int} PsShown of (TIMED(timeout) | int timeout, pstack(count))
 
 val _ps = ref<ps_cell>(PsHidden())
 
 (* The number of the last timeout armed *)
 val _ps_timed = ref<Int>(0)
 
-fn _ps_free (c: ps_cell): void =
-  case+ c of
+fn _ps_free (cell: ps_cell): void =
+  case+ cell of
   | ~PsHidden() => ()
-  | ~PsShown(_ | _, p) => ps_free(p)
+  | ~PsShown(_ | _, positions) => ps_free(positions)
 
 fn _ps_take (): ps_cell = let
-  var c: ps_cell = PsHidden()
-  val () = ref_exch_elt<ps_cell>(_ps, c)
-in c end
+  var cell: ps_cell = PsHidden()
+  val () = ref_exch_elt<ps_cell>(_ps, cell)
+in cell end
 
-(* Keeps c, and shows the button or hides it as c says: the only place
+(* Keeps the cell, and shows the button or hides it as the cell says: the only place
    that shows or hides it *)
-fn _ps_put (c: ps_cell): void = let
-  val shown = (case+ c of PsHidden() => false | PsShown(_ | _, _) => true): bool
-  var cur: ps_cell = c
-  val () = ref_exch_elt<ps_cell>(_ps, cur)
-  val () = _ps_free(cur)
+fn _ps_put (cell: ps_cell): void = let
+  val shown = (case+ cell of PsHidden() => false | PsShown(_ | _, _) => true): bool
+  var old: ps_cell = cell
+  val () = ref_exch_elt<ps_cell>(_ps, old)
+  val () = _ps_free(old)
 in ui_show("jump-back", shown) end
 
-(* Timeout g has run: the button goes, with the positions it offered,
-   when it is still the one timeout g was armed for *)
-fn _back_timeout (g: Int): void = let
-  val c = _ps_take()
-  val due = (case+ c of PsHidden() => false | PsShown(_ | h, _) => h = g): bool
+(* A timeout has run: the button goes, with the positions it offered,
+   when it is still the one timeout that was armed for *)
+fn _back_timeout (timeout: Int): void = let
+  val cell = _ps_take()
+  val due = (case+ cell of PsHidden() => false | PsShown(_ | armed, _) => armed = timeout): bool
 in
   if due then let
-    val () = _ps_free(c)
+    val () = _ps_free(cell)
   in _ps_put(PsHidden()) end
-  else _ps_put(c)
+  else _ps_put(cell)
 end
 
 (* Arms a new timeout for the button, which takes it away *)
-fn _back_arm (): [g:int] (TIMED(g) | int g) = let
-  val g = !_ps_timed + 1
-  val () = !_ps_timed := g
-  val (pf | ()) = _timed_arm(g, lam(h) => _back_timeout(h))
-in (pf | g) end
+fn _back_arm (): [timeout:int] (TIMED(timeout) | int timeout) = let
+  val timeout = !_ps_timed + 1
+  val () = !_ps_timed := timeout
+  val (armed | ()) = _timed_arm(timeout, lam(fired) => _back_timeout(fired))
+in (armed | timeout) end
 
-(* Shows the button offering the positions p, with a new timeout *)
-fn _back_offer {k:pos} (p: pstack(k)): void = let
-  val (pf | g) = _back_arm()
-in _ps_put(PsShown(pf | g, p)) end
+(* Shows the button offering the positions, with a new timeout *)
+fn _back_offer {count:pos} (positions: pstack(count)): void = let
+  val (armed | timeout) = _back_arm()
+in _ps_put(PsShown(armed | timeout, positions)) end
 
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
   val anchor = _anchor_now()
-  val c = _ps_take()
-  val p = (case+ c of
+  val cell = _ps_take()
+  val positions = (case+ cell of
     | ~PsHidden() => ps_nil()
-    | ~PsShown(_ | _, p) => p): [k:nat] pstack(k)
-  val p = (case+ reading_get() of
-    | @(pg, _, ch, _) => ps_cons((if ch > 0 then ch - 1 else 0), pg, anchor, ps_keep(p, 29))): [m:pos] pstack(m)
-in _back_offer(p) end
+    | ~PsShown(_ | _, positions) => positions): [count:nat] pstack(count)
+  val positions = (case+ reading_get() of
+    | @(page, _, chapter, _) => ps_cons((if chapter > 0 then chapter - 1 else 0), page, anchor, ps_keep(positions, 29))): [count:pos] pstack(count)
+in _back_offer(positions) end
 
 (* Returns to the position last jumped away from; the button stays, with
    a new timeout, while there are more *)
 fn _pop_position (): void = let
-  val c = _ps_take()
+  val cell = _ps_take()
 in
-  case+ c of
+  case+ cell of
   | ~PsHidden() => _ps_put(PsHidden())
-  | ~PsShown(_ | _, p) => let
-      val+ ~ps_cons(ch, g, a, rest) = p
+  | ~PsShown(_ | _, positions) => let
+      val+ ~ps_cons(chapter, page, anchor, rest) = positions
       val () = (case+ rest of
         | ~ps_nil() => _ps_put(PsHidden())
         | ps_cons(_, _, _, _) => _back_offer(rest))
-    in $P.discard<int>(_goto(ch, g, a)) end
+    in $P.discard<int>(_goto(chapter, page, anchor)) end
 end
 
-(* Loads chapter ch and shows its page at thousandth cp of it *)
-fn _goto_part (ch: Int, cp: Int): $P.promise(int, $P.Chained) = let
-  val ch = (if ch >= 0 then ch else 0): [v:nat] int v
+(* Loads a chapter and shows its page at a thousandth of it *)
+fn _goto_part (chapter: Int, thousandth: Int): $P.promise(int, $P.Chained) = let
+  val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(ch), lam(r) =>
-    if r < 0 then $P.ret<int>(r)
+  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+    if result < 0 then $P.ret<int>(result)
     else let
       val () = (case+ reading_get() of
-        | @(_, t, _, _) => _show_target(cp * t / 1000, ~1))
+        | @(_, page_count, _, _) => _show_target(thousandth * page_count / 1000, ~1))
     in $P.ret<int>(0) end)
 end
 
@@ -2229,29 +2228,29 @@ fn _page_next(): void = let
   val () = !_settle_anchor := ~1
 in
   case+ reading_get() of
-  | @(p, t, c, tc) =>
-    if p + 1 < t then let val () = _spd_turn() in _show_page(p + 1, t, c, tc) end
-    else if c < tc then let val () = _spd_turn() in $P.discard<int>(_goto(c, 0, ~1)) end
-    else _show_page(p, t, c, tc)
+  | @(page, page_count, chapter, chapter_count) =>
+    if page + 1 < page_count then let val () = _speed_turn() in _show_page(page + 1, page_count, chapter, chapter_count) end
+    else if chapter < chapter_count then let val () = _speed_turn() in $P.discard<int>(_goto(chapter, 0, ~1)) end
+    else _show_page(page, page_count, chapter, chapter_count)
 end
 
 (* The previous page: in this chapter, else the previous chapter's last *)
-fn _page_prev(): void = let
+fn _page_previous(): void = let
   val () = !_settle_anchor := ~1
 in
   case+ reading_get() of
-  | @(p, t, c, tc) =>
-    if p > 0 then _show_page(p - 1, t, c, tc)
-    else if c > 1 then $P.discard<int>(_goto(c - 2, ~1, ~1))
-    else _show_page(0, t, c, tc)
+  | @(page, page_count, chapter, chapter_count) =>
+    if page > 0 then _show_page(page - 1, page_count, chapter, chapter_count)
+    else if chapter > 1 then $P.discard<int>(_goto(chapter - 2, ~1, ~1))
+    else _show_page(0, page_count, chapter, chapter_count)
 end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
 fn _relayout (): void = let
-  val @(pg, anchor) = (case+ reading_get() of @(p, t, _, _) => _place_kept(p, t)): @(Int, Int)
+  val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
   val () = _measure_pagination()
-in _show_target(pg, anchor) end
+in _show_target(page, anchor) end
 
 (* ============================================================
    Search: every chapter's text, for the query
@@ -2263,362 +2262,362 @@ in _show_target(pg, anchor) end
    decoded), letters in any case. A hit is its chapter, content node and
    offset, with the text around it. *)
 
-#define HMAX 500
+#define HIT_MAX 500
 
 datavtype hits(int) =
   | hits_nil(0) of ()
-  | {k:nat}{l:agz}{sl:nat | sl <= 206}
-    hits_cons(k + 1) of (Int, Int, Int, $A.arr(byte, l, sl + 1), int sl, hits(k))
+  | {count:nat}{l:agz}{snippet_len:nat | snippet_len <= 206}
+    hits_cons(count + 1) of (Int, Int, Int, $A.arr(byte, l, snippet_len + 1), int snippet_len, hits(count))
 
-fun hits_free {k:nat} .<k>. (x: hits(k)): void =
-  case+ x of
+fun hits_free {count:nat} .<count>. (entries: hits(count)): void =
+  case+ entries of
   | ~hits_nil() => ()
-  | ~hits_cons(_, _, _, a, _, r) => let val () = $A.free<byte>(a) in hits_free(r) end
+  | ~hits_cons(_, _, _, snippet, _, rest) => let val () = $A.free<byte>(snippet) in hits_free(rest) end
 
-fun hits_rev {k,j:nat} .<k>. (x: hits(k), acc: hits(j)): hits(k + j) =
-  case+ x of
-  | ~hits_nil() => acc
-  | ~hits_cons(c, n, o, a, sl, r) => hits_rev(r, hits_cons(c, n, o, a, sl, acc))
+fun hits_reverse {count,reversed_count:nat} .<count>. (remaining: hits(count), reversed: hits(reversed_count)): hits(count + reversed_count) =
+  case+ remaining of
+  | ~hits_nil() => reversed
+  | ~hits_cons(chapter, node, offset, snippet, snippet_len, rest) => hits_reverse(rest, hits_cons(chapter, node, offset, snippet, snippet_len, reversed))
 
 (* The hits so far (the latest first while a search runs), their count,
    the query query[0, query_len) (lower case) and the search's number *)
 datavtype search_cell =
-  | {k:nat | k <= HMAX}{l:agz}{query_len:pos | query_len <= 200} SearchCell of (hits(k), int k, $A.arr(byte, l, query_len), int query_len)
+  | {hit_count:nat | hit_count <= HIT_MAX}{l:agz}{query_len:pos | query_len <= 200} SearchCell of (hits(hit_count), int hit_count, $A.arr(byte, l, query_len), int query_len)
   | SearchNone of ()
 
 val _search = ref<search_cell>(SearchNone())
-val _search_gen = ref<int>(0)
+val _search_generation = ref<int>(0)
 (* The hit shown, and whether a hit was jumped to since the search opened *)
-val _hit_cur = ref<Int>(~1)
+val _hit_current = ref<Int>(~1)
 val _hit_jumped = ref<bool>(false)
 
-fn _search_free (c: search_cell): void =
-  case+ c of
-  | ~SearchCell(h, _, query, _) => let val () = hits_free(h) in $A.free<byte>(query) end
+fn _search_free (cell: search_cell): void =
+  case+ cell of
+  | ~SearchCell(found, _, query, _) => let val () = hits_free(found) in $A.free<byte>(query) end
   | ~SearchNone() => ()
 
 fn _search_take (): search_cell = let
-  var c: search_cell = SearchNone()
-  val () = ref_exch_elt<search_cell>(_search, c)
-in c end
+  var cell: search_cell = SearchNone()
+  val () = ref_exch_elt<search_cell>(_search, cell)
+in cell end
 
-fn _search_put (c: search_cell): void = let
-  var cur: search_cell = c
-  val () = ref_exch_elt<search_cell>(_search, cur)
-in _search_free(cur) end
+fn _search_put (new_cell: search_cell): void = let
+  var cell: search_cell = new_cell
+  val () = ref_exch_elt<search_cell>(_search, cell)
+in _search_free(cell) end
 
-(* b, in lower case when it is an ASCII capital *)
-fn _lower (b: int): int = if b >= 65 then (if b <= 90 then b + 32 else b) else b
+(* A character's code, in lower case when it is an ASCII capital *)
+fn _lower (char_code: int): int = if char_code >= 65 then (if char_code <= 90 then char_code + 32 else char_code) else char_code
 
-(* Whether t[j, j + query_len) is query[0, query_len), letters in any case *)
-fun _match_at {lt,lq:agz}{nt,nq:pos}{j:nat}{query_len:nat | query_len <= nq; j + query_len <= nt}{i:nat | i <= query_len} .<query_len - i>.
-  (t: !$A.arr(byte, lt, nt), j: int j, query: !$A.arr(byte, lq, nq), query_len: int query_len, i: int i): bool =
+(* Whether text[at, at + query_len) is query[0, query_len), letters in any case *)
+fun _match_at {text_location,query_location:agz}{text_size,query_size:pos}{at:nat}{query_len:nat | query_len <= query_size; at + query_len <= text_size}{i:nat | i <= query_len} .<query_len - i>.
+  (text: !$A.arr(byte, text_location, text_size), at: int at, query: !$A.arr(byte, query_location, query_size), query_len: int query_len, i: int i): bool =
   if i >= query_len then true
-  else if _lower(byte2int0($A.get<byte>(t, j + i))) <> byte2int0($A.get<byte>(query, i)) then false
-  else _match_at(t, j, query, query_len, i + 1)
+  else if _lower(byte2int0($A.get<byte>(text, at + i))) <> byte2int0($A.get<byte>(query, i)) then false
+  else _match_at(text, at, query, query_len, i + 1)
 
-(* The start of the UTF-8 character at or after j in t[0, n), no further
-   than e *)
-fun _char_fwd {l:agz}{m:pos}{j,e:nat | j <= e; e <= m} .<e - j>.
-  (t: !$A.arr(byte, l, m), j: int j, e: int e): [r:nat | j <= r; r <= e] int r =
-  if j >= e then e
-  else if $AR.band_int_int(byte2int0($A.get<byte>(t, j)), 192) <> 128 then j
-  else _char_fwd(t, j + 1, e)
+(* The start of the UTF-8 character at or after at in text[0, n), no further
+   than limit *)
+fun _char_forward {l:agz}{n:pos}{at,limit:nat | at <= limit; limit <= n} .<limit - at>.
+  (text: !$A.arr(byte, l, n), at: int at, limit: int limit): [start:nat | at <= start; start <= limit] int start =
+  if at >= limit then limit
+  else if $AR.band_int_int(byte2int0($A.get<byte>(text, at)), 192) <> 128 then at
+  else _char_forward(text, at + 1, limit)
 
-(* e, or less (no less than lo), so that t[.., e) ends before a
+(* end_at, or less (no less than low), so that text[.., end_at) ends before a
    character's start *)
-fun _char_back_loop {l:agz}{m:pos}{lo,e:nat | lo <= e; e <= m} .<e - lo>.
-  (t: !$A.arr(byte, l, m), m: int m, e: int e, lo: int lo): [r:nat | lo <= r; r <= e] int r =
-  if e <= lo then lo
-  else if e >= m then e
-  else if $AR.band_int_int(byte2int0($A.get<byte>(t, e)), 192) <> 128 then e
-  else _char_back_loop(t, m, e - 1, lo)
+fun _char_back_loop {l:agz}{n:pos}{low,end_at:nat | low <= end_at; end_at <= n} .<end_at - low>.
+  (text: !$A.arr(byte, l, n), n: int n, end_at: int end_at, low: int low): [cut:nat | low <= cut; cut <= end_at] int cut =
+  if end_at <= low then low
+  else if end_at >= n then end_at
+  else if $AR.band_int_int(byte2int0($A.get<byte>(text, end_at)), 192) <> 128 then end_at
+  else _char_back_loop(text, n, end_at - 1, low)
 
-(* t[s, s + sl) into a from d, its control characters as spaces *)
-fun _snip_copy {l,la:agz}{m,ma:pos}{s,sl:nat | s + sl <= m}{d:nat | d + sl < ma}{i:nat | i <= sl} .<sl - i>.
-  (t: !$A.arr(byte, l, m), s: int s, a: !$A.arr(byte, la, ma), d: int d, sl: int sl, i: int i): void =
-  if i >= sl then ()
+(* text[start, start + span_len) into snippet from at, its control characters as spaces *)
+fun _snippet_copy {text_location,snippet_location:agz}{text_size,snippet_size:pos}{start,span_len:nat | start + span_len <= text_size}{at:nat | at + span_len < snippet_size}{i:nat | i <= span_len} .<span_len - i>.
+  (text: !$A.arr(byte, text_location, text_size), start: int start, snippet: !$A.arr(byte, snippet_location, snippet_size), at: int at, span_len: int span_len, i: int i): void =
+  if i >= span_len then ()
   else let
-    val b = byte2int0($A.get<byte>(t, s + i))
-    val () = $A.set<byte>(a, d + i, (if b < 32 then $A.int2byte(32) else $A.get<byte>(t, s + i)))
-  in _snip_copy(t, s, a, d, sl, i + 1) end
+    val char_code = byte2int0($A.get<byte>(text, start + i))
+    val () = $A.set<byte>(snippet, at + i, (if char_code < 32 then $A.int2byte(32) else $A.get<byte>(text, start + i)))
+  in _snippet_copy(text, start, snippet, at, span_len, i + 1) end
 
-(* An ellipsis (U+2026, 3 bytes) at a[d, d + 3) *)
-fn _ellipsis {la:agz}{ma:pos}{d:nat | d + 3 <= ma} (a: !$A.arr(byte, la, ma), d: int d): void = let
-  val () = $A.set<byte>(a, d, $A.int2byte(226))
-  val () = $A.set<byte>(a, d + 1, $A.int2byte(128))
-in $A.set<byte>(a, d + 2, $A.int2byte(166)) end
+(* An ellipsis (U+2026, 3 bytes) at buf[at, at + 3) *)
+fn _ellipsis {l:agz}{n:pos}{at:nat | at + 3 <= n} (buf: !$A.arr(byte, l, n), at: int at): void = let
+  val () = $A.set<byte>(buf, at, $A.int2byte(226))
+  val () = $A.set<byte>(buf, at + 1, $A.int2byte(128))
+in $A.set<byte>(buf, at + 2, $A.int2byte(166)) end
 
-(* An ellipsis at a[d, d + p) when p is 3; nothing when it is 0 *)
-fn _ellipsis_if {la:agz}{ma:pos}{d:nat}{p:int | p == 0 || p == 3; d + p <= ma}
-  (a: !$A.arr(byte, la, ma), d: int d, p: int p): void =
-  if p > 0 then _ellipsis(a, d) else ()
+(* An ellipsis at buf[at, at + width) when width is 3; nothing when it is 0 *)
+fn _ellipsis_if {l:agz}{n:pos}{at:nat}{width:int | width == 0 || width == 3; at + width <= n}
+  (buf: !$A.arr(byte, l, n), at: int at, width: int width): void =
+  if width > 0 then _ellipsis(buf, at) else ()
 
-(* e - s, at most 200 *)
-fn _span200 {s,e:nat | s <= e} (s: int s, e: int e): [c:nat | c <= 200; s + c <= e] int c =
-  if e - s <= 200 then e - s else 200
+(* end_at - start, at most 200 *)
+fn _span200 {start,end_at:nat | start <= end_at} (start: int start, end_at: int end_at): [span:nat | span <= 200; start + span <= end_at] int span =
+  if end_at - start <= 200 then end_at - start else 200
 
-(* The text around t[j, j + query_len) in t[0, n): some 40 bytes before it and
-   80 after, whole characters, its line breaks as spaces, with an
+(* The text around text[at, at + query_len) in text[0, text_len): some 40
+   bytes before it and 80 after, whole characters, its line breaks as spaces, with an
    ellipsis on a side where the text goes on *)
-fn _snippet {l:agz}{m:pos}{n:nat | n <= m}{j,query_len:nat | j + query_len <= n}
-  (t: !$A.arr(byte, l, m), m: int m, n: int n, j: int j, query_len: int query_len): [la:agz][sl:nat | sl <= 206] @($A.arr(byte, la, sl + 1), int sl) = let
-  val s0 = (if j > 40 then j - 40 else 0): [s:nat | s <= j] int s
-  val s = _char_fwd(t, s0, j)
-  val e0 = (if j + query_len + 80 < n then j + query_len + 80 else n): [e:nat | j + query_len <= e; e <= n] int e
-  val e = _char_back_loop(t, m, e0, j + query_len)
-  val sl = _span200(s, e)
-  val pre = (if s > 0 then 3 else 0): [p:int | p == 0 || p == 3] int p
-  val post = (if s + sl < n then 3 else 0): [p:int | p == 0 || p == 3] int p
-  val a = $A.alloc<byte>(pre + sl + post + 1)
-  val () = _ellipsis_if(a, 0, pre)
-  val () = _snip_copy(t, s, a, pre, sl, 0)
-  val () = _ellipsis_if(a, pre + sl, post)
-in @(a, pre + sl + post) end
+fn _snippet {l:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{at,query_len:nat | at + query_len <= text_len}
+  (text: !$A.arr(byte, l, text_size), text_size: int text_size, text_len: int text_len, at: int at, query_len: int query_len): [snippet_location:agz][snippet_len:nat | snippet_len <= 206] @($A.arr(byte, snippet_location, snippet_len + 1), int snippet_len) = let
+  val start_guess = (if at > 40 then at - 40 else 0): [start:nat | start <= at] int start
+  val start = _char_forward(text, start_guess, at)
+  val end_guess = (if at + query_len + 80 < text_len then at + query_len + 80 else text_len): [end_at:nat | at + query_len <= end_at; end_at <= text_len] int end_at
+  val end_at = _char_back_loop(text, text_size, end_guess, at + query_len)
+  val snippet_len = _span200(start, end_at)
+  val ellipsis_before = (if start > 0 then 3 else 0): [width:int | width == 0 || width == 3] int width
+  val ellipsis_after = (if start + snippet_len < text_len then 3 else 0): [width:int | width == 0 || width == 3] int width
+  val snippet = $A.alloc<byte>(ellipsis_before + snippet_len + ellipsis_after + 1)
+  val () = _ellipsis_if(snippet, 0, ellipsis_before)
+  val () = _snippet_copy(text, start, snippet, ellipsis_before, snippet_len, 0)
+  val () = _ellipsis_if(snippet, ellipsis_before + snippet_len, ellipsis_after)
+in @(snippet, ellipsis_before + snippet_len + ellipsis_after) end
 
-(* The hits of the query in t[j, n), content node idx of chapter ch,
-   onto acc, while there are fewer than HMAX *)
-fun _find_all {lt,lq:agz}{mt,nq:pos}{n:nat | n <= mt}{query_len:pos | query_len <= nq}{j:nat}{k:nat | k <= HMAX} .<max(n - j, 0)>.
-  (t: !$A.arr(byte, lt, mt), mt: int mt, n: int n, j: int j, query: !$A.arr(byte, lq, nq), query_len: int query_len,
-   ch: Int, idx: Int, acc: hits(k), k: int k): [k2:nat | k2 <= HMAX] @(hits(k2), int k2) =
-  if k >= HMAX then @(acc, k)
-  else if j + query_len > n then @(acc, k)
-  else if _match_at(t, j, query, query_len, 0) then let
-    val @(a, sl) = _snippet(t, mt, n, j, query_len)
-  in _find_all(t, mt, n, j + query_len, query, query_len, ch, idx, hits_cons(ch, idx, j, a, sl, acc), k + 1) end
-  else _find_all(t, mt, n, j + 1, query, query_len, ch, idx, acc, k)
+(* The hits of the query in text[at, text_len), a content node of a chapter,
+   onto found, while there are fewer than HIT_MAX *)
+fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_len:nat | text_len <= text_size}{query_len:pos | query_len <= query_size}{at:nat}{hit_count:nat | hit_count <= HIT_MAX} .<max(text_len - at, 0)>.
+  (text: !$A.arr(byte, text_location, text_size), text_size: int text_size, text_len: int text_len, at: int at, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+   chapter: Int, node: Int, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(hits(new_count), int new_count) =
+  if hit_count >= HIT_MAX then @(found, hit_count)
+  else if at + query_len > text_len then @(found, hit_count)
+  else if _match_at(text, at, query, query_len, 0) then let
+    val @(snippet, snippet_len) = _snippet(text, text_size, text_len, at, query_len)
+  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, at, snippet, snippet_len, found), hit_count + 1) end
+  else _find_all(text, text_size, text_len, at + 1, query, query_len, chapter, node, found, hit_count)
 
-(* The hits in text data[off, off + k), content node idx, decoded *)
-fn _scan_piece {lb,lq:agz}{n:pos}{o,m:nat | o + m <= n; m < 65536}{nq:pos}{query_len:pos | query_len <= nq}{r:nat | r <= HMAX}
-  (data: !$A.borrow(byte, lb, n), off: int o, m: int m, query: !$A.arr(byte, lq, nq), query_len: int query_len,
-   ch: Int, idx: Int, acc: hits(r), r: int r): [r2:nat | r2 <= HMAX] @(hits(r2), int r2) =
-  if m <= 0 then @(acc, r)
+(* The hits in text data[offset, offset + piece_len), a content node's, decoded *)
+fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_len:nat | offset + piece_len <= data_size; piece_len < 65536}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX}
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, piece_len: int piece_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+   chapter: Int, node: Int, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(hits(new_count), int new_count) =
+  if piece_len <= 0 then @(found, hit_count)
   else let
-    val buf = $A.alloc<byte>(m)
-    val d = decode_text(data, off, m, buf)
-    val res = _find_all(buf, m, d, 0, query, query_len, ch, idx, acc, r)
-    val () = $A.free<byte>(buf)
-  in res end
+    val text = $A.alloc<byte>(piece_len)
+    val text_len = decode_text(data, offset, piece_len, text)
+    val result = _find_all(text, piece_len, text_len, 0, query, query_len, chapter, node, found, hit_count)
+    val () = $A.free<byte>(text)
+  in result end
 
-(* The pieces of text data[off, off + k), as _text_spans makes them,
-   from content node idx: their hits, and the next node's number *)
-fun _scan_text {lb,lq:agz}{n:pos}{o,k:nat | o + k <= n}{nq:pos}{query_len:pos | query_len <= nq}{r:nat | r <= HMAX} .<k>.
-  (data: !$A.borrow(byte, lb, n), off: int o, k: int k, query: !$A.arr(byte, lq, nq), query_len: int query_len,
-   ch: Int, idx: Nat, acc: hits(r), r: int r): [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
-  if k < 65536 then let
-    val @(h, r2) = _scan_piece(data, off, k, query, query_len, ch, idx, acc, r)
-  in @(idx + 1, h, r2) end
+(* The pieces of text data[offset, offset + text_len), as _text_spans makes them,
+   from a content node: their hits, and the next node's number *)
+fun _scan_text {data_location,query_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<text_len>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+   chapter: Int, node: Nat, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
+  if text_len < 65536 then let
+    val @(found_after, new_count) = _scan_piece(data, offset, text_len, query, query_len, chapter, node, found, hit_count)
+  in @(node + 1, found_after, new_count) end
   else let
-    val c = _text_cut(data, off, k)
-    val @(h, r2) = _scan_piece(data, off, c, query, query_len, ch, idx, acc, r)
-  in _scan_text(data, off + c, k - c, query, query_len, ch, idx + 1, h, r2) end
+    val cut = _text_cut(data, offset, text_len)
+    val @(found_after, new_count) = _scan_piece(data, offset, cut, query, query_len, chapter, node, found, hit_count)
+  in _scan_text(data, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count) end
 
-(* The numbers _skip_spans takes for k bytes *)
-fun _skip_count {k:nat} .<k>. (k: int k, idx: Nat): Nat =
-  if k < 65536 then idx + 1 else _skip_count(k - 65533, idx + 1)
+(* The numbers _skip_spans takes for text_len bytes *)
+fun _skip_count {text_len:nat} .<text_len>. (text_len: int text_len, node: Nat): Nat =
+  if text_len < 65536 then node + 1 else _skip_count(text_len - 65533, node + 1)
 
-fun _scan_nodes {lb,lq:agz}{n:pos}{sz:nat}{nq:pos}{query_len:pos | query_len <= nq}{r:nat | r <= HMAX} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), top: bool,
-   query: !$A.arr(byte, lq, nq), query_len: int query_len, ch: Int, idx: Nat, acc: hits(r), r: int r)
-  : [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
+fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
+  (data: !$A.borrow(byte, data_location, data_size), nodes: !$X.xml_node_list(data_size, tree_size), top: bool,
+   query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
+  : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(i2, h, r2) = _scan_node(data, node, top, query, query_len, ch, idx, acc, r)
-    in _scan_nodes(data, rest, top, query, query_len, ch, i2, h, r2) end
-  | $X.xml_nodes_nil() => @(idx, acc, r)
+      val @(next_node, found_after, new_count) = _scan_node(data, node, top, query, query_len, chapter, content_node, found, hit_count)
+    in _scan_nodes(data, rest, top, query, query_len, chapter, next_node, found_after, new_count) end
+  | $X.xml_nodes_nil() => @(content_node, found, hit_count)
 
-and _scan_node {lb,lq:agz}{n:pos}{sz:pos}{nq:pos}{query_len:pos | query_len <= nq}{r:nat | r <= HMAX} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), top: bool,
-   query: !$A.arr(byte, lq, nq), query_len: int query_len, ch: Int, idx: Nat, acc: hits(r), r: int r)
-  : [r2:nat | r2 <= HMAX] @(Nat, hits(r2), int r2) =
+and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
+  (data: !$A.borrow(byte, data_location, data_size), node: !$X.xml_node(data_size, tree_size), top: bool,
+   query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
+  : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
-  | $X.xml_text(off, tlen) =>
-    if (if top then _blank(data, off, tlen, 0) else false) then @(_skip_count(tlen, idx), acc, r)
-    else _scan_text(data, off, tlen, query, query_len, ch, idx, acc, r)
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _t_head = @[char][4]('h', 'e', 'a', 'd')
-    var _t_title = @[char][5]('t', 'i', 't', 'l', 'e')
-    var _t_meta = @[char][4]('m', 'e', 't', 'a')
-    var _t_link = @[char][4]('l', 'i', 'n', 'k')
-    var _t_style = @[char][5]('s', 't', 'y', 'l', 'e')
-    var _t_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
-    var _t_html = @[char][4]('h', 't', 'm', 'l')
-    var _t_body = @[char][4]('b', 'o', 'd', 'y')
-    var _t_br = @[char][2]('b', 'r')
-    var _t_hr = @[char][2]('h', 'r')
-    var _t_img = @[char][3]('i', 'm', 'g')
-    var _t_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+  | $X.xml_text(offset, text_len) =>
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_skip_count(text_len, content_node), found, hit_count)
+    else _scan_text(data, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+  | $X.xml_element(name_offset, name_len, _, children) => let
+    var _tag_head = @[char][4]('h', 'e', 'a', 'd')
+    var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
+    var _tag_meta = @[char][4]('m', 'e', 't', 'a')
+    var _tag_link = @[char][4]('l', 'i', 'n', 'k')
+    var _tag_style = @[char][5]('s', 't', 'y', 'l', 'e')
+    var _tag_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+    var _tag_html = @[char][4]('h', 't', 'm', 'l')
+    var _tag_body = @[char][4]('b', 'o', 'd', 'y')
+    var _tag_br = @[char][2]('b', 'r')
+    var _tag_hr = @[char][2]('h', 'r')
+    var _tag_img = @[char][3]('i', 'm', 'g')
+    var _tag_image = @[char][5]('i', 'm', 'a', 'g', 'e')
   in
-    if xml_name_eq(data, name_off, name_len, _t_head, 4) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_title, 5) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_meta, 4) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_link, 4) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_style, 5) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_script, 6) then @(idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_html, 4) then
-      _scan_nodes(data, children, top, query, query_len, ch, idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_body, 4) then
-      _scan_nodes(data, children, top, query, query_len, ch, idx, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_br, 2) then @(idx + 1, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_hr, 2) then @(idx + 1, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_img, 3) then @(idx + 1, acc, r)
-    else if xml_name_eq(data, name_off, name_len, _t_image, 5) then @(idx + 1, acc, r)
-    else _scan_nodes(data, children, false, query, query_len, ch, idx + 1, acc, r)
+    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_meta, 4) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then @(content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then
+      _scan_nodes(data, children, top, query, query_len, chapter, content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
+      _scan_nodes(data, children, top, query, query_len, chapter, content_node, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then @(content_node + 1, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then @(content_node + 1, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then @(content_node + 1, found, hit_count)
+    else _scan_nodes(data, children, false, query, query_len, chapter, content_node + 1, found, hit_count)
   end
 
 (* The results list, or its state *)
-fn _search_status {nt:pos | nt < 256} (t: string nt): void = ui_text("search-status", t)
+fn _search_status {text_len:pos | text_len < 256} (text: string text_len): void = ui_text("search-status", text)
 
-(* The heading of chapter ch's results *)
-fn _hit_heading {c:nat} (ch: int c): void = let
-  val @(ga, gl) = nid_make("search-group", ch)
-  val () = ui_add_n("search-results", ga, gl, TDiv)
-  val @(ga, gl) = nid_make("search-group", ch)
-  val () = ui_attr_n(ga, gl, AClass, "grp")
-  val @(lb, lk) = toc_label_of(ch)
-  val @(ga, gl) = nid_make("search-group", ch)
-in ui_text_n_buf(ga, gl, lb, lk) end
+(* The heading of a chapter's results *)
+fn _hit_heading {chapter:nat} (chapter: int chapter): void = let
+  val @(group_id, group_id_len) = nid_make("search-group", chapter)
+  val () = ui_add_n("search-results", group_id, group_id_len, TDiv)
+  val @(group_id, group_id_len) = nid_make("search-group", chapter)
+  val () = ui_attr_n(group_id, group_id_len, AClass, "grp")
+  val @(label, label_len) = toc_label_of(chapter)
+  val @(group_id, group_id_len) = nid_make("search-group", chapter)
+in ui_text_n_buf(group_id, group_id_len, label, label_len) end
 
-(* One row of the results: hit i, with its text (its chapter is the
+(* One row of the results: a hit, with its text (its chapter is the
    heading above it) *)
-fn _hit_row {i:nat}{l:agz}{m:pos}{sl:nat | sl < m; sl < 65536}
-  (i: int i, a: !$A.arr(byte, l, m), sl: int sl): void = let
-  val @(ra, rl) = nid_make("search-hit", i)
-  val () = ui_btn_n("search-results", ra, rl, "pi hgo")
-  val @(pa, pl) = nid_make("search-hit", i)
-  val @(sa, sl2) = nid_make("search-hit-text", i)
-  val () = ui_add_nn(pa, pl, sa, sl2, TSpan)
-  val @(sa, sl2) = nid_make("search-hit-text", i)
-  val () = ui_attr_n(sa, sl2, AClass, "snip")
-  val b = $A.alloc<byte>(sl + 1)
-  val () = _frag_dup(a, b, sl, 0)
-  val @(sa, sl2) = nid_make("search-hit-text", i)
-in ui_text_n_buf(sa, sl2, b, sl) end
+fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_len < 65536}
+  (hit: int hit, snippet: !$A.arr(byte, l, n), snippet_len: int snippet_len): void = let
+  val @(row_id, row_id_len) = nid_make("search-hit", hit)
+  val () = ui_btn_n("search-results", row_id, row_id_len, "pi hgo")
+  val @(row_id, row_id_len) = nid_make("search-hit", hit)
+  val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
+  val () = ui_add_nn(row_id, row_id_len, text_id, text_id_len, TSpan)
+  val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
+  val () = ui_attr_n(text_id, text_id_len, AClass, "snip")
+  val text = $A.alloc<byte>(snippet_len + 1)
+  val () = _fragment_duplicate(snippet, text, snippet_len, 0)
+  val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
+in ui_text_n_buf(text_id, text_id_len, text, snippet_len) end
 
-(* The rows of hits x from hit i, under a heading wherever the chapter
+(* The rows of the hits found, from a hit on, under a heading wherever the chapter
    changes from last *)
-fun _hit_rows {k:nat}{i:nat} .<k>. (x: !hits(k), i: int i, last: Int): void =
-  case+ x of
+fun _hit_rows {count:nat}{hit:nat} .<count>. (found: !hits(count), hit: int hit, last: Int): void =
+  case+ found of
   | hits_nil() => ()
-  | @hits_cons(c, _, _, a, sl, rest) => let
-      val () = (if c >= 0 then let
-          val () = (if c <> last then _hit_heading(c) else ())
-        in _hit_row(i, a, sl) end else ())
-      val c0 = c
-      val () = _hit_rows(rest, i + 1, c0)
-      prval () = fold@(x)
+  | @hits_cons(chapter, _, _, snippet, snippet_len, rest) => let
+      val () = (if chapter >= 0 then let
+          val () = (if chapter <> last then _hit_heading(chapter) else ())
+        in _hit_row(hit, snippet, snippet_len) end else ())
+      val this_chapter = chapter
+      val () = _hit_rows(rest, hit + 1, this_chapter)
+      prval () = fold@(found)
     in end
 
 (* The search is done: the hits in order, listed *)
-fn _search_done (gen: int): void =
-  if gen <> !_search_gen then ()
+fn _search_done (generation: int): void =
+  if generation <> !_search_generation then ()
   else (case+ _search_take() of
     | ~SearchNone() => ()
-    | ~SearchCell(h, k, query, query_len) => let
-        val h = hits_rev(h, hits_nil())
+    | ~SearchCell(found, hit_count, query, query_len) => let
+        val found = hits_reverse(found, hits_nil())
         val () = ui_clear("search-results")
-        val () = _hit_rows(h, 0, ~1)
-        val () = (if k = 0 then _search_status("No results")
-          else if k = 1 then _search_status("1 result")
-          else if k >= HMAX then _search_status("500 results or more")
+        val () = _hit_rows(found, 0, ~1)
+        val () = (if hit_count = 0 then _search_status("No results")
+          else if hit_count = 1 then _search_status("1 result")
+          else if hit_count >= HIT_MAX then _search_status("500 results or more")
           else let
-            val b = $A.alloc<byte>(24)
-            val off = $S.int_to_str(b, 0, 24, k)
-            val off = _put(b, off, " results")
-          in ui_text_buf("search-status", b, off) end)
-      in _search_put(SearchCell(h, k, query, query_len)) end)
+            val buf = $A.alloc<byte>(24)
+            val offset = $S.int_to_str(buf, 0, 24, hit_count)
+            val offset = _put(buf, offset, " results")
+          in ui_text_buf("search-status", buf, offset) end)
+      in _search_put(SearchCell(found, hit_count, query, query_len)) end)
 
-(* The hits of the chapter data[0, n) (chapter ch), added *)
-fn _search_add {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), ch: Int): void =
+(* The hits of the chapter data[0, n) (the chapter given), added *)
+fn _search_add {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int): void =
   case+ _search_take() of
   | ~SearchNone() => ()
-  | ~SearchCell(h, k, query, query_len) => let
-      val @(_, h2, k2) = _scan_nodes(data, nodes, true, query, query_len, ch, 0, h, k)
-    in _search_put(SearchCell(h2, k2, query, query_len)) end
+  | ~SearchCell(found, hit_count, query, query_len) => let
+      val @(_, found_after, count_after) = _scan_nodes(data, nodes, true, query, query_len, chapter, 0, found, hit_count)
+    in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
-fn _search_add_if {lb:agz}{n:pos}{sz:nat}
-  (gen: int, data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), ch: Int): void =
-  if gen = !_search_gen then _search_add(data, nodes, ch) else ()
+fn _search_add_if {l:agz}{n:pos}{tree_size:nat}
+  (generation: int, data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int): void =
+  if generation = !_search_generation then _search_add(data, nodes, chapter) else ()
 
 fn _search_full (): bool =
   case+ _search_take() of
   | ~SearchNone() => true
-  | ~SearchCell(h, k, query, query_len) => let
-      val full = k >= HMAX
-      val () = _search_put(SearchCell(h, k, query, query_len))
+  | ~SearchCell(found, hit_count, query, query_len) => let
+      val full = hit_count >= HIT_MAX
+      val () = _search_put(SearchCell(found, hit_count, query, query_len))
     in full end
 
-(* Searches chapters i to tc - 1 of book s, one after another, while
-   search gen is the latest *)
-fun _search_ch {i,tc:nat} .<max(tc - i, 0)>. (s: int, i: int i, tc: int tc, gen: int): void =
-  if gen <> !_search_gen then ()
-  else if i >= tc then _search_done(gen)
-  else if _search_full() then _search_done(gen)
-  else (case+ book_chapter_get(s, i) of
-    | ~ChaptersUnknown() => _search_done(gen)
-    | ~ChapterNone(_) => _search_ch(s, i + 1, tc, gen)
-    | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, _, _, _, _) =>
-      (case+ piece_new(ch_csz) of
-       | ~NoPiece() => _search_ch(s, i + 1, tc, gen)
-       | ~Piece(car, cbuf) => let
-           val _ = book_read(s, fsz_s, ch_d, cbuf, ch_csz)
-           val @(cf, cb) = $A.freeze<byte>(cbuf)
-           val dp = $DC.decompress(cb, ch_csz, ch_method)
-           val () = $A.drop<byte>(cf, cb)
-           val () = piece_free(car, $A.thaw<byte>(cf))
+(* Searches chapters chapter to chapter_count - 1 of book serial, one after another, while
+   search generation is the latest *)
+fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 0)>. (serial: int, chapter: int chapter, chapter_count: int chapter_count, generation: int): void =
+  if generation <> !_search_generation then ()
+  else if chapter >= chapter_count then _search_done(generation)
+  else if _search_full() then _search_done(generation)
+  else (case+ book_chapter_get(serial, chapter) of
+    | ~ChaptersUnknown() => _search_done(generation)
+    | ~ChapterNone(_) => _search_chapters(serial, chapter + 1, chapter_count, generation)
+    | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+      (case+ piece_new(compressed_size) of
+       | ~NoPiece() => _search_chapters(serial, chapter + 1, chapter_count, generation)
+       | ~Piece(compressed_owner, compressed) => let
+           val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+           val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+           val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+           val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+           val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.discard<int>($P.and_then<Int><int>($P.vow(dp), lam(h) => let
-             val () = (case+ take_content(h) of
+           $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(handle) => let
+             val () = (case+ take_content(handle) of
                | ~NoContentBytes() => ()
-               | ~ContentBytes(xar, xhtml, xn) => let
-                   val @(xf, xb) = $A.freeze<byte>(xhtml)
-                   val nodes = $X.parse_document(xb, xn)
-                   val () = _search_add_if(gen, xb, nodes, i)
+               | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
+                   val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                   val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+                   val () = _search_add_if(generation, xhtml_bytes, nodes, chapter)
                    val () = $X.free_nodes(nodes)
-                   val () = $A.drop<byte>(xf, xb)
-                 in piece_free(xar, $A.thaw<byte>(xf)) end)
-             val () = _search_ch(s, i + 1, tc, gen)
+                   val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+                 in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
+             val () = _search_chapters(serial, chapter + 1, chapter_count, generation)
            in $P.ret<int>(0) end))
          end))
 
 (* query[0, query_len) in lower case, in a new array *)
-fun _lower_into {l,lo:agz}{m,mo:pos}{query_len:nat | query_len <= m; query_len <= mo}{i:nat | i <= query_len} .<query_len - i>.
-  (query: !$A.arr(byte, l, m), o: !$A.arr(byte, lo, mo), query_len: int query_len, i: int i): void =
+fun _lower_into {query_location,lower_location:agz}{query_size,lower_size:pos}{query_len:nat | query_len <= query_size; query_len <= lower_size}{i:nat | i <= query_len} .<query_len - i>.
+  (query: !$A.arr(byte, query_location, query_size), lower: !$A.arr(byte, lower_location, lower_size), query_len: int query_len, i: int i): void =
   if i >= query_len then ()
   else let
-    val () = $A.set<byte>(o, i, $A.int2byte($AR.low_byte(_lower(byte2int0($A.get<byte>(query, i))))))
-  in _lower_into(query, o, query_len, i + 1) end
+    val () = $A.set<byte>(lower, i, $A.int2byte($AR.low_byte(_lower(byte2int0($A.get<byte>(query, i))))))
+  in _lower_into(query, lower, query_len, i + 1) end
 
 (* ============================================================
    Public API
    ============================================================ *)
 
-#pub fun apply_diff_list(dl: $W.diff_list): void
-implement apply_diff_list(dl) = _apply_diff_list(dl)
+#pub fun apply_diff_list(diffs: $W.diff_list): void
+implement apply_diff_list(diffs) = _apply_diff_list(diffs)
 
-#pub fun apply_diff(d: $W.diff): void
-implement apply_diff(d) = _apply_diff(d)
+#pub fun apply_diff(diff: $W.diff): void
+implement apply_diff(diff) = _apply_diff(diff)
 
 
 #pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
 
-(* The page shown, dx px to the right of where it rests (a drag's
+(* The page shown, shift px to the right of where it rests (a drag's
    preview; 0 puts it back) *)
-#pub fun reader_pan(dx: int): void
+#pub fun reader_pan(shift: int): void
 
-implement reader_pan(dx) =
+implement reader_pan(shift) =
   (* scrolled, a drag across moves nothing: the turn scrolls *)
   if _scrolled() then ()
   else case+ reading_get() of
-  | @(p, _, _, _) => let
-      val cnt_narr = $A.alloc<byte>(4)
-      val () = $A.write_text(cnt_narr, 0, $A.text_lit("page"), 4)
-      val @(cnt_f, cnt_b) = $A.freeze<byte>(cnt_narr)
-      val at = (if !_rtl then ~(p * !_page_w) else p * !_page_w): int
-      val () = $SC.set_scroll_left(cnt_b, 4, at - dx)
-    in release_bytes(cnt_f, cnt_b) end
+  | @(page, _, _, _) => let
+      val page_id = $A.alloc<byte>(4)
+      val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+      val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
+      val scroll_left = (if !_right_to_left then ~(page * !_page_width) else page * !_page_width): int
+      val () = $SC.set_scroll_left(page_id_bytes, 4, scroll_left - shift)
+    in release_bytes(page_id_frozen, page_id_bytes) end
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)
@@ -2627,15 +2626,15 @@ implement reader_pan(dx) =
 implement reader_scrolled () =
   if ~_scrolled() then ()
   else case+ reading_get() of
-  | @(p, t, c, tc) => let
-      val top = _scroll_top(p)
-      val () = _measure_lit("page")
+  | @(page, page_count, chapter, chapter_count) => let
+      val top = _scroll_top(page)
+      val () = _measure_literal("page")
       val bottom = $DR.get_measure_scroll_h() - $DR.get_measure_h()
-      val q = _screen_at(top, bottom, t)
+      val screen = _screen_at(top, bottom, page_count)
     in
-      if q = p then ()
+      if screen = page then ()
       (* the reader moved: a restored place no longer holds them *)
-      else let val () = !_settle_anchor := ~1 in _place_shown(q, t, c, tc) end
+      else let val () = !_settle_anchor := ~1 in _place_shown(screen, page_count, chapter, chapter_count) end
     end
 
 (* The reader turns the page on or back. Reading on from where a jump
@@ -2649,55 +2648,55 @@ in _page_next() end
 #pub fun page_prev(): void
 implement page_prev() = let
   val () = reader_stack_clear()
-in _page_prev() end
+in _page_previous() end
 
-#pub fun load_chapter {i:nat} (chapter_idx: int i): $P.promise(int, $P.Chained)
-implement load_chapter(chapter_idx) = _load_chapter(chapter_idx)
-
-
+#pub fun load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(int, $P.Chained)
+implement load_chapter(chapter_index) = _load_chapter(chapter_index)
 
 
 
 
 
 
-(* Loads chapter ch and shows page pg of it (the last for -1), or the
+
+
+(* Loads a chapter and shows a page of it (the last for -1), or the
    page of content node anchor when anchor >= 0 *)
-#pub fun reader_goto (ch: Int, pg: Int, anchor: Int): $P.promise(int, $P.Chained)
-implement reader_goto (ch, pg, anchor) = _goto(ch, pg, anchor)
+#pub fun reader_goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained)
+implement reader_goto (chapter, page, anchor) = _goto(chapter, page, anchor)
 
-(* Jumps to row i of the contents list, remembering where the reader
+(* Jumps to a row of the contents list, remembering where the reader
    was *)
-#pub fun reader_goto_entry (i: Int): void
-implement reader_goto_entry (i) =
-  case+ toc_dest_of(i) of
+#pub fun reader_goto_entry (row: Int): void
+implement reader_goto_entry (row) =
+  case+ toc_dest_of(row) of
   | ~TocNoDest() => ()
-  | ~TocDest(ch, fr, f) => let
+  | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
 
-(* Goes to print page i, remembering where the reader was *)
-#pub fun reader_goto_page (i: Int): void
-implement reader_goto_page (i) =
-  case+ toc_page_dest_of(i) of
+(* Goes to a print page, remembering where the reader was *)
+#pub fun reader_goto_page (print_page: Int): void
+implement reader_goto_page (print_page) =
+  case+ toc_page_dest_of(print_page) of
   | ~TocNoDest() => ()
-  | ~TocDest(ch, fr, f) => let
+  | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
 
-(* Jumps to chapter ch's element fr[0, f), remembering where the reader
+(* Jumps to a chapter's element fragment[0, fragment_len), remembering where the reader
    was *)
-#pub fun reader_jump {l:agz}{n:pos}{f:nat | f < n} (ch: Int, fr: $A.arr(byte, l, n), f: int f): void
-implement reader_jump (ch, fr, f) = let
+#pub fun reader_jump {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: Int, fragment: $A.arr(byte, l, n), fragment_len: int fragment_len): void
+implement reader_jump (chapter, fragment, fragment_len) = let
   val () = _push_position()
-in $P.discard<int>(_goto_frag(ch, fr, f)) end
+in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
 
-(* Jumps to page pg of chapter ch (the page of content node anchor, when
+(* Jumps to a page of a chapter (the page of content node anchor, when
    it is not -1), remembering where the reader was *)
-#pub fun reader_jump_to (ch: Int, pg: Int, anchor: Int): void
-implement reader_jump_to (ch, pg, anchor) = let
+#pub fun reader_jump_to (chapter: Int, page: Int, anchor: Int): void
+implement reader_jump_to (chapter, page, anchor) = let
   val () = _push_position()
-in $P.discard<int>(_goto(ch, pg, anchor)) end
+in $P.discard<int>(_goto(chapter, page, anchor)) end
 
 (* The back button: to the position last jumped away from *)
 #pub fun reader_back (): void
@@ -2712,36 +2711,36 @@ implement reader_stack_clear () = _ps_put(PsHidden())
    counts the minutes since. Back in the library, nothing is being read
    until the next book opens. *)
 #pub fn reader_timer_start (): void
-implement reader_timer_start () = !_spd_last := $TM.epoch_minutes()
+implement reader_timer_start () = !_speed_last_minute := $TM.epoch_minutes()
 
 #pub fn reader_timer_stop (): void
-implement reader_timer_stop () = !_spd_last := ~1
+implement reader_timer_stop () = !_speed_last_minute := ~1
 
 (* The scrubber dragged to x: the thumb there, and the title of the
    chapter there in its tip *)
 #pub fun reader_scrub_preview (x: Int): void
 implement reader_scrub_preview (x) = let
-  val v = _track_at(x)
-  val () = _scrub_at(v)
-  val () = ui_place("scrubber-tip", PLeft, v)
+  val thousandth = _track_at(x)
+  val () = _scrub_at(thousandth)
+  val () = ui_place("scrubber-tip", PLeft, thousandth)
   val () = (case+ reading_get() of
-    | @(_, _, _, tc) => let
-        val @(c, _) = _chapter_at(v, 0, tc)
-      in toc_title_in("scrubber-tip", c) end)
+    | @(_, _, _, chapter_count) => let
+        val @(chapter, _) = _chapter_at(thousandth, 0, chapter_count)
+      in toc_title_in("scrubber-tip", chapter) end)
 in ui_show("scrubber-tip", true) end
 
 (* The scrubber let go at x: to that place in the book, remembering
    where the reader was *)
 #pub fun reader_scrub_go (x: Int): void
 implement reader_scrub_go (x) = let
-  val v = _track_at(x)
+  val thousandth = _track_at(x)
   val () = ui_show("scrubber-tip", false)
 in
   case+ reading_get() of
-  | @(_, _, _, tc) => let
-      val @(c, cp) = _chapter_at(v, 0, tc)
+  | @(_, _, _, chapter_count) => let
+      val @(chapter, chapter_thousandth) = _chapter_at(thousandth, 0, chapter_count)
       val () = _push_position()
-    in $P.discard<int>(_goto_part(c, cp)) end
+    in $P.discard<int>(_goto_part(chapter, chapter_thousandth)) end
 end
 
 (* Stores where the reader is *)
@@ -2752,55 +2751,55 @@ implement reader_save () = _record_position()
 #pub fun reader_anchor (): Int
 implement reader_anchor () = _anchor_now()
 
-(* The link covering content node i, if any: followed (a link within
+(* The link covering a content node, if any: followed (a link within
    the book, remembering where the reader was); true when there is one,
    also for a link out of the book, which the browser opens *)
-fun _link_find {k:nat} .<k>. (x: !links(k), i: int): @(int, Int, bool, [l:agz][f:nat] @($A.arr(byte, l, f + 1), int f)) =
-  case+ x of
-  | links_nil() => let val a0 = $A.alloc<byte>(1) in @(0, 0, false, @(a0, 0)) end
-  | @links_cons(s0, e0, ch, fr, f, note, rest) =>
-    if (if s0 <= i then i < e0 else false) then let
-      val c = ch
-      val nt = note
-      val b = $A.alloc<byte>(f + 1)
-      val () = _frag_dup(fr, b, f + 1, 0)
-      val ff = f
-      prval () = fold@(x)
-    in @((if c < 0 then 2 else 1), c, nt, @(b, ff)) end
+fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): @(int, Int, bool, [l:agz][fragment_len:nat] @($A.arr(byte, l, fragment_len + 1), int fragment_len)) =
+  case+ entries of
+  | links_nil() => let val empty = $A.alloc<byte>(1) in @(0, 0, false, @(empty, 0)) end
+  | @links_cons(first_node, end_node, chapter, fragment, fragment_len, note, rest) =>
+    if (if first_node <= node then node < end_node else false) then let
+      val found_chapter = chapter
+      val found_note = note
+      val copy = $A.alloc<byte>(fragment_len + 1)
+      val () = _fragment_duplicate(fragment, copy, fragment_len + 1, 0)
+      val copy_len = fragment_len
+      prval () = fold@(entries)
+    in @((if found_chapter < 0 then 2 else 1), found_chapter, found_note, @(copy, copy_len)) end
     else let
-      val r = _link_find(rest, i)
-      prval () = fold@(x)
-    in r end
+      val found = _link_find(rest, node)
+      prval () = fold@(entries)
+    in found end
 
-(* The little-endian int at b[p, p + 4) *)
-fn _i32_at {l:agz}{n:pos}{p:nat | p + 4 <= n} (b: !$A.arr(byte, l, n), p: int p): Int = let
-  val b0 = $AR.low_byte(byte2int0($A.get<byte>(b, p)))
-  val b1 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 1)))
-  val b2 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 2)))
-  val b3 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 3)))
-  val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
-in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
+(* The little-endian int at buf[at, at + 4) *)
+fn _int32_at {l:agz}{n:pos}{at:nat | at + 4 <= n} (buf: !$A.arr(byte, l, n), at: int at): Int = let
+  val byte0 = $AR.low_byte(byte2int0($A.get<byte>(buf, at)))
+  val byte1 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 1)))
+  val byte2 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 2)))
+  val byte3 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 3)))
+  val high = (if byte3 < 128 then byte3 else byte3 - 256): [high:int | ~128 <= high; high < 128] int high
+in byte0 + byte1 * 256 + byte2 * 65536 + high * 16777216 end
 
 (* Reads the reading speed kept under "spd" *)
 #pub fun reader_speed_load (): $P.promise(int, $P.Chained)
 implement reader_speed_load () = let
-  val @(kf, kb) = $A.freeze<byte>(_spd_key())
-  val p = $IDB.idb_get(kb, 3)
-  val () = release_bytes(kf, kb)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
+  val stored = $IDB.idb_get(key_bytes, 3)
+  val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(p), lam(h) =>
-    case+ take_blob(h) of
+  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+    case+ take_blob(handle) of
     | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(b, n) =>
-      if n < 8 then let val () = $A.free<byte>(b) in $P.ret<int>(0) end
+    | ~BlobBytes(data, data_len) =>
+      if data_len < 8 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else let
-        val m = _i32_at(b, 0)
-        val g = _i32_at(b, 4)
-        val () = $A.free<byte>(b)
+        val minutes = _int32_at(data, 0)
+        val pages = _int32_at(data, 4)
+        val () = $A.free<byte>(data)
         (* only a plausible count: both at least 0, the pages at most 2000 *)
-        val () = (if m >= 0 then (if g >= 0 then (if g <= 2000 then let
-            val () = !_spd_min := m
-          in !_spd_pages := g end else ()) else ()) else ())
+        val () = (if minutes >= 0 then (if pages >= 0 then (if pages <= 2000 then let
+            val () = !_speed_minutes := minutes
+          in !_speed_pages := pages end else ()) else ()) else ())
       in $P.ret<int>(0) end)
 end
 
@@ -2810,390 +2809,390 @@ end
 
 (* The note shown over the page: its chapter and fragment, for "Go to
    note" *)
-datavtype note_tgt =
-  | {l:agz}{f:nat | f <= 200} NoteTgt of (Int, $A.arr(byte, l, f + 1), int f)
-  | NoNoteTgt of ()
+datavtype note_target =
+  | {l:agz}{fragment_len:nat | fragment_len <= 200} NoteTarget of (Int, $A.arr(byte, l, fragment_len + 1), int fragment_len)
+  | NoNoteTarget of ()
 
-val _note_tgt = ref<note_tgt>(NoNoteTgt())
+val _note_target = ref<note_target>(NoNoteTarget())
 
-fn _note_tgt_put (t: note_tgt): void = let
-  var c: note_tgt = t
-  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
-in case+ c of ~NoteTgt(_, a, _) => $A.free<byte>(a) | ~NoNoteTgt() => () end
+fn _note_target_put (target: note_target): void = let
+  var cell: note_target = target
+  val () = ref_exch_elt<note_target>(_note_target, cell)
+in case+ cell of ~NoteTarget(_, fragment, _) => $A.free<byte>(fragment) | ~NoNoteTarget() => () end
 
-fn _note_tgt_take (): note_tgt = let
-  var c: note_tgt = NoNoteTgt()
-  val () = ref_exch_elt<note_tgt>(_note_tgt, c)
-in c end
+fn _note_target_take (): note_target = let
+  var cell: note_target = NoNoteTarget()
+  val () = ref_exch_elt<note_target>(_note_target, cell)
+in cell end
 
-stadef NOTE_CAP = 4096
-macdef _NOTE_CAP = 4096
+stadef NOTE_CAPACITY = 4096
+macdef _NOTE_CAPACITY = 4096
 
-(* buf[p, q) := data[o + i, o + k) with runs of white space made one
-   space, and none first; at most NOTE_CAP - 1 bytes in all *)
-fun _nt_put {lb,lo:agz}{n:pos}{o,k:nat | o + k <= n}{i:nat | i <= k}{p:nat | p <= NOTE_CAP} .<k - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, i: int i,
-   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
-  if i >= k then p
-  else if p >= _NOTE_CAP - 1 then p
+(* buf[at, end_at) := data[offset + i, offset + text_len) with runs of white space made one
+   space, and none first; at most NOTE_CAPACITY - 1 bytes in all *)
+fun _note_put {data_location,note_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}{i:nat | i <= text_len}{at:nat | at <= NOTE_CAPACITY} .<text_len - i>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, i: int i,
+   buf: !$A.arr(byte, note_location, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
+  if i >= text_len then at
+  else if at >= _NOTE_CAPACITY - 1 then at
   else let
-    val c = byte2int0($A.read<byte>(data, o + i))
+    val char_code = byte2int0($A.read<byte>(data, offset + i))
   in
-    if c = 32 || c = 9 || c = 10 || c = 13 then
-      (if p = 0 then _nt_put(data, o, k, i + 1, buf, p)
-       else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then _nt_put(data, o, k, i + 1, buf, p)
-       else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in _nt_put(data, o, k, i + 1, buf, p + 1) end)
+    if char_code = 32 || char_code = 9 || char_code = 10 || char_code = 13 then
+      (if at = 0 then _note_put(data, offset, text_len, i + 1, buf, at)
+       else if byte2int0($A.get<byte>(buf, at - 1)) = 32 then _note_put(data, offset, text_len, i + 1, buf, at)
+       else let val () = $A.set<byte>(buf, at, $A.int2byte(32)) in _note_put(data, offset, text_len, i + 1, buf, at + 1) end)
     else let
-      val () = $A.set<byte>(buf, p, $A.read<byte>(data, o + i))
-    in _nt_put(data, o, k, i + 1, buf, p + 1) end
+      val () = $A.set<byte>(buf, at, $A.read<byte>(data, offset + i))
+    in _note_put(data, offset, text_len, i + 1, buf, at + 1) end
   end
 
-(* A space at buf[p], unless the text so far ends in one: where a block
+(* A space at buf[at], unless the text so far ends in one: where a block
    of the note ends *)
-fn _nt_break {lo:agz}{p:nat | p <= NOTE_CAP} (buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
-  if p = 0 then p
-  else if p >= _NOTE_CAP - 1 then p
-  else if byte2int0($A.get<byte>(buf, p - 1)) = 32 then p
-  else let val () = $A.set<byte>(buf, p, $A.int2byte(32)) in p + 1 end
+fn _note_break {l:agz}{at:nat | at <= NOTE_CAPACITY} (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
+  if at = 0 then at
+  else if at >= _NOTE_CAPACITY - 1 then at
+  else if byte2int0($A.get<byte>(buf, at - 1)) = 32 then at
+  else let val () = $A.set<byte>(buf, at, $A.int2byte(32)) in at + 1 end
 
-(* The text of the element of nodes whose id is fr[0, f), gathered into
-   buf from p (inside: whether nodes are within it) *)
-fun _nt_nodes {lb,la,lo:agz}{n:pos}{sz:nat}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
-   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
-   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+(* The text of the element of nodes whose id is fragment[0, fragment_len), gathered into
+   buf from at (inside: whether nodes are within it) *)
+fun _note_nodes {data_location,fragment_location,note_location:agz}{data_size:pos}{tree_size:nat}{fragment_len:pos}{at:nat | at <= NOTE_CAPACITY} .<tree_size, 1>.
+  (data: !$A.borrow(byte, data_location, data_size), nodes: !$X.xml_node_list(data_size, tree_size),
+   fragment: !$A.arr(byte, fragment_location, fragment_len + 1), fragment_len: int fragment_len, inside: bool,
+   buf: !$A.arr(byte, note_location, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val p = _nt_node(data, node, fr, f, inside, buf, p)
-    in _nt_nodes(data, rest, fr, f, inside, buf, p) end
-  | $X.xml_nodes_nil() => p
+      val at = _note_node(data, node, fragment, fragment_len, inside, buf, at)
+    in _note_nodes(data, rest, fragment, fragment_len, inside, buf, at) end
+  | $X.xml_nodes_nil() => at
 
-and _nt_node {lb,la,lo:agz}{n:pos}{sz:pos}{f:pos}{p:nat | p <= NOTE_CAP} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
-   fr: !$A.arr(byte, la, f + 1), f: int f, inside: bool,
-   buf: !$A.arr(byte, lo, NOTE_CAP), p: int p): [q:nat | q <= NOTE_CAP] int q =
+and _note_node {data_location,fragment_location,note_location:agz}{data_size:pos}{tree_size:pos}{fragment_len:pos}{at:nat | at <= NOTE_CAPACITY} .<tree_size, 0>.
+  (data: !$A.borrow(byte, data_location, data_size), node: !$X.xml_node(data_size, tree_size),
+   fragment: !$A.arr(byte, fragment_location, fragment_len + 1), fragment_len: int fragment_len, inside: bool,
+   buf: !$A.arr(byte, note_location, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
   case+ node of
-  | $X.xml_text(off, tlen) => if inside then _nt_put(data, off, tlen, 0, buf, p) else p
+  | $X.xml_text(offset, text_len) => if inside then _note_put(data, offset, text_len, 0, buf, at) else at
   | $X.xml_element(_, _, attrs, children) => let
-      var _a_id = @[char][2]('i', 'd')
-      val here = (case+ find_attr(data, attrs, _a_id, 2) of
+      var _attr_id = @[char][2]('i', 'd')
+      val here = (case+ find_attr(data, attrs, _attr_id, 2) of
         | ~xspan_none() => false
-        | ~xspan_at(o, k) => if k = f then _same(data, o, fr, k, 0) else false): bool
-      val q = _nt_nodes(data, children, fr, f, (if inside then true else here), buf, p)
-    in if inside then _nt_break(buf, q) else q end
+        | ~xspan_at(start, span_len) => if span_len = fragment_len then _same(data, start, fragment, span_len, 0) else false): bool
+      val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
+    in if inside then _note_break(buf, end_at) else end_at end
 
 (* The note's text, decoded, shown in the note overlay, which opens *)
-fn _note_show {lo:agz}{q:nat | q <= NOTE_CAP} (buf: $A.arr(byte, lo, NOTE_CAP), q: int q): void = let
-  val q = (if q > 0 then (if byte2int0($A.get<byte>(buf, q - 1)) = 32 then q - 1 else q) else q): [r:nat | r <= NOTE_CAP] int r
-  val out = $A.alloc<byte>(_NOTE_CAP)
-  val @(bf, bb) = $A.freeze<byte>(buf)
-  val r = decode_text(bb, 0, q, out)
-  val () = release_bytes(bf, bb)
-  val () = ui_text_buf("footnote-text", out, r)
+fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byte, l, NOTE_CAPACITY), text_len: int text_len): void = let
+  val text_len = (if text_len > 0 then (if byte2int0($A.get<byte>(buf, text_len - 1)) = 32 then text_len - 1 else text_len) else text_len): [text_len:nat | text_len <= NOTE_CAPACITY] int text_len
+  val decoded = $A.alloc<byte>(_NOTE_CAPACITY)
+  val @(note_frozen, note_bytes) = $A.freeze<byte>(buf)
+  val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
+  val () = release_bytes(note_frozen, note_bytes)
+  val () = ui_text_buf("footnote-text", decoded, decoded_len)
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
 
-(* The note kept in _note_tgt, found in its chapter's XHTML data[0, n):
+(* The note kept in _note_target, found in its chapter's XHTML data[0, n):
    shown over the page, and kept for "Go to note"; when it has no text
    there, the link is followed instead *)
-fn _note_found {lb:agz}{n:pos} (data: !$A.borrow(byte, lb, n), n: int n): void =
-  case+ _note_tgt_take() of
-  | ~NoNoteTgt() => ()
-  | ~NoteTgt(ch, fr, f) =>
-    if f <= 0 then let
+fn _note_found {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): void =
+  case+ _note_target_take() of
+  | ~NoNoteTarget() => ()
+  | ~NoteTarget(chapter, fragment, fragment_len) =>
+    if fragment_len <= 0 then let
       val () = _push_position()
-    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
     else let
-      val buf = $A.alloc<byte>(_NOTE_CAP)
+      val buf = $A.alloc<byte>(_NOTE_CAPACITY)
       val nodes = $X.parse_document(data, n)
-      val q = _nt_nodes(data, nodes, fr, f, false, buf, 0)
+      val text_len = _note_nodes(data, nodes, fragment, fragment_len, false, buf, 0)
       val () = $X.free_nodes(nodes)
     in
-      if q > 0 then let
-        val () = _note_show(buf, q)
-      in _note_tgt_put(NoteTgt(ch, fr, f)) end
+      if text_len > 0 then let
+        val () = _note_show(buf, text_len)
+      in _note_target_put(NoteTarget(chapter, fragment, fragment_len)) end
       else let
         val () = $A.free<byte>(buf)
         val () = _push_position()
-      in $P.discard<int>(_goto_frag(ch, fr, f)) end
+      in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
     end
 
-(* The note kept in _note_tgt followed as a link: its chapter could not
+(* The note kept in _note_target followed as a link: its chapter could not
    be read *)
 fn _note_follow (): void =
-  case+ _note_tgt_take() of
-  | ~NoNoteTgt() => ()
-  | ~NoteTgt(ch, fr, f) => let
+  case+ _note_target_take() of
+  | ~NoNoteTarget() => ()
+  | ~NoteTarget(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
 
-(* Opens the note fr[0, f) of chapter ch over the page (found once its
+(* Opens the note fragment[0, fragment_len) of a chapter over the page (found once its
    chapter is read); when it cannot be found, the link is followed *)
-fn _note_open {l:agz}{f:pos | f <= 200} (ch: Int, fr: $A.arr(byte, l, f + 1), f: int f): void = let
-  val () = _note_tgt_put(NoteTgt(ch, fr, f))
-  val s = book_serial()
-  val ci = (if ch >= 0 then ch else 0): [v:nat] int v
+fn _note_open {l:agz}{fragment_len:pos | fragment_len <= 200} (chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len): void = let
+  val () = _note_target_put(NoteTarget(chapter, fragment, fragment_len))
+  val serial = book_serial()
+  val chapter_index = (if chapter >= 0 then chapter else 0): [chapter_index:nat] int chapter_index
 in
-  case+ book_chapter_get(s, ci) of
+  case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() => _note_follow()
   | ~ChapterNone(_) => _note_follow()
-  | ~ChapterGot(fsz_s, ch_d, ch_csz, ch_method, _, _, _, _) =>
-    (case+ piece_new(ch_csz) of
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+    (case+ piece_new(compressed_size) of
      | ~NoPiece() => _note_follow()
-     | ~Piece(car, cbuf) => let
-         val _ = book_read(s, fsz_s, ch_d, cbuf, ch_csz)
-         val @(cf, cb) = $A.freeze<byte>(cbuf)
-         val dp = $DC.decompress(cb, ch_csz, ch_method)
-         val () = $A.drop<byte>(cf, cb)
-         val () = piece_free(car, $A.thaw<byte>(cf))
+     | ~Piece(compressed_owner, compressed) => let
+         val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+         val decompressing = $DC.decompress(compressed_bytes, compressed_size, method)
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.discard<int>($P.and_then<Int><int>($P.vow(dp), lam(h) => let
-           val () = (case+ take_content(h) of
+         $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(handle) => let
+           val () = (case+ take_content(handle) of
              | ~NoContentBytes() => _note_follow()
-             | ~ContentBytes(xar, xhtml, xn) => let
-                 val @(xf, xb) = $A.freeze<byte>(xhtml)
-                 val () = _note_found(xb, xn)
-                 val () = $A.drop<byte>(xf, xb)
-               in piece_free(xar, $A.thaw<byte>(xf)) end)
+             | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
+                 val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                 val () = _note_found(xhtml_bytes, xhtml_size)
+                 val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+               in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
          in $P.ret<int>(0) end))
        end)
 end
 
-(* The path of content node i's image, copied; none when it has none *)
-datavtype pic_path =
-  | {l:agz}{k:pos | k < 65536} PicPath of ($A.arr(byte, l, k), int k)
-  | NoPicPath of ()
+(* The path of a content node's image, copied; none when it has none *)
+datavtype picture_path =
+  | {l:agz}{path_len:pos | path_len < 65536} PicturePath of ($A.arr(byte, l, path_len), int path_len)
+  | NoPicturePath of ()
 
-fun _pic_find {k:nat} .<k>. (x: !pics(k), i: int): pic_path =
-  case+ x of
-  | pics_nil() => NoPicPath()
-  | @pics_cons(idx, a, k, rest) =>
-    if idx = i then let
-      val b = $A.alloc<byte>(k)
-      val () = _frag_dup(a, b, k, 0)
-      val kk = k
-      prval () = fold@(x)
-    in PicPath(b, kk) end
+fun _picture_find {count:nat} .<count>. (entries: !pictures(count), node: int): picture_path =
+  case+ entries of
+  | pictures_nil() => NoPicturePath()
+  | @pictures_cons(entry_node, path, path_len, rest) =>
+    if entry_node = node then let
+      val copy = $A.alloc<byte>(path_len)
+      val () = _fragment_duplicate(path, copy, path_len, 0)
+      val copy_len = path_len
+      prval () = fold@(entries)
+    in PicturePath(copy, copy_len) end
     else let
-      val r = _pic_find(rest, i)
-      prval () = fold@(x)
-    in r end
+      val found = _picture_find(rest, node)
+      prval () = fold@(entries)
+    in found end
 
-(* Shows content node i's image in the image viewer, which opens; false
-   when node i is not an image of the chapter *)
-#pub fun reader_image_at (i: int): bool
-implement reader_image_at (i) = let
-  val c = _pics_take()
-  val+ @PicsCell(x) = c
-  val r = _pic_find(x, i)
-  prval () = fold@(c)
-  val () = _pics_put(c)
+(* Shows a content node's image in the image viewer, which opens; false
+   when the node is not an image of the chapter *)
+#pub fun reader_image_at (node: int): bool
+implement reader_image_at (node) = let
+  val cell = _pictures_take()
+  val+ @PicturesCell(entries) = cell
+  val found = _picture_find(entries, node)
+  prval () = fold@(cell)
+  val () = _pictures_put(cell)
 in
-  case+ r of
-  | ~NoPicPath() => false
-  | ~PicPath(b, k) =>
+  case+ found of
+  | ~NoPicturePath() => false
+  | ~PicturePath(path, path_len) =>
     (case+ book_meta_get() of
-     | ~$R.none() => let val () = $A.free<byte>(b) in false end
-     | ~$R.some(@(z, _, _, _, _, _)) => let
-         val @(fb, bb) = $A.freeze<byte>(b)
-         val () = _show_image(book_serial(), z, 0, true, !_load_gen, bb, k)
-         val () = release_bytes(fb, bb)
+     | ~$R.none() => let val () = $A.free<byte>(path) in false end
+     | ~$R.some(@(file_size, _, _, _, _, _)) => let
+         val @(path_frozen, path_bytes) = $A.freeze<byte>(path)
+         val () = _show_image(book_serial(), file_size, 0, true, !_load_generation, path_bytes, path_len)
+         val () = release_bytes(path_frozen, path_bytes)
          val () = layer_open(LImage())
          val () = ui_focus("image-close")
        in true end)
 end
 
 (* The book's language's primary subtag ("fr" of "fr-CA"), lower case,
-   in b[0, k) of 3 bytes: when it is 2 or 3 letters; else "en" *)
-#pub fun reader_lang_code (): [l:agz][k:pos | k <= 3] @($A.arr(byte, l, 3), int k)
+   in code[0, code_len) of 3 bytes: when it is 2 or 3 letters; else "en" *)
+#pub fun reader_lang_code (): [l:agz][code_len:pos | code_len <= 3] @($A.arr(byte, l, 3), int code_len)
 
-fun _subtag_len {l:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k} .<k - i>.
-  (a: !$A.arr(byte, l, n), k: int k, i: int i): [j:nat | j <= k] int j =
-  if i >= k then i
-  else if byte2int0($A.get<byte>(a, i)) = 45 then i
-  else _subtag_len(a, k, i + 1)
+fun _subtag_len {l:agz}{n:pos}{lang_len:nat | lang_len <= n}{i:nat | i <= lang_len} .<lang_len - i>.
+  (lang: !$A.arr(byte, l, n), lang_len: int lang_len, i: int i): [subtag_len:nat | subtag_len <= lang_len] int subtag_len =
+  if i >= lang_len then i
+  else if byte2int0($A.get<byte>(lang, i)) = 45 then i
+  else _subtag_len(lang, lang_len, i + 1)
 
-(* Byte i of a[0, j), in lower case, when it is a letter; else -1 *)
-fn _lower_letter {l:agz}{n:pos}{i:nat | i < n} (a: !$A.arr(byte, l, n), i: int i): int = let
-  val c = byte2int0($A.get<byte>(a, i))
-  val lc = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): int
-in if lc < 97 then ~1 else if lc > 122 then ~1 else lc end
+(* Byte i of lang[0, j), in lower case, when it is a letter; else -1 *)
+fn _lower_letter {l:agz}{n:pos}{i:nat | i < n} (lang: !$A.arr(byte, l, n), i: int i): int = let
+  val char_code = byte2int0($A.get<byte>(lang, i))
+  val lower = (if char_code >= 65 then (if char_code <= 90 then char_code + 32 else char_code) else char_code): int
+in if lower < 97 then ~1 else if lower > 122 then ~1 else lower end
 
 implement reader_lang_code () = let
-  val c = _blang_take()
+  val cell = _book_lang_take()
   (* the primary subtag's letters, lower case, and how many; 0 when it is
      not 2 or 3 letters *)
-  val @(r, c0, c1, c2) = (case+ c of
-    | @BookLang(a, k) => let
-        val j = _subtag_len(a, k, 0)
-        val res = (if j < 2 then @(0, 0, 0, 0) else if j > 3 then @(0, 0, 0, 0)
+  val @(code_len, letter0, letter1, letter2) = (case+ cell of
+    | @BookLang(lang, lang_len) => let
+        val subtag_len = _subtag_len(lang, lang_len, 0)
+        val letters = (if subtag_len < 2 then @(0, 0, 0, 0) else if subtag_len > 3 then @(0, 0, 0, 0)
           else let
-            val x0 = _lower_letter(a, 0)
-            val x1 = _lower_letter(a, 1)
-            val x2 = (if j = 3 then (if k >= 3 then _lower_letter(a, 2) else ~1) else 0): int
+            val lower0 = _lower_letter(lang, 0)
+            val lower1 = _lower_letter(lang, 1)
+            val lower2 = (if subtag_len = 3 then (if lang_len >= 3 then _lower_letter(lang, 2) else ~1) else 0): int
           in
-            if x0 < 0 then @(0, 0, 0, 0) else if x1 < 0 then @(0, 0, 0, 0)
-            else if x2 < 0 then @(0, 0, 0, 0) else @(j, x0, x1, x2)
+            if lower0 < 0 then @(0, 0, 0, 0) else if lower1 < 0 then @(0, 0, 0, 0)
+            else if lower2 < 0 then @(0, 0, 0, 0) else @(subtag_len, lower0, lower1, lower2)
           end): @(int, int, int, int)
-        prval () = fold@(c)
-      in res end
+        prval () = fold@(cell)
+      in letters end
     | NoBookLang() => @(0, 0, 0, 0)): @(int, int, int, int)
-  val () = _blang_put(c)
-  val o = $A.alloc<byte>(3)
-  val () = $A.set<byte>(o, 0, $A.int2byte($AR.low_byte(if r >= 2 then c0 else 101)))
-  val () = $A.set<byte>(o, 1, $A.int2byte($AR.low_byte(if r >= 2 then c1 else 110)))
-  val () = $A.set<byte>(o, 2, $A.int2byte($AR.low_byte(if r = 3 then c2 else 0)))
-in if r = 3 then @(o, 3) else @(o, 2) end
+  val () = _book_lang_put(cell)
+  val code = $A.alloc<byte>(3)
+  val () = $A.set<byte>(code, 0, $A.int2byte($AR.low_byte(if code_len >= 2 then letter0 else 101)))
+  val () = $A.set<byte>(code, 1, $A.int2byte($AR.low_byte(if code_len >= 2 then letter1 else 110)))
+  val () = $A.set<byte>(code, 2, $A.int2byte($AR.low_byte(if code_len = 3 then letter2 else 0)))
+in if code_len = 3 then @(code, 3) else @(code, 2) end
 
-#pub fun reader_link_at (i: int): bool
-implement reader_link_at (i) = let
-  val c = _links_take()
-  val+ @LinksCell(x) = c
-  val @(kind, ch, note, @(b, f)) = _link_find(x, i)
-  prval () = fold@(c)
-  val () = _links_put(c)
+#pub fun reader_link_at (node: int): bool
+implement reader_link_at (node) = let
+  val cell = _links_take()
+  val+ @LinksCell(entries) = cell
+  val @(kind, chapter, note, @(fragment, fragment_len)) = _link_find(entries, node)
+  prval () = fold@(cell)
+  val () = _links_put(cell)
 in
   if kind = 1 then
     (* a note's reference to a note it names opens the note over the
        page; any other link is followed *)
-    (if note then (if f > 0 then (if f <= 200 then let
-        val () = _note_open(ch, b, f)
+    (if note then (if fragment_len > 0 then (if fragment_len <= 200 then let
+        val () = _note_open(chapter, fragment, fragment_len)
       in true end
-      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
-      else let val () = _push_position() val () = $P.discard<int>(_goto_frag(ch, b, f)) in true end)
+      else let val () = _push_position() val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) in true end)
+      else let val () = _push_position() val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) in true end)
      else let
        val () = _push_position()
-       val () = $P.discard<int>(_goto_frag(ch, b, f))
+       val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len))
      in true end)
-  else let val () = $A.free<byte>(b) in kind = 2 end
+  else let val () = $A.free<byte>(fragment) in kind = 2 end
 end
 
 (* Goes to the note shown over the page, remembering where the reader
    was *)
 #pub fun reader_note_go (): void
 implement reader_note_go () =
-  case+ _note_tgt_take() of
-  | ~NoNoteTgt() => ()
-  | ~NoteTgt(ch, fr, f) => let
+  case+ _note_target_take() of
+  | ~NoNoteTarget() => ()
+  | ~NoteTarget(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_frag(ch, fr, f)) end
+    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Whether the open book reads right to left *)
 #pub fun reader_rtl (): bool
-implement reader_rtl () = !_rtl
+implement reader_rtl () = !_right_to_left
 
-(* k, at most 200 *)
-fn _query_len_of {k:pos} (k: int k): [c:pos | c <= 200; c <= k] int c = if k <= 200 then k else 200
+(* A length, at most 200 *)
+fn _query_len_of {length:pos} (length: int length): [query_len:pos | query_len <= 200; query_len <= length] int query_len = if length <= 200 then length else 200
 
-(* Searches the open book for query[0, k): its hits are listed as they are
+(* Searches the open book for query[0, length): its hits are listed as they are
    found, chapter by chapter *)
-#pub fun reader_search {l:agz}{m:pos}{k:nat | k <= m} (query: $A.arr(byte, l, m), k: int k): void
-implement reader_search (query, k) = let
-  val () = !_search_gen := !_search_gen + 1
-  val gen = !_search_gen
+#pub fun reader_search {l:agz}{n:pos}{length:nat | length <= n} (query: $A.arr(byte, l, n), length: int length): void
+implement reader_search (query, length) = let
+  val () = !_search_generation := !_search_generation + 1
+  val generation = !_search_generation
   val () = $BDOM.clear_marks(2)
   val () = ui_clear("search-results")
   val () = ui_show("search-nav", false)
-  val () = !_hit_cur := ~1
+  val () = !_hit_current := ~1
 in
-  if k <= 0 then let
+  if length <= 0 then let
     val () = $A.free<byte>(query)
     val () = _search_put(SearchNone())
   in _search_status(" ") end
   else let
-    val query_len = _query_len_of(k)
-    val o = $A.alloc<byte>(query_len)
-    val () = _lower_into(query, o, query_len, 0)
+    val query_len = _query_len_of(length)
+    val lowered = $A.alloc<byte>(query_len)
+    val () = _lower_into(query, lowered, query_len, 0)
     val () = $A.free<byte>(query)
-    val () = _search_put(SearchCell(hits_nil(), 0, o, query_len))
+    val () = _search_put(SearchCell(hits_nil(), 0, lowered, query_len))
     val () = _search_status("Searching\xE2\x80\xA6")
   in
     case+ reading_get() of
-    | @(_, _, _, tc) => _search_ch(book_serial(), 0, tc, gen)
+    | @(_, _, _, chapter_count) => _search_chapters(book_serial(), 0, chapter_count, generation)
   end
 end
 
-fun _hit_at {k:nat} .<k>. (x: !hits(k), i: int): @(Int, Int, Int) =
-  case+ x of
+fun _hit_at {count:nat} .<count>. (found: !hits(count), i: int): @(Int, Int, Int) =
+  case+ found of
   | hits_nil() => @(~1, 0, 0)
-  | @hits_cons(c, nd, o, _, _, rest) =>
+  | @hits_cons(chapter, node, offset, _, _, rest) =>
     if i = 0 then let
-      val r = @(c, nd, o)
-      prval () = fold@(x)
-    in r end
+      val hit = @(chapter, node, offset)
+      prval () = fold@(found)
+    in hit end
     else let
-      val r = _hit_at(rest, i - 1)
-      prval () = fold@(x)
-    in r end
+      val hit = _hit_at(rest, i - 1)
+      prval () = fold@(found)
+    in hit end
 
-(* Hit i, its count and the query's length; a chapter of -1 when there
+(* A hit, its count and the query's length; a chapter of -1 when there
    is none *)
-fn _hit (i: Int): @(Int, Int, Int, Int, Int) =
+fn _hit (hit: Int): @(Int, Int, Int, Int, Int) =
   case+ _search_take() of
   | ~SearchNone() => @(~1, 0, 0, 0, 0)
-  | ~SearchCell(h, k, query, query_len) => let
-      val @(c, nd, o) = _hit_at(h, i)
-      val () = _search_put(SearchCell(h, k, query, query_len))
-    in @(c, nd, o, k, query_len) end
+  | ~SearchCell(found, hit_count, query, query_len) => let
+      val @(chapter, node, offset) = _hit_at(found, hit)
+      val () = _search_put(SearchCell(found, hit_count, query, query_len))
+    in @(chapter, node, offset, hit_count, query_len) end
 
-(* "i of k" under the results *)
-fn _hit_count (i: Int, k: Int): void = let
-  val b = $A.alloc<byte>(40)
-  val off = $S.int_to_str(b, 0, 40, (if i >= 0 then i + 1 else 0): Nat)
-  val off = _put(b, off, " of ")
-  val off = $S.int_to_str(b, off, 40, (if k >= 0 then k else 0): Nat)
-in ui_text_buf("search-count", b, off) end
+(* "3 of 12": the hit's number of the hit count, under the results *)
+fn _hit_count (hit: Int, hit_count: Int): void = let
+  val buf = $A.alloc<byte>(40)
+  val offset = $S.int_to_str(buf, 0, 40, (if hit >= 0 then hit + 1 else 0): Nat)
+  val offset = _put(buf, offset, " of ")
+  val offset = $S.int_to_str(buf, offset, 40, (if hit_count >= 0 then hit_count else 0): Nat)
+in ui_text_buf("search-count", buf, offset) end
 
-(* Opens hit i: its page, the match marked; the first one remembers where
+(* Opens a hit: its page, the match marked; the first one remembers where
    the reader was *)
-#pub fun reader_search_go (i: Int): void
-implement reader_search_go (i) = let
-  val @(c, nd, o, k, query_len) = _hit(i)
+#pub fun reader_search_go (hit: Int): void
+implement reader_search_go (hit) = let
+  val @(chapter, node, offset, hit_count, query_len) = _hit(hit)
 in
-  if c < 0 then ()
+  if chapter < 0 then ()
   else let
     val () = (if !_hit_jumped then () else let
         val () = _push_position()
       in !_hit_jumped := true end)
-    val () = !_hit_cur := i
-    val () = _hit_count(i, k)
+    val () = !_hit_current := hit
+    val () = _hit_count(hit, hit_count)
     val () = ui_show("search-nav", true)
   in
-    $P.discard<int>($P.and_then<int><int>(_goto(c, 0, nd), lam(r) => let
-      val () = (if r >= 0 then (if nd >= 0 then let
+    $P.discard<int>($P.and_then<int><int>(_goto(chapter, 0, node), lam(result) => let
+      val () = (if result >= 0 then (if node >= 0 then let
           val () = $BDOM.clear_marks(2)
-          val @(ia, il) = nid_pad3("c", nd)
-          val @(ja, jl) = nid_pad3("c", nd)
-          val @(fa, fb) = $A.freeze<byte>(ia)
-          val @(ga, gb) = $A.freeze<byte>(ja)
-          val () = $BDOM.mark_range(2, fb, il, o, gb, jl, o + query_len)
-          val () = release_bytes(ga, gb)
-        in release_bytes(fa, fb) end else ()) else ())
+          val @(start_id, start_id_len) = nid_pad3("c", node)
+          val @(end_id, end_id_len) = nid_pad3("c", node)
+          val @(start_frozen, start_bytes) = $A.freeze<byte>(start_id)
+          val @(end_frozen, end_bytes) = $A.freeze<byte>(end_id)
+          val () = $BDOM.mark_range(2, start_bytes, start_id_len, offset, end_bytes, end_id_len, offset + query_len)
+          val () = release_bytes(end_frozen, end_bytes)
+        in release_bytes(start_frozen, start_bytes) end else ()) else ())
     in $P.ret<int>(0) end))
   end
 end
 
-(* The next (d = 1) or previous (d = -1) hit *)
-#pub fun reader_search_step (d: Int): void
-implement reader_search_step (d) = let
-  val @(_, _, _, k, _) = _hit(0)
+(* The next (direction = 1) or previous (direction = -1) hit *)
+#pub fun reader_search_step (direction: Int): void
+implement reader_search_step (direction) = let
+  val @(_, _, _, hit_count, _) = _hit(0)
 in
-  if k <= 0 then ()
+  if hit_count <= 0 then ()
   else let
-    val i = !_hit_cur + d
-  in reader_search_go(if i < 0 then k - 1 else if i >= k then 0 else i) end
+    val next = !_hit_current + direction
+  in reader_search_go(if next < 0 then hit_count - 1 else if next >= hit_count then 0 else next) end
 end
 
 (* Stops the search, its hits and marks gone, where the reader is *)
 #pub fun reader_search_stop (): void
 implement reader_search_stop () = let
-  val () = !_search_gen := !_search_gen + 1
+  val () = !_search_generation := !_search_generation + 1
   val () = $BDOM.clear_marks(2)
   val () = ui_show("search-nav", false)
   val () = ui_clear("search-results")
   val () = _search_status(" ")
   val () = _search_put(SearchNone())
-  val () = !_hit_cur := ~1
+  val () = !_hit_current := ~1
 in !_hit_jumped := false end
 
 (* Closes the search: its marks go, and the reader returns to where it
@@ -3207,21 +3206,21 @@ in if jumped then _pop_position() else () end
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()
 
-(* Shows page p of the chapter shown (clamped to its pages) *)
-#pub fun reader_page (p: Int): void
-implement reader_page (p) = let
+(* Shows a page of the chapter shown (clamped to its pages) *)
+#pub fun reader_page (page: Int): void
+implement reader_page (page) = let
   (* the reader moved: a restored place no longer holds them *)
   val () = !_settle_anchor := ~1
 in case+ reading_get() of
-  | @(_, t, c, tc) => if p < 0 then _show_page(0, t, c, tc) else if p >= t then _show_page(t - 1, t, c, tc) else _show_page(p, t, c, tc)
+  | @(_, page_count, chapter, chapter_count) => if page < 0 then _show_page(0, page_count, chapter, chapter_count) else if page >= page_count then _show_page(page_count - 1, page_count, chapter, chapter_count) else _show_page(page, page_count, chapter, chapter_count)
 end
 
 #pub fun update_page_indicator(): void
 implement update_page_indicator() = _update_page_indicator()
 
 
-#pub fun num_id {sn:pos | sn <= 3}{i:nat}{w:int | w == 2 || w == 3}
-  (pre: string sn, i: int i, w: int w): [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k)
-implement num_id(pre, i, w) = _num_id(pre, i, w)
+#pub fun num_id {prefix_len:pos | prefix_len <= 3}{number:nat}{width:int | width == 2 || width == 3}
+  (id_prefix: string prefix_len, number: int number, width: int width): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len)
+implement num_id(id_prefix, number, width) = _number_id(id_prefix, number, width)
 
 end (* #target wasm *)

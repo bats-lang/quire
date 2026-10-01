@@ -4,87 +4,102 @@
 #use array as A
 #use arith as AR
 
-(* Just past the last '/' in buf[p, e), or la if there is none *)
-fun _after_last_slash {l:agz}{n:pos}{p,e:nat | p <= e; e <= n}{la:int | la <= p} .<e - p>.
-  (buf: !$A.arr(byte, l, n), p: int p, e: int e, la: int la): [r:int | la <= r; r <= e] int r =
-  if p >= e then la
-  else if byte2int0($A.get<byte>(buf, p)) = 47 then _after_last_slash(buf, p + 1, e, p + 1)
-  else _after_last_slash(buf, p + 1, e, la)
+(* Just past the last '/' in path[position, path_end), or after_slash if
+   there is none *)
+fun _after_last_slash {l:agz}{n:pos}{position,path_end:nat | position <= path_end; path_end <= n}
+  {after_slash:int | after_slash <= position} .<path_end - position>.
+  (path: !$A.arr(byte, l, n), position: int position, path_end: int path_end, after_slash: int after_slash)
+  : [found:int | after_slash <= found; found <= path_end] int found =
+  if position >= path_end then after_slash
+  else if byte2int0($A.get<byte>(path, position)) = 47 then _after_last_slash(path, position + 1, path_end, position + 1)
+  else _after_last_slash(path, position + 1, path_end, after_slash)
 
-(* The end of the segment of buf[i, m): the next '/' at or after i, or m *)
-fun _seg_end {l:agz}{m:pos}{i:nat | i <= m} .<m - i>.
-  (buf: !$A.arr(byte, l, m), m: int m, i: int i): [j:int | i <= j; j <= m] int j =
-  if i >= m then i
-  else if byte2int0($A.get<byte>(buf, i)) = 47 then i
-  else _seg_end(buf, m, i + 1)
+(* The end of the segment of path[start, path_len): the next '/' at or
+   after start, or path_len *)
+fun _segment_end {l:agz}{path_len:pos}{start:nat | start <= path_len} .<path_len - start>.
+  (path: !$A.arr(byte, l, path_len), path_len: int path_len, start: int start)
+  : [stop:int | start <= stop; stop <= path_len] int stop =
+  if start >= path_len then start
+  else if byte2int0($A.get<byte>(path, start)) = 47 then start
+  else _segment_end(path, path_len, start + 1)
 
-(* Just past the last '/' of buf[0, p], or 0: where ".." leaves a path
-   buf[0, p + 2) that ends with '/' *)
-fun _back {l:agz}{m:pos}{p:int | p < m} .<max(p + 1, 0)>.
-  (buf: !$A.arr(byte, l, m), p: int p): [q:nat | q <= max(p + 1, 0)] int q =
-  if p < 0 then 0
-  else if byte2int0($A.get<byte>(buf, p)) = 47 then p + 1
-  else _back(buf, p - 1)
+(* Just past the last '/' of path[0, position], or 0: where ".." leaves a
+   path path[0, position + 2) that ends with '/' *)
+fun _parent_end {l:agz}{path_len:pos}{position:int | position < path_len} .<max(position + 1, 0)>.
+  (path: !$A.arr(byte, l, path_len), position: int position)
+  : [parent_end:nat | parent_end <= max(position + 1, 0)] int parent_end =
+  if position < 0 then 0
+  else if byte2int0($A.get<byte>(path, position)) = 47 then position + 1
+  else _parent_end(path, position - 1)
 
-(* buf[s, s + c) to buf[d, d + c), front first (d <= s) *)
-fun _move {l:agz}{m:pos}{s,d,c:nat | d <= s; s + c <= m} .<c>.
-  (buf: !$A.arr(byte, l, m), s: int s, d: int d, c: int c): void =
-  if c <= 0 then ()
+(* path[source, source + count) to path[target, target + count), front
+   first (target <= source) *)
+fun _move_bytes {l:agz}{path_len:pos}{source,target,count:nat | target <= source; source + count <= path_len} .<count>.
+  (path: !$A.arr(byte, l, path_len), source: int source, target: int target, count: int count): void =
+  if count <= 0 then ()
   else let
-    val () = $A.set<byte>(buf, d, $A.get<byte>(buf, s))
-  in _move(buf, s + 1, d + 1, c - 1) end
+    val () = $A.set<byte>(path, target, $A.get<byte>(path, source))
+  in _move_bytes(path, source + 1, target + 1, count - 1) end
 
-(* The path buf[0, m) with its empty, "." and ".." segments resolved,
-   in place: the segments read from i on are written from w on (w <= i);
-   the resolved length *)
-fun _norm {l:agz}{m:pos}{i,w:nat | w <= i; i <= m} .<m - i>.
-  (buf: !$A.arr(byte, l, m), m: int m, i: int i, w: int w): [k:nat | k <= m] int k =
-  if i >= m then w
+(* path[0, path_len) with its empty, "." and ".." segments
+   resolved, in place: the segments read from read_at on are written
+   from write_at on (write_at <= read_at); the resolved length *)
+fun _normalize {l:agz}{path_len:pos}{read_at,write_at:nat | write_at <= read_at; read_at <= path_len} .<path_len - read_at>.
+  (path: !$A.arr(byte, l, path_len), path_len: int path_len, read_at: int read_at, write_at: int write_at)
+  : [resolved_len:nat | resolved_len <= path_len] int resolved_len =
+  if read_at >= path_len then write_at
   else let
-    val [j:int] j = _seg_end(buf, m, i)
-    val c = j - i
-    val dot1 = (if c >= 1 then byte2int0($A.get<byte>(buf, i)) = 46 else false): bool
-    val dot2 = (if c >= 2 then byte2int0($A.get<byte>(buf, i + 1)) = 46 else false): bool
-    val up = (if w >= 2 then _back(buf, w - 2) else 0): [q:nat | q <= w] int q
+    val [segment_end:int] segment_end = _segment_end(path, path_len, read_at)
+    val segment_len = segment_end - read_at
+    val first_dot = (if segment_len >= 1 then byte2int0($A.get<byte>(path, read_at)) = 46 else false): bool
+    val second_dot = (if segment_len >= 2 then byte2int0($A.get<byte>(path, read_at + 1)) = 46 else false): bool
+    val parent_end = (if write_at >= 2 then _parent_end(path, write_at - 2) else 0)
+      : [parent_end:nat | parent_end <= write_at] int parent_end
   in
-    if j < m then
-      (* a segment and its '/': the next one starts at j + 1 *)
-      if c = 0 then _norm(buf, m, j + 1, w)
-      else if c = 1 && dot1 then _norm(buf, m, j + 1, w)
-      else if c = 2 && dot1 && dot2 then _norm(buf, m, j + 1, up)
+    if segment_end < path_len then
+      (* a segment and its '/': the next one starts at segment_end + 1 *)
+      if segment_len = 0 then _normalize(path, path_len, segment_end + 1, write_at)
+      else if segment_len = 1 && first_dot then _normalize(path, path_len, segment_end + 1, write_at)
+      else if segment_len = 2 && first_dot && second_dot then _normalize(path, path_len, segment_end + 1, parent_end)
       else let
-        val () = _move(buf, i, w, c)
-        val () = $A.set<byte>(buf, w + c, $A.int2byte(47))
-      in _norm(buf, m, j + 1, w + c + 1) end
+        val () = _move_bytes(path, read_at, write_at, segment_len)
+        val () = $A.set<byte>(path, write_at + segment_len, $A.int2byte(47))
+      in _normalize(path, path_len, segment_end + 1, write_at + segment_len + 1) end
     (* the last segment *)
-    else if c = 1 && dot1 then w
-    else if c = 2 && dot1 && dot2 then up
+    else if segment_len = 1 && first_dot then write_at
+    else if segment_len = 2 && first_dot && second_dot then parent_end
     else let
-      val () = _move(buf, i, w, c)
-    in w + c end
+      val () = _move_bytes(path, read_at, write_at, segment_len)
+    in write_at + segment_len end
   end
 
-(* The end of an src value data[so, so + e): its first '#', or its end *)
-fun _src_end {lb:agz}{n:pos}{so,sl:nat | so + sl <= n}{e:nat | e <= sl} .<sl - e>.
-  (data: !$A.borrow(byte, lb, n), so: int so, sl: int sl, e: int e): [r:nat | r <= sl] int r =
-  if e >= sl then e
-  else if byte2int0($A.read<byte>(data, so + e)) = 35 then e
-  else _src_end(data, so, sl, e + 1)
+(* The end of an src value data[src_offset, src_offset + src_len): its
+   first '#' at or after position, or its end *)
+fun _src_end {l:agz}{n:pos}{src_offset,src_len:nat | src_offset + src_len <= n}{position:nat | position <= src_len} .<src_len - position>.
+  (data: !$A.borrow(byte, l, n), src_offset: int src_offset, src_len: int src_len, position: int position)
+  : [before_hash:nat | before_hash <= src_len] int before_hash =
+  if position >= src_len then position
+  else if byte2int0($A.read<byte>(data, src_offset + position)) = 35 then position
+  else _src_end(data, src_offset, src_len, position + 1)
 
-(* Whether path[0, k) ends with pat[0, np), letters in any case *)
-fun _ends_with {lp:agz}{k:pos}{np:pos | np <= k}{i:nat | i <= np} .<np - i>.
-  (path: !$A.borrow(byte, lp, k), k: int k, pat: &(@[char][np]), np: int np, i: int i): bool =
-  if i >= np then true
+(* Whether path[0, path_len) ends with suffix[0, suffix_len), letters in
+   any case, compared from position on *)
+fun _ends_with {path_loc:agz}{path_len:pos}{suffix_len:pos | suffix_len <= path_len}{position:nat | position <= suffix_len}
+  .<suffix_len - position>.
+  (path: !$A.borrow(byte, path_loc, path_len), path_len: int path_len,
+   suffix: &(@[char][suffix_len]), suffix_len: int suffix_len, position: int position): bool =
+  if position >= suffix_len then true
   else let
-    val b = byte2int0($A.read<byte>(path, k - np + i))
-    val lb = (if b >= 65 then (if b <= 90 then b + 32 else b) else b): int
+    val letter = byte2int0($A.read<byte>(path, path_len - suffix_len + position))
+    val lower = (if letter >= 65 then (if letter <= 90 then letter + 32 else letter) else letter): int
   in
-    if lb <> char2int0(pat.[i]) then false
-    else _ends_with(path, k, pat, np, i + 1)
+    if lower <> char2int0(suffix.[position]) then false
+    else _ends_with(path, path_len, suffix, suffix_len, position + 1)
   end
 
-(* The image type the name path[0, k) says (by its extension) *)
-fn _mime_of {lp:agz}{k:pos} (path: !$A.borrow(byte, lp, k), k: int k): [sn:pos | sn <= 24] string sn = let
+(* The image type the name path[0, path_len) says (by its extension) *)
+fn _mime_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
+  : [type_len:pos | type_len <= 24] string type_len = let
   var png = @[char][4]('.', 'p', 'n', 'g')
   var jpg = @[char][4]('.', 'j', 'p', 'g')
   var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
@@ -92,13 +107,13 @@ fn _mime_of {lp:agz}{k:pos} (path: !$A.borrow(byte, lp, k), k: int k): [sn:pos |
   var svg = @[char][4]('.', 's', 'v', 'g')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
 in
-  if k >= 5 && _ends_with(path, k, jpeg, 5, 0) then "image/jpeg"
-  else if k >= 5 && _ends_with(path, k, webp, 5, 0) then "image/webp"
-  else if k < 4 then "application/octet-stream"
-  else if _ends_with(path, k, png, 4, 0) then "image/png"
-  else if _ends_with(path, k, jpg, 4, 0) then "image/jpeg"
-  else if _ends_with(path, k, gif, 4, 0) then "image/gif"
-  else if _ends_with(path, k, svg, 4, 0) then "image/svg+xml"
+  if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then "image/jpeg"
+  else if path_len >= 5 && _ends_with(path, path_len, webp, 5, 0) then "image/webp"
+  else if path_len < 4 then "application/octet-stream"
+  else if _ends_with(path, path_len, png, 4, 0) then "image/png"
+  else if _ends_with(path, path_len, jpg, 4, 0) then "image/jpeg"
+  else if _ends_with(path, path_len, gif, 4, 0) then "image/gif"
+  else if _ends_with(path, path_len, svg, 4, 0) then "image/svg+xml"
   else "application/octet-stream"
 end
 
@@ -107,34 +122,39 @@ end
    Public API
    ============================================================ *)
 
-(* The length of the directory part of buf[0, e): up to and including
-   its last '/', 0 when it has none *)
-#pub fn path_dir_end {l:agz}{n:pos}{e:nat | e <= n}
-  (buf: !$A.arr(byte, l, n), e: int e): [r:nat | r <= e] int r
+(* The length of the directory part of path[0, path_len): up to and
+   including its last '/', 0 when it has none *)
+#pub fn path_dir_end {l:agz}{n:pos}{path_len:nat | path_len <= n}
+  (path: !$A.arr(byte, l, n), path_len: int path_len): [dir_len:nat | dir_len <= path_len] int dir_len
 
-implement path_dir_end (buf, e) = _after_last_slash(buf, 0, e, 0)
+implement path_dir_end (path, path_len) = _after_last_slash(path, 0, path_len, 0)
 
-(* The path buf[0, m) with its empty, "." and ".." segments resolved, in
-   place; the resolved length *)
-#pub fn path_norm {l:agz}{m:pos} (buf: !$A.arr(byte, l, m), m: int m): [k:nat | k <= m] int k
+(* path[0, path_len) with its empty, "." and ".." segments
+   resolved, in place; the resolved length *)
+#pub fn path_norm {l:agz}{path_len:pos} (path: !$A.arr(byte, l, path_len), path_len: int path_len)
+  : [resolved_len:nat | resolved_len <= path_len] int resolved_len
 
-implement path_norm (buf, m) = _norm(buf, m, 0, 0)
+implement path_norm (path, path_len) = _normalize(path, path_len, 0, 0)
 
-(* The length of an href or src data[so, so + sl) before its '#' *)
-#pub fn src_end {lb:agz}{n:pos}{so,sl:nat | so + sl <= n}
-  (data: !$A.borrow(byte, lb, n), so: int so, sl: int sl): [r:nat | r <= sl] int r
+(* The length of an href or src data[src_offset, src_offset + src_len)
+   before its '#' *)
+#pub fn src_end {l:agz}{n:pos}{src_offset,src_len:nat | src_offset + src_len <= n}
+  (data: !$A.borrow(byte, l, n), src_offset: int src_offset, src_len: int src_len)
+  : [before_hash:nat | before_hash <= src_len] int before_hash
 
-implement src_end (data, so, sl) = _src_end(data, so, sl, 0)
+implement src_end (data, src_offset, src_len) = _src_end(data, src_offset, src_len, 0)
 
-(* The image type the name path[0, k) says (by its extension) *)
-#pub fn mime_of {lp:agz}{k:pos} (path: !$A.borrow(byte, lp, k), k: int k): [sn:pos | sn <= 24] string sn
+(* The image type the name path[0, path_len) says (by its extension) *)
+#pub fn mime_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
+  : [type_len:pos | type_len <= 24] string type_len
 
-implement mime_of (path, k) = _mime_of(path, k)
+implement mime_of (path, path_len) = _mime_of(path, path_len)
 
 (* The same as a code: 1 png, 2 jpeg, 3 gif, 4 svg, 5 webp, 0 other *)
-#pub fn mime_code_of {lp:agz}{k:pos} (path: !$A.borrow(byte, lp, k), k: int k): [c:nat | c <= 5] int c
+#pub fn mime_code_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
+  : [code:nat | code <= 5] int code
 
-implement mime_code_of (path, k) = let
+implement mime_code_of (path, path_len) = let
   var png = @[char][4]('.', 'p', 'n', 'g')
   var jpg = @[char][4]('.', 'j', 'p', 'g')
   var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
@@ -142,12 +162,12 @@ implement mime_code_of (path, k) = let
   var svg = @[char][4]('.', 's', 'v', 'g')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
 in
-  if k >= 5 && _ends_with(path, k, jpeg, 5, 0) then 2
-  else if k >= 5 && _ends_with(path, k, webp, 5, 0) then 5
-  else if k < 4 then 0
-  else if _ends_with(path, k, png, 4, 0) then 1
-  else if _ends_with(path, k, jpg, 4, 0) then 2
-  else if _ends_with(path, k, gif, 4, 0) then 3
-  else if _ends_with(path, k, svg, 4, 0) then 4
+  if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then 2
+  else if path_len >= 5 && _ends_with(path, path_len, webp, 5, 0) then 5
+  else if path_len < 4 then 0
+  else if _ends_with(path, path_len, png, 4, 0) then 1
+  else if _ends_with(path, path_len, jpg, 4, 0) then 2
+  else if _ends_with(path, path_len, gif, 4, 0) then 3
+  else if _ends_with(path, path_len, svg, 4, 0) then 4
   else 0
 end

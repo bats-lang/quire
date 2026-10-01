@@ -12,47 +12,47 @@
    ============================================================ *)
 
 (* A position in a buffer; indexed so a read at it can be proven. *)
-#pub typedef pos_t = [p:int] int p
+#pub typedef pos_t = [position:int] int position
 
 (* ============================================================
    Array to text conversion
    ============================================================ *)
 
 fun _arr_to_text_loop
-  {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
-  (src: !$A.arr(byte, l, n), len: int n,
-   tb: $A.text_builder(n, i), pos: int i): $A.text_builder(n, n) =
-  if pos >= len then tb
+  {l:agz}{n:pos}{position:nat | position <= n} .<n - position>.
+  (source: !$A.arr(byte, l, n), source_len: int n,
+   builder: $A.text_builder(n, position), position: int position): $A.text_builder(n, n) =
+  if position >= source_len then builder
   else let
-    val b = byte2int0($A.get<byte>(src, pos))
-    val tb = $A.text_putc(tb, pos, $AR.byte_of_char(int2char0(b)))
-  in _arr_to_text_loop(src, len, tb, pos + 1) end
+    val byte_value = byte2int0($A.get<byte>(source, position))
+    val builder = $A.text_putc(builder, position, $AR.byte_of_char(int2char0(byte_value)))
+  in _arr_to_text_loop(source, source_len, builder, position + 1) end
 
 #pub fn arr_to_text
   {l:agz}{n:pos}
-  (src: !$A.arr(byte, l, n), len: int n): $A.text(n)
+  (source: !$A.arr(byte, l, n), source_len: int n): $A.text(n)
 
-implement arr_to_text{l}{n}(src, len) = let
-  val tb = $A.text_build(len)
-  val tb = _arr_to_text_loop(src, len, tb, 0)
-in $A.text_done(tb) end
+implement arr_to_text{l}{n}(source, source_len) = let
+  val builder = $A.text_build(source_len)
+  val builder = _arr_to_text_loop(source, source_len, builder, 0)
+in $A.text_done(builder) end
 
 (* ============================================================
    Spans of a parsed document
    ============================================================ *)
 
-(* A span [o, o + k) of an n-byte document (from xml-tree, which proves
+(* A span [offset, offset + span_len) of an n-byte document (from xml-tree, which proves
    it inside the document), or none. Linear: a datatype's cell is never
    freed (there is no GC), so each span is consumed by a ~ pattern or by
    xspan_free. *)
 #pub datavtype xspan(n:int) =
-  | {o,k:nat | o + k <= n} xspan_at(n) of (int o, int k)
+  | {offset,span_len:nat | offset + span_len <= n} xspan_at(n) of (int offset, int span_len)
   | xspan_none(n) of ()
 
-#pub fn xspan_free {n:int} (s: xspan(n)): void
+#pub fn xspan_free {n:int} (span: xspan(n)): void
 
-implement xspan_free (s) =
-  case+ s of
+implement xspan_free (span) =
+  case+ span of
   | ~xspan_at(_, _) => ()
   | ~xspan_none() => ()
 
@@ -60,163 +60,164 @@ implement xspan_free (s) =
    XML name matching
    ============================================================ *)
 
-fun _match_chars {lb:agz}{n:pos}{o:nat}{np:pos | o + np <= n}{i:nat | i <= np} .<np - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, pat: &(@[char][np]), plen: int np, i: int i): bool =
-  if i >= plen then true
-  else if byte2int0($A.read<byte>(data, o + i)) <> char2int0(pat.[i]) then false
-  else _match_chars(data, o, pat, plen, i + 1)
+fun _match_chars {l:agz}{n:pos}{offset:nat}{pattern_len:pos | offset + pattern_len <= n}{position:nat | position <= pattern_len} .<pattern_len - position>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len, position: int position): bool =
+  if position >= pattern_len then true
+  else if byte2int0($A.read<byte>(data, offset + position)) <> char2int0(pattern.[position]) then false
+  else _match_chars(data, offset, pattern, pattern_len, position + 1)
 
-(* Whether the name at [o, o + k) is pat *)
+(* Whether the name at [offset, offset + name_len) is pattern *)
 #pub fn xml_name_eq
-  {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k,
-   pat: &(@[char][np]), plen: int np): bool
+  {l:agz}{n:pos}{offset,name_len:nat | offset + name_len <= n}{pattern_len:pos}
+  (data: !$A.borrow(byte, l, n), offset: int offset, name_len: int name_len,
+   pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool
 
-implement xml_name_eq(data, o, k, pat, plen) =
-  if k <> plen then false
-  else _match_chars(data, o, pat, plen, 0)
+implement xml_name_eq(data, offset, name_len, pattern, pattern_len) =
+  if name_len <> pattern_len then false
+  else _match_chars(data, offset, pattern, pattern_len, 0)
 
 (* ============================================================
    XML attribute lookup (internal)
    ============================================================ *)
 
-fun _find_attr_val
-  {lb:agz}{n:pos}{sa:nat}{np:pos} .<sa>.
-  (data: !$A.borrow(byte, lb, n),
-   attrs: !$X.xml_attr_list(n, sa),
-   aname: &(@[char][np]), alen: int np): xspan(n) =
+fun _find_attr_value
+  {l:agz}{n:pos}{attr_count:nat}{attr_name_len:pos} .<attr_count>.
+  (data: !$A.borrow(byte, l, n),
+   attrs: !$X.xml_attr_list(n, attr_count),
+   attr_name: &(@[char][attr_name_len]), attr_name_len: int attr_name_len): xspan(n) =
   case+ attrs of
-  | $X.xml_attrs_cons(aname_off, aname_len, val_off, val_len, rest) =>
-    if xml_name_eq(data, aname_off, aname_len, aname, alen) then xspan_at(val_off, val_len)
-    else _find_attr_val(data, rest, aname, alen)
+  | $X.xml_attrs_cons(each_name_offset, each_name_len, value_offset, value_len, rest) =>
+    if xml_name_eq(data, each_name_offset, each_name_len, attr_name, attr_name_len) then xspan_at(value_offset, value_len)
+    else _find_attr_value(data, rest, attr_name, attr_name_len)
   | $X.xml_attrs_nil() => xspan_none()
 
-(* The value of the attribute named aname among attrs, when there is one *)
+(* The value of the attribute named attr_name among attrs, when there
+   is one *)
 #pub fn find_attr
-  {lb:agz}{n:pos}{sa:nat}{np:pos}
-  (data: !$A.borrow(byte, lb, n),
-   attrs: !$X.xml_attr_list(n, sa),
-   aname: &(@[char][np]), alen: int np): xspan(n)
+  {l:agz}{n:pos}{attr_count:nat}{attr_name_len:pos}
+  (data: !$A.borrow(byte, l, n),
+   attrs: !$X.xml_attr_list(n, attr_count),
+   attr_name: &(@[char][attr_name_len]), attr_name_len: int attr_name_len): xspan(n)
 
-implement find_attr(data, attrs, aname, alen) = _find_attr_val(data, attrs, aname, alen)
+implement find_attr(data, attrs, attr_name, attr_name_len) = _find_attr_value(data, attrs, attr_name, attr_name_len)
 
 (* ============================================================
    Container.xml: find rootfile full-path
    ============================================================ *)
 
-fun _walk_rootfile_nodes_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+fun _rootfile_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-    (case+ _walk_rootfile_node(data, node) of
-     | ~xspan_none() => _walk_rootfile_nodes_r(data, rest)
+    (case+ _rootfile_node(data, node) of
+     | ~xspan_none() => _rootfile_nodes(data, rest)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
-and _walk_rootfile_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+and _rootfile_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_rootfile = @[char][8]('r', 'o', 'o', 't', 'f', 'i', 'l', 'e')
-    var _c_fp = @[char][9]('f', 'u', 'l', 'l', '-', 'p', 'a', 't', 'h')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var rootfile_chars = @[char][8]('r', 'o', 'o', 't', 'f', 'i', 'l', 'e')
+    var full_path_chars = @[char][9]('f', 'u', 'l', 'l', '-', 'p', 'a', 't', 'h')
   in
-    if xml_name_eq(data, name_off, name_len, _c_rootfile, 8) then
-      _find_attr_val(data, attrs, _c_fp, 9)
-    else _walk_rootfile_nodes_r(data, children)
+    if xml_name_eq(data, tag_offset, tag_len, rootfile_chars, 8) then
+      _find_attr_value(data, attrs, full_path_chars, 9)
+    else _rootfile_nodes(data, children)
   end
   | $X.xml_text(_, _) => xspan_none()
 
 (* The full-path attribute of container.xml's first rootfile *)
 #pub fn walk_rootfile_nodes
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
-implement walk_rootfile_nodes(data, nodes) = _walk_rootfile_nodes_r(data, nodes)
+implement walk_rootfile_nodes(data, nodes) = _rootfile_nodes(data, nodes)
 
 (* ============================================================
    OPF: extract title/author from metadata
    ============================================================ *)
 
-fun _walk_opf_metadata_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+fun _opf_metadata_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
    title: xspan(n), author: xspan(n)): @(xspan(n), xspan(n)) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(t, a) = _walk_opf_node(data, node, title, author)
-    in _walk_opf_metadata_r(data, rest, t, a) end
+      val @(next_title, next_author) = _opf_metadata_node(data, node, title, author)
+    in _opf_metadata_nodes(data, rest, next_title, next_author) end
   | $X.xml_nodes_nil() => @(title, author)
 
-and _walk_opf_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
+and _opf_metadata_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
    title: xspan(n), author: xspan(n)): @(xspan(n), xspan(n)) =
   case+ node of
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _c_title = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
-    var _c_creator = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
+  | $X.xml_element(tag_offset, tag_len, _, children) => let
+    var title_chars = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
+    var creator_chars = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
   in
-    if xml_name_eq(data, name_off, name_len, _c_title, 8) then let
+    if xml_name_eq(data, tag_offset, tag_len, title_chars, 8) then let
       val () = xspan_free(title)
     in @(_get_first_text(children), author) end
-    else if xml_name_eq(data, name_off, name_len, _c_creator, 10) then let
+    else if xml_name_eq(data, tag_offset, tag_len, creator_chars, 10) then let
       val () = xspan_free(author)
     in @(title, _get_first_text(children)) end
-    else _walk_opf_metadata_r(data, children, title, author)
+    else _opf_metadata_nodes(data, children, title, author)
   end
   | $X.xml_text(_, _) => @(title, author)
 
 and _get_first_text
-  {n:int}{sz:nat} .<sz, 0>.
-  (children: !$X.xml_node_list(n, sz)): xspan(n) =
+  {n:int}{tree_size:nat} .<tree_size, 0>.
+  (children: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ children of
   | $X.xml_nodes_cons(node, _) =>
     (case+ node of
-     | $X.xml_text(off, tlen) => xspan_at(off, tlen)
+     | $X.xml_text(text_offset, text_len) => xspan_at(text_offset, text_len)
      | $X.xml_element(_, _, _, _) => xspan_none())
   | $X.xml_nodes_nil() => xspan_none()
 
 (* The text of the OPF's dc:title and dc:creator *)
 #pub fn walk_opf_metadata
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): @(xspan(n), xspan(n))
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): @(xspan(n), xspan(n))
 
 implement walk_opf_metadata(data, nodes) =
-  _walk_opf_metadata_r(data, nodes, xspan_none(), xspan_none())
+  _opf_metadata_nodes(data, nodes, xspan_none(), xspan_none())
 
 (* The text of the OPF's first dc:language *)
-fun _opf_lang_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+fun _opf_language_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val r = _opf_lang_node(data, node)
+      val language = _opf_language_node(data, node)
     in
-      case+ r of
-      | ~xspan_none() => _opf_lang_r(data, rest)
-      | _ => r
+      case+ language of
+      | ~xspan_none() => _opf_language_nodes(data, rest)
+      | _ => language
     end
   | $X.xml_nodes_nil() => xspan_none()
 
-and _opf_lang_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+and _opf_language_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _c_lang = @[char][11]('d', 'c', ':', 'l', 'a', 'n', 'g', 'u', 'a', 'g', 'e')
+  | $X.xml_element(tag_offset, tag_len, _, children) => let
+    var language_chars = @[char][11]('d', 'c', ':', 'l', 'a', 'n', 'g', 'u', 'a', 'g', 'e')
   in
-    if xml_name_eq(data, name_off, name_len, _c_lang, 11) then _get_first_text(children)
-    else _opf_lang_r(data, children)
+    if xml_name_eq(data, tag_offset, tag_len, language_chars, 11) then _get_first_text(children)
+    else _opf_language_nodes(data, children)
   end
   | $X.xml_text(_, _) => xspan_none()
 
 #pub fn opf_language
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
-implement opf_language(data, nodes) = _opf_lang_r(data, nodes)
+implement opf_language(data, nodes) = _opf_language_nodes(data, nodes)
 
 (* ============================================================
    Accessibility metadata (EPUB Accessibility 1.1): the OPF's
@@ -249,264 +250,268 @@ implement opf_language(data, nodes) = _opf_lang_r(data, nodes)
 (* the WCAG level conformsTo names, times A11Y_LEVEL: 1 A, 2 AA, 3 AAA *)
 #pub macdef A11Y_LEVEL = 4194304
 
-(* Whether data[o, o + k) is s *)
-fun _span_is_at {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:nat}{i:nat | i <= sn} .<sn - i>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then true
-  else if i >= k then false
-  else if byte2int0($A.read<byte>(data, o + i)) <> char2int0(string_get_at(s, i)) then false
-  else _span_is_at(data, o, k, s, sl, i + 1)
+(* Whether data[offset, offset + span_len) is text, from position *)
+fun _span_is_from {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{text_len:nat}{position:nat | position <= text_len} .<text_len - position>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, text: string text_len, text_len: int text_len, position: int position): bool =
+  if position >= text_len then true
+  else if position >= span_len then false
+  else if byte2int0($A.read<byte>(data, offset + position)) <> char2int0(string_get_at(text, position)) then false
+  else _span_is_from(data, offset, span_len, text, text_len, position + 1)
 
-fn _span_is {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:nat}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn): bool = let
-  val sl = g1u2i(string1_length(s))
-in if k <> sl then false else _span_is_at(data, o, k, s, sl, 0) end
+fn _span_is {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{text_len:nat}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, text: string text_len): bool = let
+  val text_len = g1u2i(string1_length(text))
+in if span_len <> text_len then false else _span_is_from(data, offset, span_len, text, text_len, 0) end
 
-(* data[o, o + k) without the white space around it *)
-fun _trim_front {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [o2,k2:nat | o2 + k2 <= n] @(int o2, int k2) =
-  if k <= 0 then @(o, k)
-  else if byte2int0($A.read<byte>(data, o)) <= 32 then _trim_front(data, o + 1, k - 1)
-  else @(o, k)
+(* data[offset, offset + span_len) without the white space around it *)
+fun _trim_front {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n} .<span_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): [trimmed_offset,trimmed_len:nat | trimmed_offset + trimmed_len <= n] @(int trimmed_offset, int trimmed_len) =
+  if span_len <= 0 then @(offset, span_len)
+  else if byte2int0($A.read<byte>(data, offset)) <= 32 then _trim_front(data, offset + 1, span_len - 1)
+  else @(offset, span_len)
 
-fun _trim_back {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [k2:nat | k2 <= k] int k2 =
-  if k <= 0 then k
-  else if byte2int0($A.read<byte>(data, o + k - 1)) <= 32 then _trim_back(data, o, k - 1)
-  else k
+fun _trim_back {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n} .<span_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): [trimmed_len:nat | trimmed_len <= span_len] int trimmed_len =
+  if span_len <= 0 then span_len
+  else if byte2int0($A.read<byte>(data, offset + span_len - 1)) <= 32 then _trim_back(data, offset, span_len - 1)
+  else span_len
 
-fn _trim {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): [o2,k2:nat | o2 + k2 <= n] @(int o2, int k2) = let
-  val @(o2, k2) = _trim_front(data, o, k)
-  val k3 = _trim_back(data, o2, k2)
-in @(o2, k3) end
+fn _trim {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len)
+  : [trimmed_offset,trimmed_len:nat | trimmed_offset + trimmed_len <= n] @(int trimmed_offset, int trimmed_len) = let
+  val @(trimmed_offset, front_len) = _trim_front(data, offset, span_len)
+  val trimmed_len = _trim_back(data, trimmed_offset, front_len)
+in @(trimmed_offset, trimmed_len) end
 
-(* Whether data[p, p + sl), in lower case, is s (lower case), from j *)
-fun _lower_from {lb:agz}{n:pos}{sn:pos}{p:nat | p + sn <= n}{j:nat | j <= sn} .<sn - j>.
-  (data: !$A.borrow(byte, lb, n), p: int p, s: string sn, sl: int sn, j: int j): bool =
-  if j >= sl then true
+(* Whether data[start, start + text_len), in lower case, is text (lower
+   case), from position *)
+fun _lowercase_from {l:agz}{n:pos}{text_len:pos}{start:nat | start + text_len <= n}{position:nat | position <= text_len} .<text_len - position>.
+  (data: !$A.borrow(byte, l, n), start: int start, text: string text_len, text_len: int text_len, position: int position): bool =
+  if position >= text_len then true
   else let
-    val c = byte2int0($A.read<byte>(data, p + j))
-    val c = (if c >= 65 then (if c <= 90 then c + 32 else c) else c): int
-  in if c <> char2int0(string_get_at(s, j)) then false else _lower_from(data, p, s, sl, j + 1) end
+    val letter = byte2int0($A.read<byte>(data, start + position))
+    val letter = (if letter >= 65 then (if letter <= 90 then letter + 32 else letter) else letter): int
+  in if letter <> char2int0(string_get_at(text, position)) then false else _lowercase_from(data, start, text, text_len, position + 1) end
 
-(* Whether data[o, o + k), in lower case, has s (lower case) from i *)
-fun _has_lower {lb:agz}{n:pos}{o,k:nat | o + k <= n}{sn:pos}{i:nat} .<max(k - i, 0)>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, s: string sn, sl: int sn, i: int i): bool =
-  if i + sl > k then false
-  else if _lower_from(data, o + i, s, sl, 0) then true
-  else _has_lower(data, o, k, s, sl, i + 1)
+(* Whether data[offset, offset + span_len), in lower case, has text
+   (lower case) from position *)
+fun _has_lowercase {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{text_len:pos}{position:nat} .<max(span_len - position, 0)>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, text: string text_len, text_len: int text_len, position: int position): bool =
+  if position + text_len > span_len then false
+  else if _lowercase_from(data, offset + position, text, text_len, 0) then true
+  else _has_lowercase(data, offset, span_len, text, text_len, position + 1)
 
-fn _bor (a: int, b: int): int = $AR.bor_int_int(a, b)
+fn _bit_or (left: int, right: int): int = $AR.bor_int_int(left, right)
 
 (* The WCAG level a conformance statement or URL names: 3 AAA, 2 AA,
    1 A, 0 none *)
-fn _wcag_level {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): int =
-  if _has_lower(data, o, k, "aaa", 3, 0) then 3
-  else if _has_lower(data, o, k, "level aa", 8, 0) then 2
-  else if _has_lower(data, o, k, "wcag-aa", 7, 0) then 2
-  else if _has_lower(data, o, k, "level a", 7, 0) then 1
-  else if _has_lower(data, o, k, "wcag-a", 6, 0) then 1
+fn _wcag_level {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): int =
+  if _has_lowercase(data, offset, span_len, "aaa", 3, 0) then 3
+  else if _has_lowercase(data, offset, span_len, "level aa", 8, 0) then 2
+  else if _has_lowercase(data, offset, span_len, "wcag-aa", 7, 0) then 2
+  else if _has_lowercase(data, offset, span_len, "level a", 7, 0) then 1
+  else if _has_lowercase(data, offset, span_len, "wcag-a", 6, 0) then 1
   else 0
 
-(* v, with the bit that says the book has accessibility metadata *)
-fn _known (v: int): int = _bor(v, A11Y_KNOWN)
+(* flags, with the bit that says the book has accessibility metadata *)
+fn _known (flags: int): int = _bit_or(flags, A11Y_KNOWN)
 
-(* The flag a property's value v sets *)
-fn _a11y_value {lb:agz}{n:pos}{po,pk,vo,vk:nat | po + pk <= n; vo + vk <= n}
-  (data: !$A.borrow(byte, lb, n), po: int po, pk: int pk, vo: int vo, vk: int vk): int = let
-  val @(vo, vk) = _trim(data, vo, vk)
+(* The flag a property's value sets *)
+fn _a11y_value {l:agz}{n:pos}{property_offset,property_len,value_offset,value_len:nat | property_offset + property_len <= n; value_offset + value_len <= n}
+  (data: !$A.borrow(byte, l, n), property_offset: int property_offset, property_len: int property_len, value_offset: int value_offset, value_len: int value_len): int = let
+  val @(value_offset, value_len) = _trim(data, value_offset, value_len)
 in
-  if _span_is(data, po, pk, "schema:accessibilityFeature") then
-    _known(if _span_is(data, vo, vk, "displayTransformability") then A11Y_TRANSFORM
-     else if _span_is(data, vo, vk, "alternativeText") then A11Y_ALT
-     else if _span_is(data, vo, vk, "longDescription") then A11Y_LONGDESC
-     else if _span_is(data, vo, vk, "tableOfContents") then A11Y_TOC
-     else if _span_is(data, vo, vk, "index") then A11Y_INDEX
-     else if _span_is(data, vo, vk, "structuralNavigation") then A11Y_STRUCT
-     else if _span_is(data, vo, vk, "pageNavigation") then A11Y_PAGES
-     else if _span_is(data, vo, vk, "MathML") then A11Y_MATHML
-     else if _span_is(data, vo, vk, "transcript") then A11Y_TRANSCRIPT
-     else if _span_is(data, vo, vk, "closedCaptions") then A11Y_CAPTIONS
-     else if _span_is(data, vo, vk, "captions") then A11Y_CAPTIONS
+  if _span_is(data, property_offset, property_len, "schema:accessibilityFeature") then
+    _known(if _span_is(data, value_offset, value_len, "displayTransformability") then A11Y_TRANSFORM
+     else if _span_is(data, value_offset, value_len, "alternativeText") then A11Y_ALT
+     else if _span_is(data, value_offset, value_len, "longDescription") then A11Y_LONGDESC
+     else if _span_is(data, value_offset, value_len, "tableOfContents") then A11Y_TOC
+     else if _span_is(data, value_offset, value_len, "index") then A11Y_INDEX
+     else if _span_is(data, value_offset, value_len, "structuralNavigation") then A11Y_STRUCT
+     else if _span_is(data, value_offset, value_len, "pageNavigation") then A11Y_PAGES
+     else if _span_is(data, value_offset, value_len, "MathML") then A11Y_MATHML
+     else if _span_is(data, value_offset, value_len, "transcript") then A11Y_TRANSCRIPT
+     else if _span_is(data, value_offset, value_len, "closedCaptions") then A11Y_CAPTIONS
+     else if _span_is(data, value_offset, value_len, "captions") then A11Y_CAPTIONS
      else 0)
-  else if _span_is(data, po, pk, "schema:accessMode") then
-    _known(if _span_is(data, vo, vk, "textual") then A11Y_MODE_TEXT
-     else if _span_is(data, vo, vk, "visual") then A11Y_MODE_VISUAL
+  else if _span_is(data, property_offset, property_len, "schema:accessMode") then
+    _known(if _span_is(data, value_offset, value_len, "textual") then A11Y_MODE_TEXT
+     else if _span_is(data, value_offset, value_len, "visual") then A11Y_MODE_VISUAL
      else 0)
-  else if _span_is(data, po, pk, "schema:accessModeSufficient") then
-    _known(if _span_is(data, vo, vk, "textual") then A11Y_SUFF_TEXT else 0)
-  else if _span_is(data, po, pk, "schema:accessibilityHazard") then
-    _known(if _span_is(data, vo, vk, "none") then A11Y_HZ_NONE
-     else if _span_is(data, vo, vk, "flashing") then A11Y_HZ_FLASH
-     else if _span_is(data, vo, vk, "motionSimulation") then A11Y_HZ_MOTION
-     else if _span_is(data, vo, vk, "sound") then A11Y_HZ_SOUND
-     else if _span_is(data, vo, vk, "noFlashingHazard") then A11Y_HZ_NOFLASH
-     else if _span_is(data, vo, vk, "noMotionSimulationHazard") then A11Y_HZ_NOMOTION
-     else if _span_is(data, vo, vk, "noSoundHazard") then A11Y_HZ_NOSOUND
-     else if _span_is(data, vo, vk, "unknown") then A11Y_HZ_UNKNOWN
+  else if _span_is(data, property_offset, property_len, "schema:accessModeSufficient") then
+    _known(if _span_is(data, value_offset, value_len, "textual") then A11Y_SUFF_TEXT else 0)
+  else if _span_is(data, property_offset, property_len, "schema:accessibilityHazard") then
+    _known(if _span_is(data, value_offset, value_len, "none") then A11Y_HZ_NONE
+     else if _span_is(data, value_offset, value_len, "flashing") then A11Y_HZ_FLASH
+     else if _span_is(data, value_offset, value_len, "motionSimulation") then A11Y_HZ_MOTION
+     else if _span_is(data, value_offset, value_len, "sound") then A11Y_HZ_SOUND
+     else if _span_is(data, value_offset, value_len, "noFlashingHazard") then A11Y_HZ_NOFLASH
+     else if _span_is(data, value_offset, value_len, "noMotionSimulationHazard") then A11Y_HZ_NOMOTION
+     else if _span_is(data, value_offset, value_len, "noSoundHazard") then A11Y_HZ_NOSOUND
+     else if _span_is(data, value_offset, value_len, "unknown") then A11Y_HZ_UNKNOWN
      else 0)
-  else if _span_is(data, po, pk, "dcterms:conformsTo") then
-    _known(_wcag_level(data, vo, vk) * A11Y_LEVEL)
-  else if _span_is(data, po, pk, "schema:accessibilitySummary") then _known(0)
+  else if _span_is(data, property_offset, property_len, "dcterms:conformsTo") then
+    _known(_wcag_level(data, value_offset, value_len) * A11Y_LEVEL)
+  else if _span_is(data, property_offset, property_len, "schema:accessibilitySummary") then _known(0)
   else 0
 end
 
-(* The flags of nodes, or'd onto acc, and the summary (the first one) *)
-fun _a11y_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), acc: int, summary: xspan(n)): @(int, xspan(n)) =
+(* The flags of nodes, or'd onto flags, and the summary (the first one) *)
+fun _a11y_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), flags: int, summary: xspan(n)): @(int, xspan(n)) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(acc, summary) = _a11y_node(data, node, acc, summary)
-    in _a11y_r(data, rest, acc, summary) end
-  | $X.xml_nodes_nil() => @(acc, summary)
+      val @(flags, summary) = _a11y_node(data, node, flags, summary)
+    in _a11y_nodes(data, rest, flags, summary) end
+  | $X.xml_nodes_nil() => @(flags, summary)
 
 and _a11y_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), acc: int, summary: xspan(n)): @(int, xspan(n)) =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), flags: int, summary: xspan(n)): @(int, xspan(n)) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_meta = @[char][4]('m', 'e', 't', 'a')
-    var _c_link = @[char][4]('l', 'i', 'n', 'k')
-    var _c_property = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
-    var _c_name = @[char][4]('n', 'a', 'm', 'e')
-    var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
-    var _c_rel = @[char][3]('r', 'e', 'l')
-    var _c_href = @[char][4]('h', 'r', 'e', 'f')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var link_chars = @[char][4]('l', 'i', 'n', 'k')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+    var name_chars = @[char][4]('n', 'a', 'm', 'e')
+    var content_chars = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+    var rel_chars = @[char][3]('r', 'e', 'l')
+    var href_chars = @[char][4]('h', 'r', 'e', 'f')
   in
-    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
       (* EPUB 3: <meta property="p">v</meta>; EPUB 2: <meta name="p" content="v"/> *)
-      (case+ _find_attr_val(data, attrs, _c_property, 8) of
-       | ~xspan_at(po, pk) =>
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
          (case+ _get_first_text(children) of
-          | ~xspan_at(vo, vk) => let
-              val f = _a11y_value(data, po, pk, vo, vk)
-              val is_summary = _span_is(data, po, pk, "schema:accessibilitySummary")
+          | ~xspan_at(value_offset, value_len) => let
+              val flag = _a11y_value(data, property_offset, property_len, value_offset, value_len)
+              val is_summary = _span_is(data, property_offset, property_len, "schema:accessibilitySummary")
             in
               case+ summary of
               | xspan_none() => if is_summary then let
                     val () = xspan_free(summary)
-                  in @(_bor(acc, f), xspan_at(vo, vk)) end
-                  else @(_bor(acc, f), summary)
-              | _ => @(_bor(acc, f), summary)
+                  in @(_bit_or(flags, flag), xspan_at(value_offset, value_len)) end
+                  else @(_bit_or(flags, flag), summary)
+              | _ => @(_bit_or(flags, flag), summary)
             end
-          | ~xspan_none() => @(acc, summary))
+          | ~xspan_none() => @(flags, summary))
        | ~xspan_none() =>
-         (case+ _find_attr_val(data, attrs, _c_name, 4) of
-          | ~xspan_at(po, pk) =>
-            (case+ _find_attr_val(data, attrs, _c_content, 7) of
-             | ~xspan_at(vo, vk) => let
-                 val f = _a11y_value(data, po, pk, vo, vk)
-                 val is_summary = _span_is(data, po, pk, "schema:accessibilitySummary")
+         (case+ _find_attr_value(data, attrs, name_chars, 4) of
+          | ~xspan_at(property_offset, property_len) =>
+            (case+ _find_attr_value(data, attrs, content_chars, 7) of
+             | ~xspan_at(value_offset, value_len) => let
+                 val flag = _a11y_value(data, property_offset, property_len, value_offset, value_len)
+                 val is_summary = _span_is(data, property_offset, property_len, "schema:accessibilitySummary")
                in
                  case+ summary of
                  | xspan_none() => if is_summary then let
                        val () = xspan_free(summary)
-                     in @(_bor(acc, f), xspan_at(vo, vk)) end
-                     else @(_bor(acc, f), summary)
-                 | _ => @(_bor(acc, f), summary)
+                     in @(_bit_or(flags, flag), xspan_at(value_offset, value_len)) end
+                     else @(_bit_or(flags, flag), summary)
+                 | _ => @(_bit_or(flags, flag), summary)
                end
-             | ~xspan_none() => @(acc, summary))
-          | ~xspan_none() => @(acc, summary)))
-    else if xml_name_eq(data, name_off, name_len, _c_link, 4) then
-      (case+ _find_attr_val(data, attrs, _c_rel, 3) of
-       | ~xspan_at(ro, rk) =>
-         (case+ _find_attr_val(data, attrs, _c_href, 4) of
-          | ~xspan_at(ho, hk) => @(_bor(acc, _a11y_value(data, ro, rk, ho, hk)), summary)
-          | ~xspan_none() => @(acc, summary))
-       | ~xspan_none() => @(acc, summary))
-    else _a11y_r(data, children, acc, summary)
+             | ~xspan_none() => @(flags, summary))
+          | ~xspan_none() => @(flags, summary)))
+    else if xml_name_eq(data, tag_offset, tag_len, link_chars, 4) then
+      (case+ _find_attr_value(data, attrs, rel_chars, 3) of
+       | ~xspan_at(rel_offset, rel_len) =>
+         (case+ _find_attr_value(data, attrs, href_chars, 4) of
+          | ~xspan_at(href_offset, href_len) => @(_bit_or(flags, _a11y_value(data, rel_offset, rel_len, href_offset, href_len)), summary)
+          | ~xspan_none() => @(flags, summary))
+       | ~xspan_none() => @(flags, summary))
+    else _a11y_nodes(data, children, flags, summary)
   end
-  | $X.xml_text(_, _) => @(acc, summary)
+  | $X.xml_text(_, _) => @(flags, summary)
 
 (* The OPF's accessibility metadata: its flags (the A11Y_ bits), and its
    accessibilitySummary's text, if any *)
 #pub fn opf_a11y
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): @(int, xspan(n))
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): @(int, xspan(n))
 
-implement opf_a11y(data, nodes) = _a11y_r(data, nodes, 0, xspan_none())
+implement opf_a11y(data, nodes) = _a11y_nodes(data, nodes, 0, xspan_none())
 
 (* ============================================================
    Series: EPUB 3's belongs-to-collection and group-position, or
    Calibre's calibre:series and calibre:series_index
    ============================================================ *)
 
-(* The whole number at data[o, o + k) (digits before any '.'), 0 when
-   there is none; at most 99999 *)
-fun _whole {lb:agz}{n:pos}{o,k:nat | o + k <= n} .<k>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, acc: int): int =
-  if k <= 0 then acc
+(* The whole number at data[offset, offset + span_len) (digits before
+   any '.'), its digits after those of number; 0 when there is none; at
+   most 99999 *)
+fun _whole_number {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n} .<span_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, number: int): int =
+  if span_len <= 0 then number
   else let
-    val c = byte2int0($A.read<byte>(data, o))
+    val digit_byte = byte2int0($A.read<byte>(data, offset))
   in
-    if c = 32 then (if acc = 0 then _whole(data, o + 1, k - 1, acc) else acc)
-    else if c < 48 then acc
-    else if c > 57 then acc
-    else if acc > 9999 then acc
-    else _whole(data, o + 1, k - 1, acc * 10 + (c - 48))
+    if digit_byte = 32 then (if number = 0 then _whole_number(data, offset + 1, span_len - 1, number) else number)
+    else if digit_byte < 48 then number
+    else if digit_byte > 57 then number
+    else if number > 9999 then number
+    else _whole_number(data, offset + 1, span_len - 1, number * 10 + (digit_byte - 48))
   end
 
 (* The series found in nodes so far: its name, and its number *)
-fun _series_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz), name: xspan(n), num: int): @(xspan(n), int) =
+fun _series_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), name: xspan(n), number: int): @(xspan(n), int) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(name, num) = _series_node(data, node, name, num)
-    in _series_r(data, rest, name, num) end
-  | $X.xml_nodes_nil() => @(name, num)
+      val @(name, number) = _series_node(data, node, name, number)
+    in _series_nodes(data, rest, name, number) end
+  | $X.xml_nodes_nil() => @(name, number)
 
 and _series_node
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz), name: xspan(n), num: int): @(xspan(n), int) =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), name: xspan(n), number: int): @(xspan(n), int) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_meta = @[char][4]('m', 'e', 't', 'a')
-    var _c_property = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
-    var _c_name = @[char][4]('n', 'a', 'm', 'e')
-    var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+    var name_chars = @[char][4]('n', 'a', 'm', 'e')
+    var content_chars = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
   in
-    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then
-      (case+ _find_attr_val(data, attrs, _c_property, 8) of
-       | ~xspan_at(po, pk) =>
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
          (case+ _get_first_text(children) of
-          | ~xspan_at(vo, vk) =>
-            if _span_is(data, po, pk, "belongs-to-collection") then
+          | ~xspan_at(value_offset, value_len) =>
+            if _span_is(data, property_offset, property_len, "belongs-to-collection") then
               (case+ name of
-               | xspan_none() => let val () = xspan_free(name) in @(xspan_at(vo, vk), num) end
-               | _ => @(name, num))
-            else if _span_is(data, po, pk, "group-position") then
-              @(name, (if num = 0 then _whole(data, vo, vk, 0) else num))
-            else @(name, num)
-          | ~xspan_none() => @(name, num))
+               | xspan_none() => let val () = xspan_free(name) in @(xspan_at(value_offset, value_len), number) end
+               | _ => @(name, number))
+            else if _span_is(data, property_offset, property_len, "group-position") then
+              @(name, (if number = 0 then _whole_number(data, value_offset, value_len, 0) else number))
+            else @(name, number)
+          | ~xspan_none() => @(name, number))
        | ~xspan_none() =>
-         (case+ _find_attr_val(data, attrs, _c_name, 4) of
-          | ~xspan_at(po, pk) =>
-            (case+ _find_attr_val(data, attrs, _c_content, 7) of
-             | ~xspan_at(vo, vk) =>
-               if _span_is(data, po, pk, "calibre:series") then
+         (case+ _find_attr_value(data, attrs, name_chars, 4) of
+          | ~xspan_at(property_offset, property_len) =>
+            (case+ _find_attr_value(data, attrs, content_chars, 7) of
+             | ~xspan_at(value_offset, value_len) =>
+               if _span_is(data, property_offset, property_len, "calibre:series") then
                  (case+ name of
-                  | xspan_none() => let val () = xspan_free(name) in @(xspan_at(vo, vk), num) end
-                  | _ => @(name, num))
-               else if _span_is(data, po, pk, "calibre:series_index") then
-                 @(name, (if num = 0 then _whole(data, vo, vk, 0) else num))
-               else @(name, num)
-             | ~xspan_none() => @(name, num))
-          | ~xspan_none() => @(name, num)))
-    else _series_r(data, children, name, num)
+                  | xspan_none() => let val () = xspan_free(name) in @(xspan_at(value_offset, value_len), number) end
+                  | _ => @(name, number))
+               else if _span_is(data, property_offset, property_len, "calibre:series_index") then
+                 @(name, (if number = 0 then _whole_number(data, value_offset, value_len, 0) else number))
+               else @(name, number)
+             | ~xspan_none() => @(name, number))
+          | ~xspan_none() => @(name, number)))
+    else _series_nodes(data, children, name, number)
   end
-  | $X.xml_text(_, _) => @(name, num)
+  | $X.xml_text(_, _) => @(name, number)
 
 (* The book's series (its name, when it has one) and its number in it
    (0 when none is given) *)
 #pub fn opf_series
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): @(xspan(n), int)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): @(xspan(n), int)
 
-implement opf_series(data, nodes) = _series_r(data, nodes, xspan_none(), 0)
+implement opf_series(data, nodes) = _series_nodes(data, nodes, xspan_none(), 0)
 
 (* ============================================================
    Spine: find Nth idref
@@ -514,33 +519,33 @@ implement opf_series(data, nodes) = _series_r(data, nodes, xspan_none(), 0)
 
 (* The idref of the itemref after skip others, or how many remain to
    skip *)
-fun _find_nth_idref_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
+fun _nth_idref_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
    skip: int): @(xspan(n), int) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(r, left) = _check_itemref_nth(data, node, skip)
+      val @(idref, left) = _nth_idref_node(data, node, skip)
     in
-      case+ r of
-      | ~xspan_none() => _find_nth_idref_r(data, rest, left)
-      | _ => @(r, left)
+      case+ idref of
+      | ~xspan_none() => _nth_idref_nodes(data, rest, left)
+      | _ => @(idref, left)
     end
   | $X.xml_nodes_nil() => @(xspan_none(), skip)
 
-and _check_itemref_nth
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
+and _nth_idref_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
    skip: int): @(xspan(n), int) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
-    var _c_idref = @[char][5]('i', 'd', 'r', 'e', 'f')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var itemref_chars = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
+    var idref_chars = @[char][5]('i', 'd', 'r', 'e', 'f')
   in
-    if xml_name_eq(data, name_off, name_len, _c_itemref, 7) then
-      if skip <= 0 then @(_find_attr_val(data, attrs, _c_idref, 5), 0)
+    if xml_name_eq(data, tag_offset, tag_len, itemref_chars, 7) then
+      if skip <= 0 then @(_find_attr_value(data, attrs, idref_chars, 5), 0)
       else @(xspan_none(), skip - 1)
-    else _find_nth_idref_r(data, children, skip)
+    else _nth_idref_nodes(data, children, skip)
   end
   | $X.xml_text(_, _) => @(xspan_none(), skip)
 
@@ -548,85 +553,85 @@ and _check_itemref_nth
    Spine: count items
    ============================================================ *)
 
-fun _count_spine_items_r
-  {lb:agz}{n:pos}{sz:nat}{c:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
-   acc: int c): [d:nat] int d =
+fun _count_itemref_nodes
+  {l:agz}{n:pos}{tree_size:nat}{count:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
+   count: int count): [total:nat] int total =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-      _count_spine_items_r(data, rest, _count_itemref(data, node, acc))
-  | $X.xml_nodes_nil() => acc
+      _count_itemref_nodes(data, rest, _count_itemref_node(data, node, count))
+  | $X.xml_nodes_nil() => count
 
-and _count_itemref
-  {lb:agz}{n:pos}{sz:pos}{c:nat} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
-   acc: int c): [d:nat] int d =
+and _count_itemref_node
+  {l:agz}{n:pos}{tree_size:pos}{count:nat} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
+   count: int count): [total:nat] int total =
   case+ node of
-  | $X.xml_element(name_off, name_len, _, children) => let
-    var _c_itemref = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
+  | $X.xml_element(tag_offset, tag_len, _, children) => let
+    var itemref_chars = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
   in
-    if xml_name_eq(data, name_off, name_len, _c_itemref, 7) then acc + 1
-    else _count_spine_items_r(data, children, acc)
+    if xml_name_eq(data, tag_offset, tag_len, itemref_chars, 7) then count + 1
+    else _count_itemref_nodes(data, children, count)
   end
-  | $X.xml_text(_, _) => acc
+  | $X.xml_text(_, _) => count
 
 (* Number of itemref elements *)
 #pub fn count_spine_items
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): [c:nat] int c
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): [count:nat] int count
 
-implement count_spine_items(data, nodes) = _count_spine_items_r(data, nodes, 0)
+implement count_spine_items(data, nodes) = _count_itemref_nodes(data, nodes, 0)
 
 (* ============================================================
    Manifest: find href by idref
    ============================================================ *)
 
-fun _find_manifest_href_r
-  {lb:agz}{n:pos}{sz:nat}{io,ik:nat | io + ik <= n} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz),
-   idref_off: int io, idref_len: int ik): xspan(n) =
+fun _manifest_href_nodes
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-    (case+ _check_manifest_item(data, len, node, idref_off, idref_len) of
-     | ~xspan_none() => _find_manifest_href_r(data, len, rest, idref_off, idref_len)
+    (case+ _manifest_href_node(data, data_len, node, idref_offset, idref_len) of
+     | ~xspan_none() => _manifest_href_nodes(data, data_len, rest, idref_offset, idref_len)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
-and _check_manifest_item
-  {lb:agz}{n:pos}{sz:pos}{io,ik:nat | io + ik <= n} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), len: int n, node: !$X.xml_node(n, sz),
-   idref_off: int io, idref_len: int ik): xspan(n) =
+and _manifest_href_node
+  {l:agz}{n:pos}{tree_size:pos}{idref_offset,idref_len:nat | idref_offset + idref_len <= n} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, node: !$X.xml_node(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var item_chars = @[char][4]('i', 't', 'e', 'm')
   in
-    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
-      var _c_id = @[char][2]('i', 'd')
+    if xml_name_eq(data, tag_offset, tag_len, item_chars, 4) then let
+      var id_chars = @[char][2]('i', 'd')
     in
-      case+ _find_attr_val(data, attrs, _c_id, 2) of
-      | ~xspan_at(id_off, id_len) =>
+      case+ _find_attr_value(data, attrs, id_chars, 2) of
+      | ~xspan_at(id_offset, id_len) =>
         if id_len <> idref_len then xspan_none()
-        else if $S.borrow_region_eq(data, len, id_off, idref_off, idref_len) then let
-          var _c_href = @[char][4]('h', 'r', 'e', 'f')
-        in _find_attr_val(data, attrs, _c_href, 4) end
+        else if $S.borrow_region_eq(data, data_len, id_offset, idref_offset, idref_len) then let
+          var href_chars = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_value(data, attrs, href_chars, 4) end
         else xspan_none()
       | ~xspan_none() => xspan_none()
     end
-    else _find_manifest_href_r(data, len, children, idref_off, idref_len)
+    else _manifest_href_nodes(data, data_len, children, idref_offset, idref_len)
   end
   | $X.xml_text(_, _) => xspan_none()
 
-(* The href of the manifest item for the chapter_idx-th spine itemref *)
+(* The href of the manifest item for the chapter_index-th spine itemref *)
 #pub fn find_chapter_href_n
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), len: int n,
-   nodes: !$X.xml_node_list(n, sz), chapter_idx: int): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   nodes: !$X.xml_node_list(n, tree_size), chapter_index: int): xspan(n)
 
-implement find_chapter_href_n(data, len, nodes, chapter_idx) = let
-  val @(idref, _) = _find_nth_idref_r(data, nodes, chapter_idx)
+implement find_chapter_href_n(data, data_len, nodes, chapter_index) = let
+  val @(idref, _) = _nth_idref_nodes(data, nodes, chapter_index)
 in
   case+ idref of
-  | ~xspan_at(o, k) => _find_manifest_href_r(data, len, nodes, o, k)
+  | ~xspan_at(idref_offset, idref_len) => _manifest_href_nodes(data, data_len, nodes, idref_offset, idref_len)
   | ~xspan_none() => xspan_none()
 end
 
@@ -634,79 +639,80 @@ end
    Manifest: items by property, meta by name
    ============================================================ *)
 
-(* Whether data[o, o + k) has pat[0, np) in it at or after i *)
-fun _span_has {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}{i:nat} .<max(k - i + 1, 0)>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np, i: int i): bool =
-  if i + np > k then false
-  else if _match_chars(data, o + i, pat, np, 0) then true
-  else _span_has(data, o, k, pat, np, i + 1)
+(* Whether data[offset, offset + span_len) has pattern[0, pattern_len)
+   in it at or after position *)
+fun _span_has {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}{position:nat} .<max(span_len - position + 1, 0)>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len, position: int position): bool =
+  if position + pattern_len > span_len then false
+  else if _match_chars(data, offset + position, pattern, pattern_len, 0) then true
+  else _span_has(data, offset, span_len, pattern, pattern_len, position + 1)
 
-(* The href of the first manifest item whose properties have prop *)
-fun _item_with_prop_r
-  {lb:agz}{n:pos}{sz:nat}{np:pos} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
-   prop: &(@[char][np]), np: int np): xspan(n) =
+(* The href of the first manifest item whose properties have property *)
+fun _item_with_property_nodes
+  {l:agz}{n:pos}{tree_size:nat}{property_len:pos} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
+   property: &(@[char][property_len]), property_len: int property_len): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-    (case+ _item_with_prop(data, node, prop, np) of
-     | ~xspan_none() => _item_with_prop_r(data, rest, prop, np)
+    (case+ _item_with_property(data, node, property, property_len) of
+     | ~xspan_none() => _item_with_property_nodes(data, rest, property, property_len)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
-and _item_with_prop
-  {lb:agz}{n:pos}{sz:pos}{np:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz),
-   prop: &(@[char][np]), np: int np): xspan(n) =
+and _item_with_property
+  {l:agz}{n:pos}{tree_size:pos}{property_len:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
+   property: &(@[char][property_len]), property_len: int property_len): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var item_chars = @[char][4]('i', 't', 'e', 'm')
   in
-    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
-      var _c_props = @[char][10]('p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's')
+    if xml_name_eq(data, tag_offset, tag_len, item_chars, 4) then let
+      var properties_chars = @[char][10]('p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's')
     in
-      case+ _find_attr_val(data, attrs, _c_props, 10) of
-      | ~xspan_at(po, pk) =>
-        if _span_has(data, po, pk, prop, np, 0) then let
-          var _c_href = @[char][4]('h', 'r', 'e', 'f')
-        in _find_attr_val(data, attrs, _c_href, 4) end
+      case+ _find_attr_value(data, attrs, properties_chars, 10) of
+      | ~xspan_at(properties_offset, properties_len) =>
+        if _span_has(data, properties_offset, properties_len, property, property_len, 0) then let
+          var href_chars = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_value(data, attrs, href_chars, 4) end
         else xspan_none()
       | ~xspan_none() => xspan_none()
     end
-    else _item_with_prop_r(data, children, prop, np)
+    else _item_with_property_nodes(data, children, property, property_len)
   end
   | $X.xml_text(_, _) => xspan_none()
 
 (* The content of the first <meta name="cover"> *)
-fun _meta_cover_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+fun _meta_cover_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ _meta_cover(data, node) of
-     | ~xspan_none() => _meta_cover_r(data, rest)
+     | ~xspan_none() => _meta_cover_nodes(data, rest)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
 and _meta_cover
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_meta = @[char][4]('m', 'e', 't', 'a')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
   in
-    if xml_name_eq(data, name_off, name_len, _c_meta, 4) then let
-      var _c_name = @[char][4]('n', 'a', 'm', 'e')
-      var _c_cover = @[char][5]('c', 'o', 'v', 'e', 'r')
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then let
+      var name_chars = @[char][4]('n', 'a', 'm', 'e')
+      var cover_chars = @[char][5]('c', 'o', 'v', 'e', 'r')
     in
-      case+ _find_attr_val(data, attrs, _c_name, 4) of
-      | ~xspan_at(no, nk) =>
-        if xml_name_eq(data, no, nk, _c_cover, 5) then let
-          var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
-        in _find_attr_val(data, attrs, _c_content, 7) end
+      case+ _find_attr_value(data, attrs, name_chars, 4) of
+      | ~xspan_at(meta_name_offset, meta_name_len) =>
+        if xml_name_eq(data, meta_name_offset, meta_name_len, cover_chars, 5) then let
+          var content_chars = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+        in _find_attr_value(data, attrs, content_chars, 7) end
         else xspan_none()
       | ~xspan_none() => xspan_none()
     end
-    else _meta_cover_r(data, children)
+    else _meta_cover_nodes(data, children)
   end
   | $X.xml_text(_, _) => xspan_none()
 
@@ -714,135 +720,138 @@ and _meta_cover
    cover-image (EPUB 3), else the item a <meta name="cover"> names
    (EPUB 2) *)
 #pub fn find_cover_href
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz)): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
-implement find_cover_href (data, len, nodes) = let
-  var _c_ci = @[char][11]('c', 'o', 'v', 'e', 'r', '-', 'i', 'm', 'a', 'g', 'e')
+implement find_cover_href (data, data_len, nodes) = let
+  var cover_image_chars = @[char][11]('c', 'o', 'v', 'e', 'r', '-', 'i', 'm', 'a', 'g', 'e')
 in
-  case+ _item_with_prop_r(data, nodes, _c_ci, 11) of
+  case+ _item_with_property_nodes(data, nodes, cover_image_chars, 11) of
   | ~xspan_none() =>
-    (case+ _meta_cover_r(data, nodes) of
-     | ~xspan_at(io, ik) => _find_manifest_href_r(data, len, nodes, io, ik)
+    (case+ _meta_cover_nodes(data, nodes) of
+     | ~xspan_at(id_offset, id_len) => _manifest_href_nodes(data, data_len, nodes, id_offset, id_len)
      | ~xspan_none() => xspan_none())
   | found => found
 end
 
-(* The href of the manifest item with property prop (such as "nav") *)
+(* The href of the manifest item with property `property` (such as
+   "nav") *)
 #pub fn find_item_with_prop
-  {lb:agz}{n:pos}{sz:nat}{np:pos}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz),
-   prop: &(@[char][np]), np: int np): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}{property_len:pos}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
+   property: &(@[char][property_len]), property_len: int property_len): xspan(n)
 
-implement find_item_with_prop (data, nodes, prop, np) = _item_with_prop_r(data, nodes, prop, np)
+implement find_item_with_prop (data, nodes, property, property_len) = _item_with_property_nodes(data, nodes, property, property_len)
 
-(* The href of the manifest item with id data[io, io + ik) *)
+(* The href of the manifest item with id data[id_offset, id_offset + id_len) *)
 #pub fn find_manifest_href
-  {lb:agz}{n:pos}{sz:nat}{io,ik:nat | io + ik <= n}
-  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz),
-   io: int io, ik: int ik): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}{id_offset,id_len:nat | id_offset + id_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   id_offset: int id_offset, id_len: int id_len): xspan(n)
 
-implement find_manifest_href (data, len, nodes, io, ik) = _find_manifest_href_r(data, len, nodes, io, ik)
+implement find_manifest_href (data, data_len, nodes, id_offset, id_len) = _manifest_href_nodes(data, data_len, nodes, id_offset, id_len)
 
 (* The toc attribute of the first <spine> *)
-fun _spine_toc_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+fun _spine_toc_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ _spine_toc(data, node) of
-     | ~xspan_none() => _spine_toc_r(data, rest)
+     | ~xspan_none() => _spine_toc_nodes(data, rest)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
 and _spine_toc
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var spine_chars = @[char][5]('s', 'p', 'i', 'n', 'e')
   in
-    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
-      var _c_toc = @[char][3]('t', 'o', 'c')
-    in _find_attr_val(data, attrs, _c_toc, 3) end
-    else _spine_toc_r(data, children)
+    if xml_name_eq(data, tag_offset, tag_len, spine_chars, 5) then let
+      var toc_chars = @[char][3]('t', 'o', 'c')
+    in _find_attr_value(data, attrs, toc_chars, 3) end
+    else _spine_toc_nodes(data, children)
   end
   | $X.xml_text(_, _) => xspan_none()
 
 (* The href of the NCX (EPUB 2's table of contents): the manifest item
    the spine's toc attribute names *)
 #pub fn find_ncx_href
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), len: int n, nodes: !$X.xml_node_list(n, sz)): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
-implement find_ncx_href (data, len, nodes) =
-  case+ _spine_toc_r(data, nodes) of
-  | ~xspan_at(io, ik) => _find_manifest_href_r(data, len, nodes, io, ik)
+implement find_ncx_href (data, data_len, nodes) =
+  case+ _spine_toc_nodes(data, nodes) of
+  | ~xspan_at(id_offset, id_len) => _manifest_href_nodes(data, data_len, nodes, id_offset, id_len)
   | ~xspan_none() => xspan_none()
 
-(* Whether data[o, o + k) has pat[0, np) in it *)
-#pub fn span_has {lb:agz}{n:pos}{o,k:nat | o + k <= n}{np:pos}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, pat: &(@[char][np]), np: int np): bool
+(* Whether data[offset, offset + span_len) has pattern[0, pattern_len)
+   in it *)
+#pub fn span_has {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool
 
-implement span_has (data, o, k, pat, np) = _span_has(data, o, k, pat, np, 0)
+implement span_has (data, offset, span_len, pattern, pattern_len) = _span_has(data, offset, span_len, pattern, pattern_len, 0)
 
 (* Whether the first <spine> reads right to left *)
-fun _spine_rtl_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): int =
+fun _spine_rtl_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): int =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val r = _spine_rtl(data, node)
-    in if r >= 0 then r else _spine_rtl_r(data, rest) end
+      val direction = _spine_rtl(data, node)
+    in if direction >= 0 then direction else _spine_rtl_nodes(data, rest) end
   | $X.xml_nodes_nil() => ~1
 
 (* At a <spine>: 1 right to left, 0 left to right, 2 when it does not
    say (or says "default"); -1 when the node has none *)
 and _spine_rtl
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): int =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): int =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_spine = @[char][5]('s', 'p', 'i', 'n', 'e')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var spine_chars = @[char][5]('s', 'p', 'i', 'n', 'e')
   in
-    if xml_name_eq(data, name_off, name_len, _c_spine, 5) then let
-      var _c_ppd = @[char][26]('p', 'a', 'g', 'e', '-', 'p', 'r', 'o', 'g', 'r', 'e', 's', 's', 'i', 'o', 'n', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n')
-      var _c_rtl = @[char][3]('r', 't', 'l')
-      var _c_ltr = @[char][3]('l', 't', 'r')
+    if xml_name_eq(data, tag_offset, tag_len, spine_chars, 5) then let
+      var page_progression_chars = @[char][26]('p', 'a', 'g', 'e', '-', 'p', 'r', 'o', 'g', 'r', 'e', 's', 's', 'i', 'o', 'n', '-', 'd', 'i', 'r', 'e', 'c', 't', 'i', 'o', 'n')
+      var rtl_chars = @[char][3]('r', 't', 'l')
+      var ltr_chars = @[char][3]('l', 't', 'r')
     in
       (* 2: none said, or "default" *)
-      case+ _find_attr_val(data, attrs, _c_ppd, 26) of
-      | ~xspan_at(vo, vk) => if xml_name_eq(data, vo, vk, _c_rtl, 3) then 1
-          else if xml_name_eq(data, vo, vk, _c_ltr, 3) then 0 else 2
+      case+ _find_attr_value(data, attrs, page_progression_chars, 26) of
+      | ~xspan_at(value_offset, value_len) => if xml_name_eq(data, value_offset, value_len, rtl_chars, 3) then 1
+          else if xml_name_eq(data, value_offset, value_len, ltr_chars, 3) then 0 else 2
       | ~xspan_none() => 2
     end
-    else _spine_rtl_r(data, children)
+    else _spine_rtl_nodes(data, children)
   end
   | $X.xml_text(_, _) => ~1
 
-(* Where a language tag's primary subtag ends in data[o, o + k): at its
-   first '-' or '_' *)
-fun _subtag_end {lb:agz}{n:pos}{o,k:nat | o + k <= n}{j:nat | j <= k} .<k - j>.
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k, j: int j): [e:nat | e <= k] int e =
-  if j >= k then k
+(* Where a language tag's primary subtag ends in
+   data[offset, offset + language_len): at its first '-' or '_' at or
+   after position *)
+fun _subtag_end {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}{position:nat | position <= language_len} .<language_len - position>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len, position: int position): [subtag_len:nat | subtag_len <= language_len] int subtag_len =
+  if position >= language_len then language_len
   else let
-    val c = byte2int0($A.read<byte>(data, o + j))
-  in if c = 45 || c = 95 then j else _subtag_end(data, o, k, j + 1) end
+    val letter = byte2int0($A.read<byte>(data, offset + position))
+  in if letter = 45 || letter = 95 then position else _subtag_end(data, offset, language_len, position + 1) end
 
-(* Whether the language tag data[o, o + k) is of a language written right
-   to left: Arabic, Hebrew (and its old code iw), Persian, Urdu,
+(* Whether the language tag data[offset, offset + language_len) is of a
+   language written right to left: Arabic, Hebrew (and its old code iw), Persian, Urdu,
    Yiddish (and ji), Pashto, Sindhi, Uyghur, Dhivehi, Kashmiri, Central
    Kurdish, Syriac, Aramaic *)
-fn _lang_rtl {lb:agz}{n:pos}{o,k:nat | o + k <= n}
-  (data: !$A.borrow(byte, lb, n), o: int o, k: int k): bool = let
-  val @(o, k) = _trim_front(data, o, k)
-  val e = _subtag_end(data, o, k, 0)
+fn _language_rtl {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len): bool = let
+  val @(offset, language_len) = _trim_front(data, offset, language_len)
+  val subtag_len = _subtag_end(data, offset, language_len, 0)
 in
-  _span_is(data, o, e, "ar") || _span_is(data, o, e, "he") || _span_is(data, o, e, "iw")
-  || _span_is(data, o, e, "fa") || _span_is(data, o, e, "ur") || _span_is(data, o, e, "yi")
-  || _span_is(data, o, e, "ji") || _span_is(data, o, e, "ps") || _span_is(data, o, e, "sd")
-  || _span_is(data, o, e, "ug") || _span_is(data, o, e, "dv") || _span_is(data, o, e, "ks")
-  || _span_is(data, o, e, "ckb") || _span_is(data, o, e, "syr") || _span_is(data, o, e, "arc")
+  _span_is(data, offset, subtag_len, "ar") || _span_is(data, offset, subtag_len, "he") || _span_is(data, offset, subtag_len, "iw")
+  || _span_is(data, offset, subtag_len, "fa") || _span_is(data, offset, subtag_len, "ur") || _span_is(data, offset, subtag_len, "yi")
+  || _span_is(data, offset, subtag_len, "ji") || _span_is(data, offset, subtag_len, "ps") || _span_is(data, offset, subtag_len, "sd")
+  || _span_is(data, offset, subtag_len, "ug") || _span_is(data, offset, subtag_len, "dv") || _span_is(data, offset, subtag_len, "ks")
+  || _span_is(data, offset, subtag_len, "ckb") || _span_is(data, offset, subtag_len, "syr") || _span_is(data, offset, subtag_len, "arc")
 end
 
 (* Whether the book reads right to left: as its spine's
@@ -850,57 +859,57 @@ end
    "default" (the reading system's choice), when its language is
    written right to left, as Readium does *)
 #pub fn spine_rtl
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): bool
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool
 
 implement spine_rtl (data, nodes) = let
-  val r = _spine_rtl_r(data, nodes)
+  val direction = _spine_rtl_nodes(data, nodes)
 in
-  if r = 1 then true
-  else if r = 0 then false
-  else case+ _opf_lang_r(data, nodes) of
-    | ~xspan_at(o, k) => _lang_rtl(data, o, k)
+  if direction = 1 then true
+  else if direction = 0 then false
+  else case+ _opf_language_nodes(data, nodes) of
+    | ~xspan_at(language_offset, language_len) => _language_rtl(data, language_offset, language_len)
     | ~xspan_none() => false
 end
 
 (* The href of the first manifest item that is a font *)
-fun _font_item_r
-  {lb:agz}{n:pos}{sz:nat} .<sz, 1>.
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n) =
+fun _font_item_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ _font_item(data, node) of
-     | ~xspan_none() => _font_item_r(data, rest)
+     | ~xspan_none() => _font_item_nodes(data, rest)
      | found => found)
   | $X.xml_nodes_nil() => xspan_none()
 
 and _font_item
-  {lb:agz}{n:pos}{sz:pos} .<sz, 0>.
-  (data: !$A.borrow(byte, lb, n), node: !$X.xml_node(n, sz)): xspan(n) =
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
   case+ node of
-  | $X.xml_element(name_off, name_len, attrs, children) => let
-    var _c_item = @[char][4]('i', 't', 'e', 'm')
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var item_chars = @[char][4]('i', 't', 'e', 'm')
   in
-    if xml_name_eq(data, name_off, name_len, _c_item, 4) then let
-      var _c_mt = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
-      var _c_font = @[char][4]('f', 'o', 'n', 't')
-      var _c_otf = @[char][8]('o', 'p', 'e', 'n', 't', 'y', 'p', 'e')
+    if xml_name_eq(data, tag_offset, tag_len, item_chars, 4) then let
+      var media_type_chars = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+      var font_chars = @[char][4]('f', 'o', 'n', 't')
+      var opentype_chars = @[char][8]('o', 'p', 'e', 'n', 't', 'y', 'p', 'e')
     in
-      case+ _find_attr_val(data, attrs, _c_mt, 10) of
-      | ~xspan_at(mo, mk) =>
-        if (if _span_has(data, mo, mk, _c_font, 4, 0) then true else _span_has(data, mo, mk, _c_otf, 8, 0)) then let
-          var _c_href = @[char][4]('h', 'r', 'e', 'f')
-        in _find_attr_val(data, attrs, _c_href, 4) end
+      case+ _find_attr_value(data, attrs, media_type_chars, 10) of
+      | ~xspan_at(media_type_offset, media_type_len) =>
+        if (if _span_has(data, media_type_offset, media_type_len, font_chars, 4, 0) then true else _span_has(data, media_type_offset, media_type_len, opentype_chars, 8, 0)) then let
+          var href_chars = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_value(data, attrs, href_chars, 4) end
         else xspan_none()
       | ~xspan_none() => xspan_none()
     end
-    else _font_item_r(data, children)
+    else _font_item_nodes(data, children)
   end
   | $X.xml_text(_, _) => xspan_none()
 
 (* The href of the book's first embedded font *)
 #pub fn find_font_href
-  {lb:agz}{n:pos}{sz:nat}
-  (data: !$A.borrow(byte, lb, n), nodes: !$X.xml_node_list(n, sz)): xspan(n)
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
-implement find_font_href (data, nodes) = _font_item_r(data, nodes)
+implement find_font_href (data, nodes) = _font_item_nodes(data, nodes)

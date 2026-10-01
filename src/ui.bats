@@ -23,117 +23,117 @@ staload "mem.sats"
    ============================================================ *)
 
 (* A string literal's bytes in a fresh array *)
-fn _lit {n:pos | n < 256} (s: string n, n: int n): [l:agz] $A.arr(byte, l, n) = let
-  val a = $A.alloc<byte>(n)
-  val () = $A.write_text(a, 0, $A.text_lit(s), n)
-in a end
+fn _literal_bytes {n:pos | n < 256} (text: string n, n: int n): [l:agz] $A.arr(byte, l, n) = let
+  val bytes = $A.alloc<byte>(n)
+  val () = $A.write_text(bytes, 0, $A.text_lit(text), n)
+in bytes end
 
-fn _len {n:pos | n < 256} (s: string n): int n = g1u2i(string1_length(s))
+fn _length {n:pos | n < 256} (text: string n): int n = g1u2i(string1_length(text))
 
-(* s's bytes at buf[p, p + sn) *)
-fun _put_str {l:agz}{n:pos}{sn:nat}{p:nat | p + sn <= n}{i:nat | i <= sn} .<sn - i>.
-  (buf: !$A.arr(byte, l, n), p: int p, s: string sn, sl: int sn, i: int i): int(p + sn) =
-  if i >= sl then p + sl
+(* text's bytes at buffer[at, at + text_len) *)
+fun _put_text {l:agz}{n:pos}{text_len:nat}{at:nat | at + text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
+  (buffer: !$A.arr(byte, l, n), at: int at, text: string text_len, text_len: int text_len, i: int i): int(at + text_len) =
+  if i >= text_len then at + text_len
   else let
-    val () = $A.set<byte>(buf, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
-  in _put_str(buf, p, s, sl, i + 1) end
+    val () = $A.set<byte>(buffer, at + i, $A.int2byte($AR.byte_of_char(string_get_at(text, i))))
+  in _put_text(buffer, at, text, text_len, i + 1) end
 
-(* A numbered id: pre (a word, up to 16 bytes, so an id says what it
-   is) and i's decimal digits *)
-#pub fn nid_make {sn:pos | sn <= 16}{i:nat} (pre: string sn, i: int i)
-  : [l:agz][k:pos | k <= 32] @($A.arr(byte, l, k), int k)
+(* A numbered id: id_prefix (a word, up to 16 bytes, so an id says what it
+   is) and number's decimal digits *)
+#pub fn nid_make {prefix_len:pos | prefix_len <= 16}{number:nat} (id_prefix: string prefix_len, number: int number)
+  : [id_loc:agz][id_len:pos | id_len <= 32] @($A.arr(byte, id_loc, id_len), int id_len)
 
-implement nid_make(pre, i) = let
-  val buf = $A.alloc<byte>(32)
-  val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
-  val off = $S.int_to_str(buf, off, 32, i)
-  val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 32, exact, off, off)
-  val () = $A.free<byte>(buf)
-in @(exact, off) end
+implement nid_make(id_prefix, number) = let
+  val buffer = $A.alloc<byte>(32)
+  val id_len = _put_text(buffer, 0, id_prefix, g1u2i(string1_length(id_prefix)), 0)
+  val id_len = $S.int_to_str(buffer, id_len, 32, number)
+  val id = $A.alloc<byte>(id_len)
+  val buffer = $S.copy_arr_region(buffer, 0, 32, id, id_len, id_len)
+  val () = $A.free<byte>(buffer)
+in @(id, id_len) end
 
-(* The zeros before i's digits at buf[o], to make them three *)
-fn _pad3 {l:agz}{o:nat | o <= 3}{i:nat} (buf: !$A.arr(byte, l, 16), o: int o, i: int i): [p:nat | p <= o + 2] int p =
-  if i < 10 then let
-    val () = $A.set<byte>(buf, o, $A.int2byte(48))
-    val () = $A.set<byte>(buf, o + 1, $A.int2byte(48))
-  in o + 2 end
-  else if i < 100 then let
-    val () = $A.set<byte>(buf, o, $A.int2byte(48))
-  in o + 1 end
-  else o
+(* The zeros before number's digits at buffer[at], to make them three *)
+fn _pad_to_three {l:agz}{at:nat | at <= 3}{number:nat} (buffer: !$A.arr(byte, l, 16), at: int at, number: int number): [padded:nat | padded <= at + 2] int padded =
+  if number < 10 then let
+    val () = $A.set<byte>(buffer, at, $A.int2byte(48))
+    val () = $A.set<byte>(buffer, at + 1, $A.int2byte(48))
+  in at + 2 end
+  else if number < 100 then let
+    val () = $A.set<byte>(buffer, at, $A.int2byte(48))
+  in at + 1 end
+  else at
 
-(* A content node's id: pre and i's digits, zero-padded to three (as
+(* A content node's id: id_prefix and number's digits, zero-padded to three (as
    the reader numbers its content nodes) *)
-#pub fn nid_pad3 {sn:pos | sn <= 3}{i:nat} (pre: string sn, i: int i)
-  : [l:agz][k:pos | k <= 16] @($A.arr(byte, l, k), int k)
+#pub fn nid_pad3 {prefix_len:pos | prefix_len <= 3}{number:nat} (id_prefix: string prefix_len, number: int number)
+  : [id_loc:agz][id_len:pos | id_len <= 16] @($A.arr(byte, id_loc, id_len), int id_len)
 
-implement nid_pad3(pre, i) = let
-  val buf = $A.alloc<byte>(16)
-  val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
-  val off = _pad3(buf, off, i)
-  val off = $S.int_to_str(buf, off, 16, i)
-  val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 16, exact, off, off)
-  val () = $A.free<byte>(buf)
-in @(exact, off) end
+implement nid_pad3(id_prefix, number) = let
+  val buffer = $A.alloc<byte>(16)
+  val id_len = _put_text(buffer, 0, id_prefix, g1u2i(string1_length(id_prefix)), 0)
+  val id_len = _pad_to_three(buffer, id_len, number)
+  val id_len = $S.int_to_str(buffer, id_len, 16, number)
+  val id = $A.alloc<byte>(id_len)
+  val buffer = $S.copy_arr_region(buffer, 0, 16, id, id_len, id_len)
+  val () = $A.free<byte>(buffer)
+in @(id, id_len) end
 
-(* A numbered id with a suffix: pre, i's digits, then suf *)
-#pub fn nid_make2 {sn:pos | sn <= 16}{i:nat}{un:pos | un <= 12}
-  (pre: string sn, i: int i, suf: string un)
-  : [l:agz][k:pos | k <= 40] @($A.arr(byte, l, k), int k)
+(* A numbered id with a suffix: id_prefix, number's digits, then suffix *)
+#pub fn nid_make2 {prefix_len:pos | prefix_len <= 16}{number:nat}{suffix_len:pos | suffix_len <= 12}
+  (id_prefix: string prefix_len, number: int number, suffix: string suffix_len)
+  : [id_loc:agz][id_len:pos | id_len <= 40] @($A.arr(byte, id_loc, id_len), int id_len)
 
-implement nid_make2(pre, i, suf) = let
-  val buf = $A.alloc<byte>(40)
-  val off = _put_str(buf, 0, pre, g1u2i(string1_length(pre)), 0)
-  val off = $S.int_to_str(buf, off, 40, i)
-  val off = _put_str(buf, off, suf, g1u2i(string1_length(suf)), 0)
-  val exact = $A.alloc<byte>(off)
-  val buf = $S.copy_arr_region(buf, 0, 40, exact, off, off)
-  val () = $A.free<byte>(buf)
-in @(exact, off) end
+implement nid_make2(id_prefix, number, suffix) = let
+  val buffer = $A.alloc<byte>(40)
+  val id_len = _put_text(buffer, 0, id_prefix, g1u2i(string1_length(id_prefix)), 0)
+  val id_len = $S.int_to_str(buffer, id_len, 40, number)
+  val id_len = _put_text(buffer, id_len, suffix, g1u2i(string1_length(suffix)), 0)
+  val id = $A.alloc<byte>(id_len)
+  val buffer = $S.copy_arr_region(buffer, 0, 40, id, id_len, id_len)
+  val () = $A.free<byte>(buffer)
+in @(id, id_len) end
 
-(* The number an id pre<digits> names, from bytes the host passed (an
+(* The number an id prefix<digits> names, from bytes the host passed (an
    event's target): checked here, once; -1 when it is not such an id *)
-fun _digits {lb:agz}{n:nat}{i:nat | i <= n} .<n - i>.
-  (b: !$A.borrow(byte, lb, n), n: int n, i: int i, acc: [a:nat | a <= 99999999] int a): [v:int | v >= ~1] int v =
-  if i >= n then acc
+fun _digits {l:agz}{n:nat}{i:nat | i <= n} .<n - i>.
+  (bytes: !$A.borrow(byte, l, n), n: int n, i: int i, number: [so_far:nat | so_far <= 99999999] int so_far): [parsed:int | parsed >= ~1] int parsed =
+  if i >= n then number
   else let
-    val c = $AR.low_byte(byte2int0($A.read<byte>(b, i)))
+    val code = $AR.low_byte(byte2int0($A.read<byte>(bytes, i)))
   in
-    if c < 48 then ~1
-    else if c > 57 then ~1
-    else if acc > 9999999 then ~1
-    else _digits(b, n, i + 1, acc * 10 + (c - 48))
+    if code < 48 then ~1
+    else if code > 57 then ~1
+    else if number > 9999999 then ~1
+    else _digits(bytes, n, i + 1, number * 10 + (code - 48))
   end
 
-fun _prefix_is {lb:agz}{n:nat}{sn:nat}{o:nat}{i:nat | i <= sn} .<sn - i>.
-  (b: !$A.borrow(byte, lb, n), n: int n, o: int o, pre: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then true
-  else if o + i >= n then false
-  else if byte2int0($A.read<byte>(b, o + i)) <> char2int0(string_get_at(pre, i)) then false
-  else _prefix_is(b, n, o, pre, sl, i + 1)
+fun _prefix_at {l:agz}{n:nat}{prefix_len:nat}{at:nat}{i:nat | i <= prefix_len} .<prefix_len - i>.
+  (bytes: !$A.borrow(byte, l, n), n: int n, at: int at, id_prefix: string prefix_len, prefix_len: int prefix_len, i: int i): bool =
+  if i >= prefix_len then true
+  else if at + i >= n then false
+  else if byte2int0($A.read<byte>(bytes, at + i)) <> char2int0(string_get_at(id_prefix, i)) then false
+  else _prefix_at(bytes, n, at, id_prefix, prefix_len, i + 1)
 
-#pub fn nid_parse {lb:agz}{n:nat}{o:nat}{sn:pos | sn <= 16}
-  (b: !$A.borrow(byte, lb, n), n: int n, off: int o, pre: string sn): [v:int | v >= ~1] int v
+#pub fn nid_parse {l:agz}{n:nat}{at:nat}{prefix_len:pos | prefix_len <= 16}
+  (bytes: !$A.borrow(byte, l, n), n: int n, at: int at, id_prefix: string prefix_len): [parsed:int | parsed >= ~1] int parsed
 
-implement nid_parse{lb}{n}{o}{sn}(b, n, off, pre) = let
-  val sl = g1u2i(string1_length(pre))
+implement nid_parse{l}{n}{at}{prefix_len}(bytes, n, at, id_prefix) = let
+  val prefix_len = g1u2i(string1_length(id_prefix))
 in
-  if ~_prefix_is(b, n, off, pre, sl, 0) then ~1
-  else if off + sl >= n then ~1
-  else _digits(b, n, off + sl, 0)
+  if ~_prefix_at(bytes, n, at, id_prefix, prefix_len, 0) then ~1
+  else if at + prefix_len >= n then ~1
+  else _digits(bytes, n, at + prefix_len, 0)
 end
 
 (* ============================================================
    Elements
    ============================================================ *)
 
-fn _with_doc {lp,li:agz}{np,ni:pos | np < 256; ni < 256}{tl:pos | tl < 256}
-  (pb: !$A.borrow(byte, lp, np), pn: int np, ib: !$A.borrow(byte, li, ni), inn: int ni, tag: string tl): void = let
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(doc, pb, pn, ib, inn, tag)
-in $D.destroy(doc) end
+fn _add_in_document {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{tag_len:pos | tag_len < 256}
+  (parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len, id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, tag: string tag_len): void = let
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, tag)
+in $D.destroy(document) end
 
 (* The elements made from a plain tag. None of them takes input or is
    a target: a control (a button, a field, an image) is made only by the
@@ -141,112 +141,112 @@ in $D.destroy(doc) end
    name, so no control can be made without one *)
 #pub datatype tag = TDiv | TSpan | TH1 | TB | TStyle
 
-fn _tag_name (t: tag): [k:pos | k < 256] string k =
-  case+ t of
+fn _tag_name (element_tag: tag): [name_len:pos | name_len < 256] string name_len =
+  case+ element_tag of
   | TDiv() => "div" | TSpan() => "span" | TH1() => "h1" | TB() => "b" | TStyle() => "style"
 
-fn _add_s {np,ni:pos | np < 256; ni < 256}{tl:pos | tl < 256}
-  (parent: string np, id: string ni, tag: string tl): void = let
-  val pn = _len(parent) and inn = _len(id)
-  val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val () = _with_doc(pb, pn, ib, inn, tag)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+fn _add_element {parent_len,id_len:pos | parent_len < 256; id_len < 256}{tag_len:pos | tag_len < 256}
+  (parent: string parent_len, id: string id_len, tag: string tag_len): void = let
+  val parent_len = _length(parent) and id_len = _length(id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val () = _add_in_document(parent_bytes, parent_len, id_bytes, id_len, tag)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
 (* A new element <tag id=id> as the last child of parent *)
-#pub fn ui_add {np,ni:pos | np < 256; ni < 256}
-  (parent: string np, id: string ni, t: tag): void
+#pub fn ui_add {parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent: string parent_len, id: string id_len, element_tag: tag): void
 
-implement ui_add(parent, id, t) = _add_s(parent, id, _tag_name(t))
+implement ui_add(parent, id, element_tag) = _add_element(parent, id, _tag_name(element_tag))
 
 (* A new element with a numbered id under a fixed parent. The functions
    taking ids or texts in arrays consume (free) them. *)
-#pub fn ui_add_n {np:pos | np < 256}{l:agz}{ni:pos | ni < 256}
-  (parent: string np, id: $A.arr(byte, l, ni), inn: int ni, t: tag): void
+#pub fn ui_add_n {parent_len:pos | parent_len < 256}{id_loc:agz}{id_len:pos | id_len < 256}
+  (parent: string parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, element_tag: tag): void
 
-implement ui_add_n(parent, id, inn, t) = let
-  val pn = _len(parent)
-  val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val () = _with_doc(pb, pn, ib, inn, _tag_name(t))
-  val () = release_bytes(if_, ib)
-in release_bytes(pf, pb) end
+implement ui_add_n(parent, id, id_len, element_tag) = let
+  val parent_len = _length(parent)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val () = _add_in_document(parent_bytes, parent_len, id_bytes, id_len, _tag_name(element_tag))
+  val () = release_bytes(id_frozen, id_bytes)
+in release_bytes(parent_frozen, parent_bytes) end
 
 (* A new element with a numbered id under a numbered parent *)
-#pub fn ui_add_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, t: tag): void
+#pub fn ui_add_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, element_tag: tag): void
 
-implement ui_add_nn(parent, pn, id, inn, t) = let
-  val @(pf, pb) = $A.freeze<byte>(parent)
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val () = _with_doc(pb, pn, ib, inn, _tag_name(t))
-  val () = release_bytes(if_, ib)
-  val () = release_bytes(pf, pb)
+implement ui_add_nn(parent, parent_len, id, id_len, element_tag) = let
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val () = _add_in_document(parent_bytes, parent_len, id_bytes, id_len, _tag_name(element_tag))
+  val () = release_bytes(id_frozen, id_bytes)
+  val () = release_bytes(parent_frozen, parent_bytes)
 in end
 
 
 (* Removes every child of element id *)
-#pub fn ui_clear {ni:pos | ni < 256} (id: string ni): void
+#pub fn ui_clear {id_len:pos | id_len < 256} (id: string id_len): void
 
 implement ui_clear(id) = let
-  val inn = _len(id)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.remove_children(doc, ib, inn)
-  val () = $D.destroy(doc)
-in release_bytes(if_, ib) end
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.remove_children(document, id_bytes, id_len)
+  val () = $D.destroy(document)
+in release_bytes(id_frozen, id_bytes) end
 
 (* ============================================================
    Attributes
    ============================================================ *)
 
-fn _attr_b {li,lv:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos}{o,k:nat | o + k <= nv; k < 65536}
-  (ib: !$A.borrow(byte, li, ni), inn: int ni, name: string nl,
-   vb: !$A.borrow(byte, lv, nv), off: int o, k: int k): void = let
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.set_attr(doc, ib, inn, name, vb, off, k)
-in $D.destroy(doc) end
+fn _set_attr_bytes {id_loc,value_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos}{offset,length:nat | offset + length <= value_len; length < 65536}
+  (id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len,
+   value_bytes: !$A.borrow(byte, value_loc, value_len), offset: int offset, length: int length): void = let
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, offset, length)
+in $D.destroy(document) end
 
-(* Attribute name of element id: the literal v. The attributes that
+(* Attribute name of element id: the literal value. The attributes that
    name an element (aria-label, aria-labelledby, alt, placeholder) or
    give it a role are not among the ones ui_attr sets: only the
    constructors set them *)
-fn _sattr {ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
-  (id: string ni, name: string nl, v: string nv): void = let
-  val inn = _len(id) and vn = _len(v)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
-  val () = _attr_b(ib, inn, name, vb, 0, vn)
-  val () = release_bytes(vf, vb)
-in release_bytes(if_, ib) end
+fn _set_attr {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
+  (id: string id_len, name: string name_len, value: string value_len): void = let
+  val id_len = _length(id) and value_len = _length(value)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
+  val () = _set_attr_bytes(id_bytes, id_len, name, value_bytes, 0, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-fn _sattr_n {l:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
-  (id: $A.arr(byte, l, ni), inn: int ni, name: string nl, v: string nv): void = let
-  val vn = _len(v)
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
-  val () = _attr_b(ib, inn, name, vb, 0, vn)
-  val () = release_bytes(vf, vb)
-  val () = release_bytes(if_, ib)
+fn _set_attr_n {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: string value_len): void = let
+  val value_len = _length(value)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
+  val () = _set_attr_bytes(id_bytes, id_len, name, value_bytes, 0, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+  val () = release_bytes(id_frozen, id_bytes)
 in end
 
-fn _sattr_buf {ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (id: string ni, name: string nl, buf: $A.arr(byte, l, n), k: int k): void = let
-  val inn = _len(id)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(bf, bb) = $A.freeze<byte>(buf)
-  val () = _attr_b(ib, inn, name, bb, 0, k)
-  val () = release_bytes(bf, bb)
-in release_bytes(if_, ib) end
+fn _set_attr_buf {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
+  (id: string id_len, name: string name_len, value: $A.arr(byte, l, n), value_len: int value_len): void = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val () = _set_attr_bytes(id_bytes, id_len, name, value_bytes, 0, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-fn _sattr_n_buf {li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (id: $A.arr(byte, li, ni), inn: int ni, name: string nl, buf: $A.arr(byte, l, n), k: int k): void = let
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val @(bf, bb) = $A.freeze<byte>(buf)
-  val () = _attr_b(ib, inn, name, bb, 0, k)
-  val () = release_bytes(bf, bb)
-  val () = release_bytes(if_, ib)
+fn _set_attr_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_loc:agz}{value_size:pos}{value_len:pos | value_len <= value_size; value_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: $A.arr(byte, value_loc, value_size), value_len: int value_len): void = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val () = _set_attr_bytes(id_bytes, id_len, name, value_bytes, 0, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+  val () = release_bytes(id_frozen, id_bytes)
 in end
 
 (* The attributes other code may set. There is no style: the one inline
@@ -268,8 +268,8 @@ in end
      system opens with the app, or shares with it, are dropped *)
   | APwaFullscreen | APwaOrientationLock | APwaBrightness | APwaFileDrop
 
-fn _attr_name (a: attr): [k:pos | k < 256] string k =
-  case+ a of
+fn _attr_name (attribute: attr): [name_len:pos | name_len < 256] string name_len =
+  case+ attribute of
   | AClass() => "class" | ASelected() => "aria-selected" | APressed() => "aria-pressed"
   | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
@@ -283,190 +283,190 @@ fn _attr_name (a: attr): [k:pos | k < 256] string k =
   | APwaFullscreen() => "data-pwa-fullscreen" | APwaOrientationLock() => "data-pwa-orientation-lock"
   | APwaBrightness() => "data-pwa-brightness" | APwaFileDrop() => "data-pwa-file-drop"
 
-(* Attribute a of element id: the literal v (non-empty) *)
-#pub fn ui_attr {ni:pos | ni < 256}{nv:pos | nv < 256}
-  (id: string ni, a: attr, v: string nv): void
+(* The attribute of element id: the literal value (non-empty) *)
+#pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
+  (id: string id_len, attribute: attr, value: string value_len): void
 
-implement ui_attr(id, a, v) = _sattr(id, _attr_name(a), v)
+implement ui_attr(id, attribute, value) = _set_attr(id, _attr_name(attribute), value)
 
-#pub fn ui_attr_n {l:agz}{ni:pos | ni < 256}{nv:pos | nv < 256}
-  (id: $A.arr(byte, l, ni), inn: int ni, a: attr, v: string nv): void
+#pub fn ui_attr_n {id_loc:agz}{id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, attribute: attr, value: string value_len): void
 
-implement ui_attr_n(id, inn, a, v) = _sattr_n(id, inn, _attr_name(a), v)
+implement ui_attr_n(id, id_len, attribute, value) = _set_attr_n(id, id_len, _attr_name(attribute), value)
 
-(* Attribute a of element id: buf[0, k) *)
-#pub fn ui_attr_buf {ni:pos | ni < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (id: string ni, a: attr, buf: $A.arr(byte, l, n), k: int k): void
+(* The attribute of element id: value[0, value_len) *)
+#pub fn ui_attr_buf {id_len:pos | id_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
+  (id: string id_len, attribute: attr, value: $A.arr(byte, l, n), value_len: int value_len): void
 
-implement ui_attr_buf(id, a, buf, k) = _sattr_buf(id, _attr_name(a), buf, k)
+implement ui_attr_buf(id, attribute, value, value_len) = _set_attr_buf(id, _attr_name(attribute), value, value_len)
 
-#pub fn ui_attr_n_buf {li:agz}{ni:pos | ni < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (id: $A.arr(byte, li, ni), inn: int ni, a: attr, buf: $A.arr(byte, l, n), k: int k): void
+#pub fn ui_attr_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{value_loc:agz}{value_size:pos}{value_len:pos | value_len <= value_size; value_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, attribute: attr, value: $A.arr(byte, value_loc, value_size), value_len: int value_len): void
 
-implement ui_attr_n_buf(id, inn, a, buf, k) = _sattr_n_buf(id, inn, _attr_name(a), buf, k)
+implement ui_attr_n_buf(id, id_len, attribute, value, value_len) = _set_attr_n_buf(id, id_len, _attr_name(attribute), value, value_len)
 
 (* Where an element sits along its track (PLeft) or how much of it it
    fills (PWidth) *)
 #pub datatype place = PLeft | PWidth
 
-(* "left:" or "width:", then v / 10 with one decimal, then "%" *)
-fn _place_style {l:agz}{v:nat | v <= 1000} (b: !$A.arr(byte, l, 32), p: place, v: int v): [k:pos | k <= 32] int k = let
-  val off = (case+ p of
-    | PLeft() => _put_str(b, 0, "left:", 5, 0)
-    | PWidth() => _put_str(b, 0, "width:", 6, 0)): [o:pos | o <= 6] int o
-  val off = $S.int_to_str(b, off, 32, v / 10)
-  val off = _put_str(b, off, ".", 1, 0)
-  val off = $S.int_to_str(b, off, 32, v - (v / 10) * 10)
-in _put_str(b, off, "%", 1, 0) end
+(* "left:" or "width:", then tenths / 10 with one decimal, then "%" *)
+fn _place_style {l:agz}{tenths:nat | tenths <= 1000} (style: !$A.arr(byte, l, 32), placement: place, tenths: int tenths): [style_len:pos | style_len <= 32] int style_len = let
+  val style_len = (case+ placement of
+    | PLeft() => _put_text(style, 0, "left:", 5, 0)
+    | PWidth() => _put_text(style, 0, "width:", 6, 0)): [written:pos | written <= 6] int written
+  val style_len = $S.int_to_str(style, style_len, 32, tenths / 10)
+  val style_len = _put_text(style, style_len, ".", 1, 0)
+  val style_len = $S.int_to_str(style, style_len, 32, tenths - (tenths / 10) * 10)
+in _put_text(style, style_len, "%", 1, 0) end
 
-(* Element id's place: v tenths of a percent of its track *)
-#pub fn ui_place {ni:pos | ni < 256}{v:nat | v <= 1000} (id: string ni, p: place, v: int v): void
+(* Element id's place, in tenths of a percent of its track *)
+#pub fn ui_place {id_len:pos | id_len < 256}{tenths:nat | tenths <= 1000} (id: string id_len, placement: place, tenths: int tenths): void
 
-implement ui_place (id, p, v) = let
-  val b = $A.alloc<byte>(32)
-  val k = _place_style(b, p, v)
-in _sattr_buf(id, "style", b, k) end
+implement ui_place (id, placement, tenths) = let
+  val style = $A.alloc<byte>(32)
+  val style_len = _place_style(style, placement, tenths)
+in _set_attr_buf(id, "style", style, style_len) end
 
-#pub fn ui_place_n {li:agz}{ni:pos | ni < 256}{v:nat | v <= 1000}
-  (id: $A.arr(byte, li, ni), inn: int ni, p: place, v: int v): void
+#pub fn ui_place_n {id_loc:agz}{id_len:pos | id_len < 256}{tenths:nat | tenths <= 1000}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, placement: place, tenths: int tenths): void
 
-implement ui_place_n (id, inn, p, v) = let
-  val b = $A.alloc<byte>(32)
-  val k = _place_style(b, p, v)
-in _sattr_n_buf(id, inn, "style", b, k) end
+implement ui_place_n (id, id_len, placement, tenths) = let
+  val style = $A.alloc<byte>(32)
+  val style_len = _place_style(style, placement, tenths)
+in _set_attr_n_buf(id, id_len, "style", style, style_len) end
 
 (* The class of element id *)
-#pub fn ui_class {ni:pos | ni < 256}{nv:pos | nv < 256} (id: string ni, cls: string nv): void
+#pub fn ui_class {id_len:pos | id_len < 256}{class_len:pos | class_len < 256} (id: string id_len, class_name: string class_len): void
 
-implement ui_class(id, cls) = _sattr(id, "class", cls)
+implement ui_class(id, class_name) = _set_attr(id, "class", class_name)
 
 (* Whether element id is shown (hidden ones have data-hide="1", which the
    stylesheet does not display) *)
-#pub fn ui_show {ni:pos | ni < 256} (id: string ni, shown: bool): void
+#pub fn ui_show {id_len:pos | id_len < 256} (id: string id_len, shown: bool): void
 
 implement ui_show(id, shown) =
-  if shown then _sattr(id, "data-hide", "0") else _sattr(id, "data-hide", "1")
+  if shown then _set_attr(id, "data-hide", "0") else _set_attr(id, "data-hide", "1")
 
-#pub fn ui_show_n {l:agz}{ni:pos | ni < 256} (id: $A.arr(byte, l, ni), inn: int ni, shown: bool): void
+#pub fn ui_show_n {id_loc:agz}{id_len:pos | id_len < 256} (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, shown: bool): void
 
-implement ui_show_n(id, inn, shown) =
-  if shown then _sattr_n(id, inn, "data-hide", "0") else _sattr_n(id, inn, "data-hide", "1")
+implement ui_show_n(id, id_len, shown) =
+  if shown then _set_attr_n(id, id_len, "data-hide", "0") else _set_attr_n(id, id_len, "data-hide", "1")
 
 (* The file input id, made again (so a file chosen twice in a row is
    taken both times) as the one child of parent after its label: its
    change events are taken on parent. Its name is its label. *)
-#pub fn ui_file_input {np,ni:pos | np < 256; ni < 256}{nl,na:pos | nl < 256; na < 256}
-  (parent: string np, id: string ni, label: string nl, accept: string na, multiple: bool): void
+#pub fn ui_file_input {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len,accept_len:pos | label_len < 256; accept_len < 256}
+  (parent: string parent_len, id: string id_len, label: string label_len, accept: string accept_len, multiple: bool): void
 
 implement ui_file_input(parent, id, label, accept, multiple) = let
   val () = ui_text(parent, label)
-  val () = _add_s(parent, id, "input")
-  val () = _sattr(id, "type", "file")
-  val () = _sattr(id, "accept", accept)
-  val () = (if multiple then _sattr(id, "multiple", "multiple") else ())
-in _sattr(id, "aria-label", label) end
+  val () = _add_element(parent, id, "input")
+  val () = _set_attr(id, "type", "file")
+  val () = _set_attr(id, "accept", accept)
+  val () = (if multiple then _set_attr(id, "multiple", "multiple") else ())
+in _set_attr(id, "aria-label", label) end
 
-(* The row of a range input iid from lo to hi at the value v[0, k):
+(* The row of a range input input_id from low to high at the value value[0, value_len):
    made again (a range the user has moved no longer follows its value
-   attribute), with its label lid and its value's text vid after it.
+   attribute), with its label label_id and its value's text value_id after it.
    Its name is its label. *)
-#pub fn ui_range {nr,nd,nl,ni,n1,n2,nv:pos | nr < 256; nd < 256; nl < 256; ni < 256; n1 < 256; n2 < 256; nv < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (row: string nr, lid: string nd, label: string nl, iid: string ni, lo: string n1, hi: string n2, vid: string nv,
-   v: $A.arr(byte, l, n), k: int k): void
+#pub fn ui_range {row_len,label_id_len,label_len,input_id_len,low_len,high_len,value_id_len:pos | row_len < 256; label_id_len < 256; label_len < 256; input_id_len < 256; low_len < 256; high_len < 256; value_id_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
+  (row: string row_len, label_id: string label_id_len, label: string label_len, input_id: string input_id_len, low: string low_len, high: string high_len, value_id: string value_id_len,
+   value: $A.arr(byte, l, n), value_len: int value_len): void
 
-implement ui_range(row, lid, label, iid, lo, hi, vid, v, k) = let
+implement ui_range(row, label_id, label, input_id, low, high, value_id, value, value_len) = let
   val () = ui_clear(row)
-  val () = _add_s(row, lid, "span")
-  val () = _sattr(lid, "class", "slabel")
-  val () = ui_text(lid, label)
-  val () = _add_s(row, iid, "input")
-  val () = _sattr(iid, "type", "range")
-  val () = _sattr(iid, "min", lo)
-  val () = _sattr(iid, "max", hi)
-  val () = _sattr_buf(iid, "value", v, k)
-  val () = _sattr(iid, "aria-label", label)
-  val () = _add_s(row, vid, "span")
-in _sattr(vid, "class", "sval") end
+  val () = _add_element(row, label_id, "span")
+  val () = _set_attr(label_id, "class", "slabel")
+  val () = ui_text(label_id, label)
+  val () = _add_element(row, input_id, "input")
+  val () = _set_attr(input_id, "type", "range")
+  val () = _set_attr(input_id, "min", low)
+  val () = _set_attr(input_id, "max", high)
+  val () = _set_attr_buf(input_id, "value", value, value_len)
+  val () = _set_attr(input_id, "aria-label", label)
+  val () = _add_element(row, value_id, "span")
+in _set_attr(value_id, "class", "sval") end
 
 
 (* ============================================================
    Text
    ============================================================ *)
 
-fn _text_b {li,lt:agz}{ni:pos | ni < 256}{nt:pos}{o,k:nat | o + k <= nt; k < 65536}
-  (ib: !$A.borrow(byte, li, ni), inn: int ni, tb: !$A.borrow(byte, lt, nt), off: int o, k: int k): void = let
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.set_text(doc, ib, inn, tb, off, k)
-in $D.destroy(doc) end
+fn _set_text_bytes {id_loc,text_loc:agz}{id_len:pos | id_len < 256}{text_size:pos}{offset,length:nat | offset + length <= text_size; length < 65536}
+  (id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, text_bytes: !$A.borrow(byte, text_loc, text_size), offset: int offset, length: int length): void = let
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.set_text(document, id_bytes, id_len, text_bytes, offset, length)
+in $D.destroy(document) end
 
-(* The text of element id: the literal t *)
-#pub fn ui_text {ni:pos | ni < 256}{nt:pos | nt < 256} (id: string ni, t: string nt): void
+(* The text of element id: the literal text *)
+#pub fn ui_text {id_len:pos | id_len < 256}{text_len:pos | text_len < 256} (id: string id_len, text: string text_len): void
 
-implement ui_text(id, t) = let
-  val inn = _len(id) and tn = _len(t)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
-  val () = _text_b(ib, inn, tb, 0, tn)
-  val () = release_bytes(tf, tb)
-in release_bytes(if_, ib) end
+implement ui_text(id, text) = let
+  val id_len = _length(id) and text_len = _length(text)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(_literal_bytes(text, text_len))
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, 0, text_len)
+  val () = release_bytes(text_frozen, text_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-#pub fn ui_text_n {l:agz}{ni:pos | ni < 256}{nt:pos | nt < 256} (id: $A.arr(byte, l, ni), inn: int ni, t: string nt): void
+#pub fn ui_text_n {id_loc:agz}{id_len:pos | id_len < 256}{text_len:pos | text_len < 256} (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, text: string text_len): void
 
-implement ui_text_n(id, inn, t) = let
-  val tn = _len(t)
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
-  val () = _text_b(ib, inn, tb, 0, tn)
-  val () = release_bytes(tf, tb)
-  val () = release_bytes(if_, ib)
+implement ui_text_n(id, id_len, text) = let
+  val text_len = _length(text)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(_literal_bytes(text, text_len))
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, 0, text_len)
+  val () = release_bytes(text_frozen, text_bytes)
+  val () = release_bytes(id_frozen, id_bytes)
 in end
 
-(* The text of element id: buf[0, k) *)
-#pub fn ui_text_buf {ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
-  (id: string ni, buf: $A.arr(byte, l, n), k: int k): void
+(* The text of element id: text[0, text_len) *)
+#pub fn ui_text_buf {id_len:pos | id_len < 256}{l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+  (id: string id_len, text: $A.arr(byte, l, n), text_len: int text_len): void
 
-implement ui_text_buf(id, buf, k) = let
-  val inn = _len(id)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(bf, bb) = $A.freeze<byte>(buf)
-  val () = _text_b(ib, inn, bb, 0, k)
-  val () = release_bytes(bf, bb)
-in release_bytes(if_, ib) end
+implement ui_text_buf(id, text, text_len) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, 0, text_len)
+  val () = release_bytes(text_frozen, text_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-#pub fn ui_text_n_buf {li:agz}{ni:pos | ni < 256}{l:agz}{n:pos}{k:nat | k <= n; k < 65536}
-  (id: $A.arr(byte, li, ni), inn: int ni, buf: $A.arr(byte, l, n), k: int k): void
+#pub fn ui_text_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{text_loc:agz}{text_size:pos}{text_len:nat | text_len <= text_size; text_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, text: $A.arr(byte, text_loc, text_size), text_len: int text_len): void
 
-implement ui_text_n_buf(id, inn, buf, k) = let
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val @(bf, bb) = $A.freeze<byte>(buf)
-  val () = _text_b(ib, inn, bb, 0, k)
-  val () = release_bytes(bf, bb)
-  val () = release_bytes(if_, ib)
+implement ui_text_n_buf(id, id_len, text, text_len) = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, 0, text_len)
+  val () = release_bytes(text_frozen, text_bytes)
+  val () = release_bytes(id_frozen, id_bytes)
 in end
 
-(* The text of element id: data[off, off + k) of a borrow *)
-#pub fn ui_text_n_b {li:agz}{ni:pos | ni < 256}{lt:agz}{nt:pos}{o,k:nat | o + k <= nt; k < 65536}
-  (id: $A.arr(byte, li, ni), inn: int ni, tb: !$A.borrow(byte, lt, nt), off: int o, k: int k): void
+(* The text of element id: data[offset, offset + length) of a borrow *)
+#pub fn ui_text_n_b {id_loc:agz}{id_len:pos | id_len < 256}{text_loc:agz}{text_size:pos}{offset,length:nat | offset + length <= text_size; length < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, text_bytes: !$A.borrow(byte, text_loc, text_size), offset: int offset, length: int length): void
 
-implement ui_text_n_b(id, inn, tb, off, k) = let
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val () = _text_b(ib, inn, tb, off, k)
-  val () = release_bytes(if_, ib)
+implement ui_text_n_b(id, id_len, text_bytes, offset, length) = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, offset, length)
+  val () = release_bytes(id_frozen, id_bytes)
 in end
 
 (* The text of element id: a long literal (under 64 KiB) *)
-#pub fn ui_text_long {ni:pos | ni < 256}{nt:pos | nt < 65536} (id: string ni, t: string nt): void
+#pub fn ui_text_long {id_len:pos | id_len < 256}{text_len:pos | text_len < 65536} (id: string id_len, text: string text_len): void
 
-implement ui_text_long(id, t) = let
-  val inn = _len(id)
-  val tn = g1u2i(string1_length(t))
-  val ta = $A.alloc<byte>(tn)
-  val () = $A.write_text(ta, 0, $A.text_lit(t), tn)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val @(tf, tb) = $A.freeze<byte>(ta)
-  val () = _text_b(ib, inn, tb, 0, tn)
-  val () = release_bytes(tf, tb)
-in release_bytes(if_, ib) end
+implement ui_text_long(id, text) = let
+  val id_len = _length(id)
+  val text_len = g1u2i(string1_length(text))
+  val text_array = $A.alloc<byte>(text_len)
+  val () = $A.write_text(text_array, 0, $A.text_lit(text), text_len)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(text_array)
+  val () = _set_text_bytes(id_bytes, id_len, text_bytes, 0, text_len)
+  val () = release_bytes(text_frozen, text_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
 (* ============================================================
    Controls, images and roles. These are the only ways to make a
@@ -481,41 +481,41 @@ in release_bytes(if_, ib) end
      is given one with it.
    ============================================================ *)
 
-(* In doc: attribute name of element ib, the literal v; its text, t *)
-fn _dattr {l,li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}{nv:pos | nv < 256}
-  (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, name: string nl, v: string nv): void = let
-  val vn = _len(v)
-  val @(vf, vb) = $A.freeze<byte>(_lit(v, vn))
-  val () = $D.set_attr(doc, ib, inn, name, vb, 0, vn)
-in release_bytes(vf, vb) end
+(* In document: attribute name of element id_bytes, the literal value; or its text *)
+fn _document_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: string value_len): void = let
+  val value_len = _length(value)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
+  val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, 0, value_len)
+in release_bytes(value_frozen, value_bytes) end
 
-fn _dtext {l,li:agz}{ni:pos | ni < 256}{nt:pos | nt < 256}
-  (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, t: string nt): void = let
-  val tn = _len(t)
-  val @(tf, tb) = $A.freeze<byte>(_lit(t, tn))
-  val () = $D.set_text(doc, ib, inn, tb, 0, tn)
-in release_bytes(tf, tb) end
+fn _document_text {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{text_len:pos | text_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, text: string text_len): void = let
+  val text_len = _length(text)
+  val @(text_frozen, text_bytes) = $A.freeze<byte>(_literal_bytes(text, text_len))
+  val () = $D.set_text(document, id_bytes, id_len, text_bytes, 0, text_len)
+in release_bytes(text_frozen, text_bytes) end
 
 (* An attribute with the empty value (alt="") *)
-fn _dempty {l,li:agz}{ni:pos | ni < 256}{nl:pos | nl < 256}
-  (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, name: string nl): void = let
-  val @(vf, vb) = $A.freeze<byte>($A.alloc<byte>(1))
-  val () = $D.set_attr(doc, ib, inn, name, vb, 0, 0)
-in release_bytes(vf, vb) end
+fn _document_empty_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len): void = let
+  val @(value_frozen, value_bytes) = $A.freeze<byte>($A.alloc<byte>(1))
+  val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, 0, 0)
+in release_bytes(value_frozen, value_bytes) end
 
-(* A button element ib in pb, of class cls *)
-fn _dbutton {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
-  (doc: !$D.document(l), pb: !$A.borrow(byte, lp, np), pn: int np,
-   ib: !$A.borrow(byte, li, ni), inn: int ni, cls: string nc): void = let
-  val () = $D.add_element(doc, pb, pn, ib, inn, "button")
-  val () = _dattr(doc, ib, inn, "type", "button")
-in _dattr(doc, ib, inn, "class", cls) end
+(* A button element id_bytes in parent_bytes, of class class_name *)
+fn _document_button {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (document: !$D.document(document_loc), parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len,
+   id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void = let
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "button")
+  val () = _document_attr(document, id_bytes, id_len, "type", "button")
+in _document_attr(document, id_bytes, id_len, "class", class_name) end
 
 #pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak
 
-fn _glyph (ic: icon): [k:pos | k < 256] string k =
-  case+ ic of
+fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
+  case+ the_icon of
   | IcBack() => "\xE2\x86\x90" | IcClose() => "\xE2\x9C\x95" | IcGear() => "\xE2\x9A\x99"
   | IcStar() => "\xE2\x98\x86" | IcSearch() => "\xF0\x9F\x94\x8D" | IcPrev() => "\xE2\x80\xB9"
   | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
@@ -527,227 +527,227 @@ fn _glyph (ic: icon): [k:pos | k < 256] string k =
 #pub datatype harm =
   | HEmptyTrash                           (* every book in the Trash *)
 
-(* The menu item that asks about h: its id and its label *)
-fn _harm_item (h: harm): @([k:pos | k < 256] string k, [k:pos | k < 256] string k) =
-  case+ h of
+(* The menu item that asks about the_harm: its id and its label *)
+fn _harm_item (the_harm: harm): @([id_len:pos | id_len < 256] string id_len, [label_len:pos | label_len < 256] string label_len) =
+  case+ the_harm of
   | HEmptyTrash() => @("menu-empty-trash", "Empty Trash")
 
-(* The id of h's menu item, for its click: the item asks about h *)
-#pub fn ui_harm_id (h: harm): [k:pos | k < 256] string k
-implement ui_harm_id (h) = let val @(id, _) = _harm_item(h) in id end
+(* The id of the_harm's menu item, for its click: the item asks about the_harm *)
+#pub fn ui_harm_id (the_harm: harm): [id_len:pos | id_len < 256] string id_len
+implement ui_harm_id (the_harm) = let val @(id, _) = _harm_item(the_harm) in id end
 
-(* What a dialog's button does: Danger(h) for the one that does h. Red
+(* What a dialog's button does: Danger(the_harm) for the one that does the_harm. Red
    is the stylesheet's mark for [data-harm], which only this module
-   sets, and only from a harm: on h's menu item (ui_harm_item) and on
-   the button that does h (ui_tone) *)
+   sets, and only from a harm: on the_harm's menu item (ui_harm_item) and on
+   the button that does the_harm (ui_tone) *)
 #pub datatype tone = Plain | Danger of harm
 
 (* The kinds of control, each carrying what names it *)
 datatype control =
-  | {nc,nl:pos | nc < 256; nl < 256} CText of (string nc, string nl)
-  | {nc,nn:pos | nc < 256; nn < 256} CIcon of (string nc, icon, string nn)
-  | {nc:pos | nc < 256} CNamedByContent of (string nc)
-  | {nl:pos | nl < 256} CMenuItem of (string nl)
+  | {class_len,label_len:pos | class_len < 256; label_len < 256} CText of (string class_len, string label_len)
+  | {class_len,name_len:pos | class_len < 256; name_len < 256} CIcon of (string class_len, icon, string name_len)
+  | {class_len:pos | class_len < 256} CNamedByContent of (string class_len)
+  | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
   | CHarmItem of harm
-  | {nl,nx:pos | nl < 256; nx < 256} CTab of (string nl, string nx, bool)
+  | {label_len,controls_len:pos | label_len < 256; controls_len < 256} CTab of (string label_len, string controls_len, bool)
   (* a link out of the app, named by its text, opened in a new tab and
      told nothing of the app; its href is set by ui_https_href *)
-  | {nc,nl:pos | nc < 256; nl < 256} CLinkOut of (string nc, string nl)
+  | {class_len,label_len:pos | class_len < 256; label_len < 256} CLinkOut of (string class_len, string label_len)
 
-(* Control c as element ib, the last child of pb *)
-fn _control {l,lp,li:agz}{np,ni:pos | np < 256; ni < 256}
-  (doc: !$D.document(l), pb: !$A.borrow(byte, lp, np), pn: int np,
-   ib: !$A.borrow(byte, li, ni), inn: int ni, c: control): void =
-  case+ c of
-  | CText(cls, label) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, cls)
-    in _dtext(doc, ib, inn, label) end
-  | CIcon(cls, ic, name) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, cls)
-      val () = _dattr(doc, ib, inn, "aria-label", name)
-    in _dtext(doc, ib, inn, _glyph(ic)) end
-  | CNamedByContent(cls) => _dbutton(doc, pb, pn, ib, inn, cls)
-  | CLinkOut(cls, label) => let
-      val () = $D.add_element(doc, pb, pn, ib, inn, "a")
-      val () = _dattr(doc, ib, inn, "class", cls)
-      val () = _dattr(doc, ib, inn, "target", "_blank")
-      val () = _dattr(doc, ib, inn, "rel", "noopener noreferrer")
-    in _dtext(doc, ib, inn, label) end
+(* Control the_control as element id_bytes, the last child of parent_bytes *)
+fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (document: !$D.document(document_loc), parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len,
+   id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, the_control: control): void =
+  case+ the_control of
+  | CText(class_name, label) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+    in _document_text(document, id_bytes, id_len, label) end
+  | CIcon(class_name, the_icon, name) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+      val () = _document_attr(document, id_bytes, id_len, "aria-label", name)
+    in _document_text(document, id_bytes, id_len, _glyph(the_icon)) end
+  | CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+  | CLinkOut(class_name, label) => let
+      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
+      val () = _document_attr(document, id_bytes, id_len, "class", class_name)
+      val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
+      val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
+    in _document_text(document, id_bytes, id_len, label) end
   | CMenuItem(label) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
-      val () = _dattr(doc, ib, inn, "role", "menuitem")
-    in _dtext(doc, ib, inn, label) end
-  | CHarmItem(h) => let
-      val @(_, label) = _harm_item(h)
-      val () = _dbutton(doc, pb, pn, ib, inn, "mi")
-      val () = _dattr(doc, ib, inn, "role", "menuitem")
-      val () = _dattr(doc, ib, inn, "data-harm", "y")
-    in _dtext(doc, ib, inn, label) end
-  | CTab(label, controls, sel) => let
-      val () = _dbutton(doc, pb, pn, ib, inn, "tab")
-      val () = _dattr(doc, ib, inn, "role", "tab")
-      val () = _dattr(doc, ib, inn, "aria-controls", controls)
-      val () = _dattr(doc, ib, inn, "aria-selected", (if sel then "true" else "false"): [k:pos | k < 256] string k)
-    in _dtext(doc, ib, inn, label) end
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
+      val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
+    in _document_text(document, id_bytes, id_len, label) end
+  | CHarmItem(the_harm) => let
+      val @(_, label) = _harm_item(the_harm)
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
+      val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
+      val () = _document_attr(document, id_bytes, id_len, "data-harm", "y")
+    in _document_text(document, id_bytes, id_len, label) end
+  | CTab(label, controls, selected) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "tab")
+      val () = _document_attr(document, id_bytes, id_len, "role", "tab")
+      val () = _document_attr(document, id_bytes, id_len, "aria-controls", controls)
+      val () = _document_attr(document, id_bytes, id_len, "aria-selected", (if selected then "true" else "false"): [value_len:pos | value_len < 256] string value_len)
+    in _document_text(document, id_bytes, id_len, label) end
 
-fn _control_s {np,ni:pos | np < 256; ni < 256} (parent: string np, id: string ni, c: control): void = let
-  val pn = _len(parent) and inn = _len(id)
-  val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = _control(doc, pb, pn, ib, inn, c)
-  val () = $D.destroy(doc)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+fn _control_literal {parent_len,id_len:pos | parent_len < 256; id_len < 256} (parent: string parent_len, id: string id_len, the_control: control): void = let
+  val parent_len = _length(parent) and id_len = _length(id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _control(document, parent_bytes, parent_len, id_bytes, id_len, the_control)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-fn _control_n {np:pos | np < 256}{l:agz}{ni:pos | ni < 256}
-  (parent: string np, id: $A.arr(byte, l, ni), inn: int ni, c: control): void = let
-  val pn = _len(parent)
-  val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = _control(doc, pb, pn, ib, inn, c)
-  val () = $D.destroy(doc)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+fn _control_n {parent_len:pos | parent_len < 256}{id_loc:agz}{id_len:pos | id_len < 256}
+  (parent: string parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, the_control: control): void = let
+  val parent_len = _length(parent)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _control(document, parent_bytes, parent_len, id_bytes, id_len, the_control)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-fn _control_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, c: control): void = let
-  val @(pf, pb) = $A.freeze<byte>(parent)
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = _control(doc, pb, pn, ib, inn, c)
-  val () = $D.destroy(doc)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+fn _control_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, the_control: control): void = let
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _control(document, parent_bytes, parent_len, id_bytes, id_len, the_control)
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
 (* A new element with its class *)
-#pub fn ui_el {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
-  (parent: string np, id: string ni, t: tag, cls: string nc): void
+#pub fn ui_el {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: string parent_len, id: string id_len, element_tag: tag, class_name: string class_len): void
 
-implement ui_el(parent, id, t, cls) = let
-  val () = ui_add(parent, id, t)
-in _sattr(id, "class", cls) end
+implement ui_el(parent, id, element_tag, class_name) = let
+  val () = ui_add(parent, id, element_tag)
+in _set_attr(id, "class", class_name) end
 
 (* A button named by the text it shows *)
-#pub fn ui_text_btn {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nl:pos | nl < 256}
-  (parent: string np, id: string ni, cls: string nc, label: string nl): void
+#pub fn ui_text_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len): void
 
-implement ui_text_btn(parent, id, cls, label) = _control_s(parent, id, CText(cls, label))
+implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, id, CText(class_name, label))
 
-(* A button showing icon ic, named name *)
-#pub fn ui_icon_btn {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nn:pos | nn < 256}
-  (parent: string np, id: string ni, cls: string nc, ic: icon, name: string nn): void
+(* A button showing icon the_icon, named name *)
+#pub fn ui_icon_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len, the_icon: icon, name: string name_len): void
 
-implement ui_icon_btn(parent, id, cls, ic, name) = _control_s(parent, id, CIcon(cls, ic, name))
+implement ui_icon_btn(parent, id, class_name, the_icon, name) = _control_literal(parent, id, CIcon(class_name, the_icon, name))
 
-#pub fn ui_icon_btn_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nn:pos | nn < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni,
-   cls: string nc, ic: icon, name: string nn): void
+#pub fn ui_icon_btn_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len,
+   class_name: string class_len, the_icon: icon, name: string name_len): void
 
-implement ui_icon_btn_nn(parent, pn, id, inn, cls, ic, name) = _control_nn(parent, pn, id, inn, CIcon(cls, ic, name))
+implement ui_icon_btn_nn(parent, parent_len, id, id_len, class_name, the_icon, name) = _control_nn(parent, parent_len, id, id_len, CIcon(class_name, the_icon, name))
 
 (* A numbered button named by what is put in it (a book's title, a
    chapter's, a result's text) *)
-#pub fn ui_btn_n {np:pos | np < 256}{l:agz}{ni:pos | ni < 256}{nc:pos | nc < 256}
-  (parent: string np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc): void
+#pub fn ui_btn_n {parent_len:pos | parent_len < 256}{id_loc:agz}{id_len:pos | id_len < 256}{class_len:pos | class_len < 256}
+  (parent: string parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
 
-implement ui_btn_n(parent, id, inn, cls) = _control_n(parent, id, inn, CNamedByContent(cls))
+implement ui_btn_n(parent, id, id_len, class_name) = _control_n(parent, id, id_len, CNamedByContent(class_name))
 
-#pub fn ui_btn_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc): void
+#pub fn ui_btn_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
 
-implement ui_btn_nn(parent, pn, id, inn, cls) = _control_nn(parent, pn, id, inn, CNamedByContent(cls))
+implement ui_btn_nn(parent, parent_len, id, id_len, class_name) = _control_nn(parent, parent_len, id, id_len, CNamedByContent(class_name))
 
 (* A numbered button named by the text it shows *)
-#pub fn ui_text_btn_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nl:pos | nl < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc, label: string nl): void
+#pub fn ui_text_btn_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len, label: string label_len): void
 
-implement ui_text_btn_nn(parent, pn, id, inn, cls, label) = _control_nn(parent, pn, id, inn, CText(cls, label))
+implement ui_text_btn_nn(parent, parent_len, id, id_len, class_name, label) = _control_nn(parent, parent_len, id, id_len, CText(class_name, label))
 
 (* A link out of the app, showing label (its name) *)
-#pub fn ui_link_out {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nl:pos | nl < 256}
-  (parent: string np, id: string ni, cls: string nc, label: string nl): void
+#pub fn ui_link_out {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len): void
 
-implement ui_link_out(parent, id, cls, label) = _control_s(parent, id, CLinkOut(cls, label))
+implement ui_link_out(parent, id, class_name, label) = _control_literal(parent, id, CLinkOut(class_name, label))
 
-(* Whether a[i, sl) is s[i, sl) (a has at least sl bytes) *)
-fun _prefix {l:agz}{n:pos}{sl:nat | sl <= n}{i:nat | i <= sl} .<sl - i>.
-  (a: !$A.arr(byte, l, n), s: string sl, sl: int sl, i: int i): bool =
-  if i >= sl then true
-  else if byte2int0($A.get<byte>(a, i)) <> char2int0(string_get_at(s, i)) then false
-  else _prefix(a, s, sl, i + 1)
+(* Whether bytes[i, expected_len) is expected[i, expected_len) (bytes has at least expected_len bytes) *)
+fun _starts_with {l:agz}{n:pos}{expected_len:nat | expected_len <= n}{i:nat | i <= expected_len} .<expected_len - i>.
+  (bytes: !$A.arr(byte, l, n), expected: string expected_len, expected_len: int expected_len, i: int i): bool =
+  if i >= expected_len then true
+  else if byte2int0($A.get<byte>(bytes, i)) <> char2int0(string_get_at(expected, i)) then false
+  else _starts_with(bytes, expected, expected_len, i + 1)
 
-(* Whether a[0, k) starts with "https://" *)
-fn _is_https {l:agz}{n:pos}{k:nat | k <= n} (a: !$A.arr(byte, l, n), k: int k): bool =
-  if k < 8 then false
-  else _prefix(a, "https://", 8, 0)
+(* Whether url[0, url_len) starts with "https://" *)
+fn _is_https {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n), url_len: int url_len): bool =
+  if url_len < 8 then false
+  else _starts_with(url, "https://", 8, 0)
 
-(* The href of a link out (ui_link_out) id: a[0, k), only when it is an
+(* The href of a link out (ui_link_out) id: url[0, url_len), only when it is an
    https URL; otherwise the link is left as it was *)
-#pub fn ui_https_href {ni:pos | ni < 256}{l:agz}{n:pos}{k:pos | k <= n; k < 65536}
-  (id: string ni, a: $A.arr(byte, l, n), k: int k): void
+#pub fn ui_https_href {id_len:pos | id_len < 256}{l:agz}{n:pos}{url_len:pos | url_len <= n; url_len < 65536}
+  (id: string id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
 
-implement ui_https_href (id, a, k) =
-  if _is_https(a, k) then _sattr_buf(id, "href", a, k) else $A.free<byte>(a)
+implement ui_https_href (id, url, url_len) =
+  if _is_https(url, url_len) then _set_attr_buf(id, "href", url, url_len) else $A.free<byte>(url)
 
 (* An item of a menu, named by its label *)
-#pub fn ui_menuitem {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}
-  (parent: string np, id: string ni, label: string nl): void
+#pub fn ui_menuitem {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}
+  (parent: string parent_len, id: string id_len, label: string label_len): void
 
-implement ui_menuitem(parent, id, label) = _control_s(parent, id, CMenuItem(label))
+implement ui_menuitem(parent, id, label) = _control_literal(parent, id, CMenuItem(label))
 
-(* The menu item that asks about h, marked as losing what it names: its
-   id and label are h's *)
-#pub fn ui_harm_item {np:pos | np < 256} (parent: string np, h: harm): void
+(* The menu item that asks about the_harm, marked as losing what it names: its
+   id and label are the_harm's *)
+#pub fn ui_harm_item {parent_len:pos | parent_len < 256} (parent: string parent_len, the_harm: harm): void
 
-implement ui_harm_item(parent, h) = let
-  val @(id, _) = _harm_item(h)
-in _control_s(parent, id, CHarmItem(h)) end
+implement ui_harm_item(parent, the_harm) = let
+  val @(id, _) = _harm_item(the_harm)
+in _control_literal(parent, id, CHarmItem(the_harm)) end
 
 (* Button id's tone: marked when it does a harm *)
-#pub fn ui_tone {ni:pos | ni < 256} (id: string ni, t: tone): void
+#pub fn ui_tone {id_len:pos | id_len < 256} (id: string id_len, button_tone: tone): void
 
-implement ui_tone(id, t) =
-  case+ t of
-  | Danger(_) => _sattr(id, "data-harm", "y")
-  | Plain() => _sattr(id, "data-harm", "n")
+implement ui_tone(id, button_tone) =
+  case+ button_tone of
+  | Danger(_) => _set_attr(id, "data-harm", "y")
+  | Plain() => _set_attr(id, "data-harm", "n")
 
 (* A tab named by its label, controlling the panel controls *)
-#pub fn ui_tab {np,ni:pos | np < 256; ni < 256}{nl:pos | nl < 256}{nx:pos | nx < 256}
-  (parent: string np, id: string ni, label: string nl, controls: string nx, selected: bool): void
+#pub fn ui_tab {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}{controls_len:pos | controls_len < 256}
+  (parent: string parent_len, id: string id_len, label: string label_len, controls: string controls_len, selected: bool): void
 
-implement ui_tab(parent, id, label, controls, selected) = _control_s(parent, id, CTab(label, controls, selected))
+implement ui_tab(parent, id, label, controls, selected) = _control_literal(parent, id, CTab(label, controls, selected))
 
 (* A decorative image (alt=""): the text beside it says what it shows *)
-#pub fn ui_img {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
-  (parent: string np, id: string ni, cls: string nc): void
+#pub fn ui_img {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len): void
 
-implement ui_img(parent, id, cls) = let
-  val pn = _len(parent) and inn = _len(id)
-  val @(pf, pb) = $A.freeze<byte>(_lit(parent, pn))
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(doc, pb, pn, ib, inn, "img")
-  val () = _dattr(doc, ib, inn, "class", cls)
-  val () = _dempty(doc, ib, inn, "alt")
-  val () = $D.destroy(doc)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+implement ui_img(parent, id, class_name) = let
+  val parent_len = _length(parent) and id_len = _length(id)
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "img")
+  val () = _document_attr(document, id_bytes, id_len, "class", class_name)
+  val () = _document_empty_attr(document, id_bytes, id_len, "alt")
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-#pub fn ui_img_nn {lp,l:agz}{np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}
-  (parent: $A.arr(byte, lp, np), pn: int np, id: $A.arr(byte, l, ni), inn: int ni, cls: string nc): void
+#pub fn ui_img_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void
 
-implement ui_img_nn(parent, pn, id, inn, cls) = let
-  val @(pf, pb) = $A.freeze<byte>(parent)
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(doc, pb, pn, ib, inn, "img")
-  val () = _dattr(doc, ib, inn, "class", cls)
-  val () = _dempty(doc, ib, inn, "alt")
-  val () = $D.destroy(doc)
-  val () = release_bytes(pf, pb)
-in release_bytes(if_, ib) end
+implement ui_img_nn(parent, parent_len, id, id_len, class_name) = let
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "img")
+  val () = _document_attr(document, id_bytes, id_len, "class", class_name)
+  val () = _document_empty_attr(document, id_bytes, id_len, "alt")
+  val () = $D.destroy(document)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
 (* A text field named name, which is also what it shows while empty.
    Search (type=search) or a multi-line text area. *)
@@ -755,93 +755,93 @@ in release_bytes(if_, ib) end
 #pub datatype field = FSearch | FText | FLine
   | FChoice   (* a choice among options the page's script puts in it *)
 
-#pub fn ui_field {np,ni:pos | np < 256; ni < 256}{nc:pos | nc < 256}{nn:pos | nn < 256}
-  (parent: string np, id: string ni, f: field, cls: string nc, name: string nn): void
+#pub fn ui_field {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
+  (parent: string parent_len, id: string id_len, field_kind: field, class_name: string class_len, name: string name_len): void
 
-implement ui_field(parent, id, f, cls, name) = let
-  val () = (case+ f of
+implement ui_field(parent, id, field_kind, class_name, name) = let
+  val () = (case+ field_kind of
     | FSearch() => let
-        val () = _add_s(parent, id, "input")
-      in _sattr(id, "type", "search") end
-    | FText() => _add_s(parent, id, "textarea")
-    | FChoice() => _add_s(parent, id, "select")
+        val () = _add_element(parent, id, "input")
+      in _set_attr(id, "type", "search") end
+    | FText() => _add_element(parent, id, "textarea")
+    | FChoice() => _add_element(parent, id, "select")
     | FLine() => let
-        val () = _add_s(parent, id, "input")
-        val () = _sattr(id, "type", "text")
-        val () = _sattr(id, "autocomplete", "off")
-      in _sattr(id, "enterkeyhint", "done") end)
-  val () = _sattr(id, "class", cls)
-  val () = _sattr(id, "placeholder", name)
-in _sattr(id, "aria-label", name) end
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "text")
+        val () = _set_attr(id, "autocomplete", "off")
+      in _set_attr(id, "enterkeyhint", "done") end)
+  val () = _set_attr(id, "class", class_name)
+  val () = _set_attr(id, "placeholder", name)
+in _set_attr(id, "aria-label", name) end
 
 (* Roles that need no name *)
 #pub datatype role = RMain | RStatus | RAlert | RTooltip | RHeading
 
-#pub fn ui_role {ni:pos | ni < 256} (id: string ni, r: role): void
+#pub fn ui_role {id_len:pos | id_len < 256} (id: string id_len, the_role: role): void
 
-implement ui_role(id, r) =
-  case+ r of
-  | RMain() => _sattr(id, "role", "main")
-  | RStatus() => _sattr(id, "role", "status")
-  | RAlert() => _sattr(id, "role", "alert")
-  | RTooltip() => _sattr(id, "role", "tooltip")
+implement ui_role(id, the_role) =
+  case+ the_role of
+  | RMain() => _set_attr(id, "role", "main")
+  | RStatus() => _set_attr(id, "role", "status")
+  | RAlert() => _set_attr(id, "role", "alert")
+  | RTooltip() => _set_attr(id, "role", "tooltip")
   | RHeading() => let
-      val () = _sattr(id, "role", "heading")
-    in _sattr(id, "aria-level", "1") end
+      val () = _set_attr(id, "role", "heading")
+    in _set_attr(id, "aria-level", "1") end
 
 (* Roles that need a name: given here, with the role *)
 #pub datatype named = NRegion | NToolbar | NDialog | NModal | NNavigation | NDocument
   | NSlider | NTablist | NTabpanel | NMenu | NStatus | NGroup
 
-fn _named_role (r: named): [k:pos | k < 256] string k =
-  case+ r of
+fn _named_role (the_role: named): [role_len:pos | role_len < 256] string role_len =
+  case+ the_role of
   | NRegion() => "region" | NToolbar() => "toolbar" | NDialog() => "dialog"
   | NModal() => "dialog" | NNavigation() => "navigation" | NDocument() => "document"
   | NSlider() => "slider" | NTablist() => "tablist" | NTabpanel() => "tabpanel"
   | NMenu() => "menu" | NStatus() => "status" | NGroup() => "group"
 
-fn _named_modal {ni:pos | ni < 256} (id: string ni, r: named): void =
-  case+ r of
-  | NModal() => _sattr(id, "aria-modal", "true")
+fn _named_modal {id_len:pos | id_len < 256} (id: string id_len, the_role: named): void =
+  case+ the_role of
+  | NModal() => _set_attr(id, "aria-modal", "true")
   | _ => ()
 
-fn _dmodal {l,li:agz}{ni:pos | ni < 256}
-  (doc: !$D.document(l), ib: !$A.borrow(byte, li, ni), inn: int ni, r: named): void =
-  case+ r of
-  | NModal() => _dattr(doc, ib, inn, "aria-modal", "true")
+fn _document_modal {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, the_role: named): void =
+  case+ the_role of
+  | NModal() => _document_attr(document, id_bytes, id_len, "aria-modal", "true")
   | _ => ()
 
-(* Role r for element id, named name *)
-#pub fn ui_named {ni:pos | ni < 256}{nn:pos | nn < 256} (id: string ni, r: named, name: string nn): void
+(* Role the_role for element id, named name *)
+#pub fn ui_named {id_len:pos | id_len < 256}{name_len:pos | name_len < 256} (id: string id_len, the_role: named, name: string name_len): void
 
-implement ui_named(id, r, name) = let
-  val () = _sattr(id, "role", _named_role(r))
-  val () = _named_modal(id, r)
-in _sattr(id, "aria-label", name) end
+implement ui_named(id, the_role, name) = let
+  val () = _set_attr(id, "role", _named_role(the_role))
+  val () = _named_modal(id, the_role)
+in _set_attr(id, "aria-label", name) end
 
-(* Role r for numbered element id, named by the text of numbered
+(* Role the_role for numbered element id, named by the text of numbered
    element by *)
-#pub fn ui_labelled_nn {li,lb:agz}{ni,nb:pos | ni < 256; nb < 256}
-  (id: $A.arr(byte, li, ni), inn: int ni, r: named, by: $A.arr(byte, lb, nb), bn: int nb): void
+#pub fn ui_labelled_nn {id_loc,by_loc:agz}{id_len,by_len:pos | id_len < 256; by_len < 256}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, the_role: named, by: $A.arr(byte, by_loc, by_len), by_len: int by_len): void
 
-implement ui_labelled_nn(id, inn, r, by, bn) = let
-  val @(if_, ib) = $A.freeze<byte>(id)
-  val @(bf, bb) = $A.freeze<byte>(by)
-  val doc = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = _dattr(doc, ib, inn, "role", _named_role(r))
-  val () = _dmodal(doc, ib, inn, r)
-  val () = $D.set_attr(doc, ib, inn, "aria-labelledby", bb, 0, bn)
-  val () = $D.destroy(doc)
-  val () = release_bytes(bf, bb)
-in release_bytes(if_, ib) end
+implement ui_labelled_nn(id, id_len, the_role, by, by_len) = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(by_frozen, by_bytes) = $A.freeze<byte>(by)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _document_attr(document, id_bytes, id_len, "role", _named_role(the_role))
+  val () = _document_modal(document, id_bytes, id_len, the_role)
+  val () = $D.set_attr(document, id_bytes, id_len, "aria-labelledby", by_bytes, 0, by_len)
+  val () = $D.destroy(document)
+  val () = release_bytes(by_frozen, by_bytes)
+in release_bytes(id_frozen, id_bytes) end
 
-(* Role r for element id, named by the text of element by *)
-#pub fn ui_labelled {ni:pos | ni < 256}{nb:pos | nb < 256} (id: string ni, r: named, by: string nb): void
+(* Role the_role for element id, named by the text of element by *)
+#pub fn ui_labelled {id_len:pos | id_len < 256}{by_len:pos | by_len < 256} (id: string id_len, the_role: named, by: string by_len): void
 
-implement ui_labelled(id, r, by) = let
-  val () = _sattr(id, "role", _named_role(r))
-  val () = _named_modal(id, r)
-in _sattr(id, "aria-labelledby", by) end
+implement ui_labelled(id, the_role, by) = let
+  val () = _set_attr(id, "role", _named_role(the_role))
+  val () = _named_modal(id, the_role)
+in _set_attr(id, "aria-labelledby", by) end
 
 
 (* ============================================================
@@ -850,13 +850,13 @@ in _sattr(id, "aria-labelledby", by) end
 
 (* What a listener listens on *)
 #pub datatype on =
-  | {n:pos | n < 256} OnEl of (string n)
+  | {id_len:pos | id_len < 256} OnEl of (string id_len)
   | OnDocument
   | OnWindow
   | OnExternalFiles   (* files handed to the app from outside it *)
   (* pointer events under an element, for the gestures package (bridge's
      listen_gestures) *)
-  | {n:pos | n < 256} OnGestures of (string n)
+  | {id_len:pos | id_len < 256} OnGestures of (string id_len)
 
 (* The app's listeners, as one table: the last added is at its head.
    A listener's id is its position in the table (the first added is 0),
@@ -867,63 +867,63 @@ in _sattr(id, "aria-labelledby", by) end
    there is no other way to register a listener. *)
 #pub datatype regs(int) =
   | RNil(0)
-  | {n:nat}{e:pos | e < 256} RCons(n + 1) of
-      (regs(n), on, string e, ($EV.event_payload) -<cloref1> int)
+  | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
+      (regs(count), on, string event_len, ($EV.event_payload) -<cloref1> int)
 
-fn _listen1 {ne:pos | ne < 256}
-  (o: on, ev: string ne, lid: $EV.listener_id, cb: ($EV.event_payload) -<cloref1> int): void = let
-  val en = _len(ev)
-  val @(ef, eb) = $A.freeze<byte>(_lit(ev, en))
-  val () = (case+ o of
+fn _listen_one {event_len:pos | event_len < 256}
+  (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<cloref1> int): void = let
+  val event_len = _length(event)
+  val @(event_frozen, event_bytes) = $A.freeze<byte>(_literal_bytes(event, event_len))
+  val () = (case+ target of
     | OnEl(id) => let
-        val inn = _len(id)
-        val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-        val () = $EV.listen(ib, inn, eb, en, lid, cb)
-      in release_bytes(if_, ib) end
-    | OnDocument() => $EV.listen_document(eb, en, lid, cb)
-    | OnWindow() => $EV.listen_window(eb, en, lid, cb)
-    | OnExternalFiles() => $EV.listen_external_files(lid, cb)
+        val id_len = _length(id)
+        val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+        val () = $EV.listen(id_bytes, id_len, event_bytes, event_len, listener, callback)
+      in release_bytes(id_frozen, id_bytes) end
+    | OnDocument() => $EV.listen_document(event_bytes, event_len, listener, callback)
+    | OnWindow() => $EV.listen_window(event_bytes, event_len, listener, callback)
+    | OnExternalFiles() => $EV.listen_external_files(listener, callback)
     | OnGestures(id) => let
-        val inn = _len(id)
-        val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-        val () = $EV.listen_gestures(ib, inn, lid, cb)
-      in release_bytes(if_, ib) end)
-in release_bytes(ef, eb) end
+        val id_len = _length(id)
+        val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+        val () = $EV.listen_gestures(id_bytes, id_len, listener, callback)
+      in release_bytes(id_frozen, id_bytes) end)
+in release_bytes(event_frozen, event_bytes) end
 
-(* Registers r's listeners, each with its position as its id; the
+(* Registers the listeners, each with its position as its id; the
    number registered *)
-fun _listen_all {n:nat | n <= 127} .<n>. (r: regs(n)): int n =
-  case+ r of
+fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): int count =
+  case+ listeners of
   | RNil() => 0
-  | RCons(rest, o, ev, cb) => let
-      val k = _listen_all(rest)
-      val () = _listen1(o, ev, k, cb)
-    in k + 1 end
+  | RCons(rest, target, event, callback) => let
+      val position = _listen_all(rest)
+      val () = _listen_one(target, event, position, callback)
+    in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the
    bridge's last, which no listener of the table can have *)
 #pub fn ui_media_listener (): int 127
 implement ui_media_listener () = 127
 
-#pub fn ui_listen_all {n:nat | n <= 127} (r: regs(n)): void
+#pub fn ui_listen_all {count:nat | count <= 127} (listeners: regs(count)): void
 
-implement ui_listen_all (r) = let val _ = _listen_all(r) in end
+implement ui_listen_all (listeners) = let val _ = _listen_all(listeners) in end
 
 (* Measures element id: its box goes to dom_read's measure slots *)
-#pub fn ui_measure {ni:pos | ni < 256} (id: string ni): void
+#pub fn ui_measure {id_len:pos | id_len < 256} (id: string id_len): void
 
 implement ui_measure(id) = let
-  val inn = _len(id)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val _ = $R.discard<int><int>($DR.measure(ib, inn))
-in release_bytes(if_, ib) end
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val _ = $R.discard<int><int>($DR.measure(id_bytes, id_len))
+in release_bytes(id_frozen, id_bytes) end
 
-#pub fn ui_focus {ni:pos | ni < 256} (id: string ni): void
+#pub fn ui_focus {id_len:pos | id_len < 256} (id: string id_len): void
 
 implement ui_focus(id) = let
-  val inn = _len(id)
-  val @(if_, ib) = $A.freeze<byte>(_lit(id, inn))
-  val () = $BDOM.focus_node(ib, inn)
-in release_bytes(if_, ib) end
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val () = $BDOM.focus_node(id_bytes, id_len)
+in release_bytes(id_frozen, id_bytes) end
 
 end (* #target wasm *)

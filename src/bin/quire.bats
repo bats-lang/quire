@@ -43,13 +43,13 @@ staload GD = "gestures/src/decode.sats"
 (* 0 the library is shown, 1 the reader *)
 val _view = ref<int>(0)
 (* The library book whose menu or info view is open *)
-val _menu_idx = ref<Int>(~1)
+val _menu_index = ref<Int>(~1)
 (* Whether the reader's bars are shown, and the latest hide timer's *)
 val _chrome = ref<bool>(true)
-val _chrome_gen = ref<int>(0)
+val _chrome_generation = ref<int>(0)
 (* A wheel turn waiting out its pause; the latest resize's number *)
 val _wheel_busy = ref<bool>(false)
-val _resize_gen = ref<int>(0)
+val _resize_generation = ref<int>(0)
 (* The content node of the link within the book that has the focus, or -1 *)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
@@ -57,8 +57,8 @@ val _scrubbing = ref<bool>(false)
 (* The gesture recognizer's state (linear, so it is taken out of its
    cell and put back); and whether a drag has just ended, so that the
    click the browser sends after it is not also a tap *)
-datavtype gcell = GNone | GSome of $GT.gstate
-val _gestures = ref<gcell>(GNone())
+datavtype gesture_cell = GNone | GSome of $GT.gstate
+val _gestures = ref<gesture_cell>(GNone())
 val _dragged = ref<bool>(false)
 (* The latest keystroke in the search field's number *)
 val _search_tick = ref<int>(0)
@@ -69,39 +69,39 @@ val _search_tick = ref<int>(0)
 
 (* A pointer-like event's payload: x, y (int32 LE), the target's id
    length (u16 LE) and id *)
-fn _i32at {l:agz}{n:nat}{p:nat | p + 4 <= n} (b: !$A.arr(byte, l, n), p: int p): Int = let
-  val b0 = $AR.low_byte(byte2int0($A.get<byte>(b, p)))
-  val b1 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 1)))
-  val b2 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 2)))
-  val b3 = $AR.low_byte(byte2int0($A.get<byte>(b, p + 3)))
-  val hi = (if b3 < 128 then b3 else b3 - 256): [h:int | ~128 <= h; h < 128] int h
-in b0 + b1 * 256 + b2 * 65536 + hi * 16777216 end
+fn _int32_at {l:agz}{n:nat}{at:nat | at + 4 <= n} (bytes: !$A.arr(byte, l, n), at: int at): Int = let
+  val byte0 = $AR.low_byte(byte2int0($A.get<byte>(bytes, at)))
+  val byte1 = $AR.low_byte(byte2int0($A.get<byte>(bytes, at + 1)))
+  val byte2 = $AR.low_byte(byte2int0($A.get<byte>(bytes, at + 2)))
+  val byte3 = $AR.low_byte(byte2int0($A.get<byte>(bytes, at + 3)))
+  val high = (if byte3 < 128 then byte3 else byte3 - 256): [signed:int | ~128 <= signed; signed < 128] int signed
+in byte0 + byte1 * 256 + byte2 * 65536 + high * 16777216 end
 
-(* The number n of the target id pre<n> of a pointer event, or -1 *)
-fn _target_num {sn:pos | sn <= 16} (h: $EV.event_payload, pre: string sn): [v:int | v >= ~1] int v =
+(* The number n of the target id prefix<n> of a pointer event, or -1 *)
+fn _target_number {prefix_len:pos | prefix_len <= 16} (h: $EV.event_payload, id_prefix: string prefix_len): [number:int | number >= ~1] int number =
   case+ take_blob(h) of
   | ~NoBlobBytes() => ~1
-  | ~BlobBytes(b, n) => let
-      val @(f, bb) = $A.freeze<byte>(b)
-      val v = (if n >= 11 then nid_parse(bb, n, 10, pre) else ~1): [v:int | v >= ~1] int v
-      val () = $A.drop<byte>(f, bb)
-    in let val () = $A.free<byte>($A.thaw<byte>(f)) in v end end
+  | ~BlobBytes(event_bytes, n) => let
+      val @(frozen, borrowed) = $A.freeze<byte>(event_bytes)
+      val number = (if n >= 11 then nid_parse(borrowed, n, 10, id_prefix) else ~1): [number:int | number >= ~1] int number
+      val () = $A.drop<byte>(frozen, borrowed)
+    in let val () = $A.free<byte>($A.thaw<byte>(frozen)) in number end end
 
 (* Whether the target id of a pointer event is id *)
-fun _bytes_are {l:agz}{n:nat}{o:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
-  (b: !$A.arr(byte, l, n), n: int n, o: int o, s: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then o + sl = n
-  else if o + i >= n then false
-  else if byte2int0($A.get<byte>(b, o + i)) <> char2int0(string_get_at(s, i)) then false
-  else _bytes_are(b, n, o, s, sl, i + 1)
+fun _bytes_are {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_len - i>.
+  (bytes: !$A.arr(byte, l, n), n: int n, at: int at, text: string text_len, text_len: int text_len, i: int i): bool =
+  if i >= text_len then at + text_len = n
+  else if at + i >= n then false
+  else if byte2int0($A.get<byte>(bytes, at + i)) <> char2int0(string_get_at(text, i)) then false
+  else _bytes_are(bytes, n, at, text, text_len, i + 1)
 
-(* Whether b[o, o + sl) is s *)
-fun _bytes_at {l:agz}{n:nat}{o:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
-  (b: !$A.arr(byte, l, n), n: int n, o: int o, s: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then true
-  else if o + i >= n then false
-  else if byte2int0($A.get<byte>(b, o + i)) <> char2int0(string_get_at(s, i)) then false
-  else _bytes_at(b, n, o, s, sl, i + 1)
+(* Whether bytes[at, at + text_len) is text *)
+fun _bytes_at {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_len - i>.
+  (bytes: !$A.arr(byte, l, n), n: int n, at: int at, text: string text_len, text_len: int text_len, i: int i): bool =
+  if i >= text_len then true
+  else if at + i >= n then false
+  else if byte2int0($A.get<byte>(bytes, at + i)) <> char2int0(string_get_at(text, i)) then false
+  else _bytes_at(bytes, n, at, text, text_len, i + 1)
 
 (* The target id of a pointer event, matched against the ids the
    caller asks about: the payload's bytes *)
@@ -112,96 +112,96 @@ datavtype target =
 fn _target (h: $EV.event_payload): target =
   case+ take_blob(h) of
   | ~NoBlobBytes() => NoTarget()
-  | ~BlobBytes(b, n) =>
-    if n < 10 then let val () = $A.free<byte>(b) in NoTarget() end
-    else Target(b, n, _i32at(b, 0))
+  | ~BlobBytes(event_bytes, n) =>
+    if n < 10 then let val () = $A.free<byte>(event_bytes) in NoTarget() end
+    else Target(event_bytes, n, _int32_at(event_bytes, 0))
 
-fn _is {sn:pos} (t: !target, id: string sn): bool =
-  case+ t of
-  | Target(b, n, _) => _bytes_are(b, n, 10, id, g1u2i(string1_length(id)), 0)
+fn _is {id_len:pos} (clicked: !target, id: string id_len): bool =
+  case+ clicked of
+  | Target(bytes, n, _) => _bytes_are(bytes, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
-(* The harm whose menu item (ui_harm_item) t is: its click asks about
+(* The harm whose menu item (ui_harm_item) clicked is: its click asks about
    that same harm *)
-fn _harm_clicked (t: !target): Option_vt(harm) =
-  if _is(t, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
+fn _harm_clicked (clicked: !target): Option_vt(harm) =
+  if _is(clicked, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
 
-(* The number n of the target's id pre<n>, or -1 *)
-fn _row_of {sn:pos | sn <= 16} (t: !target, pre: string sn): [v:int | v >= ~1] int v =
-  case+ t of
-  | @Target(b, n, _) => let
-      val @(f, bb) = $A.freeze<byte>(b)
-      val v = (if n >= 11 then nid_parse(bb, n, 10, pre) else ~1): [v:int | v >= ~1] int v
-      val () = $A.drop<byte>(f, bb)
-      val () = b := $A.thaw<byte>(f)
-      prval () = fold@(t)
-    in v end
+(* The number n of the target's id prefix<n>, or -1 *)
+fn _row_of {prefix_len:pos | prefix_len <= 16} (clicked: !target, id_prefix: string prefix_len): [number:int | number >= ~1] int number =
+  case+ clicked of
+  | @Target(event_bytes, n, _) => let
+      val @(frozen, borrowed) = $A.freeze<byte>(event_bytes)
+      val number = (if n >= 11 then nid_parse(borrowed, n, 10, id_prefix) else ~1): [number:int | number >= ~1] int number
+      val () = $A.drop<byte>(frozen, borrowed)
+      val () = event_bytes := $A.thaw<byte>(frozen)
+      prval () = fold@(clicked)
+    in number end
   | NoTarget() => ~1
 
 (* The x of the target's event, or -1 *)
-fn _target_x (t: !target): Int =
-  case+ t of
+fn _target_x (clicked: !target): Int =
+  case+ clicked of
   | Target(_, _, x) => x
   | NoTarget() => ~1
 
 (* The y of a pointer event's target record, or -1 *)
-fn _target_y (t: !target): Int =
-  case+ t of
-  | Target(b, n, _) => if n >= 8 then _i32at(b, 4) else ~1
+fn _target_y (clicked: !target): Int =
+  case+ clicked of
+  | Target(event_bytes, n, _) => if n >= 8 then _int32_at(event_bytes, 4) else ~1
   | NoTarget() => ~1
 
-fn _target_free (t: target): void =
-  case+ t of
-  | ~Target(b, _, _) => $A.free<byte>(b)
+fn _target_free (clicked: target): void =
+  case+ clicked of
+  | ~Target(event_bytes, _, _) => $A.free<byte>(event_bytes)
   | ~NoTarget() => ()
 
 (* The x of a pointer event, or -1 *)
 fn _event_x (h: $EV.event_payload): Int =
   case+ take_blob(h) of
   | ~NoBlobBytes() => ~1
-  | ~BlobBytes(b, n) =>
-    if n < 8 then let val () = $A.free<byte>(b) in ~1 end
-    else let val x = _i32at(b, 0) val () = $A.free<byte>(b) in x end
+  | ~BlobBytes(event_bytes, n) =>
+    if n < 8 then let val () = $A.free<byte>(event_bytes) in ~1 end
+    else let val x = _int32_at(event_bytes, 0) val () = $A.free<byte>(event_bytes) in x end
 
 (* An input event's value, as a number (0 when it is not one) *)
-fun _num_of {l:agz}{n:nat}{i:nat | i <= n} .<n - i>.
-  (b: !$A.arr(byte, l, n), n: int n, i: int i, acc: [a:nat | a < 100000] int a): [v:nat | v < 100000] int v =
-  if i >= n then acc
+fun _number_of {l:agz}{n:nat}{i:nat | i <= n} .<n - i>.
+  (bytes: !$A.arr(byte, l, n), n: int n, i: int i, number: [so_far:nat | so_far < 100000] int so_far): [parsed:nat | parsed < 100000] int parsed =
+  if i >= n then number
   else let
-    val c = $AR.low_byte(byte2int0($A.get<byte>(b, i)))
+    val code = $AR.low_byte(byte2int0($A.get<byte>(bytes, i)))
   in
-    if c < 48 then acc else if c > 57 then acc
-    else if acc > 9999 then acc
-    else _num_of(b, n, i + 1, acc * 10 + (c - 48))
+    if code < 48 then number else if code > 57 then number
+    else if number > 9999 then number
+    else _number_of(bytes, n, i + 1, number * 10 + (code - 48))
   end
 
-fn _input_num (h: $EV.event_payload): [v:nat | v < 100000] int v =
+fn _input_number (h: $EV.event_payload): [number:nat | number < 100000] int number =
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
-  | ~BlobBytes(b, n) => let
-      val v = (if n >= 2 then _num_of(b, n, 2, 0) else 0): [v:nat | v < 100000] int v
-      val () = $A.free<byte>(b)
-    in v end
+  | ~BlobBytes(event_bytes, n) => let
+      val number = (if n >= 2 then _number_of(event_bytes, n, 2, 0) else 0): [number:nat | number < 100000] int number
+      val () = $A.free<byte>(event_bytes)
+    in number end
 
 (* An input event's value, from its bytes (after the 2 length bytes) *)
-fn _input_text (h: $EV.event_payload): [l:agz][k:nat] @($A.arr(byte, l, k + 1), int k) =
+fn _input_text (h: $EV.event_payload): [l:agz][text_len:nat] @($A.arr(byte, l, text_len + 1), int text_len) =
   case+ take_blob(h) of
-  | ~NoBlobBytes() => let val a = $A.alloc<byte>(1) in @(a, 0) end
-  | ~BlobBytes(b, n) =>
+  | ~NoBlobBytes() => let val text = $A.alloc<byte>(1) in @(text, 0) end
+  | ~BlobBytes(event_bytes, n) =>
     if n <= 2 then let
-      val () = $A.free<byte>(b)
-      val a = $A.alloc<byte>(1)
-    in @(a, 0) end
+      val () = $A.free<byte>(event_bytes)
+      val text = $A.alloc<byte>(1)
+    in @(text, 0) end
     else let
-      val k = n - 2
-      val a = $A.alloc<byte>(k + 1)
-      fun cp {lb,la:agz}{n:nat}{k:nat | k + 2 <= n}{i:nat | i <= k} .<k - i>.
-        (b: !$A.arr(byte, lb, n), a: !$A.arr(byte, la, k + 1), k: int k, i: int i): void =
-        if i >= k then ()
-        else let val () = $A.set<byte>(a, i, $A.get<byte>(b, i + 2)) in cp(b, a, k, i + 1) end
-      val () = cp(b, a, k, 0)
-      val () = $A.free<byte>(b)
-    in @(a, k) end
+      val text_len = n - 2
+      val text = $A.alloc<byte>(text_len + 1)
+      fun copy_text {event_loc,text_loc:agz}{event_size:nat}{text_len:nat | text_len + 2 <= event_size}{i:nat | i <= text_len} .<text_len - i>.
+        (event_bytes: !$A.arr(byte, event_loc, event_size), text: !$A.arr(byte, text_loc, text_len + 1), text_len: int text_len, i: int i): void =
+        if i >= text_len then ()
+        else let val () = $A.set<byte>(text, i, $A.get<byte>(event_bytes, i + 2)) in copy_text(event_bytes, text, text_len, i + 1) end
+      val () = copy_text(event_bytes, text, text_len, 0)
+      val () = $A.free<byte>(event_bytes)
+    in @(text, text_len) end
 
 (* ============================================================
    Views
@@ -214,19 +214,19 @@ fn _input_text (h: $EV.event_payload): [l:agz][k:nat] @($A.arr(byte, l, k + 1), 
    ============================================================ *)
 
 fn _view_key (): [l:agz] $A.arr(byte, l, 4) = let
-  val k = $A.alloc<byte>(4)
-  val () = $A.write_text(k, 0, $A.text_lit("view"), 4)
-in k end
+  val key = $A.alloc<byte>(4)
+  val () = $A.write_text(key, 0, $A.text_lit("view"), 4)
+in key end
 
 (* Keeps "view": the open book's key, or -1 for the library *)
-fn _view_save (key: int): void = let
-  val b = $A.alloc<byte>(4)
-  val () = $A.write_i32(b, 0, key)
-  val @(bf, bb) = $A.freeze<byte>(b)
-  val @(kf, kb) = $A.freeze<byte>(_view_key())
-  val () = $P.discard<Int>($IDB.idb_put(kb, 4, bb, 4))
-  val () = release_bytes(kf, kb)
-in release_bytes(bf, bb) end
+fn _view_save (book_key: int): void = let
+  val value = $A.alloc<byte>(4)
+  val () = $A.write_i32(value, 0, book_key)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
+  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4))
+  val () = release_bytes(key_frozen, key_bytes)
+in release_bytes(value_frozen, value_bytes) end
 
 fn _show_library (): void = let
   val () = !_view := 0
@@ -253,17 +253,17 @@ fn _chrome_set_off (): void = let
   val () = !_chrome := false
 in ui_attr("reader", AClass, "rv chrome-off") end
 
-fn _chrome_set (on: bool): void = let
+fn _chrome_set (shown: bool): void = let
   (* bringing the bars up leaves the place a jump landed on: the back
      button goes *)
-  val () = (if on && ~(!_chrome) then reader_stack_clear() else ())
-  val () = !_chrome := on
-  val () = (if on then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
-  val () = !_chrome_gen := !_chrome_gen + 1
-  val gen = !_chrome_gen
+  val () = (if shown && ~(!_chrome) then reader_stack_clear() else ())
+  val () = !_chrome := shown
+  val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
+  val () = !_chrome_generation := !_chrome_generation + 1
+  val generation = !_chrome_generation
 in
-  if on then $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(5000)), lam(_) => let
-      val () = (if !_chrome_gen = gen then _chrome_set_off() else ())
+  if shown then $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(5000)), lam(_) => let
+      val () = (if !_chrome_generation = generation then _chrome_set_off() else ())
     in $P.ret<int>(0) end))
   else ()
 end
@@ -274,20 +274,20 @@ end
 val _hint_seen = ref<bool>(true)
 
 fn _hint_key (): [l:agz] $A.arr(byte, l, 4) = let
-  val k = $A.alloc<byte>(4)
-  val () = $A.write_text(k, 0, $A.text_lit("hint"), 4)
-in k end
+  val key = $A.alloc<byte>(4)
+  val () = $A.write_text(key, 0, $A.text_lit("hint"), 4)
+in key end
 
 (* Reads whether the hint was shown in an earlier run *)
 fn _hint_load (): void = let
-  val @(kf, kb) = $A.freeze<byte>(_hint_key())
-  val p = $IDB.idb_get(kb, 4)
-  val () = release_bytes(kf, kb)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_hint_key())
+  val stored = $IDB.idb_get(key_bytes, 4)
+  val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(p), lam(h) => let
+  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(h) => let
     val () = (case+ take_blob(h) of
       | ~NoBlobBytes() => !_hint_seen := false
-      | ~BlobBytes(b, _) => $A.free<byte>(b))
+      | ~BlobBytes(value_bytes, _) => $A.free<byte>(value_bytes))
   in $P.ret<int>(0) end))
 end
 
@@ -299,13 +299,13 @@ fn _hint_offer (): void =
   if !_hint_seen then ()
   else let
     val () = !_hint_seen := true
-    val v = $A.alloc<byte>(1)
-    val () = $A.write_byte(v, 0, 1)
-    val @(vf, vb) = $A.freeze<byte>(v)
-    val @(kf, kb) = $A.freeze<byte>(_hint_key())
-    val () = $P.discard<Int>($IDB.idb_put(kb, 4, vb, 1))
-    val () = release_bytes(kf, kb)
-    val () = release_bytes(vf, vb)
+    val value = $A.alloc<byte>(1)
+    val () = $A.write_byte(value, 0, 1)
+    val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+    val @(key_frozen, key_bytes) = $A.freeze<byte>(_hint_key())
+    val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1))
+    val () = release_bytes(key_frozen, key_bytes)
+    val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
     $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(8000)), lam(_) => let
@@ -322,101 +322,101 @@ fn _show_reader (): void = let
      awake while the book is open *)
   val () = $WN.keep_awake(true)
   (* The browser's (and Android's) back button leaves the reader *)
-  val a = $A.alloc<byte>(2)
-  val () = $A.write_byte(a, 0, 35)
-  val () = $A.write_byte(a, 1, 114)
-  val @(f, b) = $A.freeze<byte>(a)
-  val () = $NAV.push_state(b, 2)
-  val () = release_bytes(f, b)
+  val hash = $A.alloc<byte>(2)
+  val () = $A.write_byte(hash, 0, 35)
+  val () = $A.write_byte(hash, 1, 114)
+  val @(hash_frozen, hash_bytes) = $A.freeze<byte>(hash)
+  val () = $NAV.push_state(hash_bytes, 2)
+  val () = release_bytes(hash_frozen, hash_bytes)
   val () = _chrome_set(true)
 in ui_focus("page") end
 
 (* Opens library book i where it was left *)
-(* src[0, n) copied to dst[o, o + n) *)
-fun _copy_from_to {ls,ld:agz}{ms,md:nat}{n:nat | n <= ms}{o:nat | o + n <= md}{j:nat | j <= n} .<n - j>.
-  (src: !$A.arr(byte, ls, ms), n: int n, dst: !$A.arr(byte, ld, md), o: int o, j: int j): void =
-  if j >= n then ()
-  else let val () = $A.set<byte>(dst, o + j, $A.get<byte>(src, j)) in _copy_from_to(src, n, dst, o, j + 1) end
+(* source[0, count) copied to destination[at, at + count) *)
+fun _copy_from_to {source_loc,destination_loc:agz}{source_size,destination_size:nat}{count:nat | count <= source_size}{at:nat | at + count <= destination_size}{j:nat | j <= count} .<count - j>.
+  (source: !$A.arr(byte, source_loc, source_size), count: int count, destination: !$A.arr(byte, destination_loc, destination_size), at: int at, j: int j): void =
+  if j >= count then ()
+  else let val () = $A.set<byte>(destination, at + j, $A.get<byte>(source, j)) in _copy_from_to(source, count, destination, at, j + 1) end
 
-fn _copy_into {ls,ld:agz}{ms,md:nat}{n:nat | n <= ms}{o:nat | o + n <= md}
-  (src: !$A.arr(byte, ls, ms), n: int n, dst: !$A.arr(byte, ld, md), o: int o): void =
-  _copy_from_to(src, n, dst, o, 0)
+fn _copy_into {source_loc,destination_loc:agz}{source_size,destination_size:nat}{count:nat | count <= source_size}{at:nat | at + count <= destination_size}
+  (source: !$A.arr(byte, source_loc, source_size), count: int count, destination: !$A.arr(byte, destination_loc, destination_size), at: int at): void =
+  _copy_from_to(source, count, destination, at, 0)
 
-(* A shared selection's citation, book i's: "Author, Title" (as the
+(* A shared selection's citation, the book's: "Author, Title" (as the
    export's) *)
-fn _citation_set {i:int} (i: int i): void = let
-  val @(t, tn) = lib_text(i, 0)
-  val @(a, an) = lib_text(i, 1)
-  val b = $A.alloc<byte>(520)
-  val () = _copy_into(a, an, b, 0)
-  val () = $A.set<byte>(b, an, $A.int2byte(44))
-  val () = $A.set<byte>(b, an + 1, $A.int2byte(32))
-  val () = _copy_into(t, tn, b, an + 2)
-  val () = $A.free<byte>(t)
-  val () = $A.free<byte>(a)
-in ui_text_buf("share-citation", b, an + 2 + tn) end
+fn _citation_set {book:int} (book: int book): void = let
+  val @(title, title_len) = lib_text(book, 0)
+  val @(author, author_len) = lib_text(book, 1)
+  val citation = $A.alloc<byte>(520)
+  val () = _copy_into(author, author_len, citation, 0)
+  val () = $A.set<byte>(citation, author_len, $A.int2byte(44))
+  val () = $A.set<byte>(citation, author_len + 1, $A.int2byte(32))
+  val () = _copy_into(title, title_len, citation, author_len + 2)
+  val () = $A.free<byte>(title)
+  val () = $A.free<byte>(author)
+in ui_text_buf("share-citation", citation, author_len + 2 + title_len) end
 
-fn _open_book {i:int} (i: int i): void =
-  case+ lib_nums(i) of
+fn _open_book {book:int} (book: int book): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) =>
-    if x.shelf = 3 then let
+  | ~$R.some(book_numbers) =>
+    if book_numbers.shelf = 3 then let
       val () = modal_inform("In the Trash")
     in modal_text_lit("Restore this book from the Trash to read it.") end
-    else if x.shelf = 2 then let
+    else if book_numbers.shelf = 2 then let
       val () = modal_inform("Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     else let
       val () = _show_reader()
       val () = _hint_offer()
-      val () = _citation_set(i)
+      val () = _citation_set(book)
       val () = reader_stack_clear()
       val () = reader_timer_start()
       (* a reload now comes back to this book *)
-      val () = _view_save(x.key)
+      val () = _view_save(book_numbers.key)
       val () = ui_text("chapter-title", "Loading...")
       (* no page is shown until this book's is: the last book's stays out
          of the indicator *)
       val () = ui_clear("indicator-title")
       val () = ui_clear("indicator-label")
       val () = ui_clear("indicator-pages")
-      val ch = x.chapter
-      val pg = x.page
-      val anchor = x.anchor
-      val h1 = x.id_high
-      val h2 = x.id_low
+      val chapter = book_numbers.chapter
+      val page = book_numbers.page
+      val anchor = book_numbers.anchor
+      val id_high = book_numbers.id_high
+      val id_low = book_numbers.id_low
     in
-      if open_key_get() = x.key then
-        $P.discard<int>($P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor)))
+      if open_key_get() = book_numbers.key then
+        $P.discard<int>($P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor)))
       else
-        $P.discard<int>($P.and_then<Int><int>(open_stored(x.key, h1, h2), lam(r) =>
-          if r < 0 then let
+        $P.discard<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), lam(result) =>
+          if result < 0 then let
             val () = _show_library()
             val () = ui_text("error-text", "This book's file could not be read. Import it again.")
             val () = ui_show("error-banner", true)
-          in $P.ret<int>(r) end
-          else $P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor))))
+          in $P.ret<int>(result) end
+          else $P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor))))
     end
 
 (* The view kept by the last run: its book opened again, on its page,
    when it is still on a shelf it is read from; else the library *)
 fn _view_restore (): $P.promise(int, $P.Chained) = let
-  val @(kf, kb) = $A.freeze<byte>(_view_key())
-  val p = $IDB.idb_get(kb, 4)
-  val () = release_bytes(kf, kb)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
+  val stored = $IDB.idb_get(key_bytes, 4)
+  val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(p), lam(h) => let
+  $P.and_then<Int><int>($P.vow(stored), lam(h) => let
     val key = (case+ take_blob(h) of
       | ~NoBlobBytes() => ~1
-      | ~BlobBytes(b, n) =>
-        if n < 4 then let val () = $A.free<byte>(b) in ~1 end
-        else let val k = _i32at(b, 0) val () = $A.free<byte>(b) in k end): Int
-    val i = (if key < 0 then ~1 else lib_index_of_key(key)): [r:int | r >= ~1] int r
-    val readable = (if i < 0 then false else (case+ lib_nums(i) of
+      | ~BlobBytes(value_bytes, n) =>
+        if n < 4 then let val () = $A.free<byte>(value_bytes) in ~1 end
+        else let val stored_key = _int32_at(value_bytes, 0) val () = $A.free<byte>(value_bytes) in stored_key end): Int
+    val book = (if key < 0 then ~1 else lib_index_of_key(key)): [index:int | index >= ~1] int index
+    val readable = (if book < 0 then false else (case+ lib_nums(book) of
       | ~$R.none() => false
-      | ~$R.some(x) => x.shelf < 2)): bool
+      | ~$R.some(book_numbers) => book_numbers.shelf < 2)): bool
   in
-    if readable then let val () = _open_book(i) in $P.ret<int>(0) end
+    if readable then let val () = _open_book(book) in $P.ret<int>(0) end
     else let val () = _show_library() in $P.ret<int>(0) end
   end)
 end
@@ -429,183 +429,183 @@ fn _save_render (): void = let
   val () = lib_save()
 in lib_render() end
 
-(* Sets book i's shelf *)
-fn _set_shelf {i:int} (i: int i, shelf: Int): void = lib_set_shelf(i, shelf)
+(* Sets the book's shelf *)
+fn _set_shelf {book:int} (book: int book, shelf: Int): void = lib_set_shelf(book, shelf)
 
-(* Deletes the stored data under key letter c of book (h1, h2) *)
-fn _idb_del {c:nat | c < 256} (c: int c, h1: int, h2: int): void = let
-  val k = lib_key(c, h1, h2)
-  val @(f, b) = $A.freeze<byte>(k)
-  val () = $P.discard<Int>($IDB.idb_delete(b, 15))
-in release_bytes(f, b) end
+(* Deletes the stored data of book (id_high, id_low) under the key of letter *)
+fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): void = let
+  val key = lib_key(letter, id_high, id_low)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
+in release_bytes(key_frozen, key_bytes) end
 
-(* Archives book i: its record is kept and its file deleted. The file
+(* Archives the book: its record is kept and its file deleted. The file
    goes only when the Undo offer does: until then Undo puts the book
    back where it was, file and all *)
-fn _archive {i:int} (i: int i): void =
-  case+ lib_nums(i) of
+fn _archive {book:int} (book: int book): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) => let
-      val key = x.key
-      val was = x.shelf
-      val h1 = x.id_high
-      val h2 = x.id_low
-      val () = _set_shelf(i, 2)
+  | ~$R.some(book_numbers) => let
+      val key = book_numbers.key
+      val was = book_numbers.shelf
+      val id_high = book_numbers.id_high
+      val id_low = book_numbers.id_low
+      val () = _set_shelf(book, 2)
     in
       undo_offer("Archived", lam () => let
-          val j = lib_index_of_key(key)
-        in if j >= 0 then _set_shelf(j, was) else () end,
+          val index = lib_index_of_key(key)
+        in if index >= 0 then _set_shelf(index, was) else () end,
         (* the file goes only if the book is still archived (it may have
            been restored meanwhile, by importing it again) *)
         lam () => let
-          val j = lib_index_of_key(key)
+          val index = lib_index_of_key(key)
         in
-          if j < 0 then ()
-          else (case+ lib_nums(j) of
+          if index < 0 then ()
+          else (case+ lib_nums(index) of
             | ~$R.none() => ()
-            | ~$R.some(y) =>
-              if y.shelf = 2 then let
-                val () = _idb_del(98, h1, h2)
+            | ~$R.some(numbers_now) =>
+              if numbers_now.shelf = 2 then let
+                val () = _idb_delete(98, id_high, id_low)
               in if open_key_get() = key then open_key_set(0) else () end
               else ())
         end)
     end
 
-(* Hides or unhides book i, offering Undo *)
-fn _hide_toggle {i:int} (i: int i): void =
-  case+ lib_nums(i) of
+(* Hides or unhides the book, offering Undo *)
+fn _hide_toggle {book:int} (book: int book): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) => let
-      val key = x.key
-      val was = x.shelf
-      val () = _set_shelf(i, (if was = 1 then 0 else 1))
+  | ~$R.some(book_numbers) => let
+      val key = book_numbers.key
+      val was = book_numbers.shelf
+      val () = _set_shelf(book, (if was = 1 then 0 else 1))
     in
-      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [k:pos | k < 256] string k, lam () => let
-          val j = lib_index_of_key(key)
-        in if j >= 0 then _set_shelf(j, was) else () end,
+      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len, lam () => let
+          val index = lib_index_of_key(key)
+        in if index >= 0 then _set_shelf(index, was) else () end,
         lam () => ())
     end
 
 
 (* The book actions' labels (in the book menu or the info view) for a
-   book on shelf s: in the Trash, Restore only (a book leaves the Trash
+   book on shelf shelf: in the Trash, Restore only (a book leaves the Trash
    for good only when it is emptied); elsewhere Hide or Unhide, Archive
    or Restore, and Move to Trash *)
-fn _shelf_labels {n1,n2,n3:pos | n1 < 256; n2 < 256; n3 < 256}
-  (hide: string n1, arch: string n2, del: string n3, s: Int): void =
-  if s = 3 then let
+fn _shelf_labels {hide_len,archive_len,trash_len:pos | hide_len < 256; archive_len < 256; trash_len < 256}
+  (hide: string hide_len, archive: string archive_len, trash: string trash_len, shelf: Int): void =
+  if shelf = 3 then let
     val () = ui_text(hide, "Restore")
-    val () = ui_show(arch, false)
-  in ui_show(del, false) end
+    val () = ui_show(archive, false)
+  in ui_show(trash, false) end
   else let
-    val () = (if s = 1 then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
-    val () = ui_show(arch, true)
-    val () = (if s = 2 then ui_text(arch, "Restore") else ui_text(arch, "Archive"))
-  in ui_show(del, true) end
+    val () = (if shelf = 1 then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
+    val () = ui_show(archive, true)
+    val () = (if shelf = 2 then ui_text(archive, "Restore") else ui_text(archive, "Archive"))
+  in ui_show(trash, true) end
 
-(* The book menu for book i, its items as its shelf asks *)
-fn _menu_open {i:int} (i: int i): void =
-  case+ lib_nums(i) of
+(* The book menu for the book, its items as its shelf asks *)
+fn _menu_open {book:int} (book: int book): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) => let
-      val () = !_menu_idx := i
-      val () = _shelf_labels("card-menu-hide", "card-menu-archive", "card-menu-trash", x.shelf)
+  | ~$R.some(book_numbers) => let
+      val () = !_menu_index := book
+      val () = _shelf_labels("card-menu-hide", "card-menu-archive", "card-menu-trash", book_numbers.shelf)
       val () = layer_open(LBookMenu())
     in ui_focus("card-menu-info") end
 
-(* "N% · Ch C of T" for x in b; its length *)
-fn _progress_text {l:agz} (b: !$A.arr(byte, l, 64), x: bnums): [k:nat | k <= 64] int k = let
-  val off = $S.int_to_str(b, 0, 64, lib_progress(x))
-  val () = $A.set<byte>(b, off, $A.int2byte(37))
-  val tch = x.chapters
-  val ch0 = x.chapter
+(* "N% · Ch C of T" for book_numbers in text; its length *)
+fn _progress_text {l:agz} (text: !$A.arr(byte, l, 64), book_numbers: bnums): [text_len:nat | text_len <= 64] int text_len = let
+  val percent_len = $S.int_to_str(text, 0, 64, lib_progress(book_numbers))
+  val () = $A.set<byte>(text, percent_len, $A.int2byte(37))
+  val chapter_count = book_numbers.chapters
+  val chapter_index = book_numbers.chapter
 in
-  if tch <= 0 then off + 1
+  if chapter_count <= 0 then percent_len + 1
   else let
-    val ch = (if ch0 >= 0 then ch0 + 1 else 1): Int
-    val () = $A.set<byte>(b, off + 1, $A.int2byte(32))
-    val () = $A.set<byte>(b, off + 2, $A.int2byte(194))
-    val () = $A.set<byte>(b, off + 3, $A.int2byte(183))
-    val () = $A.set<byte>(b, off + 4, $A.int2byte(32))
-    val () = $A.write_text(b, off + 5, $A.text_lit("Ch "), 3)
-    val o2 = $S.int_to_str(b, off + 8, 64, ch)
-    val () = $A.write_text(b, o2, $A.text_lit(" of "), 4)
-  in $S.int_to_str(b, o2 + 4, 64, tch) end
+    val chapter_shown = (if chapter_index >= 0 then chapter_index + 1 else 1): Int
+    val () = $A.set<byte>(text, percent_len + 1, $A.int2byte(32))
+    val () = $A.set<byte>(text, percent_len + 2, $A.int2byte(194))
+    val () = $A.set<byte>(text, percent_len + 3, $A.int2byte(183))
+    val () = $A.set<byte>(text, percent_len + 4, $A.int2byte(32))
+    val () = $A.write_text(text, percent_len + 5, $A.text_lit("Ch "), 3)
+    val after_chapter = $S.int_to_str(text, percent_len + 8, 64, chapter_shown)
+    val () = $A.write_text(text, after_chapter, $A.text_lit(" of "), 4)
+  in $S.int_to_str(text, after_chapter + 4, 64, chapter_count) end
 end
 
 (* The pages an hour of pages turned in minutes, 0 without minutes *)
 fn _per_hour (pages: Int, minutes: Int): Int = let
-  val m = g1ofg0(minutes)
-  val p = g1ofg0(pages)
-in if m > 0 then (if p > 0 then (p * 60) / m else 0) else 0 end
+  val minutes_read = g1ofg0(minutes)
+  val pages_turned = g1ofg0(pages)
+in if minutes_read > 0 then (if pages_turned > 0 then (pages_turned * 60) / minutes_read else 0) else 0 end
 
-(* The info view of book i *)
-fn _info_open {i:int} (i: int i): void =
-  case+ lib_nums(i) of
+(* The info view of the book *)
+fn _info_open {book:int} (book: int book): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) => let
-      val () = !_menu_idx := i
-      val @(t, tn) = lib_text(i, 0)
-      val () = ui_text_buf("book-info-title", t, tn)
-      val @(a, an) = lib_text(i, 1)
-      val () = ui_text_buf("book-info-author", a, an)
+  | ~$R.some(book_numbers) => let
+      val () = !_menu_index := book
+      val @(title, title_len) = lib_text(book, 0)
+      val () = ui_text_buf("book-info-title", title, title_len)
+      val @(author, author_len) = lib_text(book, 1)
+      val () = ui_text_buf("book-info-author", author, author_len)
       (* progress: "N% · chapter C of T" *)
-      val b = $A.alloc<byte>(64)
-      val off = _progress_text(b, x)
-      val () = ui_text_buf("info-progress", b, off)
-      val d = $A.alloc<byte>(32)
-      val dk = date_text(d, x.added)
-      val () = ui_text_buf("info-added", d, dk)
-      val () = (if x.opened > 0 then let
-          val d = $A.alloc<byte>(32)
-          val dk = date_text(d, x.opened)
-        in ui_text_buf("info-last-read", d, dk) end
+      val progress = $A.alloc<byte>(64)
+      val progress_len = _progress_text(progress, book_numbers)
+      val () = ui_text_buf("info-progress", progress, progress_len)
+      val date = $A.alloc<byte>(32)
+      val date_len = date_text(date, book_numbers.added)
+      val () = ui_text_buf("info-added", date, date_len)
+      val () = (if book_numbers.opened > 0 then let
+          val date = $A.alloc<byte>(32)
+          val date_len = date_text(date, book_numbers.opened)
+        in ui_text_buf("info-last-read", date, date_len) end
         else ui_text("info-last-read", "Never"))
-      val z = $A.alloc<byte>(32)
-      val zk = size_text(z, x.file_size)
-      val () = ui_text_buf("info-size", z, zk)
+      val size = $A.alloc<byte>(32)
+      val size_len = size_text(size, book_numbers.file_size)
+      val () = ui_text_buf("info-size", size, size_len)
       (* the time it has been read, and its pages an hour (as Kobo's
          Reading Life shows them), once it has been *)
-      val () = (if x.minutes_read > 0 then let
-          val d = $A.alloc<byte>(32)
-          val dk = stats_duration_text(d, x.minutes_read)
-        in ui_text_buf("info-time", d, dk) end
+      val () = (if book_numbers.minutes_read > 0 then let
+          val duration = $A.alloc<byte>(32)
+          val duration_len = stats_duration_text(duration, book_numbers.minutes_read)
+        in ui_text_buf("info-time", duration, duration_len) end
         else ui_text("info-time", "Not yet"))
-      val () = (if x.minutes_read > 0 then let
-          val sp = $A.alloc<byte>(32)
-          val sk = $S.int_to_str(sp, 0, 32, _per_hour(x.pages_read, x.minutes_read))
-          val () = $A.write_text(sp, sk, $A.text_lit(" pages an hour"), 14)
-        in ui_text_buf("info-speed", sp, sk + 14) end
+      val () = (if book_numbers.minutes_read > 0 then let
+          val speed = $A.alloc<byte>(32)
+          val speed_len = $S.int_to_str(speed, 0, 32, _per_hour(book_numbers.pages_read, book_numbers.minutes_read))
+          val () = $A.write_text(speed, speed_len, $A.text_lit(" pages an hour"), 14)
+        in ui_text_buf("info-speed", speed, speed_len + 14) end
         else ())
-      val () = ui_show("info-speed-row", x.minutes_read > 0)
-      val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", x.shelf)
+      val () = ui_show("info-speed-row", book_numbers.minutes_read > 0)
+      val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", book_numbers.shelf)
       val () = ui_attr("book-info-cover", ASrc, "data:,")
-      val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.id_high, x.id_low, x.cover) else ())
+      val () = (if book_numbers.cover > 0 then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
       (* a book without a cover shows none, not a broken image *)
-      val () = ui_show("book-info-cover", x.cover > 0)
-      val () = lib_a11y_show(x.id_high, x.id_low)
+      val () = ui_show("book-info-cover", book_numbers.cover > 0)
+      val () = lib_a11y_show(book_numbers.id_high, book_numbers.id_low)
       val () = layer_open(LBookInfo())
     in ui_focus("book-info-back") end
 
-(* A book menu or info view action on book i: 1 hide, unhide or (from
+(* A book menu or info view action on the book: 1 hide, unhide or (from
    the Trash) restore; 2 archive, or say how to restore; 3 move to the
    Trash *)
-fn _book_action {i:int} (i: int i, act: int): void =
-  case+ lib_nums(i) of
+fn _book_action {book:int} (book: int book, action: int): void =
+  case+ lib_nums(book) of
   | ~$R.none() => ()
-  | ~$R.some(x) =>
-    if act = 1 then
-      (if x.shelf = 3 then _set_shelf(i, 0) else _hide_toggle(i))
-    else if act = 2 then
-      (if x.shelf = 2 then let
+  | ~$R.some(book_numbers) =>
+    if action = 1 then
+      (if book_numbers.shelf = 3 then _set_shelf(book, 0) else _hide_toggle(book))
+    else if action = 2 then
+      (if book_numbers.shelf = 2 then let
          val () = modal_inform("Restore")
        in modal_text_lit("To restore this book, import its file again.") end
-       else if x.shelf = 3 then ()
-       else _archive(i))
-    else if x.shelf = 3 then ()
+       else if book_numbers.shelf = 3 then ()
+       else _archive(book))
+    else if book_numbers.shelf = 3 then ()
     else let
       val () = layer_close(LBookInfo())
-    in lib_trash(i) end
+    in lib_trash(book) end
 
 (* ============================================================
    Settings
@@ -615,8 +615,8 @@ fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
 in if !_view = 1 then reader_relayout() else () end
 
-fn _clamp {lo,hi:int | lo <= hi} (v: Int, lo: int lo, hi: int hi): [r:int | lo <= r; r <= hi] int r =
-  if v < lo then lo else if v > hi then hi else v
+fn _clamp {low,high:int | low <= high} (value: Int, low: int low, high: int high): [clamped:int | low <= clamped; clamped <= high] int clamped =
+  if value < low then low else if value > high then high else value
 
 (* ============================================================
    Listeners
@@ -630,156 +630,157 @@ fn _clamp {lo,hi:int | lo <= hi} (v: Int, lo: int lo, hi: int hi): [r:int | lo <
 fn _has_selection (): bool =
   case+ $DR.get_selection_text() of
   | ~$R.none() => false
-  | ~$R.some(b) => let val () = $DC.blob_free(b) in true end
+  | ~$R.some(selection) => let val () = $DC.blob_free(selection) in true end
 
 (* The selected text, to the clipboard *)
 (* Look up: the selection's first 64 bytes (cut where a character
    begins), trimmed, as a Wiktionary search in the book's language:
    "https://fr.wiktionary.org/wiki/Special:Search?search=..." *)
-fn _hexdig (v: int): int = if v < 10 then 48 + v else 55 + v
+fn _hex_digit (value: int): int = if value < 10 then 48 + value else 55 + value
 
-(* out[p, r) := a[i, k) percent-encoded (letters, digits and -_.~ as
-   they are, a space as %20) *)
-fun _pct {l,lo:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k}{p:nat | p + 3 * (k - i) <= 256} .<k - i>.
-  (a: !$A.arr(byte, l, n), k: int k, i: int i, out: !$A.arr(byte, lo, 256), p: int p): [r:nat | r <= 256] int r =
-  if i >= k then p
+(* out[at, written) := text[i, text_len) percent-encoded (letters, digits
+   and -_.~ as they are, a space as %20) *)
+fun _percent_encode {text_loc,out_loc:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{i:nat | i <= text_len}{at:nat | at + 3 * (text_len - i) <= 256} .<text_len - i>.
+  (text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, i: int i, out: !$A.arr(byte, out_loc, 256), at: int at): [written:nat | written <= 256] int written =
+  if i >= text_len then at
   else let
-    val c = byte2int0($A.get<byte>(a, i))
-    val plain = (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
-      || c = 45 || c = 95 || c = 46 || c = 126
+    val code = byte2int0($A.get<byte>(text, i))
+    val plain = (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57)
+      || code = 45 || code = 95 || code = 46 || code = 126
   in
     if plain then let
-      val () = $A.set<byte>(out, p, $A.int2byte($AR.low_byte(c)))
-    in _pct(a, k, i + 1, out, p + 1) end
+      val () = $A.set<byte>(out, at, $A.int2byte($AR.low_byte(code)))
+    in _percent_encode(text, text_len, i + 1, out, at + 1) end
     else let
-      val b = (if c >= 0 then c else c + 256): int
-      val () = $A.set<byte>(out, p, $A.int2byte(37))
-      val () = $A.set<byte>(out, p + 1, $A.int2byte($AR.low_byte(_hexdig(b / 16))))
-      val () = $A.set<byte>(out, p + 2, $A.int2byte($AR.low_byte(_hexdig(b - (b / 16) * 16))))
-    in _pct(a, k, i + 1, out, p + 3) end
+      val unsigned = (if code >= 0 then code else code + 256): int
+      val () = $A.set<byte>(out, at, $A.int2byte(37))
+      val () = $A.set<byte>(out, at + 1, $A.int2byte($AR.low_byte(_hex_digit(unsigned / 16))))
+      val () = $A.set<byte>(out, at + 2, $A.int2byte($AR.low_byte(_hex_digit(unsigned - (unsigned / 16) * 16))))
+    in _percent_encode(text, text_len, i + 1, out, at + 3) end
   end
 
-fun _ws_start {l:agz}{n:pos}{k:nat | k <= n}{i:nat | i <= k} .<k - i>.
-  (a: !$A.arr(byte, l, n), k: int k, i: int i): [j:nat | j <= k] int j =
-  if i >= k then i
-  else let val c = byte2int0($A.get<byte>(a, i)) in
-    if c = 32 || c = 9 || c = 10 || c = 13 then _ws_start(a, k, i + 1) else i
+fun _trim_start {l:agz}{n:pos}{text_len:nat | text_len <= n}{i:nat | i <= text_len} .<text_len - i>.
+  (text: !$A.arr(byte, l, n), text_len: int text_len, i: int i): [start:nat | start <= text_len] int start =
+  if i >= text_len then i
+  else let val code = byte2int0($A.get<byte>(text, i)) in
+    if code = 32 || code = 9 || code = 10 || code = 13 then _trim_start(text, text_len, i + 1) else i
   end
 
-fun _ws_end {l:agz}{n:pos}{s:nat}{k:nat | s <= k; k <= n} .<k - s>.
-  (a: !$A.arr(byte, l, n), s: int s, k: int k): [e:nat | s <= e; e <= k] int e =
-  if k <= s then k
-  else let val c = byte2int0($A.get<byte>(a, k - 1)) in
-    if c = 32 || c = 9 || c = 10 || c = 13 then _ws_end(a, s, k - 1) else k
+fun _trim_end {l:agz}{n:pos}{start:nat}{stop:nat | start <= stop; stop <= n} .<stop - start>.
+  (text: !$A.arr(byte, l, n), start: int start, stop: int stop): [trimmed:nat | start <= trimmed; trimmed <= stop] int trimmed =
+  if stop <= start then stop
+  else let val code = byte2int0($A.get<byte>(text, stop - 1)) in
+    if code = 32 || code = 9 || code = 10 || code = 13 then _trim_end(text, start, stop - 1) else stop
   end
 
-(* The first j <= e (from s) where a character begins: a byte that is
-   not 0x80 to 0xBF *)
-fun _char_start {l:agz}{n:pos}{s,e:nat | s <= e; e < n} .<e - s>.
-  (a: !$A.arr(byte, l, n), s: int s, e: int e): [j:nat | s <= j; j <= e] int j =
-  if e <= s then e
-  else let val c = byte2int0($A.get<byte>(a, e)) in
-    if c >= 128 && c < 192 then _char_start(a, s, e - 1) else e
+(* The first place <= stop (from start) where a character begins: a
+   byte that is not 0x80 to 0xBF *)
+fun _char_start {l:agz}{n:pos}{start,stop:nat | start <= stop; stop < n} .<stop - start>.
+  (text: !$A.arr(byte, l, n), start: int start, stop: int stop): [begins:nat | start <= begins; begins <= stop] int begins =
+  if stop <= start then stop
+  else let val code = byte2int0($A.get<byte>(text, stop)) in
+    if code >= 128 && code < 192 then _char_start(text, start, stop - 1) else stop
   end
 
-(* The end of a[s, e), cut to at most 64 bytes where a character begins *)
-fn _cut {l:agz}{n:pos}{s,e:nat | s <= e; e <= n}
-  (a: !$A.arr(byte, l, n), s: int s, e: int e): [j:nat | s <= j; j <= e; j - s <= 64] int j =
-  if e - s <= 64 then e
-  else _char_start(a, s, s + 64)
+(* The end of text[start, stop), cut to at most 64 bytes where a
+   character begins *)
+fn _cut {l:agz}{n:pos}{start,stop:nat | start <= stop; stop <= n}
+  (text: !$A.arr(byte, l, n), start: int start, stop: int stop): [cut:nat | start <= cut; cut <= stop; cut - start <= 64] int cut =
+  if stop - start <= 64 then stop
+  else _char_start(text, start, start + 64)
 
-(* w[0, e - s) := a[s, e), at most 64 bytes *)
-fun _copy_bytes {l,lw:agz}{n:pos}{s,e:nat | s <= e; e <= n; e - s <= 64}{j:nat | j <= e - s} .<e - s - j>.
-  (a: !$A.arr(byte, l, n), s: int s, e: int e, w: !$A.arr(byte, lw, 65), j: int j): void =
-  if s + j >= e then ()
+(* word[0, stop - start) := text[start, stop), at most 64 bytes *)
+fun _copy_bytes {text_loc,word_loc:agz}{text_size:pos}{start,stop:nat | start <= stop; stop <= text_size; stop - start <= 64}{j:nat | j <= stop - start} .<stop - start - j>.
+  (text: !$A.arr(byte, text_loc, text_size), start: int start, stop: int stop, word: !$A.arr(byte, word_loc, 65), j: int j): void =
+  if start + j >= stop then ()
   else let
-    val () = $A.set<byte>(w, j, $A.get<byte>(a, s + j))
-  in _copy_bytes(a, s, e, w, j + 1) end
+    val () = $A.set<byte>(word, j, $A.get<byte>(text, start + j))
+  in _copy_bytes(text, start, stop, word, j + 1) end
 
-fn _copy_word {l,lw:agz}{n:pos}{s,e:nat | s <= e; e <= n}
-  (a: !$A.arr(byte, l, n), s: int s, e: int e, w: !$A.arr(byte, lw, 65)): [m:nat | m <= 64] int m =
-  if e - s > 64 then 0
-  else let val () = _copy_bytes(a, s, e, w, 0) in e - s end
+fn _copy_word {text_loc,word_loc:agz}{text_size:pos}{start,stop:nat | start <= stop; stop <= text_size}
+  (text: !$A.arr(byte, text_loc, text_size), start: int start, stop: int stop, word: !$A.arr(byte, word_loc, 65)): [word_len:nat | word_len <= 64] int word_len =
+  if stop - start > 64 then 0
+  else let val () = _copy_bytes(text, start, stop, word, 0) in stop - start end
 
-(* out[p, p + sl) := s *)
-fun _put_lit_at {lo:agz}{sl:nat}{p:nat | p + sl <= 256}{i:nat | i <= sl} .<sl - i>.
-  (out: !$A.arr(byte, lo, 256), p: int p, s: string sl, sl: int sl, i: int i): void =
-  if i >= sl then ()
+(* out[at, at + text_len) := text *)
+fun _put_literal_at {l:agz}{text_len:nat}{at:nat | at + text_len <= 256}{i:nat | i <= text_len} .<text_len - i>.
+  (out: !$A.arr(byte, l, 256), at: int at, text: string text_len, text_len: int text_len, i: int i): void =
+  if i >= text_len then ()
   else let
-    val () = $A.set<byte>(out, p + i, $A.int2byte($AR.byte_of_char(string_get_at(s, i))))
-  in _put_lit_at(out, p, s, sl, i + 1) end
+    val () = $A.set<byte>(out, at + i, $A.int2byte($AR.byte_of_char(string_get_at(text, i))))
+  in _put_literal_at(out, at, text, text_len, i + 1) end
 
-fn _put_lit {lo:agz}{sl:nat}{p:nat | p + sl <= 256}
-  (out: !$A.arr(byte, lo, 256), p: int p, s: string sl): int(p + sl) = let
-  val sl = g1u2i(string1_length(s))
-  val () = _put_lit_at(out, p, s, sl, 0)
-in p + sl end
+fn _put_literal {l:agz}{text_len:nat}{at:nat | at + text_len <= 256}
+  (out: !$A.arr(byte, l, 256), at: int at, text: string text_len): int(at + text_len) = let
+  val text_len = g1u2i(string1_length(text))
+  val () = _put_literal_at(out, at, text, text_len, 0)
+in at + text_len end
 
-fn _put_arr {lo,la:agz}{p:nat | p + 3 <= 256}{k:pos | k <= 3}
-  (out: !$A.arr(byte, lo, 256), p: int p, a: !$A.arr(byte, la, 3), k: int k): int(p + k) = let
-  val () = $A.set<byte>(out, p, $A.get<byte>(a, 0))
-  val () = $A.set<byte>(out, p + 1, $A.get<byte>(a, 1))
-  val () = (if k = 3 then $A.set<byte>(out, p + 2, $A.get<byte>(a, 2)) else ())
-in p + k end
+fn _put_array {out_loc,code_loc:agz}{at:nat | at + 3 <= 256}{code_len:pos | code_len <= 3}
+  (out: !$A.arr(byte, out_loc, 256), at: int at, code: !$A.arr(byte, code_loc, 3), code_len: int code_len): int(at + code_len) = let
+  val () = $A.set<byte>(out, at, $A.get<byte>(code, 0))
+  val () = $A.set<byte>(out, at + 1, $A.get<byte>(code, 1))
+  val () = (if code_len = 3 then $A.set<byte>(out, at + 2, $A.get<byte>(code, 2)) else ())
+in at + code_len end
 
 fn _lookup_update (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
-  | ~$R.some(bl) => let
-      val n = $DC.blob_len(bl)
+  | ~$R.some(selection) => let
+      val selection_len = $DC.blob_len(selection)
     in
-      if n <= 0 then $DC.blob_free(bl)
-      else if n > 4096 then $DC.blob_free(bl)
+      if selection_len <= 0 then $DC.blob_free(selection)
+      else if selection_len > 4096 then $DC.blob_free(selection)
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(bl, 0, a, n)
-        val () = $DC.blob_free(bl)
-        val s0 = _ws_start(a, n, 0)
-        val e0 = _ws_end(a, s0, n)
-        val e1 = _cut(a, s0, e0)
-        val w = $A.alloc<byte>(65)
-        val m = _copy_word(a, s0, e1, w)
-        val () = $A.free<byte>(a)
+        val text = $A.alloc<byte>(selection_len)
+        val () = $DC.blob_read(selection, 0, text, selection_len)
+        val () = $DC.blob_free(selection)
+        val start = _trim_start(text, selection_len, 0)
+        val trimmed_end = _trim_end(text, start, selection_len)
+        val cut_end = _cut(text, start, trimmed_end)
+        val word = $A.alloc<byte>(65)
+        val word_len = _copy_word(text, start, cut_end, word)
+        val () = $A.free<byte>(text)
         val out = $A.alloc<byte>(256)
-        val p = _put_lit(out, 0, "https://")
-        val @(lg, lk) = reader_lang_code()
-        val p = _put_arr(out, p, lg, lk)
-        val () = $A.free<byte>(lg)
-        val p = _put_lit(out, p, ".wiktionary.org/wiki/Special:Search?search=")
-        val q = _pct(w, m, 0, out, p)
-        val () = $A.free<byte>(w)
-      in if q > 0 then ui_https_href("selection-lookup", out, q) else $A.free<byte>(out) end
+        val at = _put_literal(out, 0, "https://")
+        val @(language, language_len) = reader_lang_code()
+        val at = _put_array(out, at, language, language_len)
+        val () = $A.free<byte>(language)
+        val at = _put_literal(out, at, ".wiktionary.org/wiki/Special:Search?search=")
+        val url_len = _percent_encode(word, word_len, 0, out, at)
+        val () = $A.free<byte>(word)
+      in if url_len > 0 then ui_https_href("selection-lookup", out, url_len) else $A.free<byte>(out) end
     end
 
 fn _copy_selection (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
-  | ~$R.some(b) => let
-      val n = $DC.blob_len(b)
+  | ~$R.some(selection) => let
+      val selection_len = $DC.blob_len(selection)
     in
-      if n <= 0 then $DC.blob_free(b)
-      else if n > 1048576 then $DC.blob_free(b)
+      if selection_len <= 0 then $DC.blob_free(selection)
+      else if selection_len > 1048576 then $DC.blob_free(selection)
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(b, 0, a, n)
-        val () = $DC.blob_free(b)
-        val @(f, bb) = $A.freeze<byte>(a)
-        val () = $P.discard<Int>($P.vow($CB.clipboard_write(bb, n)))
-      in release_bytes(f, bb) end
+        val text = $A.alloc<byte>(selection_len)
+        val () = $DC.blob_read(selection, 0, text, selection_len)
+        val () = $DC.blob_free(selection)
+        val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
+        val () = $P.discard<Int>($P.vow($CB.clipboard_write(text_bytes, selection_len)))
+      in release_bytes(text_frozen, text_bytes) end
     end
 
 (* Exports the open book's annotations: downloaded, or to be shared
    (the page's script shares them once this click's listener is done) *)
 fn _export (share: bool): void = let
-  val i = lib_index_of_key(open_key_get())
-  val @(t, tn) = lib_text(i, 0)
-  val @(a, an) = lib_text(i, 1)
-in annot_export(t, tn, a, an, share) end
+  val book = lib_index_of_key(open_key_get())
+  val @(title, title_len) = lib_text(book, 0)
+  val @(author, author_len) = lib_text(book, 1)
+in annot_export(title, title_len, author, author_len, share) end
 
-(* Goes to annotation i, remembering where the reader was *)
-fn _annot_go (i: int): void = let
-  val @(ch, pg, sn) = annot_dest(i)
-in if ch >= 0 then reader_jump_to(ch, pg, sn) else () end
+(* Goes to annotation, remembering where the reader was *)
+fn _annotation_go (annotation: int): void = let
+  val @(chapter, page, node) = annot_dest(annotation)
+in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
 
 (* A factory reset: every book moves to the Trash (where it can still be
    restored until the Trash is emptied) and the settings go back to
@@ -795,162 +796,162 @@ in
     in back_settings() end, lam () => ())
 end
 
-(* The collections panel for book i, its toggles pressed as the book's
+(* The collections panel for the book, its toggles pressed as the book's
    collections are *)
-fn _collections_open {i:int} (i: int i): void = let
-  val () = !_menu_idx := i
-  val () = lib_coll_panel(i)
+fn _collections_open {book:int} (book: int book): void = let
+  val () = !_menu_index := book
+  val () = lib_coll_panel(book)
   val () = layer_open(LCollections())
 in if lib_coll_count() > 0 then ui_focus("collection-put0") else ui_focus("collections-new") end
 
-(* Puts book i in collection j, or takes it out: its toggle and the
+(* Puts the book in the collection, or takes it out: its toggle and the
    library follow *)
-fn _collection_put {i:int}{j:int} (i: int i, j: int j): void =
-  if j < 0 then ()
+fn _collection_put {book:int}{collection:int} (book: int book, collection: int collection): void =
+  if collection < 0 then ()
   else let
-    val () = lib_coll_toggle(i, j)
-    val @(bi, bl) = nid_make("collection-put", j)
-    val () = (if lib_coll_has(i, j) then ui_attr_n(bi, bl, APressed, "true") else ui_attr_n(bi, bl, APressed, "false"))
+    val () = lib_coll_toggle(book, collection)
+    val @(put_id, put_id_len) = nid_make("collection-put", collection)
+    val () = (if lib_coll_has(book, collection) then ui_attr_n(put_id, put_id_len, APressed, "true") else ui_attr_n(put_id, put_id_len, APressed, "false"))
   in lib_render() end
 
-(* A new collection, named in the dialog, with book i in it *)
-fn _collection_new {i:int} (i: int i): void = let
+(* A new collection, named in the dialog, with the book in it *)
+fn _collection_new {book:int} (book: int book): void = let
   val () = modal_open(QNewCollection(), "New collection", lam () => let
-      val @(b, k) = modal_name_read()
-      val j = lib_coll_add(b, k)
-      val () = (if j >= 0 then lib_coll_toggle(i, j) else ())
-      val () = lib_coll_panel(i)
+      val @(name, name_len) = modal_name_read()
+      val collection = lib_coll_add(name, name_len)
+      val () = (if collection >= 0 then lib_coll_toggle(book, collection) else ())
+      val () = lib_coll_panel(book)
     in lib_render() end, lam () => ())
 in modal_name_field() end
 
 (* The collection shown, named again in the dialog *)
 fn _collection_rename (): void = let
-  val j = lib_coll_shown()
+  val collection = lib_coll_shown()
 in
-  if j < 0 then ()
+  if collection < 0 then ()
   else let
     val () = modal_open(QRenameCollection(), "Rename collection", lam () => let
-        val @(b, k) = modal_name_read()
-      in lib_coll_rename(j, b, k) end, lam () => ())
+        val @(name, name_len) = modal_name_read()
+      in lib_coll_rename(collection, name, name_len) end, lam () => ())
     val () = modal_name_field()
-  in lib_coll_name_show(j) end
+  in lib_coll_name_show(collection) end
 end
 
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 21) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 21) = let
   (* import *)
-  val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
+  val listeners = RCons(listeners, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
-  val r = RCons(r, OnEl("library"), "dragover", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "dragover", lam(_) => let
       val () = $EV.prevent_default()
     in let val () = ui_attr("library", AClass, "lib drag") in 0 end end)
-  val r = RCons(r, OnEl("library"), "dragleave", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "dragleave", lam(_) => let
       val () = ui_attr("library", AClass, "lib")
     in 0 end)
-  val r = RCons(r, OnEl("library"), "drop", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "drop", lam(_) => let
       val () = $EV.prevent_default()
       val () = ui_attr("library", AClass, "lib")
       val () = import_dropped()
     in 0 end)
   (* the cards: open, and the book menu *)
-  val r = RCons(r, OnEl("book-list"), "click", lam(h) => let
-      val t = _target(h)
-      val i = _row_of(t, "book")
-      val m = _row_of(t, "book-more")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("book-list"), "click", lam(h) => let
+      val clicked = _target(h)
+      val book = _row_of(clicked, "book")
+      val menu_book = _row_of(clicked, "book-more")
+      val () = _target_free(clicked)
     in
-      if i >= 0 then let val () = _open_book(i) in 0 end
-      else if m >= 0 then let val () = _menu_open(m) in 0 end
+      if book >= 0 then let val () = _open_book(book) in 0 end
+      else if menu_book >= 0 then let val () = _menu_open(menu_book) in 0 end
       else 0
     end)
   (* the view: which books, as a list or a grid; kept with the settings *)
-  val r = RCons(r, OnEl("library-view"), "click", lam(h) => let
-      val t = _target(h)
-      val f = (if _is(t, "filter-books-all") then 0 else if _is(t, "filter-unread") then 1
-        else if _is(t, "filter-reading") then 2 else if _is(t, "filter-finished") then 3 else ~1): int
-      val g = (if _is(t, "view-list") then 0 else if _is(t, "view-grid") then 1 else ~1): int
+  val listeners = RCons(listeners, OnEl("library-view"), "click", lam(h) => let
+      val clicked = _target(h)
+      val filter = (if _is(clicked, "filter-books-all") then 0 else if _is(clicked, "filter-unread") then 1
+        else if _is(clicked, "filter-reading") then 2 else if _is(clicked, "filter-finished") then 3 else ~1): int
+      val grid = (if _is(clicked, "view-list") then 0 else if _is(clicked, "view-grid") then 1 else ~1): int
       (* the collections: which is shown, and the one shown renamed or
          deleted *)
-      val cj = _row_of(t, "collection")
-      val call = _is(t, "collection-all")
-      val crename = _is(t, "collection-rename")
-      val cdelete = _is(t, "collection-delete")
-      val () = _target_free(t)
-      val () = (if call then lib_coll_show(~1) else if cj >= 0 then lib_coll_show(cj)
-        else if crename then _collection_rename() else if cdelete then lib_coll_delete(lib_coll_shown()) else ())
-      val () = (if f >= 0 then lib_filter_set(f) else if g >= 0 then lib_grid_set(g) else ())
-    in if f >= 0 || g >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
+      val collection = _row_of(clicked, "collection")
+      val all_collections = _is(clicked, "collection-all")
+      val rename_collection = _is(clicked, "collection-rename")
+      val delete_collection = _is(clicked, "collection-delete")
+      val () = _target_free(clicked)
+      val () = (if all_collections then lib_coll_show(~1) else if collection >= 0 then lib_coll_show(collection)
+        else if rename_collection then _collection_rename() else if delete_collection then lib_coll_delete(lib_coll_shown()) else ())
+      val () = (if filter >= 0 then lib_filter_set(filter) else if grid >= 0 then lib_grid_set(grid) else ())
+    in if filter >= 0 || grid >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
   (* the book to continue: opened *)
-  val r = RCons(r, OnEl("continue-list"), "click", lam(h) => let
-      val t = _target(h)
-      val i = _row_of(t, "continue")
-      val () = _target_free(t)
-    in if i >= 0 then let val () = _open_book(i) in 0 end else 0 end)
-  val r = RCons(r, OnEl("book-list"), "contextmenu", lam(h) => let
+  val listeners = RCons(listeners, OnEl("continue-list"), "click", lam(h) => let
+      val clicked = _target(h)
+      val book = _row_of(clicked, "continue")
+      val () = _target_free(clicked)
+    in if book >= 0 then let val () = _open_book(book) in 0 end else 0 end)
+  val listeners = RCons(listeners, OnEl("book-list"), "contextmenu", lam(h) => let
       val () = $EV.prevent_default()
-      val i = _target_num(h, "book")
-    in if i >= 0 then let val () = _menu_open(i) in 0 end else 0 end)
-  val r = RCons(r, OnEl("card-menu"), "click", lam(h) => let
-      val t = _target(h)
-      val i = !_menu_idx
+      val book = _target_number(h, "book")
+    in if book >= 0 then let val () = _menu_open(book) in 0 end else 0 end)
+  val listeners = RCons(listeners, OnEl("card-menu"), "click", lam(h) => let
+      val clicked = _target(h)
+      val book = !_menu_index
       val () = layer_close(LBookMenu())
-      val () = (if i >= 0 then
-          (if _is(t, "card-menu-info") then _info_open(i)
-           else if _is(t, "card-menu-collections") then _collections_open(i)
-           else if _is(t, "card-menu-hide") then _book_action(i, 1)
-           else if _is(t, "card-menu-archive") then _book_action(i, 2)
-           else if _is(t, "card-menu-trash") then _book_action(i, 3)
+      val () = (if book >= 0 then
+          (if _is(clicked, "card-menu-info") then _info_open(book)
+           else if _is(clicked, "card-menu-collections") then _collections_open(book)
+           else if _is(clicked, "card-menu-hide") then _book_action(book, 1)
+           else if _is(clicked, "card-menu-archive") then _book_action(book, 2)
+           else if _is(clicked, "card-menu-trash") then _book_action(book, 3)
            else ()) else ())
-    in let val () = _target_free(t) in 0 end end)
+    in let val () = _target_free(clicked) in 0 end end)
   (* a book's collections: each toggled, a new one, or done (or a
      click outside) *)
-  val r = RCons(r, OnEl("collections-menu"), "click", lam(h) => let
-      val t = _target(h)
-      val i = !_menu_idx
-      val j = _row_of(t, "collection-put")
-      val made = _is(t, "collections-new")
-      val done = (if _is(t, "collections-done") then true else _is(t, "collections-menu")): bool
-      val () = _target_free(t)
-      val () = (if i < 0 then ()
-        else if j >= 0 then _collection_put(i, j)
-        else if made then _collection_new(i)
+  val listeners = RCons(listeners, OnEl("collections-menu"), "click", lam(h) => let
+      val clicked = _target(h)
+      val book = !_menu_index
+      val collection = _row_of(clicked, "collection-put")
+      val made = _is(clicked, "collections-new")
+      val done = (if _is(clicked, "collections-done") then true else _is(clicked, "collections-menu")): bool
+      val () = _target_free(clicked)
+      val () = (if book < 0 then ()
+        else if collection >= 0 then _collection_put(book, collection)
+        else if made then _collection_new(book)
         else if done then layer_close(LCollections())
         else ())
     in 0 end)
   (* the info view *)
-  val r = RCons(r, OnEl("book-info"), "click", lam(h) => let
-      val t = _target(h)
-      val i = !_menu_idx
-      val () = (if _is(t, "book-info-back") then layer_close(LBookInfo())
-        else if i < 0 then ()
-        else if _is(t, "book-info-hide") then let val () = layer_close(LBookInfo()) in _book_action(i, 1) end
-        else if _is(t, "book-info-archive") then let val () = layer_close(LBookInfo()) in _book_action(i, 2) end
-        else if _is(t, "book-info-trash") then _book_action(i, 3)
+  val listeners = RCons(listeners, OnEl("book-info"), "click", lam(h) => let
+      val clicked = _target(h)
+      val book = !_menu_index
+      val () = (if _is(clicked, "book-info-back") then layer_close(LBookInfo())
+        else if book < 0 then ()
+        else if _is(clicked, "book-info-hide") then let val () = layer_close(LBookInfo()) in _book_action(book, 1) end
+        else if _is(clicked, "book-info-archive") then let val () = layer_close(LBookInfo()) in _book_action(book, 2) end
+        else if _is(clicked, "book-info-trash") then _book_action(book, 3)
         else ())
-    in let val () = _target_free(t) in 0 end end)
+    in let val () = _target_free(clicked) in 0 end end)
   (* sort and shelf *)
-  val r = RCons(r, OnEl("sort-button"), "click", lam(_) => let
-      val o = lib_sort_get()
-      val o = (if o >= 4 then 0 else o + 1): int
-      val () = lib_sort(o)
-      val () = lib_sort_label(o)
+  val listeners = RCons(listeners, OnEl("sort-button"), "click", lam(_) => let
+      val sort_order = lib_sort_get()
+      val sort_order = (if sort_order >= 4 then 0 else sort_order + 1): int
+      val () = lib_sort(sort_order)
+      val () = lib_sort_label(sort_order)
       val () = set_apply(lib_state_get())
     in let val () = lib_render() in 0 end end)
-  val r = RCons(r, OnEl("shelf-button"), "click", lam(_) => let
-      val s = lib_shelf_get()
-      val () = lib_shelf_set((if s >= 3 then 0 else s + 1): int)
+  val listeners = RCons(listeners, OnEl("shelf-button"), "click", lam(_) => let
+      val shelf = lib_shelf_get()
+      val () = lib_shelf_set((if shelf >= 3 then 0 else shelf + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
-  val r = RCons(r, OnEl("library-search-box"), "input", lam(h) => let
-      val @(q, n) = _input_text(h)
-      val () = ui_show("library-search-clear", n > 0)
-      val () = lib_query_set(q, n)
+  val listeners = RCons(listeners, OnEl("library-search-box"), "input", lam(h) => let
+      val @(query, query_len) = _input_text(h)
+      val () = ui_show("library-search-clear", query_len > 0)
+      val () = lib_query_set(query, query_len)
     in let val () = lib_render() in 0 end end)
-  val r = RCons(r, OnEl("library-search-box"), "click", lam(h) => let
-      val t = _target(h)
-      val clear = _is(t, "library-search-clear")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("library-search-box"), "click", lam(h) => let
+      val clicked = _target(h)
+      val clear = _is(clicked, "library-search-clear")
+      val () = _target_free(clicked)
     in
       if clear then let
         val () = app_library_search()
@@ -960,147 +961,147 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 21) = let
       else 0
     end)
   (* a backup picked to restore *)
-  val r = RCons(r, OnEl("menu-import-backup"), "change", lam(_) => let
+  val listeners = RCons(listeners, OnEl("menu-import-backup"), "change", lam(_) => let
       val () = layer_close(LLibraryMenu())
       val () = backup_import()
     in 0 end)
   (* the error banner *)
-  val r = RCons(r, OnEl("error-dismiss"), "click", lam(_) => let val () = ui_show("error-banner", false) in 0 end)
-  val r = RCons(r, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
+  val listeners = RCons(listeners, OnEl("error-dismiss"), "click", lam(_) => let val () = ui_show("error-banner", false) in 0 end)
+  val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
-  val r = RCons(r, OnEl("library-menu-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library-menu-button"), "click", lam(_) => let
       val () = layer_open(LLibraryMenu())
     in let val () = ui_focus("menu-export-backup") in 0 end end)
-  val r = RCons(r, OnEl("library-menu"), "click", lam(h) => let
-      val t = _target(h)
-      val () = (case+ _harm_clicked(t) of
-        | ~Some_vt(h) => let
+  val listeners = RCons(listeners, OnEl("library-menu"), "click", lam(h) => let
+      val clicked = _target(h)
+      val () = (case+ _harm_clicked(clicked) of
+        | ~Some_vt(the_harm) => let
             val () = layer_close(LLibraryMenu())
-          in lib_ask_harm(h, lam () => _save_render()) end
+          in lib_ask_harm(the_harm, lam () => _save_render()) end
         | ~None_vt() =>
-        if _is(t, "menu-factory-reset") then let
+        if _is(clicked, "menu-factory-reset") then let
           val () = layer_close(LLibraryMenu())
         in _factory_reset() end
-        else if _is(t, "menu-export-backup") then let
+        else if _is(clicked, "menu-export-backup") then let
           val () = layer_close(LLibraryMenu())
         in backup_export() end
         (* the page's script asks the browser to install the app *)
-        else if _is(t, "menu-install") then layer_close(LLibraryMenu())
-        else if _is(t, "menu-storage-kept") then let
+        else if _is(clicked, "menu-install") then layer_close(LLibraryMenu())
+        else if _is(clicked, "menu-storage-kept") then let
           val () = layer_close(LLibraryMenu())
           val () = modal_inform("Your books are kept")
         in modal_text_lit("This browser keeps the books you import until you remove them.") end
-        else if _is(t, "menu-storage-at-risk") then let
+        else if _is(clicked, "menu-storage-at-risk") then let
           val () = layer_close(LLibraryMenu())
           val () = modal_inform("Your books may be cleared")
         in modal_text_lit("This browser may clear what Quire keeps when it runs short of space. Installing Quire, or reading it more often, makes the browser more likely to keep it. Keep your EPUB files: a backup holds your places, notes and settings, not the books.") end
-        else if _is(t, "menu-stats") then let
+        else if _is(clicked, "menu-stats") then let
           val () = layer_close(LLibraryMenu())
           val () = stats_show()
           val () = layer_open(LStats())
         in ui_focus("stats-done") end
-        else if _is(t, "menu-close") then layer_close(LLibraryMenu())
-        else if _is(t, "library-menu") then layer_close(LLibraryMenu())
+        else if _is(clicked, "menu-close") then layer_close(LLibraryMenu())
+        else if _is(clicked, "library-menu") then layer_close(LLibraryMenu())
         else ())
-    in let val () = _target_free(t) in 0 end end)
+    in let val () = _target_free(clicked) in 0 end end)
   (* the reading statistics: a daily goal chosen, or done (or a click
      outside) *)
-  val r = RCons(r, OnEl("stats-panel"), "click", lam(h) => let
-      val t = _target(h)
-      val goal = (if _is(t, "stats-goal-off") then 0
-        else if _is(t, "stats-goal-10") then 10
-        else if _is(t, "stats-goal-20") then 20
-        else if _is(t, "stats-goal-30") then 30
-        else if _is(t, "stats-goal-60") then 60
+  val listeners = RCons(listeners, OnEl("stats-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val goal = (if _is(clicked, "stats-goal-off") then 0
+        else if _is(clicked, "stats-goal-10") then 10
+        else if _is(clicked, "stats-goal-20") then 20
+        else if _is(clicked, "stats-goal-30") then 30
+        else if _is(clicked, "stats-goal-60") then 60
         else ~1): int
-      val done = (if _is(t, "stats-done") then true else _is(t, "stats-panel")): bool
-      val () = _target_free(t)
+      val done = (if _is(clicked, "stats-done") then true else _is(clicked, "stats-panel")): bool
+      val () = _target_free(clicked)
       val () = (if goal >= 0 then let
           val () = stats_goal_set(goal)
         in stats_show() end
         else if done then layer_close(LStats())
         else ())
     in 0 end)
-in r end
+in listeners end
 
-fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
-  val r = RCons(r, OnEl("typography-button"), "click", lam(_) => let
+fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
+  val listeners = RCons(listeners, OnEl("typography-button"), "click", lam(_) => let
       val () = layer_open(LTypography())
     in let val () = ui_focus("typography-close") in 0 end end)
-  val r = RCons(r, OnEl("typography-panel"), "click", lam(h) => let
-      val t = _target(h)
-      val changed = (if _is(t, "font-literata") then let val () = set_font_set(0) in true end
-        else if _is(t, "font-inter") then let val () = set_font_set(1) in true end
-        else if _is(t, "font-book") then let val () = set_font_set(2) in true end
-        else if _is(t, "font-atkinson") then let val () = set_font_set(3) in true end
-        else if _is(t, "theme-auto") then let val () = set_theme_set(0) in true end
-        else if _is(t, "theme-light") then let val () = set_theme_set(1) in true end
-        else if _is(t, "theme-sepia") then let val () = set_theme_set(2) in true end
-        else if _is(t, "theme-dark") then let val () = set_theme_set(3) in true end
-        else if _is(t, "theme-night") then let val () = set_theme_set(4) in true end
-        else if _is(t, "theme-grey") then let val () = set_theme_set(5) in true end
-        else if _is(t, "layout-pages") then let val () = set_flow_set(0) in true end
-        else if _is(t, "layout-scroll") then let val () = set_flow_set(1) in true end
-        else if _is(t, "columns-auto") then let val () = set_cols_set(0) in true end
-        else if _is(t, "columns-one") then let val () = set_cols_set(1) in true end
-        else if _is(t, "columns-two") then let val () = set_cols_set(2) in true end
-        else if _is(t, "align-ragged") then let val () = set_align_set(0) in true end
-        else if _is(t, "align-justified") then let val () = set_align_set(1) in true end
-        else if _is(t, "hyphens-off") then let val () = set_hyph_set(0) in true end
-        else if _is(t, "hyphens-on") then let val () = set_hyph_set(1) in true end
-        else if _is(t, "dim-off") then let val () = set_dim_set(0) in true end
-        else if _is(t, "dim-on") then let val () = set_dim_set(1) in true end
-        else if _is(t, "taps-sides") then let val () = set_taps_set(0) in true end
-        else if _is(t, "taps-forward") then let val () = set_taps_set(1) in true end
-        else if _is(t, "taps-one-hand") then let val () = set_taps_set(2) in true end
-        else if _is(t, "volume-keys-off") then let val () = set_vol_set(0) in true end
-        else if _is(t, "volume-keys-turn") then let val () = set_vol_set(1) in true end
-        else if _is(t, "typography-reset") then let
+  val listeners = RCons(listeners, OnEl("typography-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(0) in true end
+        else if _is(clicked, "font-inter") then let val () = set_font_set(1) in true end
+        else if _is(clicked, "font-book") then let val () = set_font_set(2) in true end
+        else if _is(clicked, "font-atkinson") then let val () = set_font_set(3) in true end
+        else if _is(clicked, "theme-auto") then let val () = set_theme_set(0) in true end
+        else if _is(clicked, "theme-light") then let val () = set_theme_set(1) in true end
+        else if _is(clicked, "theme-sepia") then let val () = set_theme_set(2) in true end
+        else if _is(clicked, "theme-dark") then let val () = set_theme_set(3) in true end
+        else if _is(clicked, "theme-night") then let val () = set_theme_set(4) in true end
+        else if _is(clicked, "theme-grey") then let val () = set_theme_set(5) in true end
+        else if _is(clicked, "layout-pages") then let val () = set_flow_set(0) in true end
+        else if _is(clicked, "layout-scroll") then let val () = set_flow_set(1) in true end
+        else if _is(clicked, "columns-auto") then let val () = set_cols_set(0) in true end
+        else if _is(clicked, "columns-one") then let val () = set_cols_set(1) in true end
+        else if _is(clicked, "columns-two") then let val () = set_cols_set(2) in true end
+        else if _is(clicked, "align-ragged") then let val () = set_align_set(0) in true end
+        else if _is(clicked, "align-justified") then let val () = set_align_set(1) in true end
+        else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(0) in true end
+        else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(1) in true end
+        else if _is(clicked, "dim-off") then let val () = set_dim_set(0) in true end
+        else if _is(clicked, "dim-on") then let val () = set_dim_set(1) in true end
+        else if _is(clicked, "taps-sides") then let val () = set_taps_set(0) in true end
+        else if _is(clicked, "taps-forward") then let val () = set_taps_set(1) in true end
+        else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(2) in true end
+        else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
+        else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
+        else if _is(clicked, "typography-reset") then let
             val () = set_reset(lam () => let
                 val () = set_sliders()
               in _settings_changed() end)
           in false end
         else false): bool
-      val close = _is(t, "typography-close")
-      val () = _target_free(t)
+      val close = _is(clicked, "typography-close")
+      val () = _target_free(clicked)
       val () = (if close then layer_close(LTypography()) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val r = RCons(r, OnEl("size-row"), "input", lam(h) => let
-      val () = set_size_set(_clamp(_input_num(h), 12, 32))
+  val listeners = RCons(listeners, OnEl("size-row"), "input", lam(h) => let
+      val () = set_size_set(_clamp(_input_number(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("line-height-row"), "input", lam(h) => let
-      val () = set_lh_set(_clamp(_input_num(h), 12, 24))
+  val listeners = RCons(listeners, OnEl("line-height-row"), "input", lam(h) => let
+      val () = set_lh_set(_clamp(_input_number(h), 12, 24))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("margins-row"), "input", lam(h) => let
-      val () = set_margin_set(_clamp(_input_num(h), 0, 4))
+  val listeners = RCons(listeners, OnEl("margins-row"), "input", lam(h) => let
+      val () = set_margin_set(_clamp(_input_number(h), 0, 4))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("paragraph-row"), "input", lam(h) => let
-      val () = set_ps_set(_clamp(_input_num(h), 0, 20))
+  val listeners = RCons(listeners, OnEl("paragraph-row"), "input", lam(h) => let
+      val () = set_ps_set(_clamp(_input_number(h), 0, 20))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("letter-row"), "input", lam(h) => let
-      val () = set_ls_set(_clamp(_input_num(h), 0, 12))
+  val listeners = RCons(listeners, OnEl("letter-row"), "input", lam(h) => let
+      val () = set_ls_set(_clamp(_input_number(h), 0, 12))
     in let val () = _settings_changed() in 0 end end)
-  val r = RCons(r, OnEl("word-row"), "input", lam(h) => let
-      val () = set_ws_set(_clamp(_input_num(h), 0, 16))
+  val listeners = RCons(listeners, OnEl("word-row"), "input", lam(h) => let
+      val () = set_ws_set(_clamp(_input_number(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
-in r end
+in listeners end
 
 (* ============================================================
    Search
    ============================================================ *)
 
 (* Whether an element is shown *)
-fn _shown {ni:pos | ni < 256} (id: string ni): bool = let
+fn _shown {id_len:pos | id_len < 256} (id: string id_len): bool = let
   val () = ui_measure(id)
 in $DR.get_measure_w() > 0 end
 
-(* The search field, made again holding a[0, k) *)
-fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void =
-  if k > 0 then ui_attr_buf("search-field", AValue, a, k) else $A.free<byte>(a)
+(* The search field, made again holding query[0, query_len) *)
+fn _search_value {l:agz}{n:pos}{query_len:nat | query_len <= n; query_len < 65536} (query: $A.arr(byte, l, n), query_len: int query_len): void =
+  if query_len > 0 then ui_attr_buf("search-field", AValue, query, query_len) else $A.free<byte>(query)
 
-fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
+fn _search_field {l:agz}{n:pos}{query_len:nat | query_len <= n; query_len < 65536} (query: $A.arr(byte, l, n), query_len: int query_len): void = let
   val () = app_book_search()
-in _search_value(a, k) end
+in _search_value(query, query_len) end
 
 fn _search_open (): void = let
   val () = layer_open(LSearch())
@@ -1119,36 +1120,36 @@ in ui_focus("page") end
 
 (* Searches for the field's text *)
 fn _search_run (): void = let
-  val a = $A.alloc<byte>(12)
-  val () = $A.write_text(a, 0, $A.text_lit("search-field"), 12)
-  val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 12)
-  val () = release_bytes(f, b)
+  val field_id = $A.alloc<byte>(12)
+  val () = $A.write_text(field_id, 0, $A.text_lit("search-field"), 12)
+  val @(field_id_frozen, field_id_bytes) = $A.freeze<byte>(field_id)
+  val value_read = $DR.read_input_value(field_id_bytes, 12)
+  val () = release_bytes(field_id_frozen, field_id_bytes)
 in
-  case+ r of
+  case+ value_read of
   | ~$R.none() => reader_search($A.alloc<byte>(1), 0)
-  | ~$R.some(v) => let
-      val n = $DC.blob_len(v)
+  | ~$R.some(value) => let
+      val query_len = $DC.blob_len(value)
     in
-      if n <= 0 then let
-        val () = $DC.blob_free(v)
+      if query_len <= 0 then let
+        val () = $DC.blob_free(value)
       in reader_search($A.alloc<byte>(1), 0) end
-      else if n > 65535 then $DC.blob_free(v)
+      else if query_len > 65535 then $DC.blob_free(value)
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(v, 0, a, n)
-        val () = $DC.blob_free(v)
-      in reader_search(a, n) end
+        val query = $A.alloc<byte>(query_len)
+        val () = $DC.blob_read(value, 0, query, query_len)
+        val () = $DC.blob_free(value)
+      in reader_search(query, query_len) end
     end
 end
 
 (* A keystroke in the field: the search runs once typing pauses *)
 fn _search_input (): void = let
   val () = !_search_tick := !_search_tick + 1
-  val g = !_search_tick
+  val tick = !_search_tick
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(300)), lam(_) => let
-    val () = (if !_search_tick = g then _search_run() else ())
+    val () = (if !_search_tick = tick then _search_run() else ())
   in $P.ret<int>(0) end))
 end
 
@@ -1156,21 +1157,21 @@ end
 fn _search_selection (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
-  | ~$R.some(b) => let
-      val n = $DC.blob_len(b)
+  | ~$R.some(selection) => let
+      val selection_len = $DC.blob_len(selection)
     in
-      if n <= 0 then $DC.blob_free(b)
-      else if n > 1000 then $DC.blob_free(b)
+      if selection_len <= 0 then $DC.blob_free(selection)
+      else if selection_len > 1000 then $DC.blob_free(selection)
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(b, 0, a, n)
-        val c = $A.alloc<byte>(n)
-        val () = $DC.blob_read(b, 0, c, n)
-        val () = $DC.blob_free(b)
-        val () = _search_field(a, n)
+        val field_text = $A.alloc<byte>(selection_len)
+        val () = $DC.blob_read(selection, 0, field_text, selection_len)
+        val query = $A.alloc<byte>(selection_len)
+        val () = $DC.blob_read(selection, 0, query, selection_len)
+        val () = $DC.blob_free(selection)
+        val () = _search_field(field_text, selection_len)
         val () = layer_open(LSearch())
         val () = !_search_tick := !_search_tick + 1
-      in reader_search(c, n) end
+      in reader_search(query, selection_len) end
     end
 
 (* Closes the reader's panels; whether one was open *)
@@ -1182,26 +1183,26 @@ fn _next (): void = let
   val () = (if !_chrome then _chrome_set(false) else ())
 in page_next() end
 
-fn _prev (): void = let
+fn _previous (): void = let
   val () = _hint_hide()
   val () = (if !_chrome then _chrome_set(false) else ())
 in page_prev() end
 
 (* The page to the left and to the right: back and on, or the other way
    in a book read right to left *)
-fn _left (): void = if reader_rtl() then _next() else _prev()
-fn _right (): void = if reader_rtl() then _prev() else _next()
+fn _left (): void = if reader_rtl() then _next() else _previous()
+fn _right (): void = if reader_rtl() then _previous() else _next()
 
 (* Whether x is between the sides' zones: in the middle half of the
    page *)
 fn _in_middle (x: Int): bool = let
   val () = ui_measure("page")
-  val cx = $DR.get_measure_x()
-  val cw = $DR.get_measure_w()
+  val page_x = $DR.get_measure_x()
+  val page_width = $DR.get_measure_w()
 in
-  if cw <= 0 then false
-  else if x < cx + cw / 4 then false
-  else x <= cx + cw - cw / 4
+  if page_width <= 0 then false
+  else if x < page_x + page_width / 4 then false
+  else x <= page_x + page_width - page_width / 4
 end
 
 (* What a tap at x, y on the page does, by the setting (settings.bats):
@@ -1212,74 +1213,74 @@ end
    a book read right to left turns the other way *)
 fn _zone_click (x: Int, y: Int): void = let
   val () = ui_measure("page")
-  val cx = $DR.get_measure_x()
-  val cy = $DR.get_measure_y()
-  val cw = $DR.get_measure_w()
-  val ch = $DR.get_measure_h()
-  val z = set_taps_get()
+  val page_x = $DR.get_measure_x()
+  val page_y = $DR.get_measure_y()
+  val page_width = $DR.get_measure_w()
+  val page_height = $DR.get_measure_h()
+  val taps = set_taps_get()
 in
-  if cw <= 0 then ()
-  else if z = 1 then
-    (if (if ch > 0 then y < cy + ch / 8 else false) then _chrome_set(~(!_chrome))
-     else if x < cx + cw / 4 then _left()
+  if page_width <= 0 then ()
+  else if taps = 1 then
+    (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
+     else if x < page_x + page_width / 4 then _left()
      else _right())
-  else if z = 2 then
-    (if ch <= 0 then _chrome_set(~(!_chrome))
-     else if y < cy + ch / 3 then _prev()
-     else if y > cy + ch - ch / 3 then _next()
+  else if taps = 2 then
+    (if page_height <= 0 then _chrome_set(~(!_chrome))
+     else if y < page_y + page_height / 3 then _previous()
+     else if y > page_y + page_height - page_height / 3 then _next()
      else _chrome_set(~(!_chrome)))
-  else if x < cx + cw / 4 then _left()
-  else if x > cx + cw - cw / 4 then _right()
+  else if x < page_x + page_width / 4 then _left()
+  else if x > page_x + page_width - page_width / 4 then _right()
   else _chrome_set(~(!_chrome))
 end
 
-(* A key's name at b[1, 1 + k), and its modifier flags after it *)
-fn _key_is {l:agz}{n:nat}{sn:pos} (b: !$A.arr(byte, l, n), n: int n, name: string sn): bool = let
-  val sl = g1u2i(string1_length(name))
+(* A key's name at key_bytes[1, 1 + name_len), and its modifier flags after it *)
+fn _key_is {l:agz}{n:nat}{name_len:pos} (key_bytes: !$A.arr(byte, l, n), n: int n, name: string name_len): bool = let
+  val name_len = g1u2i(string1_length(name))
 in
-  if n <> sl + 2 then false
-  else if byte2int0($A.get<byte>(b, 0)) <> sl then false
-  else _bytes_at(b, n, 1, name, sl, 0)
+  if n <> name_len + 2 then false
+  else if byte2int0($A.get<byte>(key_bytes, 0)) <> name_len then false
+  else _bytes_at(key_bytes, n, 1, name, name_len, 0)
 end
 
-fn _reader_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
-  val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
+fn _reader_key {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): void = let
+  val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1))), 1) = 1 else false): bool
   (* Ctrl or Cmd *)
-  val fl = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 10) else 0): int
+  val modifiers = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1))), 10) else 0): int
 in
   (* the keys that turn the page are the reader's alone: scrolled, the
      browser would also scroll the focused page by them *)
-  if _key_is(b, n, "ArrowRight") then _right()
-  else if _key_is(b, n, "PageDown") then let val () = $EV.prevent_default() in _next() end
-  else if _key_is(b, n, "ArrowLeft") then _left()
-  else if _key_is(b, n, "PageUp") then let val () = $EV.prevent_default() in _prev() end
-  else if _key_is(b, n, " ") then let val () = $EV.prevent_default() in (if shift then _prev() else _next()) end
+  if _key_is(key_bytes, n, "ArrowRight") then _right()
+  else if _key_is(key_bytes, n, "PageDown") then let val () = $EV.prevent_default() in _next() end
+  else if _key_is(key_bytes, n, "ArrowLeft") then _left()
+  else if _key_is(key_bytes, n, "PageUp") then let val () = $EV.prevent_default() in _previous() end
+  else if _key_is(key_bytes, n, " ") then let val () = $EV.prevent_default() in (if shift then _previous() else _next()) end
   (* the volume keys, when they turn the page and the browser gives them
      to the page: down on, up back, and the volume left as it is *)
-  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeDown") else false) then let
+  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeDown") else false) then let
     val () = $EV.prevent_default()
   in _next() end
-  else if (if set_vol_get() = 1 then _key_is(b, n, "AudioVolumeUp") else false) then let
+  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeUp") else false) then let
     val () = $EV.prevent_default()
-  in _prev() end
-  else if _key_is(b, n, "Home") then let val () = $EV.prevent_default() in reader_page(0) end
-  else if _key_is(b, n, "End") then let val () = $EV.prevent_default() in reader_page(1000000) end
-  else if _key_is(b, n, "b") then annot_bookmark_toggle(reader_anchor())
-  else if _key_is(b, n, "B") then annot_bookmark_toggle(reader_anchor())
-  else if _key_is(b, n, "t") then _chrome_set(~(!_chrome))
-  else if _key_is(b, n, "T") then _chrome_set(~(!_chrome))
-  else if _key_is(b, n, "/") then let
+  in _previous() end
+  else if _key_is(key_bytes, n, "Home") then let val () = $EV.prevent_default() in reader_page(0) end
+  else if _key_is(key_bytes, n, "End") then let val () = $EV.prevent_default() in reader_page(1000000) end
+  else if _key_is(key_bytes, n, "b") then annot_bookmark_toggle(reader_anchor())
+  else if _key_is(key_bytes, n, "B") then annot_bookmark_toggle(reader_anchor())
+  else if _key_is(key_bytes, n, "t") then _chrome_set(~(!_chrome))
+  else if _key_is(key_bytes, n, "T") then _chrome_set(~(!_chrome))
+  else if _key_is(key_bytes, n, "/") then let
       val () = $EV.prevent_default()
     in _search_open() end
-  else if (if _key_is(b, n, "f") then fl >= 2 else false) then let
+  else if (if _key_is(key_bytes, n, "f") then modifiers >= 2 else false) then let
       val () = $EV.prevent_default()
     in _search_open() end
-  else if (if _key_is(b, n, "Enter") then !_focus_link >= 0 else false) then let
+  else if (if _key_is(key_bytes, n, "Enter") then !_focus_link >= 0 else false) then let
     (* the Enter is the link's: a note opened over the page takes the
        focus to its Close, which the same Enter would otherwise press *)
     val () = $EV.prevent_default()
   in if reader_link_at(!_focus_link) then () else () end
-  else if _key_is(b, n, "Escape") then
+  else if _key_is(key_bytes, n, "Escape") then
     (if _panels_close() then ui_focus("page")
      else if _shown("search-nav") then _search_end()
      else if !_chrome then _chrome_set(false) else _show_library())
@@ -1306,13 +1307,13 @@ fn _escape_overlay (): bool =
 
 (* A key while the search panel is open: Enter goes to the next hit
    (Shift+Enter the one before), Escape closes the panel *)
-fn _search_key {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): void = let
-  val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(b, n - 1))), 1) = 1 else false): bool
+fn _search_key {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): void = let
+  val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1))), 1) = 1 else false): bool
 in
-  if _key_is(b, n, "Enter") then let
+  if _key_is(key_bytes, n, "Enter") then let
       val () = reader_search_step(if shift then ~1 else 1)
     in if _shown("search-nav") then let val () = layer_close(LSearch()) in ui_focus("page") end else () end
-  else if _key_is(b, n, "Escape") then let
+  else if _key_is(key_bytes, n, "Escape") then let
       val () = layer_close(LSearch())
     in if _shown("search-nav") then ui_focus("page") else _search_end() end
   else ()
@@ -1321,7 +1322,7 @@ end
 (* The contents panel, open on its contents tab *)
 fn _toc_open (): void = let
   val () = (case+ reading_get() of
-    | @(_, _, c, tc) => toc_render((if c > 0 then c - 1 else 0), tc))
+    | @(_, _, chapter, chapter_count) => toc_render((if chapter > 0 then chapter - 1 else 0), chapter_count))
   val () = ui_attr("contents-tab", ASelected, "true")
   val () = ui_attr("bookmarks-tab", ASelected, "false")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -1367,23 +1368,23 @@ in $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(0)), lam(_) => let
 (* The page turn's events: a pan moves the page with the finger, a
    commit turns it (a drag to the left shows the page to the right),
    a cancel puts it back *)
-fun _on_gestures {n:nat} .<n>. (es: list_vt($GT.gevent, n)): void =
-  case+ es of
+fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): void =
+  case+ events of
   | ~list_vt_nil() => ()
-  | ~list_vt_cons(e, rest) => let
-      val () = (case+ e of
-        | ~$GT.GPan(r, d) => if r = PAGE_REGION then reader_pan(d / 16) else ()
-        | ~$GT.GCommit(r, dr) =>
-          if r <> PAGE_REGION then ()
+  | ~list_vt_cons(event, rest) => let
+      val () = (case+ event of
+        | ~$GT.GPan(region, distance) => if region = PAGE_REGION then reader_pan(distance / 16) else ()
+        | ~$GT.GCommit(region, direction) =>
+          if region <> PAGE_REGION then ()
           else let
             val () = _drag_ended()
-          in case+ dr of
+          in case+ direction of
             | $GP.DLeft() => _right()
             | $GP.DRight() => _left()
             | _ => reader_pan(0)
           end
-        | ~$GT.GCancel(r, _) =>
-          if r <> PAGE_REGION then ()
+        | ~$GT.GCancel(region, _) =>
+          if region <> PAGE_REGION then ()
           else let val () = _drag_ended() in reader_pan(0) end
         | ~$GT.GLongPress(_, _, _) => ()
         | ~$GT.GPinch(_, _, _, _) => ()
@@ -1397,80 +1398,80 @@ fun _on_gestures {n:nat} .<n>. (es: list_vt($GT.gevent, n)): void =
 fn _gesture_batch (h: $EV.event_payload): void =
   case+ take_blob(h) of
   | ~NoBlobBytes() => ()
-  | ~BlobBytes(b, n) => let
-      var c: gcell = GNone()
-      val () = ref_exch_elt<gcell>(_gestures, c)
-      val es = (case+ c of
-        | @GSome(st) => let
-            val es = $GD.gestures_feed(st, b, n)
-            prval () = fold@(c)
-          in es end
+  | ~BlobBytes(batch_bytes, n) => let
+      var cell: gesture_cell = GNone()
+      val () = ref_exch_elt<gesture_cell>(_gestures, cell)
+      val events = (case+ cell of
+        | @GSome(state) => let
+            val events = $GD.gestures_feed(state, batch_bytes, n)
+            prval () = fold@(cell)
+          in events end
         | GNone() => list_vt_nil()): $GT.gevents
-      val () = ref_exch_elt<gcell>(_gestures, c)
-      val () = (case+ c of ~GNone() => () | ~GSome(st) => $GT.gestures_free(st))
-      val () = $A.free<byte>(b)
-    in if !_view = 1 then _on_gestures(es) else $GT.gevents_free(es) end
+      val () = ref_exch_elt<gesture_cell>(_gestures, cell)
+      val () = (case+ cell of ~GNone() => () | ~GSome(state) => $GT.gestures_free(state))
+      val () = $A.free<byte>(batch_bytes)
+    in if !_view = 1 then _on_gestures(events) else $GT.gevents_free(events) end
 
 (* The recognizer, with the page turn's region: horizontal drags, by
    touch or pen only (a mouse drag over the page selects text) *)
 fn _gestures_start (): void = let
-  val st = $GT.gestures_new()
-  val () = $GT.gestures_region(st, PAGE_REGION, ~1, page_turn_axes(), false, false, $GT.DevTouch())
-  var c: gcell = GSome(st)
-  val () = ref_exch_elt<gcell>(_gestures, c)
-in case+ c of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
+  val state = $GT.gestures_new()
+  val () = $GT.gestures_region(state, PAGE_REGION, ~1, page_turn_axes(), false, false, $GT.DevTouch())
+  var cell: gesture_cell = GSome(state)
+  val () = ref_exch_elt<gesture_cell>(_gestures, cell)
+in case+ cell of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
 
 (* The page's scrolls, numbered, so only the last one's rest counts *)
-val _scroll_gen = ref<int>(0)
+val _scroll_generation = ref<int>(0)
 
-fn _wire_toc {n:nat} (r: regs(n)): regs(n + 9) = let
-  val r = RCons(r, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
-  val r = RCons(r, OnEl("contents-panel"), "click", lam(h) => let
-      val t = _target(h)
-      val row = _row_of(t, "toc-row")
-      val bgo = _row_of(t, "bookmark-go")
-      val bdl = _row_of(t, "bookmark-delete")
-      val bnt = _row_of(t, "bookmark-edit")
-      val pgo = _row_of(t, "page-row")
-      val () = (if _is(t, "contents-close") then layer_close(LContents())
-        else if _is(t, "contents-tab") then _toc_open()
-        else if _is(t, "bookmarks-tab") then _bookmarks_open()
-        else if _is(t, "pages-tab") then _pages_open()
-        else if pgo >= 0 then let
+fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
+  val listeners = RCons(listeners, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
+  val listeners = RCons(listeners, OnEl("contents-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val contents_row = _row_of(clicked, "toc-row")
+      val bookmark_go = _row_of(clicked, "bookmark-go")
+      val bookmark_delete = _row_of(clicked, "bookmark-delete")
+      val bookmark_note = _row_of(clicked, "bookmark-edit")
+      val print_page = _row_of(clicked, "page-row")
+      val () = (if _is(clicked, "contents-close") then layer_close(LContents())
+        else if _is(clicked, "contents-tab") then _toc_open()
+        else if _is(clicked, "bookmarks-tab") then _bookmarks_open()
+        else if _is(clicked, "pages-tab") then _pages_open()
+        else if print_page >= 0 then let
           val () = layer_close(LContents())
-        in reader_goto_page(pgo) end
-        else if bgo >= 0 then let val () = layer_close(LContents()) in _annot_go(bgo) end
-        else if bdl >= 0 then annot_delete_bookmark(bdl)
-        else if bnt >= 0 then annot_ask_note(bnt, false)
-        else if row >= 0 then let
+        in reader_goto_page(print_page) end
+        else if bookmark_go >= 0 then let val () = layer_close(LContents()) in _annotation_go(bookmark_go) end
+        else if bookmark_delete >= 0 then annot_delete_bookmark(bookmark_delete)
+        else if bookmark_note >= 0 then annot_ask_note(bookmark_note, false)
+        else if contents_row >= 0 then let
           val () = layer_close(LContents())
-        in reader_goto_entry(row) end
+        in reader_goto_entry(contents_row) end
         else ())
-      val () = _target_free(t)
+      val () = _target_free(clicked)
     in 0 end)
-  val r = RCons(r, OnEl("jump-back"), "click", lam(_) => let val () = reader_back() in 0 end)
-  val r = RCons(r, OnEl("next-chapter"), "click", lam(_) => let val () = page_next() in 0 end)
+  val listeners = RCons(listeners, OnEl("jump-back"), "click", lam(_) => let val () = reader_back() in 0 end)
+  val listeners = RCons(listeners, OnEl("next-chapter"), "click", lam(_) => let val () = page_next() in 0 end)
   (* scrolled, the place follows the page, once it rests a moment *)
-  val r = RCons(r, OnEl("page"), "scroll", lam(_) => let
-      val () = !_scroll_gen := !_scroll_gen + 1
-      val gen = !_scroll_gen
+  val listeners = RCons(listeners, OnEl("page"), "scroll", lam(_) => let
+      val () = !_scroll_generation := !_scroll_generation + 1
+      val generation = !_scroll_generation
       val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(150)), lam(_) => let
-          val () = (if !_scroll_gen = gen then reader_scrolled() else ())
+          val () = (if !_scroll_generation = generation then reader_scrolled() else ())
         in $P.ret<int>(0) end))
     in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
-  val r = RCons(r, OnEl("scrubber-track"), "pointerdown", lam(h) => let
+  val listeners = RCons(listeners, OnEl("scrubber-track"), "pointerdown", lam(h) => let
       val x = _event_x(h)
       val () = !_scrubbing := true
       val () = _chrome_set(true)
     in let val () = reader_scrub_preview(x) in 0 end end)
-  val r = RCons(r, OnDocument(), "pointermove", lam(h) =>
+  val listeners = RCons(listeners, OnDocument(), "pointermove", lam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = _chrome_set(true)
       in let val () = reader_scrub_preview(x) in 0 end end
       else 0)
-  val r = RCons(r, OnDocument(), "pointerup", lam(h) =>
+  val listeners = RCons(listeners, OnDocument(), "pointerup", lam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = !_scrubbing := false
@@ -1478,67 +1479,67 @@ fn _wire_toc {n:nat} (r: regs(n)): regs(n + 9) = let
       else 0)
   (* the app hidden (another tab, another app): where the reader is is
      stored *)
-  val r = RCons(r, OnDocument(), "visibilitychange", lam(_) =>
+  val listeners = RCons(listeners, OnDocument(), "visibilitychange", lam(_) =>
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
-in r end
+in listeners end
 
-fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
-  val r = RCons(r, OnEl("bookmark-button"), "click", lam(_) => let
+fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 6) = let
+  val listeners = RCons(listeners, OnEl("bookmark-button"), "click", lam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
-  val r = RCons(r, OnDocument(), "selectionchange", lam(_) =>
+  val listeners = RCons(listeners, OnDocument(), "selectionchange", lam(_) =>
       if !_view = 1 then let
-        val sel = _has_selection()
-        val () = ui_show("selection-toolbar", sel)
-        val () = (if sel then _lookup_update() else ())
+        val selected = _has_selection()
+        val () = ui_show("selection-toolbar", selected)
+        val () = (if selected then _lookup_update() else ())
       in 0 end else 0)
-  val r = RCons(r, OnEl("selection-toolbar"), "click", lam(h) => let
-      val t = _target(h)
-      val hl = _is(t, "selection-highlight")
-      val orange = _is(t, "selection-orange")
-      val under = _is(t, "selection-underline")
-      val nt = _is(t, "selection-note")
-      val cp = _is(t, "selection-copy")
-      val sr = _is(t, "selection-search")
-      val () = _target_free(t)
-      val () = (if hl then let val _ = annot_highlight(0) in () end
+  val listeners = RCons(listeners, OnEl("selection-toolbar"), "click", lam(h) => let
+      val clicked = _target(h)
+      val highlight = _is(clicked, "selection-highlight")
+      val orange = _is(clicked, "selection-orange")
+      val underline = _is(clicked, "selection-underline")
+      val note = _is(clicked, "selection-note")
+      val copy = _is(clicked, "selection-copy")
+      val search = _is(clicked, "selection-search")
+      val () = _target_free(clicked)
+      val () = (if highlight then let val _ = annot_highlight(0) in () end
         else if orange then let val _ = annot_highlight(1) in () end
-        else if under then let val _ = annot_highlight(2) in () end
-        else if nt then annot_ask_note(annot_highlight(0), true)
-        else if cp then _copy_selection()
-        else if sr then _search_selection()
+        else if underline then let val _ = annot_highlight(2) in () end
+        else if note then annot_ask_note(annot_highlight(0), true)
+        else if copy then _copy_selection()
+        else if search then _search_selection()
         else ())
     in let val () = ui_show("selection-toolbar", false) in 0 end end)
-  val r = RCons(r, OnEl("annotations-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("annotations-button"), "click", lam(_) => let
       val () = annot_render()
       val () = layer_open(LAnnotations())
     in let val () = ui_focus("annotations-close") in 0 end end)
-  val r = RCons(r, OnEl("annotations-panel"), "click", lam(h) => let
-      val t = _target(h)
-      val go = _row_of(t, "highlight-go")
-      val nt = _row_of(t, "highlight-edit")
-      val dl = _row_of(t, "highlight-delete")
-      val close = _is(t, "annotations-close")
-      val ex = _is(t, "annotations-export")
-      val sh = _is(t, "annotations-share")
-      val filter = (if _is(t, "filter-all") then ~1 else if _is(t, "filter-yellow") then 0
-        else if _is(t, "filter-orange") then 1 else if _is(t, "filter-underlined") then 2 else ~2): int
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("annotations-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val go_row = _row_of(clicked, "highlight-go")
+      val note_row = _row_of(clicked, "highlight-edit")
+      val delete_row = _row_of(clicked, "highlight-delete")
+      val close = _is(clicked, "annotations-close")
+      val export_asked = _is(clicked, "annotations-export")
+      val share_asked = _is(clicked, "annotations-share")
+      val filter = (if _is(clicked, "filter-all") then ~1 else if _is(clicked, "filter-yellow") then 0
+        else if _is(clicked, "filter-orange") then 1 else if _is(clicked, "filter-underlined") then 2 else ~2): int
+      val () = _target_free(clicked)
       val () = (if close then layer_close(LAnnotations())
-        else if ex then _export(false)
-        else if sh then _export(true)
+        else if export_asked then _export(false)
+        else if share_asked then _export(true)
         else if filter >= ~1 then annot_filter_set(filter)
-        else if go >= 0 then let val () = layer_close(LAnnotations()) in _annot_go(go) end
-        else if nt >= 0 then annot_ask_note(nt, false)
-        else if dl >= 0 then annot_delete_highlight(dl)
+        else if go_row >= 0 then let val () = layer_close(LAnnotations()) in _annotation_go(go_row) end
+        else if note_row >= 0 then annot_ask_note(note_row, false)
+        else if delete_row >= 0 then annot_delete_highlight(delete_row)
         else ())
     in 0 end)
   (* a note opened over the page: gone to, or closed *)
-  val r = RCons(r, OnEl("footnote"), "click", lam(h) => let
-      val t = _target(h)
-      val go = _is(t, "footnote-go")
-      val close = _is(t, "footnote-close")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("footnote"), "click", lam(h) => let
+      val clicked = _target(h)
+      val go = _is(clicked, "footnote-go")
+      val close = _is(clicked, "footnote-close")
+      val () = _target_free(clicked)
       val () = (if go then let
           val () = layer_close(LNote())
           val () = reader_note_go()
@@ -1548,49 +1549,49 @@ fn _wire_annotations {n:nat} (r: regs(n)): regs(n + 6) = let
         in ui_focus("page") end
         else ())
     in 0 end)
-in r end
+in listeners end
 
-fn _wire_search {n:nat} (r: regs(n)): regs(n + 4) = let
-  val r = RCons(r, OnEl("search-button"), "click", lam(_) => let
+fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
+  val listeners = RCons(listeners, OnEl("search-button"), "click", lam(_) => let
       val () = (if layer_is_open(LSearch()) then layer_close(LSearch()) else _search_open())
     in 0 end)
   (* the field is made again for a selection's search: its events are
      taken on the panel *)
-  val r = RCons(r, OnEl("search-panel"), "input", lam(_) => let val () = _search_input() in 0 end)
-  val r = RCons(r, OnEl("search-panel"), "click", lam(h) => let
-      val t = _target(h)
-      val go = _row_of(t, "search-hit")
-      val close = _is(t, "search-close")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("search-panel"), "input", lam(_) => let val () = _search_input() in 0 end)
+  val listeners = RCons(listeners, OnEl("search-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val hit = _row_of(clicked, "search-hit")
+      val close = _is(clicked, "search-close")
+      val () = _target_free(clicked)
       val () = (if close then _search_end()
-        else if go >= 0 then let
+        else if hit >= 0 then let
           val () = layer_close(LSearch())
-        in reader_search_go(go) end
+        in reader_search_go(hit) end
         else ())
     in 0 end)
-  val r = RCons(r, OnEl("search-nav"), "click", lam(h) => let
-      val t = _target(h)
-      val pv = _is(t, "search-previous")
-      val nx = _is(t, "search-next")
-      val close = _is(t, "search-nav-close")
-      val () = _target_free(t)
-      val () = (if pv then reader_search_step(~1)
-        else if nx then reader_search_step(1)
+  val listeners = RCons(listeners, OnEl("search-nav"), "click", lam(h) => let
+      val clicked = _target(h)
+      val previous = _is(clicked, "search-previous")
+      val next = _is(clicked, "search-next")
+      val close = _is(clicked, "search-nav-close")
+      val () = _target_free(clicked)
+      val () = (if previous then reader_search_step(~1)
+        else if next then reader_search_step(1)
         else if close then _search_end()
         else ())
     in 0 end)
-in r end
+in listeners end
 
-fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
-  val r = RCons(r, OnEl("back-to-library"), "click", lam(_) => let val () = _show_library() in 0 end)
-  val r = RCons(r, OnEl("previous-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
-  val r = RCons(r, OnEl("next-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
-  val r = RCons(r, OnEl("page"), "click", lam(h) => let
-      val t = _target(h)
-      val node = _row_of(t, "c")
-      val x = _target_x(t)
-      val y = _target_y(t)
-      val () = _target_free(t)
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
+  val listeners = RCons(listeners, OnEl("back-to-library"), "click", lam(_) => let val () = _show_library() in 0 end)
+  val listeners = RCons(listeners, OnEl("previous-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
+  val listeners = RCons(listeners, OnEl("next-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  val listeners = RCons(listeners, OnEl("page"), "click", lam(h) => let
+      val clicked = _target(h)
+      val node = _row_of(clicked, "c")
+      val x = _target_x(clicked)
+      val y = _target_y(clicked)
+      val () = _target_free(clicked)
     in
       if _has_selection() then 0
       else if !_dragged then 0
@@ -1602,19 +1603,19 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown
      full screen *)
-  val r = RCons(r, OnEl("page"), "contextmenu", lam(h) => let
-      val t = _target(h)
-      val node = _row_of(t, "c")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("page"), "contextmenu", lam(h) => let
+      val clicked = _target(h)
+      val node = _row_of(clicked, "c")
+      val () = _target_free(clicked)
     in
       if node < 0 then 0
       else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
       else 0
     end)
-  val r = RCons(r, OnEl("image-viewer"), "click", lam(h) => let
-      val t = _target(h)
-      val close = _is(t, "image-close")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("image-viewer"), "click", lam(h) => let
+      val clicked = _target(h)
+      val close = _is(clicked, "image-close")
+      val () = _target_free(clicked)
     in
       if close then let
         val () = layer_close(LImage())
@@ -1623,68 +1624,68 @@ fn _wire_reader {n:nat} (r: regs(n)): regs(n + 13) = let
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
-  val r = RCons(r, OnEl("page"), "focusin", lam(h) => let
-      val t = _target(h)
-      val node = _row_of(t, "c")
-      val () = _target_free(t)
+  val listeners = RCons(listeners, OnEl("page"), "focusin", lam(h) => let
+      val clicked = _target(h)
+      val node = _row_of(clicked, "c")
+      val () = _target_free(clicked)
       val () = !_focus_link := node
     in 0 end)
-  val r = RCons(r, OnEl("page"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
-  val r = RCons(r, OnDocument(), "keydown", lam(h) =>
+  val listeners = RCons(listeners, OnEl("page"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
+  val listeners = RCons(listeners, OnDocument(), "keydown", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
-      | ~BlobBytes(b, n) => let
-          val esc = _key_is(b, n, "Escape")
-          val () = (if (if esc then _escape_overlay() else false) then ()
+      | ~BlobBytes(key_bytes, n) => let
+          val escape = _key_is(key_bytes, n, "Escape")
+          val () = (if (if escape then _escape_overlay() else false) then ()
             else if !_view <> 1 then ()
             else if _shown("dialog") then ()
-            else if layer_is_open(LSearch()) then _search_key(b, n)
-            else _reader_key(b, n))
-          val () = $A.free<byte>(b)
+            else if layer_is_open(LSearch()) then _search_key(key_bytes, n)
+            else _reader_key(key_bytes, n))
+          val () = $A.free<byte>(key_bytes)
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
-  val r = RCons(r, OnEl("page"), "wheel", lam(h) =>
+  val listeners = RCons(listeners, OnEl("page"), "wheel", lam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
-      | ~BlobBytes(b, n) =>
-        if n < 8 then let val () = $A.free<byte>(b) in 0 end
+      | ~BlobBytes(wheel_bytes, n) =>
+        if n < 8 then let val () = $A.free<byte>(wheel_bytes) in 0 end
         else let
-          val dy = _i32at(b, 4)
-          val () = $A.free<byte>(b)
+          val delta_y = _int32_at(wheel_bytes, 4)
+          val () = $A.free<byte>(wheel_bytes)
         in
           if !_wheel_busy then 0
-          else if dy = 0 then 0
+          else if delta_y = 0 then 0
           else let
             val () = !_wheel_busy := true
-            val () = (if dy > 0 then _next() else _prev())
+            val () = (if delta_y > 0 then _next() else _previous())
             val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) => let
                 val () = !_wheel_busy := false
               in $P.ret<int>(0) end))
           in 0 end
         end)
   (* a tap on the footer's readout shows the next, and keeps it *)
-  val r = RCons(r, OnEl("footer-readout"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("footer-readout"), "click", lam(_) => let
       val () = reader_readout_next()
       val () = set_save(lib_state_get())
     in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
-  val r = RCons(r, OnGestures("reader"), "gestures", lam(h) => let
+  val listeners = RCons(listeners, OnGestures("reader"), "gestures", lam(h) => let
       val () = _gesture_batch(h)
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
-  val r = RCons(r, OnWindow(), "resize", lam(_) => let
-      val () = !_resize_gen := !_resize_gen + 1
-      val gen = !_resize_gen
+  val listeners = RCons(listeners, OnWindow(), "resize", lam(_) => let
+      val () = !_resize_generation := !_resize_generation + 1
+      val generation = !_resize_generation
       val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(200)), lam(_) => let
-          val () = (if !_resize_gen = gen then (if !_view = 1 then reader_relayout() else ()) else ())
+          val () = (if !_resize_generation = generation then (if !_view = 1 then reader_relayout() else ()) else ())
         in $P.ret<int>(0) end))
     in 0 end)
   (* the browser's back button: out of the reader *)
   val () = $NAV.set_popstate_callback(lam(_) => let
       val () = (if !_view = 1 then _show_library() else ())
     in 0 end)
-in r end
+in listeners end
 
 (* ============================================================
    Startup
@@ -1694,13 +1695,13 @@ implement main0 () = let
   val () = app_build()
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
-  val r = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
+  val listeners = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
   (* files handed to the app from outside it (an Android intent) *)
-  val r = RCons(r, OnExternalFiles(), "files", lam(h) => let
+  val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
       val () = import_external(h)
     in 0 end)
-  val () = ui_listen_all(r)
+  val () = ui_listen_all(listeners)
   val () = $P.discard<int>(reader_speed_load())
   val () = _hint_load()
   val () = lib_install_hint_load()
@@ -1708,12 +1709,12 @@ implement main0 () = let
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
-  val p = $P.and_then<int><int>(set_load(), lam(st) => let
-      val () = lib_sort_label($AR.band_int_int(st, 7))
+  val loaded = $P.and_then<int><int>(set_load(), lam(state) => let
+      val () = lib_sort_label($AR.band_int_int(state, 7))
     in
       $P.and_then<int><int>(lib_load(), lam(_) => let
-        val () = lib_state_set(st)
+        val () = lib_state_set(state)
         val () = lib_render()
       in _view_restore() end)
     end)
-in $P.discard<int>(p) end
+in $P.discard<int>(loaded) end
