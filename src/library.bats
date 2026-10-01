@@ -23,29 +23,31 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
    ============================================================ *)
 
 (* A book's numbers. Its id is the first 14 hex digits of its file's
-   SHA-256, as two 28-bit halves; its key numbers it in this run (it is
-   not stored). Times are minutes since the epoch. *)
+   SHA-256, as two 28-bit halves (id_high the first 7 digits, id_low
+   the last 7); its key numbers it in this run (it is not stored).
+   Times are minutes since the epoch. *)
 #pub typedef bnums = @{
   key = Int,
-  h1 = Int, h2 = Int,
-  shelf = Int,     (* 0 on the shelf, 1 hidden, 2 archived, 3 in the Trash *)
+  id_high = Int, id_low = Int,
+  shelf = Int,          (* 0 on the shelf, 1 hidden, 2 archived, 3 in the Trash *)
   added = Int,
-  opened = Int,    (* 0 when never read *)
-  ch = Int,        (* the chapter read last, from 0 *)
-  tch = Int,       (* the book's chapters, 0 when not known yet *)
-  pg = Int,        (* the page read last, of pgs in that chapter *)
-  pgs = Int,
-  anchor = Int,    (* the content node at that page's start, -1 none *)
-  fsz = Int,       (* the file's bytes *)
-  cover = Int,     (* the cover image's type (mime_str), 0 none *)
-  done = Int,      (* 1 when the last page was reached *)
-  sidx = Int,      (* its number in its series, 0 when none is given *)
-  cols = Int,      (* the collections it is in: collection j is bit j *)
-  rmin = Int,      (* the minutes it has been read (a page turned on within
-                      3 minutes of the one before counts its minutes) *)
-  rpg = Int,       (* the pages turned on those minutes counted *)
-  fin = Int        (* when its last page was first reached, 0 when not
-                      known *)
+  opened = Int,         (* 0 when never read *)
+  chapter = Int,        (* the chapter read last, from 0 *)
+  chapters = Int,       (* the book's chapters, 0 when not known yet *)
+  page = Int,           (* the page read last, of pages in that chapter *)
+  pages = Int,
+  anchor = Int,         (* the content node at that page's start, -1 none *)
+  file_size = Int,      (* the file's bytes *)
+  cover = Int,          (* the cover image's type (mime_str), 0 none *)
+  done = Int,           (* 1 when the last page was reached *)
+  series_number = Int,  (* its number in its series, 0 when none is given *)
+  collections = Int,    (* the collections it is in: collection j is bit j *)
+  minutes_read = Int,   (* the minutes it has been read (a page turned on
+                           within 3 minutes of the one before counts its
+                           minutes) *)
+  pages_read = Int,     (* the pages turned on those minutes counted *)
+  finished_at = Int     (* when its last page was first reached, 0 when
+                           not known *)
 }
 
 (* A book: its title and author (1 to 255 bytes), its series' name (0
@@ -197,7 +199,7 @@ fun _find {count:nat}{i:nat} .<count>. (books: !books(count), id_high: int, id_l
   | books_nil() => ~1
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-    in if nums.h1 = id_high then (if nums.h2 = id_low then i else _find(rest, id_high, id_low, i + 1))
+    in if nums.id_high = id_high then (if nums.id_low = id_low then i else _find(rest, id_high, id_low, i + 1))
        else _find(rest, id_high, id_low, i + 1) end
 
 (* The index of the book with this id, or -1 *)
@@ -402,9 +404,9 @@ in
     val @(author, author_len) = _span_arr(data, data_len, author_start, author_span, "Unknown Author")
     val @(series, series_len) = _series_arr(data, data_len, series_start, series_span)
     val nums = @{
-      key = key, h1 = id_high, h2 = id_low, shelf = 0, added = now, opened = 0,
-      ch = 0, tch = 0, pg = 0, pgs = 0, anchor = ~1, fsz = file_size, cover = cover, done = 0,
-      sidx = series_index, cols = 0, rmin = 0, rpg = 0, fin = 0
+      key = key, id_high = id_high, id_low = id_low, shelf = 0, added = now, opened = 0,
+      chapter = 0, chapters = 0, page = 0, pages = 0, anchor = ~1, file_size = file_size, cover = cover, done = 0,
+      series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0
     }: bnums
     val () = lib_put(LibCell(books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), count + 1))
   in key end
@@ -492,9 +494,9 @@ in release_bytes(key_frozen, key_bytes) end
 
 implement lib_set_shelf (index, shelf) = let
   val () = lib_update(index, lam(nums) => @{
-    key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = shelf, added = nums.added, opened = nums.opened,
-    ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs, anchor = nums.anchor,
-    fsz = nums.fsz, cover = nums.cover, done = nums.done, sidx = nums.sidx, cols = nums.cols, rmin = nums.rmin, rpg = nums.rpg, fin = nums.fin })
+    key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
+    chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
   val () = lib_save()
 in lib_render() end
 
@@ -522,10 +524,10 @@ fn _delete_book {index:int} (index: int index): void =
   case+ lib_nums(index) of
   | ~$R.none() => ()
   | ~$R.some(nums) => let
-      val () = _idb_delete(98, nums.h1, nums.h2)
-      val () = _idb_delete(99, nums.h1, nums.h2)
-      val () = _idb_delete(97, nums.h1, nums.h2)
-      val () = _idb_delete(121, nums.h1, nums.h2)
+      val () = _idb_delete(98, nums.id_high, nums.id_low)
+      val () = _idb_delete(99, nums.id_high, nums.id_low)
+      val () = _idb_delete(97, nums.id_high, nums.id_low)
+      val () = _idb_delete(121, nums.id_high, nums.id_low)
     in _remove(index) end
 
 (* The index of the first book in the Trash from i on, or -1 *)
@@ -574,9 +576,9 @@ fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int co
   if i >= count then ()
   else let
     val () = lib_update(i, lam(nums) => @{
-      key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = 3, added = nums.added, opened = nums.opened,
-      ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs, anchor = nums.anchor,
-      fsz = nums.fsz, cover = nums.cover, done = nums.done, sidx = nums.sidx, cols = nums.cols, rmin = nums.rmin, rpg = nums.rpg, fin = nums.fin })
+      key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = 3, added = nums.added, opened = nums.opened,
+      chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
   in _trash_all(i + 1, count) end
 
 (* Each book of shelved put back on its shelf *)
@@ -586,9 +588,9 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved(count)): void =
   | ShelvedCons(key, shelf, rest) => let
       val index = lib_index_of_key(key)
       val () = (if index >= 0 then lib_update(index, lam(nums) => @{
-          key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = shelf, added = nums.added, opened = nums.opened,
-          ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs, anchor = nums.anchor,
-          fsz = nums.fsz, cover = nums.cover, done = nums.done, sidx = nums.sidx, cols = nums.cols, rmin = nums.rmin, rpg = nums.rpg, fin = nums.fin }) else ())
+          key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
+          chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at }) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -635,7 +637,7 @@ in
       val compared = _less(first_series, first_series_len, second_series, second_series_len, 0)
     in
       if compared < 0 then true else if compared > 0 then false
-      else if first_nums.sidx <> second_nums.sidx then first_nums.sidx < second_nums.sidx
+      else if first_nums.series_number <> second_nums.series_number then first_nums.series_number < second_nums.series_number
       else _less(first_title, first_title_len, second_title, second_title_len, 0) < 0
     end else true)
     else (if second_series_len > 0 then false else _less(first_title, first_title_len, second_title, second_title_len, 0) < 0))
@@ -806,11 +808,11 @@ fun _map_collections {count:nat} .<count>. (books: !books(count), change: (Int, 
   | books_nil() => ()
   | @books_cons(book, rest) => let
       val+ @Book(_, _, _, _, _, _, nums) = book
-      val membership = change(nums.key, nums.cols)
+      val membership = change(nums.key, nums.collections)
       val () = nums := @{
-        key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = nums.shelf, added = nums.added, opened = nums.opened,
-        ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs, anchor = nums.anchor,
-        fsz = nums.fsz, cover = nums.cover, done = nums.done, sidx = nums.sidx, cols = membership, rmin = nums.rmin, rpg = nums.rpg, fin = nums.fin }
+        key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+        chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at }
       prval () = fold@(book)
       val () = _map_collections(rest, change)
       prval () = fold@(books)
@@ -855,7 +857,7 @@ fun _keys_in {count:nat}{so_far:nat} .<count>. (books: !books(count), collection
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
     in
-      if $AR.band_int_int(nums.cols, _collection_bit(collection)) <> 0 then _keys_in(rest, collection, KeysCons(nums.key, keys))
+      if $AR.band_int_int(nums.collections, _collection_bit(collection)) <> 0 then _keys_in(rest, collection, KeysCons(nums.key, keys))
       else _keys_in(rest, collection, keys)
     end
 
@@ -872,7 +874,7 @@ implement lib_coll_shown () = !_coll_shown
    none is) *)
 fn _in_shown (nums: bnums): bool = let
   val shown = !_coll_shown
-in if shown < 0 then true else $AR.band_int_int(nums.cols, _collection_bit(shown)) <> 0 end
+in if shown < 0 then true else $AR.band_int_int(nums.collections, _collection_bit(shown)) <> 0 end
 
 (* The name of a collection just deleted, while its Undo is offered *)
 datavtype coll_gone =
@@ -1017,7 +1019,7 @@ implement lib_coll_has (index, collection) =
   if collection < 0 then false
   else case+ lib_nums(index) of
   | ~$R.none() => false
-  | ~$R.some(nums) => $AR.band_int_int(nums.cols, _collection_bit(collection)) <> 0
+  | ~$R.some(nums) => $AR.band_int_int(nums.collections, _collection_bit(collection)) <> 0
 
 (* Puts the book at index in collection, or takes it out when it is in
    it *)
@@ -1029,10 +1031,10 @@ implement lib_coll_toggle (index, collection) =
   else let
     val on = lib_coll_has(index, collection)
     val () = lib_update(index, lam(nums) => @{
-      key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = nums.shelf, added = nums.added, opened = nums.opened,
-      ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs, anchor = nums.anchor,
-      fsz = nums.fsz, cover = nums.cover, done = nums.done, sidx = nums.sidx,
-      cols = (if on then nums.cols - _collection_bit(collection) else nums.cols + _collection_bit(collection)), rmin = nums.rmin, rpg = nums.rpg, fin = nums.fin })
+      key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+      chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
+      collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
   in lib_save() end
 
 (* Collection deleted, with an Undo offer that puts it back: its books
@@ -1152,7 +1154,7 @@ fun _toggles {count:nat}{j:nat} .<count>. (collections: !colls(count), j: int j,
 
 implement lib_coll_panel (index) = let
   val () = ui_clear("collections-list")
-  val membership = (case+ lib_nums(index) of ~$R.none() => 0 | ~$R.some(nums) => nums.cols): Int
+  val membership = (case+ lib_nums(index) of ~$R.none() => 0 | ~$R.some(nums) => nums.collections): Int
   val cell = colls_take()
   val+ @CollCell(collections, collection_count) = cell
   val () = _toggles(collections, 0, membership)
@@ -1230,8 +1232,8 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 836 *
   | books_nil() => start
   | books_cons(book, rest) => let
       val+ Book(title, title_len, author, author_len, series, series_len, nums) = book
-      val () = $A.write_i32(out, start, nums.h1)
-      val () = $A.write_i32(out, start + 4, nums.h2)
+      val () = $A.write_i32(out, start, nums.id_high)
+      val () = $A.write_i32(out, start + 4, nums.id_low)
       val () = $A.write_byte(out, start + 8, title_len)
       val () = _put_bytes(title, title_len, out, start + 9, 0)
       val author_at = start + 9 + title_len
@@ -1241,24 +1243,24 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 836 *
       val () = $A.write_i32(out, numbers_at, nums.shelf)
       val () = $A.write_i32(out, numbers_at + 4, nums.added)
       val () = $A.write_i32(out, numbers_at + 8, nums.opened)
-      val () = $A.write_i32(out, numbers_at + 12, nums.ch)
-      val () = $A.write_i32(out, numbers_at + 16, nums.tch)
-      val () = $A.write_i32(out, numbers_at + 20, nums.pg)
-      val () = $A.write_i32(out, numbers_at + 24, nums.pgs)
+      val () = $A.write_i32(out, numbers_at + 12, nums.chapter)
+      val () = $A.write_i32(out, numbers_at + 16, nums.chapters)
+      val () = $A.write_i32(out, numbers_at + 20, nums.page)
+      val () = $A.write_i32(out, numbers_at + 24, nums.pages)
       val () = $A.write_i32(out, numbers_at + 28, nums.anchor)
-      val () = $A.write_i32(out, numbers_at + 32, nums.fsz)
+      val () = $A.write_i32(out, numbers_at + 32, nums.file_size)
       val () = $A.write_i32(out, numbers_at + 36, nums.cover + nums.done * 256)
       (* QLB2: the series' name and the book's number in it *)
       val series_at = numbers_at + 40
       val () = $A.write_byte(out, series_at, series_len)
       val () = _put_bytes(series, series_len, out, series_at + 1, 0)
-      val () = $A.write_i32(out, series_at + 1 + series_len, nums.sidx)
+      val () = $A.write_i32(out, series_at + 1 + series_len, nums.series_number)
       (* QLB3: the collections it is in *)
-      val () = $A.write_i32(out, series_at + 5 + series_len, nums.cols)
+      val () = $A.write_i32(out, series_at + 5 + series_len, nums.collections)
       (* QLB4: how long it has been read, and when it was finished *)
-      val () = $A.write_i32(out, series_at + 9 + series_len, nums.rmin)
-      val () = $A.write_i32(out, series_at + 13 + series_len, nums.rpg)
-      val () = $A.write_i32(out, series_at + 17 + series_len, nums.fin)
+      val () = $A.write_i32(out, series_at + 9 + series_len, nums.minutes_read)
+      val () = $A.write_i32(out, series_at + 13 + series_len, nums.pages_read)
+      val () = $A.write_i32(out, series_at + 17 + series_len, nums.finished_at)
     in _write_books(out, series_at + 21 + series_len, rest) end
 
 (* Stores the library under "lib" *)
@@ -1355,12 +1357,12 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
         val () = !_next_key := key + 1
         val cover_done = _int32_at(buf, numbers_at + 36)
         val nums = @{
-          key = key, h1 = id_high, h2 = id_low,
+          key = key, id_high = id_high, id_low = id_low,
           shelf = _int32_at(buf, numbers_at), added = _int32_at(buf, numbers_at + 4), opened = _int32_at(buf, numbers_at + 8),
-          ch = _int32_at(buf, numbers_at + 12), tch = _int32_at(buf, numbers_at + 16), pg = _int32_at(buf, numbers_at + 20),
-          pgs = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), fsz = _int32_at(buf, numbers_at + 32),
+          chapter = _int32_at(buf, numbers_at + 12), chapters = _int32_at(buf, numbers_at + 16), page = _int32_at(buf, numbers_at + 20),
+          pages = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), file_size = _int32_at(buf, numbers_at + 32),
           cover = $AR.low_byte(cover_done), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
-          sidx = 0, cols = 0, rmin = 0, rpg = 0, fin = 0
+          series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0
         }: bnums
         (* QLB2 has the series after; QLB3, then the collections; QLB1,
            neither *)
@@ -1378,15 +1380,15 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
           val series = $A.alloc<byte>(series_len + 1)
           val () = _bytes_of_into(buf, series_at + 1, series_len, series, 0)
           val nums = @{
-            key = nums.key, h1 = nums.h1, h2 = nums.h2, shelf = nums.shelf, added = nums.added,
-            opened = nums.opened, ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs,
-            anchor = nums.anchor, fsz = nums.fsz, cover = nums.cover, done = nums.done,
-            sidx = _int32_at(buf, series_at + 1 + series_len),
-            cols = (if version >= 3 then (if series_at + 9 + series_len <= n then g1ofg0($AR.band_int_int(_int32_at(buf, series_at + 5 + series_len), 255)) else 0) else 0): Int,
+            key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added,
+            opened = nums.opened, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
+            anchor = nums.anchor, file_size = nums.file_size, cover = nums.cover, done = nums.done,
+            series_number = _int32_at(buf, series_at + 1 + series_len),
+            collections = (if version >= 3 then (if series_at + 9 + series_len <= n then g1ofg0($AR.band_int_int(_int32_at(buf, series_at + 5 + series_len), 255)) else 0) else 0): Int,
             (* QLB4: how long it has been read, and when it was finished *)
-            rmin = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 9 + series_len) else 0) else 0): Int,
-            rpg = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 13 + series_len) else 0) else 0): Int,
-            fin = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 17 + series_len) else 0) else 0): Int
+            minutes_read = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 9 + series_len) else 0) else 0): Int,
+            pages_read = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 13 + series_len) else 0) else 0): Int,
+            finished_at = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 17 + series_len) else 0) else 0): Int
           }: bnums
         in _parse_books(buf, n, series_at + tail + series_len,
              books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), parsed + 1, version) end
@@ -1518,10 +1520,10 @@ in digits_end + 1 end
 
 (* How far through the book with numbers nums is, in percent *)
 fn _progress (nums: bnums): [percent:nat | percent <= 100] int percent = let
-  val chapters = nums.tch
-  val stored_chapter = nums.ch
-  val stored_pages = nums.pgs
-  val stored_page = nums.pg
+  val chapters = nums.chapters
+  val stored_chapter = nums.chapter
+  val stored_pages = nums.pages
+  val stored_page = nums.page
 in
   if nums.done > 0 then 100
   else if chapters <= 0 then 0
@@ -1783,7 +1785,7 @@ fn _card {index:nat}{base_len,row_len,more_len,parent_len:pos | base_len <= 16; 
   val @(parent_id, parent_id_len) = nid_make(base, index)
   val @(cover_id, cover_id_len) = nid_make2(base, index, "-cover")
   val () = ui_img_nn(parent_id, parent_id_len, cover_id, cover_id_len, (if nums.cover > 0 then "cov" else "cov cov0"): [class_len:pos | class_len < 256] string class_len)
-  val () = (if nums.cover > 0 then _show_cover(base, index, nums.h1, nums.h2, nums.cover, generation) else ())
+  val () = (if nums.cover > 0 then _show_cover(base, index, nums.id_high, nums.id_low, nums.cover, generation) else ())
   (* title, author *)
   val @(parent_id, parent_id_len) = nid_make(base, index)
   val @(info_id, info_id_len) = nid_make2(base, index, "-info")
@@ -1809,7 +1811,7 @@ fn _card {index:nat}{base_len,row_len,more_len,parent_len:pos | base_len <= 16; 
   val @(author_id, author_id_len) = nid_make2(base, index, "-author")
   val () = ui_text_n_buf(author_id, author_id_len, author_text, author_len)
   (* its series, and its number in it: "Foundation · 2" *)
-  val () = (if series_len > 0 then _card_series(base, index, series, series_len, nums.sidx) else ())
+  val () = (if series_len > 0 then _card_series(base, index, series, series_len, nums.series_number) else ())
   (* progress *)
   val @(parent_id, parent_id_len) = nid_make2(base, index, "-info")
   val @(progress_id, progress_id_len) = nid_make2(base, index, "-progress")
@@ -2104,7 +2106,7 @@ fun _finished_in {count:nat} .<count>. (books: !books(count), year: Int, offset:
   | books_nil() => finished
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-      val in_year = (if nums.fin > 0 then year_of_day((nums.fin + offset) / 1440) = year else false): bool
+      val in_year = (if nums.finished_at > 0 then year_of_day((nums.finished_at + offset) / 1440) = year else false): bool
     in _finished_in(rest, year, offset, (if in_year then finished + 1 else finished)) end
 
 #pub fn lib_finished_in (year: Int, offset: Int): int
