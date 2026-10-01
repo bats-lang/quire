@@ -63,11 +63,7 @@ test('a chapter that cannot be read leaves the reader on its page, with the bann
   await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 3' }).click();
   await expect(chapterTitle(page)).toHaveText('Chapter 3');
   await expect(alert(page)).toBeHidden();
-  // the bridge's decompress leaves its stream writer's rejections
-  // unhandled (batsJsDecompress: writer.write and writer.close), so the
-  // damaged data is also reported as a page error; any other is not
-  // expected
-  expect(errors.filter(e => !e.includes('The compressed data was not valid'))).toEqual([]);
+  expect(errors).toEqual([]);
 });
 
 test('a book whose saved place cannot be read goes back to the library, with the banner', async ({ page }) => {
