@@ -10,6 +10,7 @@
 staload "book.sats"
 staload "pages.sats"
 staload "ui.sats"
+staload "notice.sats"
 staload "layer.sats"
 staload "app.sats"
 staload "style.sats"
@@ -229,7 +230,8 @@ fn _view_save (book_key: int): void = let
   val () = $A.write_i32(value, 0, book_key)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4))
+  (* ignored: a view not stored only opens the library next time *)
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4), lam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
@@ -272,9 +274,8 @@ fn _chrome_set (shown: bool): void = let
   val () = !_chrome_generation := !_chrome_generation + 1
   val generation = !_chrome_generation
 in
-  if shown then $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(5000)), lam(_) => let
-      val () = (if !_chrome_generation = generation then _chrome_set_off() else ())
-    in $P.ret<int>(0) end))
+  if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), lam(_) =>
+      if !_chrome_generation = generation then _chrome_set_off() else ())
   else ()
 end
 
@@ -294,11 +295,11 @@ fn _hint_load (): void = let
   val stored = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(h) => let
+  $P.finish<Int>($P.vow(stored), lam(h) => let
     val () = (case+ take_blob(h) of
       | ~NoBlobBytes() => !_hint_seen := false
       | ~BlobBytes(value_bytes, _) => $A.free<byte>(value_bytes))
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 fn _hint_hide (): void = ui_show("turn-hint", false)
@@ -313,14 +314,13 @@ fn _hint_offer (): void =
     val () = $A.write_byte(value, 0, 1)
     val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
     val @(key_frozen, key_bytes) = $A.freeze<byte>(_hint_key())
-    val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1))
+    (* ignored: a hint not stored as shown only shows once more *)
+    val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1), lam(_) => ())
     val () = release_bytes(key_frozen, key_bytes)
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
-    $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(8000)), lam(_) => let
-      val () = _hint_hide()
-    in $P.ret<int>(0) end))
+    $P.finish<Int>($P.vow($TM.timer_set(8000)), lam(_) => _hint_hide())
   end
 
 fn _show_reader (): void = let
@@ -366,6 +366,15 @@ fn _citation_set {book:int} (book: int book): void = let
   val () = $A.free<byte>(author)
 in ui_text_buf("share-citation", citation, author_len + 2 + title_len) end
 
+(* A book's saved place, gone to as it opens: when its chapter could not
+   be shown there is no page to stay on, so the reader goes back to the
+   library and the banner says why *)
+fn _opened_checked (result: int): void =
+  if result >= 0 then ()
+  else let
+    val () = (if !_view = 1 then _show_library() else ())
+  in notice_part_unread() end
+
 fn _open_book {book:int} (book: int book): void =
   case+ lib_nums(book) of
   | ~$R.none() => ()
@@ -400,16 +409,18 @@ fn _open_book {book:int} (book: int book): void =
       (* the other devices' place and annotations, brought *)
       val () = sync_book_opened(book_numbers.key)
     in
+      (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
-        $P.discard<int>($P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor)))
+        $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor)), lam(result) =>
+          _opened_checked(result))
       else
-        $P.discard<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), lam(result) =>
+        $P.finish<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), lam(result) =>
           if result < 0 then let
             val () = _show_library()
-            val () = ui_text("error-text", "This book's file could not be read. Import it again.")
-            val () = ui_show("error-banner", true)
-          in $P.ret<int>(result) end
-          else $P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor))))
+            val () = notice_error("This book's file could not be read. Import it again.")
+          in $P.ret<int>(0) end
+          else $P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor))), lam(result) =>
+          _opened_checked(result))
     end
 
 (* The view kept by the last run: its book opened again, on its page,
@@ -450,7 +461,8 @@ fn _set_shelf {book:int} (book: int book, shelf: Int): void = lib_set_shelf(book
 fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): void = let
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
+  (* ignored: a delete that fails leaves bytes nothing reads *)
+  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Archives the book: its record is kept and its file deleted. The file
@@ -808,7 +820,11 @@ fn _copy_selection (): void =
         val () = $BD.blob_read(selection, 0, text, selection_len)
         val () = $BD.blob_free(selection)
         val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
-        val () = $P.discard<Int>($P.vow($CB.clipboard_write(text_bytes, selection_len)))
+        (* a copy that failed is said in the banner: the reader would
+           otherwise paste something stale *)
+        val () = $P.finish<Int>($CB.clipboard_write(text_bytes, selection_len), lam(copied) =>
+          if copied = 1 then notice_copied()
+          else notice_error("The text could not be copied: the browser did not allow it."))
       in release_bytes(text_frozen, text_bytes) end
     end
 
@@ -1009,7 +1025,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
       val () = backup_import()
     in 0 end)
   (* the error banner *)
-  val listeners = RCons(listeners, OnEl("error-dismiss"), "click", lam(_) => let val () = ui_show("error-banner", false) in 0 end)
+  val listeners = RCons(listeners, OnEl("error-dismiss"), "click", lam(_) => let val () = notice_dismiss() in 0 end)
   val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
   val listeners = RCons(listeners, OnEl("library-menu-button"), "click", lam(_) => let
@@ -1249,9 +1265,8 @@ fn _search_input (): void = let
   val () = !_search_tick := !_search_tick + 1
   val tick = !_search_tick
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(300)), lam(_) => let
-    val () = (if !_search_tick = tick then _search_run() else ())
-  in $P.ret<int>(0) end))
+  $P.finish<Int>($P.vow($TM.timer_set(300)), lam(_) =>
+    if !_search_tick = tick then _search_run() else ())
 end
 
 (* Searches for the selected text *)
@@ -1463,9 +1478,7 @@ in ui_show("pages-list", true) end
    drops once the click has had its turn *)
 fn _drag_ended (): void = let
   val () = !_dragged := true
-in $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(0)), lam(_) => let
-    val () = !_dragged := false
-  in $P.ret<int>(0) end)) end
+in $P.finish<Int>($P.vow($TM.timer_set(0)), lam(_) => !_dragged := false) end
 
 (* The page turn's events: a pan moves the page with the finger, a
    commit turns it (a drag to the left shows the page to the right),
@@ -1602,9 +1615,8 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("page"), "scroll", lam(_) => let
       val () = !_scroll_generation := !_scroll_generation + 1
       val generation = !_scroll_generation
-      val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(150)), lam(_) => let
-          val () = (if !_scroll_generation = generation then reader_scrolled() else ())
-        in $P.ret<int>(0) end))
+      val () = $P.finish<Int>($P.vow($TM.timer_set(150)), lam(_) =>
+          if !_scroll_generation = generation then reader_scrolled() else ())
     in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
   val listeners = RCons(listeners, OnEl("scrubber-track"), "pointerdown", lam(h) => let
@@ -1815,9 +1827,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
           else let
             val () = !_wheel_busy := true
             val () = (if delta_y > 0 then _next() else _previous())
-            val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) => let
-                val () = !_wheel_busy := false
-              in $P.ret<int>(0) end))
+            val () = $P.finish<Int>($P.vow($TM.timer_set(250)), lam(_) => !_wheel_busy := false)
           in 0 end
         end)
   (* a tap on the footer's readout shows the next, and keeps it *)
@@ -1834,9 +1844,8 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
   val listeners = RCons(listeners, OnWindow(), "resize", lam(_) => let
       val () = !_resize_generation := !_resize_generation + 1
       val generation = !_resize_generation
-      val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(200)), lam(_) => let
-          val () = (if !_resize_generation = generation then (if !_view = 1 then reader_relayout() else ()) else ())
-        in $P.ret<int>(0) end))
+      val () = $P.finish<Int>($P.vow($TM.timer_set(200)), lam(_) =>
+          if !_resize_generation = generation then (if !_view = 1 then reader_relayout() else ()) else ())
     in 0 end)
   (* the browser's back button: out of the reader *)
   val () = $NAV.set_popstate_callback(lam(_) => let
@@ -1861,13 +1870,15 @@ implement main0 () = let
       val () = import_external(h)
     in 0 end)
   val () = ui_listen_all(listeners)
-  val () = $P.discard<int>(reader_speed_load())
+  (* ignored: each load deals with its own value (a speed, the
+     dictionaries and the catalogues not read start as none) *)
+  val () = $P.finish<int>(reader_speed_load(), lam(_) => ())
   val () = _hint_load()
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = stamp_load()
-  val () = $P.discard<int>(dict_load())
-  val () = $P.discard<int>(catalogue_load())
+  val () = $P.finish<int>(dict_load(), lam(_) => ())
+  val () = $P.finish<int>(catalogue_load(), lam(_) => ())
   val () = dict_when_read(lam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
@@ -1882,4 +1893,6 @@ implement main0 () = let
         val () = sync_start()
       in _view_restore() end)
     end)
-in $P.discard<int>(loaded) end
+(* ignored: each step deals with its own value (but see bats-lang/bridge#87:
+   a library that could not be read is taken for none) *)
+in $P.finish<int>(loaded, lam(_) => ()) end

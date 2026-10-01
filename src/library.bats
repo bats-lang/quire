@@ -10,6 +10,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "notice.sats"
 staload "book.sats"
 staload "modal.sats"
 staload "undo.sats"
@@ -536,7 +537,8 @@ end
 fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): void = let
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
+  (* ignored: a delete that fails leaves bytes nothing reads *)
+  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Sets the shelf of the book at index, and keeps and shows the
@@ -1389,7 +1391,7 @@ in
       val key = $A.alloc<byte>(3)
       val () = $A.write_text(key, 0, $A.text_lit("lib"), 3)
       val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-      val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, used, stop))
+      val () = save_checked($IDB.idb_put(key_bytes, 3, used, stop))
       val () = release_bytes(key_frozen, key_bytes)
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
@@ -1666,11 +1668,11 @@ fn _show_cover {base_len:pos | base_len <= 16}{index:nat}
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), lam(handle) =>
     case+ take_content(handle) of
-    | ~NoContentBytes() => $P.ret<int>(0)
+    | ~NoContentBytes() => ()
     | ~ContentBytes(owner, buf, n) =>
-      if !_render_gen <> generation then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
+      if !_render_gen <> generation then piece_free(owner, buf)
       else let
         val mime = mime_str(code)
         val mime_len = g1u2i(string1_length(mime))
@@ -1684,8 +1686,7 @@ in
         val () = $A.drop<byte>(data_frozen, data_bytes)
         val () = piece_free(owner, $A.thaw<byte>(data_frozen))
         val () = release_bytes(id_frozen, id_bytes)
-        val () = release_bytes(mime_frozen, mime_bytes)
-      in $P.ret<int>(0) end))
+      in release_bytes(mime_frozen, mime_bytes) end)
 end
 
 (* ============================================================
@@ -1792,14 +1793,14 @@ implement lib_a11y_show (id_high, id_low) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), lam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => let
         (* imported before this was read *)
         val _ = _a11y_line(0, "Import this book's file again to see its accessibility information.")
-      in $P.ret<int>(0) end
+      in () end
     | ~ContentBytes(owner, buf, n) =>
-      if n < 6 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
+      if n < 6 then piece_free(owner, buf)
       else let
         val flags = _int32_at(buf, 2)
         val line = _a11y_lines(flags, 0)
@@ -1812,9 +1813,7 @@ in
             val () = ui_add_n("book-info-a11y-list", line_id, line_id_len, TDiv)
             val @(line_id, line_id_len) = nid_make("a11y-line", line)
           in ui_text_n_buf(line_id, line_id_len, summary, summary_len) end else ()) else ())
-        val () = piece_free(owner, buf)
-      in $P.ret<int>(0) end)
-  )
+      in piece_free(owner, buf) end)
 end
 
 #pub fn lib_show_cover_in {id_len:pos | id_len < 256} (id: string id_len, id_high: int, id_low: int, code: int): void
@@ -1825,9 +1824,9 @@ implement lib_show_cover_in (id, id_high, id_low, code) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), lam(handle) =>
     case+ take_content(handle) of
-    | ~NoContentBytes() => $P.ret<int>(0)
+    | ~NoContentBytes() => ()
     | ~ContentBytes(owner, buf, n) => let
         val mime = mime_str(code)
         val mime_len = g1u2i(string1_length(mime))
@@ -1843,8 +1842,7 @@ in
         val () = $A.drop<byte>(data_frozen, data_bytes)
         val () = piece_free(owner, $A.thaw<byte>(data_frozen))
         val () = release_bytes(id_frozen, id_bytes)
-        val () = release_bytes(mime_frozen, mime_bytes)
-      in $P.ret<int>(0) end))
+      in release_bytes(mime_frozen, mime_bytes) end)
 end
 
 (* The series line of card index: the series' name, and " · N" *)
@@ -2067,12 +2065,11 @@ implement lib_install_hint_load () = let
   val stored = $IDB.idb_get(key_bytes, 12)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(stored), lam(handle) => let
+  $P.finish<Int>($P.vow(stored), lam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => !_install_hint_dismissed := false
       | ~BlobBytes(blob, _) => $A.free<byte>(blob))
-    val () = _install_hint_show()
-  in $P.ret<int>(0) end))
+  in _install_hint_show() end)
 end
 
 (* The hint dismissed, for good *)
@@ -2083,7 +2080,8 @@ implement lib_install_hint_dismiss () = let
   val () = $A.write_byte(value, 0, 1)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_install_hint_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 12, value_bytes, 1))
+  (* ignored: a dismissal not stored only shows the hint once more *)
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 12, value_bytes, 1), lam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
   val () = release_bytes(value_frozen, value_bytes)
 in _install_hint_show() end

@@ -17,6 +17,7 @@ staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "ui.sats"
+staload "notice.sats"
 staload "layer.sats"
 staload "library.sats"
 staload "import.sats"
@@ -159,7 +160,8 @@ fn _speed_save (): void = let
   val () = $A.write_i32(data, 4, !_speed_pages)
   val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8))
+  (* ignored: a speed not stored only starts the time-left estimates over *)
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8), lam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(data_frozen, data_bytes) end
 
@@ -1605,15 +1607,16 @@ in
       val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
       val decompressing = $P.vow(decompressing)
     in
-      $P.discard<int>($P.and_then<Int><int>(decompressing, lam(handle) =>
+      (* an image that cannot be read stays empty, as a browser leaves an
+         image it cannot load: a book's images are decorative (alt="") *)
+      $P.finish<Int>(decompressing, lam(handle) =>
         case+ take_content(handle) of
-        | ~NoContentBytes() => $P.ret<int>(~1)
+        | ~NoContentBytes() => ()
         | ~ContentBytes(content_owner, content, content_len) => let
             val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
             val () = (if !_load_generation = generation then _set_src(node, in_viewer, content_bytes, content_len, mime) else ())
             val () = $A.drop<byte>(content_frozen, content_bytes)
-            val () = piece_free(content_owner, $A.thaw<byte>(content_frozen))
-          in $P.ret<int>(0) end))
+          in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
     end
 end
 
@@ -2061,8 +2064,8 @@ in if page_width > 0 then _count_pages() else ~1 end
    shown since (generation) *)
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
   if times <= 0 then ()
-  else $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(250)), lam(_) =>
-    if generation <> !_settle_generation then $P.ret<int>(0)
+  else $P.finish<Int>($P.vow($TM.timer_set(250)), lam(_) =>
+    if generation <> !_settle_generation then ()
     else let
       val () = (case+ reading_get() of
         | @(page, page_count, _, _) => let
@@ -2081,8 +2084,7 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
             else if moved then _show_target(page, anchor)
             else ()
           end)
-      val () = _settle(generation, times - 1)
-    in $P.ret<int>(0) end))
+    in _settle(generation, times - 1) end)
 
 (* Starts settling the page just shown, which anchor (when >= 0) is on *)
 fn _settle_start (anchor: Int): void = let
@@ -2127,6 +2129,19 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
     end)
   end
 
+(* Ends a jump (or a turn into another chapter): when the chapter could
+   not be shown (its result is below 0), the reader stays on the page it
+   was on, shown again (a drag may have moved it), never a blank one,
+   and the banner says why *)
+fn _jump_checked (jumping: $P.promise(int, $P.Chained)): void =
+  $P.finish<int>(jumping, lam(result) =>
+    if result >= 0 then ()
+    else let
+      val () = (case+ reading_get() of
+        | @(page, page_count, chapter, chapter_count) =>
+          if chapter > 0 then _show_page(page, page_count, chapter, chapter_count) else ())
+    in notice_part_unread() end)
+
 (* The positions jumped away from (a contents entry, a link, a search
    result), the latest first: the back button returns to them *)
 datavtype pstack(int) =
@@ -2158,9 +2173,7 @@ in
 stadef TIMED = TIMED_
 
 fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<cloref1> void): (TIMED(timeout) | void) = let
-  val () = $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => let
-      val () = done(timeout)
-    in $P.ret<int>(0) end))
+  val () = $P.finish<Int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => done(timeout))
 in (TimedArmed() | ()) end
 end
 
@@ -2243,7 +2256,7 @@ in
       val () = (case+ rest of
         | ~ps_nil() => _ps_put(PsHidden())
         | ps_cons(_, _, _, _) => _back_offer(rest))
-    in $P.discard<int>(_goto(chapter, page, anchor)) end
+    in _jump_checked(_goto(chapter, page, anchor)) end
 end
 
 (* Loads a chapter and shows its page at a thousandth of it *)
@@ -2265,7 +2278,7 @@ in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
     if page + 1 < page_count then let val () = _speed_turn() in _show_page(page + 1, page_count, chapter, chapter_count) end
-    else if chapter < chapter_count then let val () = _speed_turn() in $P.discard<int>(_goto(chapter, 0, ~1)) end
+    else if chapter < chapter_count then let val () = _speed_turn() in _jump_checked(_goto(chapter, 0, ~1)) end
     else _show_page(page, page_count, chapter, chapter_count)
 end
 
@@ -2276,7 +2289,7 @@ in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
     if page > 0 then _show_page(page - 1, page_count, chapter, chapter_count)
-    else if chapter > 1 then $P.discard<int>(_goto(chapter - 2, ~1, ~1))
+    else if chapter > 1 then _jump_checked(_goto(chapter - 2, ~1, ~1))
     else _show_page(0, page_count, chapter, chapter_count)
 end
 
@@ -2621,7 +2634,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(handle) => let
+           $P.finish<Int>($P.vow(decompressing), lam(handle) => let
              val () = (case+ take_content(handle) of
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -2631,8 +2644,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
                    val () = $X.free_nodes(nodes)
                    val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                  in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
-             val () = _search_chapters(serial, chapter + 1, chapter_count, generation)
-           in $P.ret<int>(0) end))
+           in _search_chapters(serial, chapter + 1, chapter_count, generation) end)
          end))
 
 (* query[0, query_len) in lower case, in a new array *)
@@ -2727,7 +2739,7 @@ implement reader_goto_entry (row) =
   | ~TocNoDest() => ()
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Goes to a print page, remembering where the reader was *)
 #pub fun reader_goto_page (print_page: Int): void
@@ -2736,21 +2748,21 @@ implement reader_goto_page (print_page) =
   | ~TocNoDest() => ()
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Jumps to a chapter's element fragment[0, fragment_len), remembering where the reader
    was *)
 #pub fun reader_jump {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: Int, fragment: $A.arr(byte, l, n), fragment_len: int fragment_len): void
 implement reader_jump (chapter, fragment, fragment_len) = let
   val () = _push_position()
-in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Jumps to a page of a chapter (the page of content node anchor, when
    it is not -1), remembering where the reader was *)
 #pub fun reader_jump_to (chapter: Int, page: Int, anchor: Int): void
 implement reader_jump_to (chapter, page, anchor) = let
   val () = _push_position()
-in $P.discard<int>(_goto(chapter, page, anchor)) end
+in _jump_checked(_goto(chapter, page, anchor)) end
 
 (* The back button: to the position last jumped away from *)
 #pub fun reader_back (): void
@@ -2794,7 +2806,7 @@ in
   | @(_, _, _, chapter_count) => let
       val @(chapter, chapter_thousandth) = _chapter_at(thousandth, 0, chapter_count)
       val () = _push_position()
-    in $P.discard<int>(_goto_part(chapter, chapter_thousandth)) end
+    in _jump_checked(_goto_part(chapter, chapter_thousandth)) end
 end
 
 (* Stores where the reader is *)
@@ -2955,7 +2967,7 @@ fn _note_found {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): void =
   | ~NoteTarget(chapter, fragment, fragment_len) =>
     if fragment_len <= 0 then let
       val () = _push_position()
-    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
     else let
       val buf = $A.alloc<byte>(_NOTE_CAPACITY)
       val nodes = $X.parse_document(data, n)
@@ -2968,7 +2980,7 @@ fn _note_found {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): void =
       else let
         val () = $A.free<byte>(buf)
         val () = _push_position()
-      in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+      in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
     end
 
 (* The note kept in _note_target followed as a link: its chapter could not
@@ -2978,7 +2990,7 @@ fn _note_follow (): void =
   | ~NoNoteTarget() => ()
   | ~NoteTarget(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Opens the note fragment[0, fragment_len) of a chapter over the page (found once its
    chapter is read); when it cannot be found, the link is followed *)
@@ -3000,7 +3012,7 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(handle) => let
+         $P.finish<Int>($P.vow(decompressing), lam(handle) => let
            val () = (case+ take_content(handle) of
              | ~NoContentBytes() => _note_follow()
              | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -3008,7 +3020,7 @@ in
                  val () = _note_found(xhtml_bytes, xhtml_size)
                  val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
-         in $P.ret<int>(0) end))
+         in () end)
        end)
 end
 
@@ -3112,11 +3124,11 @@ in
     (if note then (if fragment_len > 0 then (if fragment_len <= 200 then let
         val () = _note_open(chapter, fragment, fragment_len)
       in true end
-      else let val () = _push_position() val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) in true end)
-      else let val () = _push_position() val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) in true end)
+      else let val () = _push_position() val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) in true end)
+      else let val () = _push_position() val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) in true end)
      else let
        val () = _push_position()
-       val () = $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len))
+       val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
      in true end)
   else let val () = $A.free<byte>(fragment) in kind = 2 end
 end
@@ -3129,7 +3141,7 @@ implement reader_note_go () =
   | ~NoNoteTarget() => ()
   | ~NoteTarget(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in $P.discard<int>(_goto_fragment(chapter, fragment, fragment_len)) end
+    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Whether the open book reads right to left *)
 #pub fun reader_rtl (): bool
@@ -3212,7 +3224,9 @@ in
     val () = _hit_count(hit, hit_count)
     val () = ui_show("search-nav", true)
   in
-    $P.discard<int>($P.and_then<int><int>(_goto(chapter, 0, node), lam(result) => let
+    (* the hit is marked only once its chapter is shown; a failure is
+       told by _jump_checked *)
+    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), lam(result) => let
       val () = (if result >= 0 then (if node >= 0 then let
           val () = $BDOM.clear_marks(2)
           val @(start_id, start_id_len) = nid_pad3("c", node)
@@ -3222,7 +3236,7 @@ in
           val () = $BDOM.mark_range(2, start_bytes, start_id_len, offset, end_bytes, end_id_len, offset + query_len)
           val () = release_bytes(end_frozen, end_bytes)
         in release_bytes(start_frozen, start_bytes) end else ()) else ())
-    in $P.ret<int>(0) end))
+    in $P.ret<int>(result) end))
   end
 end
 

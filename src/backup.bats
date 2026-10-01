@@ -13,6 +13,7 @@
 #use result as R
 
 staload "ui.sats"
+staload "notice.sats"
 staload "modal.sats"
 staload "book.sats"
 staload "library.sats"
@@ -464,7 +465,7 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), lam(handle) => let
           val () = (case+ take_content(handle) of
             | ~NoContentBytes() => _push(_text_chunk("[]"))
             | ~ContentBytes(content_owner, content, content_len) => let
@@ -476,8 +477,7 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
                 | ~JChunk(annotations_owner, annotations_bytes, annotations_len) =>
                   _push(JChunk(annotations_owner, annotations_bytes, annotations_len))
               end)
-          val () = _export_books(book_index + 1, count, false)
-        in $P.ret<int>(0) end))
+        in _export_books(book_index + 1, count, false) end)
       end)
 
 (* Downloads the backup, quire-backup.json *)
@@ -551,7 +551,7 @@ implement backup_orphan_put (id_high, id_low, numbers) = let
   val () = _orphan_write(record, numbers, 0)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, record_bytes, 4 + 4 * RECORD_NUMBERS))
+  val () = save_checked($IDB.idb_put(key_bytes, 15, record_bytes, 4 + 4 * RECORD_NUMBERS))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -623,12 +623,12 @@ implement backup_claim (id_high, id_low) = let
   val pending = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) =>
+  $P.finish<Int>($P.vow(pending), lam(handle) =>
     case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
+    | ~NoBlobBytes() => ()
     | ~BlobBytes(record, n) =>
-      if n < 4 + 4 * RECORD_NUMBERS_FIRST then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(record, 1)) <> 79 then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
+      if n < 4 + 4 * RECORD_NUMBERS_FIRST then $A.free<byte>(record)
+      else if byte2int0($A.get<byte>(record, 1)) <> 79 then $A.free<byte>(record)
       else let
         val numbers = backup_numbers_new()
         val () = _orphan_read(record, n, numbers)
@@ -636,9 +636,10 @@ in
         val () = _claim_apply(id_high, id_low, numbers)
         val () = $A.free<Int>(numbers)
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
-        val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
-        val () = release_bytes(key_frozen, key_bytes)
-      in $P.ret<int>(0) end))
+        (* ignored: a record not deleted is applied again only if the
+           book is imported again, which is harmless *)
+        val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+      in release_bytes(key_frozen, key_bytes) end)
 end
 
 (* ============================================================
@@ -1158,37 +1159,32 @@ in pending end
 
 implement backup_import () =
   if _backup_file_count() <= 0 then ()
-  else $P.discard<int>($P.and_then<Int><int>($P.vow(_backup_file_open()), lam(handle) => let
+  else $P.finish<Int>($P.vow(_backup_file_open()), lam(handle) => let
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in
     case+ $BF.file_claim(handle) of
-    | ~$R.none() => let
-        val () = _say("The backup could not be read.")
-      in $P.ret<int>(0) end
+    | ~$R.none() =>
+      _say("The backup could not be read.")
     | ~$R.some(file) => let
         val file_size = $BF.file_size(file)
       in
         if file_size <= 0 then let
           val () = $BF.file_close(file)
-          val () = _say("This file is not a Quire backup.")
-        in $P.ret<int>(0) end
+        in _say("This file is not a Quire backup.") end
         else if file_size > BACKUP_MAX_BYTES then let
           val () = $BF.file_close(file)
-          val () = _say("This file is too large to be a Quire backup.")
-        in $P.ret<int>(0) end
+        in _say("This file is too large to be a Quire backup.") end
         else (case+ piece_new(file_size) of
           | ~NoPiece() => let
               val () = $BF.file_close(file)
-              val () = _say("The backup could not be read: there is not enough memory.")
-            in $P.ret<int>(0) end
+            in _say("The backup could not be read: there is not enough memory.") end
           | ~Piece(owner, out) => let
               val () = $BF.file_read(file, 0, out, file_size)
               val () = $BF.file_close(file)
               val () = _restore(out, file_size)
-              val () = piece_free(owner, out)
-            in $P.ret<int>(0) end)
+            in piece_free(owner, out) end)
       end
-  end))
+  end)
 
 end (* #target wasm *)

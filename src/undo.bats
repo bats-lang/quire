@@ -50,15 +50,14 @@ implement undo_offer (text, undo, final) = let
   val () = ui_text("undo-text", text)
   val () = ui_show("undo-toast", true)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(SHOWN)), lam(_) =>
+  $P.finish<Int>($P.vow($TM.timer_set(SHOWN)), lam(_) =>
     case+ !_offer of
     | Offer(shown_serial, _, _) =>
       if shown_serial = serial then let
         val () = _settle()
-        val () = _hide()
-      in $P.ret<int>(0) end
-      else $P.ret<int>(0)
-    | NoOffer() => $P.ret<int>(0)))
+      in _hide() end
+      else ()
+    | NoOffer() => ())
 end
 
 (* The offer shown, made final and taken away: for what makes an undo

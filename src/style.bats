@@ -978,7 +978,7 @@ fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, 0)): [after:nat | after 
   val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sheet end
 
-fn _shell {left:nat | left >= 6300} (sheet: sheet(left, 0)): [after:nat | after >= left - 6300] sheet(after, 0) = let
+fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after >= left - 6600] sheet(after, 0) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, 1, 0)
@@ -1061,13 +1061,23 @@ fn _shell {left:nat | left >= 6300} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Padding(), "6px 10px")
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = close(sheet)
+  (* the error banner: at the top of the screen, over the library and
+     the reader (and over the overlays and toasts) until dismissed *)
   val sheet = rule(sheet, ".banner")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Top(), "max(8px,env(safe-area-inset-top))")
+  val sheet = lay(sheet, Left(), "50%")
+  val sheet = centre_x(sheet)
+  val sheet = lay(sheet, ZIndex(), "22")
+  val sheet = lay(sheet, Width(), "calc(100% - 32px)")
+  val sheet = lay(sheet, MaxWidth(), "640px")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "8px")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = lay(sheet, Padding(), "10px 12px")
   val sheet = lay(sheet, BorderRadius(), "6px")
+  val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = surf(S_bannerfg_banner | sheet, 13, 12)
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
@@ -1291,7 +1301,7 @@ fn _shell {left:nat | left >= 6300} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4400} (sheet: sheet(left, 0)): [after:nat | after >= left - 4400] sheet(after, 0) = let
+fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | after >= left - 4500] sheet(after, 0) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1345,6 +1355,11 @@ fn _overlays {left:nat | left >= 4400} (sheet: sheet(left, 0)): [after:nat | aft
   (* sync's toast, above the Undo toast *)
   val sheet = rule(sheet, ".toast.tup")
   val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 168px)")
+  val sheet = close(sheet)
+  (* the copy status, above sync's: text alone, with no button *)
+  val sheet = rule(sheet, ".toast.tcopy")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 224px)")
+  val sheet = lay(sheet, Padding(), "10px 16px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")

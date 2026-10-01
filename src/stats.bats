@@ -11,6 +11,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "notice.sats"
 staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
@@ -132,7 +133,7 @@ fn _save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count))
+  val () = save_checked($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -171,7 +172,7 @@ fn _elsewhere_save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_elsewhere_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count))
+  val () = save_checked($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -180,7 +181,7 @@ fn _elsewhere_load (): void = let
   val pending = $IDB.idb_get(key_bytes, 14)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), lam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>
@@ -189,7 +190,7 @@ in
         else let
           val () = !_days_elsewhere := _read_days(record, n, 8, DAYS)
         in $A.free<byte>(record) end)
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 (* Reads the log stored in an earlier run *)
@@ -198,7 +199,7 @@ implement stats_load () = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
   val pending = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
-  val () = $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+  val () = $P.finish<Int>($P.vow(pending), lam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>
@@ -209,7 +210,7 @@ implement stats_load () = let
           val () = !_goal := (if goal >= 0 then (if goal <= 600 then goal else 0) else 0)
           val () = !_days := _read_days(record, n, 8, DAYS)
         in $A.free<byte>(record) end)
-  in $P.ret<int>(0) end))
+  in () end)
   (* and the days read elsewhere *)
 in _elsewhere_load() end
 

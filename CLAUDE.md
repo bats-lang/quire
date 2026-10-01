@@ -344,6 +344,22 @@ exported, so other code can dismiss a dialog (`modal_dismiss`) but
 never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
 
+No promise's value is dropped unread (`$P.discard` is not used): a
+chain ends with `$P.finish`, and a value it ignores is written out as
+`lam(_) => ()`, with a comment saying why losing it is harmless (a
+cover, a hint, a delete nothing reads again). What fails is said
+(`src/notice.bats`): the error banner (`error-banner`, `RAlert`) is a
+child of `bats-root`, so it shows over the library and the reader
+alike. A write of the reader's own data (the library, annotations,
+settings, statistics, catalogues, dictionaries, sync's store) ends in
+`save_checked`, which says once a session that storage may be full; a
+book whose own file was not stored is named (`_book_store_checked` in
+`src/import.bats`). A chapter that cannot be shown leaves the reader on
+the page it was on (`_jump_checked` in `src/reader.bats`), or, as a book
+opens, back in the library; either way the banner says why. A copy is
+confirmed by the copy status (`copy-status`, `RStatus`), apart from the
+Undo toast.
+
 The overlays (the menus, book info and the reader's panels) are a
 `layer` (`src/layer.bats`), whose element ids only that module knows:
 they are shown and hidden only by `layer_open` and `layer_close`, which

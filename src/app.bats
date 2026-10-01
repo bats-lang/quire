@@ -58,8 +58,8 @@ implement app_book_search () = let
   val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
 in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
 
-(* The library view: toolbar, error banner, import progress, the list of
-   books and the empty-library message *)
+(* The library view: toolbar, import progress, the list of books and the
+   empty-library message *)
 fn _library (): void = let
   val () = ui_el("bats-root", "library", TDiv, "lib")
   (* EPUBs the system opens with the installed app, or shares with it,
@@ -76,12 +76,6 @@ fn _library (): void = let
   val () = ui_icon_btn("library-bar", "library-menu-button", "ibtn", IcGear, "Library menu")
   val () = ui_el("library-bar", "library-search-box", TDiv, "sfield")
   val () = app_library_search()
-  (* error banner *)
-  val () = ui_el("library", "error-banner", TDiv, "banner")
-  val () = ui_role("error-banner", RAlert)
-  val () = ui_add("error-banner", "error-text", TSpan)
-  val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
-  val () = _hide("error-banner")
   (* on iOS Safari (the stylesheet shows it only there), once the
      library has a book: installing is how its books are kept *)
   val () = ui_el("library", "install-hint", TDiv, "ihint")
@@ -311,6 +305,18 @@ fn _modal (): void = let
   val () = ui_text_btn("dialog-buttons", "dialog-button1", "btn", "-")
   val () = ui_text_btn("dialog-buttons", "dialog-button2", "btn btn-p", "-")
 in _hide("dialog") end
+
+(* The error banner, over the library and the reader alike, until it is
+   dismissed; and the copy status, apart from the Undo toast (notice.bats) *)
+fn _notices (): void = let
+  val () = ui_el("bats-root", "error-banner", TDiv, "banner")
+  val () = ui_role("error-banner", RAlert)
+  val () = ui_add("error-banner", "error-text", TSpan)
+  val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
+  val () = _hide("error-banner")
+  val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")
+  val () = ui_role("copy-status", RStatus)
+in _hide("copy-status") end
 
 (* The Undo toast: what was just done, and a way back *)
 fn _undo_toast (): void = let
@@ -693,6 +699,7 @@ implement app_build () = let
   val () = ui_text_buf("style-sheet", css, css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
+  val () = _notices()
   val () = _library()
   val () = _context_menu()
   val () = _collections()
