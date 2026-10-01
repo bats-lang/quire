@@ -15,7 +15,6 @@
 #use arith as AR
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "layer.sats"
@@ -29,6 +28,7 @@ staload "opds.sats"
 staload "url.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The most catalogues kept *)
 #define MOST_CATALOGUES 64
@@ -412,14 +412,14 @@ in
   case+ value of
   | ~$R.none() => kept_none()
   | ~$R.some(blob) => let
-      val value_len = $DC.blob_len(blob)
+      val value_len = $BD.blob_len(blob)
     in
-      if value_len <= 0 then let val () = $DC.blob_free(blob) in kept_none() end
-      else if value_len > most then let val () = $DC.blob_free(blob) in kept_none() end
+      if value_len <= 0 then let val () = $BD.blob_free(blob) in kept_none() end
+      else if value_len > most then let val () = $BD.blob_free(blob) in kept_none() end
       else let
         val bytes = $A.alloc<byte>(value_len)
-        val () = $DC.blob_read(blob, 0, bytes, value_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, bytes, value_len)
+        val () = $BD.blob_free(blob)
         val start = _trim_start(bytes, 0, value_len)
         val stop = _trim_end(bytes, start, value_len)
         val text_len = stop - start

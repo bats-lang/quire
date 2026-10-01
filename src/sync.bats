@@ -16,7 +16,6 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "layer.sats"
@@ -34,6 +33,7 @@ staload FE = "wasm.bats-packages.dev/bridge/src/fetch.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -540,25 +540,25 @@ in
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(ReadFailed(_unreached(), 0)) end
       | ~$R.some(@(status, etag_len, body)) =>
         if status = 404 then let
-          val () = $DC.blob_free(body)
+          val () = $BD.blob_free(body)
           (* no file yet: it is written without a version to match *)
           val () = _etag_set(etag, 0)
         in answer(ReadNothing()) end
         else if (if status < 200 then true else status >= 300) then let
-          val () = $DC.blob_free(body)
+          val () = $BD.blob_free(body)
           val () = $A.free<byte>(etag)
         in answer(ReadFailed(_failure_kind(status), status)) end
         else let
-          val size = $DC.blob_len(body)
+          val size = $BD.blob_len(body)
           val () = _etag_set(etag, etag_len)
         in
-          if size > SYNC_MAX_BYTES then let val () = $DC.blob_free(body) in answer(ReadFailed(RESULT_TOO_LARGE, 0)) end
-          else if size <= 0 then let val () = $DC.blob_free(body) in answer(ReadNothing()) end
+          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in answer(ReadFailed(RESULT_TOO_LARGE, 0)) end
+          else if size <= 0 then let val () = $BD.blob_free(body) in answer(ReadNothing()) end
           else (case+ piece_new(size) of
-            | ~NoPiece() => let val () = $DC.blob_free(body) in answer(ReadFailed(RESULT_MEMORY, 0)) end
+            | ~NoPiece() => let val () = $BD.blob_free(body) in answer(ReadFailed(RESULT_MEMORY, 0)) end
             | ~Piece(owner, file) => let
-                val () = $DC.blob_read(body, 0, file, size)
-                val () = $DC.blob_free(body)
+                val () = $BD.blob_read(body, 0, file, size)
+                val () = $BD.blob_free(body)
               in answer(ReadFile(owner, file, size)) end)
         end)
   in $P.ret<int>(0) end))
@@ -576,7 +576,7 @@ in
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(WriteFailed(_unreached(), 0)) end
       | ~$R.some(@(status, _, reply)) => let
           val () = $A.free<byte>(etag)
-          val () = $DC.blob_free(reply)
+          val () = $BD.blob_free(reply)
         in
           if status = 412 then answer(WriteConflict())
           else if (if status >= 200 then status < 300 else false) then answer(Written())
@@ -1673,10 +1673,10 @@ in
   case+ value of
   | ~$R.none() => @(out, 0)
   | ~$R.some(blob) => let
-      val blob_len = $DC.blob_len(blob)
+      val blob_len = $BD.blob_len(blob)
       val value_len = _within(blob_len, most)
-      val () = $DC.blob_read(blob, 0, out, value_len)
-      val () = $DC.blob_free(blob)
+      val () = $BD.blob_read(blob, 0, out, value_len)
+      val () = $BD.blob_free(blob)
     in @(out, value_len) end
 end
 

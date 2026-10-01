@@ -5,7 +5,6 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 #use gestures as G
 
 staload "book.sats"
@@ -40,6 +39,7 @@ staload WN = "wasm.bats-packages.dev/bridge/src/window.sats"
 staload GP = "gestures/src/pointer.sats"
 staload GT = "gestures/src/tracker.sats"
 staload GD = "gestures/src/decode.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* ============================================================
    State
@@ -647,7 +647,7 @@ fn _clamp {low,high:int | low <= high} (value: Int, low: int low, high: int high
 fn _has_selection (): bool =
   case+ $DR.get_selection_text() of
   | ~$R.none() => false
-  | ~$R.some(selection) => let val () = $DC.blob_free(selection) in true end
+  | ~$R.some(selection) => let val () = $BD.blob_free(selection) in true end
 
 (* The selected text, to the clipboard *)
 (* Look up: the selection's first 64 bytes (cut where a character
@@ -766,14 +766,14 @@ fn _lookup_update (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
   | ~$R.some(selection) => let
-      val selection_len = $DC.blob_len(selection)
+      val selection_len = $BD.blob_len(selection)
     in
-      if selection_len <= 0 then $DC.blob_free(selection)
-      else if selection_len > 4096 then $DC.blob_free(selection)
+      if selection_len <= 0 then $BD.blob_free(selection)
+      else if selection_len > 4096 then $BD.blob_free(selection)
       else let
         val text = $A.alloc<byte>(selection_len)
-        val () = $DC.blob_read(selection, 0, text, selection_len)
-        val () = $DC.blob_free(selection)
+        val () = $BD.blob_read(selection, 0, text, selection_len)
+        val () = $BD.blob_free(selection)
         val start = _trim_start(text, selection_len, 0)
         val trimmed_end = _trim_end(text, start, selection_len)
         val cut_end = _cut(text, start, trimmed_end)
@@ -799,14 +799,14 @@ fn _copy_selection (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
   | ~$R.some(selection) => let
-      val selection_len = $DC.blob_len(selection)
+      val selection_len = $BD.blob_len(selection)
     in
-      if selection_len <= 0 then $DC.blob_free(selection)
-      else if selection_len > 1048576 then $DC.blob_free(selection)
+      if selection_len <= 0 then $BD.blob_free(selection)
+      else if selection_len > 1048576 then $BD.blob_free(selection)
       else let
         val text = $A.alloc<byte>(selection_len)
-        val () = $DC.blob_read(selection, 0, text, selection_len)
-        val () = $DC.blob_free(selection)
+        val () = $BD.blob_read(selection, 0, text, selection_len)
+        val () = $BD.blob_free(selection)
         val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
         val () = $P.discard<Int>($P.vow($CB.clipboard_write(text_bytes, selection_len)))
       in release_bytes(text_frozen, text_bytes) end
@@ -1230,16 +1230,16 @@ in
   case+ value_read of
   | ~$R.none() => reader_search($A.alloc<byte>(1), 0)
   | ~$R.some(value) => let
-      val query_len = $DC.blob_len(value)
+      val query_len = $BD.blob_len(value)
     in
       if query_len <= 0 then let
-        val () = $DC.blob_free(value)
+        val () = $BD.blob_free(value)
       in reader_search($A.alloc<byte>(1), 0) end
-      else if query_len > 65535 then $DC.blob_free(value)
+      else if query_len > 65535 then $BD.blob_free(value)
       else let
         val query = $A.alloc<byte>(query_len)
-        val () = $DC.blob_read(value, 0, query, query_len)
-        val () = $DC.blob_free(value)
+        val () = $BD.blob_read(value, 0, query, query_len)
+        val () = $BD.blob_free(value)
       in reader_search(query, query_len) end
     end
 end
@@ -1259,16 +1259,16 @@ fn _search_selection (): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
   | ~$R.some(selection) => let
-      val selection_len = $DC.blob_len(selection)
+      val selection_len = $BD.blob_len(selection)
     in
-      if selection_len <= 0 then $DC.blob_free(selection)
-      else if selection_len > 1000 then $DC.blob_free(selection)
+      if selection_len <= 0 then $BD.blob_free(selection)
+      else if selection_len > 1000 then $BD.blob_free(selection)
       else let
         val field_text = $A.alloc<byte>(selection_len)
-        val () = $DC.blob_read(selection, 0, field_text, selection_len)
+        val () = $BD.blob_read(selection, 0, field_text, selection_len)
         val query = $A.alloc<byte>(selection_len)
-        val () = $DC.blob_read(selection, 0, query, selection_len)
-        val () = $DC.blob_free(selection)
+        val () = $BD.blob_read(selection, 0, query, selection_len)
+        val () = $BD.blob_free(selection)
         val () = _search_field(field_text, selection_len)
         val () = layer_open(LSearch())
         val () = !_search_tick := !_search_tick + 1

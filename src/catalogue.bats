@@ -18,8 +18,6 @@
 #use arith as AR
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
-#use wasm.bats-packages.dev/file-input as FI
 
 staload "ui.sats"
 staload "layer.sats"
@@ -31,6 +29,8 @@ staload "url.sats"
 staload "import.sats"
 staload "catalogues.sats"
 staload FE = "wasm.bats-packages.dev/bridge/src/fetch.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 
 (* The most bytes a page of a catalogue is read in *)
 #define FEED_MOST 4194304
@@ -183,18 +183,18 @@ fn _claim {most:pos | most <= 268435456} (handle: Int, most: int most): fetched 
   | ~$R.some(response) => let
       val @(status, blob) = response
     in
-      if status < 200 then let val () = $DC.blob_free(blob) in Refused(status) end
-      else if status > 299 then let val () = $DC.blob_free(blob) in Refused(status) end
+      if status < 200 then let val () = $BD.blob_free(blob) in Refused(status) end
+      else if status > 299 then let val () = $BD.blob_free(blob) in Refused(status) end
       else let
-        val size = $DC.blob_len(blob)
+        val size = $BD.blob_len(blob)
       in
-        if size <= 0 then let val () = $DC.blob_free(blob) in Empty() end
-        else if size > most then let val () = $DC.blob_free(blob) in TooLarge() end
+        if size <= 0 then let val () = $BD.blob_free(blob) in Empty() end
+        else if size > most then let val () = $BD.blob_free(blob) in TooLarge() end
         else (case+ piece_new(size) of
-          | ~NoPiece() => let val () = $DC.blob_free(blob) in TooLarge() end
+          | ~NoPiece() => let val () = $BD.blob_free(blob) in TooLarge() end
           | ~Piece(owner, piece) => let
-              val () = $DC.blob_read(blob, 0, piece, size)
-              val () = $DC.blob_free(blob)
+              val () = $BD.blob_read(blob, 0, piece, size)
+              val () = $BD.blob_free(blob)
             in Fetched(owner, piece, size) end)
       end
     end
@@ -528,7 +528,7 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
   case+ got of
   | ~Fetched(owner, piece, size) => let
       val @(frozen, borrowed) = $A.freeze<byte>(piece)
-      val book_file = $FI.file_store(borrowed, size)
+      val book_file = $BF.file_store(borrowed, size)
       val () = $A.drop<byte>(frozen, borrowed)
       val () = piece_free(owner, $A.thaw<byte>(frozen))
       val title = (if request = !_request then _shown_entry(index, 2) else kept_none()): kept

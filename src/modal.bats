@@ -5,13 +5,13 @@
 #include "share/atspre_staload.hats"
 #use array as A
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload "mem.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The questions that lose nothing *)
 #pub datatype question =
@@ -144,14 +144,14 @@ in
   case+ value_read of
   | ~$R.none() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
   | ~$R.some(value) => let
-      val value_len = $DC.blob_len(value)
+      val value_len = $BD.blob_len(value)
     in
-      if value_len <= 0 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
-      else if value_len > 1024 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
+      if value_len <= 0 then let val () = $BD.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
+      else if value_len > 1024 then let val () = $BD.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
       else let
         val name = $A.alloc<byte>(value_len)
-        val () = $DC.blob_read(value, 0, name, value_len)
-        val () = $DC.blob_free(value)
+        val () = $BD.blob_read(value, 0, name, value_len)
+        val () = $BD.blob_free(value)
       in @(name, value_len) end
     end
 end
