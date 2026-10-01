@@ -51,64 +51,64 @@ implement modal_open_now () =
   | Pending(AskNothing(), _, _) => false
   | _ => true
 
-typedef lit = [k:pos | k < 256] string k
+typedef lit = [length:pos | length < 256] string length
 
 (* A harm's title, text and the verb of the button that does it *)
-fn _harm_words (h: harm): @(lit, lit, lit) =
-  case+ h of
+fn _harm_words (the_harm: harm): @(lit, lit, lit) =
+  case+ the_harm of
   | HEmptyTrash() => @("Empty the Trash?", "Every book in the Trash is deleted, with its reading position and annotations. This cannot be undone.", "Empty")
 
-(* The buttons' labels and the second one's tone for question a:
-   Danger(h) exactly when a is Harmful(h) *)
-fn _buttons (a: ask): @(lit, lit, tone) =
-  case+ a of
+(* The buttons' labels and the second one's tone for question asked:
+   Danger(the_harm) exactly when asked is Harmful(the_harm) *)
+fn _buttons (asked: ask): @(lit, lit, tone) =
+  case+ asked of
   | AskNothing() => @("OK", "-", Plain)
   | Harmless(QInform()) => @("OK", "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
   | Harmless(QNote()) => @("Cancel", "Save", Plain)
   | Harmless(QNewCollection()) => @("Cancel", "Create", Plain)
   | Harmless(QRenameCollection()) => @("Cancel", "Rename", Plain)
-  | Harmful(h) => let val @(_, _, verb) = _harm_words(h) in @("Cancel", verb, Danger(h)) end
+  | Harmful(the_harm) => let val @(_, _, verb) = _harm_words(the_harm) in @("Cancel", verb, Danger(the_harm)) end
 
-fn _show {nt:pos | nt < 256} (a: ask, title: string nt, yes: act, no: act): void = let
-  val () = !_pending := Pending(a, yes, no)
-  val @(b1, b2, t) = _buttons(a)
+fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len, yes: act, no: act): void = let
+  val () = !_pending := Pending(asked, yes, no)
+  val @(first_label, second_label, second_tone) = _buttons(asked)
   val () = ui_text("dialog-title", title)
-  val () = ui_text("dialog-button1", b1)
-  val () = ui_text("dialog-button2", b2)
-  val () = (case+ t of
+  val () = ui_text("dialog-button1", first_label)
+  val () = ui_text("dialog-button2", second_label)
+  val () = (case+ second_tone of
     | Danger(_) => ui_class("dialog-button2", "btn")
     | Plain() => ui_class("dialog-button2", "btn btn-p"))
-  val () = ui_tone("dialog-button2", t)
-  val () = ui_show("dialog-button2", string_get_at(b2, 0) <> '-')
+  val () = ui_tone("dialog-button2", second_tone)
+  val () = ui_show("dialog-button2", string_get_at(second_label, 0) <> '-')
   val () = ui_show("dialog-text", true)
   val () = ui_show("dialog-note", false)
   val () = ui_show("dialog-name-box", false)
   val () = ui_show("dialog", true)
 in ui_focus("dialog-button1") end
 
-(* Opens the dialog asking q, with its title: yes runs on its second
+(* Opens the dialog asking the question asked, with its title: yes runs on its second
    button, no on its first (or Escape, or a click outside) *)
-#pub fn modal_open {nt:pos | nt < 256} (q: question, title: string nt, yes: () -<cloref1> void, no: () -<cloref1> void): void
-implement modal_open (q, title, yes, no) = _show(Harmless(q), title, yes, no)
+#pub fn modal_open {title_len:pos | title_len < 256} (asked: question, title: string title_len, yes: () -<cloref1> void, no: () -<cloref1> void): void
+implement modal_open (asked, title, yes, no) = _show(Harmless(asked), title, yes, no)
 
 (* A message with its title: OK *)
-#pub fn modal_inform {nt:pos | nt < 256} (title: string nt): void
+#pub fn modal_inform {title_len:pos | title_len < 256} (title: string title_len): void
 implement modal_inform (title) = _show(Harmless(QInform()), title, _none, _none)
 
-(* Asks whether to do h, which yes does: h's title, text and red button *)
-#pub fn modal_confirm (h: harm, yes: () -<cloref1> void): void
-implement modal_confirm (h, yes) = let
-  val @(title, text, _) = _harm_words(h)
-  val () = _show(Harmful(h), title, yes, _none)
+(* Asks whether to do the_harm, which yes does: the_harm's title, text and red button *)
+#pub fn modal_confirm (the_harm: harm, yes: () -<cloref1> void): void
+implement modal_confirm (the_harm, yes) = let
+  val @(title, text, _) = _harm_words(the_harm)
+  val () = _show(Harmful(the_harm), title, yes, _none)
 in ui_text("dialog-text", text) end
 
-(* The dialog's text: buf[0, k) *)
-#pub fn modal_text {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (buf: $A.arr(byte, l, n), k: int k): void
-implement modal_text (buf, k) = ui_text_buf("dialog-text", buf, k)
+(* The dialog's text: buf[0, text_len) *)
+#pub fn modal_text {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536} (buf: $A.arr(byte, l, n), text_len: int text_len): void
+implement modal_text (buf, text_len) = ui_text_buf("dialog-text", buf, text_len)
 
-#pub fn modal_text_lit {nt:pos | nt < 256} (t: string nt): void
-implement modal_text_lit (t) = ui_text("dialog-text", t)
+#pub fn modal_text_lit {text_len:pos | text_len < 256} (text: string text_len): void
+implement modal_text_lit (text) = ui_text("dialog-text", text)
 
 (* Shows the dialog's text area (for a note) instead of its text *)
 #pub fn modal_textarea (): void
@@ -128,31 +128,31 @@ implement modal_name_field () = let
   val () = ui_show("dialog-name-box", true)
 in ui_focus("dialog-name") end
 
-(* The name field holding b[0, k) *)
-#pub fn modal_name_set {l:agz}{n:pos}{k:pos | k <= n; k < 65536} (b: $A.arr(byte, l, n), k: int k): void
-implement modal_name_set (b, k) = ui_attr_buf("dialog-name", AValue, b, k)
+(* The name field holding name[0, name_len) *)
+#pub fn modal_name_set {l:agz}{n:pos}{name_len:pos | name_len <= n; name_len < 65536} (name: $A.arr(byte, l, n), name_len: int name_len): void
+implement modal_name_set (name, name_len) = ui_attr_buf("dialog-name", AValue, name, name_len)
 
 (* What the name field holds: its bytes (at most 1024) and how many *)
-#pub fn modal_name_read (): [l:agz][m:pos][k:nat | k <= m] @($A.arr(byte, l, m), int k)
+#pub fn modal_name_read (): [l:agz][n:pos][name_len:nat | name_len <= n] @($A.arr(byte, l, n), int name_len)
 implement modal_name_read () = let
-  val a = $A.alloc<byte>(11)
-  val () = $A.write_text(a, 0, $A.text_lit("dialog-name"), 11)
-  val @(f, b) = $A.freeze<byte>(a)
-  val r = $DR.read_input_value(b, 11)
-  val () = release_bytes(f, b)
+  val field_id = $A.alloc<byte>(11)
+  val () = $A.write_text(field_id, 0, $A.text_lit("dialog-name"), 11)
+  val @(field_id_frozen, field_id_bytes) = $A.freeze<byte>(field_id)
+  val value_read = $DR.read_input_value(field_id_bytes, 11)
+  val () = release_bytes(field_id_frozen, field_id_bytes)
 in
-  case+ r of
-  | ~$R.none() => let val a0 = $A.alloc<byte>(1) in @(a0, 0) end
-  | ~$R.some(v) => let
-      val n = $DC.blob_len(v)
+  case+ value_read of
+  | ~$R.none() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | ~$R.some(value) => let
+      val value_len = $DC.blob_len(value)
     in
-      if n <= 0 then let val () = $DC.blob_free(v) in let val a0 = $A.alloc<byte>(1) in @(a0, 0) end end
-      else if n > 1024 then let val () = $DC.blob_free(v) in let val a0 = $A.alloc<byte>(1) in @(a0, 0) end end
+      if value_len <= 0 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
+      else if value_len > 1024 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
       else let
-        val a = $A.alloc<byte>(n)
-        val () = $DC.blob_read(v, 0, a, n)
-        val () = $DC.blob_free(v)
-      in @(a, n) end
+        val name = $A.alloc<byte>(value_len)
+        val () = $DC.blob_read(value, 0, name, value_len)
+        val () = $DC.blob_free(value)
+      in @(name, value_len) end
     end
 end
 
@@ -169,27 +169,27 @@ in if second then yes() else no() end
 #pub fn modal_dismiss (): void
 implement modal_dismiss () = if modal_open_now() then _answer(false) else ()
 
-(* Whether b[10, n), a pointer event's target id, is id *)
-fun _id_is {l:agz}{n:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
-  (b: !$A.arr(byte, l, n), n: int n, s: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then 10 + sl = n
+(* Whether event_bytes[10, n), a pointer event's target id, is id *)
+fun _id_is {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
+  (event_bytes: !$A.arr(byte, l, n), n: int n, id: string id_len, id_len: int id_len, i: int i): bool =
+  if i >= id_len then 10 + id_len = n
   else if 10 + i >= n then false
-  else if byte2int0($A.get<byte>(b, 10 + i)) <> char2int0(string_get_at(s, i)) then false
-  else _id_is(b, n, s, sl, i + 1)
+  else if byte2int0($A.get<byte>(event_bytes, 10 + i)) <> char2int0(string_get_at(id, i)) then false
+  else _id_is(event_bytes, n, id, id_len, i + 1)
 
-fn _target_is {l:agz}{n:nat}{sn:nat} (b: !$A.arr(byte, l, n), n: int n, s: string sn): bool =
-  _id_is(b, n, s, g1u2i(string1_length(s)), 0)
+fn _target_is {l:agz}{n:nat}{id_len:nat} (event_bytes: !$A.arr(byte, l, n), n: int n, id: string id_len): bool =
+  _id_is(event_bytes, n, id, g1u2i(string1_length(id)), 0)
 
-(* Whether a key event's bytes b[0, n) (the key's name, after its
+(* Whether a key event's bytes key_bytes[0, n) (the key's name, after its
    length) are Enter's *)
-fn _enter {l:agz}{n:nat} (b: !$A.arr(byte, l, n), n: int n): bool =
+fn _enter {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): bool =
   if n <> 7 then false
-  else if byte2int0($A.get<byte>(b, 0)) <> 5 then false
-  else if byte2int0($A.get<byte>(b, 1)) <> 69 then false
-  else if byte2int0($A.get<byte>(b, 2)) <> 110 then false
-  else if byte2int0($A.get<byte>(b, 3)) <> 116 then false
-  else if byte2int0($A.get<byte>(b, 4)) <> 101 then false
-  else byte2int0($A.get<byte>(b, 5)) = 114
+  else if byte2int0($A.get<byte>(key_bytes, 0)) <> 5 then false
+  else if byte2int0($A.get<byte>(key_bytes, 1)) <> 69 then false
+  else if byte2int0($A.get<byte>(key_bytes, 2)) <> 110 then false
+  else if byte2int0($A.get<byte>(key_bytes, 3)) <> 116 then false
+  else if byte2int0($A.get<byte>(key_bytes, 4)) <> 101 then false
+  else byte2int0($A.get<byte>(key_bytes, 5)) = 114
 
 (* Whether the open question asks for a name *)
 fn _asks_name (): bool =
@@ -201,14 +201,14 @@ fn _asks_name (): bool =
 (* The dialog's listeners: its buttons and a click outside its box; and
    Enter in its name field, which answers as its second button does
    (only a question asking for a name has that field) *)
-#pub fn modal_listen {n:nat} (r: regs(n)): regs(n + 2)
-implement modal_listen (r) = let
-  val r = RCons(r, OnEl("dialog-name-box"), "keydown", lam(h) =>
+#pub fn modal_listen {count:nat} (listeners: regs(count)): regs(count + 2)
+implement modal_listen (listeners) = let
+  val listeners = RCons(listeners, OnEl("dialog-name-box"), "keydown", lam(h) =>
     case+ take_blob(h) of
     | ~NoBlobBytes() => 0
-    | ~BlobBytes(b, n) => let
-        val enter = _enter(b, n)
-        val () = $A.free<byte>(b)
+    | ~BlobBytes(event_bytes, n) => let
+        val enter = _enter(event_bytes, n)
+        val () = $A.free<byte>(event_bytes)
       in
         if enter && _asks_name() then let
           val () = $EV.prevent_default()
@@ -216,13 +216,13 @@ implement modal_listen (r) = let
         in 0 end
         else 0
       end)
-in RCons(r, OnEl("dialog"), "click", lam(h) =>
+in RCons(listeners, OnEl("dialog"), "click", lam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
-  | ~BlobBytes(b, n) => let
-      val second = _target_is(b, n, "dialog-button2")
-      val first = (if _target_is(b, n, "dialog-button1") then true else _target_is(b, n, "dialog")): bool
-      val () = $A.free<byte>(b)
+  | ~BlobBytes(event_bytes, n) => let
+      val second = _target_is(event_bytes, n, "dialog-button2")
+      val first = (if _target_is(event_bytes, n, "dialog-button1") then true else _target_is(event_bytes, n, "dialog")): bool
+      val () = $A.free<byte>(event_bytes)
     in
       if second then let val () = _answer(true) in 0 end
       else if first then let val () = _answer(false) in 0 end

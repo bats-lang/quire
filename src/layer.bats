@@ -24,15 +24,15 @@ staload "ui.sats"
   | LCollections   (* a book's collections *)
   | LStats         (* the reading statistics *)
 
-fn _id (l: layer): [k:pos | k < 256] string k =
-  case+ l of
+fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
+  case+ overlay of
   | LBookMenu() => "card-menu" | LLibraryMenu() => "library-menu" | LBookInfo() => "book-info"
   | LContents() => "contents-panel" | LTypography() => "typography-panel" | LSearch() => "search-panel"
   | LAnnotations() => "annotations-panel" | LNote() => "footnote" | LImage() => "image-viewer"
   | LCollections() => "collections-menu" | LStats() => "stats-panel"
 
-fn _n (l: layer): int =
-  case+ l of
+fn _number (overlay: layer): int =
+  case+ overlay of
   | LBookMenu() => 0 | LLibraryMenu() => 1 | LBookInfo() => 2 | LContents() => 3
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
   | LCollections() => 9 | LStats() => 10
@@ -40,49 +40,49 @@ fn _n (l: layer): int =
 (* The open overlays, the last opened first *)
 datatype layers(int) =
   | LNil(0)
-  | {n:nat} LCons(n + 1) of (layer, layers(n))
+  | {count:nat} LCons(count + 1) of (layer, layers(count))
 
-val _open = ref<[n:nat] layers(n)>(LNil())
+val _open = ref<[count:nat] layers(count)>(LNil())
 
-(* ls without l *)
-fun _without {n:nat} .<n>. (ls: layers(n), l: layer): [m:nat | m <= n] layers(m) =
-  case+ ls of
+(* overlays without overlay *)
+fun _without {count:nat} .<count>. (overlays: layers(count), overlay: layer): [left:nat | left <= count] layers(left) =
+  case+ overlays of
   | LNil() => LNil()
-  | LCons(x, rest) => if _n(x) = _n(l) then _without(rest, l) else LCons(x, _without(rest, l))
+  | LCons(first, rest) => if _number(first) = _number(overlay) then _without(rest, overlay) else LCons(first, _without(rest, overlay))
 
-fun _has {n:nat} .<n>. (ls: layers(n), l: layer): bool =
-  case+ ls of
+fun _has {count:nat} .<count>. (overlays: layers(count), overlay: layer): bool =
+  case+ overlays of
   | LNil() => false
-  | LCons(x, rest) => if _n(x) = _n(l) then true else _has(rest, l)
+  | LCons(first, rest) => if _number(first) = _number(overlay) then true else _has(rest, overlay)
 
-(* Opens l on top of the others (moving it there if it was open) *)
-#pub fn layer_open (l: layer): void
-implement layer_open (l) = let
-  val () = !_open := LCons(l, _without(!_open, l))
-in ui_show(_id(l), true) end
+(* Opens overlay on top of the others (moving it there if it was open) *)
+#pub fn layer_open (overlay: layer): void
+implement layer_open (overlay) = let
+  val () = !_open := LCons(overlay, _without(!_open, overlay))
+in ui_show(_element_id(overlay), true) end
 
-(* Closes l *)
-#pub fn layer_close (l: layer): void
-implement layer_close (l) = let
-  val () = !_open := _without(!_open, l)
-in ui_show(_id(l), false) end
+(* Closes overlay *)
+#pub fn layer_close (overlay: layer): void
+implement layer_close (overlay) = let
+  val () = !_open := _without(!_open, overlay)
+in ui_show(_element_id(overlay), false) end
 
-(* Whether l is open *)
-#pub fn layer_is_open (l: layer): bool
-implement layer_is_open (l) = _has(!_open, l)
+(* Whether overlay is open *)
+#pub fn layer_is_open (overlay: layer): bool
+implement layer_is_open (overlay) = _has(!_open, overlay)
 
-fun _close_each {n:nat} .<n>. (ls: layers(n)): void =
-  case+ ls of
+fun _close_each {count:nat} .<count>. (overlays: layers(count)): void =
+  case+ overlays of
   | LNil() => ()
-  | LCons(x, rest) => let val () = ui_show(_id(x), false) in _close_each(rest) end
+  | LCons(first, rest) => let val () = ui_show(_element_id(first), false) in _close_each(rest) end
 
 (* Closes every overlay; true when one was open *)
 #pub fn layer_close_all (): bool
 implement layer_close_all () = let
-  val ls = !_open
+  val overlays = !_open
   val () = !_open := LNil()
-  val () = _close_each(ls)
-in case+ ls of LNil() => false | LCons(_, _) => true end
+  val () = _close_each(overlays)
+in case+ overlays of LNil() => false | LCons(_, _) => true end
 
 (* The answer to Escape: the overlay opened last is closed, and returned *)
 #pub datatype escaped = Escaped of layer | NothingOpen
@@ -91,9 +91,9 @@ in case+ ls of LNil() => false | LCons(_, _) => true end
 implement layer_escape () =
   case+ !_open of
   | LNil() => NothingOpen()
-  | LCons(l, rest) => let
+  | LCons(overlay, rest) => let
       val () = !_open := rest
-      val () = ui_show(_id(l), false)
-    in Escaped(l) end
+      val () = ui_show(_element_id(overlay), false)
+    in Escaped(overlay) end
 
 end (* #target wasm *)

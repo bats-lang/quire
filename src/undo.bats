@@ -40,20 +40,20 @@ fn _settle (): void =
 (* Offers to undo what was just done, saying text: undo undoes it;
    final runs when the toast goes without being used. An earlier offer
    still shown is made final first *)
-#pub fn undo_offer {nt:pos | nt < 256} (text: string nt, undo: () -<cloref1> void, final: () -<cloref1> void): void
+#pub fn undo_offer {text_len:pos | text_len < 256} (text: string text_len, undo: () -<cloref1> void, final: () -<cloref1> void): void
 
 implement undo_offer (text, undo, final) = let
   val () = _settle()
-  val s = !_serial + 1
-  val () = !_serial := s
-  val () = !_offer := Offer(s, undo, final)
+  val serial = !_serial + 1
+  val () = !_serial := serial
+  val () = !_offer := Offer(serial, undo, final)
   val () = ui_text("undo-text", text)
   val () = ui_show("undo-toast", true)
 in
   $P.discard<int>($P.and_then<Int><int>($P.vow($TM.timer_set(SHOWN)), lam(_) =>
     case+ !_offer of
-    | Offer(s2, _, _) =>
-      if s2 = s then let
+    | Offer(shown_serial, _, _) =>
+      if shown_serial = serial then let
         val () = _settle()
         val () = _hide()
       in $P.ret<int>(0) end
@@ -77,22 +77,22 @@ fn _undo (): void =
       val () = _hide()
     in undo() end
 
-(* Whether b[10, n), a pointer event's target id, is id *)
-fun _id_is {l:agz}{n:nat}{sn:nat}{i:nat | i <= sn} .<sn - i>.
-  (b: !$A.arr(byte, l, n), n: int n, s: string sn, sl: int sn, i: int i): bool =
-  if i >= sl then 10 + sl = n
+(* Whether event_bytes[10, n), a pointer event's target id, is id *)
+fun _id_is {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
+  (event_bytes: !$A.arr(byte, l, n), n: int n, id: string id_len, id_len: int id_len, i: int i): bool =
+  if i >= id_len then 10 + id_len = n
   else if 10 + i >= n then false
-  else if byte2int0($A.get<byte>(b, 10 + i)) <> char2int0(string_get_at(s, i)) then false
-  else _id_is(b, n, s, sl, i + 1)
+  else if byte2int0($A.get<byte>(event_bytes, 10 + i)) <> char2int0(string_get_at(id, i)) then false
+  else _id_is(event_bytes, n, id, id_len, i + 1)
 
 (* The toast's listener: its Undo button *)
-#pub fn undo_listen {n:nat} (r: regs(n)): regs(n + 1)
-implement undo_listen (r) = RCons(r, OnEl("undo-toast"), "click", lam(h) =>
+#pub fn undo_listen {count:nat} (listeners: regs(count)): regs(count + 1)
+implement undo_listen (listeners) = RCons(listeners, OnEl("undo-toast"), "click", lam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
-  | ~BlobBytes(b, n) => let
-      val hit = _id_is(b, n, "undo-button", 11, 0)
-      val () = $A.free<byte>(b)
+  | ~BlobBytes(event_bytes, n) => let
+      val hit = _id_is(event_bytes, n, "undo-button", 11, 0)
+      val () = $A.free<byte>(event_bytes)
     in if hit then let val () = _undo() in 0 end else 0 end)
 
 end (* #target wasm *)
