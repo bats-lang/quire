@@ -196,6 +196,13 @@ Elements are made through `src/ui.bats`:
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
   images are decorative (`alt=""`); a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
+* Each element id is made at one place in the code, no numbered id
+  (`nid_make`, a prefix and a number) can spell another, and every id
+  the code names is one it makes: `tests/static/ids.py` checks the
+  source (the constructors, `ui_harm_id`, and helpers that pass an id
+  on), in CI through `tests/static/run.sh`. An element made again to
+  reset it (a search field, a file input) is made by one function,
+  called at startup and at the reset.
 * `ui_attr` takes a typed attribute that cannot be a name, a role or a
   style. The one inline style is a place (`ui_place`: left or width,
   in tenths of a percent up to 100%), so no inline style can set a

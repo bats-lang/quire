@@ -953,10 +953,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 21) = let
       val () = _target_free(t)
     in
       if clear then let
-        val () = ui_clear("library-search-box")
-        val () = ui_field("library-search-box", "library-search", FSearch, "search", "Search the library")
-        val () = ui_icon_btn("library-search-box", "library-search-clear", "ibtn sclear", IcClose, "Clear search")
-        val () = ui_show("library-search-clear", false)
+        val () = app_library_search()
         val () = lib_query_set($A.alloc<byte>(1), 0)
         val () = lib_render()
       in let val () = ui_focus("library-search") in 0 end end
@@ -1102,10 +1099,8 @@ fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n
   if k > 0 then ui_attr_buf("search-field", AValue, a, k) else $A.free<byte>(a)
 
 fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
-  val () = ui_clear("search-header")
-  val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
-  val () = _search_value(a, k)
-in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
+  val () = app_book_search()
+in _search_value(a, k) end
 
 fn _search_open (): void = let
   val () = layer_open(LSearch())
