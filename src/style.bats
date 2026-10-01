@@ -1293,7 +1293,7 @@ fn _shell {left:nat | left >= 6300} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4100} (sheet: sheet(left, 0)): [after:nat | after >= left - 4100] sheet(after, 0) = let
+fn _overlays {left:nat | left >= 4400} (sheet: sheet(left, 0)): [after:nat | after >= left - 4400] sheet(after, 0) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1343,6 +1343,10 @@ fn _overlays {left:nat | left >= 4100} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = lay(sheet, Width(), "max-content")
   val sheet = lay(sheet, MaxWidth(), "min(92vw,420px)")
+  val sheet = close(sheet)
+  (* sync's toast, above the Undo toast *)
+  val sheet = rule(sheet, ".toast.tup")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 168px)")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
@@ -1397,6 +1401,16 @@ fn _overlays {left:nat | left >= 4100} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Font(), "inherit")
   val sheet = lay(sheet, Padding(), "8px")
   val sheet = lay(sheet, BorderRadius(), "6px")
+  val sheet = close(sheet)
+  (* the sync panel: what it does, then its fields, one a line *)
+  val sheet = rule(sheet, ".sabout")
+  val sheet = lay(sheet, Padding(), "4px 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sfields")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, Gap(), "8px")
+  val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = close(sheet)
   (* a book's collections, one toggle a line *)
   val sheet = rule(sheet, ".seg.cseg")
@@ -1867,7 +1881,7 @@ fn _reader {left:nat | left >= 7600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5160} (sheet: sheet(left, 0)): [after:nat | after >= left - 5160] sheet(after, 0) = let
+fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after >= left - 5400] sheet(after, 0) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2049,6 +2063,20 @@ fn _panels {left:nat | left >= 5160} (sheet: sheet(left, 0)): [after:nat | after
   (* a dictionary's article, as text: its line breaks kept *)
   val sheet = rule(sheet, ".dart")
   val sheet = lay(sheet, WhiteSpace(), "pre-wrap")
+  val sheet = close(sheet)
+  (* a catalogue's book: its cover, title and author, and Get *)
+  val sheet = rule(sheet, ".bkrow")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = lay(sheet, Padding(), "10px 14px")
+  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = close(sheet)
+  (* the fields that add a catalogue *)
+  val sheet = rule(sheet, ".cform")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, Gap(), "8px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")

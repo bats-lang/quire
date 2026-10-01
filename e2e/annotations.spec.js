@@ -156,8 +156,9 @@ test('a highlight cites the print page it was made on, and one in a chapter with
   expect(errors).toEqual([]);
 });
 
-// Rewrites each annotations record stored as "QA2" (with print pages)
-// as "QA1", the format before them; how many were rewritten
+// Rewrites each annotations record stored as "QA3" (dated, with
+// deletions and print pages) as "QA1", the format before print pages;
+// how many were rewritten
 const storeAsQA1 = page => page.evaluate(() => new Promise((resolve, reject) => {
   const opened = indexedDB.open('bats');
   opened.onerror = () => reject(opened.error);
@@ -172,15 +173,17 @@ const storeAsQA1 = page => page.evaluate(() => new Promise((resolve, reject) => 
       const value = cursor.value;
       const bytes = ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
         : value instanceof ArrayBuffer ? new Uint8Array(value) : null;
-      if (bytes && bytes.length >= 4 && String.fromCharCode(...bytes.subarray(0, 4)) === 'QA2\n') {
+      if (bytes && bytes.length >= 8 && String.fromCharCode(...bytes.subarray(0, 4)) === 'QA3\n') {
         const out = [81, 65, 49, 10];
-        let position = 4;
-        while (position + 36 <= bytes.length) {
-          const textLength = bytes[position + 32] + bytes[position + 33] * 256;
-          const noteAt = position + 34 + textLength;
+        // past the deletions (a count, then 12 bytes each)
+        let position = 8 + 12 * (bytes[4] + bytes[5] * 256);
+        while (position + 40 <= bytes.length) {
+          const textLength = bytes[position + 36] + bytes[position + 37] * 256;
+          const noteAt = position + 38 + textLength;
           const noteLength = bytes[noteAt] + bytes[noteAt + 1] * 256;
           const labelAt = noteAt + 2 + noteLength;
-          out.push(...bytes.subarray(position, labelAt));
+          // the eight numbers before when it changed, its text and note
+          out.push(...bytes.subarray(position, position + 32), ...bytes.subarray(position + 36, labelAt));
           position = labelAt + 1 + bytes[labelAt];
         }
         cursor.update(new Uint8Array(out));
@@ -211,7 +214,7 @@ test('annotations stored before print pages were kept (QA1) still load', async (
   // with no print page to cite
   expect(citation(md, 'Para 2.0')).toMatch(/^— Print Tests, \*Older Notes\*, [^\n]+$/);
   expect(citation(md, 'Para 2.0')).not.toContain(', page');
-  // stored again, as QA2, it keeps loading
+  // stored again, as now, it keeps loading
   await selectText(page, 9, 14);
   await selectionButton(page, 'Highlight').click();
   await toLibrary(page);

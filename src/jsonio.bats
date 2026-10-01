@@ -9,6 +9,7 @@
 #use arith as AR
 
 staload "book.sats"
+staload "clock.sats"
 
 (* ============================================================
    Writing
@@ -24,6 +25,105 @@ staload "book.sats"
 implement jchunk_free (chunk) = case+ chunk of
   | ~JChunk(owner, out, _) => piece_free(owner, out)
   | ~JNone() => ()
+
+(* A JSON file made a chunk at a time: count chunks of total bytes, the
+   last one first *)
+#pub datavtype jchunks(int, int) =
+  | jchunks_nil(0, 0) of ()
+  | {count,total:nat}{owner,l:agz}{n:pos}{length:nat | length <= n}
+    jchunks_cons(count + 1, total + length) of
+      (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int length, jchunks(count, total))
+
+fun _jchunks_free {count,total:nat} .<count>. (pieces: jchunks(count, total)): void =
+  case+ pieces of
+  | ~jchunks_nil() => ()
+  | ~jchunks_cons(owner, bytes, _, rest) => let val () = piece_free(owner, bytes) in _jchunks_free(rest) end
+
+(* The chunks so far, at most limit bytes in all; whether each could
+   be made (and kept within the limit) *)
+#pub datavtype jfile(limit:int) =
+  | {count,total:nat | total <= limit} JFile(limit) of (jchunks(count, total), int total, bool)
+
+(* A file with no chunk yet *)
+#pub fn jfile_new {limit:nat} (): jfile(limit)
+implement jfile_new () = JFile(jchunks_nil(), 0, true)
+
+#pub fn jfile_free {limit:nat} (file: jfile(limit)): void
+implement jfile_free (file) = let val+ ~JFile(pieces, _, _) = file in _jchunks_free(pieces) end
+
+(* chunk added after the chunks so far (the file is incomplete when
+   chunk is none, or would be over limit bytes) *)
+#pub fn jfile_push {limit:nat} (file: jfile(limit), limit: int limit, chunk: jchunk): jfile(limit)
+implement jfile_push (file, limit, chunk) = let
+  val+ ~JFile(pieces, total, complete) = file
+in
+  case+ chunk of
+  | ~JNone() => JFile(pieces, total, false)
+  | ~JChunk(owner, bytes, length) =>
+    if total + length > limit then let
+      val () = piece_free(owner, bytes)
+    in JFile(pieces, total, false) end
+    else JFile(jchunks_cons(owner, bytes, length, pieces), total + length, complete)
+end
+
+(* out[start, start + length) := source[0, length) *)
+fun _copy_at {l,source_loc:agz}{owner,source_owner:addr}{out_size,n:nat}{length:nat | length <= n}
+  {start:nat | start + length <= out_size}{i:nat | i <= length} .<length - i>.
+  (out: !$A.arrx(byte, l, out_size, owner), start: int start,
+   source: !$A.arrx(byte, source_loc, n, source_owner), length: int length, i: int i): void =
+  if i >= length then ()
+  else let
+    val () = $A.write_byte(out, start + i, $AR.low_byte(byte2int0($A.get<byte>(source, i))))
+  in _copy_at(out, start, source, length, i + 1) end
+
+(* The chunks, the last first, at out[0, total) in order *)
+fun _join {l:agz}{owner:addr}{out_size:nat}{count,total:nat | total <= out_size} .<count>.
+  (out: !$A.arrx(byte, l, out_size, owner), pieces: jchunks(count, total), total: int total): void =
+  case+ pieces of
+  | ~jchunks_nil() => ()
+  | ~jchunks_cons(owner, bytes, length, rest) => let
+      val () = _copy_at(out, total - length, bytes, length, 0)
+      val () = piece_free(owner, bytes)
+    in _join(out, rest, total - length) end
+
+(* A whole file: its bytes, out[0, n) *)
+#pub datavtype jwhole =
+  | {owner,l:agz}{n:pos | n <= 268435456} JWhole of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
+  | JNoWhole of ()
+
+(* The file's chunks joined, in one piece; none when it is incomplete,
+   empty, or no piece can be had for it *)
+#pub fn jfile_join {limit:nat | limit <= 268435456} (file: jfile(limit)): jwhole
+implement jfile_join (file) = let
+  val+ ~JFile(pieces, total, complete) = file
+in
+  if ~complete then let val () = _jchunks_free(pieces) in JNoWhole() end
+  else if total <= 0 then let val () = _jchunks_free(pieces) in JNoWhole() end
+  else (case+ piece_new(total) of
+    | ~NoPiece() => let val () = _jchunks_free(pieces) in JNoWhole() end
+    | ~Piece(owner, out) => let
+        val () = _join(out, pieces, total)
+      in JWhole(owner, out, total) end)
+end
+
+(* out[i, count) := source[start + i, start + count) *)
+fun _copy_from {out_loc,l:agz}{out_owner,owner:addr}{out_size,n:nat}{start,count:nat | start + count <= n; count <= out_size}
+  {i:nat | i <= count} .<count - i>.
+  (out: !$A.arrx(byte, out_loc, out_size, out_owner), source: !$A.arrx(byte, l, n, owner), start: int start, count: int count, i: int i): void =
+  if i >= count then ()
+  else let
+    val () = $A.write_byte(out, i, $AR.low_byte(byte2int0($A.get<byte>(source, start + i))))
+  in _copy_from(out, source, start, count, i + 1) end
+
+(* A copy of source[start, stop) in a piece of its own *)
+#pub fn jchunk_copy {l:agz}{owner:addr}{n:nat}{start,stop:nat | start < stop; stop <= n; stop - start <= 268435456}
+  (source: !$A.arrx(byte, l, n, owner), start: int start, stop: int stop): jchunk
+implement jchunk_copy (source, start, stop) =
+  case+ piece_new(stop - start) of
+  | ~NoPiece() => JNone()
+  | ~Piece(piece_owner, out) => let
+      val () = _copy_from(out, source, start, stop - start, 0)
+    in JChunk(piece_owner, out, stop - start) end
 
 fun _write_text {l:agz}{owner:addr}{n:nat}{text_len:nat}{position:nat | position + text_len <= n}{i:nat | i <= text_len}
   .<text_len - i>.
@@ -76,8 +176,47 @@ implement jw_int (out, position, value) =
     val () = _write_digits(out, position, count - 1, negative)
   in position + count end
 
+(* A stamp (clock.bats) as milliseconds since the epoch: its minute's
+   start, and its count in that minute as milliseconds; 0 for none *)
+#pub fn jw_stamp {l:agz}{owner:addr}{n:nat}{position:nat | position + 15 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position, stamp: Int)
+  : [stop:int | position < stop; stop <= position + 15] int stop
+
+implement jw_stamp (out, position, stamp) =
+  if stamp <= 0 then jw_int(out, position, 0)
+  else let
+    (* minutes * 60000 is minutes * 6 followed by four digits *)
+    val tens_of_seconds = jw_int(out, position, stamp_minutes(stamp) * 6)
+    val count = stamp_count(stamp)
+    val () = $A.write_byte(out, tens_of_seconds, 48)
+    val () = $A.write_byte(out, tens_of_seconds + 1, 48)
+    val () = $A.write_byte(out, tens_of_seconds + 2, $AR.low_byte(48 + count / 10))
+    val () = $A.write_byte(out, tens_of_seconds + 3, $AR.low_byte(48 + count - (count / 10) * 10))
+  in tens_of_seconds + 4 end
+
 fn _hex_digit {value:nat | value < 16} (value: int value): [digit:nat | digit < 256] int digit =
   if value < 10 then 48 + value else 87 + value
+
+(* half's 7 hex digits (its low 28 bits), the first at
+   out[position + 7 - left] *)
+fun _seven_hex_at {l:agz}{owner:addr}{n:nat}{position:nat | position + 7 <= n}{left:nat | left <= 7} .<left>.
+  (out: !$A.arrx(byte, l, n, owner), position: int position, half: int, left: int left): void =
+  if left <= 0 then ()
+  else let
+    val () = $A.write_byte(out, position + 7 - left,
+      _hex_digit($AR.band_g1($AR.low_byte($AR.bsr_int_int(half, 4 * (left - 1))), 15)))
+  in _seven_hex_at(out, position, half, left - 1) end
+
+(* An id (a book's, an annotation's) as its 14 hex digits, quoted: the
+   7 of each half of 28 bits, at out[position, position + 16) *)
+#pub fn jw_id {l:agz}{owner:addr}{n:nat}{position:nat | position + 16 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position, id_high: int, id_low: int): int(position + 16)
+implement jw_id (out, position, id_high, id_low) = let
+  val () = $A.write_byte(out, position, 34)
+  val () = _seven_hex_at(out, position + 1, id_high, 7)
+  val () = _seven_hex_at(out, position + 8, id_low, 7)
+  val () = $A.write_byte(out, position + 15, 34)
+in position + 16 end
 
 (* The escaped bytes of source[i, source_end), at out[position, ...) *)
 fun _escape {l,source_loc:agz}{owner,source_owner:addr}{n,source_size:nat}
@@ -199,6 +338,40 @@ implement jr_int (buf, n, position) =
   else let
     val @(count, value, stop) = _read_digits(buf, n, position, 0, 0)
   in @(count > 0 && _number_ends(buf, n, stop), value, stop) end
+
+(* The digits at position, at most 13 of them (milliseconds since the
+   epoch, to the year 2286), as the number's ten-thousands and its last
+   four digits *)
+fun _milliseconds {l:agz}{owner:addr}{n:nat}{position:nat | position <= n}{count:nat | count <= 13} .<13 - count>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, count: int count, high: Int, low: Int)
+  : [stop:int | position <= stop; stop <= n] @(int, Int, Int, int stop) =
+  if count >= 13 then @(count, high, low, position)
+  else if position >= n then @(count, high, low, position)
+  else let val character = _byte_at(buf, position) in
+    if character < 48 then @(count, high, low, position)
+    else if character > 57 then @(count, high, low, position)
+    else let
+      val shifted = low * 10 + (character - 48)
+    in _milliseconds(buf, n, position + 1, count + 1, high * 10 + shifted / 10000, shifted - (shifted / 10000) * 10000) end
+  end
+
+(* A stamp written by jw_stamp at position: whether there is one, the
+   stamp (its count in its minute at most 63) and where it ends *)
+#pub fn jr_stamp {l:agz}{owner:addr}{n:nat}{position:nat | position <= n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position)
+  : [stop:int | position <= stop; stop <= n] @(bool, Int, int stop)
+
+implement jr_stamp (buf, n, position) = let
+  val @(count, high, low, stop) = _milliseconds(buf, n, position, 0, 0, 0)
+in
+  if count <= 0 then @(false, 0, stop)
+  else if ~_number_ends(buf, n, stop) then @(false, 0, stop)
+  else if high <= 0 then @(true, 0, stop)
+  else let
+    val within = (high - (high / 6) * 6) * 10000 + low
+    val count_in_minute = (if within >= 63 then 63 else if within <= 0 then 0 else within): [count:nat | count < 64] int count
+  in @(true, stamp_make(high / 6, count_in_minute), stop) end
+end
 
 fn _hex_value (character: int): int =
   if character >= 48 then (if character <= 57 then character - 48
@@ -447,5 +620,31 @@ fun _key_equals {key_loc:agz}{capacity:nat}{key_len:nat | key_len <= capacity}{t
 implement jr_key_is (key, key_len, text) = let
   val text_len = g1u2i(string1_length(text))
 in if key_len <> text_len then false else _key_equals(key, key_len, text, text_len, 0) end
+
+(* The 7 hex digits at position, as a number; -1 when one is not *)
+fun _seven_hex {l:agz}{owner:addr}{n:nat}{position:nat | position + 7 <= n}{i:nat | i <= 7} .<7 - i>.
+  (buf: !$A.arrx(byte, l, n, owner), position: int position, i: int i, value: int): int =
+  if i >= 7 then value
+  else let
+    val digit = _hex_value(_byte_at(buf, position + i))
+  in if digit < 0 then ~1 else _seven_hex(buf, position, i + 1, value * 16 + digit) end
+
+(* An id written by jw_id at position: whether there is one, its two
+   halves, and where it ends *)
+#pub fn jr_id {l:agz}{owner:addr}{n:nat}{position:nat | position <= n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position)
+  : [stop:int | position <= stop; stop <= n] @(bool, Int, Int, int stop)
+implement jr_id (buf, n, position) =
+  if position + 16 > n then let val stop = jr_skip(buf, n, position) in @(false, 0, 0, stop) end
+  else if _byte_at(buf, position) <> 34 then let val stop = jr_skip(buf, n, position) in @(false, 0, 0, stop) end
+  else if _byte_at(buf, position + 15) <> 34 then let val stop = jr_skip(buf, n, position) in @(false, 0, 0, stop) end
+  else let
+    val id_high = g1ofg0(_seven_hex(buf, position + 1, 0, 0))
+    val id_low = g1ofg0(_seven_hex(buf, position + 8, 0, 0))
+  in
+    if id_high < 0 then @(false, 0, 0, position + 16)
+    else if id_low < 0 then @(false, 0, 0, position + 16)
+    else @(true, id_high, id_low, position + 16)
+  end
 
 end (* #target wasm *)

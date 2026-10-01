@@ -553,6 +553,10 @@ datatype control =
   (* a link out of the app, named by its text, opened in a new tab and
      told nothing of the app; its href is set by ui_https_href *)
   | {class_len,label_len:pos | class_len < 256; label_len < 256} CLinkOut of (string class_len, string label_len)
+  (* a link that downloads what it points at (a book a catalogue's
+     page does not let the app read), named by its text, opened in a new
+     tab; its href is set by ui_web_href_n *)
+  | {class_len,label_len:pos | class_len < 256; label_len < 256} CDownload of (string class_len, string label_len)
 
 (* Control the_control as element id_bytes, the last child of parent_bytes *)
 fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}
@@ -570,6 +574,13 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
   | CLinkOut(class_name, label) => let
       val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
       val () = _document_attr(document, id_bytes, id_len, "class", class_name)
+      val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
+      val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
+    in _document_text(document, id_bytes, id_len, label) end
+  | CDownload(class_name, label) => let
+      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
+      val () = _document_attr(document, id_bytes, id_len, "class", class_name)
+      val () = _document_empty_attr(document, id_bytes, id_len, "download")
       val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
       val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
     in _document_text(document, id_bytes, id_len, label) end
@@ -691,6 +702,40 @@ fn _is_https {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n
 implement ui_https_href (id, url, url_len) =
   if _is_https(url, url_len) then _set_attr_buf(id, "href", url, url_len) else $A.free<byte>(url)
 
+(* A numbered download link (ui_download_nn), showing label (its name) *)
+#pub fn ui_download_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
+  (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len, label: string label_len): void
+
+implement ui_download_nn(parent, parent_len, id, id_len, class_name, label) = _control_nn(parent, parent_len, id, id_len, CDownload(class_name, label))
+
+(* Whether url[0, url_len) starts with "http://" *)
+fn _is_http {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n), url_len: int url_len): bool =
+  if url_len < 7 then false
+  else _starts_with(url, "http://", 7, 0)
+
+(* The href of the numbered download link id: url[0, url_len), only
+   when it is an http or https address; otherwise the link is left as
+   it was *)
+#pub fn ui_web_href_n {id_loc:agz}{id_len:pos | id_len < 256}{l:agz}{n:pos}{url_len:pos | url_len <= n; url_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
+
+implement ui_web_href_n (id, id_len, url, url_len) =
+  if _is_https(url, url_len) || _is_http(url, url_len) then _set_attr_n_buf(id, id_len, "href", url, url_len)
+  else let
+    val () = $A.free<byte>(id)
+  in $A.free<byte>(url) end
+
+(* The source of the numbered image id (ui_img_nn): url[0, url_len),
+   only when it is an http or https address *)
+#pub fn ui_web_src_n {id_loc:agz}{id_len:pos | id_len < 256}{l:agz}{n:pos}{url_len:pos | url_len <= n; url_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
+
+implement ui_web_src_n (id, id_len, url, url_len) =
+  if _is_https(url, url_len) || _is_http(url, url_len) then _set_attr_n_buf(id, id_len, "src", url, url_len)
+  else let
+    val () = $A.free<byte>(id)
+  in $A.free<byte>(url) end
+
 (* An item of a menu, named by its label *)
 #pub fn ui_menuitem {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}
   (parent: string parent_len, id: string id_len, label: string label_len): void
@@ -754,6 +799,9 @@ in release_bytes(id_frozen, id_bytes) end
 (* A search field, a text area, or one line of text (a name) *)
 #pub datatype field = FSearch | FText | FLine
   | FChoice   (* a choice among options the page's script puts in it *)
+  (* a web address, a user name and a password, as a sign-in form has
+     them: the browser's password manager can fill them *)
+  | FUrl | FUser | FPassword
 
 #pub fn ui_field {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
   (parent: string parent_len, id: string id_len, field_kind: field, class_name: string class_len, name: string name_len): void
@@ -769,7 +817,23 @@ implement ui_field(parent, id, field_kind, class_name, name) = let
         val () = _add_element(parent, id, "input")
         val () = _set_attr(id, "type", "text")
         val () = _set_attr(id, "autocomplete", "off")
-      in _set_attr(id, "enterkeyhint", "done") end)
+      in _set_attr(id, "enterkeyhint", "done") end
+    | FUrl() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "url")
+        val () = _set_attr(id, "autocomplete", "url")
+        val () = _set_attr(id, "autocapitalize", "none")
+      in _set_attr(id, "spellcheck", "false") end
+    | FUser() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "text")
+        val () = _set_attr(id, "autocomplete", "username")
+        val () = _set_attr(id, "autocapitalize", "none")
+      in _set_attr(id, "spellcheck", "false") end
+    | FPassword() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "password")
+      in _set_attr(id, "autocomplete", "current-password") end)
   val () = _set_attr(id, "class", class_name)
   val () = _set_attr(id, "placeholder", name)
 in _set_attr(id, "aria-label", name) end

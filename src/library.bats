@@ -15,6 +15,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "epub_xml.sats"
 staload "mem.sats"
+staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
@@ -46,8 +47,18 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
                            within 3 minutes of the one before counts its
                            minutes) *)
   pages_read = Int,     (* the pages turned on those minutes counted *)
-  finished_at = Int     (* when its last page was first reached, 0 when
+  finished_at = Int,    (* when its last page was first reached, 0 when
                            not known *)
+  (* when the shelf, the collections it is in and its being finished
+     (done and finished_at) last changed: stamps (clock.bats), 0 never,
+     which sync compares (the latest change wins) *)
+  shelf_modified = Int,
+  collections_modified = Int,
+  finished_modified = Int,
+  (* the minutes it has been read and the pages turned on them on the
+     other devices sync knows of, as it last saw them *)
+  minutes_elsewhere = Int,
+  pages_elsewhere = Int
 }
 
 (* A book: its title and author (1 to 255 bytes), its series' name (0
@@ -277,6 +288,45 @@ implement lib_update (index, change) =
     prval () = fold@(cell)
   in lib_put(cell) end
 
+(* The reading on other devices (sync's) of every book, forgotten: what
+   sync reads next is summed anew *)
+fun _elsewhere_clear {count:nat} .<count>. (books: !books(count)): void =
+  case+ books of
+  | books_nil() => ()
+  | @books_cons(book, rest) => let
+      val+ @Book(_, _, _, _, _, _, nums) = book
+      val () = nums := @{
+        key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+        chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
+        finished_modified = nums.finished_modified, minutes_elsewhere = 0, pages_elsewhere = 0 }
+      prval () = fold@(book)
+      val () = _elsewhere_clear(rest)
+      prval () = fold@(books)
+    in end
+
+#pub fn lib_elsewhere_clear (): void
+implement lib_elsewhere_clear () = let
+  val cell = lib_take()
+  val+ @LibCell(books, _) = cell
+  val () = _elsewhere_clear(books)
+  prval () = fold@(cell)
+in lib_put(cell) end
+
+(* minutes more read, and pages turned on them, on another device of
+   the book at index *)
+#pub fn lib_elsewhere_add {index:int} (index: int index, minutes: Int, pages: Int): void
+implement lib_elsewhere_add (index, minutes, pages) =
+  if minutes <= 0 then ()
+  else lib_update(index, lam(nums) => @{
+    key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+    chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+    shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
+    finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere + minutes,
+    pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int) })
+
 (* source[j, source_len) into dest[start + j, start + source_len) *)
 fun _copy {source_loc,dest_loc:agz}{source_len,source_size,dest_size:nat | source_len <= source_size}
   {start:nat | start + source_len <= dest_size}{j:nat | j <= source_len} .<source_len - j>.
@@ -406,7 +456,8 @@ in
     val nums = @{
       key = key, id_high = id_high, id_low = id_low, shelf = 0, added = now, opened = 0,
       chapter = 0, chapters = 0, page = 0, pages = 0, anchor = ~1, file_size = file_size, cover = cover, done = 0,
-      series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0
+      series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
+      shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
     }: bnums
     val () = lib_put(LibCell(books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), count + 1))
   in key end
@@ -496,7 +547,9 @@ implement lib_set_shelf (index, shelf) = let
   val () = lib_update(index, lam(nums) => @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
+    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+    shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
+    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
   val () = lib_save()
 in lib_render() end
 
@@ -578,7 +631,9 @@ fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int co
     val () = lib_update(i, lam(nums) => @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = 3, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
+      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+      shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
   in _trash_all(i + 1, count) end
 
 (* Each book of shelved put back on its shelf *)
@@ -590,7 +645,9 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved(count)): void =
       val () = (if index >= 0 then lib_update(index, lam(nums) => @{
           key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at }) else ())
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+          shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
+          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -812,9 +869,31 @@ fun _map_collections {count:nat} .<count>. (books: !books(count), change: (Int, 
       val () = nums := @{
         key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at }
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        shelf_modified = nums.shelf_modified,
+        collections_modified = (if membership <> nums.collections then stamp_now() else nums.collections_modified),
+        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }
       prval () = fold@(book)
       val () = _map_collections(rest, change)
+      prval () = fold@(books)
+    in end
+
+(* The books in collection: their collections changed now (the
+   collection was renamed: by name, which sync goes by, they are in
+   another one) *)
+fun _stamp_members {count:nat} .<count>. (books: !books(count), collection: int): void =
+  case+ books of
+  | books_nil() => ()
+  | @books_cons(book, rest) => let
+      val+ @Book(_, _, _, _, _, _, nums) = book
+      val () = (if $AR.band_int_int(nums.collections, $AR.bsl_int_int(1, collection)) <> 0 then nums := @{
+        key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+        chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        shelf_modified = nums.shelf_modified, collections_modified = stamp_now(),
+        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere } else ())
+      prval () = fold@(book)
+      val () = _stamp_members(rest, collection)
       prval () = fold@(books)
     in end
 
@@ -944,6 +1023,11 @@ in
     val cell = colls_take()
     val+ ~CollCell(collections, count) = cell
     val () = colls_put(CollCell(_colls_rename(collections, collection, name, name_len), count))
+    val library = lib_take()
+    val+ @LibCell(books, _) = library
+    val () = (if collection >= 0 then (if collection < 8 then _stamp_members(books, collection) else ()) else ())
+    prval () = fold@(library)
+    val () = lib_put(library)
     val () = lib_save()
   in lib_render() end
 end
@@ -1034,7 +1118,9 @@ implement lib_coll_toggle (index, collection) =
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
-      collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at })
+      collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+      shelf_modified = nums.shelf_modified, collections_modified = stamp_now(), finished_modified = nums.finished_modified,
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
   in lib_save() end
 
 (* Collection deleted, with an Undo offer that puts it back: its books
@@ -1199,8 +1285,11 @@ in colls_put(cell) end
    tch, pg, pgs, anchor, fsz, cover | done << 8; its series (u8 length,
    bytes) and its number in it (i32); the collections it is in (i32);
    the minutes it has been read, the pages turned on them, and when it
-   was finished (3 x i32). At most 836 bytes a book. QLB3 has none of
-   the last three. QLB2 has no collections, before or in the
+   was finished (3 x i32); when its shelf, collections and being
+   finished last changed (3 stamps, i32), and the minutes it has been
+   read on other devices and the pages turned on them (2 x i32). At
+   most 856 bytes a book. QLB4 has none of the last five, QLB3 none of
+   the last eight. QLB2 has no collections, before or in the
    books; QLB1 has no series either. *)
 
 
@@ -1226,7 +1315,7 @@ fun _write_names {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 41 * 
       prval () = fold@(collections)
     in stop end
 
-fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 836 * count <= n} .<count>.
+fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 856 * count <= n} .<count>.
   (out: !$A.arrx(byte, l, n, owner), start: int start, books: !books(count)): [stop:nat | stop <= n] int stop =
   case+ books of
   | books_nil() => start
@@ -1261,7 +1350,14 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 836 *
       val () = $A.write_i32(out, series_at + 9 + series_len, nums.minutes_read)
       val () = $A.write_i32(out, series_at + 13 + series_len, nums.pages_read)
       val () = $A.write_i32(out, series_at + 17 + series_len, nums.finished_at)
-    in _write_books(out, series_at + 21 + series_len, rest) end
+      (* QLB5: when its shelf, collections and being finished changed,
+         and its reading on other devices *)
+      val () = $A.write_i32(out, series_at + 21 + series_len, nums.shelf_modified)
+      val () = $A.write_i32(out, series_at + 25 + series_len, nums.collections_modified)
+      val () = $A.write_i32(out, series_at + 29 + series_len, nums.finished_modified)
+      val () = $A.write_i32(out, series_at + 33 + series_len, nums.minutes_elsewhere)
+      val () = $A.write_i32(out, series_at + 37 + series_len, nums.pages_elsewhere)
+    in _write_books(out, series_at + 41 + series_len, rest) end
 
 (* Stores the library under "lib" *)
 #pub fn lib_save (): void
@@ -1271,7 +1367,7 @@ implement lib_save () = let
   val+ @LibCell(books, count) = library
   val collections_cell = colls_take()
   val+ @CollCell(collections, collection_count) = collections_cell
-  val size = 333 + 836 * count
+  val size = 333 + 856 * count
 in
   case+ piece_new(size) of
   | ~NoPiece() => let
@@ -1280,7 +1376,7 @@ in
       prval () = fold@(library)
     in lib_put(library) end
   | ~Piece(owner, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB4"), 4)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB5"), 4)
       val () = $A.write_byte(out, 4, collection_count)
       val books_at = _write_names(out, 5, collections)
       prval () = fold@(collections_cell)
@@ -1362,14 +1458,15 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
           chapter = _int32_at(buf, numbers_at + 12), chapters = _int32_at(buf, numbers_at + 16), page = _int32_at(buf, numbers_at + 20),
           pages = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), file_size = _int32_at(buf, numbers_at + 32),
           cover = $AR.low_byte(cover_done), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
-          series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0
+          series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
+          shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
         }: bnums
         (* QLB2 has the series after; QLB3, then the collections; QLB1,
            neither *)
         val series_at = numbers_at + 40
         val series_len = (if version >= 2 then (if series_at < n then $AR.low_byte(byte2int0($A.get<byte>(buf, series_at))) else 0) else 0)
           : [series_len:nat | series_len < 256] int series_len
-        val tail = (if version >= 4 then 21 else if version >= 3 then 9 else 5): [tail:int | tail == 5 || tail == 9 || tail == 21] int tail
+        val tail = (if version >= 5 then 41 else if version >= 4 then 21 else if version >= 3 then 9 else 5): [tail:int | tail == 5 || tail == 9 || tail == 21 || tail == 41] int tail
       in
         if version < 2 then _parse_books(buf, n, series_at, books_cons(Book(title, title_len, author, author_len, $A.alloc<byte>(1), 0, nums), books), parsed + 1, version)
         else if series_at + tail + series_len > n then let
@@ -1388,7 +1485,14 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
             (* QLB4: how long it has been read, and when it was finished *)
             minutes_read = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 9 + series_len) else 0) else 0): Int,
             pages_read = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 13 + series_len) else 0) else 0): Int,
-            finished_at = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 17 + series_len) else 0) else 0): Int
+            finished_at = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 17 + series_len) else 0) else 0): Int,
+            (* QLB5: when its shelf, collections and being finished
+               changed, and its reading on other devices *)
+            shelf_modified = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 21 + series_len) else 0) else 0): Int,
+            collections_modified = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 25 + series_len) else 0) else 0): Int,
+            finished_modified = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 29 + series_len) else 0) else 0): Int,
+            minutes_elsewhere = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 33 + series_len) else 0) else 0): Int,
+            pages_elsewhere = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 37 + series_len) else 0) else 0): Int
           }: bnums
         in _parse_books(buf, n, series_at + tail + series_len,
              books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), parsed + 1, version) end
@@ -1444,7 +1548,7 @@ in
       if n < 4 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) > 52 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) > 53 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else let
         val version = byte2int0($A.get<byte>(buf, 3)) - 48
         val @(books_at, collections, collection_count) = _names_of(buf, n, version)
