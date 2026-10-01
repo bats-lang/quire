@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
-  control, selectionButton, reload, pagedBook,
+  control, selectionButton, reload, pagedBook, librarySearch,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Annotations');
@@ -205,6 +205,12 @@ test('annotations stored before print pages were kept (QA1) still load', async (
   await writeNote(page, 'Written before');
   await toLibrary(page);
   await reload(page);
+  // the app loaded again before its store is rewritten and it is
+  // reloaded: a reload while the last one is still loading aborts the
+  // loader's fetch of app.wasm, which the page reports as an error
+  // ("Failed to fetch", bridge.js), and the rewrite would race the
+  // app's own reads at startup
+  await expect(librarySearch(page)).toBeVisible();
   expect(await storeAsQA1(page)).toBe(1);
   await page.reload();
   await openBook(page, 'Older Notes');

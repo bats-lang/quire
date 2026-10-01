@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, readBook, place, placeChanged, toLibrary, chapters, dialog, menuItem, libraryMenu, bookMenu,
   oneColumn, reload, openBook, cards,
+  librarySettings, settingsButton, restoreInput,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 60) => ({ title, author: 'Stats Tests', rawChapters: chapters(n, paras) });
@@ -140,10 +141,11 @@ test('a backup keeps the reading log, the goal and each book\'s time, and a rest
   await statsPanel(page).getByRole('button', { name: '30 min' }).click();
   await page.keyboard.press('Escape');
 
-  await libraryMenu(page);
+  await librarySettings(page);
   const download = page.waitForEvent('download');
-  await menuItem(page, 'Export backup').click();
+  await settingsButton(page, 'Export backup').click();
   const json = readFileSync(await (await download).path(), 'utf8');
+  await settingsButton(page, 'Done').click();
   const b = JSON.parse(json);
   expect(b.settings.dailyGoal).toBe(30);
   const today = Math.floor(Date.parse('2026-06-01T10:00:00Z') / 86400000);
@@ -155,8 +157,8 @@ test('a backup keeps the reading log, the goal and each book\'s time, and a rest
   b.settings.dailyGoal = 10;
   const path = testInfo.outputPath('stats-backup.json');
   writeFileSync(path, JSON.stringify(b));
-  await libraryMenu(page);
-  await page.getByLabel('Import backup').setInputFiles([path]);
+  await librarySettings(page);
+  await restoreInput(page).setInputFiles([path]);
   await expect(dialog(page, 'Backup restored')).toBeVisible();
   await dialog(page, 'Backup restored').getByRole('button').first().click();
   await openStats(page);
@@ -179,9 +181,9 @@ test.describe('in Auckland (UTC+12 in June)', () => {
     await openStats(page);
     await expect(stat(page, 'stats-today')).toHaveText('3 min');
     await page.keyboard.press('Escape');
-    await libraryMenu(page);
+    await librarySettings(page);
     const download = page.waitForEvent('download');
-    await menuItem(page, 'Export backup').click();
+    await settingsButton(page, 'Export backup').click();
     const b = JSON.parse(readFileSync(await (await download).path(), 'utf8'));
     const localDay = Math.floor(Date.parse('2026-06-02T00:00:00Z') / 86400000);
     expect(b.readingLog).toEqual([[localDay, 3]]);

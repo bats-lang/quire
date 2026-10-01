@@ -6,6 +6,7 @@ import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
+  librarySettings, settingsButton,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -223,7 +224,7 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   // items and the button beside it
   const colour = l => l.evaluate(e => getComputedStyle(e).color);
   const red = await colour(menuItem(page, 'Empty Trash'));
-  expect(red).not.toBe(await colour(menuItem(page, 'Factory reset')));
+  expect(red).not.toBe(await colour(menuItem(page, 'Close')));
   await menuItem(page, 'Empty Trash').click();
   const ask = dialog(page, 'Empty the Trash?');
   expect(await colour(ask.getByRole('button', { name: 'Empty' }))).toBe(red);
@@ -292,8 +293,8 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await expect.poll(() => bg(page)).not.toBe(plain);
   const sepia = await bg(page);
   // it asks nothing, and offers Undo
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText(empty)).toBeVisible();
@@ -308,8 +309,8 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   for (let i = 0; i < 3; i++) await shelf(page).click();
   // without Undo, the books wait in the Trash
   await expect(shelf(page)).toHaveText('Library');
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
   await reload(page);
   await expect(cards(page)).toHaveCount(0);

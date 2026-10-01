@@ -330,10 +330,69 @@ in
     in _put_literal(out, after, ".)") end
 end
 
+(* How the last sync failed, in a few words (at most 40 bytes), at
+   out[position] *)
+fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: int, status: Int)
+  : [stop:nat | stop <= position + 64] int stop =
+  if result = RESULT_UNREACHABLE then _put_literal(out, position, "Can't reach the server")
+  else if result = RESULT_BLOCKED then _put_literal(out, position, "Can't reach the server")
+  else if result = RESULT_CREDENTIALS then _put_literal(out, position, "Wrong user name or password")
+  else if result = RESULT_FOLDER then _put_literal(out, position, "Folder not found")
+  else if result = RESULT_CONFLICT then _put_literal(out, position, "The file kept changing")
+  else if result = RESULT_TOO_LARGE then _put_literal(out, position, "The sync file is over 16 MB")
+  else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file can't be read")
+  else if result = RESULT_MEMORY then _put_literal(out, position, "Not enough memory")
+  else if result = RESULT_ADDRESS then _put_literal(out, position, "No folder address")
+  else let
+    val after = _put_literal(out, position, "Server error (")
+    val after = $S.int_to_str(out, after, 512, status)
+  in _put_literal(out, after, ")") end
+
+(* The Settings screen's Sync row's state: "Off", the store and how long
+   ago it last synced ("WebDAV \xC2\xB7 synced 2 min ago"), or how the
+   last sync failed, in short *)
+fn _summary_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] int stop = let
+  val result = !_last_result
+in
+  if ~_store_on() then _put_literal(out, 0, "Off")
+  else let
+    val after = _put_literal(out, 0, "WebDAV \xC2\xB7 ")
+  in
+    if result = RESULT_RUNNING then _put_literal(out, after, "syncing...")
+    else if result = RESULT_NONE then _put_literal(out, after, "not synced yet")
+    else if result = RESULT_DONE then let
+      val elapsed = $TM.epoch_minutes() - !_last_minutes
+    in
+      if elapsed < 1 then _put_literal(out, after, "synced just now")
+      else if elapsed < 60 then let
+        val after = _put_literal(out, after, "synced ")
+        val after = $S.int_to_str(out, after, 512, elapsed)
+      in _put_literal(out, after, " min ago") end
+      else if elapsed < 1440 then let
+        val after = _put_literal(out, after, "synced ")
+        val after = $S.int_to_str(out, after, 512, elapsed / 60)
+      in _put_literal(out, after, " h ago") end
+      else let
+        val after = _put_literal(out, after, "synced on ")
+      in _when_text(out, after, !_last_minutes) end
+    end
+    else _result_short(out, 0, result, !_last_status)
+  end
+end
+
+(* The Settings screen's Sync row's state, as it is now *)
+#pub fn sync_summary_show (): void
+implement sync_summary_show () = let
+  val summary = $A.alloc<byte>(512)
+  val summary_stop = _summary_text(summary)
+in ui_text_buf("settings-sync-state", summary, summary_stop) end
+
+(* The sync screen's status line and the Settings screen's Sync row *)
 fn _status_show (): void = let
   val out = $A.alloc<byte>(512)
   val stop = _status_text(out)
-in ui_text_buf("sync-status", out, stop) end
+  val () = ui_text_buf("sync-status", out, stop)
+in sync_summary_show() end
 
 (* ============================================================
    The request: GET or PUT of <folder>/quire-sync.json

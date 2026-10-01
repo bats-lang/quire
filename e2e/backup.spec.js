@@ -7,6 +7,7 @@ import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
   selectionButton, colours, bookPage, pagedBook, showChrome, control,
+  librarySettings, settingsButton, restoreInput,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -14,24 +15,25 @@ const refused = page => dialog(page, 'Backup');
 const bg = async page => (await colours(page)).bg.join(',');
 
 async function exportBackup(page) {
-  await libraryMenu(page);
+  await librarySettings(page);
   const download = page.waitForEvent('download');
-  await menuItem(page, 'Export backup').click();
+  await settingsButton(page, 'Export backup').click();
   const d = await download;
   expect(d.suggestedFilename()).toBe('quire-backup.json');
+  await settingsButton(page, 'Done').click();
   return readFileSync(await d.path(), 'utf8');
 }
 
 async function restoreBackup(page, path) {
-  await libraryMenu(page);
-  await page.getByLabel('Import backup').setInputFiles([path]);
+  await librarySettings(page);
+  await restoreInput(page).setInputFiles([path]);
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 // A reset with its Trash emptied: nothing of the library is left
 async function factoryReset(page) {
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
