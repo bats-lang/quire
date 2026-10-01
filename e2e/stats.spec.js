@@ -164,3 +164,26 @@ test('a backup keeps the reading log, the goal and each book\'s time, and a rest
   await expect(stat(page, 'stats-week')).toHaveText('24 min');
   await expect(stat(page, 'stats-streak')).toHaveText('2 days');
 });
+
+test.describe('in Auckland (UTC+12 in June)', () => {
+  test.use({ timezoneId: 'Pacific/Auckland' });
+
+  test('the reading log counts the local day, not the UTC one', async ({ page }) => {
+    // 20:00 UTC on 1 June is 08:00 on 2 June in Auckland
+    await page.clock.install({ time: new Date('2026-06-01T20:00:00Z') });
+    await start(page);
+    await readBook(page, book('Local'));
+    await oneColumn(page);
+    await readMinutes(page, 3);
+    await toLibrary(page);
+    await openStats(page);
+    await expect(stat(page, 'stats-today')).toHaveText('3 min');
+    await page.keyboard.press('Escape');
+    await libraryMenu(page);
+    const download = page.waitForEvent('download');
+    await menuItem(page, 'Export backup').click();
+    const b = JSON.parse(readFileSync(await (await download).path(), 'utf8'));
+    const localDay = Math.floor(Date.parse('2026-06-02T00:00:00Z') / 86400000);
+    expect(b.readingLog).toEqual([[localDay, 3]]);
+  });
+});
