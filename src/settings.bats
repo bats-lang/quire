@@ -8,7 +8,6 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
 staload "undo.sats"
@@ -17,6 +16,7 @@ staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The settings, each in its range:
    size               font size in px, 12 to 32
@@ -272,7 +272,7 @@ fn _night (): bool = let
 in
   case+ found of
   | ~$R.none() => false
-  | ~$R.some(blob) => let val () = $DC.blob_free(blob) in true end
+  | ~$R.some(blob) => let val () = $BD.blob_free(blob) in true end
 end
 
 (* The theme shown now: auto is Night at night (reading a bright screen
