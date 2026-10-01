@@ -29,6 +29,10 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
   | {count:nat} DaysCons(count + 1) of (Int, Int, days(count))
 
 val _days = ref<[count:nat] days(count)>(DaysNil())
+(* The days read on the other devices sync knows of, their minutes
+   summed, as sync last saw them: shown with this device's, and kept
+   apart from them (sync passes on only this device's) *)
+val _days_elsewhere = ref<[count:nat] days(count)>(DaysNil())
 (* The daily goal in minutes, 0 for none *)
 val _goal = ref<int>(0)
 
@@ -150,14 +154,51 @@ fun _read_days {l:agz}{n:nat}{position:nat | position <= n}{limit:nat} .<limit>.
   else DaysCons(_read_i32(bytes, position), _read_i32(bytes, position + 4),
     _read_days(bytes, n, position + 8, limit - 1))
 
+(* "QR1\n", 0, then the days read elsewhere as the log's are, under
+   "rlog-elsewhere" *)
+fn _elsewhere_key (): [l:agz] $A.arr(byte, l, 14) = let
+  val key = $A.alloc<byte>(14)
+  val () = $A.write_text(key, 0, $A.text_lit("rlog-elsewhere"), 14)
+in key end
+
+fn _elsewhere_save (): void = let
+  val entries = _first(!_days_elsewhere, DAYS)
+  val count = _count(entries)
+  val record = $A.alloc<byte>(8 + 8 * count)
+  val () = $A.write_text(record, 0, $A.text_lit("QR1"), 3)
+  val () = $A.write_byte(record, 3, 10)
+  val () = $A.write_i32(record, 4, 0)
+  val () = _write_days(record, 8, entries)
+  val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_elsewhere_key())
+  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count))
+  val () = release_bytes(key_frozen, key_bytes)
+in release_bytes(record_frozen, record_bytes) end
+
+fn _elsewhere_load (): void = let
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_elsewhere_key())
+  val pending = $IDB.idb_get(key_bytes, 14)
+  val () = release_bytes(key_frozen, key_bytes)
+in
+  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+    val () = (case+ take_blob(handle) of
+      | ~NoBlobBytes() => ()
+      | ~BlobBytes(record, n) =>
+        if n < 8 then $A.free<byte>(record)
+        else if byte2int0($A.get<byte>(record, 1)) <> 82 then $A.free<byte>(record)
+        else let
+          val () = !_days_elsewhere := _read_days(record, n, 8, DAYS)
+        in $A.free<byte>(record) end)
+  in $P.ret<int>(0) end))
+end
+
 (* Reads the log stored in an earlier run *)
 #pub fn stats_load (): void
 implement stats_load () = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
   val pending = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
-in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+  val () = $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>
@@ -169,7 +210,8 @@ in
           val () = !_days := _read_days(record, n, 8, DAYS)
         in $A.free<byte>(record) end)
   in $P.ret<int>(0) end))
-end
+  (* and the days read elsewhere *)
+in _elsewhere_load() end
 
 (* ============================================================
    The log
@@ -196,8 +238,29 @@ fun _between {count:nat} .<count>. (entries: days(count), first_day: Int, last_d
     _between(rest, first_day, last_day,
       (if day >= first_day then (if day <= last_day then total + minutes else total) else total))
 
+(* The minutes read on days from first_day to last_day, here and on
+   the other devices sync knows of *)
 #pub fn stats_minutes_between (first_day: Int, last_day: Int): Int
-implement stats_minutes_between (first_day, last_day) = _between(!_days, first_day, last_day, 0)
+implement stats_minutes_between (first_day, last_day) =
+  _between(!_days, first_day, last_day, 0) + _between(!_days_elsewhere, first_day, last_day, 0)
+
+(* entries with minutes more read on day *)
+fun _add_day {count:nat} .<count>. (entries: days(count), day: Int, minutes: Int): [total:nat] days(total) =
+  case+ entries of
+  | DaysNil() => DaysCons(day, minutes, DaysNil())
+  | DaysCons(entry_day, entry_minutes, rest) =>
+    if entry_day = day then DaysCons(entry_day, entry_minutes + minutes, rest)
+    else if entry_day < day then DaysCons(day, minutes, DaysCons(entry_day, entry_minutes, rest))
+    else DaysCons(entry_day, entry_minutes, _add_day(rest, day, minutes))
+
+(* The days of entries added to into, the latest first *)
+fun _sum_days {count,into_count:nat} .<count>. (entries: days(count), into: days(into_count)): [total:nat] days(total) =
+  case+ entries of
+  | DaysNil() => into
+  | DaysCons(day, minutes, rest) => _sum_days(rest, _add_day(into, day, minutes))
+
+(* The days read, here and elsewhere, the latest first *)
+fn _all_days (): [count:nat] days(count) = _sum_days(!_days_elsewhere, !_days)
 
 (* The days read in a row, back from the day wanted (the latest first) *)
 fun _in_a_row {count:nat} .<count>. (entries: days(count), wanted: Int, streak: int): int =
@@ -214,8 +277,9 @@ fun _in_a_row {count:nat} .<count>. (entries: days(count), wanted: Int, streak: 
 #pub fn stats_streak (): int
 implement stats_streak () = let
   val today = stats_today()
-  val streak = _in_a_row(!_days, today, 0)
-in if streak > 0 then streak else _in_a_row(!_days, today - 1, 0) end
+  val all_days = _all_days()
+  val streak = _in_a_row(all_days, today, 0)
+in if streak > 0 then streak else _in_a_row(all_days, today - 1, 0) end
 
 #pub fn stats_goal_get (): int
 implement stats_goal_get () = !_goal
@@ -329,5 +393,26 @@ implement stats_restore_day (day, minutes) =
 (* Keeps the days a backup put back *)
 #pub fn stats_restored (): void
 implement stats_restored () = _save()
+
+(* ============================================================
+   Sync: the days read on other devices
+   ============================================================ *)
+
+(* Forgets the days read elsewhere: those sync reads next are summed
+   anew *)
+#pub fn stats_elsewhere_clear (): void
+implement stats_elsewhere_clear () = !_days_elsewhere := DaysNil()
+
+(* minutes read on day on another device *)
+#pub fn stats_elsewhere_add (day: Int, minutes: Int): void
+implement stats_elsewhere_add (day, minutes) =
+  if minutes <= 0 then ()
+  else if day <= 0 then ()
+  else if minutes > 1440 then ()
+  else !_days_elsewhere := _first(_add_day(!_days_elsewhere, day, minutes), DAYS)
+
+(* Keeps the days read elsewhere *)
+#pub fn stats_elsewhere_keep (): void
+implement stats_elsewhere_keep () = _elsewhere_save()
 
 end (* #target wasm *)

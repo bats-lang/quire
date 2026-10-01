@@ -27,6 +27,7 @@ staload "ui.sats"
   | LDictionary    (* a word looked up in a dictionary *)
   | LCatalogues    (* the catalogues: listed, added and removed *)
   | LCatalogue     (* a catalogue's pages, browsed *)
+  | LSync          (* sync between devices: its folder, and how it went *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   case+ overlay of
@@ -36,6 +37,7 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   | LCollections() => "collections-menu" | LStats() => "stats-panel"
   | LDictionaries() => "dictionaries-panel" | LDictionary() => "dictionary-panel"
   | LCatalogues() => "catalogues-panel" | LCatalogue() => "catalogue-panel"
+  | LSync() => "sync-screen"
 
 fn _number (overlay: layer): int =
   case+ overlay of
@@ -43,6 +45,7 @@ fn _number (overlay: layer): int =
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
   | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
   | LCatalogues() => 13 | LCatalogue() => 14
+  | LSync() => 15
 
 (* The open overlays, the last opened first *)
 datatype layers(int) =

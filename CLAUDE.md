@@ -110,7 +110,10 @@ page's arena, or the one piece of an arena sized to it, so it has no
   OpenSearch description while they are read, and a book's EPUB got
   from one until it is handed to the JS side as a file (`_claim` in
   `src/catalogue.bats`); the catalogues' part of the backup
-  (`catalogue_backup_json` in `src/catalogues.bats`).
+  (`catalogue_backup_json` in `src/catalogues.bats`);
+* the sync file: as it is read from the store, each chunk of the merge
+  and the merge joined as it is written (`_out`, `_remote`, `_written`
+  in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`).
 
 Each piece lives only while it is parsed or written: nothing is kept
 between page turns yet, since pages are CSS columns of the chapter's
@@ -151,6 +154,40 @@ never put in the DOM. The list of dictionaries (`dicts`) is stored
 under "dicts"; a removal is offered back by the Undo toast, and its
 files are deleted when the offer is made final. The backup lists the
 dictionaries' names and languages, not their files.
+
+### Sync
+
+`src/sync.bats` keeps places, shelves, collections, annotations and
+reading time the same on the reader's devices, through one file,
+`quire-sync.json`, in the backup's JSON format plus each record's
+stamps, a `deleted` list per book and a `devices` list. Where the file
+is kept is a `store` (only `WebDav(url, user, password)` now): its
+credentials are stored on this device only, by the store's kind
+("sync" names the kind, "sync-webdav" holds the WebDAV ones), never in
+the backup. The merge and its tries call only `store_read` (the file,
+none yet, or a failure) and `store_write` (written, a conflict, or a
+failure); WebDAV's read is a GET whose ETag is the version, its write
+a PUT with If-Match (a 412 is the conflict). A sync reads, merges and
+writes (again after a conflict, up to 3 tries), and only once the file
+is written does this device take the merge, so a failed sync changes
+nothing here. It runs when the app opens, when a book is opened, when
+the page is hidden, and from the screen's Sync now (`LSync`,
+`sync-screen`, opened from the library menu; Turn off goes through
+Undo).
+
+A change is dated by a stamp (`src/clock.bats`): a hybrid logical
+clock, minutes since 2025 times 64 plus a count, after every stamp made
+or seen here (the browser gives the time only to the minute), written
+in the file as milliseconds. Shelves, collections (by name) and being
+finished take the latest change; the place, the furthest (the open
+book's is offered by a toast instead); the reading log and each book's
+time are each device's own (its entry in `devices`), summed for display
+(`stats_elsewhere_*`, `minutes_elsewhere`). An annotation's id is the
+SHA-256 of what never changes in it (bookmark or highlight, chapter,
+start, end, minute made), so it is never stored and two devices that
+restored one backup give it the same id; the latest change wins, and a
+deletion (`deleted`, kept 180 days, `QA3`) wins over a change made
+before it. A book only another device has is kept as an orphan ("o").
 
 ### Catalogues
 

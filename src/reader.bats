@@ -28,6 +28,7 @@ staload "stats.sats"
 staload "annot.sats"
 staload "entity.sats"
 staload "mem.sats"
+staload "clock.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -694,7 +695,11 @@ in
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
-        minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at) })
+        minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at),
+        shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
+        (* finished now: a change sync passes on *)
+        finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
+        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
       val () = lib_touch(book_index)
     in lib_save() end
 end
