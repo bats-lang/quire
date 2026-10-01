@@ -18,10 +18,10 @@ fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, fal
 implement app_import_input () =
   ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true)
 
-(* The library menu's backup file input, with no file chosen *)
+(* The Settings screen's backup file input, with no file chosen *)
 #pub fn app_backup_input (): void
 implement app_backup_input () =
-  ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
+  ui_file_input("settings-restore", "backup-file", "Restore backup", ".json,application/json", false)
 
 (* The dictionaries' file input, with no file chosen: a dictionary's
    files are picked together *)
@@ -278,17 +278,63 @@ fn _library_menu (): void = let
   val () = ui_attr("menu-storage-kept", AClass, "mi stkept")
   val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
   val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
+  val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
-  val () = ui_menuitem("library-menu-box", "menu-dictionaries", "Dictionaries")
-  val () = ui_menuitem("library-menu-box", "menu-sync", "Sync")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
-  val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
-  val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
-  val () = app_backup_input()
   val () = ui_harm_item("library-menu-box", HEmptyTrash())
-  val () = ui_menuitem("library-menu-box", "menu-factory-reset", "Factory reset")
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
 in _hide("library-menu") end
+
+(* The Settings screen, opened from the library menu and the reader:
+   one screen of groups, each complex area a screen of its own opened
+   from a row that says its state (Android's settings pattern). Sync
+   (its row says whether it is on and how the last sync went, from
+   sync_summary_show), the dictionaries, the backup (exported, or one
+   restored), the daily reading goal (the statistics panel has it too),
+   and the resets, each offered back by the Undo toast *)
+fn _settings_screen (): void = let
+  val () = ui_el("bats-root", "settings-screen", TDiv, "info")
+  val () = ui_labelled("settings-screen", NDialog, "settings-title")
+  val () = ui_el("settings-screen", "settings-box", TDiv, "info-in")
+  val () = ui_el("settings-box", "settings-title", TDiv, "mtitle")
+  val () = ui_text("settings-title", "Settings")
+  (* sync: its screen, and its state *)
+  val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
+  val () = ui_named("settings-sync-row", NGroup, "Sync")
+  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn", "Sync \xE2\x80\xBA")
+  val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
+  val () = ui_role("settings-sync-state", RStatus)
+  (* the dictionaries' panel *)
+  val () = ui_el("settings-box", "settings-dictionaries-row", TDiv, "srow")
+  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn", "Dictionaries \xE2\x80\xBA")
+  (* the backup *)
+  val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
+  val () = ui_text("settings-backup-title", "Backup")
+  val () = ui_el("settings-box", "settings-backup", TDiv, "srow")
+  val () = ui_named("settings-backup", NGroup, "Backup")
+  val () = ui_text_btn("settings-backup", "settings-export-backup", "btn", "Export backup")
+  val () = ui_el("settings-backup", "settings-restore", TDiv, "btn")
+  val () = app_backup_input()
+  (* the daily reading goal *)
+  val () = ui_el("settings-box", "settings-goal-title", TDiv, "a11yg")
+  val () = ui_text("settings-goal-title", "Reading goal")
+  val () = ui_el("settings-box", "settings-goal", TDiv, "seg")
+  val () = ui_named("settings-goal", NGroup, "Daily reading goal")
+  val () = ui_text_btn("settings-goal", "settings-goal-off", "sbtn", "Off")
+  val () = ui_text_btn("settings-goal", "settings-goal-10", "sbtn", "10 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-20", "sbtn", "20 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-30", "sbtn", "30 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-60", "sbtn", "1 h")
+  (* the resets, each offered back by the Undo toast *)
+  val () = ui_el("settings-box", "settings-reset-title", TDiv, "a11yg")
+  val () = ui_text("settings-reset-title", "Reset")
+  val () = ui_el("settings-box", "settings-reset", TDiv, "srow")
+  val () = ui_named("settings-reset", NGroup, "Reset")
+  val () = ui_text_btn("settings-reset", "settings-reset-settings", "btn", "Reset settings")
+  val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
+  val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
+in _hide("settings-screen") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)
 fn _modal (): void = let
@@ -379,6 +425,9 @@ fn _reader (): void = let
   val () = ui_icon_btn("reader-top-bar", "bookmark-button", "ibtn", IcStar, "Bookmark this page")
   val () = ui_attr("bookmark-button", APressed, "false")
   val () = ui_icon_btn("reader-top-bar", "search-button", "ibtn", IcSearch, "Search in book")
+  (* the Settings screen: in this bar, whose title gives way, since the
+     bottom bar has no room left on a phone *)
+  val () = ui_icon_btn("reader-top-bar", "reader-settings", "ibtn", IcGear, "Settings")
   val () = ui_el("reader", "page", TDiv, "caf")
   (* shown (by the typography's style) exactly when a screen shows two
      columns, so the reader can tell *)
@@ -705,6 +754,7 @@ implement app_build () = let
   val () = _collections()
   val () = _stats()
   val () = _library_menu()
+  val () = _settings_screen()
   val () = _info()
   val () = _reader()
   val () = _toc()

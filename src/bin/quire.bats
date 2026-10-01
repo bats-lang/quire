@@ -896,7 +896,63 @@ in
   in lib_coll_name_show(collection) end
 end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
+(* Opens the Settings screen, its Sync row and goal as they are now *)
+fn _settings_open (): void = let
+  val () = stats_goal_show()
+  val () = sync_summary_show()
+  val () = layer_open(LSettings())
+in ui_focus("settings-sync") end
+
+(* The Settings screen: opened from the reader's bar (the library
+   menu's item is wired with the menu), its rows, and a backup picked to
+   restore. A restore or a factory reset changes the library, so the
+   reader goes back to it first, as it does for files handed to the app *)
+fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("reader-settings"), "click", lam(_) => let
+      val () = _settings_open()
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("settings-screen"), "click", lam(h) => let
+      val clicked = _target(h)
+      val goal = (if _is(clicked, "settings-goal-off") then 0
+        else if _is(clicked, "settings-goal-10") then 10
+        else if _is(clicked, "settings-goal-20") then 20
+        else if _is(clicked, "settings-goal-30") then 30
+        else if _is(clicked, "settings-goal-60") then 60
+        else ~1): int
+      val sync = _is(clicked, "settings-sync")
+      val dictionaries = _is(clicked, "settings-dictionaries")
+      val export = _is(clicked, "settings-export-backup")
+      val reset = _is(clicked, "settings-reset-settings")
+      val factory_reset = _is(clicked, "settings-factory-reset")
+      val done = _is(clicked, "settings-done")
+      val () = _target_free(clicked)
+      val () = (if goal >= 0 then let
+          val () = stats_goal_set(goal)
+        in stats_goal_show() end
+        else if sync then sync_screen_open()
+        else if dictionaries then let
+          val @(code, code_len) = reader_lang_code()
+          val () = dict_panel_open(code, code_len)
+        in $A.free<byte>(code) end
+        else if export then backup_export()
+        else if reset then set_reset(lam () => let
+            val () = set_sliders()
+          in _settings_changed() end)
+        else if factory_reset then let
+          val () = layer_close(LSettings())
+          val () = (if !_view = 1 then _show_library() else ())
+        in _factory_reset() end
+        else if done then layer_close(LSettings())
+        else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("settings-restore"), "change", lam(_) => let
+      val () = layer_close(LSettings())
+      val () = (if !_view = 1 then _show_library() else ())
+      val () = backup_import()
+    in 0 end)
+in listeners end
+
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1019,18 +1075,13 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
       in let val () = ui_focus("library-search") in 0 end end
       else 0
     end)
-  (* a backup picked to restore *)
-  val listeners = RCons(listeners, OnEl("menu-import-backup"), "change", lam(_) => let
-      val () = layer_close(LLibraryMenu())
-      val () = backup_import()
-    in 0 end)
   (* the error banner *)
   val listeners = RCons(listeners, OnEl("error-dismiss"), "click", lam(_) => let val () = notice_dismiss() in 0 end)
   val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
   val listeners = RCons(listeners, OnEl("library-menu-button"), "click", lam(_) => let
       val () = layer_open(LLibraryMenu())
-    in let val () = ui_focus("menu-export-backup") in 0 end end)
+    in let val () = ui_focus("menu-settings") in 0 end end)
   val listeners = RCons(listeners, OnEl("library-menu"), "click", lam(h) => let
       val clicked = _target(h)
       val () = (case+ _harm_clicked(clicked) of
@@ -1038,12 +1089,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
             val () = layer_close(LLibraryMenu())
           in lib_ask_harm(the_harm, lam () => _save_render()) end
         | ~None_vt() =>
-        if _is(clicked, "menu-factory-reset") then let
+        if _is(clicked, "menu-settings") then let
           val () = layer_close(LLibraryMenu())
-        in _factory_reset() end
-        else if _is(clicked, "menu-export-backup") then let
-          val () = layer_close(LLibraryMenu())
-        in backup_export() end
+        in _settings_open() end
         (* the page's script asks the browser to install the app *)
         else if _is(clicked, "menu-install") then layer_close(LLibraryMenu())
         else if _is(clicked, "menu-storage-kept") then let
@@ -1062,14 +1110,6 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
         else if _is(clicked, "menu-catalogues") then let
           val () = layer_close(LLibraryMenu())
         in catalogue_panel_open() end
-        else if _is(clicked, "menu-dictionaries") then let
-          val () = layer_close(LLibraryMenu())
-          val @(code, code_len) = reader_lang_code()
-          val () = dict_panel_open(code, code_len)
-        in $A.free<byte>(code) end
-        else if _is(clicked, "menu-sync") then let
-          val () = layer_close(LLibraryMenu())
-        in sync_screen_open() end
         else if _is(clicked, "menu-close") then layer_close(LLibraryMenu())
         else if _is(clicked, "library-menu") then layer_close(LLibraryMenu())
         else ())
@@ -1808,6 +1848,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
           val () = (if (if escape then _escape_overlay() else false) then ()
             else if !_view <> 1 then ()
             else if _shown("dialog") then ()
+            (* the Settings screen, and the screens it opens (sync's
+               fields), are over the reader: keys are theirs *)
+            else if layer_is_open(LSettings()) then ()
             else if layer_is_open(LSearch()) then _search_key(key_bytes, n)
             else _reader_key(key_bytes, n))
           val () = $A.free<byte>(key_bytes)
@@ -1863,7 +1906,7 @@ implement main0 () = let
   val () = sync_screen_make()
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
-  val listeners = _wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))
+  val listeners = _wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil())))))))))))
   (* files handed to the app from outside it (an Android intent) *)
   val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
