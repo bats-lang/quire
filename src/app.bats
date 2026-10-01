@@ -231,6 +231,7 @@ fn _library_menu (): void = let
   val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   val () = ui_menuitem("library-menu-box", "menu-dictionaries", "Dictionaries")
+  val () = ui_menuitem("library-menu-box", "menu-sync", "Sync")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
   val () = app_backup_input()

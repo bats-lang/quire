@@ -26,6 +26,8 @@ staload "annot.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
+staload "clock.sats"
+staload "sync.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -248,6 +250,10 @@ fn _show_library (): void = let
   val () = reader_stack_clear()
   val () = reader_timer_stop()
   val () = window_close()
+  (* what sync brings for the book now goes to its stored record, and
+     no place of another device's is offered *)
+  val () = annot_close()
+  val () = sync_book_closed()
 in lib_render() end
 
 (* The reader's bars: shown, and hidden again after 5 seconds *)
@@ -387,6 +393,8 @@ fn _open_book {book:int} (book: int book): void =
       val anchor = book_numbers.anchor
       val id_high = book_numbers.id_high
       val id_low = book_numbers.id_low
+      (* the other devices' place and annotations, brought *)
+      val () = sync_book_opened(book_numbers.key)
     in
       if open_key_get() = book_numbers.key then
         $P.discard<int>($P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor)))
@@ -567,19 +575,22 @@ fn _info_open {book:int} (book: int book): void =
       val size_len = size_text(size, book_numbers.file_size)
       val () = ui_text_buf("info-size", size, size_len)
       (* the time it has been read, and its pages an hour (as Kobo's
-         Reading Life shows them), once it has been *)
-      val () = (if book_numbers.minutes_read > 0 then let
+         Reading Life shows them), once it has been: on this device and
+         the others sync knows of *)
+      val minutes_read = book_numbers.minutes_read + book_numbers.minutes_elsewhere
+      val pages_read = book_numbers.pages_read + book_numbers.pages_elsewhere
+      val () = (if minutes_read > 0 then let
           val duration = $A.alloc<byte>(32)
-          val duration_len = stats_duration_text(duration, book_numbers.minutes_read)
+          val duration_len = stats_duration_text(duration, minutes_read)
         in ui_text_buf("info-time", duration, duration_len) end
         else ui_text("info-time", "Not yet"))
-      val () = (if book_numbers.minutes_read > 0 then let
+      val () = (if minutes_read > 0 then let
           val speed = $A.alloc<byte>(32)
-          val speed_len = $S.int_to_str(speed, 0, 32, _per_hour(book_numbers.pages_read, book_numbers.minutes_read))
+          val speed_len = $S.int_to_str(speed, 0, 32, _per_hour(pages_read, minutes_read))
           val () = $A.write_text(speed, speed_len, $A.text_lit(" pages an hour"), 14)
         in ui_text_buf("info-speed", speed, speed_len + 14) end
         else ())
-      val () = ui_show("info-speed-row", book_numbers.minutes_read > 0)
+      val () = ui_show("info-speed-row", minutes_read > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", book_numbers.shelf)
       val () = ui_attr("book-info-cover", ASrc, "data:,")
       val () = (if book_numbers.cover > 0 then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
@@ -1033,6 +1044,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
           val @(code, code_len) = reader_lang_code()
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
+        else if _is(clicked, "menu-sync") then let
+          val () = layer_close(LLibraryMenu())
+        in sync_screen_open() end
         else if _is(clicked, "menu-close") then layer_close(LLibraryMenu())
         else if _is(clicked, "library-menu") then layer_close(LLibraryMenu())
         else ())
@@ -1069,6 +1083,36 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
      be cleared: its events are taken on its box) *)
   val listeners = RCons(listeners, OnEl("dictionary-import"), "change", lam(_) => let
       val () = dict_import_picked()
+    in 0 end)
+in listeners end
+
+(* Sync: its screen's buttons, its toast's, and the page hidden (a sync,
+   so what was read here is on the other devices) *)
+fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("sync-screen"), "click", lam(h) => let
+      val clicked = _target(h)
+      val now = _is(clicked, "sync-now")
+      val off = _is(clicked, "sync-off")
+      val done = _is(clicked, "sync-done")
+      val () = _target_free(clicked)
+      val () = (if now then sync_now()
+        else if off then sync_off()
+        else if done then layer_close(LSync())
+        else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("sync-toast"), "click", lam(h) => let
+      val clicked = _target(h)
+      val go = _is(clicked, "sync-go")
+      val dismiss = _is(clicked, "sync-toast-close")
+      val () = _target_free(clicked)
+      val () = (if go then let
+          val @(chapter, page, anchor) = sync_further_take()
+        in if chapter >= 0 then (if !_view = 1 then reader_jump_to(chapter, page, anchor) else ()) else () end
+        else if dismiss then sync_further_dismiss()
+        else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnDocument(), "visibilitychange", lam(_) => let
+      val () = (if $WN.get_visibility() = 1 then sync_run() else ())
     in 0 end)
 in listeners end
 
@@ -1752,9 +1796,11 @@ in listeners end
 
 implement main0 () = let
   val () = app_build()
+  (* the sync screen keeps its own elements *)
+  val () = sync_screen_make()
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
-  val listeners = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
+  val listeners = _wire_sync(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil())))))))))
   (* files handed to the app from outside it (an Android intent) *)
   val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
@@ -1765,6 +1811,7 @@ implement main0 () = let
   val () = _hint_load()
   val () = lib_install_hint_load()
   val () = stats_load()
+  val () = stamp_load()
   val () = $P.discard<int>(dict_load())
   val () = dict_when_read(lam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
@@ -1776,6 +1823,8 @@ implement main0 () = let
       $P.and_then<int><int>(lib_load(), lam(_) => let
         val () = lib_state_set(state)
         val () = lib_render()
+        (* sync, once the library is read *)
+        val () = sync_start()
       in _view_restore() end)
     end)
 in $P.discard<int>(loaded) end

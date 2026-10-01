@@ -24,6 +24,7 @@ staload "mem.sats"
 staload "stats.sats"
 staload "app.sats"
 staload "dictionary.sats"
+staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -32,70 +33,21 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 (* A backup's most bytes *)
 #define BACKUP_MAX_BYTES 268435456
 
-(* ============================================================
-   The file, in chunks: count chunks of total bytes, the last one first
-   ============================================================ *)
+(* The file, made a chunk at a time *)
+val _file = ref<jfile(BACKUP_MAX_BYTES)>(jfile_new{BACKUP_MAX_BYTES}())
 
-datavtype chunks(int, int) =
-  | chunks_nil(0, 0) of ()
-  | {count,total:nat}{owner,l:agz}{n:pos}{length:nat | length <= n}
-    chunks_cons(count + 1, total + length) of
-      (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int length, chunks(count, total))
+fn _file_take (): jfile(BACKUP_MAX_BYTES) = let
+  var file: jfile(BACKUP_MAX_BYTES) = jfile_new{BACKUP_MAX_BYTES}()
+  val () = ref_exch_elt<jfile(BACKUP_MAX_BYTES)>(_file, file)
+in file end
 
-fun chunks_free {count,total:nat} .<count>. (pieces: chunks(count, total)): void =
-  case+ pieces of
-  | ~chunks_nil() => ()
-  | ~chunks_cons(owner, bytes, _, rest) => let val () = piece_free(owner, bytes) in chunks_free(rest) end
-
-(* The chunks so far; whether each could be made *)
-datavtype chunk_cell =
-  | {count,total:nat | total <= BACKUP_MAX_BYTES} ChunkCell of (chunks(count, total), int total, bool)
-
-val _chunks = ref<chunk_cell>(ChunkCell(chunks_nil(), 0, true))
-
-fn _chunks_take (): chunk_cell = let
-  var cell: chunk_cell = ChunkCell(chunks_nil(), 0, true)
-  val () = ref_exch_elt<chunk_cell>(_chunks, cell)
-in cell end
-
-fn _chunks_put (cell: chunk_cell): void = let
-  var current: chunk_cell = cell
-  val () = ref_exch_elt<chunk_cell>(_chunks, current)
-  val+ ~ChunkCell(pieces, _, _) = current
-in chunks_free(pieces) end
+fn _file_put (file: jfile(BACKUP_MAX_BYTES)): void = let
+  var current: jfile(BACKUP_MAX_BYTES) = file
+  val () = ref_exch_elt<jfile(BACKUP_MAX_BYTES)>(_file, current)
+in jfile_free(current) end
 
 (* Adds chunk after the chunks so far *)
-fn _push (chunk: jchunk): void = let
-  val+ ~ChunkCell(pieces, total, complete) = _chunks_take()
-in
-  case+ chunk of
-  | ~JNone() => _chunks_put(ChunkCell(pieces, total, false))
-  | ~JChunk(owner, bytes, length) =>
-    if total + length > BACKUP_MAX_BYTES then let
-      val () = piece_free(owner, bytes)
-    in _chunks_put(ChunkCell(pieces, total, false)) end
-    else _chunks_put(ChunkCell(chunks_cons(owner, bytes, length, pieces), total + length, complete))
-end
-
-(* out[start, start + length) := source[0, length) *)
-fun _copy_at {l,source_loc:agz}{owner,source_owner:addr}{out_size,n:nat}{length:nat | length <= n}
-  {start:nat | start + length <= out_size}{i:nat | i <= length} .<length - i>.
-  (out: !$A.arrx(byte, l, out_size, owner), start: int start,
-   source: !$A.arrx(byte, source_loc, n, source_owner), length: int length, i: int i): void =
-  if i >= length then ()
-  else let
-    val () = $A.write_byte(out, start + i, $AR.low_byte(byte2int0($A.get<byte>(source, i))))
-  in _copy_at(out, start, source, length, i + 1) end
-
-(* The chunks, the last first, at out[0, total) in order *)
-fun _join {l:agz}{owner:addr}{out_size:nat}{count,total:nat | total <= out_size} .<count>.
-  (out: !$A.arrx(byte, l, out_size, owner), pieces: chunks(count, total), total: int total): void =
-  case+ pieces of
-  | ~chunks_nil() => ()
-  | ~chunks_cons(owner, bytes, length, rest) => let
-      val () = _copy_at(out, total - length, bytes, length, 0)
-      val () = piece_free(owner, bytes)
-    in _join(out, rest, total - length) end
+fn _push (chunk: jchunk): void = _file_put(jfile_push(_file_take(), BACKUP_MAX_BYTES, chunk))
 
 (* ============================================================
    Export
@@ -206,52 +158,217 @@ fn _collections_chunk (): jchunk =
       val next = jw_lit(out, next, "],\"books\":[")
     in JChunk(owner, out, next) end
 
+(* ============================================================
+   A book's numbers, as a backup (or sync's file) has them
+   ============================================================ *)
+
+(* numbers[0, 3) its id (numbers[2] is 1 once read); numbers[3, 12) its
+   shelf, when it was added and opened, its place (chapter, chapters,
+   page, pages, anchor) and whether it is done; numbers[12] the
+   collections it is in (bit j for the file's collection j); numbers[13,
+   16) its minutes read, the pages turned on them and when it was
+   finished; numbers[16, 19) when its shelf, collections and being
+   finished last changed (stamps, clock.bats); numbers[19] its file's
+   size. A number a file does not give is -1 (0 for those before the
+   anchor, and for done) *)
+#pub stadef BOOK_NUMBERS = 20
+
+#define SLOT_SHELF 3
+#define SLOT_ADDED 4
+#define SLOT_OPENED 5
+#define SLOT_CHAPTER 6
+#define SLOT_CHAPTERS 7
+#define SLOT_PAGE 8
+#define SLOT_PAGES 9
+#define SLOT_ANCHOR 10
+#define SLOT_DONE 11
+#define SLOT_COLLECTIONS 12
+#define SLOT_MINUTES 13
+#define SLOT_PAGES_READ 14
+#define SLOT_FINISHED 15
+#define SLOT_SHELF_MODIFIED 16
+#define SLOT_COLLECTIONS_MODIFIED 17
+#define SLOT_FINISHED_MODIFIED 18
+#define SLOT_SIZE 19
+
+(* A book's numbers, before its members are read *)
+fun _clear_numbers {numbers_loc:agz}{i:nat | i <= BOOK_NUMBERS} .<BOOK_NUMBERS - i>.
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
+  if i >= 20 then ()
+  else let
+    val () = $A.set<Int>(numbers, i, (if i = SLOT_ANCHOR then ~1 else if i >= SLOT_COLLECTIONS then ~1 else 0))
+  in _clear_numbers(numbers, i + 1) end
+
+#pub fn backup_numbers_clear {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void
+implement backup_numbers_clear (numbers) = _clear_numbers(numbers, 0)
+
+(* A book's numbers, cleared *)
+#pub fn backup_numbers_new (): [numbers_loc:agz] $A.arr(Int, numbers_loc, BOOK_NUMBERS)
+implement backup_numbers_new () = let
+  val numbers = $A.alloc<Int>(20)
+  val () = _clear_numbers(numbers, 0)
+in numbers end
+
+(* A library book's numbers (its collections as the library numbers
+   them) *)
+#pub fn backup_numbers_of {numbers_loc:agz} (nums: bnums, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void
+implement backup_numbers_of (nums, numbers) = let
+  val () = $A.set<Int>(numbers, 0, nums.id_high)
+  val () = $A.set<Int>(numbers, 1, nums.id_low)
+  val () = $A.set<Int>(numbers, 2, 1)
+  val () = $A.set<Int>(numbers, SLOT_SHELF, nums.shelf)
+  val () = $A.set<Int>(numbers, SLOT_ADDED, nums.added)
+  val () = $A.set<Int>(numbers, SLOT_OPENED, nums.opened)
+  val () = $A.set<Int>(numbers, SLOT_CHAPTER, nums.chapter)
+  val () = $A.set<Int>(numbers, SLOT_CHAPTERS, nums.chapters)
+  val () = $A.set<Int>(numbers, SLOT_PAGE, nums.page)
+  val () = $A.set<Int>(numbers, SLOT_PAGES, nums.pages)
+  val () = $A.set<Int>(numbers, SLOT_ANCHOR, nums.anchor)
+  val () = $A.set<Int>(numbers, SLOT_DONE, nums.done)
+  val () = $A.set<Int>(numbers, SLOT_COLLECTIONS, nums.collections)
+  val () = $A.set<Int>(numbers, SLOT_MINUTES, nums.minutes_read)
+  val () = $A.set<Int>(numbers, SLOT_PAGES_READ, nums.pages_read)
+  val () = $A.set<Int>(numbers, SLOT_FINISHED, nums.finished_at)
+  val () = $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, nums.shelf_modified)
+  val () = $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, nums.collections_modified)
+  val () = $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, nums.finished_modified)
+in $A.set<Int>(numbers, SLOT_SIZE, nums.file_size) end
+
+(* The book's id, when the numbers have one *)
+#pub fn backup_numbers_id {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): @(bool, Int, Int)
+implement backup_numbers_id (numbers) =
+  @($A.get<Int>(numbers, 2) = 1, $A.get<Int>(numbers, 0), $A.get<Int>(numbers, 1))
+
+(* The collections the book is in: mask, bit j for collection j *)
+#pub fn backup_numbers_collections {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), mask: Int): void
+implement backup_numbers_collections (numbers, mask) = $A.set<Int>(numbers, SLOT_COLLECTIONS, mask)
+
+(* The book's place: its chapter, page and anchor *)
+#pub fn backup_numbers_place {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): @(Int, Int, Int)
+implement backup_numbers_place (numbers) =
+  @($A.get<Int>(numbers, SLOT_CHAPTER), $A.get<Int>(numbers, SLOT_PAGE), $A.get<Int>(numbers, SLOT_ANCHOR))
+
+(* The minutes the book has been read and the pages turned on them, as
+   the numbers give them: minutes and pages, or (-1) not given *)
+#pub fn backup_numbers_reading {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), minutes: Int, pages: Int): void
+implement backup_numbers_reading (numbers, minutes, pages) = let
+  val () = $A.set<Int>(numbers, SLOT_MINUTES, minutes)
+in $A.set<Int>(numbers, SLOT_PAGES_READ, pages) end
+
+(* Whether place (chapter, page of pages) is further in the book than
+   other: a later chapter, or further through the same one *)
+fn _further (chapter: Int, page: Int, pages: Int, other_chapter: Int, other_page: Int, other_pages: Int): bool =
+  if chapter <> other_chapter then chapter > other_chapter
+  else let
+    val page = (if page > 0 then page else 0): Int
+    val other_page = (if other_page > 0 then other_page else 0): Int
+    val pages = (if pages > 0 then pages else 1): Int
+    val other_pages = (if other_pages > 0 then other_pages else 1): Int
+  in page * other_pages > other_page * pages end
+
+(* Whether the place numbers give is further than other's *)
+#pub fn backup_numbers_further {numbers_loc,other_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS)): bool
+implement backup_numbers_further (numbers, other) =
+  _further($A.get<Int>(numbers, SLOT_CHAPTER), $A.get<Int>(numbers, SLOT_PAGE), $A.get<Int>(numbers, SLOT_PAGES),
+    $A.get<Int>(other, SLOT_CHAPTER), $A.get<Int>(other, SLOT_PAGE), $A.get<Int>(other, SLOT_PAGES))
+
+(* numbers[first, first + count) := other's *)
+fun _take_slots {numbers_loc,other_loc:agz}{first,count:nat | first + count <= BOOK_NUMBERS} .<count>.
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS), first: int first, count: int count): void =
+  if count <= 0 then ()
+  else let
+    val () = $A.set<Int>(numbers, first, $A.get<Int>(other, first))
+  in _take_slots(numbers, other, first + 1, count - 1) end
+
+(* Whether other's change of a value (value and stamp at its slots) is
+   the later of the two: the later stamp, or the greater value when two
+   devices made theirs at the same stamp (an order both agree on) *)
+fn _later {numbers_loc,other_loc:agz}{value_slot,stamp_slot:nat | value_slot < BOOK_NUMBERS; stamp_slot < BOOK_NUMBERS}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS), value_slot: int value_slot, stamp_slot: int stamp_slot): bool = let
+  val stamp = $A.get<Int>(numbers, stamp_slot)
+  val other_stamp = $A.get<Int>(other, stamp_slot)
+in
+  if other_stamp < 0 then false
+  else if other_stamp > stamp then true
+  else if other_stamp < stamp then false
+  else $A.get<Int>(other, value_slot) > $A.get<Int>(numbers, value_slot)
+end
+
+(* numbers merged with other's (the same book's on another device, both
+   with their collections numbered alike): the furthest place, unless
+   keep_place (the book is open here: the reader is offered the other
+   place instead); the shelf, the collections and being finished of the
+   later change; when it was added, the earliest; opened, the latest *)
+#pub fn backup_numbers_merge {numbers_loc,other_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS), keep_place: bool): void
+implement backup_numbers_merge (numbers, other, keep_place) = let
+  val () = (if keep_place then () else if backup_numbers_further(other, numbers) then _take_slots(numbers, other, SLOT_CHAPTER, 5) else ())
+  val () = (if _later(numbers, other, SLOT_SHELF, SLOT_SHELF_MODIFIED) then let
+      val () = $A.set<Int>(numbers, SLOT_SHELF, $A.get<Int>(other, SLOT_SHELF))
+    in $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, $A.get<Int>(other, SLOT_SHELF_MODIFIED)) end else ())
+  val () = (if _later(numbers, other, SLOT_COLLECTIONS, SLOT_COLLECTIONS_MODIFIED) then let
+      val () = $A.set<Int>(numbers, SLOT_COLLECTIONS, $A.get<Int>(other, SLOT_COLLECTIONS))
+    in $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, $A.get<Int>(other, SLOT_COLLECTIONS_MODIFIED)) end else ())
+  val () = (if _later(numbers, other, SLOT_DONE, SLOT_FINISHED_MODIFIED) then let
+      val () = $A.set<Int>(numbers, SLOT_DONE, $A.get<Int>(other, SLOT_DONE))
+      val () = $A.set<Int>(numbers, SLOT_FINISHED, $A.get<Int>(other, SLOT_FINISHED))
+    in $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, $A.get<Int>(other, SLOT_FINISHED_MODIFIED)) end else ())
+  val added = $A.get<Int>(numbers, SLOT_ADDED)
+  val other_added = $A.get<Int>(other, SLOT_ADDED)
+  val () = (if other_added > 0 then (if added <= 0 then $A.set<Int>(numbers, SLOT_ADDED, other_added)
+    else if other_added < added then $A.set<Int>(numbers, SLOT_ADDED, other_added) else ()) else ())
+in
+  if $A.get<Int>(other, SLOT_OPENED) > $A.get<Int>(numbers, SLOT_OPENED) then $A.set<Int>(numbers, SLOT_OPENED, $A.get<Int>(other, SLOT_OPENED))
+  else ()
+end
+
+(* Every stamp of numbers, seen: what this device changes next is later
+   than them *)
+#pub fn backup_numbers_seen {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void
+implement backup_numbers_seen (numbers) = let
+  val () = stamp_seen($A.get<Int>(numbers, SLOT_SHELF_MODIFIED))
+  val () = stamp_seen($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED))
+in stamp_seen($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED)) end
+
 (* The numbers of the collections a book is in (the bits of
-   collections), from collection on, each after a comma but the first *)
-fun _collection_numbers_json {l:agz}{owner:addr}{n:nat}{collection:nat | collection <= 8}
-  {position:nat | position + 2 * (8 - collection) <= n} .<8 - collection>.
+   collections), from collection on, each after a comma but the first:
+   at most 31 of them *)
+fun _collection_numbers_json {l:agz}{owner:addr}{n:nat}{collection:nat | collection <= 31}
+  {position:nat | position + 3 * (31 - collection) <= n} .<31 - collection>.
   (out: !$A.arrx(byte, l, n, owner), position: int position, collection: int collection,
    collections: int, first: bool)
-  : [stop:nat | stop <= position + 2 * (8 - collection)] int stop =
-  if collection >= 8 then position
+  : [stop:nat | stop <= position + 3 * (31 - collection)] int stop =
+  if collection >= 31 then position
   else if $AR.band_int_int(collections, $AR.bsl_int_int(1, collection)) = 0 then
     _collection_numbers_json(out, position, collection + 1, collections, first)
-  else if first then let
-    val () = $A.write_byte(out, position, 48 + collection)
-  in _collection_numbers_json(out, position + 1, collection + 1, collections, false) end
   else let
-    val () = $A.write_byte(out, position, 44)
-    val () = $A.write_byte(out, position + 1, 48 + collection)
-  in _collection_numbers_json(out, position + 2, collection + 1, collections, false) end
+    val after_comma = (if first then position else jw_lit(out, position, ",")): [after:nat | position <= after; after <= position + 1] int after
+    val stop = (if collection >= 10 then let
+        val () = $A.write_byte(out, after_comma, $AR.low_byte(48 + collection / 10))
+        val () = $A.write_byte(out, after_comma + 1, $AR.low_byte(48 + collection - 10 * (collection / 10)))
+      in after_comma + 2 end
+      else let
+        val () = $A.write_byte(out, after_comma, 48 + collection)
+      in after_comma + 1 end): [stop:nat | stop <= position + 3] int stop
+  in _collection_numbers_json(out, stop, collection + 1, collections, false) end
 
 fn _text_chunk {text_len:pos | text_len <= 16} (text: string text_len): jchunk =
   case+ piece_new(16) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => JChunk(owner, out, jw_lit(out, 0, text))
 
-(* out[position + 1 + digit, position + 15) := key[1 + digit, 15) *)
-fun _copy_id_digits {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position + 16 <= n}{digit:nat | digit <= 14}
-  .<14 - digit>.
-  (out: !$A.arrx(byte, l, n, owner), position: int position, key: !$A.arr(byte, key_loc, 15), digit: int digit)
-  : void =
-  if digit >= 14 then ()
-  else let
-    val () = $A.write_byte(out, position + 1 + digit, $AR.low_byte(byte2int0($A.get<byte>(key, digit + 1))))
-  in _copy_id_digits(out, position, key, digit + 1) end
+(* A number of numbers, or 0 when the file did not give it *)
+fn _given {numbers_loc:agz}{slot:nat | slot < BOOK_NUMBERS} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), slot: int slot): Int = let
+  val value = $A.get<Int>(numbers, slot)
+in if value < 0 then 0 else value end
 
-(* The id's 14 hex digits, quoted, at out[position, position + 16) *)
-fn _id_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 16 <= n}
-  (out: !$A.arrx(byte, l, n, owner), position: int position, id_high: int, id_low: int): int(position + 16) = let
-  val key = lib_key(105, id_high, id_low)
-  val () = $A.write_byte(out, position, 34)
-  val () = _copy_id_digits(out, position, key, 0)
-  val () = $A.free<byte>(key)
-  val () = $A.write_byte(out, position + 15, 34)
-in position + 16 end
-
-(* Book book_index's members, up to its annotations' value; after
-   another book's closing brace when it is not the first *)
-fn _book_chunk {book_index:int} (book_index: int book_index, numbers: bnums, first: bool): jchunk =
+(* Book book_index's members (its title and author the library's, its
+   numbers numbers), up to its annotations' value; after another book's
+   closing brace when it is not the first *)
+#pub fn backup_book_chunk {book_index:int}{numbers_loc:agz}
+  (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), first: bool): jchunk
+implement backup_book_chunk (book_index, numbers, first) =
   case+ piece_new(4096) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
@@ -259,7 +376,7 @@ fn _book_chunk {book_index:int} (book_index: int book_index, numbers: bnums, fir
       val @(author, author_len) = lib_text(book_index, 1)
       val next = (if first then jw_lit(out, 0, "{\"id\":") else jw_lit(out, 0, "},{\"id\":"))
         : [after:int | 6 <= after; after <= 8] int after
-      val next = _id_json(out, next, numbers.id_high, numbers.id_low)
+      val next = jw_id(out, next, $A.get<Int>(numbers, 0), $A.get<Int>(numbers, 1))
       val next = jw_lit(out, next, ",\"title\":")
       val next = jw_str(out, next, title, title_len)
       val next = jw_lit(out, next, ",\"author\":")
@@ -267,64 +384,68 @@ fn _book_chunk {book_index:int} (book_index: int book_index, numbers: bnums, fir
       val () = $A.free<byte>(title)
       val () = $A.free<byte>(author)
       val next = jw_lit(out, next, ",\"shelf\":")
-      val next = jw_int(out, next, numbers.shelf)
+      val next = jw_int(out, next, _given(numbers, SLOT_SHELF))
       val next = jw_lit(out, next, ",\"added\":")
-      val next = jw_int(out, next, numbers.added)
+      val next = jw_int(out, next, _given(numbers, SLOT_ADDED))
       val next = jw_lit(out, next, ",\"opened\":")
-      val next = jw_int(out, next, numbers.opened)
+      val next = jw_int(out, next, _given(numbers, SLOT_OPENED))
       val next = jw_lit(out, next, ",\"chapter\":")
-      val next = jw_int(out, next, numbers.chapter)
+      val next = jw_int(out, next, _given(numbers, SLOT_CHAPTER))
       val next = jw_lit(out, next, ",\"chapters\":")
-      val next = jw_int(out, next, numbers.chapters)
+      val next = jw_int(out, next, _given(numbers, SLOT_CHAPTERS))
       val next = jw_lit(out, next, ",\"page\":")
-      val next = jw_int(out, next, numbers.page)
+      val next = jw_int(out, next, _given(numbers, SLOT_PAGE))
       val next = jw_lit(out, next, ",\"pages\":")
-      val next = jw_int(out, next, numbers.pages)
+      val next = jw_int(out, next, _given(numbers, SLOT_PAGES))
       val next = jw_lit(out, next, ",\"anchor\":")
-      val next = jw_int(out, next, numbers.anchor)
+      val next = jw_int(out, next, $A.get<Int>(numbers, SLOT_ANCHOR))
       val next = jw_lit(out, next, ",\"size\":")
-      val next = jw_int(out, next, numbers.file_size)
+      val next = jw_int(out, next, _given(numbers, SLOT_SIZE))
       val next = jw_lit(out, next, ",\"done\":")
-      val next = jw_int(out, next, numbers.done)
+      val next = jw_int(out, next, _given(numbers, SLOT_DONE))
       val next = jw_lit(out, next, ",\"collections\":[")
-      val next = _collection_numbers_json(out, next, 0, numbers.collections, true)
+      val next = _collection_numbers_json(out, next, 0, _given(numbers, SLOT_COLLECTIONS), true)
       val next = jw_lit(out, next, "]")
       val next = jw_lit(out, next, ",\"readMinutes\":")
-      val next = jw_int(out, next, numbers.minutes_read)
+      val next = jw_int(out, next, _given(numbers, SLOT_MINUTES))
       val next = jw_lit(out, next, ",\"readPages\":")
-      val next = jw_int(out, next, numbers.pages_read)
+      val next = jw_int(out, next, _given(numbers, SLOT_PAGES_READ))
       val next = jw_lit(out, next, ",\"finished\":")
-      val next = jw_int(out, next, numbers.finished_at)
+      val next = jw_int(out, next, _given(numbers, SLOT_FINISHED))
+      val next = jw_lit(out, next, ",\"shelfModified\":")
+      val next = jw_stamp(out, next, _given(numbers, SLOT_SHELF_MODIFIED))
+      val next = jw_lit(out, next, ",\"collectionsModified\":")
+      val next = jw_stamp(out, next, _given(numbers, SLOT_COLLECTIONS_MODIFIED))
+      val next = jw_lit(out, next, ",\"finishedModified\":")
+      val next = jw_stamp(out, next, _given(numbers, SLOT_FINISHED_MODIFIED))
       val next = jw_lit(out, next, ",\"annotations\":")
     in JChunk(owner, out, next) end
 
+(* Library book book_index's members, up to its annotations' value *)
+fn _book_chunk {book_index:int} (book_index: int book_index, nums: bnums, first: bool): jchunk = let
+  val numbers = backup_numbers_new()
+  val () = backup_numbers_of(nums, numbers)
+  val chunk = backup_book_chunk(book_index, numbers, first)
+  val () = $A.free<Int>(numbers)
+in chunk end
+
 (* Downloads the chunks as one file *)
-fn _export_finish (): void = let
-  val+ ~ChunkCell(pieces, total, complete) = _chunks_take()
-in
-  if ~complete then let
-    val () = chunks_free(pieces)
-  in _say("The backup could not be made: there is not enough memory.") end
-  else if total <= 0 then chunks_free(pieces)
-  else (case+ piece_new(total) of
-    | ~NoPiece() => let
-        val () = chunks_free(pieces)
-      in _say("The backup could not be made: there is not enough memory.") end
-    | ~Piece(owner, out) => let
-        val () = _join(out, pieces, total)
-        val @(file_frozen, file_bytes) = $A.freeze<byte>(out)
-        val mime = $A.alloc<byte>(16)
-        val () = $A.write_text(mime, 0, $A.text_lit("application/json"), 16)
-        val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime)
-        val file_name = $A.alloc<byte>(17)
-        val () = $A.write_text(file_name, 0, $A.text_lit("quire-backup.json"), 17)
-        val @(name_frozen, name_bytes) = $A.freeze<byte>(file_name)
-        val () = $BL.download_blob(file_bytes, total, mime_bytes, 16, name_bytes, 17)
-        val () = release_bytes(name_frozen, name_bytes)
-        val () = release_bytes(mime_frozen, mime_bytes)
-        val () = $A.drop<byte>(file_frozen, file_bytes)
-      in piece_free(owner, $A.thaw<byte>(file_frozen)) end)
-end
+fn _export_finish (): void =
+  case+ jfile_join(_file_take()) of
+  | ~JNoWhole() => _say("The backup could not be made: there is not enough memory.")
+  | ~JWhole(owner, out, total) => let
+      val @(file_frozen, file_bytes) = $A.freeze<byte>(out)
+      val mime = $A.alloc<byte>(16)
+      val () = $A.write_text(mime, 0, $A.text_lit("application/json"), 16)
+      val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime)
+      val file_name = $A.alloc<byte>(17)
+      val () = $A.write_text(file_name, 0, $A.text_lit("quire-backup.json"), 17)
+      val @(name_frozen, name_bytes) = $A.freeze<byte>(file_name)
+      val () = $BL.download_blob(file_bytes, total, mime_bytes, 16, name_bytes, 17)
+      val () = release_bytes(name_frozen, name_bytes)
+      val () = release_bytes(mime_frozen, mime_bytes)
+      val () = $A.drop<byte>(file_frozen, file_bytes)
+    in piece_free(owner, $A.thaw<byte>(file_frozen)) end
 
 (* Books book_index to count - 1, one after another (each one's
    annotations are read from storage); then the file is downloaded *)
@@ -361,7 +482,7 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
 #pub fn backup_export (): void
 
 implement backup_export () = let
-  val () = _chunks_put(ChunkCell(chunks_nil(), 0, true))
+  val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
   val () = _push(_settings_chunk())
   val () = _push(_log_chunk())
   val () = _push(dict_backup_json())
@@ -372,34 +493,18 @@ in _export_books(0, lib_count(), true) end
    A book's record kept for later: "o" and its id
    ============================================================ *)
 
-(* A book's numbers as a backup is read: numbers[0, 3) its id
-   (numbers[2] is 1 once read), numbers[3, 12) its shelf, dates and
-   place (_number_slot), numbers[12] the collections it is in, as the
-   library numbers them (-1 when the backup does not say), numbers[13,
-   16) its minutes read, pages turned on them and when it was finished
-   (each -1 when the backup does not say); numbers[16 + j] the library's
-   number of the backup's collection j (-1 none) *)
-#define NUMBER_SLOTS 24
-#define COLLECTION_SLOTS 16
-
-(* A book's numbers, before its members are read *)
-fun _clear_numbers {numbers_loc:agz}{i:nat | i <= COLLECTION_SLOTS} .<COLLECTION_SLOTS - i>.
-  (numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), i: int i): void =
-  if i >= COLLECTION_SLOTS then ()
-  else let
-    val () = $A.set<Int>(numbers, i, (if i = 10 then ~1 else if i >= 12 then ~1 else 0))
-  in _clear_numbers(numbers, i + 1) end
-
 (* The record's numbers, in order: shelf, added, opened, chapter,
-   chapters, page, pages, anchor, done, collections, minutes read, pages
-   turned on them, finished. A record kept by an earlier version has the
-   first 9 (RECORD_NUMBERS_FIRST) or 10 of them. *)
-#define RECORD_NUMBERS 13
+   chapters, page, pages, anchor, done, collections (as the library
+   numbers them), minutes read, pages turned on them, finished, and when
+   the shelf, the collections and being finished last changed. A record
+   kept by an earlier version has the first 9 (RECORD_NUMBERS_FIRST), 10
+   or 13 of them. *)
+#define RECORD_NUMBERS 16
 #define RECORD_NUMBERS_FIRST 9
 
 fun _orphan_write {record_loc,numbers_loc:agz}{i:nat | i <= RECORD_NUMBERS} .<RECORD_NUMBERS - i>.
   (record: !$A.arr(byte, record_loc, 4 + 4 * RECORD_NUMBERS),
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), i: int i): void =
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
   if i >= RECORD_NUMBERS then ()
   else let
     val () = $A.write_i32(record, 4 + 4 * i, $A.get<Int>(numbers, 3 + i))
@@ -410,7 +515,7 @@ fun _orphan_write {record_loc,numbers_loc:agz}{i:nat | i <= RECORD_NUMBERS} .<RE
 fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECORD_NUMBERS}
   {n:int | n >= 4 + 4 * count}{i:nat | i <= count} .<count - i>.
   (record: !$A.arr(byte, record_loc, n), count: int count,
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), i: int i): void =
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
   if i >= count then ()
   else let
     val offset = 4 + 4 * i
@@ -425,15 +530,18 @@ fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECOR
 (* A kept record's numbers, record[0, n), into numbers: RECORD_NUMBERS
    of them, or as many as an earlier version kept *)
 fn _orphan_read {record_loc,numbers_loc:agz}{n:int | n >= 4 + 4 * RECORD_NUMBERS_FIRST}
-  (record: !$A.arr(byte, record_loc, n), n: int n, numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS)): void =
+  (record: !$A.arr(byte, record_loc, n), n: int n, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void =
   if n >= 4 + 4 * RECORD_NUMBERS then _orphan_read_numbers(record, RECORD_NUMBERS, numbers, 0)
+  else if n >= 4 + 4 * 13 then _orphan_read_numbers(record, 13, numbers, 0)
   else if n >= 4 + 4 * 10 then _orphan_read_numbers(record, 10, numbers, 0)
   else _orphan_read_numbers(record, RECORD_NUMBERS_FIRST, numbers, 0)
 
-(* Stores numbers[3, 16) (a book's numbers from a backup) under its "o"
-   key *)
-fn _orphan_put {numbers_loc:agz}
-  (id_high: int, id_low: int, numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS)): void = let
+(* Keeps numbers[3, 19) (a book's numbers from a backup or from sync,
+   its collections as the library numbers them) under its "o" key, for
+   when the book is imported *)
+#pub fn backup_orphan_put {numbers_loc:agz}
+  (id_high: int, id_low: int, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void
+implement backup_orphan_put (id_high, id_low, numbers) = let
   val record = $A.alloc<byte>(4 + 4 * RECORD_NUMBERS)
   val () = $A.write_text(record, 0, $A.text_lit("QO1"), 3)
   val () = $A.write_byte(record, 3, 10)
@@ -448,26 +556,34 @@ in release_bytes(record_frozen, record_bytes) end
 fn _in_range (value: Int, low: Int, high: Int, fallback: Int): Int =
   if value < low then fallback else if value > high then fallback else value
 
-(* Library book book_index's numbers set from numbers[3, 12) *)
-fn _apply_numbers {book_index:int}{numbers_loc:agz}
-  (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS)): void = let
-  val shelf = _in_range($A.get<Int>(numbers, 3), 0, 2, 0)
-  val added = $A.get<Int>(numbers, 4)
-  val opened = _in_range($A.get<Int>(numbers, 5), 0, 2147483647, 0)
-  val chapter = _in_range($A.get<Int>(numbers, 6), 0, 2147483647, 0)
-  val chapters = _in_range($A.get<Int>(numbers, 7), 0, 2147483647, 0)
-  val page = _in_range($A.get<Int>(numbers, 8), 0, 2147483647, 0)
-  val pages = _in_range($A.get<Int>(numbers, 9), 0, 2147483647, 0)
-  val anchor = _in_range($A.get<Int>(numbers, 10), ~1, 2147483647, ~1)
-  val done = _in_range($A.get<Int>(numbers, 11), 0, 1, 0)
-  (* the collections, when the backup says which: of those there are *)
-  val collections = $A.get<Int>(numbers, 12)
+(* Library book book_index's numbers set from numbers (its collections
+   as the library numbers them), each one the numbers do not give left
+   as it is: a shelf up to shelf_most (2 from a backup, which puts
+   nothing in the Trash; 3 from sync) *)
+#pub fn backup_apply_numbers {book_index:int}{numbers_loc:agz}
+  (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), shelf_most: int): void
+implement backup_apply_numbers (book_index, numbers, shelf_most) = let
+  val shelf = _in_range($A.get<Int>(numbers, SLOT_SHELF), 0, g1ofg0(shelf_most), 0)
+  val added = $A.get<Int>(numbers, SLOT_ADDED)
+  val opened = _in_range($A.get<Int>(numbers, SLOT_OPENED), 0, 2147483647, 0)
+  val chapter = _in_range($A.get<Int>(numbers, SLOT_CHAPTER), 0, 2147483647, 0)
+  val chapters = _in_range($A.get<Int>(numbers, SLOT_CHAPTERS), 0, 2147483647, 0)
+  val page = _in_range($A.get<Int>(numbers, SLOT_PAGE), 0, 2147483647, 0)
+  val pages = _in_range($A.get<Int>(numbers, SLOT_PAGES), 0, 2147483647, 0)
+  val anchor = _in_range($A.get<Int>(numbers, SLOT_ANCHOR), ~1, 2147483647, ~1)
+  val done = _in_range($A.get<Int>(numbers, SLOT_DONE), 0, 1, 0)
+  (* the collections, when the file says which: of those there are *)
+  val collections = $A.get<Int>(numbers, SLOT_COLLECTIONS)
   val collections = (if collections >= 0
     then g1ofg0($AR.band_int_int(collections, $AR.bsl_int_int(1, lib_coll_count()) - 1)) else ~1): Int
-  (* its reading statistics, when the backup has them *)
-  val minutes = _in_range($A.get<Int>(numbers, 13), ~1, 2147483647, ~1)
-  val pages_turned = _in_range($A.get<Int>(numbers, 14), ~1, 2147483647, ~1)
-  val finished = _in_range($A.get<Int>(numbers, 15), ~1, 2147483647, ~1)
+  (* its reading statistics, when the file has them *)
+  val minutes = _in_range($A.get<Int>(numbers, SLOT_MINUTES), ~1, 2147483647, ~1)
+  val pages_turned = _in_range($A.get<Int>(numbers, SLOT_PAGES_READ), ~1, 2147483647, ~1)
+  val finished = _in_range($A.get<Int>(numbers, SLOT_FINISHED), ~1, 2147483647, ~1)
+  (* when they changed, when the file says *)
+  val shelf_modified = _in_range($A.get<Int>(numbers, SLOT_SHELF_MODIFIED), ~1, 2147483647, ~1)
+  val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
+  val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
 in
   lib_update(book_index, lam(before) => @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
@@ -477,22 +593,26 @@ in
     collections = (if collections >= 0 then collections else before.collections),
     minutes_read = (if minutes >= 0 then minutes else before.minutes_read),
     pages_read = (if pages_turned >= 0 then pages_turned else before.pages_read),
-    finished_at = (if finished >= 0 then finished else before.finished_at) })
+    finished_at = (if finished >= 0 then finished else before.finished_at),
+    shelf_modified = (if shelf_modified >= 0 then shelf_modified else before.shelf_modified),
+    collections_modified = (if collections_modified >= 0 then collections_modified else before.collections_modified),
+    finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
+    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere })
 end
 
-(* Library book id_high, id_low (when it is there) takes the numbers
-   numbers[3, 12) *)
-fn _claim_apply {numbers_loc:agz} (id_high: Int, id_low: Int, numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS)): void = let
+(* Library book id_high, id_low (when it is there) takes the numbers *)
+fn _claim_apply {numbers_loc:agz} (id_high: Int, id_low: Int, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void = let
   val book_index = lib_find(id_high, id_low)
 in
   if book_index >= 0 then let
-    val () = _apply_numbers(book_index, numbers)
+    val () = backup_apply_numbers(book_index, numbers, 3)
     val () = lib_save()
   in lib_render() end
   else ()
 end
 
-(* A book just imported takes the record a backup kept for it *)
+(* A book just imported takes the record a backup (or sync) kept for
+   it *)
 #pub fn backup_claim (id_high: Int, id_low: Int): void
 
 implement backup_claim (id_high, id_low) = let
@@ -507,8 +627,7 @@ in
       if n < 4 + 4 * RECORD_NUMBERS_FIRST then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(record, 1)) <> 79 then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
       else let
-        val numbers = $A.alloc<Int>(NUMBER_SLOTS)
-        val () = _clear_numbers(numbers, 0)
+        val numbers = backup_numbers_new()
         val () = _orphan_read(record, n, numbers)
         val () = $A.free<byte>(record)
         val () = _claim_apply(id_high, id_low, numbers)
@@ -523,44 +642,42 @@ end
    Restore
    ============================================================ *)
 
-(* The value of hex digit character, or -1 *)
-fn _hex_value (character: Int): Int =
-  if character >= 48 then (if character <= 57 then character - 48
-    else if character >= 97 then (if character <= 102 then character - 87 else ~1)
-    else if character >= 65 then (if character <= 70 then character - 55 else ~1) else ~1)
+(* A member's key's most bytes: the longest a book's numbers have is
+   "collectionsModified" *)
+#define KEY_BYTES 24
+
+(* The number a book member's key names, its slot in numbers; -1 for
+   any other *)
+fn _number_slot {key_loc:agz}{key_len:nat | key_len <= KEY_BYTES} (key: !$A.arr(byte, key_loc, KEY_BYTES), key_len: int key_len)
+  : [slot:int | ~1 <= slot; slot < BOOK_NUMBERS; slot <> SLOT_COLLECTIONS] int slot =
+  if jr_key_is(key, key_len, "shelf") then SLOT_SHELF
+  else if jr_key_is(key, key_len, "added") then SLOT_ADDED
+  else if jr_key_is(key, key_len, "opened") then SLOT_OPENED
+  else if jr_key_is(key, key_len, "chapter") then SLOT_CHAPTER
+  else if jr_key_is(key, key_len, "chapters") then SLOT_CHAPTERS
+  else if jr_key_is(key, key_len, "page") then SLOT_PAGE
+  else if jr_key_is(key, key_len, "pages") then SLOT_PAGES
+  else if jr_key_is(key, key_len, "anchor") then SLOT_ANCHOR
+  else if jr_key_is(key, key_len, "done") then SLOT_DONE
+  else if jr_key_is(key, key_len, "readMinutes") then SLOT_MINUTES
+  else if jr_key_is(key, key_len, "readPages") then SLOT_PAGES_READ
+  else if jr_key_is(key, key_len, "finished") then SLOT_FINISHED
+  else if jr_key_is(key, key_len, "size") then SLOT_SIZE
   else ~1
 
-(* The 7 hex digits key[start, start + 7), or -1 *)
-fun _seven_hex {key_loc:agz}{start:nat | start <= 16}{i:nat | i <= 7; start + 7 <= 16} .<7 - i>.
-  (key: !$A.arr(byte, key_loc, 16), start: int start, i: int i, value: Int): Int =
-  if i >= 7 then value
-  else let
-    val digit = _hex_value($AR.low_byte(byte2int0($A.get<byte>(key, start + i))))
-  in if digit < 0 then ~1 else _seven_hex(key, start, i + 1, value * 16 + digit) end
-
-(* The number a book member's key names, its slot in numbers: 3 shelf,
-   4 added, 5 opened, 6 chapter, 7 chapters, 8 page, 9 pages, 10 anchor,
-   11 done, 13 readMinutes, 14 readPages, 15 finished; -1 for any other *)
-fn _number_slot {key_loc:agz}{key_len:nat | key_len <= 16} (key: !$A.arr(byte, key_loc, 16), key_len: int key_len)
-  : [slot:int | ~1 <= slot; slot < COLLECTION_SLOTS; slot <> 12] int slot =
-  if jr_key_is(key, key_len, "shelf") then 3
-  else if jr_key_is(key, key_len, "added") then 4
-  else if jr_key_is(key, key_len, "opened") then 5
-  else if jr_key_is(key, key_len, "chapter") then 6
-  else if jr_key_is(key, key_len, "chapters") then 7
-  else if jr_key_is(key, key_len, "page") then 8
-  else if jr_key_is(key, key_len, "pages") then 9
-  else if jr_key_is(key, key_len, "anchor") then 10
-  else if jr_key_is(key, key_len, "done") then 11
-  else if jr_key_is(key, key_len, "readMinutes") then 13
-  else if jr_key_is(key, key_len, "readPages") then 14
-  else if jr_key_is(key, key_len, "finished") then 15
+(* The stamp a book member's key names, its slot in numbers; -1 for any
+   other *)
+fn _stamp_slot {key_loc:agz}{key_len:nat | key_len <= KEY_BYTES} (key: !$A.arr(byte, key_loc, KEY_BYTES), key_len: int key_len)
+  : [slot:int | ~1 <= slot; slot < BOOK_NUMBERS] int slot =
+  if jr_key_is(key, key_len, "shelfModified") then SLOT_SHELF_MODIFIED
+  else if jr_key_is(key, key_len, "collectionsModified") then SLOT_COLLECTIONS_MODIFIED
+  else if jr_key_is(key, key_len, "finishedModified") then SLOT_FINISHED_MODIFIED
   else ~1
 
 (* A number (or true or false) at value_start, kept in numbers[slot] *)
-fn _number_at {l,numbers_loc:agz}{owner:addr}{n:nat}{value_start:nat | value_start <= n}{slot:nat | slot < COLLECTION_SLOTS}
+fn _number_at {l,numbers_loc:agz}{owner:addr}{n:nat}{value_start:nat | value_start <= n}{slot:nat | slot < BOOK_NUMBERS}
   (buf: !$A.arrx(byte, l, n, owner), n: int n, value_start: int value_start,
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), slot: int slot)
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), slot: int slot)
   : [stop:int | value_start <= stop; stop <= n] int stop = let
   val @(is_int, value, after_int) = jr_int(buf, n, value_start)
 in
@@ -573,71 +690,111 @@ in
   end
 end
 
+(* A stamp at value_start, kept in numbers[slot] *)
+fn _stamp_at {l,numbers_loc:agz}{owner:addr}{n:nat}{value_start:nat | value_start <= n}{slot:nat | slot < BOOK_NUMBERS}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, value_start: int value_start,
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), slot: int slot)
+  : [stop:int | value_start <= stop; stop <= n] int stop = let
+  val @(is_stamp, stamp, after_stamp) = jr_stamp(buf, n, value_start)
+in
+  if is_stamp then let val () = $A.set<Int>(numbers, slot, stamp) in after_stamp end
+  else jr_skip(buf, n, value_start)
+end
+
 (* The id member's value at value_start: numbers[0], numbers[1] and
    numbers[2] (1 when read) *)
-fn _id_at {l,key_loc,numbers_loc:agz}{owner:addr}{n:nat}{value_start:nat | value_start < n}
+fn _id_at {l,numbers_loc:agz}{owner:addr}{n:nat}{value_start:nat | value_start < n}
   (buf: !$A.arrx(byte, l, n, owner), n: int n, value_start: int value_start,
-   key: !$A.arr(byte, key_loc, 16), numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS))
-  : [stop:int | value_start < stop; stop <= n] int stop = let
-  val @(found, id_len, stop) = jr_str(buf, n, value_start, key, 16)
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS))
+  : [stop:int | value_start <= stop; stop <= n] int stop = let
+  val @(found, id_high, id_low, stop) = jr_id(buf, n, value_start)
 in
   if ~found then stop
-  else if id_len <> 14 then stop
   else let
-    val id_high = _seven_hex(key, 0, 0, 0)
-    val id_low = _seven_hex(key, 7, 0, 0)
-  in
-    if id_high < 0 then stop
-    else if id_low < 0 then stop
-    else let
-      val () = $A.set<Int>(numbers, 0, id_high)
-      val () = $A.set<Int>(numbers, 1, id_low)
-      val () = $A.set<Int>(numbers, 2, 1)
-    in stop end
-  end
+    val () = $A.set<Int>(numbers, 0, id_high)
+    val () = $A.set<Int>(numbers, 1, id_low)
+    val () = $A.set<Int>(numbers, 2, 1)
+  in stop end
 end
 
 (* The collections of a book's array from position, to its closing
-   bracket: mask with each one's bit, as the library numbers them
-   (numbers[COLLECTION_SLOTS + j] for the backup's collection j) *)
-fun _collection_items {l,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position,
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), mask: int)
+   bracket: mask with bit j for the file's collection j (j below 31) *)
+fun _collection_items {l:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, mask: int)
   : [stop:int | position <= stop; stop <= n] @(bool, int, int stop) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, mask, n)
   else if jr_is(buf, n, next, 93) then @(true, mask, next + 1)
-  else if jr_is(buf, n, next, 44) then _collection_items(buf, n, next + 1, numbers, mask)
+  else if jr_is(buf, n, next, 44) then _collection_items(buf, n, next + 1, mask)
   else let
     val @(is_int, collection, stop) = jr_int(buf, n, next)
   in
     if ~is_int then @(false, mask, stop)
     else if stop <= next then @(false, mask, stop)
     else let
-      val library_number = (if collection >= 0 then
-        (if collection < 8 then $A.get<Int>(numbers, COLLECTION_SLOTS + collection) else ~1) else ~1): Int
-      val mask = (if library_number >= 0 then
-        (if library_number < 8 then $AR.bor_int_int(mask, $AR.bsl_int_int(1, library_number)) else mask)
+      val mask = (if collection >= 0 then
+        (if collection < 31 then $AR.bor_int_int(mask, $AR.bsl_int_int(1, collection)) else mask)
         else mask): int
-    in _collection_items(buf, n, stop, numbers, mask) end
+    in _collection_items(buf, n, stop, mask) end
   end
 end
 
-(* The backup's collections from position, to their array's closing
+(* The library's numbers of a file's collections: map[j] for the file's
+   collection j (-1 none) *)
+#pub stadef MAP_SIZE = 31
+
+(* No collection of the file's known yet *)
+fun _unmapped {map_loc:agz}{collection:nat | collection <= MAP_SIZE} .<MAP_SIZE - collection>.
+  (map: !$A.arr(Int, map_loc, MAP_SIZE), collection: int collection): void =
+  if collection >= 31 then ()
+  else let
+    val () = $A.set<Int>(map, collection, ~1)
+  in _unmapped(map, collection + 1) end
+
+#pub fn backup_map_new (): [map_loc:agz] $A.arr(Int, map_loc, MAP_SIZE)
+implement backup_map_new () = let
+  val map = $A.alloc<Int>(31)
+  val () = _unmapped(map, 0)
+in map end
+
+(* mask (bit j for collection j) as map numbers them, from collection
+   on, onto mapped *)
+fun _mapped {map_loc:agz}{collection:nat | collection <= MAP_SIZE} .<MAP_SIZE - collection>.
+  (map: !$A.arr(Int, map_loc, MAP_SIZE), mask: int, collection: int collection, mapped: int): int =
+  if collection >= 31 then mapped
+  else if $AR.band_int_int(mask, $AR.bsl_int_int(1, collection)) = 0 then _mapped(map, mask, collection + 1, mapped)
+  else let
+    val number = $A.get<Int>(map, collection)
+  in
+    if number < 0 then _mapped(map, mask, collection + 1, mapped)
+    else if number >= 31 then _mapped(map, mask, collection + 1, mapped)
+    else _mapped(map, mask, collection + 1, $AR.bor_int_int(mapped, $AR.bsl_int_int(1, number)))
+  end
+
+(* A book's collections (numbers[12], when given) as map numbers them *)
+#pub fn backup_map_collections {numbers_loc,map_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), map: !$A.arr(Int, map_loc, MAP_SIZE)): void
+implement backup_map_collections (numbers, map) = let
+  val mask = $A.get<Int>(numbers, SLOT_COLLECTIONS)
+in
+  if mask < 0 then ()
+  else $A.set<Int>(numbers, SLOT_COLLECTIONS, g1ofg0(_mapped(map, mask, 0, 0)))
+end
+
+(* The file's collections from position, to their array's closing
    bracket, from its collection-th: each found in the library by its
-   name, or made there, and its number there kept in
-   numbers[COLLECTION_SLOTS + collection] *)
-fun _collection_names_at {l,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}{collection:nat}
+   name, or made there, and its number there kept in map[collection] *)
+fun _collection_names_at {l,map_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}{collection:nat}
   .<n - position>.
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position,
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), collection: int collection)
+   map: !$A.arr(Int, map_loc, MAP_SIZE), collection: int collection)
   : [stop:int | position <= stop; stop <= n] @(bool, int stop) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, n)
   else if jr_is(buf, n, next, 93) then @(true, next + 1)
-  else if jr_is(buf, n, next, 44) then _collection_names_at(buf, n, next + 1, numbers, collection)
+  else if jr_is(buf, n, next, 44) then _collection_names_at(buf, n, next + 1, map, collection)
   else let
     val name = $A.alloc<byte>(256)
     val @(found, name_len, stop) = jr_str(buf, n, next, name, 256)
@@ -645,68 +802,104 @@ in
     if ~found then let val () = $A.free<byte>(name) in @(false, stop) end
     else let
       val library_number = lib_coll_find_or_add(name, name_len)
-      val () = (if collection < 8 then $A.set<Int>(numbers, COLLECTION_SLOTS + collection, g1ofg0(library_number)) else ())
-    in _collection_names_at(buf, n, stop, numbers, collection + 1) end
+      val () = (if collection < 31 then $A.set<Int>(map, collection, g1ofg0(library_number)) else ())
+    in _collection_names_at(buf, n, stop, map, collection + 1) end
   end
 end
 
-(* No collection of the backup's known yet *)
-fun _unmapped {numbers_loc:agz}{collection:nat | collection <= 8} .<8 - collection>.
-  (numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), collection: int collection): void =
-  if collection >= 8 then ()
-  else let
-    val () = $A.set<Int>(numbers, COLLECTION_SLOTS + collection, ~1)
-  in _unmapped(numbers, collection + 1) end
+(* The library's numbers of the file's collections, the array at
+   position: found by name, or made; whether it was read whole, and
+   where it ends *)
+#pub fn backup_collections_map {l,map_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, map: !$A.arr(Int, map_loc, MAP_SIZE))
+  : [stop:int | position <= stop; stop <= n] @(bool, int stop)
+implement backup_collections_map (buf, n, position, map) =
+  if position >= n then @(false, position)
+  else if jr_is(buf, n, position, 91) then _collection_names_at(buf, n, position + 1, map, 0)
+  else let val stop = jr_skip(buf, n, position) in @(false, stop) end
 
 (* A book object's members from position, to its closing brace: its
-   numbers into numbers, and where its annotations' array is (-1 none) *)
+   numbers into numbers (its collections as the file numbers them), and
+   where its annotations' array is, and its deleted annotations' (sync's
+   "deleted"), each -1 when it has none *)
 fun _book_members {l,key_loc,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}
-  {annotations_start:int | ~1 <= annotations_start; annotations_start <= n} .<n - position>.
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), annotations: int annotations_start)
-  : [stop:int | position <= stop; stop <= n][found_at:int | ~1 <= found_at; found_at <= n]
-    @(bool, int found_at, int stop) = let
+  {annotations_start,deleted_start:int | ~1 <= annotations_start; annotations_start <= n; ~1 <= deleted_start; deleted_start <= n} .<n - position>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, KEY_BYTES),
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), annotations: int annotations_start, deleted: int deleted_start)
+  : [stop:int | position <= stop; stop <= n][found_at,deleted_at:int | ~1 <= found_at; found_at <= n; ~1 <= deleted_at; deleted_at <= n]
+    @(bool, int found_at, int deleted_at, int stop) = let
   val next = jr_ws(buf, n, position)
 in
-  if next >= n then @(false, annotations, n)
-  else if jr_is(buf, n, next, 125) then @(true, annotations, next + 1)
-  else if jr_is(buf, n, next, 44) then _book_members(buf, n, next + 1, key, numbers, annotations)
+  if next >= n then @(false, annotations, deleted, n)
+  else if jr_is(buf, n, next, 125) then @(true, annotations, deleted, next + 1)
+  else if jr_is(buf, n, next, 44) then _book_members(buf, n, next + 1, key, numbers, annotations, deleted)
   else let
-    val @(found, key_len, value_start) = jr_key(buf, n, next, key, 16)
+    val @(found, key_len, value_start) = jr_key(buf, n, next, key, KEY_BYTES)
   in
-    if ~found then @(false, annotations, value_start)
-    else if value_start >= n then @(false, annotations, value_start)
+    if ~found then @(false, annotations, deleted, value_start)
+    else if value_start >= n then @(false, annotations, deleted, value_start)
     else if jr_key_is(key, key_len, "id") then
-      _book_members(buf, n, _id_at(buf, n, value_start, key, numbers), key, numbers, annotations)
+      _book_members(buf, n, _id_at(buf, n, value_start, numbers), key, numbers, annotations, deleted)
     else if jr_key_is(key, key_len, "annotations") then
-      _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, value_start)
+      _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, value_start, deleted)
+    else if jr_key_is(key, key_len, "deleted") then
+      _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, annotations, value_start)
     else if jr_key_is(key, key_len, "collections") then
       (if jr_is(buf, n, value_start, 91) then let
-         val @(closed, mask, stop) = _collection_items(buf, n, value_start + 1, numbers, 0)
-         val () = $A.set<Int>(numbers, 12, g1ofg0(mask))
-       in if closed then _book_members(buf, n, stop, key, numbers, annotations) else @(false, annotations, stop) end
-       else _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, annotations))
+         val @(closed, mask, stop) = _collection_items(buf, n, value_start + 1, 0)
+         val () = $A.set<Int>(numbers, SLOT_COLLECTIONS, g1ofg0(mask))
+       in if closed then _book_members(buf, n, stop, key, numbers, annotations, deleted) else @(false, annotations, deleted, stop) end
+       else _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, annotations, deleted))
     else let
       val slot = _number_slot(key, key_len)
     in
-      if slot >= 0 then _book_members(buf, n, _number_at(buf, n, value_start, numbers, slot), key, numbers, annotations)
-      else _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, annotations)
+      if slot >= 0 then _book_members(buf, n, _number_at(buf, n, value_start, numbers, slot), key, numbers, annotations, deleted)
+      else let
+        val stamp_slot = _stamp_slot(key, key_len)
+      in
+        if stamp_slot >= 0 then _book_members(buf, n, _stamp_at(buf, n, value_start, numbers, stamp_slot), key, numbers, annotations, deleted)
+        else _book_members(buf, n, jr_skip(buf, n, value_start), key, numbers, annotations, deleted)
+      end
     end
   end
 end
 
+(* The members of the book object whose opening brace is at position:
+   its numbers into numbers (cleared first; its collections as the file
+   numbers them), whether it closed, where its annotations' array and
+   its deleted annotations' are (-1 none), and where it ends *)
+#pub fn backup_book_members {l,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position < n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS))
+  : [stop:int | position < stop; stop <= n][found_at,deleted_at:int | ~1 <= found_at; found_at <= n; ~1 <= deleted_at; deleted_at <= n]
+    @(bool, int found_at, int deleted_at, int stop)
+implement backup_book_members (buf, n, position, numbers) = let
+  val () = _clear_numbers(numbers, 0)
+  val key = $A.alloc<byte>(KEY_BYTES)
+  val @(closed, annotations, deleted, stop) = _book_members(buf, n, position + 1, key, numbers, ~1, ~1)
+  val () = $A.free<byte>(key)
+in @(closed, annotations, deleted, stop) end
+
+(* The changes a backup's book does not date, dated now: a restore is
+   a change of the user's, which sync passes on *)
+fn _dated {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void = let
+  val () = (if $A.get<Int>(numbers, SLOT_SHELF_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, stamp_now()) else ())
+  val () = (if $A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, stamp_now()) else ())
+in if $A.get<Int>(numbers, SLOT_FINISHED_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, stamp_now()) else () end
+
 (* Puts a book's state back from numbers: into the library when the
    book is there, else kept under its "o" key; its annotations from the
    array at annotations *)
-fn _restore_book {l,numbers_loc:agz}{owner:addr}{n:nat}{annotations_start:int | ~1 <= annotations_start; annotations_start <= n}
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS),
-   annotations: int annotations_start): bool =
+fn _restore_book {l,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{annotations_start:int | ~1 <= annotations_start; annotations_start <= n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS),
+   map: !$A.arr(Int, map_loc, MAP_SIZE), annotations: int annotations_start): bool =
   if $A.get<Int>(numbers, 2) <> 1 then false
   else let
     val id_high = $A.get<Int>(numbers, 0)
     val id_low = $A.get<Int>(numbers, 1)
+    val () = backup_map_collections(numbers, map)
+    val () = _dated(numbers)
     val book_index = lib_find(id_high, id_low)
-    val () = (if book_index >= 0 then _apply_numbers(book_index, numbers) else _orphan_put(id_high, id_low, numbers))
+    val () = (if book_index >= 0 then backup_apply_numbers(book_index, numbers, 2) else backup_orphan_put(id_high, id_low, numbers))
     val () = (if annotations >= 0 then let
         val _ = annot_json_store(buf, n, annotations, id_high, id_low)
       in () end else ())
@@ -714,22 +907,21 @@ fn _restore_book {l,numbers_loc:agz}{owner:addr}{n:nat}{annotations_start:int | 
 
 (* The books of the array's items from position, to its closing
    bracket, put back one by one; how many *)
-fun _book_items {l,key_loc,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), restored: int)
+fun _book_items {l,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position,
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), map: !$A.arr(Int, map_loc, MAP_SIZE), restored: int)
   : [stop:int | position <= stop; stop <= n] @(bool, int, int stop) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, restored, n)
   else if jr_is(buf, n, next, 93) then @(true, restored, next + 1)
-  else if jr_is(buf, n, next, 44) then _book_items(buf, n, next + 1, key, numbers, restored)
+  else if jr_is(buf, n, next, 44) then _book_items(buf, n, next + 1, numbers, map, restored)
   else if jr_is(buf, n, next, 123) then let
-    val () = _clear_numbers(numbers, 0)
-    val @(closed, annotations, stop) = _book_members(buf, n, next + 1, key, numbers, ~1)
+    val @(closed, annotations, _, stop) = backup_book_members(buf, n, next, numbers)
   in
     if ~closed then @(false, restored, stop)
-    else if _restore_book(buf, n, numbers, annotations) then _book_items(buf, n, stop, key, numbers, restored + 1)
-    else _book_items(buf, n, stop, key, numbers, restored)
+    else if _restore_book(buf, n, numbers, map, annotations) then _book_items(buf, n, stop, numbers, map, restored + 1)
+    else _book_items(buf, n, stop, numbers, map, restored)
   end
   else @(false, restored, next)
 end
@@ -852,15 +1044,15 @@ end
 
 (* The backup's members from position: whether it is one (its "quire"
    is 1), the books put back, and the sort order *)
-fun _top_members {l,key_loc,numbers_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
+fun _top_members {l,key_loc,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
-   numbers: !$A.arr(Int, numbers_loc, NUMBER_SLOTS), quire: bool, books: int, sort: int)
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), map: !$A.arr(Int, map_loc, MAP_SIZE), quire: bool, books: int, sort: int)
   : @(bool, int, int) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, books, sort)
   else if jr_is(buf, n, next, 125) then @(quire, books, sort)
-  else if jr_is(buf, n, next, 44) then _top_members(buf, n, next + 1, key, numbers, quire, books, sort)
+  else if jr_is(buf, n, next, 44) then _top_members(buf, n, next + 1, key, numbers, map, quire, books, sort)
   else let
     val @(found, key_len, value_start) = jr_key(buf, n, next, key, 16)
   in
@@ -869,38 +1061,38 @@ in
     else if jr_key_is(key, key_len, "quire") then let
       val @(is_int, version, stop) = jr_int(buf, n, value_start)
     in
-      if is_int then _top_members(buf, n, stop, key, numbers, version = 1, books, sort)
-      else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, false, books, sort)
+      if is_int then _top_members(buf, n, stop, key, numbers, map, version = 1, books, sort)
+      else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, false, books, sort)
     end
     else if ~quire then @(false, books, sort)
     else if jr_key_is(key, key_len, "settings") then
       (if jr_is(buf, n, value_start, 123) then let
          val @(closed, new_sort, stop) = _settings_members(buf, n, value_start + 1, key, sort)
        in
-         if closed then _top_members(buf, n, stop, key, numbers, quire, books, new_sort)
+         if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, new_sort)
          else @(false, books, sort)
        end
-       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, quire, books, sort))
+       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
     else if jr_key_is(key, key_len, "readingLog") then
       (if jr_is(buf, n, value_start, 91) then let
          val @(closed, stop) = _log_at(buf, n, value_start + 1)
          val () = stats_restored()
-       in if closed then _top_members(buf, n, stop, key, numbers, quire, books, sort) else @(false, books, sort) end
-       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, quire, books, sort))
+       in if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, sort) else @(false, books, sort) end
+       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
     else if jr_key_is(key, key_len, "collections") then
       (if jr_is(buf, n, value_start, 91) then let
-         val @(closed, stop) = _collection_names_at(buf, n, value_start + 1, numbers, 0)
-       in if closed then _top_members(buf, n, stop, key, numbers, quire, books, sort) else @(false, books, sort) end
-       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, quire, books, sort))
+         val @(closed, stop) = _collection_names_at(buf, n, value_start + 1, map, 0)
+       in if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, sort) else @(false, books, sort) end
+       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
     else if jr_key_is(key, key_len, "books") then
       (if jr_is(buf, n, value_start, 91) then let
-         val @(closed, restored, stop) = _book_items(buf, n, value_start + 1, key, numbers, books)
+         val @(closed, restored, stop) = _book_items(buf, n, value_start + 1, numbers, map, books)
        in
-         if closed then _top_members(buf, n, stop, key, numbers, quire, restored, sort)
+         if closed then _top_members(buf, n, stop, key, numbers, map, quire, restored, sort)
          else @(false, restored, sort)
        end
-       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, quire, books, sort))
-    else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, quire, books, sort)
+       else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
+    else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort)
   end
 end
 
@@ -919,11 +1111,12 @@ in
   else if ~jr_is(buf, n, start, 123) then _say("This file is not a Quire backup.")
   else let
     val key = $A.alloc<byte>(16)
-    val numbers = $A.alloc<Int>(NUMBER_SLOTS)
-    val () = _unmapped(numbers, 0)
-    val @(complete, restored, sort) = _top_members(buf, n, start + 1, key, numbers, false, 0, lib_sort_get())
+    val numbers = backup_numbers_new()
+    val map = backup_map_new()
+    val @(complete, restored, sort) = _top_members(buf, n, start + 1, key, numbers, map, false, 0, lib_sort_get())
     val () = $A.free<byte>(key)
     val () = $A.free<Int>(numbers)
+    val () = $A.free<Int>(map)
     val () = lib_sort(sort)
     val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())

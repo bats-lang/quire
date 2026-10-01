@@ -22,6 +22,7 @@ staload "entity.sats"
 staload "library.sats"
 staload "backup.sats"
 staload "mem.sats"
+staload "clock.sats"
 staload "app.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
@@ -324,7 +325,10 @@ in
       val () = lib_update(library_index, lam(record) => @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = 0, added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
-        file_size = file_size, cover = (if cover > 0 then (cover: Int) else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at })
+        file_size = file_size, cover = (if cover > 0 then (cover: Int) else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
+        (* back on the shelf: a change sync passes on *)
+        shelf_modified = (if record.shelf <> 0 then stamp_now() else record.shelf_modified), collections_modified = record.collections_modified,
+        finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
     in
       case+ lib_nums(library_index) of

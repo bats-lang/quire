@@ -754,6 +754,9 @@ in release_bytes(id_frozen, id_bytes) end
 (* A search field, a text area, or one line of text (a name) *)
 #pub datatype field = FSearch | FText | FLine
   | FChoice   (* a choice among options the page's script puts in it *)
+  (* a web address, a user name and a password, as a sign-in form has
+     them: the browser's password manager can fill them *)
+  | FUrl | FUser | FPassword
 
 #pub fn ui_field {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
   (parent: string parent_len, id: string id_len, field_kind: field, class_name: string class_len, name: string name_len): void
@@ -769,7 +772,23 @@ implement ui_field(parent, id, field_kind, class_name, name) = let
         val () = _add_element(parent, id, "input")
         val () = _set_attr(id, "type", "text")
         val () = _set_attr(id, "autocomplete", "off")
-      in _set_attr(id, "enterkeyhint", "done") end)
+      in _set_attr(id, "enterkeyhint", "done") end
+    | FUrl() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "url")
+        val () = _set_attr(id, "autocomplete", "url")
+        val () = _set_attr(id, "autocapitalize", "none")
+      in _set_attr(id, "spellcheck", "false") end
+    | FUser() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "text")
+        val () = _set_attr(id, "autocomplete", "username")
+        val () = _set_attr(id, "autocapitalize", "none")
+      in _set_attr(id, "spellcheck", "false") end
+    | FPassword() => let
+        val () = _add_element(parent, id, "input")
+        val () = _set_attr(id, "type", "password")
+      in _set_attr(id, "autocomplete", "current-password") end)
   val () = _set_attr(id, "class", class_name)
   val () = _set_attr(id, "placeholder", name)
 in _set_attr(id, "aria-label", name) end
