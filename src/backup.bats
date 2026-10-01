@@ -59,7 +59,7 @@ in modal_text_lit(text) end
 
 (* The file's start: its settings, and the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(512) of
+  case+ piece_new(576) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       val next = jw_lit(out, 0, "{\"quire\":1,\"settings\":{\"size\":")
@@ -94,6 +94,8 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, set_flow_get())
       val next = jw_lit(out, next, ",\"columns\":")
       val next = jw_int(out, next, set_cols_get())
+      val next = jw_lit(out, next, ",\"ruby\":")
+      val next = jw_int(out, next, set_ruby_get())
       val next = jw_lit(out, next, ",\"sort\":")
       val next = jw_int(out, next, lib_sort_get())
       val next = jw_lit(out, next, ",\"libraryGrid\":")
@@ -981,6 +983,9 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "dailyGoal") then let
         val () = (if value >= 0 then (if value <= 600 then stats_goal_set(value) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "ruby") then let
+        val () = (if value >= 0 then (if value <= 1 then set_ruby_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "columns") then let
         val () = (if value >= 0 then (if value <= 2 then set_cols_set(value) else ()) else ())

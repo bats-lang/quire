@@ -50,6 +50,8 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
                       1 the page of the chapter's pages, 2 the chapter of
                       the book's, 3 the time left in the chapter, 4 in
                       the book (where the browser gives them to the page)
+   ruby               a ruby's annotations (furigana over a word): 0
+                      hidden, 1 shown
    (the spacings reach what WCAG 1.4.12 asks a page to take: 2em
    after a paragraph, .12em between letters, .16em between words) *)
 #pub typedef set_size = [v:int | 12 <= v; v <= 32] int v
@@ -68,6 +70,7 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 #pub typedef set_rd = [v:nat | v <= 4] int v
 #pub typedef set_flow = [v:nat | v <= 1] int v
 #pub typedef set_cols = [v:nat | v <= 2] int v
+#pub typedef set_ruby = [v:nat | v <= 1] int v
 
 typedef settings = @{
   size = set_size, line_height = set_lh, margin = set_margin, font = set_font, theme = set_theme,
@@ -85,6 +88,10 @@ fn _defaults (): settings =
      volume_keys = 0, readout = 0, scrolled = 0, columns = 0 }
 
 val _set = ref<settings>(_defaults())
+(* Whether a ruby's annotations are shown (1, the default) or hidden:
+   kept apart from the record, which one field more would make too
+   large for wasm to copy without memmove, which it is not given *)
+val _ruby = ref<int>(1)
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)
 
@@ -120,6 +127,8 @@ implement set_rd_get () = (!_set).readout
 implement set_flow_get () = (!_set).scrolled
 #pub fn set_cols_get (): set_cols
 implement set_cols_get () = (!_set).columns
+#pub fn set_ruby_get (): set_ruby
+implement set_ruby_get () = if !_ruby = 0 then 0 else 1
 
 (* ============================================================
    Applying
@@ -204,9 +213,18 @@ fn _put_scrolled {l:agz}{position:nat | position + 72 <= 1024}
   if scrolled = 1 then _put_text(buf, position, ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}")
   else position
 
+(* A ruby's annotations hidden: its rt and rtc (an rp is not shown
+   where ruby is, by the browser's own sheet). Layout, not colour *)
+fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
+  (buf: !$A.arr(byte, l, 1024), position: int position, ruby: set_ruby)
+  : [stop:nat | stop <= position + 30] int stop =
+  if ruby = 0 then _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
+  else position
+
 (* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
   val current = !_set
+  val ruby = set_ruby_get()
   val buf = $A.alloc<byte>(1024)
   val next = _put_text(buf, 0, ".caf{font-size:")
   val next = $S.int_to_str(buf, next, 1024, current.size)
@@ -235,6 +253,8 @@ fn _apply_type (): void = let
   val next = _put_columns(buf, next, current.columns)
   (* scrolled: the chapter down the page, not in columns across *)
   val next = _put_scrolled(buf, next, current.scrolled)
+  (* a ruby's annotations, shown or hidden *)
+  val next = _put_ruby(buf, next, ruby)
 in ui_text_buf("style-type", buf, next) end
 
 (* Whether it is night by the local clock (22:00 to 07:00, iOS Night
@@ -326,6 +346,8 @@ fn _show_controls (): void = let
   val () = _pressed("taps-one-hand", current.tap_zones = 2)
   val () = _pressed("volume-keys-turn", current.volume_keys = 1)
   val () = _pressed("volume-keys-off", current.volume_keys = 0)
+  val () = _pressed("ruby-show", set_ruby_get() = 1)
+  val () = _pressed("ruby-hide", set_ruby_get() = 0)
   val buf = $A.alloc<byte>(32)
   val next = _put_tenths(buf, 0, 32, current.paragraph_spacing)
   val () = ui_text_buf("paragraph-value", buf, next)
@@ -342,11 +364,12 @@ in ui_text_buf("word-value", buf, next) end
 
 (* "S2", then size, line height, margin, font, theme, the library's
    sort order, align, hyphens, paragraph, letter and word spacing, dim
-   images, tap zones, volume keys, readout, scrolled and columns, a byte
-   each. ("S1" was the first 8.) *)
+   images, tap zones, volume keys, readout, scrolled, columns and ruby,
+   a byte each. ("S1" was the first 8; a record of "S2" without the
+   last bytes has their defaults.) *)
 fn _save (sort: int): void = let
   val current = !_set
-  val record = $A.alloc<byte>(19)
+  val record = $A.alloc<byte>(20)
   val () = $A.write_byte(record, 0, 83)
   val () = $A.write_byte(record, 1, 50)
   val () = $A.write_byte(record, 2, current.size)
@@ -366,11 +389,12 @@ fn _save (sort: int): void = let
   val () = $A.write_byte(record, 16, current.readout)
   val () = $A.write_byte(record, 17, current.scrolled)
   val () = $A.write_byte(record, 18, current.columns)
+  val () = $A.write_byte(record, 19, set_ruby_get())
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, record_bytes, 19))
+  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, record_bytes, 20))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -563,6 +587,8 @@ in !_set := @{
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
   readout = current.readout, scrolled = value, columns = current.columns } end
+#pub fn set_ruby_set (value: set_ruby): void
+implement set_ruby_set (value) = !_ruby := value
 #pub fn set_cols_set (value: set_cols): void
 implement set_cols_set (value) = let
   val current = !_set
@@ -575,7 +601,9 @@ in !_set := @{
 
 (* The defaults. Private: the settings go back to them only by
    set_reset, which offers the ones they replace back *)
-fn _reset (): void = !_set := _defaults()
+fn _reset (): void = let
+  val () = !_set := _defaults()
+in !_ruby := 1 end
 
 (* Puts the defaults back at once, then runs after (which applies
    them); what it returns puts the settings they replaced back, and
@@ -583,9 +611,13 @@ fn _reset (): void = !_set := _defaults()
 #pub fn set_reset_undoable (after: () -<cloref1> void): () -<cloref1> void
 implement set_reset_undoable (after) = let
   val before = !_set
+  val ruby_before = !_ruby
   val () = _reset()
   val () = after()
-in lam () => let val () = !_set := before in after() end end
+in lam () => let
+  val () = !_set := before
+  val () = !_ruby := ruby_before
+in after() end end
 
 (* The same, offering Undo *)
 #pub fn set_reset (after: () -<cloref1> void): void
@@ -664,11 +696,14 @@ in
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 17))), 0, 1, 0) else 0) else 0): set_flow
         val columns = (if n >= 19 then (if second_version then
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 18))), 0, 2, 0) else 0) else 0): set_cols
+        val ruby = (if n >= 20 then (if second_version then
+          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 19))), 0, 1, 1) else 1) else 1): set_ruby
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font, theme = theme,
           align = align, hyphens = hyphens, paragraph_spacing = paragraph_spacing, letter_spacing = letter_spacing,
           word_spacing = word_spacing, dim_images = dim_images, tap_zones = tap_zones, volume_keys = volume_keys,
           readout = readout, scrolled = scrolled, columns = columns }
+        val () = !_ruby := ruby
         val () = set_show()
       in $P.ret<int>(sort) end)
 end

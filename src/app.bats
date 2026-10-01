@@ -463,6 +463,17 @@ fn _settings (): void = let
   val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
   val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
   val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
+  (* a ruby's annotations (furigana) shown or hidden: offered only once
+     a chapter of the open book has shown a ruby (reader_ruby_forget,
+     the reader's _ruby_mark) *)
+  val () = ui_el("typography-panel", "ruby-row", TDiv, "srow")
+  val () = ui_el("ruby-row", "ruby-label", TSpan, "slabel")
+  val () = ui_text("ruby-label", "Ruby")
+  val () = ui_el("ruby-row", "ruby-choice", TDiv, "seg")
+  val () = ui_named("ruby-choice", NGroup, "Ruby annotations")
+  val () = ui_text_btn("ruby-choice", "ruby-show", "sbtn", "Show")
+  val () = ui_text_btn("ruby-choice", "ruby-hide", "sbtn", "Hide")
+  val () = _hide("ruby-row")
   val () = ui_el("typography-panel", "dim-row", TDiv, "srow")
   val () = ui_el("dim-row", "dim-label", TSpan, "slabel")
   val () = ui_text("dim-label", "Dim images")

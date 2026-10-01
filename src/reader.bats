@@ -1120,6 +1120,11 @@ fn _tag_of
   var samp = @[char][4]('s', 'a', 'm', 'p')
   var var_ = @[char][3]('v', 'a', 'r')
   var big = @[char][3]('b', 'i', 'g')
+  var ruby = @[char][4]('r', 'u', 'b', 'y')
+  var ruby_base = @[char][2]('r', 'b')
+  var ruby_text = @[char][2]('r', 't')
+  var ruby_text_container = @[char][3]('r', 't', 'c')
+  var ruby_parenthesis = @[char][2]('r', 'p')
 in
   if is(data, p_, 1) then "p"
   else if is(data, h1, 2) then "h1" else if is(data, h2, 2) then "h2"
@@ -1147,8 +1152,29 @@ in
   else if is(data, table, 5) then "table" else if is(data, tr, 2) then "tr"
   else if is(data, td, 2) then "td" else if is(data, th, 2) then "th"
   else if is(data, thead, 5) then "thead" else if is(data, tbody, 5) then "tbody"
+  (* a ruby keeps its parts, so its annotations sit over its base *)
+  else if is(data, ruby, 4) then "ruby" else if is(data, ruby_base, 2) then "rb"
+  else if is(data, ruby_text, 2) then "rt" else if is(data, ruby_text_container, 3) then "rtc"
+  else if is(data, ruby_parenthesis, 2) then "rp"
   else "div"
 end
+
+(* Whether a chapter of the open book has shown a ruby: the settings'
+   Ruby row is offered from then on *)
+val _ruby_seen = ref<bool>(false)
+
+(* A ruby rendered: the Ruby row shown, the first time *)
+fn _ruby_mark (): void =
+  if !_ruby_seen then ()
+  else let
+    val () = !_ruby_seen := true
+  in ui_show("ruby-row", true) end
+
+(* A book opens: the Ruby row waits for its first ruby *)
+#pub fn reader_ruby_forget (): void
+implement reader_ruby_forget () = let
+  val () = !_ruby_seen := false
+in ui_show("ruby-row", false) end
 
 (* The fragment a jump leads to: the id of an element of the chapter
    loading; its content node is found as the chapter is rendered *)
@@ -1470,6 +1496,8 @@ and _render_node
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
       val () = _break_check(data, attrs, content_node)
+      var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
+      val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
       var _tag_a = @[char][1]('a')
     in
       if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
@@ -2419,28 +2447,38 @@ fun _scan_text {data_location,query_location:agz}{data_size:pos}{offset,text_len
     val @(found_after, new_count) = _scan_piece(data, offset, cut, query, query_len, chapter, node, found, hit_count)
   in _scan_text(data, offset + cut, text_len - cut, query, query_len, chapter, node + 1, found_after, new_count) end
 
+(* The numbers _scan_text takes for text data[offset, offset + text_len),
+   as _text_spans makes its pieces, with nothing searched *)
+fun _text_count {data_location:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size} .<text_len>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, text_len: int text_len, node: Nat): Nat =
+  if text_len < 65536 then node + 1
+  else let
+    val cut = _text_cut(data, offset, text_len)
+  in _text_count(data, offset + cut, text_len - cut, node + 1) end
+
 (* The numbers _skip_spans takes for text_len bytes *)
 fun _skip_count {text_len:nat} .<text_len>. (text_len: int text_len, node: Nat): Nat =
   if text_len < 65536 then node + 1 else _skip_count(text_len - 65533, node + 1)
 
 fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
-  (data: !$A.borrow(byte, data_location, data_size), nodes: !$X.xml_node_list(data_size, tree_size), top: bool,
+  (data: !$A.borrow(byte, data_location, data_size), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(next_node, found_after, new_count) = _scan_node(data, node, top, query, query_len, chapter, content_node, found, hit_count)
-    in _scan_nodes(data, rest, top, query, query_len, chapter, next_node, found_after, new_count) end
+      val @(next_node, found_after, new_count) = _scan_node(data, node, top, searched, query, query_len, chapter, content_node, found, hit_count)
+    in _scan_nodes(data, rest, top, searched, query, query_len, chapter, next_node, found_after, new_count) end
   | $X.xml_nodes_nil() => @(content_node, found, hit_count)
 
 and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 0>.
-  (data: !$A.borrow(byte, data_location, data_size), node: !$X.xml_node(data_size, tree_size), top: bool,
+  (data: !$A.borrow(byte, data_location, data_size), node: !$X.xml_node(data_size, tree_size), top: bool, searched: bool,
    query: !$A.arr(byte, query_location, query_size), query_len: int query_len, chapter: Int, content_node: Nat, found: hits(hit_count), hit_count: int hit_count)
   : [new_count:nat | new_count <= HIT_MAX] @(Nat, hits(new_count), int new_count) =
   case+ node of
   | $X.xml_text(offset, text_len) =>
     if (if top then _blank(data, offset, text_len, 0) else false) then @(_skip_count(text_len, content_node), found, hit_count)
-    else _scan_text(data, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+    else if searched then _scan_text(data, offset, text_len, query, query_len, chapter, content_node, found, hit_count)
+    else @(_text_count(data, offset, text_len, content_node), found, hit_count)
   | $X.xml_element(name_offset, name_len, _, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
     var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
@@ -2454,6 +2492,15 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{
     var _tag_hr = @[char][2]('h', 'r')
     var _tag_img = @[char][3]('i', 'm', 'g')
     var _tag_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+    var _tag_ruby_text = @[char][2]('r', 't')
+    var _tag_ruby_text_container = @[char][3]('r', 't', 'c')
+    var _tag_ruby_parenthesis = @[char][2]('r', 'p')
+    (* a ruby's annotations and parentheses are not searched (a search
+       finds the base, not its reading), but their nodes are counted as
+       render makes them *)
+    val annotation = (if xml_name_eq(data, name_offset, name_len, _tag_ruby_text, 2) then true
+      else if xml_name_eq(data, name_offset, name_len, _tag_ruby_text_container, 3) then true
+      else xml_name_eq(data, name_offset, name_len, _tag_ruby_parenthesis, 2)): bool
   in
     if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then @(content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then @(content_node, found, hit_count)
@@ -2462,14 +2509,14 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{
     else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then @(content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then @(content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then
-      _scan_nodes(data, children, top, query, query_len, chapter, content_node, found, hit_count)
+      _scan_nodes(data, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
-      _scan_nodes(data, children, top, query, query_len, chapter, content_node, found, hit_count)
+      _scan_nodes(data, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then @(content_node + 1, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then @(content_node + 1, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then @(content_node + 1, found, hit_count)
-    else _scan_nodes(data, children, false, query, query_len, chapter, content_node + 1, found, hit_count)
+    else _scan_nodes(data, children, false, (if annotation then false else searched), query, query_len, chapter, content_node + 1, found, hit_count)
   end
 
 (* The results list, or its state *)
@@ -2540,7 +2587,7 @@ fn _search_add {l:agz}{n:pos}{tree_size:nat}
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
-      val @(_, found_after, count_after) = _scan_nodes(data, nodes, true, query, query_len, chapter, 0, found, hit_count)
+      val @(_, found_after, count_after) = _scan_nodes(data, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
 fn _search_add_if {l:agz}{n:pos}{tree_size:nat}
