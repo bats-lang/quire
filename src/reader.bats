@@ -691,10 +691,10 @@ in
       val () = !_book_minutes := 0
       val () = !_book_pages := 0
       val () = lib_update(book_index, lam(record) => @{
-        key = record.key, h1 = record.h1, h2 = record.h2, shelf = record.shelf, added = record.added, opened = now,
-        ch = chapter_index, tch = (if chapter_count > 0 then (chapter_count: Int) else record.tch), pg = page, pgs = page_count, anchor = anchor,
-        fsz = record.fsz, cover = record.cover, done = (if at_end then 1 else record.done), sidx = record.sidx, cols = record.cols,
-        rmin = record.rmin + minutes_read, rpg = record.rpg + pages_read, fin = (if at_end then (if record.fin > 0 then record.fin else now) else record.fin) })
+        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
+        chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
+        file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
+        minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at) })
       val () = lib_touch(book_index)
     in lib_save() end
 end
