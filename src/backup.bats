@@ -243,7 +243,7 @@ fn _book_chunk {i:int} (i: int i, x: bnums, first: bool): jchunk =
       val @(t, tn) = lib_text(i, 0)
       val @(a, an) = lib_text(i, 1)
       val p = (if first then jw_lit(out, 0, "{\"id\":") else jw_lit(out, 0, "},{\"id\":")): [q:int | 6 <= q; q <= 8] int q
-      val p = _id_json(out, p, x.h1, x.h2)
+      val p = _id_json(out, p, x.id_high, x.id_low)
       val p = jw_lit(out, p, ",\"title\":")
       val p = jw_str(out, p, t, tn)
       val p = jw_lit(out, p, ",\"author\":")
@@ -257,28 +257,28 @@ fn _book_chunk {i:int} (i: int i, x: bnums, first: bool): jchunk =
       val p = jw_lit(out, p, ",\"opened\":")
       val p = jw_int(out, p, x.opened)
       val p = jw_lit(out, p, ",\"chapter\":")
-      val p = jw_int(out, p, x.ch)
+      val p = jw_int(out, p, x.chapter)
       val p = jw_lit(out, p, ",\"chapters\":")
-      val p = jw_int(out, p, x.tch)
+      val p = jw_int(out, p, x.chapters)
       val p = jw_lit(out, p, ",\"page\":")
-      val p = jw_int(out, p, x.pg)
+      val p = jw_int(out, p, x.page)
       val p = jw_lit(out, p, ",\"pages\":")
-      val p = jw_int(out, p, x.pgs)
+      val p = jw_int(out, p, x.pages)
       val p = jw_lit(out, p, ",\"anchor\":")
       val p = jw_int(out, p, x.anchor)
       val p = jw_lit(out, p, ",\"size\":")
-      val p = jw_int(out, p, x.fsz)
+      val p = jw_int(out, p, x.file_size)
       val p = jw_lit(out, p, ",\"done\":")
       val p = jw_int(out, p, x.done)
       val p = jw_lit(out, p, ",\"collections\":[")
-      val p = _cols_json(out, p, 0, x.cols, true)
+      val p = _cols_json(out, p, 0, x.collections, true)
       val p = jw_lit(out, p, "]")
       val p = jw_lit(out, p, ",\"readMinutes\":")
-      val p = jw_int(out, p, x.rmin)
+      val p = jw_int(out, p, x.minutes_read)
       val p = jw_lit(out, p, ",\"readPages\":")
-      val p = jw_int(out, p, x.rpg)
+      val p = jw_int(out, p, x.pages_read)
       val p = jw_lit(out, p, ",\"finished\":")
-      val p = jw_int(out, p, x.fin)
+      val p = jw_int(out, p, x.finished_at)
       val p = jw_lit(out, p, ",\"annotations\":")
     in JChunk(ow, out, p) end
 
@@ -320,7 +320,7 @@ fun _export_seq {i,c:nat | i <= c} .<c - i>. (i: int i, c: int c, first: bool): 
     | ~$R.none() => _export_seq(i + 1, c, first)
     | ~$R.some(x) => let
         val () = _push(_book_chunk(i, x, first))
-        val @(kf, kb) = $A.freeze<byte>(lib_key(97, x.h1, x.h2))
+        val @(kf, kb) = $A.freeze<byte>(lib_key(97, x.id_high, x.id_low))
         val p = $IDB.idb_get(kb, 15)
         val () = release_bytes(kf, kb)
       in
@@ -438,12 +438,12 @@ fn _apply {i:int}{lv:agz} (i: int i, vs: !$A.arr(Int, lv, VS)): void = let
   val finished = _in($A.get<Int>(vs, 15), ~1, 2147483647, ~1)
 in
   lib_update(i, lam(x) => @{
-    key = x.key, h1 = x.h1, h2 = x.h2, shelf = sh,
+    key = x.key, id_high = x.id_high, id_low = x.id_low, shelf = sh,
     added = (if ad > 0 then ad else x.added), opened = opn,
-    ch = ch, tch = tch, pg = pg, pgs = pgs, anchor = an,
-    fsz = x.fsz, cover = x.cover, done = dn, sidx = x.sidx, cols = (if co >= 0 then co else x.cols),
-    rmin = (if minutes >= 0 then minutes else x.rmin), rpg = (if pages >= 0 then pages else x.rpg),
-    fin = (if finished >= 0 then finished else x.fin) })
+    chapter = ch, chapters = tch, page = pg, pages = pgs, anchor = an,
+    file_size = x.file_size, cover = x.cover, done = dn, series_number = x.series_number, collections = (if co >= 0 then co else x.collections),
+    minutes_read = (if minutes >= 0 then minutes else x.minutes_read), pages_read = (if pages >= 0 then pages else x.pages_read),
+    finished_at = (if finished >= 0 then finished else x.finished_at) })
 end
 
 (* Library book h1, h2 (when it is there) takes the numbers vs[3, 12) *)
