@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
-  selectionButton, colours, bookPage,
+  selectionButton, colours, bookPage, pagedBook, showChrome, control,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -128,6 +128,55 @@ test('a backup restored after a reset brings everything back, and a book importe
   expect(await page.evaluate(() => CSS.highlights.has('bats-mark-3'))).toBe(true);
   // and the settings came back with the rest
   expect(await bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).textAlign)).toBe('justify');
+});
+
+test('a highlight\'s print page is in the backup, and a restore keeps it', async ({ page }) => {
+  const errors = await start(page);
+  const paged = pagedBook('Printed Backup', 'Print Tests');
+  const file = epubFile(paged);
+  await importFiles(page, [file], 1);
+  await openBook(page, 'Printed Backup');
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(2);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await toLibrary(page);
+  const json = await exportBackup(page);
+  const [book] = JSON.parse(json).books;
+  expect(book.annotations).toHaveLength(2);
+  expect(book.annotations[0]).toMatchObject({ kind: 'highlight', chapter: 1, text: 'Para 2.0', printPage: '4' });
+  // a highlight on no print page has no member for it
+  expect(book.annotations[1]).toMatchObject({ kind: 'highlight', chapter: 2, text: 'Para 3.0' });
+  expect(book.annotations[1]).not.toHaveProperty('printPage');
+  const path = rawFile('quire-backup.json', json);
+
+  await factoryReset(page);
+  await importFiles(page, [file], 1);
+  await restoreBackup(page, path);
+  await expect(restored(page)).toContainText('Books restored: 1');
+  await restored(page).getByRole('button', { name: 'OK' }).click();
+  // the restored highlight cites its page in the export, and is in the
+  // next backup with it
+  await openBook(page, 'Printed Backup');
+  await showChrome(page);
+  await control(page, 'Annotations').click();
+  const panel = dialog(page, 'Annotations');
+  const download = page.waitForEvent('download');
+  await panel.getByRole('button', { name: 'Export', exact: true }).click();
+  const md = readFileSync(await (await download).path(), 'utf8');
+  expect(md).toMatch(/> Para 2\.0\n\n— Print Tests, \*Printed Backup\*, [^\n]+, page 4\n/);
+  expect(md).toMatch(/> Para 3\.0\n\n— Print Tests, \*Printed Backup\*, [^\n,]+\n/);
+  await panel.getByRole('button', { name: 'Close' }).click();
+  await toLibrary(page);
+  const [again] = JSON.parse(await exportBackup(page)).books;
+  expect(again.annotations[0]).toMatchObject({ text: 'Para 2.0', printPage: '4' });
+  expect(errors).toEqual([]);
 });
 
 test('a file that is not a backup is refused with a message', async ({ page }) => {
