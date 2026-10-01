@@ -512,7 +512,7 @@ fn _document_button {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos |
 in _document_attr(document, id_bytes, id_len, "class", class_name) end
 
 #pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
-  | IcContents | IcNotes | IcFont | IcMore | IcSpeak
+  | IcContents | IcNotes | IcFont | IcMore | IcSpeak | IcPhrasePrevious | IcPhraseNext
 
 fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   case+ the_icon of
@@ -520,6 +520,7 @@ fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   | IcStar() => "\xE2\x98\x86" | IcSearch() => "\xF0\x9F\x94\x8D" | IcPrev() => "\xE2\x80\xB9"
   | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
   | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE" | IcSpeak() => "\xF0\x9F\x94\x8A"
+  | IcPhrasePrevious() => "\xE2\x8F\xAE" | IcPhraseNext() => "\xE2\x8F\xAD"
 
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
@@ -748,6 +749,18 @@ implement ui_img_nn(parent, parent_len, id, id_len, class_name) = let
   val () = $D.destroy(document)
   val () = release_bytes(parent_frozen, parent_bytes)
 in release_bytes(id_frozen, id_bytes) end
+
+(* An audio element with no controls, hidden from assistive technology:
+   it is not a control, so it needs no name (the buttons that play it
+   have theirs), and the tags plain elements are made from stay closed
+   to controls *)
+#pub fn ui_audio {parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent: string parent_len, id: string id_len): void
+
+implement ui_audio(parent, id) = let
+  val () = _add_element(parent, id, "audio")
+  val () = _set_attr(id, "preload", "auto")
+in _set_attr(id, "aria-hidden", "true") end
 
 (* A text field named name, which is also what it shows while empty.
    Search (type=search) or a multi-line text area. *)

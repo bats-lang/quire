@@ -107,7 +107,7 @@ in modal_text_lit(text) end
 
 (* The file's start: its settings, and the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576) of
+  case+ piece_new(640) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       val next = jw_lit(out, 0, "{\"quire\":1,\"settings\":{\"size\":")
@@ -144,6 +144,11 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, set_cols_get())
       val next = jw_lit(out, next, ",\"ruby\":")
       val next = jw_int(out, next, set_ruby_get())
+      (* the narration's speed, in hundredths (50 to 200) *)
+      val next = jw_lit(out, next, ",\"narrationSpeed\":")
+      val next = jw_int(out, next, 25 * set_narration_speed_get())
+      val next = jw_lit(out, next, ",\"narrationSkip\":")
+      val next = jw_int(out, next, set_narration_skip_get())
       val next = jw_lit(out, next, ",\"sort\":")
       val next = jw_int(out, next, lib_sort_get())
       val next = jw_lit(out, next, ",\"libraryGrid\":")
@@ -791,6 +796,13 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "dailyGoal") then let
         val () = (if value >= 0 then (if value <= 600 then stats_goal_set(value) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "narrationSpeed") then let
+        val quarters = value / 25
+        val () = (if quarters * 25 = value then (if quarters >= 2 then (if quarters <= 8 then set_narration_speed_set(quarters) else ()) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "narrationSkip") then let
+        val () = (if value >= 0 then (if value <= 1 then set_narration_skip_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
         val () = (if value >= 0 then (if value <= 1 then set_ruby_set(value) else ()) else ())

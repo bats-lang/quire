@@ -52,6 +52,11 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
                       the book (where the browser gives them to the page)
    ruby               a ruby's annotations (furigana over a word): 0
                       hidden, 1 shown
+   narration speed    a book's narration (its Media Overlays), in
+                      quarters of its own speed: 2 (half) to 8 (double),
+                      the range EPUB 3.3's reading systems offer
+   narration skip     1 a narration passes over page numbers and notes
+                      (skippable structures), 0 it reads them
    (the spacings reach what WCAG 1.4.12 asks a page to take: 2em
    after a paragraph, .12em between letters, .16em between words) *)
 #pub typedef set_size = [v:int | 12 <= v; v <= 32] int v
@@ -71,6 +76,8 @@ staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 #pub typedef set_flow = [v:nat | v <= 1] int v
 #pub typedef set_cols = [v:nat | v <= 2] int v
 #pub typedef set_ruby = [v:nat | v <= 1] int v
+#pub typedef set_narration_speed = [v:int | 2 <= v; v <= 8] int v
+#pub typedef set_narration_skip = [v:nat | v <= 1] int v
 
 typedef settings = @{
   size = set_size, line_height = set_lh, margin = set_margin, font = set_font, theme = set_theme,
@@ -92,6 +99,10 @@ val _set = ref<settings>(_defaults())
    kept apart from the record, which one field more would make too
    large for wasm to copy without memmove, which it is not given *)
 val _ruby = ref<int>(1)
+(* The narration's speed and whether it skips page numbers and notes:
+   kept apart from the record too *)
+val _narration_speed = ref<int>(4)
+val _narration_skip = ref<int>(1)
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)
 
@@ -129,6 +140,12 @@ implement set_flow_get () = (!_set).scrolled
 implement set_cols_get () = (!_set).columns
 #pub fn set_ruby_get (): set_ruby
 implement set_ruby_get () = if !_ruby = 0 then 0 else 1
+#pub fn set_narration_speed_get (): set_narration_speed
+implement set_narration_speed_get () = let
+  val speed = g1ofg0(!_narration_speed)
+in if speed < 2 then 4 else if speed > 8 then 4 else speed end
+#pub fn set_narration_skip_get (): set_narration_skip
+implement set_narration_skip_get () = if !_narration_skip = 0 then 0 else 1
 
 (* ============================================================
    Applying
@@ -305,6 +322,20 @@ implement set_theme_recheck () =
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
+(* The narration's speed, as its slider shows it: 0.5 to 2, each with a
+   multiplication sign *)
+fn _narration_speed_text (): void = let
+  val speed = set_narration_speed_get()
+in
+  if speed <= 2 then ui_text("narration-speed-value", "0.5\xC3\x97")
+  else if speed = 3 then ui_text("narration-speed-value", "0.75\xC3\x97")
+  else if speed = 4 then ui_text("narration-speed-value", "1\xC3\x97")
+  else if speed = 5 then ui_text("narration-speed-value", "1.25\xC3\x97")
+  else if speed = 6 then ui_text("narration-speed-value", "1.5\xC3\x97")
+  else if speed = 7 then ui_text("narration-speed-value", "1.75\xC3\x97")
+  else ui_text("narration-speed-value", "2\xC3\x97")
+end
+
 (* The settings panel's controls, showing the settings *)
 fn _show_controls (): void = let
   val current = !_set
@@ -348,6 +379,9 @@ fn _show_controls (): void = let
   val () = _pressed("volume-keys-off", current.volume_keys = 0)
   val () = _pressed("ruby-show", set_ruby_get() = 1)
   val () = _pressed("ruby-hide", set_ruby_get() = 0)
+  val () = _pressed("narration-skip", set_narration_skip_get() = 1)
+  val () = _pressed("narration-read", set_narration_skip_get() = 0)
+  val () = _narration_speed_text()
   val buf = $A.alloc<byte>(32)
   val next = _put_tenths(buf, 0, 32, current.paragraph_spacing)
   val () = ui_text_buf("paragraph-value", buf, next)
@@ -364,12 +398,13 @@ in ui_text_buf("word-value", buf, next) end
 
 (* "S2", then size, line height, margin, font, theme, the library's
    sort order, align, hyphens, paragraph, letter and word spacing, dim
-   images, tap zones, volume keys, readout, scrolled, columns and ruby,
-   a byte each. ("S1" was the first 8; a record of "S2" without the
-   last bytes has their defaults.) *)
+   images, tap zones, volume keys, readout, scrolled, columns, ruby,
+   and the narration's speed and skipping, a byte each. ("S1" was the
+   first 8; a record of "S2" without the last bytes has their
+   defaults.) *)
 fn _save (sort: int): void = let
   val current = !_set
-  val record = $A.alloc<byte>(20)
+  val record = $A.alloc<byte>(22)
   val () = $A.write_byte(record, 0, 83)
   val () = $A.write_byte(record, 1, 50)
   val () = $A.write_byte(record, 2, current.size)
@@ -390,11 +425,13 @@ fn _save (sort: int): void = let
   val () = $A.write_byte(record, 17, current.scrolled)
   val () = $A.write_byte(record, 18, current.columns)
   val () = $A.write_byte(record, 19, set_ruby_get())
+  val () = $A.write_byte(record, 20, set_narration_speed_get())
+  val () = $A.write_byte(record, 21, set_narration_skip_get())
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, record_bytes, 20))
+  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, record_bytes, 22))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -427,6 +464,11 @@ implement set_sliders () = let
   val value_len = $S.int_to_str(value_text, 0, 16, current.word_spacing)
   val () = ui_range("word-row", "word-label", "Word spacing", "word-range", "0", "16", "word-value",
     value_text, value_len)
+  (* the narration's speed, in quarters *)
+  val value_text = $A.alloc<byte>(16)
+  val value_len = $S.int_to_str(value_text, 0, 16, set_narration_speed_get())
+  val () = ui_range("narration-speed-row", "narration-speed-label", "Narration speed", "narration-speed-range", "2", "8",
+    "narration-speed-value", value_text, value_len)
 in _show_controls() end
 
 (* Applies the settings (and shows them in the panel), then saves them
@@ -589,6 +631,10 @@ in !_set := @{
   readout = current.readout, scrolled = value, columns = current.columns } end
 #pub fn set_ruby_set (value: set_ruby): void
 implement set_ruby_set (value) = !_ruby := value
+#pub fn set_narration_speed_set (value: set_narration_speed): void
+implement set_narration_speed_set (value) = !_narration_speed := value
+#pub fn set_narration_skip_set (value: set_narration_skip): void
+implement set_narration_skip_set (value) = !_narration_skip := value
 #pub fn set_cols_set (value: set_cols): void
 implement set_cols_set (value) = let
   val current = !_set
@@ -603,6 +649,8 @@ in !_set := @{
    set_reset, which offers the ones they replace back *)
 fn _reset (): void = let
   val () = !_set := _defaults()
+  val () = !_narration_speed := 4
+  val () = !_narration_skip := 1
 in !_ruby := 1 end
 
 (* Puts the defaults back at once, then runs after (which applies
@@ -612,11 +660,15 @@ in !_ruby := 1 end
 implement set_reset_undoable (after) = let
   val before = !_set
   val ruby_before = !_ruby
+  val speed_before = !_narration_speed
+  val skip_before = !_narration_skip
   val () = _reset()
   val () = after()
 in lam () => let
   val () = !_set := before
   val () = !_ruby := ruby_before
+  val () = !_narration_speed := speed_before
+  val () = !_narration_skip := skip_before
 in after() end end
 
 (* The same, offering Undo *)
@@ -698,12 +750,18 @@ in
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 18))), 0, 2, 0) else 0) else 0): set_cols
         val ruby = (if n >= 20 then (if second_version then
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 19))), 0, 1, 1) else 1) else 1): set_ruby
+        val narration_speed = (if n >= 21 then (if second_version then
+          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 20))), 2, 8, 4) else 4) else 4): set_narration_speed
+        val narration_skip = (if n >= 22 then (if second_version then
+          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 21))), 0, 1, 1) else 1) else 1): set_narration_skip
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font, theme = theme,
           align = align, hyphens = hyphens, paragraph_spacing = paragraph_spacing, letter_spacing = letter_spacing,
           word_spacing = word_spacing, dim_images = dim_images, tap_zones = tap_zones, volume_keys = volume_keys,
           readout = readout, scrolled = scrolled, columns = columns }
         val () = !_ruby := ruby
+        val () = !_narration_speed := narration_speed
+        val () = !_narration_skip := narration_skip
         val () = set_show()
       in $P.ret<int>(sort) end)
 end
