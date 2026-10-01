@@ -380,11 +380,11 @@ fn _open_book {i:int} (i: int i): void =
       val () = ui_clear("indicator-title")
       val () = ui_clear("indicator-label")
       val () = ui_clear("indicator-pages")
-      val ch = x.ch
-      val pg = x.pg
+      val ch = x.chapter
+      val pg = x.page
       val anchor = x.anchor
-      val h1 = x.h1
-      val h2 = x.h2
+      val h1 = x.id_high
+      val h2 = x.id_low
     in
       if open_key_get() = x.key then
         $P.discard<int>($P.and_then<int><int>(annot_load(h1, h2), lam(_) => reader_goto(ch, pg, anchor)))
@@ -448,8 +448,8 @@ fn _archive {i:int} (i: int i): void =
   | ~$R.some(x) => let
       val key = x.key
       val was = x.shelf
-      val h1 = x.h1
-      val h2 = x.h2
+      val h1 = x.id_high
+      val h2 = x.id_low
       val () = _set_shelf(i, 2)
     in
       undo_offer("Archived", lam () => let
@@ -517,8 +517,8 @@ fn _menu_open {i:int} (i: int i): void =
 fn _progress_text {l:agz} (b: !$A.arr(byte, l, 64), x: bnums): [k:nat | k <= 64] int k = let
   val off = $S.int_to_str(b, 0, 64, lib_progress(x))
   val () = $A.set<byte>(b, off, $A.int2byte(37))
-  val tch = x.tch
-  val ch0 = x.ch
+  val tch = x.chapters
+  val ch0 = x.chapter
 in
   if tch <= 0 then off + 1
   else let
@@ -562,28 +562,28 @@ fn _info_open {i:int} (i: int i): void =
         in ui_text_buf("info-last-read", d, dk) end
         else ui_text("info-last-read", "Never"))
       val z = $A.alloc<byte>(32)
-      val zk = size_text(z, x.fsz)
+      val zk = size_text(z, x.file_size)
       val () = ui_text_buf("info-size", z, zk)
       (* the time it has been read, and its pages an hour (as Kobo's
          Reading Life shows them), once it has been *)
-      val () = (if x.rmin > 0 then let
+      val () = (if x.minutes_read > 0 then let
           val d = $A.alloc<byte>(32)
-          val dk = stats_duration_text(d, x.rmin)
+          val dk = stats_duration_text(d, x.minutes_read)
         in ui_text_buf("info-time", d, dk) end
         else ui_text("info-time", "Not yet"))
-      val () = (if x.rmin > 0 then let
+      val () = (if x.minutes_read > 0 then let
           val sp = $A.alloc<byte>(32)
-          val sk = $S.int_to_str(sp, 0, 32, _per_hour(x.rpg, x.rmin))
+          val sk = $S.int_to_str(sp, 0, 32, _per_hour(x.pages_read, x.minutes_read))
           val () = $A.write_text(sp, sk, $A.text_lit(" pages an hour"), 14)
         in ui_text_buf("info-speed", sp, sk + 14) end
         else ())
-      val () = ui_show("info-speed-row", x.rmin > 0)
+      val () = ui_show("info-speed-row", x.minutes_read > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", x.shelf)
       val () = ui_attr("book-info-cover", ASrc, "data:,")
-      val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.h1, x.h2, x.cover) else ())
+      val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.id_high, x.id_low, x.cover) else ())
       (* a book without a cover shows none, not a broken image *)
       val () = ui_show("book-info-cover", x.cover > 0)
-      val () = lib_a11y_show(x.h1, x.h2)
+      val () = lib_a11y_show(x.id_high, x.id_low)
       val () = layer_open(LBookInfo())
     in ui_focus("book-info-back") end
 
@@ -953,10 +953,7 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 21) = let
       val () = _target_free(t)
     in
       if clear then let
-        val () = ui_clear("library-search-box")
-        val () = ui_field("library-search-box", "library-search", FSearch, "search", "Search the library")
-        val () = ui_icon_btn("library-search-box", "library-search-clear", "ibtn sclear", IcClose, "Clear search")
-        val () = ui_show("library-search-clear", false)
+        val () = app_library_search()
         val () = lib_query_set($A.alloc<byte>(1), 0)
         val () = lib_render()
       in let val () = ui_focus("library-search") in 0 end end
@@ -1102,10 +1099,8 @@ fn _search_value {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n
   if k > 0 then ui_attr_buf("search-field", AValue, a, k) else $A.free<byte>(a)
 
 fn _search_field {l:agz}{n:pos}{k:nat | k <= n; k < 65536} (a: $A.arr(byte, l, n), k: int k): void = let
-  val () = ui_clear("search-header")
-  val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
-  val () = _search_value(a, k)
-in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
+  val () = app_book_search()
+in _search_value(a, k) end
 
 fn _search_open (): void = let
   val () = layer_open(LSearch())

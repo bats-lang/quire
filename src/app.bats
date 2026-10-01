@@ -10,6 +10,34 @@ staload "style.sats"
 
 fn _hide {ni:pos | ni < 256} (id: string ni): void = ui_show(id, false)
 
+(* Each element made again to reset it is made only here, so each id is
+   made at one place (tests/static/ids.py) *)
+
+(* The import button's file input, with no file chosen *)
+#pub fn app_import_input (): void
+implement app_import_input () =
+  ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true)
+
+(* The library menu's backup file input, with no file chosen *)
+#pub fn app_backup_input (): void
+implement app_backup_input () =
+  ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
+
+(* The library's search field, empty, and its (hidden) clear button *)
+#pub fn app_library_search (): void
+implement app_library_search () = let
+  val () = ui_clear("library-search-box")
+  val () = ui_field("library-search-box", "library-search", FSearch, "search", "Search the library")
+  val () = ui_icon_btn("library-search-box", "library-search-clear", "ibtn sclear", IcClose, "Clear search")
+in _hide("library-search-clear") end
+
+(* The book search's field, empty, and its close button *)
+#pub fn app_book_search (): void
+implement app_book_search () = let
+  val () = ui_clear("search-header")
+  val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
+in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
+
 (* The library view: toolbar, error banner, import progress, the list of
    books and the empty-library message *)
 fn _library (): void = let
@@ -24,12 +52,10 @@ fn _library (): void = let
   val () = ui_text_btn("library-bar", "shelf-button", "btn", "Library")
   val () = ui_text_btn("library-bar", "sort-button", "btn", "Sort: Last opened")
   val () = ui_el("library-bar", "import-button", TDiv, "btn btn-p")
-  val () = ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true)
+  val () = app_import_input()
   val () = ui_icon_btn("library-bar", "library-menu-button", "ibtn", IcGear, "Library menu")
   val () = ui_el("library-bar", "library-search-box", TDiv, "sfield")
-  val () = ui_field("library-search-box", "library-search", FSearch, "search", "Search the library")
-  val () = ui_icon_btn("library-search-box", "library-search-clear", "ibtn sclear", IcClose, "Clear search")
-  val () = _hide("library-search-clear")
+  val () = app_library_search()
   (* error banner *)
   val () = ui_el("library", "error-banner", TDiv, "banner")
   val () = ui_role("error-banner", RAlert)
@@ -162,7 +188,7 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
-  val () = ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
+  val () = app_backup_input()
   val () = ui_harm_item("library-menu-box", HEmptyTrash())
   val () = ui_menuitem("library-menu-box", "menu-factory-reset", "Factory reset")
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
@@ -474,8 +500,7 @@ fn _search (): void = let
   val () = ui_el("bats-root", "search-panel", TDiv, "panel panel-r")
   val () = ui_named("search-panel", NDialog, "Search in book")
   val () = ui_el("search-panel", "search-header", TDiv, "sbar")
-  val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
-  val () = ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search")
+  val () = app_book_search()
   val () = ui_el("search-panel", "search-status", TDiv, "snav")
   val () = ui_role("search-status", RStatus)
   val () = ui_el("search-panel", "search-results", TDiv, "plist")
