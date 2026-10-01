@@ -29,6 +29,20 @@ implement app_backup_input () =
 implement app_dictionary_input () =
   ui_file_input("dictionary-import", "dictionary-file", "Import dictionary", ".ifo,.idx,.dict,.dz,.syn", true)
 
+(* The fields that add a catalogue, empty: its name and its address *)
+#pub fn app_catalogue_form (): void
+implement app_catalogue_form () = let
+  val () = ui_clear("catalogue-form")
+  val () = ui_field("catalogue-form", "catalogue-name", FLine, "mname", "Catalogue name")
+in ui_field("catalogue-form", "catalogue-address", FLine, "mname", "Catalogue URL") end
+
+(* The catalogue's search field, empty, and its button *)
+#pub fn app_catalogue_search (): void
+implement app_catalogue_search () = let
+  val () = ui_clear("catalogue-search-bar")
+  val () = ui_field("catalogue-search-bar", "catalogue-search", FSearch, "search", "Search the catalogue")
+in ui_text_btn("catalogue-search-bar", "catalogue-search-go", "btn", "Search") end
+
 (* The library's search field, empty, and its (hidden) clear button *)
 #pub fn app_library_search (): void
 implement app_library_search () = let
@@ -212,6 +226,47 @@ fn _dictionary (): void = let
   val () = ui_text_btn("dictionary-bar", "dictionary-close", "btn", "Close")
 in _hide("dictionary-panel") end
 
+(* The OPDS catalogues books are got from: each one's name, opening
+   it, and Remove; and another added by its name and address *)
+fn _catalogues (): void = let
+  val () = ui_el("bats-root", "catalogues-panel", TDiv, "ovl")
+  val () = ui_el("catalogues-panel", "catalogues-box", TDiv, "menu")
+  val () = ui_labelled("catalogues-box", NDialog, "catalogues-title")
+  val () = ui_el("catalogues-box", "catalogues-title", TDiv, "mtitle")
+  val () = ui_text("catalogues-title", "Catalogues")
+  val () = ui_el("catalogues-box", "catalogues-none", TDiv, "cnone")
+  val () = ui_text("catalogues-none", "No catalogues yet")
+  val () = ui_add("catalogues-box", "catalogues-list", TDiv)
+  val () = ui_el("catalogues-box", "catalogue-form", TDiv, "cform")
+  val () = ui_named("catalogue-form", NGroup, "Add catalogue")
+  val () = app_catalogue_form()
+  val () = ui_text_btn("catalogues-box", "catalogue-add", "btn", "Add catalogue")
+  val () = ui_el("catalogues-box", "catalogues-status", TDiv, "cnone")
+  val () = ui_role("catalogues-status", RStatus)
+  val () = ui_text_btn("catalogues-box", "catalogues-done", "btn btn-p", "Done")
+in _hide("catalogues-panel") end
+
+(* A catalogue, browsed: Back to the page before, the page's title and
+   Close; its search, what it says (loading, or why it cannot be read),
+   its entries, and its next and previous pages *)
+fn _catalogue (): void = let
+  val () = ui_el("bats-root", "catalogue-panel", TDiv, "panel")
+  val () = ui_labelled("catalogue-panel", NDialog, "catalogue-title")
+  val () = ui_el("catalogue-panel", "catalogue-header", TDiv, "ph")
+  val () = ui_icon_btn("catalogue-header", "catalogue-back", "ibtn", IcBack, "Back")
+  val () = ui_el("catalogue-header", "catalogue-title", TSpan, "grow")
+  val () = ui_icon_btn("catalogue-header", "catalogue-close", "ibtn", IcClose, "Close catalogue")
+  val () = ui_el("catalogue-panel", "catalogue-search-bar", TDiv, "sbar")
+  val () = app_catalogue_search()
+  val () = ui_el("catalogue-panel", "catalogue-status", TDiv, "snav")
+  val () = ui_role("catalogue-status", RStatus)
+  val () = ui_el("catalogue-panel", "catalogue-list", TDiv, "plist")
+  val () = ui_named("catalogue-list", NRegion, "Entries")
+  val () = ui_el("catalogue-panel", "catalogue-pages", TDiv, "snav")
+  val () = ui_text_btn("catalogue-pages", "catalogue-previous", "btn", "Previous")
+  val () = ui_text_btn("catalogue-pages", "catalogue-next", "btn", "Next")
+in _hide("catalogue-panel") end
+
 (* The library menu (the gear) *)
 fn _library_menu (): void = let
   val () = ui_el("bats-root", "library-menu", TDiv, "ovl")
@@ -231,6 +286,7 @@ fn _library_menu (): void = let
   val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   val () = ui_menuitem("library-menu-box", "menu-dictionaries", "Dictionaries")
+  val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
   val () = app_backup_input()
@@ -640,6 +696,8 @@ implement app_build () = let
   val () = _image_viewer()
   val () = _dictionaries()
   val () = _dictionary()
+  val () = _catalogues()
+  val () = _catalogue()
   val () = _undo_toast()
 in _modal() end
 
