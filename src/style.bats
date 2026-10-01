@@ -1850,7 +1850,7 @@ fn _reader {left:nat | left >= 7000} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5160} (sheet: sheet(left, 0)): [after:nat | after >= left - 5160] sheet(after, 0) = let
+fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after >= left - 5400] sheet(after, 0) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2032,6 +2032,20 @@ fn _panels {left:nat | left >= 5160} (sheet: sheet(left, 0)): [after:nat | after
   (* a dictionary's article, as text: its line breaks kept *)
   val sheet = rule(sheet, ".dart")
   val sheet = lay(sheet, WhiteSpace(), "pre-wrap")
+  val sheet = close(sheet)
+  (* a catalogue's book: its cover, title and author, and Get *)
+  val sheet = rule(sheet, ".bkrow")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = lay(sheet, Padding(), "10px 14px")
+  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = close(sheet)
+  (* the fields that add a catalogue *)
+  val sheet = rule(sheet, ".cform")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, Gap(), "8px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")

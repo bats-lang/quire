@@ -492,6 +492,58 @@ in
     in $P.ret<Int>(outcome) end)
 end
 
+(* Imports book_file, of file_size bytes, whose name is kept *)
+fn _import_file {file_size:nat} (book_file: $FI.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) = let
+  val () = _stage_name()
+  val () = _stage("Reading file", 10)
+  val () = ui_show("error-banner", false)
+in
+  if file_size <= 0 then let
+    val () = $FI.close(book_file)
+    val () = _error()
+  in $P.ret<Int>(~1) end
+  else let
+    val @(id_high, id_low) = _file_id(book_file, file_size)
+    val library_index = lib_find(id_high, id_low)
+  in
+    if library_index < 0 then _import_go(book_file, file_size, id_high, id_low, ~1)
+    else (case+ lib_nums(library_index) of
+      | ~$R.none() => _import_go(book_file, file_size, id_high, id_low, ~1)
+      | ~$R.some(record) =>
+        (* An archived book is restored by importing it again *)
+        if record.shelf = 2 then _import_go(book_file, file_size, id_high, id_low, library_index)
+        else let
+          val @(answer_promise, resolver) = $P.create<Int>()
+          val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
+          val @(title, title_len) = lib_text(library_index, 0)
+          val message = $A.alloc<byte>(320)
+          val () = _copy_into(title, title_len, message, 0, 0)
+          val () = $A.free<byte>(title)
+          val text_end = _put_string(message, title_len, " is already in your library.")
+          val () = modal_open(QDuplicate(), "Already in library",
+            lam () => _duplicate_answer(true), lam () => _duplicate_answer(false))
+          val () = modal_text(message, text_end)
+        in
+          $P.and_then<Int><Int>($P.vow(answer_promise), lam(answer) =>
+            case+ _duplicate_take() of
+            | ~NoDuplicate() => let
+                val () = ui_show("import-progress", false)
+              in $P.ret<Int>(~1) end
+            | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
+                val () = $FI.close(waiting_file)
+                val () = $P.resolve<Int>(waiting_resolver, 1)
+                val () = ui_show("import-progress", false)
+              in $P.ret<Int>(~1) end
+            | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
+              if answer = 2 then _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
+              else let
+                val () = $FI.close(waiting_file)
+                val () = ui_show("import-progress", false)
+              in $P.ret<Int>(0) end)
+        end)
+  end
+end
+
 (* Imports the file an open promise resolved with (its handle) *)
 fn _import_handle (handle: Int): $P.promise(Int, $P.Chained) =
   case+ $FI.claim(handle) of
@@ -502,55 +554,23 @@ fn _import_handle (handle: Int): $P.promise(Int, $P.Chained) =
   | ~$R.some(book_file) => let
       val file_size = $FI.size(book_file)
       val () = _keep_name_of(book_file)
-      val () = _stage_name()
-      val () = _stage("Reading file", 10)
-      val () = ui_show("error-banner", false)
-    in
-      if file_size <= 0 then let
-        val () = $FI.close(book_file)
-        val () = _error()
-      in $P.ret<Int>(~1) end
-      else let
-        val @(id_high, id_low) = _file_id(book_file, file_size)
-        val library_index = lib_find(id_high, id_low)
-      in
-        if library_index < 0 then _import_go(book_file, file_size, id_high, id_low, ~1)
-        else (case+ lib_nums(library_index) of
-          | ~$R.none() => _import_go(book_file, file_size, id_high, id_low, ~1)
-          | ~$R.some(record) =>
-            (* An archived book is restored by importing it again *)
-            if record.shelf = 2 then _import_go(book_file, file_size, id_high, id_low, library_index)
-            else let
-              val @(answer_promise, resolver) = $P.create<Int>()
-              val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
-              val @(title, title_len) = lib_text(library_index, 0)
-              val message = $A.alloc<byte>(320)
-              val () = _copy_into(title, title_len, message, 0, 0)
-              val () = $A.free<byte>(title)
-              val text_end = _put_string(message, title_len, " is already in your library.")
-              val () = modal_open(QDuplicate(), "Already in library",
-                lam () => _duplicate_answer(true), lam () => _duplicate_answer(false))
-              val () = modal_text(message, text_end)
-            in
-              $P.and_then<Int><Int>($P.vow(answer_promise), lam(answer) =>
-                case+ _duplicate_take() of
-                | ~NoDuplicate() => let
-                    val () = ui_show("import-progress", false)
-                  in $P.ret<Int>(~1) end
-                | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
-                    val () = $FI.close(waiting_file)
-                    val () = $P.resolve<Int>(waiting_resolver, 1)
-                    val () = ui_show("import-progress", false)
-                  in $P.ret<Int>(~1) end
-                | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
-                  if answer = 2 then _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
-                  else let
-                    val () = $FI.close(waiting_file)
-                    val () = ui_show("import-progress", false)
-                  in $P.ret<Int>(0) end)
-            end)
-      end
-    end
+    in _import_file(book_file, file_size) end
+
+(* Imports book_file, of file_size bytes, fetched from a catalogue: its
+   name (for its progress and errors) is name[0, name_len), the book's
+   title there. The promise resolves as an import's does: the book's
+   key, 0 when it was already in the library and kept, or below 0 *)
+#pub fn import_fetched {file_size:nat}{l:agz}{n:pos}{name_len:nat | name_len <= n}
+  (book_file: $FI.infile(file_size), file_size: int file_size, name: !$A.arr(byte, l, n), name_len: int name_len): $P.promise(Int, $P.Chained)
+
+implement import_fetched (book_file, file_size, name, name_len) = let
+  val () = (if name_len <= 0 then _kept_name_put(NoKeptName())
+    else let
+      val kept_len = _at_most_200(name_len)
+      val name_bytes = $A.alloc<byte>(kept_len)
+      val () = _copy_into(name, kept_len, name_bytes, 0, 0)
+    in _kept_name_put(KeptName(name_bytes, kept_len)) end)
+in _import_file(book_file, file_size) end
 
 (* Imports files file_index to file_count - 1 of source (0 the file
    input import-file, 1 the last drop), one after another *)

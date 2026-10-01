@@ -105,7 +105,12 @@ page's arena, or the one piece of an arena sized to it, so it has no
 * a dictionary's .idx and .syn while it is imported, and its table
   (`_index_read`, `_table_store` in `src/dictionary.bats`); an article
   read from a .dict, or the dictzip chunks that hold it and their
-  inflated bytes (`_article`, `_article_dz`).
+  inflated bytes (`_article`, `_article_dz`);
+* a page of an OPDS catalogue (at most 4 MiB, `FEED_MOST`) and its
+  OpenSearch description while they are read, and a book's EPUB got
+  from one until it is handed to the JS side as a file (`_claim` in
+  `src/catalogue.bats`); the catalogues' part of the backup
+  (`catalogue_backup_json` in `src/catalogues.bats`);
 * the sync file: as it is read from the store, each chunk of the merge
   and the merge joined as it is written (`_out`, `_remote`, `_written`
   in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`).
@@ -124,9 +129,11 @@ With `alloc`:
   65536 bytes as a zip name is) and a title buffer (`tbuf`).
 * `src/reader.bats`: the OPF's name (for its directory), the chapter
   path (`ch_buf`), and title and text copies (`exact`, `tbuf`).
-* The EPUB file itself never enters wasm memory: file-input keeps it on
-  the JS side, it is read by ranges, and it is saved to and restored
-  from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`).
+* The EPUB file itself never stays in wasm memory: file-input keeps it
+  on the JS side, it is read by ranges, and it is saved to and restored
+  from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`). Only a book got
+  from a catalogue passes through, in an arena piece, since the bridge's
+  fetch hands its bytes to wasm and `file_store` takes them back.
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
@@ -181,6 +188,31 @@ start, end, minute made), so it is never stored and two devices that
 restored one backup give it the same id; the latest change wins, and a
 deletion (`deleted`, kept 180 days, `QA3`) wins over a change made
 before it. A book only another device has is kept as an orphan ("o").
+
+### Catalogues
+
+`src/catalogues.bats` keeps the OPDS catalogues books are got from
+(the library menu's Catalogues): each one's name and URL, stored under
+"catalogues", Project Gutenberg's alone until the list is changed. A
+removal is offered back by the Undo toast; the backup lists them by
+name and URL. `src/catalogue.bats` browses one, a page at a time, each
+page a step of a trail Back walks (and from the first page, back to
+the list). A page is fetched through the bridge (`$FE.fetch`: its
+status and bytes), read into an arena piece of at most 4 MiB (a larger
+one is refused) and read by `src/opds.bats`, OPDS 1.2 (Atom, with
+xml-tree) or OPDS 2 (JSON, with jsonio), into a feed of at most 500
+entries: links to other pages, and books (title, author, cover, EPUB)
+with Get; its next and previous pages; its search template
+(`{searchTerms}`, or OPDS 2's `{?query}`), or the OpenSearch
+description that holds one, fetched after the page. Every address is
+resolved against the page's own (`src/url.bats`, RFC 3986). Get
+fetches the EPUB acquisition link (an EPUB 3 one first), puts its
+bytes on the JS side (file-input's `file_store`) and imports them as a
+picked file is (`import_fetched`), so a book already there is asked
+about. Where the fetch fails (in a browser, a page without CORS), Get
+gives way to a download link (`ui_download_nn`) "then import it". A
+page that cannot be read says why: not readable by a browser, not
+found (404), needs a sign-in (401, 403), or not a catalogue.
 
 ### The archive is checked once
 
