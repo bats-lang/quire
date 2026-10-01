@@ -24,6 +24,7 @@ staload "mem.sats"
 staload "stats.sats"
 staload "app.sats"
 staload "dictionary.sats"
+staload "catalogues.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -367,6 +368,7 @@ implement backup_export () = let
   val () = _push(_settings_chunk())
   val () = _push(_log_chunk())
   val () = _push(dict_backup_json())
+  val () = _push(catalogue_backup_json())
   val () = _push(_collections_chunk())
 in _export_books(0, lib_count(), true) end
 

@@ -26,6 +26,8 @@ staload "annot.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
+staload "catalogue.sats"
+staload "catalogues.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -1030,6 +1032,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
           val () = stats_show()
           val () = layer_open(LStats())
         in ui_focus("stats-done") end
+        else if _is(clicked, "menu-catalogues") then let
+          val () = layer_close(LLibraryMenu())
+        in catalogue_panel_open() end
         else if _is(clicked, "menu-dictionaries") then let
           val () = layer_close(LLibraryMenu())
           val @(code, code_len) = reader_lang_code()
@@ -1477,6 +1482,51 @@ in case+ cell of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
 (* The page's scrolls, numbered, so only the last one's rest counts *)
 val _scroll_generation = ref<int>(0)
 
+(* The catalogues: one opened, removed or added, or done (or a click
+   outside); a catalogue browsed: a link followed, a book got, Back,
+   Close, the next and previous pages, and its search (its button, or
+   Enter in its field) *)
+fn _wire_catalogues {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("catalogues-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val opened = _row_of(clicked, "catalogue-open")
+      val removed = _row_of(clicked, "drop-catalogue")
+      val add = _is(clicked, "catalogue-add")
+      val done = (if _is(clicked, "catalogues-done") then true else _is(clicked, "catalogues-panel")): bool
+      val () = _target_free(clicked)
+      val () = (if opened >= 0 then catalogue_open(opened)
+        else if removed >= 0 then catalogue_remove(removed)
+        else if add then catalogue_add()
+        else if done then layer_close(LCatalogues())
+        else ())
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("catalogue-panel"), "click", lam(h) => let
+      val clicked = _target(h)
+      val followed = _row_of(clicked, "feed-link")
+      val got = _row_of(clicked, "book-get")
+      val back = _is(clicked, "catalogue-back")
+      val close = _is(clicked, "catalogue-close")
+      val next = _is(clicked, "catalogue-next")
+      val previous = _is(clicked, "catalogue-previous")
+      val search = _is(clicked, "catalogue-search-go")
+      val () = _target_free(clicked)
+      val () = (if followed >= 0 then catalogue_follow(followed)
+        else if got >= 0 then catalogue_get(got)
+        else if back then catalogue_back()
+        else if close then catalogue_close()
+        else if next then catalogue_next()
+        else if previous then catalogue_previous()
+        else if search then catalogue_search()
+        else ())
+    in 0 end)
+in RCons(listeners, OnEl("catalogue-search-bar"), "keydown", lam(h) =>
+  case+ take_blob(h) of
+  | ~NoBlobBytes() => 0
+  | ~BlobBytes(key_bytes, n) => let
+      val enter = _key_is(key_bytes, n, "Enter")
+      val () = $A.free<byte>(key_bytes)
+    in if enter then let val () = catalogue_search() in 0 end else 0 end) end
+
 fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
   val listeners = RCons(listeners, OnEl("contents-panel"), "click", lam(h) => let
@@ -1758,7 +1808,7 @@ implement main0 () = let
   val () = app_build()
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
-  val listeners = _wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))
+  val listeners = _wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil())))))))))
   (* files handed to the app from outside it (an Android intent) *)
   val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
@@ -1770,6 +1820,7 @@ implement main0 () = let
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = $P.discard<int>(dict_load())
+  val () = $P.discard<int>(catalogue_load())
   val () = dict_when_read(lam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
