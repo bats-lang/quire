@@ -902,6 +902,12 @@ fn _filter_show (): void = let
   val () = _pressed("filter-orange", f = 1)
 in _pressed("filter-underlined", f = 2) end
 
+(* The list's message when it shows no highlight *)
+fn _annotations_empty {n:pos | n < 256} (message: string n): void = let
+  val () = ui_add("annotations-list", "annotations-empty", TDiv)
+  val () = ui_class("annotations-empty", "empty")
+in ui_text("annotations-empty", message) end
+
 (* Fills the annotations list: the highlights of the style shown, by
    chapter *)
 #pub fn annot_render (): void
@@ -917,14 +923,8 @@ implement annot_render () = let
   prval () = fold@(c)
   val () = _put(c)
 in
-  if all = 0 then let
-    val () = ui_add("annotations-list", "annotations-empty", TDiv)
-    val () = ui_class("annotations-empty", "empty")
-  in ui_text("annotations-empty", "No highlights yet. Select text to highlight it.") end
-  else if n = 0 then let
-    val () = ui_add("annotations-list", "annotations-empty", TDiv)
-    val () = ui_class("annotations-empty", "empty")
-  in ui_text("annotations-empty", "No highlights in this style.") end
+  if all = 0 then _annotations_empty("No highlights yet. Select text to highlight it.")
+  else if n = 0 then _annotations_empty("No highlights in this style.")
   else ()
 end
 

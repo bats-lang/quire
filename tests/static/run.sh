@@ -1,5 +1,6 @@
 #!/bin/sh
-# Static tests: code that must type-check, and code that must not.
+# Static tests: every element id made at one place and every id named
+# made (ids.py); code that must type-check, and code that must not.
 # What they test is private to a module (a dataprop's constructor, a
 # cell's states), so a fixture is not a package of its own: it is a
 # snippet (snippet.bats) that is put into a copy of this checkout, in the
@@ -34,6 +35,24 @@ check() { # fixture dir -> 0 when bats check passes; log in $TMP/<name>.log
     { print }' "$f" > "$f.new" && mv "$f.new" "$f"
   (cd "$w" && bats check --repository "$2") > "$TMP/$n.log" 2>&1
 }
+
+# Element ids (ids.py): the app's own, and the checker's fixtures, each
+# a src.bats that must pass it or (reject/) fail it with its `expect`
+if python3 "$ROOT/tests/static/ids.py" "$ROOT/src" > "$TMP/ids.log" 2>&1; then echo "ok   ids: $(tail -1 "$TMP/ids.log")"
+else echo "FAIL ids:"; cat "$TMP/ids.log"; fail=1; fi
+for d in "$ROOT"/tests/static/ids/accept/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/ids.py" "$d" > "$TMP/ids-$n.log" 2>&1; then echo "ok   ids/accept/$n"
+  else echo "FAIL ids/accept/$n: should pass"; cat "$TMP/ids-$n.log"; fail=1; fi
+done
+for d in "$ROOT"/tests/static/ids/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/ids.py" "$d" > "$TMP/ids-$n.log" 2>&1; then echo "FAIL ids/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/ids-$n.log"; then echo "ok   ids/reject/$n"
+  else echo "FAIL ids/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/ids-$n.log"; fail=1; fi
+done
 
 for d in "$ROOT"/tests/static/accept/*/; do
   [ -d "$d" ] || continue

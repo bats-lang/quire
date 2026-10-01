@@ -22,6 +22,7 @@ staload "entity.sats"
 staload "library.sats"
 staload "backup.sats"
 staload "mem.sats"
+staload "app.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -550,7 +551,7 @@ fn _import_handle (h: Int): $P.promise(Int, $P.Chained) =
 fun _import_seq {i,c:nat | i <= c} .<c - i>. (src: int, i: int i, c: int c): void =
   if i >= c then
     (* the input's files are all read: its choice is cleared *)
-    (if src = 0 then ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true) else ())
+    (if src = 0 then app_import_input() else ())
   else let
     val p = (if src = 0 then let
         val ia = $A.alloc<byte>(11)
