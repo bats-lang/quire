@@ -375,6 +375,8 @@ fn _open_book {book:int} (book: int book): void =
       val () = _hint_offer()
       val () = _citation_set(book)
       val () = reader_stack_clear()
+      (* the Ruby row waits for this book's first ruby *)
+      val () = reader_ruby_forget()
       val () = reader_timer_start()
       (* a reload now comes back to this book *)
       val () = _view_save(book_numbers.key)
@@ -1102,6 +1104,8 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
         else if _is(clicked, "align-justified") then let val () = set_align_set(1) in true end
         else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(0) in true end
         else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(1) in true end
+        else if _is(clicked, "ruby-show") then let val () = set_ruby_set(1) in true end
+        else if _is(clicked, "ruby-hide") then let val () = set_ruby_set(0) in true end
         else if _is(clicked, "dim-off") then let val () = set_dim_set(0) in true end
         else if _is(clicked, "dim-on") then let val () = set_dim_set(1) in true end
         else if _is(clicked, "taps-sides") then let val () = set_taps_set(0) in true end

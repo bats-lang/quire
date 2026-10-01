@@ -210,6 +210,17 @@ again.
   another when deflated) and handed to the element as a blob URL. An SVG
   `<image>` (a cover page's usual form) is shown the same way, as an
   `<img>` whose source is its `xlink:href` (or `href`).
+* (Fixed) Ruby was shown as blocks: `ruby`, `rb`, `rt`, `rtc` and `rp`
+  were made `div`s. They are now kept as themselves (`_tag_of`), so a
+  reading sits over its base and `rp` is not shown. The settings' Ruby
+  row (Show / Hide, byte 19 of the "S2" record, `ruby` in the backup;
+  held apart from the settings record, which one field more would make
+  too large to copy without memmove, which wasm is not given)
+  is offered once a chapter of the open book has shown a ruby
+  (`_ruby_seen`); Hide adds `.caf rt,.caf rtc{display:none}` to
+  `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
+  or `rp`, but counts their content nodes as render makes them, so a
+  hit or an annotation after a ruby keeps its node number.
 
 ## What the types guarantee about the interface
 
