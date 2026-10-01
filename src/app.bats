@@ -8,7 +8,7 @@
 staload "ui.sats"
 staload "style.sats"
 
-fn _hide {ni:pos | ni < 256} (id: string ni): void = ui_show(id, false)
+fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
 (* Each element made again to reset it is made only here, so each id is
    made at one place (tests/static/ids.py) *)
@@ -137,12 +137,12 @@ fn _collections (): void = let
 in _hide("collections-menu") end
 
 (* A labelled number of the reading statistics *)
-fn _stat {nr,nlid,nv:pos | nr < 256; nlid < 256; nv < 256}{nl:pos | nl < 256}
-  (rid: string nr, lid: string nlid, vid: string nv, label: string nl): void = let
-  val () = ui_el("stats-box", rid, TDiv, "srow")
-  val () = ui_add(rid, lid, TSpan)
-  val () = ui_text(lid, label)
-in ui_add(rid, vid, TB) end
+fn _stat {row_id_len,label_id_len,value_id_len:pos | row_id_len < 256; label_id_len < 256; value_id_len < 256}{label_len:pos | label_len < 256}
+  (row_id: string row_id_len, label_id: string label_id_len, value_id: string value_id_len, label: string label_len): void = let
+  val () = ui_el("stats-box", row_id, TDiv, "srow")
+  val () = ui_add(row_id, label_id, TSpan)
+  val () = ui_text(label_id, label)
+in ui_add(row_id, value_id, TB) end
 
 (* The reading statistics: the time read today, this week, the days
    read in a row and the books finished this year, and the daily goal *)
@@ -219,10 +219,10 @@ fn _undo_toast (): void = let
 in _hide("undo-toast") end
 
 (* A labelled row of the book info view *)
-fn _row {nr,nv:pos | nr < 256; nv < 256}{nl:pos | nl < 256} (rid: string nr, vid: string nv, label: string nl): void = let
-  val () = ui_el("book-info-inner", rid, TDiv, "irow")
-  val () = ui_add(rid, vid, TSpan)
-  val () = ui_text(vid, label)
+fn _row {row_id_len,label_id_len:pos | row_id_len < 256; label_id_len < 256}{label_len:pos | label_len < 256} (row_id: string row_id_len, label_id: string label_id_len, label: string label_len): void = let
+  val () = ui_el("book-info-inner", row_id, TDiv, "irow")
+  val () = ui_add(row_id, label_id, TSpan)
+  val () = ui_text(label_id, label)
 in end
 
 (* The book info view *)
@@ -572,8 +572,8 @@ implement app_build () = let
   val () = ui_clear("bats-root")
   val () = ui_class("bats-root", "app th-light")
   val () = ui_add("bats-root", "style-sheet", TStyle)
-  val @(css, cssn) = app_style()
-  val () = ui_text_buf("style-sheet", css, cssn)
+  val @(css, css_len) = app_style()
+  val () = ui_text_buf("style-sheet", css, css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
   val () = _library()
