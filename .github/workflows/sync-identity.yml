@@ -61,7 +61,6 @@ jobs:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
           GOOGLE_ANDROID_CLIENT_ID: ${{ vars.GOOGLE_ANDROID_CLIENT_ID || secrets.GOOGLE_ANDROID_CLIENT_ID }}
           DROPBOX_CLIENT_ID: ${{ vars.DROPBOX_CLIENT_ID || secrets.DROPBOX_CLIENT_ID }}
-          YANDEX_CLIENT_ID: ${{ vars.YANDEX_CLIENT_ID || secrets.YANDEX_CLIENT_ID }}
           PLAY_SIGNING_SHA1: ${{ vars.PLAY_SIGNING_SHA1 || secrets.PLAY_SIGNING_SHA1 }}
         run: |
           {
@@ -69,7 +68,7 @@ jobs:
             echo
             echo "| Name | |"
             echo "|---|---|"
-            for name in GOOGLE_WEB_CLIENT_ID GOOGLE_ANDROID_CLIENT_ID DROPBOX_CLIENT_ID YANDEX_CLIENT_ID PLAY_SIGNING_SHA1; do
+            for name in GOOGLE_WEB_CLIENT_ID GOOGLE_ANDROID_CLIENT_ID DROPBOX_CLIENT_ID PLAY_SIGNING_SHA1; do
               if [ -n "${!name}" ]; then state=set; else state=missing; fi
               echo "| \`$name\` | $state |"
             done
@@ -81,5 +80,4 @@ jobs:
             echo "* Google, Web application client: JavaScript origins \`https://bats-lang.github.io\` and \`http://localhost:3737\`; scope \`https://www.googleapis.com/auth/drive.appdata\`."
             echo "* Google, Android client: package \`dev.middlefield.quire\`, the SHA-1 above (and Play's)."
             echo "* Dropbox: redirect URIs \`https://bats-lang.github.io/quire/?oauth=dropbox\`, \`http://localhost:3737/?oauth=dropbox\`, \`quire://oauth/dropbox\`; scopes \`files.content.read\`, \`files.content.write\`; App folder; public clients (PKCE) allowed."
-            echo "* Yandex: redirect URIs \`https://bats-lang.github.io/quire/?oauth=yandex\`, \`quire://oauth/yandex\`; Yandex.Disk app folder."
           } >> "$GITHUB_STEP_SUMMARY"
