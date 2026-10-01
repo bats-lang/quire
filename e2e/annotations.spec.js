@@ -5,7 +5,7 @@ import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
-  control, selectionButton, reload,
+  control, selectionButton, reload, pagedBook,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Annotations');
@@ -108,6 +108,119 @@ test('the export is Markdown with the book, its highlights and notes', async ({ 
   expect(md).toContain('Exported note');
   // each quote says where it is from, as Kindle's notebook does
   expect(md).toMatch(/> Para 1\.0[^\n]*\n\n— Annotations Tests, \*Marked Up\*, Chapter 1\n\n\*\*Note:\*\* Exported note/);
+});
+
+// The next chapter's first page
+async function nextChapter(page, chapter) {
+  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).ch).toBe(chapter);
+}
+
+async function exportMarkdown(page) {
+  await openPanel(page);
+  const download = page.waitForEvent('download');
+  await panel(page).getByRole('button', { name: 'Export', exact: true }).click();
+  const md = readFileSync(await (await download).path(), 'utf8');
+  await panel(page).getByRole('button', { name: 'Close' }).click();
+  return md;
+}
+
+// The citation after the quote of quote
+const citation = (md, quote) => {
+  const found = md.match(new RegExp(`> ${quote.replace('.', '\\.')}\n\n(— [^\n]*)\n`));
+  return found && found[1];
+};
+
+test('a highlight cites the print page it was made on, and one in a chapter without pages cites none', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, pagedBook('Paged Notes', 'Print Tests'));
+  await nextChapter(page, 2);
+  await page.keyboard.press('t');
+  await expect(page.getByText(/^ · page \d+ in print$/)).toHaveText(' · page 4 in print');
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await nextChapter(page, 3);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await expect.poll(() => marks(page)).toMatchObject({ size: 1, text: 'Para 3.0' });
+  const md = await exportMarkdown(page);
+  expect(citation(md, 'Para 2.0')).toMatch(/^— Print Tests, \*Paged Notes\*, [^\n]+, page 4$/);
+  expect(citation(md, 'Para 3.0')).toMatch(/^— Print Tests, \*Paged Notes\*, /);
+  expect(citation(md, 'Para 3.0')).not.toContain(', page');
+  // kept across a reload
+  await toLibrary(page);
+  await reload(page);
+  await openBook(page, 'Paged Notes');
+  expect(citation(await exportMarkdown(page), 'Para 2.0')).toMatch(/, page 4$/);
+  expect(errors).toEqual([]);
+});
+
+// Rewrites each annotations record stored as "QA2" (with print pages)
+// as "QA1", the format before them; how many were rewritten
+const storeAsQA1 = page => page.evaluate(() => new Promise((resolve, reject) => {
+  const opened = indexedDB.open('bats');
+  opened.onerror = () => reject(opened.error);
+  opened.onsuccess = () => {
+    const db = opened.result;
+    const tx = db.transaction('kv', 'readwrite');
+    const store = tx.objectStore('kv');
+    let rewritten = 0;
+    store.openCursor().onsuccess = event => {
+      const cursor = event.target.result;
+      if (!cursor) return;
+      const value = cursor.value;
+      const bytes = ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+        : value instanceof ArrayBuffer ? new Uint8Array(value) : null;
+      if (bytes && bytes.length >= 4 && String.fromCharCode(...bytes.subarray(0, 4)) === 'QA2\n') {
+        const out = [81, 65, 49, 10];
+        let position = 4;
+        while (position + 36 <= bytes.length) {
+          const textLength = bytes[position + 32] + bytes[position + 33] * 256;
+          const noteAt = position + 34 + textLength;
+          const noteLength = bytes[noteAt] + bytes[noteAt + 1] * 256;
+          const labelAt = noteAt + 2 + noteLength;
+          out.push(...bytes.subarray(position, labelAt));
+          position = labelAt + 1 + bytes[labelAt];
+        }
+        cursor.update(new Uint8Array(out));
+        rewritten++;
+      }
+      cursor.continue();
+    };
+    tx.oncomplete = () => { db.close(); resolve(rewritten); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  };
+}));
+
+test('annotations stored before print pages were kept (QA1) still load', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, pagedBook('Older Notes', 'Print Tests'));
+  await nextChapter(page, 2);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Note').click();
+  await writeNote(page, 'Written before');
+  await toLibrary(page);
+  await reload(page);
+  expect(await storeAsQA1(page)).toBe(1);
+  await page.reload();
+  await openBook(page, 'Older Notes');
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 2.0' });
+  const md = await exportMarkdown(page);
+  expect(md).toContain('**Note:** Written before');
+  // with no print page to cite
+  expect(citation(md, 'Para 2.0')).toMatch(/^— Print Tests, \*Older Notes\*, [^\n]+$/);
+  expect(citation(md, 'Para 2.0')).not.toContain(', page');
+  // stored again, as QA2, it keeps loading
+  await selectText(page, 9, 14);
+  await selectionButton(page, 'Highlight').click();
+  await toLibrary(page);
+  await reload(page);
+  await openBook(page, 'Older Notes');
+  const again = await exportMarkdown(page);
+  expect(citation(again, 'lorem')).toMatch(/, page 4$/);
+  expect(citation(again, 'Para 2.0')).not.toContain(', page');
+  expect(errors).toEqual([]);
 });
 
 // every mark set on the page, with the text of each range in it

@@ -36,26 +36,33 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 #define TEXT_MAX 400
 #define NOTE_MAX 2000
 #define ANNOTATIONS_MAX 400
-#define STORED_MAX 2440
+#define STORED_MAX 2457
+(* A print page's label's most bytes (the reader's, from the book's
+   page-list) *)
+#define LABEL_MAX 16
 
 (* Each annotation: its kind (0 a bookmark; a highlight: 1 yellow, 2
    orange, 3 underlined), chapter, the
    node and offset it starts at and those it ends at, the page it was
    made on, when (epoch minutes), its text text[0, text_len) (a
-   highlight's quote, a bookmark's first words) and its note
-   note[0, note_len) *)
+   highlight's quote, a bookmark's first words), its note
+   note[0, note_len) and the print page it was made on,
+   label[0, label_len) (none, 0, when the chapter has no page-list
+   break before it) *)
 datavtype annotations(int) =
   | annotations_nil(0) of ()
-  | {count:nat}{text_loc,note_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}
+  | {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX}
     annotations_cons(count + 1) of (Int, Int, Int, Int, Int, Int, Int, Int,
-      $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len, annotations(count))
+      $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len,
+      $A.arr(byte, label_loc, label_len + 1), int label_len, annotations(count))
 
 fun annotations_free {count:nat} .<count>. (annotations: annotations(count)): void =
   case+ annotations of
   | ~annotations_nil() => ()
-  | ~annotations_cons(_, _, _, _, _, _, _, _, text, _, note, _, rest) => let
+  | ~annotations_cons(_, _, _, _, _, _, _, _, text, _, note, _, label, _, rest) => let
       val () = $A.free<byte>(text)
       val () = $A.free<byte>(note)
+      val () = $A.free<byte>(label)
     in annotations_free(rest) end
 
 datavtype annotations_cell =
@@ -65,6 +72,25 @@ val _cell = ref<annotations_cell>(AnnotationsCell(annotations_nil(), 0))
 (* The book the annotations are of *)
 val _book_id_high = ref<int>(0)
 val _book_id_low = ref<int>(0)
+
+(* The print page of the page shown (the reader's, from the book's
+   page-list): the label a highlight or bookmark made now keeps *)
+datavtype print_page =
+  | NoPrintPage of ()
+  | {label_loc:agz}{label_len:nat | label_len <= LABEL_MAX}
+    PrintPage of ($A.arr(byte, label_loc, label_len + 1), int label_len)
+
+val _print_page = ref<print_page>(NoPrintPage())
+
+fn _print_page_swap (page: print_page): print_page = let
+  var previous: print_page = page
+  val () = ref_exch_elt<print_page>(_print_page, previous)
+in previous end
+
+fn _print_page_free (page: print_page): void =
+  case+ page of
+  | ~NoPrintPage() => ()
+  | ~PrintPage(label, _) => $A.free<byte>(label)
 
 fn _take (): annotations_cell = let
   var cell: annotations_cell = AnnotationsCell(annotations_nil(), 0)
@@ -104,6 +130,23 @@ fn _copy_prefix {l:agz}{n:pos}{source_len:nat | source_len < n; source_len < 104
   val () = _copy_bytes(source, prefix_copy, source_len, 0)
 in prefix_copy end
 
+(* The page shown's print page is label[0, label_len) (none when
+   label_len is 0) *)
+#pub fn annot_print_page_set {l:agz}{n:pos}{label_len:nat | label_len <= 16; label_len < n}
+  (label: !$A.arr(byte, l, n), label_len: int label_len): void
+
+implement annot_print_page_set (label, label_len) =
+  _print_page_free(_print_page_swap(PrintPage(_copy_prefix(label, label_len), label_len)))
+
+(* A copy of the page shown's print page's label, with its length *)
+fn _print_page_copy (): [label_loc:agz][label_len:nat | label_len <= LABEL_MAX] @($A.arr(byte, label_loc, label_len + 1), int label_len) =
+  case+ _print_page_swap(NoPrintPage()) of
+  | ~NoPrintPage() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | ~PrintPage(label, label_len) => let
+      val label_copy = _copy_prefix(label, label_len)
+      val () = _print_page_free(_print_page_swap(PrintPage(label, label_len)))
+    in @(label_copy, label_len) end
+
 (* ============================================================
    Order: by chapter, node, offset
    ============================================================ *)
@@ -114,27 +157,30 @@ fn _before (chapter_a: int, node_a: int, offset_a: int, chapter_b: int, node_b: 
   else offset_a < offset_b
 
 (* annotations with the annotation added in its place *)
-fun _insert {count:nat}{text_loc,note_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX} .<count>.
+fun _insert {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX} .<count>.
   (kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int, made_at: Int,
    text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len, note: $A.arr(byte, note_loc, note_len + 1), note_len: int note_len,
+   label: $A.arr(byte, label_loc, label_len + 1), label_len: int label_len,
    annotations: annotations(count)): annotations(count + 1) =
   case+ annotations of
-  | ~annotations_nil() => annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, annotations_nil())
-  | ~annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len, rest) =>
+  | ~annotations_nil() => annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, annotations_nil())
+  | ~annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len, other_label, other_label_len, rest) =>
     if _before(chapter, start_node, start_offset, other_chapter, other_start_node, other_start_offset) then
-      annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len,
-        annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len, rest))
+      annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len,
+        annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len, other_label, other_label_len, rest))
     else
-      annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len,
-        _insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest))
+      annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_text, other_text_len, other_note, other_note_len, other_label, other_label_len,
+        _insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest))
 
 (* ============================================================
    Storage: the book's key 'a' and its id
    ============================================================ *)
 
-(* "QA1\n", then each annotation: its eight numbers (i32), its text
-   (u16 length, bytes) and its note (u16 length, bytes): at most
-   STORED_MAX bytes *)
+(* "QA2\n", then each annotation: its eight numbers (i32), its text
+   (u16 length, bytes), its note (u16 length, bytes) and its print
+   page's label (u8 length, bytes): at most STORED_MAX bytes. "QA1"
+   (written before print pages were kept) is the same without the
+   label *)
 
 fun _put_bytes {source_loc,out_loc:agz}{arena:addr}{source_size:pos}{count:nat | count <= source_size}{out_size:nat}{position:nat | position + count <= out_size}{j:nat | j <= count} .<count - j>.
   (source: !$A.arr(byte, source_loc, source_size), count: int count, out: !$A.arrx(byte, out_loc, out_size, arena), position: int position, j: int j): void =
@@ -147,7 +193,7 @@ fun _serialize {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | position + S
   (out: !$A.arrx(byte, l, n, arena), position: int position, annotations: !annotations(count)): [next:nat | next <= n] int next =
   case+ annotations of
   | annotations_nil() => position
-  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest) => let
+  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest) => let
       val () = $A.write_i32(out, position, kind)
       val () = $A.write_i32(out, position + 4, chapter)
       val () = $A.write_i32(out, position + 8, start_node)
@@ -160,7 +206,10 @@ fun _serialize {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | position + S
       val () = _put_bytes(text, text_len, out, position + 34, 0)
       val () = $A.write_u16le(out, position + 34 + text_len, note_len)
       val () = _put_bytes(note, note_len, out, position + 36 + text_len, 0)
-      val next = _serialize(out, position + 36 + text_len + note_len, rest)
+      val label_at = position + 36 + text_len + note_len
+      val () = $A.write_byte(out, label_at, label_len)
+      val () = _put_bytes(label, label_len, out, label_at + 1, 0)
+      val next = _serialize(out, label_at + 1 + label_len, rest)
       prval () = fold@(annotations)
     in next end
 
@@ -173,7 +222,7 @@ in
   case+ piece_new(piece_size) of
   | ~NoPiece() => ()
   | ~Piece(owner, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QA1"), 3)
+      val () = $A.write_text(out, 0, $A.text_lit("QA2"), 3)
       val () = $A.write_byte(out, 3, 10)
       val used_len = _serialize(out, 4, annotations)
       val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
@@ -217,10 +266,38 @@ fun _bytes_of {stored_loc:agz}{arena:addr}{stored_size:nat}{position,count:nat |
     val () = $A.set<byte>(out, j, $A.get<byte>(stored, position + j))
   in _bytes_of(stored, position, count, out, j + 1) end
 
-(* The annotations stored in stored[position, n), onto annotations: read
-   as they were stored (the book's data, checked here once) *)
+(* The version of the record stored[0, n): 2 ("QA2", with print pages),
+   1 ("QA1", without), or 0 when it is neither *)
+fn _version {l:agz}{arena:addr}{n:nat} (stored: !$A.arrx(byte, l, n, arena), n: int n): [version:nat | version <= 2; version == 0 || n >= 4] int version =
+  if n < 4 then 0
+  else if byte2int0($A.get<byte>(stored, 0)) <> 81 then 0
+  else if byte2int0($A.get<byte>(stored, 1)) <> 65 then 0
+  else let
+    val digit = byte2int0($A.get<byte>(stored, 2))
+  in if digit = 50 then 2 else if digit = 49 then 1 else 0 end
+
+(* The print page's label of the annotation whose label is stored at
+   stored[position] in a record of version version (none in a "QA1"
+   record): whether it is there whole, where its bytes start and its
+   length *)
+fn _stored_label {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, version: int)
+  : [bytes_at:nat | position <= bytes_at][label_len:nat | label_len <= LABEL_MAX; bytes_at + label_len <= n] @(bool, int bytes_at, int label_len) =
+  if version < 2 then @(true, position, 0)
+  else if position + 1 > n then @(false, position, 0)
+  else let
+    val label_len = $AR.low_byte(byte2int0($A.get<byte>(stored, position)))
+  in
+    if label_len > LABEL_MAX then @(false, position, 0)
+    else if position + 1 + label_len > n then @(false, position, 0)
+    else @(true, position + 1, label_len)
+  end
+
+(* The annotations stored in stored[position, n), a record of version
+   version, onto annotations: read as they were stored (the book's
+   data, checked here once) *)
 fun _parse {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}{count:nat | count <= ANNOTATIONS_MAX} .<n - position>.
-  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, annotations: annotations(count), count: int count)
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, version: int, annotations: annotations(count), count: int count)
   : [total:nat | total <= ANNOTATIONS_MAX] @(annotations(total), int total) =
   if count >= ANNOTATIONS_MAX then @(annotations, count)
   else if position + 36 > n then @(annotations, count)
@@ -235,14 +312,22 @@ fun _parse {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}{count:nat | 
       if note_len > NOTE_MAX then @(annotations, count)
       else if position + 36 + text_len + note_len > n then @(annotations, count)
       else let
-        val text = $A.alloc<byte>(text_len + 1)
-        val () = _bytes_of(stored, position + 34, text_len, text, 0)
-        val note = $A.alloc<byte>(note_len + 1)
-        val () = _bytes_of(stored, position + 36 + text_len, note_len, note, 0)
-        val added = _insert(_read_i32(stored, position), _read_i32(stored, position + 4), _read_i32(stored, position + 8), _read_i32(stored, position + 12),
-                      _read_i32(stored, position + 16), _read_i32(stored, position + 20), _read_i32(stored, position + 24), _read_i32(stored, position + 28),
-                      text, text_len, note, note_len, annotations)
-      in _parse(stored, n, position + 36 + text_len + note_len, added, count + 1) end
+        val label_at = position + 36 + text_len + note_len
+        val @(whole, label_bytes_at, label_len) = _stored_label(stored, n, label_at, version)
+      in
+        if ~whole then @(annotations, count)
+        else let
+          val text = $A.alloc<byte>(text_len + 1)
+          val () = _bytes_of(stored, position + 34, text_len, text, 0)
+          val note = $A.alloc<byte>(note_len + 1)
+          val () = _bytes_of(stored, position + 36 + text_len, note_len, note, 0)
+          val label = $A.alloc<byte>(label_len + 1)
+          val () = _bytes_of(stored, label_bytes_at, label_len, label, 0)
+          val added = _insert(_read_i32(stored, position), _read_i32(stored, position + 4), _read_i32(stored, position + 8), _read_i32(stored, position + 12),
+                        _read_i32(stored, position + 16), _read_i32(stored, position + 20), _read_i32(stored, position + 24), _read_i32(stored, position + 28),
+                        text, text_len, note, note_len, label, label_len, annotations)
+        in _parse(stored, n, label_bytes_at + label_len, version, added, count + 1) end
+      end
     end
   end
 
@@ -261,10 +346,12 @@ in
     case+ take_content(handle) of
     | ~NoContentBytes() => $P.ret<int>(0)
     | ~ContentBytes(owner, stored, stored_size) =>
-      if stored_size < 4 then let val () = piece_free(owner, stored) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(stored, 1)) <> 65 then let val () = piece_free(owner, stored) in $P.ret<int>(0) end
+      let
+        val version = _version(stored, stored_size)
+      in
+      if version = 0 then let val () = piece_free(owner, stored) in $P.ret<int>(0) end
       else let
-        val @(annotations, count) = _parse(stored, stored_size, 4, annotations_nil(), 0)
+        val @(annotations, count) = _parse(stored, stored_size, 4, version, annotations_nil(), 0)
         val () = piece_free(owner, stored)
         (* only while the same book is open *)
       in
@@ -273,6 +360,7 @@ in
           in $P.ret<int>(count) end
           else let val () = annotations_free(annotations) in $P.ret<int>(0) end)
         else let val () = annotations_free(annotations) in $P.ret<int>(0) end
+      end
       end)
 end
 
@@ -284,7 +372,7 @@ end
 fun _marks {count:nat} .<count>. (annotations: !annotations(count), shown_chapter: int): void =
   case+ annotations of
   | annotations_nil() => ()
-  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, _, _, _, _, _, _, rest) => let
+  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, _, _, _, _, _, _, _, _, rest) => let
       val () = (if _is_highlight(kind) then (if chapter = shown_chapter then
         (if start_node >= 0 then (if end_node >= 0 then let
            val @(start_id, start_id_len) = nid_pad3("c", start_node)
@@ -343,7 +431,7 @@ fn _page (): int = case+ reading_get() of @(page, _, _, _) => page
 fun _bookmark_here {count:nat} .<count>. (annotations: !annotations(count), shown_chapter: int, i: int): int =
   case+ annotations of
   | annotations_nil() => ~1
-  | @annotations_cons(kind, chapter, start_node, _, _, _, page, _, _, _, _, _, rest) =>
+  | @annotations_cons(kind, chapter, start_node, _, _, _, page, _, _, _, _, _, _, _, rest) =>
     if (if kind = 0 then (if chapter = shown_chapter then (if start_node >= 0 then _on_page(start_node) else page = _page()) else false) else false) then let
       prval () = fold@(annotations)
     in i end
@@ -375,22 +463,23 @@ implement annot_star () =
 fun _remove {count:nat} .<count>. (annotations: annotations(count), i: int): [kept_count:nat | kept_count <= count] @(annotations(kept_count), int kept_count) =
   case+ annotations of
   | ~annotations_nil() => @(annotations_nil(), 0)
-  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest) =>
+  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest) =>
     if i = 0 then let
       val () = $A.free<byte>(text)
       val () = $A.free<byte>(note)
+      val () = $A.free<byte>(label)
       val @(kept, kept_count) = _count(rest)
     in @(kept, kept_count) end
     else let
       val @(kept, kept_count) = _remove(rest, i - 1)
-    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, kept), kept_count + 1) end
+    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, kept), kept_count + 1) end
 
 and _count {count:nat} .<count>. (annotations: annotations(count)): @(annotations(count), int count) =
   case+ annotations of
   | ~annotations_nil() => @(annotations_nil(), 0)
-  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest) => let
+  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest) => let
       val @(counted, rest_count) = _count(rest)
-    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, counted), rest_count + 1) end
+    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, counted), rest_count + 1) end
 
 fn _delete (index: int): void = let
   val+ ~AnnotationsCell(annotations, _) = _take()
@@ -448,7 +537,9 @@ in
     val () = $A.free<byte>(note)
   in _put(AnnotationsCell(annotations, count)) end
   else let
-    val () = _put(AnnotationsCell(_insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, $TM.epoch_minutes(), text, text_len, note, note_len, annotations), count + 1))
+    (* made on the page shown, it keeps that page's print page *)
+    val @(label, label_len) = _print_page_copy()
+    val () = _put(AnnotationsCell(_insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, $TM.epoch_minutes(), text, text_len, note, note_len, label, label_len, annotations), count + 1))
   in _save() end
 end
 
@@ -499,7 +590,7 @@ fn _index_of (chapter: Int, start_node: Int, start_offset: Int): int = let
   fun find {count:nat} .<count>. (annotations: !annotations(count), i: int): int =
     case+ annotations of
     | annotations_nil() => ~1
-    | @annotations_cons(_, entry_chapter, node, offset, _, _, _, _, _, _, _, _, rest) =>
+    | @annotations_cons(_, entry_chapter, node, offset, _, _, _, _, _, _, _, _, _, _, rest) =>
       if (if entry_chapter = chapter then (if node = start_node then offset = start_offset else false) else false) then let
         prval () = fold@(annotations)
       in i end
@@ -550,7 +641,7 @@ fun _set_note {count:nat}{l:agz}{note_len:nat | note_len <= NOTE_MAX} .<count>.
   (annotations: !annotations(count), i: int, note: $A.arr(byte, l, note_len + 1), note_len: int note_len): void =
   case+ annotations of
   | annotations_nil() => $A.free<byte>(note)
-  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, old_note, old_note_len, rest) =>
+  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, old_note, old_note_len, _, _, rest) =>
     if i = 0 then let
       val () = $A.free<byte>(old_note)
       val () = old_note := note
@@ -586,7 +677,7 @@ in _save() end
 fun _note_at {count:nat} .<count>. (annotations: !annotations(count), i: int): [l:agz][note_len:nat | note_len <= NOTE_MAX] @($A.arr(byte, l, note_len + 1), int note_len) =
   case+ annotations of
   | annotations_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
-  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, note, note_len, rest) =>
+  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, note, note_len, _, _, rest) =>
     if i = 0 then let
       val note_copy = _copy_prefix(note, note_len)
       val copy_len = note_len
@@ -622,16 +713,18 @@ in annot_star() end
    holds it *)
 datavtype removed =
   | NoRemoved of ()
-  | {text_loc,note_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}
+  | {text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX}
     Removed of (int, Int, Int, Int, Int, Int, Int, Int, Int,
-      $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len)
+      $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len,
+      $A.arr(byte, label_loc, label_len + 1), int label_len)
 
 fn _removed_free (held: removed): void =
   case+ held of
   | ~NoRemoved() => ()
-  | ~Removed(_, _, _, _, _, _, _, _, _, text, _, note, _) => let
+  | ~Removed(_, _, _, _, _, _, _, _, _, text, _, note, _, label, _) => let
       val () = $A.free<byte>(text)
-    in $A.free<byte>(note) end
+      val () = $A.free<byte>(note)
+    in $A.free<byte>(label) end
 
 val _held = ref<removed>(NoRemoved())
 val _held_serial = ref<int>(0)
@@ -646,29 +739,30 @@ in previous end
 fun _pull {count:nat} .<count>. (annotations: annotations(count), i: int, offer: int): [kept_count:nat | kept_count <= count] @(annotations(kept_count), int kept_count, removed) =
   case+ annotations of
   | ~annotations_nil() => @(annotations_nil(), 0, NoRemoved())
-  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest) =>
+  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest) =>
     if i = 0 then let
       val @(kept, kept_count) = _count(rest)
-    in @(kept, kept_count, Removed(offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len)) end
+    in @(kept, kept_count, Removed(offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len)) end
     else let
       val @(kept, kept_count, pulled) = _pull(rest, i - 1, offer)
-    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, kept), kept_count + 1, pulled) end
+    in @(annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, kept), kept_count + 1, pulled) end
 
 (* The annotation held under number offer, put back in its place *)
 fn _put_back (offer: int): void =
   case+ _held_swap(NoRemoved()) of
   | ~NoRemoved() => ()
-  | ~Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len) =>
-    if held_offer <> offer then _removed_free(_held_swap(Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len)))
+  | ~Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len) =>
+    if held_offer <> offer then _removed_free(_held_swap(Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len)))
     else let
       val+ ~AnnotationsCell(annotations, count) = _take()
     in
       if count >= ANNOTATIONS_MAX then let
         val () = $A.free<byte>(text)
         val () = $A.free<byte>(note)
+        val () = $A.free<byte>(label)
       in _put(AnnotationsCell(annotations, count)) end
       else let
-        val () = _put(AnnotationsCell(_insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, annotations), count + 1))
+        val () = _put(AnnotationsCell(_insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, annotations), count + 1))
         val () = _save()
         val () = annot_marks()
       in annot_star() end
@@ -678,11 +772,12 @@ fn _put_back (offer: int): void =
 fn _let_go (offer: int): void =
   case+ _held_swap(NoRemoved()) of
   | ~NoRemoved() => ()
-  | ~Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len) =>
-    if held_offer <> offer then _removed_free(_held_swap(Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len)))
+  | ~Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len) =>
+    if held_offer <> offer then _removed_free(_held_swap(Removed(held_offer, kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len)))
     else let
       val () = $A.free<byte>(text)
-    in $A.free<byte>(note) end
+      val () = $A.free<byte>(note)
+    in $A.free<byte>(label) end
 
 (* Deletes annotation index at once, offering it back: Undo puts it
    back, and then again runs shown (which shows the list it was in) *)
@@ -770,7 +865,7 @@ implement annot_ask_note (index, fresh) =
 fun _dest_at {count:nat} .<count>. (annotations: !annotations(count), i: int): @(Int, Int, Int) =
   case+ annotations of
   | annotations_nil() => @(~1, 0, ~1)
-  | @annotations_cons(_, chapter, start_node, _, _, _, page, _, _, _, _, _, rest) =>
+  | @annotations_cons(_, chapter, start_node, _, _, _, page, _, _, _, _, _, _, _, rest) =>
     if i = 0 then let
       val dest_chapter = chapter
       val dest_page = page
@@ -880,7 +975,7 @@ fn _listed (kind: int): bool =
 fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i, last_chapter: Int): int =
   case+ annotations of
   | annotations_nil() => i
-  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, rest) => let
+  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
       val shown = _listed(kind)
       val () = (if shown then let
           val () = (if chapter <> last_chapter then (if chapter >= 0 then _heading("annotations-list", chapter) else ()) else ())
@@ -894,7 +989,7 @@ fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(coun
 fun _count_where {count:nat} .<count>. (annotations: !annotations(count), keep: int -<cloref1> bool): int =
   case+ annotations of
   | annotations_nil() => 0
-  | @annotations_cons(kind, _, _, _, _, _, _, _, _, _, _, _, rest) => let
+  | @annotations_cons(kind, _, _, _, _, _, _, _, _, _, _, _, _, _, rest) => let
       val kind_copy = kind
       val counted = _count_where(rest, keep)
       prval () = fold@(annotations)
@@ -971,7 +1066,7 @@ in _child_text_button("bookmark-tools", "bookmark-delete", i, "hbtn", "Delete") 
 fun _bookmark_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i): void =
   case+ annotations of
   | annotations_nil() => ()
-  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, rest) => let
+  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
       val () = (if kind = 0 then (if chapter >= 0 then _bookmark_row(i, chapter, text, text_len, note, note_len) else ()) else ())
       val () = _bookmark_rows(rest, i + 1)
       prval () = fold@(annotations)
@@ -1055,33 +1150,51 @@ fn _markdown_style {l:agz}{arena:addr}{n:int}{position:nat | position + 22 <= n}
 
 (* The highlights as Markdown at out[position]: each after its chapter's
    heading when it is the chapter's first *)
-(* A highlight's source, after its quote: "— Author, *Title*, Chapter",
-   from the book's author author[0, author_len) and title
-   title[0, title_len) *)
-fn _markdown_cite {out_loc,title_loc,author_loc:agz}{arena:addr}{out_size:int}{position:nat | position + 750 <= out_size}{title_size,author_size:pos}{title_len:nat | title_len < title_size; title_len < 256}{author_len:nat | author_len < author_size; author_len < 256}
+(* A highlight's source, after its quote: "— Author, *Title*, Chapter,
+   page 214", from the book's author author[0, author_len) and title
+   title[0, title_len) and the print page the highlight was made on,
+   label[0, label_len) (no ", page" when it has none) *)
+(* ", Chapter" in a citation, unless the highlight has no chapter *)
+fn _cite_chapter {l:agz}{arena:addr}{n:int}{position:nat | position + 202 <= n}
+  (out: !$A.arrx(byte, l, n, arena), position: int position, chapter: Int): [next:nat | position <= next; next <= position + 202] int next =
+  if chapter < 0 then position
+  else let
+    val @(chapter_label, chapter_label_len) = toc_label_of(chapter)
+    val chapter_label_at = _literal(out, position, ", ")
+    val () = _flat_at(chapter_label, chapter_label_len, out, chapter_label_at, 0)
+    val () = $A.free<byte>(chapter_label)
+  in chapter_label_at + chapter_label_len end
+
+(* ", page 214" in a citation, from the print page's label
+   label[0, label_len); nothing when it has none *)
+fn _cite_page {out_loc,label_loc:agz}{arena:addr}{out_size:int}{position:nat | position + 7 + LABEL_MAX <= out_size}{label_size:pos}{label_len:nat | label_len < label_size; label_len <= LABEL_MAX}
+  (out: !$A.arrx(byte, out_loc, out_size, arena), position: int position, label: !$A.arr(byte, label_loc, label_size), label_len: int label_len)
+  : [next:nat | position <= next; next <= position + 7 + LABEL_MAX] int next =
+  if label_len <= 0 then position
+  else let
+    val label_at = _literal(out, position, ", page ")
+    val () = _flat_at(label, label_len, out, label_at, 0)
+  in label_at + label_len end
+
+fn _markdown_cite {out_loc,title_loc,author_loc,label_loc:agz}{arena:addr}{out_size:int}{position:nat | position + 750 <= out_size}{title_size,author_size,label_size:pos}{title_len:nat | title_len < title_size; title_len < 256}{author_len:nat | author_len < author_size; author_len < 256}{label_len:nat | label_len < label_size; label_len <= LABEL_MAX}
   (out: !$A.arrx(byte, out_loc, out_size, arena), position: int position, chapter: Int,
-   title: !$A.arr(byte, title_loc, title_size), title_len: int title_len, author: !$A.arr(byte, author_loc, author_size), author_len: int author_len): [next:nat | position <= next; next <= position + 750] int next = let
+   title: !$A.arr(byte, title_loc, title_size), title_len: int title_len, author: !$A.arr(byte, author_loc, author_size), author_len: int author_len,
+   label: !$A.arr(byte, label_loc, label_size), label_len: int label_len): [next:nat | position <= next; next <= position + 750] int next = let
   val author_at = _literal(out, position, "\xE2\x80\x94 ")
   val () = _flat_at(author, author_len, out, author_at, 0)
   val title_at = _literal(out, author_at + author_len, ", *")
   val () = _flat_at(title, title_len, out, title_at, 0)
   val after_title = _literal(out, title_at + title_len, "*")
-in
-  if chapter < 0 then _literal(out, after_title, "\n\n")
-  else let
-    val @(label_bytes, label_len) = toc_label_of(chapter)
-    val label_at = _literal(out, after_title, ", ")
-    val () = _flat_at(label_bytes, label_len, out, label_at, 0)
-    val () = $A.free<byte>(label_bytes)
-  in _literal(out, label_at + label_len, "\n\n") end
-end
+  val after_chapter = _cite_chapter(out, after_title, chapter)
+  val after_page = _cite_page(out, after_chapter, label, label_len)
+in _literal(out, after_page, "\n\n") end
 
 fun _markdown {out_loc,title_loc,author_loc:agz}{arena:addr}{out_size:int}{count:nat}{position:nat | position + 3600 * count + 64 <= out_size}{title_size,author_size:pos}{title_len:nat | title_len < title_size; title_len < 256}{author_len:nat | author_len < author_size; author_len < 256} .<count>.
   (out: !$A.arrx(byte, out_loc, out_size, arena), position: int position, annotations: !annotations(count), last_chapter: Int,
    title: !$A.arr(byte, title_loc, title_size), title_len: int title_len, author: !$A.arr(byte, author_loc, author_size), author_len: int author_len): [next:nat | next + 64 <= out_size] int next =
   case+ annotations of
   | annotations_nil() => position
-  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, rest) =>
+  | @annotations_cons(kind, chapter, _, _, _, _, _, _, text, text_len, note, note_len, label, label_len, rest) =>
     (* a bookmark is exported when it has a note *)
     if kind = 0 then (if note_len > 0 then let
       val after_heading = _markdown_heading_if_new(out, position, chapter, last_chapter)
@@ -1108,7 +1221,7 @@ fun _markdown {out_loc,title_loc,author_loc:agz}{arena:addr}{out_size:int}{count
       (* the style, unless yellow, the usual one *)
       val style = _style_of(kind)
       val after_style = _markdown_style(out, after_quote, style)
-      val after_cite = _markdown_cite(out, after_style, chapter, title, title_len, author, author_len)
+      val after_cite = _markdown_cite(out, after_style, chapter, title, title_len, author, author_len, label, label_len)
       val after_note = _markdown_note(out, after_cite, note, note_len)
       val next = _markdown(out, after_note, rest, chapter, title, title_len, author, author_len)
       prval () = fold@(annotations)
@@ -1192,11 +1305,20 @@ fn _kind_json {l:agz}{arena:addr}{n:nat}{position:nat | position + 44 <= n}
     else jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"yellow\"")
   end
 
+(* An annotation's print page, ',"printPage":"214"', when it has one *)
+fn _print_page_json {l,label_loc:agz}{arena:addr}{n:int}{label_size:pos}{label_len:nat | label_len < label_size; label_len <= LABEL_MAX}{position:nat | position + 15 + 6 * LABEL_MAX <= n}
+  (out: !$A.arrx(byte, l, n, arena), position: int position, label: !$A.arr(byte, label_loc, label_size), label_len: int label_len)
+  : [next:nat | next <= position + 15 + 6 * LABEL_MAX] int next =
+  if label_len <= 0 then position
+  else let
+    val print_page_at = jw_lit(out, position, ",\"printPage\":")
+  in jw_str(out, print_page_at, label, label_len) end
+
 fun _json_annotations {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | position + JSON_MAX * count + 1 <= n} .<count>.
   (out: !$A.arrx(byte, l, n, arena), position: int position, annotations: !annotations(count), first: bool): [next:nat | next + 1 <= n] int next =
   case+ annotations of
   | annotations_nil() => position
-  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, rest) => let
+  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, text, text_len, note, note_len, label, label_len, rest) => let
       val after_comma = (if first then position else jw_lit(out, position, ",")): [after:int | position <= after; after <= position + 1] int after
       val after_kind = _kind_json(out, after_comma, kind)
       val chapter_at = jw_lit(out, after_kind, ",\"chapter\":")
@@ -1217,7 +1339,9 @@ fun _json_annotations {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | posit
       val after_text = jw_str(out, text_at, text, text_len)
       val note_at = jw_lit(out, after_text, ",\"note\":")
       val after_note = jw_str(out, note_at, note, note_len)
-      val after_brace = jw_lit(out, after_note, "}")
+      (* the print page, when it was made on one *)
+      val after_print_page = _print_page_json(out, after_note, label, label_len)
+      val after_brace = jw_lit(out, after_print_page, "}")
       val next = _json_annotations(out, after_brace, rest, false)
       prval () = fold@(annotations)
     in next end
@@ -1227,10 +1351,12 @@ fun _json_annotations {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | posit
 #pub fn annot_json {l:agz}{arena:addr}{n:nat} (stored: !$A.arrx(byte, l, n, arena), n: int n): jchunk
 
 implement annot_json (stored, n) =
-  if n < 4 then JNone()
-  else if byte2int0($A.get<byte>(stored, 1)) <> 65 then JNone()
+  let
+    val version = _version(stored, n)
+  in
+  if version = 0 then JNone()
   else let
-    val @(annotations, count) = _parse(stored, n, 4, annotations_nil(), 0)
+    val @(annotations, count) = _parse(stored, n, 4, version, annotations_nil(), 0)
   in
     case+ piece_new(2 + JSON_MAX * count) of
     | ~NoPiece() => let val () = annotations_free(annotations) in JNone() end
@@ -1240,6 +1366,7 @@ implement annot_json (stored, n) =
         val () = $A.write_byte(out, array_end, 93)
         val () = annotations_free(annotations)
       in JChunk(owner, out, array_end + 1) end
+  end
   end
 
 (* A copy of source[0, source_len), in source_len + 1 bytes *)
@@ -1295,35 +1422,43 @@ fn _style_member_at {json_loc,key_loc,values_loc:agz}{arena:addr}{json_size:nat}
 
 (* The members of an annotation's object from position, to its closing
    brace: its numbers (and a highlight's style) into values, its text
-   into text_buffer[0, text_len) and its note into
-   note_buffer[0, note_len) *)
-fun _members {json_loc,key_loc,text_loc,note_loc,values_loc:agz}{arena:addr}{json_size:nat}{position:nat | position <= json_size}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX} .<json_size - position>.
+   into text_buffer[0, text_len), its note into note_buffer[0, note_len)
+   and its print page into label_buffer[0, label_len) (a label longer
+   than LABEL_MAX is not one the reader makes, and is left out) *)
+fun _members {json_loc,key_loc,text_loc,note_loc,label_loc,values_loc:agz}{arena:addr}{json_size:nat}{position:nat | position <= json_size}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX} .<json_size - position>.
   (json: !$A.arrx(byte, json_loc, json_size, arena), json_size: int json_size, position: int position, key: !$A.arr(byte, key_loc, 16),
-   text_buffer: !$A.arr(byte, text_loc, TEXT_MAX), note_buffer: !$A.arr(byte, note_loc, NOTE_MAX), values: !$A.arr(Int, values_loc, 9), text_len: int text_len, note_len: int note_len)
-  : [next:int | position <= next; next <= json_size][new_text_len:nat | new_text_len <= TEXT_MAX][new_note_len:nat | new_note_len <= NOTE_MAX] @(bool, int new_text_len, int new_note_len, int next) = let
+   text_buffer: !$A.arr(byte, text_loc, TEXT_MAX), note_buffer: !$A.arr(byte, note_loc, NOTE_MAX), label_buffer: !$A.arr(byte, label_loc, LABEL_MAX + 1), values: !$A.arr(Int, values_loc, 9), text_len: int text_len, note_len: int note_len, label_len: int label_len)
+  : [next:int | position <= next; next <= json_size][new_text_len:nat | new_text_len <= TEXT_MAX][new_note_len:nat | new_note_len <= NOTE_MAX][new_label_len:nat | new_label_len <= LABEL_MAX] @(bool, int new_text_len, int new_note_len, int new_label_len, int next) = let
   val member_at = jr_ws(json, json_size, position)
 in
-  if member_at >= json_size then @(false, text_len, note_len, json_size)
-  else if jr_is(json, json_size, member_at, 125) then @(true, text_len, note_len, member_at + 1)
-  else if jr_is(json, json_size, member_at, 44) then _members(json, json_size, member_at + 1, key, text_buffer, note_buffer, values, text_len, note_len)
+  if member_at >= json_size then @(false, text_len, note_len, label_len, json_size)
+  else if jr_is(json, json_size, member_at, 125) then @(true, text_len, note_len, label_len, member_at + 1)
+  else if jr_is(json, json_size, member_at, 44) then _members(json, json_size, member_at + 1, key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
   else let
     val @(ok, key_len, value_at) = jr_key(json, json_size, member_at, key, 16)
   in
-    if ~ok then @(false, text_len, note_len, value_at)
-    else if value_at >= json_size then @(false, text_len, note_len, value_at)
+    if ~ok then @(false, text_len, note_len, label_len, value_at)
+    else if value_at >= json_size then @(false, text_len, note_len, label_len, value_at)
     else if jr_key_is(key, key_len, "text") then let
       val @(read_ok, read_text_len, after) = jr_str(json, json_size, value_at, text_buffer, TEXT_MAX)
-    in if read_ok then _members(json, json_size, after, key, text_buffer, note_buffer, values, read_text_len, note_len) else @(false, text_len, note_len, after) end
+    in if read_ok then _members(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, read_text_len, note_len, label_len) else @(false, text_len, note_len, label_len, after) end
     else if jr_key_is(key, key_len, "note") then let
       val @(read_ok, read_note_len, after) = jr_str(json, json_size, value_at, note_buffer, NOTE_MAX)
-    in if read_ok then _members(json, json_size, after, key, text_buffer, note_buffer, values, text_len, read_note_len) else @(false, text_len, note_len, after) end
-    else if jr_key_is(key, key_len, "kind") then _members(json, json_size, _kind_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, values, text_len, note_len)
-    else if jr_key_is(key, key_len, "style") then _members(json, json_size, _style_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, values, text_len, note_len)
+    in if read_ok then _members(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, text_len, read_note_len, label_len) else @(false, text_len, note_len, label_len, after) end
+    else if jr_key_is(key, key_len, "printPage") then let
+      val @(read_ok, read_label_len, after) = jr_str(json, json_size, value_at, label_buffer, LABEL_MAX + 1)
+    in
+      if ~read_ok then @(false, text_len, note_len, label_len, after)
+      else if read_label_len > LABEL_MAX then _members(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, 0)
+      else _members(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, read_label_len)
+    end
+    else if jr_key_is(key, key_len, "kind") then _members(json, json_size, _kind_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
+    else if jr_key_is(key, key_len, "style") then _members(json, json_size, _style_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
     else let
       val member = _number_member(key, key_len)
     in
-      if member >= 0 then _members(json, json_size, _number_member_at(json, json_size, value_at, values, member), key, text_buffer, note_buffer, values, text_len, note_len)
-      else _members(json, json_size, jr_skip(json, json_size, value_at), key, text_buffer, note_buffer, values, text_len, note_len)
+      if member >= 0 then _members(json, json_size, _number_member_at(json, json_size, value_at, values, member), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
+      else _members(json, json_size, jr_skip(json, json_size, value_at), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
     end
   end
 end
@@ -1333,31 +1468,32 @@ fun _zero_values {values_loc:agz}{i:nat | i <= 9} .<9 - i>. (values: !$A.arr(Int
 
 (* The annotations of a JSON array's items from position, to its closing
    bracket, onto annotations (at most ANNOTATIONS_MAX) *)
-fun _items {json_loc,key_loc,text_loc,note_loc,values_loc:agz}{arena:addr}{json_size:nat}{position:nat | position <= json_size}{count:nat | count <= ANNOTATIONS_MAX} .<json_size - position>.
+fun _items {json_loc,key_loc,text_loc,note_loc,label_loc,values_loc:agz}{arena:addr}{json_size:nat}{position:nat | position <= json_size}{count:nat | count <= ANNOTATIONS_MAX} .<json_size - position>.
   (json: !$A.arrx(byte, json_loc, json_size, arena), json_size: int json_size, position: int position, key: !$A.arr(byte, key_loc, 16),
-   text_buffer: !$A.arr(byte, text_loc, TEXT_MAX), note_buffer: !$A.arr(byte, note_loc, NOTE_MAX), values: !$A.arr(Int, values_loc, 9), annotations: annotations(count), count: int count)
+   text_buffer: !$A.arr(byte, text_loc, TEXT_MAX), note_buffer: !$A.arr(byte, note_loc, NOTE_MAX), label_buffer: !$A.arr(byte, label_loc, LABEL_MAX + 1), values: !$A.arr(Int, values_loc, 9), annotations: annotations(count), count: int count)
   : [total:nat | total <= ANNOTATIONS_MAX] @(bool, annotations(total), int total) = let
   val item_at = jr_ws(json, json_size, position)
 in
   if item_at >= json_size then @(false, annotations, count)
   else if jr_is(json, json_size, item_at, 93) then @(true, annotations, count)
-  else if jr_is(json, json_size, item_at, 44) then _items(json, json_size, item_at + 1, key, text_buffer, note_buffer, values, annotations, count)
+  else if jr_is(json, json_size, item_at, 44) then _items(json, json_size, item_at + 1, key, text_buffer, note_buffer, label_buffer, values, annotations, count)
   else if jr_is(json, json_size, item_at, 123) then let
     val () = _zero_values(values, 0)
-    val @(ok, text_len, note_len, after) = _members(json, json_size, item_at + 1, key, text_buffer, note_buffer, values, 0, 0)
+    val @(ok, text_len, note_len, label_len, after) = _members(json, json_size, item_at + 1, key, text_buffer, note_buffer, label_buffer, values, 0, 0, 0)
   in
     if ~ok then @(false, annotations, count)
-    else if count >= ANNOTATIONS_MAX then _items(json, json_size, after, key, text_buffer, note_buffer, values, annotations, count)
+    else if count >= ANNOTATIONS_MAX then _items(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, annotations, count)
     else let
       val text = _copy_prefix_or_whole(text_buffer, text_len)
       val note = _copy_prefix_or_whole(note_buffer, note_len)
+      val label = _copy_prefix_or_whole(label_buffer, label_len)
       (* a highlight's kind is its style's *)
       val kind = $A.get<Int>(values, 0)
       val kind = (if kind = 1 then 1 + $A.get<Int>(values, 8) else kind): Int
       val added = _insert(kind, $A.get<Int>(values, 1), $A.get<Int>(values, 2), $A.get<Int>(values, 3),
                     $A.get<Int>(values, 4), $A.get<Int>(values, 5), $A.get<Int>(values, 6), $A.get<Int>(values, 7),
-                    text, text_len, note, note_len, annotations)
-    in _items(json, json_size, after, key, text_buffer, note_buffer, values, added, count + 1) end
+                    text, text_len, note, note_len, label, label_len, annotations)
+    in _items(json, json_size, after, key, text_buffer, note_buffer, label_buffer, values, added, count + 1) end
   end
   else @(false, annotations, count)
 end
@@ -1375,11 +1511,13 @@ implement annot_json_store (json, json_size, position, id_high, id_low) =
     val key = $A.alloc<byte>(16)
     val text_buffer = $A.alloc<byte>(TEXT_MAX)
     val note_buffer = $A.alloc<byte>(NOTE_MAX)
+    val label_buffer = $A.alloc<byte>(LABEL_MAX + 1)
     val values = $A.alloc<Int>(9)
-    val @(ok, annotations, count) = _items(json, json_size, position + 1, key, text_buffer, note_buffer, values, annotations_nil(), 0)
+    val @(ok, annotations, count) = _items(json, json_size, position + 1, key, text_buffer, note_buffer, label_buffer, values, annotations_nil(), 0)
     val () = $A.free<byte>(key)
     val () = $A.free<byte>(text_buffer)
     val () = $A.free<byte>(note_buffer)
+    val () = $A.free<byte>(label_buffer)
     val () = $A.free<Int>(values)
   in
     if ok then let

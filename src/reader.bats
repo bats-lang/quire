@@ -895,6 +895,8 @@ fn _show_print_page {page_count:pos}{current:nat | current < page_count} (page_c
   val () = $A.set<byte>(buf, 2, $A.int2byte(183))
   val offset = _put(buf, 3, " page ")
   val () = _label_to(label, buf, offset, label_len, 0)
+  (* the print page a highlight or bookmark made here cites *)
+  val () = annot_print_page_set(label, label_len)
   val () = $A.free<byte>(label)
 in _set_text_of("footer-page", buf, _in_print(buf, offset + label_len, label_len)) end
 

@@ -43,6 +43,18 @@ export function chapters(n, paras = 20, tag = 'Para') {
   return Array.from({ length: n }, (_, k) => ({ body: chapterBody(k + 1, paras, tag) }));
 }
 
+/** A book with the print edition's pages (a page-list): chapters 1 and 2
+    each hold three page breaks, the first before their first paragraph
+    (pages 1-3 and 4-6), and chapter 3 has none */
+export function pagedBook(title, author) {
+  const para = (i, k) => `<p>Para ${i}.${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>';
+  const body = (i, breaks) => Array.from({ length: 30 }, (_, k) =>
+    (breaks && k % 10 === 0 ? `<span epub:type="pagebreak" id="pg${i}-${k / 10}" title="${(i - 1) * 3 + k / 10 + 1}"/>` : '') + para(i, k)).join('');
+  const pageList = [];
+  for (let i = 1; i <= 2; i++) for (let j = 0; j < 3; j++) pageList.push({ label: String((i - 1) * 3 + j + 1), href: `chapter${i}.xhtml#pg${i}-${j}` });
+  return { title, author, rawChapters: [{ body: body(1, true) }, { body: body(2, true) }, { body: body(3, false) }], pageList };
+}
+
 // ---- the library ----
 
 /** The input that imports EPUB files */
