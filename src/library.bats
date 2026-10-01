@@ -40,7 +40,12 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
   cover = Int,     (* the cover image's type (mime_str), 0 none *)
   done = Int,      (* 1 when the last page was reached *)
   sidx = Int,      (* its number in its series, 0 when none is given *)
-  cols = Int       (* the collections it is in: collection j is bit j *)
+  cols = Int,      (* the collections it is in: collection j is bit j *)
+  rmin = Int,      (* the minutes it has been read (a page turned on within
+                      3 minutes of the one before counts its minutes) *)
+  rpg = Int,       (* the pages turned on those minutes counted *)
+  fin = Int        (* when its last page was first reached, 0 when not
+                      known *)
 }
 
 (* A book: its title and author (1 to 255 bytes), its series' name (0
@@ -383,7 +388,7 @@ in
     val nums = @{
       key = key, h1 = h1, h2 = h2, shelf = 0, added = now, opened = 0,
       ch = 0, tch = 0, pg = 0, pgs = 0, anchor = ~1, fsz = fsz, cover = cover, done = 0,
-      sidx = sidx, cols = 0
+      sidx = sidx, cols = 0, rmin = 0, rpg = 0, fin = 0
     }: bnums
     val () = lib_put(LibCell(books_cons(Book(t, tn, a, an, sr, sn, nums), bs), k + 1))
   in key end
@@ -469,7 +474,7 @@ implement lib_set_shelf (i, shelf) = let
   val () = lib_update(i, lam(x) => @{
     key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
     ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-    fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols })
+    fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols, rmin = x.rmin, rpg = x.rpg, fin = x.fin })
   val () = lib_save()
 in lib_render() end
 
@@ -549,7 +554,7 @@ fun _trash_all {i,k:nat | i <= k} .<k - i>. (i: int i, k: int k): void =
     val () = lib_update(i, lam(x) => @{
       key = x.key, h1 = x.h1, h2 = x.h2, shelf = 3, added = x.added, opened = x.opened,
       ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols })
+      fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols, rmin = x.rmin, rpg = x.rpg, fin = x.fin })
   in _trash_all(i + 1, k) end
 
 (* Each book of ss put back on its shelf *)
@@ -561,7 +566,7 @@ fun _unshelve {n:nat} .<n>. (ss: shelved(n)): void =
       val () = (if j >= 0 then lib_update(j, lam(x) => @{
           key = x.key, h1 = x.h1, h2 = x.h2, shelf = shelf, added = x.added, opened = x.opened,
           ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-          fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols }) else ())
+          fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = x.cols, rmin = x.rmin, rpg = x.rpg, fin = x.fin }) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -767,7 +772,7 @@ fun _map_cols {k:nat} .<k>. (bs: !books(k), f: (Int, Int) -<cloref1> Int): void 
       val () = x := @{
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = x.opened,
         ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
-        fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = c }
+        fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx, cols = c, rmin = x.rmin, rpg = x.rpg, fin = x.fin }
       prval () = fold@(b)
       val () = _map_cols(rest, f)
       prval () = fold@(bs)
@@ -980,7 +985,7 @@ implement lib_coll_toggle (i, j) =
       key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = x.opened,
       ch = x.ch, tch = x.tch, pg = x.pg, pgs = x.pgs, anchor = x.anchor,
       fsz = x.fsz, cover = x.cover, done = x.done, sidx = x.sidx,
-      cols = (if on then x.cols - _bit(j) else x.cols + _bit(j)) })
+      cols = (if on then x.cols - _bit(j) else x.cols + _bit(j)), rmin = x.rmin, rpg = x.rpg, fin = x.fin })
   in lib_save() end
 
 (* Collection j deleted, with an Undo offer that puts it back: its books
@@ -1138,12 +1143,14 @@ in colls_put(c) end
    Storage: key "lib"
    ============================================================ *)
 
-(* "QLB3", the collections (u8 count, then each name: u8 length,
+(* "QLB4", the collections (u8 count, then each name: u8 length,
    bytes), then each book: id (2 x i32), title (u8 length, bytes),
    author (u8 length, bytes), then 10 x i32: shelf, added, opened, ch,
    tch, pg, pgs, anchor, fsz, cover | done << 8; its series (u8 length,
-   bytes) and its number in it (i32); the collections it is in (i32).
-   At most 824 bytes a book. QLB2 has no collections, before or in the
+   bytes) and its number in it (i32); the collections it is in (i32);
+   the minutes it has been read, the pages turned on them, and when it
+   was finished (3 x i32). At most 836 bytes a book. QLB3 has none of
+   the last three. QLB2 has no collections, before or in the
    books; QLB1 has no series either. *)
 
 
@@ -1166,7 +1173,7 @@ fun _ser_names {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 41 * j <= n} .<j>.
       prval () = fold@(cs)
     in q end
 
-fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 824 * j <= n} .<j>.
+fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 836 * j <= n} .<j>.
   (out: !$A.arrx(byte, l, n, la), p: int p, bs: !books(j)): [q:nat | q <= n] int q =
   case+ bs of
   | books_nil() => p
@@ -1197,7 +1204,11 @@ fun _ser {l:agz}{la:addr}{n:int}{j:nat}{p:nat | p + 824 * j <= n} .<j>.
       val () = $A.write_i32(out, q + 1 + sn, x.sidx)
       (* QLB3: the collections it is in *)
       val () = $A.write_i32(out, q + 5 + sn, x.cols)
-    in _ser(out, q + 9 + sn, rest) end
+      (* QLB4: how long it has been read, and when it was finished *)
+      val () = $A.write_i32(out, q + 9 + sn, x.rmin)
+      val () = $A.write_i32(out, q + 13 + sn, x.rpg)
+      val () = $A.write_i32(out, q + 17 + sn, x.fin)
+    in _ser(out, q + 21 + sn, rest) end
 
 (* Stores the library under "lib" *)
 #pub fn lib_save (): void
@@ -1207,7 +1218,7 @@ implement lib_save () = let
   val+ @LibCell(bs, k) = c
   val cc = colls_take()
   val+ @CollCell(cs, cn) = cc
-  val n = 333 + 824 * k
+  val n = 333 + 836 * k
 in
   case+ piece_new(n) of
   | ~NoPiece() => let
@@ -1216,7 +1227,7 @@ in
       prval () = fold@(c)
     in lib_put(c) end
   | ~Piece(ow, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB3"), 4)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB4"), 4)
       val () = $A.write_byte(out, 4, cn)
       val q = _ser_names(out, 5, cs)
       prval () = fold@(cc)
@@ -1296,13 +1307,13 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
           ch = _i32(buf, r + 12), tch = _i32(buf, r + 16), pg = _i32(buf, r + 20),
           pgs = _i32(buf, r + 24), anchor = _i32(buf, r + 28), fsz = _i32(buf, r + 32),
           cover = $AR.low_byte(cd), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cd, 8)), 1),
-          sidx = 0, cols = 0
+          sidx = 0, cols = 0, rmin = 0, rpg = 0, fin = 0
         }: bnums
         (* QLB2 has the series after; QLB3, then the collections; QLB1,
            neither *)
         val r = r + 40
         val sn = (if v >= 2 then (if r < n then $AR.low_byte(byte2int0($A.get<byte>(buf, r))) else 0) else 0): [m:nat | m < 256] int m
-        val tail = (if v >= 3 then 9 else 5): [e:int | e == 5 || e == 9] int e
+        val tail = (if v >= 4 then 21 else if v >= 3 then 9 else 5): [e:int | e == 5 || e == 9 || e == 21] int e
       in
         if v < 2 then _parse(buf, n, r, books_cons(Book(t, tn, au, an, $A.alloc<byte>(1), 0, nums), acc), a + 1, v)
         else if r + tail + sn > n then let
@@ -1317,7 +1328,11 @@ fun _parse {l:agz}{la:addr}{n:nat}{p:nat | p <= n}{a:nat | a <= LIB_MAX} .<n - p
             opened = nums.opened, ch = nums.ch, tch = nums.tch, pg = nums.pg, pgs = nums.pgs,
             anchor = nums.anchor, fsz = nums.fsz, cover = nums.cover, done = nums.done,
             sidx = _i32(buf, r + 1 + sn),
-            cols = (if v >= 3 then (if r + 9 + sn <= n then g1ofg0($AR.band_int_int(_i32(buf, r + 5 + sn), 255)) else 0) else 0): Int
+            cols = (if v >= 3 then (if r + 9 + sn <= n then g1ofg0($AR.band_int_int(_i32(buf, r + 5 + sn), 255)) else 0) else 0): Int,
+            (* QLB4: how long it has been read, and when it was finished *)
+            rmin = (if v >= 4 then (if r + 21 + sn <= n then _i32(buf, r + 9 + sn) else 0) else 0): Int,
+            rpg = (if v >= 4 then (if r + 21 + sn <= n then _i32(buf, r + 13 + sn) else 0) else 0): Int,
+            fin = (if v >= 4 then (if r + 21 + sn <= n then _i32(buf, r + 17 + sn) else 0) else 0): Int
           }: bnums
         in _parse(buf, n, r + tail + sn, books_cons(Book(t, tn, au, an, sr, sn, nums), acc), a + 1, v) end
       end
@@ -1371,7 +1386,7 @@ in
       if n < 4 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) > 51 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) > 52 then let val () = piece_free(ow, buf) in $P.ret<int>(0) end
       else let
         val v = byte2int0($A.get<byte>(buf, 3)) - 48
         val @(p, cs, cn) = _names_of(buf, n, v)
@@ -1994,6 +2009,40 @@ implement date_text (buf, m) = let
   val () = $A.set<byte>(buf, off + 3, $A.int2byte(45))
   val () = _two(buf, off + 4, d)
 in off + 6 end
+
+(* The year day d (days since 1970-01-01) falls in, by the same
+   inverse of days_from_civil *)
+#pub fn year_of_day (d: Int): Int
+
+implement year_of_day (d) = let
+  val days = (if d > 0 then (if d > 2932896 then 2932896 else d) else 0): [v:nat | v <= 2932896] int v
+  val z = days + 719468
+  val era = z / 146097
+  val doe = z - era * 146097
+  val yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+  val doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
+  val mp = (5 * doy + 2) / 153
+in if mp >= 10 then yoe + era * 400 + 1 else yoe + era * 400 end
+
+(* How many books were finished in year y, their days local by off
+   minutes east of UTC *)
+fun _finished_in {k:nat} .<k>. (bs: !books(k), y: Int, off: Int, acc: int): int =
+  case+ bs of
+  | books_nil() => acc
+  | books_cons(b, rest) => let
+      val+ Book(_, _, _, _, _, _, x) = b
+      val yes = (if x.fin > 0 then year_of_day((x.fin + off) / 1440) = y else false): bool
+    in _finished_in(rest, y, off, (if yes then acc + 1 else acc)) end
+
+#pub fn lib_finished_in (y: Int, off: Int): int
+
+implement lib_finished_in (y, off) = let
+  val c = lib_take()
+  val+ @LibCell(bs, _) = c
+  val n = _finished_in(bs, y, off, 0)
+  prval () = fold@(c)
+  val () = lib_put(c)
+in n end
 
 (* n bytes as "N KB" or "N.N MB" in buf (its length) *)
 #pub fn size_text {l:agz} (buf: !$A.arr(byte, l, 32), n: Int): [k:nat | k <= 32] int k

@@ -24,6 +24,7 @@ staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
 staload "settings.sats"
+staload "stats.sats"
 staload "annot.sats"
 staload "entity.sats"
 staload "mem.sats"
@@ -122,6 +123,9 @@ val _spd_min = ref<Int>(0)
 val _spd_pages = ref<Int>(0)
 (* The minute of the last page turned on, or -1 *)
 val _spd_last = ref<Int>(~1)
+(* The open book's minutes and pages read since its place was last kept *)
+val _book_min = ref<Int>(0)
+val _book_pages = ref<Int>(0)
 
 (* Whether the speed is known: 10 pages over 2 minutes at least *)
 fn _spd_known (): bool = !_spd_pages >= 10 && !_spd_min >= 2
@@ -171,6 +175,11 @@ in
   else let
     val () = !_spd_min := !_spd_min + (now - last)
     val () = !_spd_pages := !_spd_pages + 1
+    (* the reading log's day, and the open book's time, kept with its
+       place (_record_position) *)
+    val () = stats_add(now - last)
+    val () = !_book_min := !_book_min + (now - last)
+    val () = !_book_pages := !_book_pages + 1
     val () = (if !_spd_pages > 2000 then let
         val () = !_spd_min := !_spd_min / 2
       in !_spd_pages := !_spd_pages / 2 end else ())
@@ -677,10 +686,15 @@ in
     else let
       val ch = (if c > 0 then c - 1 else 0): Int
       val at_end = (if tc > 0 then (if c >= tc then p + 1 >= t else false) else false): bool
+      val bm = !_book_min
+      val bp = !_book_pages
+      val () = !_book_min := 0
+      val () = !_book_pages := 0
       val () = lib_update(i, lam(x) => @{
         key = x.key, h1 = x.h1, h2 = x.h2, shelf = x.shelf, added = x.added, opened = now,
         ch = ch, tch = (if tc > 0 then (tc: Int) else x.tch), pg = p, pgs = t, anchor = anchor,
-        fsz = x.fsz, cover = x.cover, done = (if at_end then 1 else x.done), sidx = x.sidx, cols = x.cols })
+        fsz = x.fsz, cover = x.cover, done = (if at_end then 1 else x.done), sidx = x.sidx, cols = x.cols,
+        rmin = x.rmin + bm, rpg = x.rpg + bp, fin = (if at_end then (if x.fin > 0 then x.fin else now) else x.fin) })
       val () = lib_touch(i)
     in lib_save() end
 end
@@ -2693,6 +2707,15 @@ implement reader_back () = _pop_position()
    is opened or closed, a page turned, or the bars brought up *)
 #pub fun reader_stack_clear (): void
 implement reader_stack_clear () = _ps_put(PsHidden())
+
+(* A book opened: its first page is read from now, so the first turn
+   counts the minutes since. Back in the library, nothing is being read
+   until the next book opens. *)
+#pub fn reader_timer_start (): void
+implement reader_timer_start () = !_spd_last := $TM.epoch_minutes()
+
+#pub fn reader_timer_stop (): void
+implement reader_timer_stop () = !_spd_last := ~1
 
 (* The scrubber dragged to x: the thumb there, and the title of the
    chapter there in its tip *)

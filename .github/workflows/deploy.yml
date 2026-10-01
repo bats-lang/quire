@@ -55,18 +55,13 @@ jobs:
           sudo cp $HOME/bats-bin/bats /bin/bats
           git clone https://github.com/bats-lang/repository-prototype.git $HOME/repository
 
-      - name: Build WASM
+      - name: Build the app and the PWA generator
         run: |
           bats lock --repository $HOME/repository
-          bats build --only wasm --repository $HOME/repository
-
-      - name: Build PWA generator
-        run: bats build --only native --repository $HOME/repository
+          bats build --repository $HOME/repository
 
       - name: Generate PWA
-        run: |
-          mkdir -p dist/pwa
-          dist/debug/gen-pwa
+        run: ./dist/debug/gen-pwa
 
       - name: Setup Pages
         uses: actions/configure-pages@v5

@@ -110,6 +110,38 @@ fn _collections (): void = let
   val () = ui_text_btn("collections-box", "collections-done", "btn btn-p", "Done")
 in _hide("collections-menu") end
 
+(* A labelled number of the reading statistics *)
+fn _stat {nr,nlid,nv:pos | nr < 256; nlid < 256; nv < 256}{nl:pos | nl < 256}
+  (rid: string nr, lid: string nlid, vid: string nv, label: string nl): void = let
+  val () = ui_el("stats-box", rid, TDiv, "srow")
+  val () = ui_add(rid, lid, TSpan)
+  val () = ui_text(lid, label)
+in ui_add(rid, vid, TB) end
+
+(* The reading statistics: the time read today, this week, the days
+   read in a row and the books finished this year, and the daily goal *)
+fn _stats (): void = let
+  val () = ui_el("bats-root", "stats-panel", TDiv, "ovl")
+  val () = ui_el("stats-panel", "stats-box", TDiv, "menu")
+  val () = ui_labelled("stats-box", NDialog, "stats-title")
+  val () = ui_el("stats-box", "stats-title", TDiv, "mtitle")
+  val () = ui_text("stats-title", "Reading statistics")
+  val () = _stat("stats-today-row", "stats-today-label", "stats-today", "Today")
+  val () = _stat("stats-week-row", "stats-week-label", "stats-week", "Last 7 days")
+  val () = _stat("stats-streak-row", "stats-streak-label", "stats-streak", "Days in a row")
+  val () = _stat("stats-finished-row", "stats-finished-label", "stats-finished", "Finished this year")
+  val () = ui_el("stats-box", "stats-goal-title", TDiv, "a11yg")
+  val () = ui_text("stats-goal-title", "Daily goal")
+  val () = ui_el("stats-box", "stats-goal", TDiv, "seg")
+  val () = ui_named("stats-goal", NGroup, "Daily goal")
+  val () = ui_text_btn("stats-goal", "stats-goal-off", "sbtn", "Off")
+  val () = ui_text_btn("stats-goal", "stats-goal-10", "sbtn", "10 min")
+  val () = ui_text_btn("stats-goal", "stats-goal-20", "sbtn", "20 min")
+  val () = ui_text_btn("stats-goal", "stats-goal-30", "sbtn", "30 min")
+  val () = ui_text_btn("stats-goal", "stats-goal-60", "sbtn", "1 h")
+  val () = ui_text_btn("stats-box", "stats-done", "btn btn-p", "Done")
+in _hide("stats-panel") end
+
 (* The library menu (the gear) *)
 fn _library_menu (): void = let
   val () = ui_el("bats-root", "library-menu", TDiv, "ovl")
@@ -127,6 +159,7 @@ fn _library_menu (): void = let
   val () = ui_attr("menu-storage-kept", AClass, "mi stkept")
   val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
   val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
+  val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
   val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
   val () = ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
@@ -183,6 +216,10 @@ fn _info (): void = let
   val () = ui_add("info-last-read-row", "info-last-read", TB)
   val () = _row("info-size-row", "info-size-label", "Size")
   val () = ui_add("info-size-row", "info-size", TB)
+  val () = _row("info-time-row", "info-time-label", "Time read")
+  val () = ui_add("info-time-row", "info-time", TB)
+  val () = _row("info-speed-row", "info-speed-label", "Speed")
+  val () = ui_add("info-speed-row", "info-speed", TB)
   (* the book's accessibility metadata (lib_a11y_show) *)
   val () = ui_el("book-info-inner", "book-info-a11y", TDiv, "a11y")
   val () = ui_named("book-info-a11y", NRegion, "Accessibility")
@@ -517,6 +554,7 @@ implement app_build () = let
   val () = _library()
   val () = _context_menu()
   val () = _collections()
+  val () = _stats()
   val () = _library_menu()
   val () = _info()
   val () = _reader()

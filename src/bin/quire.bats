@@ -24,6 +24,7 @@ staload "reader.sats"
 staload "toc.sats"
 staload "annot.sats"
 staload "mem.sats"
+staload "stats.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -243,6 +244,7 @@ fn _show_library (): void = let
   val () = _view_save(~1)
   val () = reader_search_stop()
   val () = reader_stack_clear()
+  val () = reader_timer_stop()
   val () = window_close()
 in lib_render() end
 
@@ -369,6 +371,7 @@ fn _open_book {i:int} (i: int i): void =
       val () = _hint_offer()
       val () = _citation_set(i)
       val () = reader_stack_clear()
+      val () = reader_timer_start()
       (* a reload now comes back to this book *)
       val () = _view_save(x.key)
       val () = ui_text("chapter-title", "Loading...")
@@ -530,6 +533,12 @@ in
   in $S.int_to_str(b, o2 + 4, 64, tch) end
 end
 
+(* The pages an hour of pages turned in minutes, 0 without minutes *)
+fn _per_hour (pages: Int, minutes: Int): Int = let
+  val m = g1ofg0(minutes)
+  val p = g1ofg0(pages)
+in if m > 0 then (if p > 0 then (p * 60) / m else 0) else 0 end
+
 (* The info view of book i *)
 fn _info_open {i:int} (i: int i): void =
   case+ lib_nums(i) of
@@ -555,6 +564,20 @@ fn _info_open {i:int} (i: int i): void =
       val z = $A.alloc<byte>(32)
       val zk = size_text(z, x.fsz)
       val () = ui_text_buf("info-size", z, zk)
+      (* the time it has been read, and its pages an hour (as Kobo's
+         Reading Life shows them), once it has been *)
+      val () = (if x.rmin > 0 then let
+          val d = $A.alloc<byte>(32)
+          val dk = stats_duration_text(d, x.rmin)
+        in ui_text_buf("info-time", d, dk) end
+        else ui_text("info-time", "Not yet"))
+      val () = (if x.rmin > 0 then let
+          val sp = $A.alloc<byte>(32)
+          val sk = $S.int_to_str(sp, 0, 32, _per_hour(x.rpg, x.rmin))
+          val () = $A.write_text(sp, sk, $A.text_lit(" pages an hour"), 14)
+        in ui_text_buf("info-speed", sp, sk + 14) end
+        else ())
+      val () = ui_show("info-speed-row", x.rmin > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", x.shelf)
       val () = ui_attr("book-info-cover", ASrc, "data:,")
       val () = (if x.cover > 0 then lib_show_cover_in("book-info-cover", x.h1, x.h2, x.cover) else ())
@@ -813,7 +836,7 @@ in
   in lib_coll_name_show(j) end
 end
 
-fn _wire_library {n:nat} (r: regs(n)): regs(n + 20) = let
+fn _wire_library {n:nat} (r: regs(n)): regs(n + 21) = let
   (* import *)
   val r = RCons(r, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -974,10 +997,33 @@ fn _wire_library {n:nat} (r: regs(n)): regs(n + 20) = let
           val () = layer_close(LLibraryMenu())
           val () = modal_inform("Your books may be cleared")
         in modal_text_lit("This browser may clear what Quire keeps when it runs short of space. Installing Quire, or reading it more often, makes the browser more likely to keep it. Keep your EPUB files: a backup holds your places, notes and settings, not the books.") end
+        else if _is(t, "menu-stats") then let
+          val () = layer_close(LLibraryMenu())
+          val () = stats_show()
+          val () = layer_open(LStats())
+        in ui_focus("stats-done") end
         else if _is(t, "menu-close") then layer_close(LLibraryMenu())
         else if _is(t, "library-menu") then layer_close(LLibraryMenu())
         else ())
     in let val () = _target_free(t) in 0 end end)
+  (* the reading statistics: a daily goal chosen, or done (or a click
+     outside) *)
+  val r = RCons(r, OnEl("stats-panel"), "click", lam(h) => let
+      val t = _target(h)
+      val goal = (if _is(t, "stats-goal-off") then 0
+        else if _is(t, "stats-goal-10") then 10
+        else if _is(t, "stats-goal-20") then 20
+        else if _is(t, "stats-goal-30") then 30
+        else if _is(t, "stats-goal-60") then 60
+        else ~1): int
+      val done = (if _is(t, "stats-done") then true else _is(t, "stats-panel")): bool
+      val () = _target_free(t)
+      val () = (if goal >= 0 then let
+          val () = stats_goal_set(goal)
+        in stats_show() end
+        else if done then layer_close(LStats())
+        else ())
+    in 0 end)
 in r end
 
 fn _wire_settings {n:nat} (r: regs(n)): regs(n + 8) = let
@@ -1663,6 +1709,7 @@ implement main0 () = let
   val () = $P.discard<int>(reader_speed_load())
   val () = _hint_load()
   val () = lib_install_hint_load()
+  val () = stats_load()
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)

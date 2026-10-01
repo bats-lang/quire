@@ -22,19 +22,20 @@ staload "ui.sats"
   | LNote          (* a note, opened from its reference *)
   | LImage         (* a book's image, full screen *)
   | LCollections   (* a book's collections *)
+  | LStats         (* the reading statistics *)
 
 fn _id (l: layer): [k:pos | k < 256] string k =
   case+ l of
   | LBookMenu() => "card-menu" | LLibraryMenu() => "library-menu" | LBookInfo() => "book-info"
   | LContents() => "contents-panel" | LTypography() => "typography-panel" | LSearch() => "search-panel"
   | LAnnotations() => "annotations-panel" | LNote() => "footnote" | LImage() => "image-viewer"
-  | LCollections() => "collections-menu"
+  | LCollections() => "collections-menu" | LStats() => "stats-panel"
 
 fn _n (l: layer): int =
   case+ l of
   | LBookMenu() => 0 | LLibraryMenu() => 1 | LBookInfo() => 2 | LContents() => 3
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
-  | LCollections() => 9
+  | LCollections() => 9 | LStats() => 10
 
 (* The open overlays, the last opened first *)
 datatype layers(int) =

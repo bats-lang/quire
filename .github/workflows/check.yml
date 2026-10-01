@@ -55,16 +55,11 @@ jobs:
       - name: Static tests
         run: tests/static/run.sh $HOME/repository
 
-      - name: Build WASM
-        run: bats build --only wasm --repository $HOME/repository
-
-      - name: Build PWA generator
-        run: bats build --only native --repository $HOME/repository
+      - name: Build the app and the PWA generator
+        run: bats build --repository $HOME/repository
 
       - name: Generate PWA
-        run: |
-          mkdir -p dist/pwa
-          dist/debug/gen-pwa
+        run: ./dist/debug/gen-pwa
 
       - name: Verify PWA output
         run: |
