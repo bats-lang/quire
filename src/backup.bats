@@ -22,6 +22,7 @@ staload "annot.sats"
 staload "jsonio.sats"
 staload "mem.sats"
 staload "stats.sats"
+staload "app.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -890,7 +891,7 @@ implement backup_import () =
   if _qbfi_count() <= 0 then ()
   else $P.discard<int>($P.and_then<Int><int>($P.vow(_qbfi_open()), lam(h) => let
     (* the file is taken from the input: its choice is cleared *)
-    val () = ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
+    val () = app_backup_input()
   in
     case+ $FI.claim(h) of
     | ~$R.none() => let
