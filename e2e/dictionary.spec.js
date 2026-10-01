@@ -1,5 +1,5 @@
 // An offline dictionary for Look up: StarDict dictionaries imported from
-// the library menu's Dictionaries, each for one language, looked up from
+// the Settings screen's Dictionaries, each for one language, looked up from
 // the selection, removed with Undo, and kept across reloads.
 
 import { test, expect } from '@playwright/test';
@@ -7,6 +7,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
+  librarySettings, settingsButton, settingsScreen,
 } from './helpers.js';
 import { createStardict } from './create-stardict.js';
 
@@ -59,10 +60,20 @@ const selection = page => page.getByRole('toolbar', { name: 'Selection' });
 const lookUpHere = page => selection(page).getByRole('button', { name: 'Look up', exact: true });
 const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up' });
 
+/** Opens the dictionaries from Settings (opened from the library menu
+    unless it is open) */
 async function openDictionaries(page) {
-  await libraryMenu(page);
-  await menuItem(page, 'Dictionaries').click();
+  if (!(await settingsScreen(page).isVisible())) await librarySettings(page);
+  await settingsButton(page, 'Dictionaries ›').click();
   await expect(dictionaries(page)).toBeVisible();
+}
+
+/** Closes the dictionaries, then Settings, with Escape */
+async function closeDictionaries(page) {
+  await page.keyboard.press('Escape');
+  await expect(dictionaries(page)).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
 }
 
 /** Imports the dictionary's files for language (a code) from the
@@ -76,6 +87,8 @@ async function importDictionary(page, dict, language, options) {
   await expect(dictionaries(page).getByRole('status')).toHaveText('Dictionary added.');
   await dictionaries(page).getByRole('button', { name: 'Done' }).click();
   await expect(dictionaries(page)).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
 }
 
 /** Selects word in the first paragraph */
@@ -102,7 +115,7 @@ test('a word is looked up in an imported dictionary: as it is, in another case, 
   await openDictionaries(page);
   await expect(dictionaries(page).getByRole('group', { name: 'Pocket English · English' })).toBeVisible();
   await expect(dictionaries(page).getByText('No dictionaries yet')).toBeHidden();
-  await page.keyboard.press('Escape');
+  await closeDictionaries(page);
 
   await readBook(page, book('Words', 'en-GB'));
   // the headword as it is: "Ephemeral", not "ephemeral"
@@ -160,7 +173,7 @@ test('an HTML article from a .dict.dz is shown as text, its tags dropped', async
   await importDictionary(page, french, 'fr');
   await openDictionaries(page);
   await expect(dictionaries(page).getByRole('group', { name: 'Petit Larousse · French' })).toBeVisible();
-  await page.keyboard.press('Escape');
+  await closeDictionaries(page);
   await readBook(page, book('Livre', 'fr-CA'));
   await select(page, 'maison');
   await lookUpHere(page).click();
@@ -195,7 +208,7 @@ test('a dictionary is removed with Undo, and gone once the Undo is not taken', a
   await reload(page);
   await openDictionaries(page);
   await expect(row).toBeVisible();
-  await page.keyboard.press('Escape');
+  await closeDictionaries(page);
   await readBook(page, book('Words', 'en'));
   await select(page, 'colour');
   await expect(lookUpHere(page)).toBeVisible();
@@ -208,7 +221,7 @@ test('a dictionary is removed with Undo, and gone once the Undo is not taken', a
   await reload(page);
   await openDictionaries(page);
   await expect(dictionaries(page).getByText('No dictionaries yet')).toBeVisible();
-  await page.keyboard.press('Escape');
+  await closeDictionaries(page);
   await openBook(page, 'Words');
   await select(page, 'colour');
   await expect(lookUpOnline(page)).toBeVisible();
@@ -256,9 +269,9 @@ test('the backup lists the dictionaries, by name and language', async ({ page })
   await start(page);
   await importDictionary(page, english, 'en');
   await importDictionary(page, french, 'fr');
-  await libraryMenu(page);
+  await librarySettings(page);
   const downloading = page.waitForEvent('download');
-  await menuItem(page, 'Export backup').click();
+  await settingsButton(page, 'Export backup').click();
   const backup = JSON.parse(readFileSync(await (await downloading).path(), 'utf8'));
   expect(backup.dictionaries).toEqual([
     { name: 'Pocket English', language: 'en' },

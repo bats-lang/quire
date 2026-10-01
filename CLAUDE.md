@@ -172,8 +172,10 @@ writes (again after a conflict, up to 3 tries), and only once the file
 is written does this device take the merge, so a failed sync changes
 nothing here. It runs when the app opens, when a book is opened, when
 the page is hidden, and from the screen's Sync now (`LSync`,
-`sync-screen`, opened from the library menu; Turn off goes through
-Undo).
+`sync-screen`, opened from the Settings screen's Sync row; Turn off
+goes through Undo). That row says sync's state in short
+(`sync_summary_show`, refreshed with the screen's status line): "Off",
+"WebDAV · synced 2 min ago", or how the last sync failed.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -343,12 +345,30 @@ exported, so other code can dismiss a dialog (`modal_dismiss`) but
 never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
 
-The overlays (the menus, book info and the reader's panels) are a
-`layer` (`src/layer.bats`), whose element ids only that module knows:
-they are shown and hidden only by `layer_open` and `layer_close`, which
-keep the stack of open overlays, last opened on top. Escape answers the
-dialog if one is open, and otherwise closes the top of that stack
-(`layer_escape`), whatever opened it.
+The overlays (the menus, book info, the reader's panels and the full
+screens: Settings, Sync) are a `layer` (`src/layer.bats`), whose
+element ids only that module knows: they are shown and hidden only by
+`layer_open` and `layer_close`, which keep the stack of open overlays,
+last opened on top. Escape answers the dialog if one is open, and
+otherwise closes the top of that stack (`layer_escape`), whatever
+opened it: from Sync, Escape goes back to Settings, and another closes
+Settings.
+
+The Settings screen (`LSettings`, `settings-screen`, made by `app.bats`
+and wired by `_wire_settings_screen` in `src/bin/quire.bats`) follows
+Android's settings pattern: one screen of groups, each complex area a
+screen of its own opened from a row that shows its state. It opens
+from the library menu's Settings and from the reader's top bar (the
+gear after Search: the bottom bar, with Contents and Typography, has
+no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
+(Export backup, and Restore backup: the input `backup-file`), the daily
+reading goal (also in the statistics panel; `stats_goal_show` marks
+both), and Reset settings and Factory reset, each with its Undo. A
+restore or a factory reset from the reader goes back to the library
+first. The library menu keeps Install, the storage notes, Settings,
+Reading statistics, Catalogues, Empty Trash (the red harm item) and
+Close. While Settings is open over the reader, keys are its own, not
+page turns.
 
 The page turns by a horizontal drag, recognized by the gestures package
 (its classifier and drag state machine are proven there): bridge's

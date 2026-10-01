@@ -335,9 +335,29 @@ fn _put_books {l:agz}{position:nat | position <= 11}
   (buf: !$A.arr(byte, l, 64), position: int position, count: Int): [stop:nat | stop <= 17] int stop =
   if count = 1 then _put_text(buf, position, " book") else _put_text(buf, position, " books")
 
-(* The reading statistics panel's numbers, as they are now *)
+fn _pressed {id_len:pos | id_len < 256} (id: string id_len, pressed: bool): void =
+  if pressed then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
+
+(* The daily goal's choices, the goal's pressed: in the statistics
+   panel and on the Settings screen *)
+#pub fn stats_goal_show (): void
+implement stats_goal_show () = let
+  val goal = !_goal
+  val () = _pressed("stats-goal-off", goal = 0)
+  val () = _pressed("stats-goal-10", goal = 10)
+  val () = _pressed("stats-goal-20", goal = 20)
+  val () = _pressed("stats-goal-30", goal = 30)
+  val () = _pressed("stats-goal-60", goal = 60)
+  val () = _pressed("settings-goal-off", goal = 0)
+  val () = _pressed("settings-goal-10", goal = 10)
+  val () = _pressed("settings-goal-20", goal = 20)
+  val () = _pressed("settings-goal-30", goal = 30)
+in _pressed("settings-goal-60", goal = 60) end
+
+(* The reading statistics panel's numbers and goal, as they are now *)
 #pub fn stats_show (): void
 implement stats_show () = let
+  val () = stats_goal_show()
   val today = stats_today()
   val today_minutes = stats_minutes_between(today, today)
   val buf = $A.alloc<byte>(64)
@@ -357,12 +377,8 @@ implement stats_show () = let
   val buf = $A.alloc<byte>(64)
   val next = $S.int_to_str(buf, 0, 64, finished)
   val next = _put_books(buf, next, finished)
-  val () = ui_text_buf("stats-finished", buf, next)
-  val () = (if goal = 0 then ui_attr("stats-goal-off", APressed, "true") else ui_attr("stats-goal-off", APressed, "false"))
-  val () = (if goal = 10 then ui_attr("stats-goal-10", APressed, "true") else ui_attr("stats-goal-10", APressed, "false"))
-  val () = (if goal = 20 then ui_attr("stats-goal-20", APressed, "true") else ui_attr("stats-goal-20", APressed, "false"))
-  val () = (if goal = 30 then ui_attr("stats-goal-30", APressed, "true") else ui_attr("stats-goal-30", APressed, "false"))
-in if goal = 60 then ui_attr("stats-goal-60", APressed, "true") else ui_attr("stats-goal-60", APressed, "false") end
+in ui_text_buf("stats-finished", buf, next) end
+
 
 (* ============================================================
    Backup: the log's days, for backup.bats
