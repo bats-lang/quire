@@ -623,7 +623,15 @@ test('the time the chapter and the book take to finish is learned from the reade
     await readout.click();
   }
   await expect(readout).toContainText('pages left in chapter');
-  // a page a minute, for a dozen pages
+  // a page a minute, for a dozen pages. The speed counts whole minutes
+  // between turns, so the clock is paused: only the minutes
+  // fast-forwarded pass, not the seconds the turns take (with a running
+  // clock, a slow run crossed one more minute, and read 13 minutes for
+  // 12 pages). The pause is over 3 minutes, so the first turn, which
+  // follows it, starts the count rather than counting the pause
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(Math.ceil(now / 60000) * 60000 + 5000);
+  await page.clock.fastForward('04:00');
   for (let k = 0; k < 12; k++) {
     const before = await place(page);
     await page.clock.fastForward('01:00');

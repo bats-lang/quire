@@ -7,11 +7,14 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
-  selectText, selectionButton, showChrome, control, oneColumn, pageShown, cards,
+  selectText, selectionButton, showChrome, control, clickControl, oneColumn, pageShown, cards,
   librarySettings, settingsButton, settingsScreen, restoreInput,
 } from './helpers.js';
 
-const FOLDER = 'http://localhost:3737/dav/books/';
+/** The WebDAV folder: on the page's own origin, whatever port the
+    suite is served on (a request to another origin would be
+    cross-origin, and read as one the server does not let in) */
+const folder = page => new URL('/dav/books/', page.url()).href;
 const USER = 'reader';
 const PASSWORD = 'app-pass-4417';
 
@@ -87,7 +90,7 @@ async function closeSync(page) {
 /** Sync set up, and a first sync: the folder, user name and password */
 async function setUp(page, password = PASSWORD) {
   await openSync(page);
-  await panel(page).getByLabel('Folder URL').fill(FOLDER);
+  await panel(page).getByLabel('Folder URL').fill(folder(page));
   await panel(page).getByLabel('User name').fill(USER);
   await panel(page).getByLabel('Password').fill(password);
   await panel(page).getByRole('button', { name: 'Sync now' }).click();
@@ -125,8 +128,7 @@ async function nextChapter(page, chapter) {
 
 const annotations = page => dialog(page, 'Annotations');
 async function openAnnotations(page) {
-  await showChrome(page);
-  await control(page, 'Annotations').click();
+  await clickControl(page, 'Annotations');
   await expect(annotations(page)).toBeVisible();
 }
 async function closeAnnotations(page) {
@@ -331,7 +333,7 @@ test('the folder, user name and password are kept on the device, never in a back
   await a.page.reload();
   await expect(cards(a.page)).toHaveCount(1);
   await openSync(a.page);
-  await expect(panel(a.page).getByLabel('Folder URL')).toHaveValue(FOLDER);
+  await expect(panel(a.page).getByLabel('Folder URL')).toHaveValue(folder(a.page));
   await expect(panel(a.page).getByLabel('Password')).toHaveValue(PASSWORD);
   // turned off, and back with Undo
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();

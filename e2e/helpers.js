@@ -295,10 +295,14 @@ export async function colours(page) {
   });
 }
 
-/** Leaves the reader for the library, through its back arrow */
+/** Leaves the reader for the library, through its back arrow (in the
+    bars, which hide themselves 5 s after they are shown: bringing them
+    up and clicking are tried again together, as clickControl does) */
 export async function toLibrary(page) {
-  await showChrome(page);
-  await page.getByRole('button', { name: 'Back to library' }).click();
+  await expect(async () => {
+    await showChrome(page);
+    await page.getByRole('button', { name: 'Back to library' }).click({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
   await expect(librarySearch(page)).toBeVisible();
 }
 
