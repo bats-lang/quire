@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Privacy policy · Quire</title>
+<style>
+:root { --text: #1f2328; --ground: #fdfcf9; --quiet: #4d535b; --link: #0b57b0; --rule: #d6d3cc; }
+@media (prefers-color-scheme: dark) {
+  :root { --text: #e8e6e1; --ground: #1c1d20; --quiet: #b9bcc2; --link: #8cbcff; --rule: #3a3c41; }
+}
+html { background: var(--ground); color: var(--text); }
+body { margin: 0 auto; max-width: 38rem; padding: 1.5rem 1rem 3rem; font: 1.0625rem/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+h1 { font-size: 1.75rem; line-height: 1.25; margin: 1rem 0 0.5rem; }
+h2 { font-size: 1.25rem; line-height: 1.3; margin: 2rem 0 0.5rem; }
+a { color: var(--link); text-underline-offset: 0.15em; }
+a:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+nav ul { display: flex; flex-wrap: wrap; gap: 0.25rem 1.25rem; list-style: none; padding: 0; margin: 0; }
+nav a { display: inline-block; padding: 0.5rem 0; }
+nav { border-bottom: 1px solid var(--rule); }
+footer { margin-top: 3rem; border-top: 1px solid var(--rule); color: var(--quiet); font-size: 0.9375rem; }
+.updated { color: var(--quiet); }
+</style>
+</head>
+<body>
+<nav aria-label="Quire">
+<ul>
+<li><a href="./">Quire</a></li>
+<li><a href="privacy.html" aria-current="page">Privacy policy</a></li>
+<li><a href="terms.html">Terms</a></li>
+<li><a href="https://github.com/bats-lang/quire">Source</a></li>
+</ul>
+</nav>
+<main>
+<h1>Privacy policy</h1>
+<p class="updated">Last updated: 2 October 2026</p>
+<p>This policy describes how Quire, the e-book reader published as a <a href="../">web app</a> and as an Android app, handles your information. In it, “we” means the people who maintain Quire.</p>
+
+<h2>What the app keeps on your device</h2>
+<p>Quire stores your data on your device: the books you import, your library and its shelves and collections, your places in your books, your bookmarks, highlights and notes, your settings, your reading statistics, the dictionaries you import, the catalogues you add, and the settings of the sync you set up, including the address and credentials of the store you sync with. In a browser it is kept in the browser's storage for the app (IndexedDB). On Android it is kept in the app's storage, and, if Android's backup of app data is turned on for your device, the system may include it in that backup to your Google account, as it does for other apps.</p>
+<p>You can export a backup of your library, settings, places and annotations as a file, which goes wherever you save it. Removing the app, or clearing its data in your browser or in Android's settings, deletes what it stores on your device.</p>
+
+<h2>Information collected automatically</h2>
+<p>When you use Quire, we, or the service that hosts the app, may collect some technical information automatically, such as your device and browser type and version, the dates and times you use the app, and diagnostic, crash or error information. We use it to find and fix problems, to keep the app working and secure, and to improve it.</p>
+
+<h2>What leaves your device when you choose</h2>
+<p>Some features send requests from your device to services you choose, when you use them:</p>
+<ul>
+<li><strong>Catalogues.</strong> When you browse a catalogue (OPDS), search it or get a book from it, the app requests its pages, cover images, search and books from that catalogue's server.</li>
+<li><strong>Looking words up online.</strong> When you follow a link to look a word up online, it opens on that site (Wiktionary) in your browser, which receives the word.</li>
+<li><strong>Links.</strong> A link in a book, or on the app's About screen, opens in your browser like any other link.</li>
+<li><strong>Sync.</strong> If you turn sync on, your places, shelves, collections, bookmarks, highlights, notes and reading time are sent to and read from the storage service you choose (such as a WebDAV server, or Google Drive). That data goes from your device to that service; your books' files are not synced. That service's own privacy policy applies to what it keeps.</li>
+<li><strong>Updates.</strong> While it is open, the web app asks the site it was loaded from whether a newer version has been published.</li>
+</ul>
+
+<h2>Google user data</h2>
+<p>If you choose to sync with Google Drive, Quire asks for one permission: to see, create and delete its own configuration data in your Google Drive (the scope <code>https://www.googleapis.com/auth/drive.appdata</code>). With it, the app reads and writes one file in Drive's app data folder, a folder only Quire can use, which holds your reading data for sync: your places, shelves, collections, bookmarks, highlights, notes and reading time. It cannot see or change any other file in your Drive.</p>
+<p>Quire uses this data only to keep your own reading data the same on your devices, a feature you turn on yourself. It is sent directly between your device and Google; it is not sent to us or to anyone else, not sold, and not used for advertising. You can stop at any time by turning sync off and removing Quire's access in your Google account's settings; deleting Quire's app data there deletes the file.</p>
+<p>Quire's use and transfer to any other app of information received from Google APIs will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>
+
+<h2>Service providers</h2>
+<p>We may use service providers to host and deliver the app. They may process the information described above only to do that work for us.</p>
+
+<h2>Selling and sharing</h2>
+<p>We do not sell your personal information.</p>
+
+<h2>Children</h2>
+<p>Quire is a general-purpose reader and is not directed at children under 13.</p>
+
+<h2>Changes to this policy</h2>
+<p>We may change this policy. The current version is always on this page, with the date it was last updated. If we make a material change, we will announce it in the app.</p>
+
+<h2>Contact</h2>
+<p>To ask about this policy or your data, open an issue in the project's <a href="https://github.com/bats-lang/quire/issues">GitHub repository</a>.</p>
+</main>
+<footer>
+<p>Quire · <a href="https://github.com/bats-lang/quire/issues">Contact us through GitHub issues</a></p>
+</footer>
+</body>
+</html>

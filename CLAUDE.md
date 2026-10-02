@@ -290,8 +290,10 @@ again.
   were made `div`s. They are now kept as themselves (`_tag_of`), so a
   reading sits over its base and `rp` is not shown. The settings' Ruby
   row (Show / Hide, byte 19 of the "S2" record, `ruby` in the backup;
-  held apart from the settings record, which one field more would make
-  too large to copy without memmove, which wasm is not given)
+  held apart from the settings record in memory, as the device's own
+  settings are: each of the record's setters writes it out whole, so a
+  field there costs a line in every setter, and a cell of its own one
+  setter; quire#210)
   is offered once a chapter of the open book has shown a ruby
   (`_ruby_seen`); Hide adds `.caf rt,.caf rtc{display:none}` to
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
@@ -540,9 +542,22 @@ gear after Search: the bottom bar, with Contents and Typography, has
 no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
 (Export backup, and Restore backup: the input `backup-file`), the daily
 reading goal (also in the statistics panel; `stats_goal_show` marks
-both), and Reset settings and Factory reset, each with its Undo. A
+both), Reset settings and Factory reset, each with its Undo, and
+About Quire › (`LAbout`, `about-screen`): the app's name and links out
+of the app (`ui_link_out_https`, an address dom's `set_url_literal`
+sets) to the home page, privacy policy, terms and source. A
 restore or a factory reset from the reader goes back to the library
-first. The library menu keeps Install, the storage notes, Settings,
+first.
+
+The home page, privacy policy and terms are plain static HTML in
+`homepage/` (#216), published by `deploy.yml` beside the app at
+`https://bats-lang.github.io/quire/homepage/` (`privacy.html`,
+`terms.html`). They are not the app's: gen-pwa does not read them, the
+Android project does not hold them, and the service worker (bridge's
+`produce_service_worker`) answers only files directly in its scope, so
+it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
+policy states what the code does: change it with any change to what is
+stored, what leaves the device, or the Google scopes asked for. The library menu keeps Install, the storage notes, Settings,
 Reading statistics, Catalogues, Empty Trash (the red harm item) and
 Close. While Settings is open over the reader, keys are its own, not
 page turns.
