@@ -7,6 +7,7 @@
 
 staload "ui.sats"
 staload "style.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
 fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
@@ -334,13 +335,24 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
 in _hide("settings-screen") end
 
+(* A link of the About screen to one of the pages published beside the
+   app (homepage/, by deploy.yml): path, relative to the app's own
+   address, in a browser, so the app is the same wherever it is served
+   (quire#217); in the Android app, whose own address is the device's,
+   the published page's https address, which the WebView hands to the
+   system's browser *)
+fn _about_page {id_len,label_len:pos | id_len < 256; label_len < 256}{path_len,address_len:pos | path_len < 240; address_len < 240}
+  (id: string id_len, label: string label_len, path: string path_len, address: string address_len): void =
+  if $BAPP.is_native_platform() then ui_link_out_https("about-links", id, "btn linkout", label, address)
+  else ui_link_out_path("about-links", id, "btn linkout", label, path)
+
 (* The About screen, opened from Settings, the same in the web app and
    the Android app: the app's name, what it is, and links out of the app
    to its home page, privacy policy, terms and source. The pages are
-   published beside the app (homepage/, by deploy.yml) but are not the
-   app's: the service worker leaves them to the network. A link out
-   opens in a new tab on the web; on Android the WebView hands an
-   address outside the app to the system's browser *)
+   published beside the app but are not the app's: the service worker
+   leaves them to the network. A link out opens in a new tab on the web;
+   on Android the WebView hands an address outside the app to the
+   system's browser *)
 fn _about_screen (): void = let
   val () = ui_el("bats-root", "about-screen", TDiv, "info")
   val () = ui_labelled("about-screen", NDialog, "about-title")
@@ -351,9 +363,9 @@ fn _about_screen (): void = let
   val () = ui_text_long("about-text", "Quire, an EPUB reader. Your books and reading data are kept on this device.")
   val () = ui_el("about-box", "about-links", TDiv, "sfields")
   val () = ui_named("about-links", NGroup, "Links")
-  val () = ui_link_out_https("about-links", "about-home", "btn linkout", "Home page", "bats-lang.github.io/quire/homepage/")
-  val () = ui_link_out_https("about-links", "about-privacy", "btn linkout", "Privacy policy", "bats-lang.github.io/quire/homepage/privacy.html")
-  val () = ui_link_out_https("about-links", "about-terms", "btn linkout", "Terms of service", "bats-lang.github.io/quire/homepage/terms.html")
+  val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
+  val () = _about_page("about-privacy", "Privacy policy", "homepage/privacy.html", "bats-lang.github.io/quire/homepage/privacy.html")
+  val () = _about_page("about-terms", "Terms of service", "homepage/terms.html", "bats-lang.github.io/quire/homepage/terms.html")
   val () = ui_link_out_https("about-links", "about-source", "btn linkout", "Source code", "github.com/bats-lang/quire")
   val () = ui_el("about-box", "about-buttons", TDiv, "mbtns")
   val () = ui_text_btn("about-buttons", "about-done", "btn btn-p", "Done")

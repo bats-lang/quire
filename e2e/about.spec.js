@@ -9,24 +9,27 @@ import { test, expect } from '@playwright/test';
 import { start, dialog, librarySettings, settingsScreen, settingsButton } from './helpers.js';
 
 const about = page => dialog(page, 'About Quire');
+// each link's href, and the address it leads to from the app at
+// baseURL: the pages beside the app relative to it, the source on GitHub
 const links = {
-  'Home page': 'https://bats-lang.github.io/quire/homepage/',
-  'Privacy policy': 'https://bats-lang.github.io/quire/homepage/privacy.html',
-  'Terms of service': 'https://bats-lang.github.io/quire/homepage/terms.html',
-  'Source code': 'https://github.com/bats-lang/quire',
+  'Home page': ['./homepage/', '/homepage/'],
+  'Privacy policy': ['./homepage/privacy.html', '/homepage/privacy.html'],
+  'Terms of service': ['./homepage/terms.html', '/homepage/terms.html'],
+  'Source code': ['https://github.com/bats-lang/quire', 'https://github.com/bats-lang/quire'],
 };
 
-test('Settings opens About, which shows the app and links out of it', async ({ page }) => {
+test('Settings opens About, which shows the app and links out of it', async ({ page, baseURL }) => {
   const errors = await start(page);
   await librarySettings(page);
   await settingsButton(page, 'About Quire ›').click();
   await expect(about(page)).toBeVisible();
   await expect(about(page)).toContainText('Quire, an EPUB reader');
   const group = about(page).getByRole('group', { name: 'Links' });
-  for (const [name, href] of Object.entries(links)) {
+  for (const [name, [href, address]] of Object.entries(links)) {
     const link = group.getByRole('link', { name, exact: true });
     await expect(link).toBeVisible();
     await expect(link).toHaveAttribute('href', href);
+    expect(await link.evaluate(a => a.href)).toBe(new URL(address, baseURL).href);
     // a new tab on the web (the system's browser on Android), told
     // nothing of the app
     await expect(link).toHaveAttribute('target', '_blank');
@@ -68,6 +71,10 @@ test('the home page goes to the network, not the service worker', async ({ page 
     expect(response.fromServiceWorker()).toBe(false);
     await expect(page.getByRole('main')).toBeVisible();
   }
+  // the home page leads back to the app beside it
+  await page.goto('/homepage/');
+  await page.getByRole('link', { name: 'Open Quire in your browser' }).click();
+  await expect(page.getByRole('searchbox', { name: 'Search the library' })).toBeVisible();
   // and nothing of them is kept, while the app's files are
   await page.goto('/');
   const kept = await page.evaluate(async () => {
