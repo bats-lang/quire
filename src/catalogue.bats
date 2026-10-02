@@ -145,20 +145,6 @@ in ui_show("catalogue-status", true) end
 
 fn _quiet (): void = ui_show("catalogue-status", false)
 
-(* Fetches address (an address shown is at most URL_MOST bytes) *)
-fn _fetch (address: !kept): $P.promise(Int, $P.Chained) = let
-  val @(bytes, address_len) = kept_copy(address)
-in
-  if address_len <= 0 then let val () = $A.free<byte>(bytes) in $P.ret<Int>(0) end
-  else let
-    val @(frozen, borrowed) = $A.freeze<byte>(bytes)
-    val @(used, rest) = $A.borrow_split<byte>(frozen, borrowed, address_len)
-    val fetching = $FE.fetch(used, address_len)
-    val borrowed = $A.borrow_join<byte>(frozen, used, rest)
-    val () = release_bytes(frozen, borrowed)
-  in $P.vow(fetching) end
-end
-
 (* What a fetch gave: its status and bytes in a piece, or why not *)
 datavtype fetched =
   | {arena_loc,piece_loc:agz}{size:pos} Fetched of (piece_owner(size, arena_loc), $A.arrx(byte, piece_loc, size, arena_loc), int size)
@@ -175,13 +161,13 @@ fn _fetched_free (got: fetched): void =
   | ~TooLarge() => ()
   | ~Empty() => ()
 
-(* The response a fetch promise resolved with (its handle), read into a
-   piece of at most most bytes *)
-fn _claim {most:pos | most <= 268435456} (handle: Int, most: int most): fetched =
-  case+ $FE.fetch_claim(handle) of
-  | ~$R.none() => Blocked()
-  | ~$R.some(response) => let
-      val @(status, blob) = response
+(* What a fetch came to, read into a piece of at most most bytes *)
+fn _claim {most:pos | most <= 268435456} (got: $FE.fetched, most: int most): fetched =
+  case+ got of
+  | ~$FE.NoResponse() => Blocked()
+  | ~$FE.Responded(response) => let
+      val status = $FE.fetch_status(response)
+      val blob = $FE.fetch_body(response)
     in
       if status < 200 then let val () = $BD.blob_free(blob) in Refused(status) end
       else if status > 299 then let val () = $BD.blob_free(blob) in Refused(status) end
@@ -198,6 +184,24 @@ fn _claim {most:pos | most <= 268435456} (handle: Int, most: int most): fetched 
             in Fetched(owner, piece, size) end)
       end
     end
+
+(* What a fetch gave, nobody took: its piece freed *)
+implement $P.dispose<fetched>(got) = _fetched_free(got)
+
+(* Fetches address (an address shown is at most URL_MOST bytes), read
+   into a piece of at most most bytes *)
+fn _fetch {most:pos | most <= 268435456} (address: !kept, most: int most): $P.promise(fetched, $P.Chained) = let
+  val @(bytes, address_len) = kept_copy(address)
+in
+  if address_len <= 0 then let val () = $A.free<byte>(bytes) in $P.ret<fetched>(Blocked()) end
+  else let
+    val @(frozen, borrowed) = $A.freeze<byte>(bytes)
+    val @(used, rest) = $A.borrow_split<byte>(frozen, borrowed, address_len)
+    val fetching = $FE.fetch(used, address_len)
+    val borrowed = $A.borrow_join<byte>(frozen, used, rest)
+    val () = release_bytes(frozen, borrowed)
+  in $P.and_then<$FE.fetched><fetched>(fetching, llam(got) => $P.ret<fetched>(_claim(got, most))) end
+end
 
 (* ============================================================
    A page shown
@@ -331,11 +335,10 @@ fn _show (page: feed, request: int): void = let
 in
   if kept_len(describing) <= 0 then kept_free(describing)
   else let
-    val fetching = _fetch(describing)
+    val fetching = _fetch(describing, FEED_MOST)
     val () = kept_free(describing)
   in
-    $P.finish<Int>(fetching, llam(handle) =>
-    _described(_claim(handle, FEED_MOST), request))
+    $P.finish<fetched>(fetching, llam(got) => _described(got, request))
   end
 end
 
@@ -373,11 +376,10 @@ fn _load (): void = let
   val () = ui_show("catalogue-pages", false)
   val () = ui_show("catalogue-search-bar", false)
   val () = _say("Loading\xE2\x80\xA6")
-  val fetching = _fetch(address)
+  val fetching = _fetch(address, FEED_MOST)
   val () = kept_free(address)
 in
-  $P.finish<Int>(fetching, llam(handle) =>
-  _arrived(_claim(handle, FEED_MOST), request))
+  $P.finish<fetched>(fetching, llam(got) => _arrived(got, request))
 end
 
 (* Goes to the page at address *)
@@ -564,11 +566,10 @@ in
   if kept_len(epub) <= 0 then kept_free(epub)
   else let
     val () = _say("Downloading the book\xE2\x80\xA6")
-    val fetching = _fetch(epub)
+    val fetching = _fetch(epub, BOOK_MOST)
     val () = kept_free(epub)
   in
-    $P.finish<Int>(fetching, llam(handle) =>
-    _got(_claim(handle, BOOK_MOST), index, request))
+    $P.finish<fetched>(fetching, llam(got) => _got(got, index, request))
   end
 end
 
