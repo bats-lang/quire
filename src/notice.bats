@@ -61,7 +61,7 @@ val _save_failure_told = ref<bool>(false)
    shows the banner, once a session. It never takes the place
    of a message still up (the failure of a book's own file names the
    book, and says to free space too): it waits for a later failure *)
-#pub fn save_checked {s:int} (saving: $P.promise($IDB.stored, s)): void
+#pub fn save_checked {s:$P.promise_state} (saving: $P.promise($IDB.stored, s)): void
 
 implement save_checked (saving) = $P.finish<$IDB.stored>(saving, llam(status) =>
   case+ status of
