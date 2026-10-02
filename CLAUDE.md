@@ -47,7 +47,8 @@ A quire PR that adopts new package versions runs `bats lock --repository
 <dir>` and commits `bats.lock` with the change that needs them. Package
 releases publish first; then the quire PR with the new lock. A publish
 never turns main red: until a lock names it, quire does not use it. The
-daily `relock.yml` (the generic `relock-pins.yml`) relocks against the
+daily `relock.yml` (the shared `relock-pins.yml` of
+bats-lang/repository-prototype, called by commit) relocks against the
 newest, moves the compiler pin, pushes `relock/<date>`, opens a PR
 listing the old and new versions and dispatches `check.yml` on it, so a
 breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change

@@ -1,6 +1,7 @@
 # Daily: relock quire's packages and move its CI pins to their newest, as
 # a pull request that runs check.yml (#203). The work is the generic
-# relock-pins.yml; what is quire's is only what it is given here.
+# relock-pins.yml in bats-lang/repository-prototype (#269 there), called
+# by commit; what is quire's is only what it is given here.
 name: relock
 
 on:
@@ -16,8 +17,9 @@ permissions:
 
 jobs:
   relock:
-    uses: ./.github/workflows/relock-pins.yml
+    uses: bats-lang/repository-prototype/.github/workflows/relock-pins.yml@63f83a5accce88e71f578cc51047958b4fc4af11
     secrets: inherit
     with:
       workflow-pins: |
         bats-lang/pwa/.github/workflows/android.yml
+        bats-lang/repository-prototype/.github/workflows/relock-pins.yml
