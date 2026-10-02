@@ -209,10 +209,14 @@ implement $P.dispose<$IDB.stored>(_) = ()
   | {arena_loc,piece_loc:agz}{content_size:pos} ContentBytes of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
   | NoContentBytes of ()
 
-(* The content a decompress promise resolved with, read whole and
-   freed: none when decompression failed, the result is empty, or no
-   piece can be had for it *)
-#pub fn take_content (handle: Int): content_bytes
+(* What decompress resolves with (bridge's decompressed: the content
+   as a blob, or DecompressFailed) *)
+#pub vtypedef decompressed = $BD.decompressed
+
+(* The content decompress resolved with, read whole and freed: none
+   when decompression failed, the result is empty, or no piece can be
+   had for it *)
+#pub fn take_decompressed (inflated: decompressed): content_bytes
 
 (* What a read of storage found, as content (in a piece): it, nothing
    stored there, or a read that failed (or no piece could be had) *)
@@ -229,9 +233,9 @@ implement $P.dispose<$IDB.stored>(_) = ()
 #pub fn zip_compression (method: int): $BD.compression
 
 (* Decompresses data[0, data_len) as method says; the promise resolves
-   with a handle for take_content, take_blob or $BD.blob_claim *)
+   with what came of it, for take_decompressed *)
 #pub fn decompress {lb:agz}{n:pos}
-  (data: !$A.borrow(byte, lb, n), data_len: int n, method: $BD.compression): $P.promise(Int, $P.Pending)
+  (data: !$A.borrow(byte, lb, n), data_len: int n, method: $BD.compression): $P.promise(decompressed, $P.Chained)
 
 (* An entry of an archive of file_size bytes, read by ranges: its
    compressed bytes (in a piece), method, where they are
@@ -541,10 +545,10 @@ in
       in ContentBytes(owner, piece, content_size) end)
 end
 
-implement take_content (handle) =
-  case+ $BD.blob_claim(handle) of
-  | ~$R.none() => NoContentBytes()
-  | ~$R.some(blob) => _blob_content(blob)
+implement take_decompressed (inflated) =
+  case+ inflated of
+  | ~$BD.DecompressFailed() => NoContentBytes()
+  | ~$BD.Decompressed(blob) => _blob_content(blob)
 
 implement lookup_content (found) =
   case+ found of
@@ -560,10 +564,8 @@ implement lookup_content (found) =
 implement zip_compression (method) =
   if method = 8 then $BD.DeflateRaw() else $BD.Uncompressed()
 
-implement decompress (data, data_len, method) = let
-  val @(p, r) = $P.create<Int>()
-  val () = $BD.decompress_req(data, data_len, method, $P.stash(r))
-in p end
+implement decompress (data, data_len, method) =
+  $BD.decompress(data, data_len, method)
 
 implement book_begin {file_size} (book_file, file_size) = let
   val () = !_book_serial := !_book_serial + 1

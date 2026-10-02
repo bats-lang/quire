@@ -348,7 +348,8 @@ fn _modal (): void = let
 in _hide("dialog") end
 
 (* The error banner, over the library and the reader alike, until it is
-   dismissed; and the copy status, apart from the Undo toast (notice.bats) *)
+   dismissed; the copy status, apart from the Undo toast (notice.bats);
+   and the offer of a new version *)
 fn _notices (): void = let
   val () = ui_el("bats-root", "error-banner", TDiv, "banner")
   val () = ui_role("error-banner", RAlert)
@@ -357,7 +358,16 @@ fn _notices (): void = let
   val () = _hide("error-banner")
   val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")
   val () = ui_role("copy-status", RStatus)
-in _hide("copy-status") end
+  val () = _hide("copy-status")
+  (* a new version is served: it is offered, never forced (quire.bats'
+     _build_watch) *)
+  val () = ui_el("bats-root", "update-toast", TDiv, "toast tnew")
+  val () = ui_role("update-toast", RStatus)
+  val () = ui_add("update-toast", "update-text", TSpan)
+  val () = ui_text("update-text", "A new version of Quire is ready.")
+  val () = ui_text_btn("update-toast", "update-reload", "btn", "Reload")
+  val () = ui_icon_btn("update-toast", "update-dismiss", "ibtn", IcClose, "Dismiss")
+in _hide("update-toast") end
 
 (* The Undo toast: what was just done, and a way back *)
 fn _undo_toast (): void = let

@@ -425,9 +425,26 @@ test('a file handed over by the host is imported', async ({ page }) => {
   const errors = await start(page);
   const epub = epubFile({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true });
   await page.route('**/_capacitor_file_/**', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
-  await page.evaluate(() => globalThis.batsFetchExternal('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
   await expect(card(page, 'Shared With Quire')).toContainText('Smoke Test', { timeout: 30000 });
   expect(errors).toEqual([]);
+});
+
+// A handed-over file whose URL cannot be fetched is named in the error
+// banner, and the files handed over after it are still imported
+test('a file handed over by the host that cannot be read is said, and the next is imported', async ({ page }) => {
+  const errors = await start(page);
+  const epub = epubFile({ title: 'After The Gone One', author: 'Smoke Test', chapters: 1 });
+  await page.route('**/_capacitor_file_/gone', r => r.fulfill({ status: 404, body: '' }));
+  await page.route('**/_capacitor_file_/next', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/gone', 'gone.epub'));
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('gone.epub could not be read.');
+  await expect(cards(page)).toHaveCount(0);
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/next', 'next.epub'));
+  await expect(card(page, 'After The Gone One')).toBeVisible({ timeout: 30000 });
+  // the browser's own report of the 404 is the one message
+  expect(errors).toEqual(['console: Failed to load resource: the server responded with a status of 404 (Not Found)']);
 });
 
 // EPUB Accessibility 1.1's discovery metadata, shown in the W3C
@@ -767,10 +784,10 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await page.route('**/_capacitor_file_/first', r => r.fulfill({ path: first, contentType: 'application/octet-stream' }));
   await page.route('**/_capacitor_file_/second', r => r.fulfill({ path: second, contentType: 'application/octet-stream' }));
   expect(await page.evaluate(() => window.persistCalls)).toBe(0);
-  await page.evaluate(() => globalThis.batsFetchExternal('/_capacitor_file_/first', 'first.epub'));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/first', 'first.epub'));
   await expect(card(page, 'First Kept')).toBeVisible({ timeout: 30000 });
   await expect.poll(() => page.evaluate(() => window.persistCalls)).toBe(1);
-  await page.evaluate(() => globalThis.batsFetchExternal('/_capacitor_file_/second', 'second.epub'));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/second', 'second.epub'));
   await expect(card(page, 'Second Kept')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => window.persistCalls)).toBe(1);

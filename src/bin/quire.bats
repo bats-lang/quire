@@ -44,7 +44,10 @@ staload WN = "wasm.bats-packages.dev/bridge/src/window.sats"
 staload GP = "gestures/src/pointer.sats"
 staload GT = "gestures/src/tracker.sats"
 staload GD = "gestures/src/decode.sats"
+staload GS = "gestures/src/source.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BE = "wasm.bats-packages.dev/bridge/src/external.sats"
+staload BW = "wasm.bats-packages.dev/bridge/src/build_watch.sats"
 
 (* ============================================================
    State
@@ -64,10 +67,11 @@ val _resize_generation = ref<int>(0)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
-(* The gesture recognizer's state (linear, so it is taken out of its
-   cell and put back); and whether a drag has just ended, so that the
-   click the browser sends after it is not also a tap *)
-datavtype gesture_cell = GNone | GSome of $GT.gstate
+(* The gesture recognizer's state and its pointer source (linear, so
+   they are taken out of their cell and put back); and whether a drag
+   has just ended, so that the click the browser sends after it is not
+   also a tap *)
+datavtype gesture_cell = GNone | GSome of ($GT.gstate, $GS.source)
 val _gestures = ref<gesture_cell>(GNone())
 val _dragged = ref<bool>(false)
 (* The latest keystroke in the search field's number *)
@@ -1653,32 +1657,78 @@ fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): voi
         | ~$GT.GTransitionCancel(_) => ())
     in _on_gestures(rest) end
 
-(* A batch of pointer records from the shim, through the recognizer *)
-fn _gesture_batch (h: $EV.event_payload): void =
+(* The recognizer and its source, out of their cell; put back with
+   _gestures_put *)
+fn _gestures_take (): gesture_cell = let
+  var cell: gesture_cell = GNone()
+  val () = ref_exch_elt<gesture_cell>(_gestures, cell)
+in cell end
+
+fn _gestures_put (held: gesture_cell): void = let
+  var cell: gesture_cell = held
+  val () = ref_exch_elt<gesture_cell>(_gestures, cell)
+in case+ cell of
+  | ~GNone() => ()
+  | ~GSome(state, source) => let
+      val () = $GS.gestures_source_free(source)
+    in $GT.gestures_free(state) end
+end
+
+(* The gesture events, acted on in the reader and dropped elsewhere *)
+fn _gestures_show (events: $GT.gevents): void =
+  if !_view = 1 then _on_gestures(events) else $GT.gevents_free(events)
+
+(* How many animation frames one pointer record may ask for, one after
+   another, while a pointer is down (a frame asks for the next): about
+   27 minutes at 60 frames a second. A metric needs the bound; the next
+   record gives the chain new rounds *)
+#define FRAME_ROUNDS 100000
+
+(* Does what the source asks: a capture (to the reader view, the
+   listened root), or a frame, whose time goes back to the source *)
+fun _gestures_act {count:nat}{rounds:nat} .<rounds, count + 1>.
+  (asked: list_vt($GS.action, count), rounds: int rounds): void =
+  case+ asked of
+  | ~list_vt_nil() => ()
+  | ~list_vt_cons(action, rest) => let
+      val () = (case+ action of
+        | ~$GS.CapturePointer(pointer_id) => ui_pointer_capture("reader", pointer_id)
+        | ~$GS.WantFrame() =>
+          $P.finish<Int>($TM.animation_frame(), llam(time) => _gestures_frame($GD.gestures_stamp(time), rounds)))
+    in _gestures_act(rest, rounds) end
+
+and _gestures_frame {time:nat}{rounds:nat} .<rounds, 0>. (time: int time, rounds: int rounds): void =
+  if rounds <= 0 then ()
+  else case+ _gestures_take() of
+  | ~GSome(state, source) => let
+      val @(events, asked) = $GS.gestures_frame(source, state, time)
+      val () = _gestures_put(GSome(state, source))
+      val () = _gestures_show(events)
+    in _gestures_act(asked, rounds - 1) end
+  | ~GNone() => ()
+
+(* A pointer record from the reader view, through the source and the
+   recognizer *)
+fn _gesture_record (h: $EV.event_payload): void =
   case+ take_blob(h) of
   | ~NoBlobBytes() => ()
-  | ~BlobBytes(batch_bytes, n) => let
-      var cell: gesture_cell = GNone()
-      val () = ref_exch_elt<gesture_cell>(_gestures, cell)
-      val events = (case+ cell of
-        | @GSome(state) => let
-            val events = $GD.gestures_feed(state, batch_bytes, n)
-            prval () = fold@(cell)
-          in events end
-        | GNone() => list_vt_nil()): $GT.gevents
-      val () = ref_exch_elt<gesture_cell>(_gestures, cell)
-      val () = (case+ cell of ~GNone() => () | ~GSome(state) => $GT.gestures_free(state))
-      val () = $A.free<byte>(batch_bytes)
-    in if !_view = 1 then _on_gestures(events) else $GT.gevents_free(events) end
+  | ~BlobBytes(record, record_len) =>
+    if record_len < 48 then $A.free<byte>(record)
+    else (case+ _gestures_take() of
+      | ~GSome(state, source) => let
+          val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
+          val () = $A.free<byte>(record)
+          val () = _gestures_put(GSome(state, source))
+          val () = _gestures_show(events)
+        in _gestures_act(asked, FRAME_ROUNDS) end
+      | ~GNone() => $A.free<byte>(record))
 
 (* The recognizer, with the page turn's region: horizontal drags, by
    touch or pen only (a mouse drag over the page selects text) *)
 fn _gestures_start (): void = let
   val state = $GT.gestures_new()
   val () = $GT.gestures_region(state, PAGE_REGION, ~1, page_turn_axes(), false, false, $GT.DevTouch())
-  var cell: gesture_cell = GSome(state)
-  val () = ref_exch_elt<gesture_cell>(_gestures, cell)
-in case+ cell of ~GNone() => () | ~GSome(old) => $GT.gestures_free(old) end
+in _gestures_put(GSome(state, $GS.gestures_source_new())) end
 
 (* The page's scrolls, numbered, so only the last one's rest counts *)
 val _scroll_generation = ref<int>(0)
@@ -1988,8 +2038,8 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
     in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
-  val listeners = RCons(listeners, OnGestures("reader"), "gestures", llam(h) => let
-      val () = _gesture_batch(h)
+  val listeners = RCons(listeners, OnPointer("reader"), "pointer", llam(h) => let
+      val () = _gesture_record(h)
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
@@ -2033,6 +2083,49 @@ in listeners end
    Startup
    ============================================================ *)
 
+(* Watches for a new version of the app (a new app.wasm served) and
+   offers it: a notice whose Reload button reloads. It never reloads by
+   itself, since a reload in the middle of reading would lose the
+   scroll position and reading aloud's place *)
+fn _build_watch (): void = let
+  val url = $A.alloc<byte>(8)
+  val () = $A.write_text(url, 0, $A.text_lit("app.wasm"), 8)
+  val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
+  val watching = $BW.build_watch(url_bytes, 8)
+  val () = release_bytes(url_frozen, url_bytes)
+in
+  $P.finish<$BW.build_change>(watching, llam(change) =>
+    case+ change of
+    | $BW.NewBuild() => ui_show("update-toast", true)
+    (* the server cannot tell builds apart: nothing to offer *)
+    | $BW.WatchEnded() => ())
+end
+
+(* The offer of a new version: Reload, or Dismiss *)
+fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
+  RCons(listeners, OnEl("update-toast"), "click", llam(h) => let
+    val clicked = _target(h)
+    val reload = _is(clicked, "update-reload")
+    val dismiss = _is(clicked, "update-dismiss")
+    val () = _target_free(clicked)
+    val () = (if reload then $NAV.reload()
+      else if dismiss then ui_show("update-toast", false)
+      else ())
+  in 0 end)
+
+(* How many files handed to the app from outside it are imported in a
+   session, one after another. A metric needs the bound *)
+#define EXTERNAL_ROUNDS 100000
+
+(* Imports each file handed to the app from outside it, as it comes:
+   one at a time, the next asked for when the last one's import is
+   done. The library is shown first, where the import is seen *)
+fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
+  if rounds <= 0 then ()
+  else $P.finish<Int>($P.and_then<$BE.external><Int>($BE.external_next(), llam(handed) => let
+      val () = (if !_view = 1 then _show_library() else ())
+    in import_external(handed) end), llam(_) => _external_wait(rounds - 1))
+
 implement main0 () = let
   val () = app_build()
   (* the sync screen keeps its own elements *)
@@ -2040,12 +2133,12 @@ implement main0 () = let
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
-  (* files handed to the app from outside it (an Android intent) *)
-  val listeners = RCons(listeners, OnExternalFiles(), "files", llam(h) => let
-      val () = (if !_view = 1 then _show_library() else ())
-      val () = import_external(h)
-    in 0 end)
+  val listeners = _wire_update(listeners)
   val () = ui_listen_all(listeners)
+  val () = _build_watch()
+  (* files handed to the app from outside it (an Android intent, the
+     installed app opened with a file or shared one) *)
+  val () = _external_wait(EXTERNAL_ROUNDS)
   (* what the platform offers: reading aloud, sharing, installing, and
      whether the storage is kept *)
   val () = aloud_offer()

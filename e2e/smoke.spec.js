@@ -73,22 +73,52 @@ test.describe('Smoke', () => {
     expect(errors).toEqual([]);
   });
 
-  test('a new build served while the app is open reloads it', async ({ page }) => {
+  test('a new build served while the app is open is offered, and loaded only on Reload', async ({ page }) => {
     let deployed = false;
-    await page.route('**/*.wasm', route => {
-      if (deployed && route.request().method() === 'HEAD') {
-        return route.fulfill({ status: 200, headers: { etag: '"a-new-build"' }, body: '' });
+    await page.route('**/app.wasm', route => {
+      if (route.request().method() === 'HEAD') {
+        const etag = deployed ? '"a-new-build"' : '"the-loaded-build"';
+        return route.fulfill({ status: 200, headers: { etag }, body: '' });
       }
       return route.continue();
     });
+    // the build is checked every 30 seconds: the clock is the test's
+    await page.clock.install();
     await page.goto('/');
     await expect(librarySearch(page)).toBeVisible();
     // the page marks itself; a reload is a new page without the mark
     await page.evaluate(() => { window.__before = true; });
     deployed = true;
+    await page.clock.runFor(31000);
+    const offer = page.getByRole('status').filter({ hasText: 'A new version of Quire is ready.' });
+    await expect(offer).toBeVisible();
+    // offered, never forced: the page is the same one
+    await page.clock.runFor(5000);
+    expect(await page.evaluate(() => window.__before)).toBe(true);
+    // Dismiss puts it away, and nothing reloads
+    await offer.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(offer).toBeHidden();
+    expect(await page.evaluate(() => window.__before)).toBe(true);
+  });
+
+  test('Reload on the offer of a new build loads it', async ({ page }) => {
+    let deployed = false;
+    await page.route('**/app.wasm', route => {
+      if (route.request().method() === 'HEAD') {
+        const etag = deployed ? '"a-new-build"' : '"the-loaded-build"';
+        return route.fulfill({ status: 200, headers: { etag }, body: '' });
+      }
+      return route.continue();
+    });
+    await page.clock.install();
+    await page.goto('/');
+    await expect(librarySearch(page)).toBeVisible();
+    await page.evaluate(() => { window.__before = true; });
+    deployed = true;
+    await page.clock.runFor(31000);
+    const offer = page.getByRole('status').filter({ hasText: 'A new version of Quire is ready.' });
     const reloaded = page.waitForEvent('load');
-    // the check runs when the page is shown again
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await offer.getByRole('button', { name: 'Reload' }).click();
     await reloaded;
     await expect(librarySearch(page)).toBeVisible();
     expect(await page.evaluate(() => window.__before)).toBeUndefined();

@@ -1623,12 +1623,11 @@ in
       val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
       val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
-      val decompressing = $P.vow(decompressing)
     in
       (* an image that cannot be read stays empty, as a browser leaves an
          image it cannot load: a book's images are decorative (alt="") *)
-      $P.finish<Int>(decompressing, llam(handle) =>
-        case+ take_content(handle) of
+      $P.finish<decompressed>(decompressing, llam(inflated) =>
+        case+ take_decompressed(inflated) of
         | ~NoContentBytes() => ()
         | ~ContentBytes(content_owner, content, content_len) => let
             val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
@@ -1873,8 +1872,8 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<Int><int>($P.vow(decompressing), llam(handle) =>
-           case+ take_content(handle) of
+         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+           case+ take_decompressed(inflated) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(font_owner, font, font_len) => let
                val mime_buf = $A.alloc<byte>(8)
@@ -1919,10 +1918,9 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
          val decompressing = decompress(compressed_bytes, opf_compressed_size, zip_compression(opf_method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
-         val decompressing = $P.vow(decompressing)
        in
-         $P.and_then<Int><int>(decompressing, llam(handle) =>
-           case+ take_content(handle) of
+         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+           case+ take_decompressed(inflated) of
            | ~NoContentBytes() => $P.ret<int>(~2)
            | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
                val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_buf)
@@ -1964,12 +1962,10 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
               val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
-
-              val decompressing = $P.vow(decompressing)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<Int><int>(decompressing, llam(handle) => let
-                val content = take_content(handle)
+              $P.and_then<decompressed><int>(decompressing, llam(inflated) => let
+                val content = take_decompressed(inflated)
               in
                 case+ content of
                 | ~NoContentBytes() => $P.ret<int>(~6)
@@ -2652,8 +2648,8 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.finish<Int>($P.vow(decompressing), llam(handle) => let
-             val () = (case+ take_content(handle) of
+           $P.finish<decompressed>(decompressing, llam(inflated) => let
+             val () = (case+ take_decompressed(inflated) of
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                    val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
@@ -3032,8 +3028,8 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.finish<Int>($P.vow(decompressing), llam(handle) => let
-           val () = (case+ take_content(handle) of
+         $P.finish<decompressed>(decompressing, llam(inflated) => let
+           val () = (case+ take_decompressed(inflated) of
              | ~NoContentBytes() => _note_follow()
              | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                  val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
@@ -3841,8 +3837,8 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<Int><script>($P.vow(decompressing), llam(handle) =>
-           case+ take_content(handle) of
+         $P.and_then<decompressed><script>(decompressing, llam(inflated) =>
+           case+ take_decompressed(inflated) of
            | ~NoContentBytes() => $P.ret<script>(NoScript())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
