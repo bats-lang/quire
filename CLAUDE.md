@@ -571,9 +571,12 @@ Android project does not hold them, and the service worker (bridge's
 `produce_service_worker`) answers only files directly in its scope, so
 it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
 policy states what the code does: change it with any change to what is
-stored, what leaves the device, or the Google scopes asked for. The library menu keeps Install, the storage notes, Settings,
-Reading statistics, Catalogues, Empty Trash (the red harm item) and
-Close. While Settings is open over the reader, keys are its own, not
+stored, what leaves the device, or the Google scopes asked for.
+
+The library menu keeps Install, the storage notes, Settings, About
+Quire (the same About screen, so the library reaches it without
+Settings), Reading statistics, Catalogues, Empty Trash (the red harm
+item) and Close. While Settings is open over the reader, keys are its own, not
 page turns.
 
 The page turns by a horizontal drag, recognized by the gestures package
