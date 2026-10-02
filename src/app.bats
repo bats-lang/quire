@@ -18,10 +18,10 @@ fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, fal
 implement app_import_input () =
   ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true)
 
-(* The library menu's backup file input, with no file chosen *)
+(* The Settings screen's backup file input, with no file chosen *)
 #pub fn app_backup_input (): void
 implement app_backup_input () =
-  ui_file_input("menu-import-backup", "backup-file", "Import backup", ".json,application/json", false)
+  ui_file_input("settings-restore", "backup-file", "Restore backup", ".json,application/json", false)
 
 (* The dictionaries' file input, with no file chosen: a dictionary's
    files are picked together *)
@@ -58,13 +58,10 @@ implement app_book_search () = let
   val () = ui_field("search-header", "search-field", FSearch, "search", "Search in book")
 in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search") end
 
-(* The library view: toolbar, error banner, import progress, the list of
-   books and the empty-library message *)
+(* The library view: toolbar, import progress, the list of books and the
+   empty-library message *)
 fn _library (): void = let
   val () = ui_el("bats-root", "library", TDiv, "lib")
-  (* EPUBs the system opens with the installed app, or shares with it,
-     are dropped here by the page's script, as a drop of the user's *)
-  val () = ui_attr("library", APwaFileDrop, "y")
   val () = ui_role("library", RMain)
   val () = ui_el("library", "library-bar", TDiv, "bar")
   val () = ui_el("library-bar", "library-title", TH1, "ttl")
@@ -76,12 +73,6 @@ fn _library (): void = let
   val () = ui_icon_btn("library-bar", "library-menu-button", "ibtn", IcGear, "Library menu")
   val () = ui_el("library-bar", "library-search-box", TDiv, "sfield")
   val () = app_library_search()
-  (* error banner *)
-  val () = ui_el("library", "error-banner", TDiv, "banner")
-  val () = ui_role("error-banner", RAlert)
-  val () = ui_add("error-banner", "error-text", TSpan)
-  val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
-  val () = _hide("error-banner")
   (* on iOS Safari (the stylesheet shows it only there), once the
      library has a book: installing is how its books are kept *)
   val () = ui_el("library", "install-hint", TDiv, "ihint")
@@ -272,29 +263,73 @@ fn _library_menu (): void = let
   val () = ui_el("bats-root", "library-menu", TDiv, "ovl")
   val () = ui_el("library-menu", "library-menu-box", TDiv, "menu")
   val () = ui_named("library-menu-box", NMenu, "Library menu")
-  (* shown by the stylesheet only where the browser offers to install
-     the app; the page's script asks it to on a click *)
+  (* shown only while the browser offers to install the app, whose
+     offer a click asks for (platform.bats) *)
   val () = ui_menuitem("library-menu-box", "menu-install", "Install Quire")
-  val () = ui_attr("menu-install", AClass, "mi pwinst")
-  val () = ui_attr("menu-install", APwaInstall, "y")
-  (* whether the browser keeps the books: shown by the stylesheet under
-     the page's script's mark (pwa-storage-kept or -at-risk), each
-     saying more when clicked *)
+  val () = _hide("menu-install")
+  (* whether the browser keeps the books, once it is known
+     (platform.bats), each saying more when clicked *)
   val () = ui_menuitem("library-menu-box", "menu-storage-kept", "Your books are kept")
-  val () = ui_attr("menu-storage-kept", AClass, "mi stkept")
+  val () = _hide("menu-storage-kept")
   val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
-  val () = ui_attr("menu-storage-at-risk", AClass, "mi strisk")
+  val () = _hide("menu-storage-at-risk")
+  val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
-  val () = ui_menuitem("library-menu-box", "menu-dictionaries", "Dictionaries")
-  val () = ui_menuitem("library-menu-box", "menu-sync", "Sync")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
-  val () = ui_menuitem("library-menu-box", "menu-export-backup", "Export backup")
-  val () = ui_el("library-menu-box", "menu-import-backup", TDiv, "mi btn")
-  val () = app_backup_input()
   val () = ui_harm_item("library-menu-box", HEmptyTrash())
-  val () = ui_menuitem("library-menu-box", "menu-factory-reset", "Factory reset")
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
 in _hide("library-menu") end
+
+(* The Settings screen, opened from the library menu and the reader:
+   one screen of groups, each complex area a screen of its own opened
+   from a row that says its state (Android's settings pattern). Sync
+   (its row says whether it is on and how the last sync went, from
+   sync_summary_show), the dictionaries, the backup (exported, or one
+   restored), the daily reading goal (the statistics panel has it too),
+   and the resets, each offered back by the Undo toast *)
+fn _settings_screen (): void = let
+  val () = ui_el("bats-root", "settings-screen", TDiv, "info")
+  val () = ui_labelled("settings-screen", NDialog, "settings-title")
+  val () = ui_el("settings-screen", "settings-box", TDiv, "info-in")
+  val () = ui_el("settings-box", "settings-title", TDiv, "mtitle")
+  val () = ui_text("settings-title", "Settings")
+  (* sync: its screen, and its state *)
+  val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
+  val () = ui_named("settings-sync-row", NGroup, "Sync")
+  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn", "Sync \xE2\x80\xBA")
+  val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
+  val () = ui_role("settings-sync-state", RStatus)
+  (* the dictionaries' panel *)
+  val () = ui_el("settings-box", "settings-dictionaries-row", TDiv, "srow")
+  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn", "Dictionaries \xE2\x80\xBA")
+  (* the backup *)
+  val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
+  val () = ui_text("settings-backup-title", "Backup")
+  val () = ui_el("settings-box", "settings-backup", TDiv, "srow")
+  val () = ui_named("settings-backup", NGroup, "Backup")
+  val () = ui_text_btn("settings-backup", "settings-export-backup", "btn", "Export backup")
+  val () = ui_el("settings-backup", "settings-restore", TDiv, "btn")
+  val () = app_backup_input()
+  (* the daily reading goal *)
+  val () = ui_el("settings-box", "settings-goal-title", TDiv, "a11yg")
+  val () = ui_text("settings-goal-title", "Reading goal")
+  val () = ui_el("settings-box", "settings-goal", TDiv, "seg")
+  val () = ui_named("settings-goal", NGroup, "Daily reading goal")
+  val () = ui_text_btn("settings-goal", "settings-goal-off", "sbtn", "Off")
+  val () = ui_text_btn("settings-goal", "settings-goal-10", "sbtn", "10 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-20", "sbtn", "20 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-30", "sbtn", "30 min")
+  val () = ui_text_btn("settings-goal", "settings-goal-60", "sbtn", "1 h")
+  (* the resets, each offered back by the Undo toast *)
+  val () = ui_el("settings-box", "settings-reset-title", TDiv, "a11yg")
+  val () = ui_text("settings-reset-title", "Reset")
+  val () = ui_el("settings-box", "settings-reset", TDiv, "srow")
+  val () = ui_named("settings-reset", NGroup, "Reset")
+  val () = ui_text_btn("settings-reset", "settings-reset-settings", "btn", "Reset settings")
+  val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
+  val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
+in _hide("settings-screen") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)
 fn _modal (): void = let
@@ -311,6 +346,28 @@ fn _modal (): void = let
   val () = ui_text_btn("dialog-buttons", "dialog-button1", "btn", "-")
   val () = ui_text_btn("dialog-buttons", "dialog-button2", "btn btn-p", "-")
 in _hide("dialog") end
+
+(* The error banner, over the library and the reader alike, until it is
+   dismissed; the copy status, apart from the Undo toast (notice.bats);
+   and the offer of a new version *)
+fn _notices (): void = let
+  val () = ui_el("bats-root", "error-banner", TDiv, "banner")
+  val () = ui_role("error-banner", RAlert)
+  val () = ui_add("error-banner", "error-text", TSpan)
+  val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
+  val () = _hide("error-banner")
+  val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")
+  val () = ui_role("copy-status", RStatus)
+  val () = _hide("copy-status")
+  (* a new version is served: it is offered, never forced (quire.bats'
+     _build_watch) *)
+  val () = ui_el("bats-root", "update-toast", TDiv, "toast tnew")
+  val () = ui_role("update-toast", RStatus)
+  val () = ui_add("update-toast", "update-text", TSpan)
+  val () = ui_text("update-text", "A new version of Quire is ready.")
+  val () = ui_text_btn("update-toast", "update-reload", "btn", "Reload")
+  val () = ui_icon_btn("update-toast", "update-dismiss", "ibtn", IcClose, "Dismiss")
+in _hide("update-toast") end
 
 (* The Undo toast: what was just done, and a way back *)
 fn _undo_toast (): void = let
@@ -373,6 +430,9 @@ fn _reader (): void = let
   val () = ui_icon_btn("reader-top-bar", "bookmark-button", "ibtn", IcStar, "Bookmark this page")
   val () = ui_attr("bookmark-button", APressed, "false")
   val () = ui_icon_btn("reader-top-bar", "search-button", "ibtn", IcSearch, "Search in book")
+  (* the Settings screen: in this bar, whose title gives way, since the
+     bottom bar has no room left on a phone *)
+  val () = ui_icon_btn("reader-top-bar", "reader-settings", "ibtn", IcGear, "Settings")
   val () = ui_el("reader", "page", TDiv, "caf")
   (* shown (by the typography's style) exactly when a screen shows two
      columns, so the reader can tell *)
@@ -408,13 +468,14 @@ fn _reader (): void = let
   val () = ui_text_btn("selection-toolbar", "selection-underline", "btn", "Underline")
   val () = ui_text_btn("selection-toolbar", "selection-note", "btn", "Note")
   val () = ui_text_btn("selection-toolbar", "selection-copy", "btn", "Copy")
-  val () = ui_text_btn("selection-toolbar", "selection-read", "btn speak", "Read from here")
-  (* shared by the page's script, cited by the book (share-citation) *)
-  val () = ui_text_btn("selection-toolbar", "selection-share", "btn share", "Share")
-  val () = ui_attr("selection-share", APwaShareSelection, "share-citation")
-  val () = ui_add("selection-toolbar", "share-citation", TSpan)
-  val () = _hide("share-citation")
-  val () = ui_attr("selection-read", APwaSpeakSelection, "page")
+  (* read aloud from the selection (read_aloud.bats), where the
+     platform speaks *)
+  val () = ui_text_btn("selection-toolbar", "selection-read", "btn", "Read from here")
+  val () = _hide("selection-read")
+  (* shared, cited by the book (sharing.bats), where the platform
+     shares *)
+  val () = ui_text_btn("selection-toolbar", "selection-share", "btn", "Share")
+  val () = _hide("selection-share")
   (* the selection looked up in a dictionary the reader imported, shown
      instead of the online one below when it has the word *)
   val () = ui_text_btn("selection-toolbar", "selection-define", "btn", "Look up")
@@ -430,11 +491,11 @@ fn _reader (): void = let
   val () = ui_icon_btn("reader-bottom-bar", "contents-button", "ibtn", IcContents, "Contents")
   val () = ui_icon_btn("reader-bottom-bar", "typography-button", "ibtn", IcFont, "Typography")
   val () = ui_icon_btn("reader-bottom-bar", "annotations-button", "ibtn", IcNotes, "Annotations")
-  (* read aloud from the page shown, or paused: by the page's script,
-     shown only where the browser speaks *)
-  val () = ui_icon_btn("reader-bottom-bar", "read-aloud", "ibtn speak", IcSpeak, "Read aloud")
+  (* read aloud from the page shown, or paused (read_aloud.bats), shown
+     only where the platform speaks *)
+  val () = ui_icon_btn("reader-bottom-bar", "read-aloud", "ibtn", IcSpeak, "Read aloud")
   val () = ui_attr("read-aloud", APressed, "false")
-  val () = ui_attr("read-aloud", APwaSpeak, "page")
+  val () = _hide("read-aloud")
   val () = ui_el("reader-bottom-bar", "page-indicator", TDiv, "pinfo")
   val () = ui_named("page-indicator", NStatus, "Page")
   val () = ui_el("page-indicator", "indicator-title", TSpan, "pgt")
@@ -444,8 +505,6 @@ fn _reader (): void = let
   val () = ui_el("page-indicator", "indicator-label", TSpan, "pgw")
   val () = ui_el("page-indicator", "indicator-pages", TSpan, "pgn")
   val () = ui_icon_btn("reader-bottom-bar", "next-page", "ibtn", IcNext, "Next page")
-  (* reading aloud turns the page with it *)
-  val () = ui_attr("next-page", APwaSpeechNext, "y")
   (* scrubber *)
   val () = ui_el("reader-bottom-bar", "scrubber", TDiv, "scr")
   val () = ui_el("scrubber", "scrubber-track", TDiv, "trk")
@@ -563,28 +622,27 @@ fn _settings (): void = let
   val () = ui_named("layout-choice", NGroup, "Layout")
   val () = ui_text_btn("layout-choice", "layout-pages", "sbtn", "Pages")
   val () = ui_text_btn("layout-choice", "layout-scroll", "sbtn", "Scroll")
-  (* reading aloud: its speed and voice, which the page's script offers
-     (the voices of the book's language) and keeps *)
-  val () = ui_el("typography-panel", "speech-row", TDiv, "srow speak")
+  (* reading aloud: its speed and voice (the voices of the book's
+     language), offered and kept by read_aloud.bats, where the platform
+     speaks *)
+  val () = ui_el("typography-panel", "speech-row", TDiv, "srow")
   val () = ui_el("speech-row", "speech-label", TSpan, "slabel")
   val () = ui_text("speech-label", "Read aloud")
   val () = ui_field("speech-row", "speech-rate", FChoice, "ssel", "Reading speed")
-  val () = ui_attr("speech-rate", APwaSpeechRate, "y")
   val () = ui_field("speech-row", "speech-voice", FChoice, "ssel", "Voice")
-  val () = ui_attr("speech-voice", APwaSpeechVoice, "page")
+  val () = _hide("speech-row")
   (* the screen: full screen, the rotation locked, and (in the Android
-     app) the brightness, each shown only where it can be had *)
-  val () = ui_el("typography-panel", "screen-row", TDiv, "srow screenrow")
+     app) the brightness, each shown only where it can be had
+     (screen_controls.bats) *)
+  val () = ui_el("typography-panel", "screen-row", TDiv, "srow")
   val () = ui_el("screen-row", "screen-label", TSpan, "slabel")
   val () = ui_text("screen-label", "Screen")
-  val () = ui_text_btn("screen-row", "screen-fullscreen", "sbtn screenfs", "Full screen")
+  val () = ui_text_btn("screen-row", "screen-fullscreen", "sbtn", "Full screen")
   val () = ui_attr("screen-fullscreen", APressed, "false")
-  val () = ui_attr("screen-fullscreen", APwaFullscreen, "y")
-  val () = ui_text_btn("screen-row", "screen-lock", "sbtn screenlock", "Lock rotation")
+  val () = ui_text_btn("screen-row", "screen-lock", "sbtn", "Lock rotation")
   val () = ui_attr("screen-lock", APressed, "false")
-  val () = ui_attr("screen-lock", APwaOrientationLock, "y")
-  val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel screenbr", "Brightness")
-  val () = ui_attr("screen-brightness", APwaBrightness, "y")
+  val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel", "Brightness")
+  val () = _hide("screen-row")
   (* paged, one column a screen or two: a spread *)
   val () = ui_el("typography-panel", "columns-row", TDiv, "srow")
   val () = ui_el("columns-row", "columns-label", TSpan, "slabel")
@@ -641,13 +699,10 @@ fn _annotations (): void = let
   val () = ui_el("annotations-header", "annotations-spacer", TSpan, "grow")
   val () = ui_text("annotations-spacer", "Annotations")
   val () = ui_text_btn("annotations-header", "annotations-export", "btn", "Export")
-  (* shared as a file by the page's script, once this click has put the
-     export in annotations-share-text *)
-  val () = ui_text_btn("annotations-header", "annotations-share", "btn share", "Share")
-  val () = ui_attr("annotations-share", APwaShareFile, "annotations-share-text")
-  val () = ui_attr("annotations-share", APwaShareName, "quire-annotations.md")
-  val () = ui_add("annotations-header", "annotations-share-text", TDiv)
-  val () = _hide("annotations-share-text")
+  (* the export shared, as a file where the platform shares files
+     (sharing.bats) *)
+  val () = ui_text_btn("annotations-header", "annotations-share", "btn", "Share")
+  val () = _hide("annotations-share")
   val () = ui_icon_btn("annotations-header", "annotations-close", "ibtn", IcClose, "Close")
   (* which highlights are listed: every one, or one style's *)
   val () = ui_el("annotations-panel", "annotations-filter", TDiv, "seg afilter")
@@ -693,11 +748,13 @@ implement app_build () = let
   val () = ui_text_buf("style-sheet", css, css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
+  val () = _notices()
   val () = _library()
   val () = _context_menu()
   val () = _collections()
   val () = _stats()
   val () = _library_menu()
+  val () = _settings_screen()
   val () = _info()
   val () = _reader()
   val () = _toc()

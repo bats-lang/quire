@@ -10,7 +10,7 @@
 #use promise as P
 #use str as S
 #use xml-tree as X
-#use wasm.bats-packages.dev/decompress as DC
+#use zip as Z
 
 staload "epub_xml.sats"
 staload "book.sats"
@@ -82,8 +82,8 @@ in toc_free(entries) end
    with compression method method and its name [name_offset, name_offset +
    name_len); ncx when it is an NCX *)
 datavtype toc_source =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    TocSource of (int file_size, int data_offset, int data_size, int method, int name_offset, int name_len, bool)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    TocSource of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, bool)
   | TocNone of ()
 
 val _source = ref<toc_source>(TocNone())
@@ -451,13 +451,12 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, data_offset, compressed, data_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressed = $DC.decompress(compressed_bytes, data_size, method)
+         val decompressed = decompress(compressed_bytes, data_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
-         val decompressed = $P.vow(decompressed)
        in
-         $P.and_then<Int><int>(decompressed, lam(handle) =>
-           case+ take_content(handle) of
+         $P.and_then<decompressed><int>(decompressed, llam(inflated) =>
+           case+ take_decompressed(inflated) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(content_owner, content, content_size) => let
                val @(content_frozen, content_bytes) = $A.freeze<byte>(content)

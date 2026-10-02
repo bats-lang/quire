@@ -113,11 +113,16 @@ page's arena, or the one piece of an arena sized to it, so it has no
   (`catalogue_backup_json` in `src/catalogues.bats`);
 * the sync file: as it is read from the store, each chunk of the merge
   and the merge joined as it is written (`_out`, `_remote`, `_written`
-  in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`).
+  in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`);
+* a chapter's text read aloud (its `script`, `reader_script_load` in
+  `src/reader.bats`), held while the chapter is read aloud; each
+  block's copy while it is cut into sentences; and each sentence's copy
+  while it is said (`script_text`).
 
-Each piece lives only while it is parsed or written: nothing is kept
-between page turns yet, since pages are CSS columns of the chapter's
-DOM.
+Each piece lives only while it is parsed or written, except the
+script read aloud, which outlives page turns (the arena it was lent from
+is released when it is given back, if the window has moved on): pages
+are CSS columns of the chapter's DOM.
 
 With `alloc`:
 
@@ -129,11 +134,12 @@ With `alloc`:
   65536 bytes as a zip name is) and a title buffer (`tbuf`).
 * `src/reader.bats`: the OPF's name (for its directory), the chapter
   path (`ch_buf`), and title and text copies (`exact`, `tbuf`).
-* The EPUB file itself never stays in wasm memory: file-input keeps it
-  on the JS side, it is read by ranges, and it is saved to and restored
-  from IndexedDB there (`$FI.idb_put`, `$FI.idb_get`). Only a book got
-  from a catalogue passes through, in an arena piece, since the bridge's
-  fetch hands its bytes to wasm and `file_store` takes them back.
+* The EPUB file itself never stays in wasm memory: bridge's file module
+  keeps it on the JS side, it is read by ranges, and it is saved to and
+  restored from IndexedDB there (`$BF.file_idb_put`, `$BF.file_idb_get`).
+  Only a book got from a catalogue passes through, in an arena piece,
+  since the bridge's fetch hands its bytes to wasm and `$BF.file_store`
+  takes them back.
 * Everything else (`src/bin/quire.bats`, the small buffers in
   `reader.bats`) is element ids, event names and storage keys: UI, not
   book content; it stays on `alloc`.
@@ -144,9 +150,9 @@ With `alloc`:
 without a connection (`src/stardict.bats` reads their bytes: the
 .ifo's keys, the headwords' order, an article as text). Like an EPUB,
 a dictionary's files never enter wasm memory to stay: they are stored
-from the JS side (file-input's `idb_put`) and read back by ranges. Its
-import checks the .ifo and the .idx's size, every record of the .idx
-and .syn, and a .dict.dz's chunk table, and stores a table ('X') of
+from the JS side (bridge's `$BF.file_idb_put`) and read back by
+ranges. Its import checks the .ifo and the .idx's size, every record
+of the .idx and .syn, and a .dict.dz's chunk table, and stores a table ('X') of
 every 64th headword of each with where its record is; a lookup
 binary-searches it and reads one block of records. An article is
 shown as text only (`article_text`): HTML and XDXF tags are dropped,
@@ -172,8 +178,10 @@ writes (again after a conflict, up to 3 tries), and only once the file
 is written does this device take the merge, so a failed sync changes
 nothing here. It runs when the app opens, when a book is opened, when
 the page is hidden, and from the screen's Sync now (`LSync`,
-`sync-screen`, opened from the library menu; Turn off goes through
-Undo).
+`sync-screen`, opened from the Settings screen's Sync row; Turn off
+goes through Undo). That row says sync's state in short
+(`sync_summary_show`, refreshed with the screen's status line): "Off",
+"WebDAV · synced 2 min ago", or how the last sync failed.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -207,7 +215,7 @@ with Get; its next and previous pages; its search template
 description that holds one, fetched after the page. Every address is
 resolved against the page's own (`src/url.bats`, RFC 3986). Get
 fetches the EPUB acquisition link (an EPUB 3 one first), puts its
-bytes on the JS side (file-input's `file_store`) and imports them as a
+bytes on the JS side (bridge's `$BF.file_store`) and imports them as a
 picked file is (`import_fetched`), so a book already there is asked
 about. Where the fetch fails (in a browser, a page without CORS), Get
 gives way to a download link (`ui_download_nn`) "then import it". A
@@ -258,6 +266,115 @@ again.
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
+
+## The platform, in Bats
+
+What the browser and the Android app offer beyond the page (reading
+aloud, full screen, the rotation lock, the brightness, sharing,
+installing, keeping the storage, the local time, files opened with the
+app) is quire's own logic, on bridge's typed atoms (each with its
+`*_available`, and each JS answer decoded into a datatype that is
+matched exhaustively), not pwa's page scripts (bats-lang/pwa#49): no
+element carries a `data-pwa-*` marker and no rule keys on a `pwa-*`
+class, so pwa's scripts act on nothing of quire's. A control is shown
+only where its platform has it, by its own `data-hide`.
+
+* **Reading aloud** (`src/read_aloud.bats`): Read aloud (the bottom
+  bar) reads the chapter shown from the first sentence on the page
+  (halving the sentences by where each starts against the page:
+  `placement`, `Before | OnPage | After`, across as the book reads, down
+  when scrolled), Read from here from the sentence the selection starts
+  in. A chapter's sentences are its `script` (`src/reader.bats`): the
+  text of each block holding no other block (a paragraph, a heading, a
+  list item, a quotation, a term, a description, a caption, a cell,
+  preformatted text), a ruby's `rt`, `rtc` and `rp` left out but their
+  content nodes counted as render makes them (search and render's walk,
+  a third time), cut by bridge's `segment_sentences` in the book's
+  language; each sentence knows its text and where it is on the page
+  (content node and UTF-16 offset at each end). Each is said by
+  `speech_speak`, marked with `mark_range` as mark 5
+  (`::highlight(bats-mark-5)`, the search hit's proven pair), and when
+  the next one starts past the page the page is turned by
+  `reader_turn_on` (the next page button's turn, as a promise of
+  `turned`: `TurnedPage | TurnedChapter | NotTurned`), into the next
+  chapter too, at most 3 turns for one sentence; reading stops where
+  nothing turns. The state is one `aloud`: `Silent`, `Loading` (a
+  script being made), `Saying` (a sentence, its utterance's number),
+  `Turning` (a turn awaited, for a sentence or the chapter's end:
+  `turn_for`) or `Paused`; each run is numbered, so what an earlier
+  run started is dropped. A pause cancels what is said and says that
+  sentence again on resume, when it is still on the page shown (else
+  from the page's first): `speechSynthesis.pause()` stops for good on
+  Android's Chrome and after some 15 s on desktop Chrome. Read aloud is
+  pressed (`aria-pressed`) while it reads, and the screen kept awake
+  (`keep_awake`; the reader keeps it awake anyway). The speed
+  (`speech_rate`, 0.75 to 2 times) and the voice of each language (by
+  the language's primary subtag, the voices whose language has it)
+  are kept with the settings, outside the settings record (bytes 20
+  and 23 on of "S2", as `ruby` is), so like them they are not saved
+  over settings that could not be read (`storage_savable`, #174). They are settings like the others,
+  and so are the brightness and the rotation lock: in the backup
+  (`readingSpeed`, `voices`, `brightness`, `rotationLocked`) and reset
+  with the settings, Undo putting them back (`set_reset_undoable`;
+  `screen_controls_apply` sets the screen again). Going to the library, opening
+  another book, or the page going away (`pagehide`) stops reading.
+* **The screen** (`src/screen_controls.bats`, the typography panel's
+  Screen row): Full screen (`fullscreen_*`, pressed as
+  `listen_fullscreen` says), Lock rotation (`orientation_*`, a
+  `rotation` kept with the settings and locked again as the app
+  starts), and Brightness (`brightness_*`, the app only: a
+  `brightness_choice`, the system's or 10 to 100%, kept with the
+  settings and set again as the app starts).
+* **Sharing** (`src/sharing.bats`): the selection, quoted and cited
+  ("“…”\n— Author, Title"), by `share_text`; the annotations' Markdown
+  file (`annot_export` to `ToShare`) by `share_file` where files can be
+  shared (`share_as`: `AsFile | AsText`), else, or when the platform
+  refuses it as a file (`FilesNotShareable`), as its text.
+* **Installing and keeping the storage** (`src/platform.bats`): Install
+  Quire is shown while the browser offers to install the app
+  (`install_prompt_available`, `listen_install_prompt`) and asks for it
+  (`install_prompt`); the Home Screen hint shows on iOS Safari only
+  (`is_ios_browser`, `src/library.bats`). The storage is asked to be
+  kept (`storage_persist`) once, after the first book is imported, and
+  the library menu says whether it is (`storage_persisted` at startup).
+* **The local time** (`src/local_time.bats`): its offset from UTC
+  (`timezone_offset_minutes`) and whether it is night (22:00 to 07:00,
+  from `epoch_millis`), for the auto theme (checked each minute while a
+  book is open, through the timer, and at each page turn) and the
+  reading statistics' local day.
+* **Files opened with the app** (`launchQueue`, the share target, the
+  Android app's files) arrive on bridge's external-file path, which the
+  library imports (`OnExternalFiles`); pwa writes no JS of its own
+  (bats-lang/pwa#49), so bridge's service worker keeps a file shared
+  with the installed web app, and bridge's `batsNative` entry points
+  are what the Android activity calls.
+
+## What allocates is linear
+
+wasm has no garbage collector, so outside `$UNSAFE` nothing that
+allocates is non-linear (bats-lang/bats#224): a type whose constructor
+carries data is a `datavtype`, consumed by a `case+ ~` match (a list
+has a `_free` walk); a closure is a `lincloptr1`, made with `llam`.
+
+Quire never frees a closure itself (`cloptr_free` needs `$UNSAFE`):
+each one is handed to a library that runs it once and frees it, a
+promise (`$P.finish`, `$P.and_then`) or the bridge (a listener of the
+`regs` table, `ui_listen_all`). What waits for a later answer keeps a
+promise's resolver, not a closure: the Undo offer (`undo_offer`
+returns the promise of how it `settled`: `Undone` or `Final`), the
+dialog (`modal_open` and `modal_confirm` return the promise of its
+`reply`: `Accepted` or `Declined`), a sync's round (`_rounds` in
+`src/sync.bats`). The caller hands its continuation to that promise,
+and the cell resolves it exactly once, so what would not have run
+before (an undo made final, a dialog's other button) still runs,
+told so by the value, and is freed. A function that called a closure
+for each item takes data that says what to do instead (`lib_nums_set`,
+`counted` in `src/annot.bats`, `regroup` in `src/library.bats`).
+
+A promise's payload type implements `$P.dispose`, before its first use
+in each module that makes a promise of it (`$P.create`, `$P.ret`,
+`$P.resolved`): `bats check` does not catch a missing one, only the C
+compile of `bats build` does.
 
 ## What the types guarantee about the interface
 
@@ -335,34 +452,85 @@ Nothing is lost at a click, except by emptying the Trash:
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
-annotation (`src/annot.bats`) have no `#pub`. Emptying runs only as the
-action handed to the dialog by `lib_ask_empty_trash`, and the dialog
-runs it only from its second button's click: the dialog registers
-that listener itself (`modal_listen`) and its answer function is not
-exported, so other code can dismiss a dialog (`modal_dismiss`) but
-never confirm one. A destructive question's title, text, button verb
+annotation (`src/annot.bats`) have no `#pub`. Emptying runs only in
+`lib_ask_harm`, when the promise of the dialog's answer
+(`modal_confirm`) resolves `Accepted`, and only the dialog's second
+button's click resolves it so: the dialog registers that listener
+itself (`modal_listen`) and its answer function is not exported, so
+other code can dismiss a dialog (`modal_dismiss`, which answers
+`Declined`) but never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
 
-The overlays (the menus, book info and the reader's panels) are a
-`layer` (`src/layer.bats`), whose element ids only that module knows:
-they are shown and hidden only by `layer_open` and `layer_close`, which
-keep the stack of open overlays, last opened on top. Escape answers the
-dialog if one is open, and otherwise closes the top of that stack
-(`layer_escape`), whatever opened it.
+No promise's value is dropped unread (`$P.discard` is not used): a
+chain ends with `$P.finish`, and a value it ignores is written out as
+`llam(_) => ()`, with a comment saying why losing it is harmless (a
+cover, a hint, a delete nothing reads again). What fails is said
+(`src/notice.bats`): the error banner (`error-banner`, `RAlert`) is a
+child of `bats-root`, so it shows over the library and the reader
+alike. A write of the reader's own data (the library, annotations,
+settings, statistics, catalogues, dictionaries, sync's store) ends in
+`save_checked`, which says once a session that storage may be full; a
+book whose own file was not stored is named (`_book_store_checked` in
+`src/import.bats`). A chapter that cannot be shown leaves the reader on
+the page it was on (`_jump_checked` in `src/reader.bats`), or, as a book
+opens, back in the library; either way the banner says why. A copy is
+confirmed by the copy status (`copy-status`, `RStatus`), apart from the
+Undo toast.
+
+A read of storage that failed is never taken for an empty one (#174):
+`lookup_bytes` and `lookup_content` (`src/book.bats`) answer
+`StoredUnreadable` / `ContentUnreadable` apart from nothing stored, so
+every load must say what it does then. A record each save rewrites
+whole (the library, settings, statistics, reading speed, catalogues,
+dictionaries, sync's state, a book's annotations) that could not be
+read is not saved this session (`src/storage.bats`: its save checks
+`storage_savable`), books are not added to an unread library, and an
+unread book's annotations cannot be made; the banner says so. A backup
+that could not read a book's notes is not made.
+
+The overlays (the menus, book info, the reader's panels and the full
+screens: Settings, Sync) are a `layer` (`src/layer.bats`), whose
+element ids only that module knows: they are shown and hidden only by
+`layer_open` and `layer_close`, which keep the stack of open overlays,
+last opened on top. Escape answers the dialog if one is open, and
+otherwise closes the top of that stack (`layer_escape`), whatever
+opened it: from Sync, Escape goes back to Settings, and another closes
+Settings.
+
+The Settings screen (`LSettings`, `settings-screen`, made by `app.bats`
+and wired by `_wire_settings_screen` in `src/bin/quire.bats`) follows
+Android's settings pattern: one screen of groups, each complex area a
+screen of its own opened from a row that shows its state. It opens
+from the library menu's Settings and from the reader's top bar (the
+gear after Search: the bottom bar, with Contents and Typography, has
+no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
+(Export backup, and Restore backup: the input `backup-file`), the daily
+reading goal (also in the statistics panel; `stats_goal_show` marks
+both), and Reset settings and Factory reset, each with its Undo. A
+restore or a factory reset from the reader goes back to the library
+first. The library menu keeps Install, the storage notes, Settings,
+Reading statistics, Catalogues, Empty Trash (the red harm item) and
+Close. While Settings is open over the reader, keys are its own, not
+page turns.
 
 The page turns by a horizontal drag, recognized by the gestures package
-(its classifier and drag state machine are proven there): bridge's
-`listen_gestures` on the reader view (`OnGestures("reader")`) sends batched
-pointer records, `_gesture_batch` in `src/bin/quire.bats` feeds them to
-the recognizer, a pan scrolls the page with the finger (`reader_pan`), a
-commit turns it and a cancel puts it back. The page (`page`, region 1,
-`data-gesture-region`) takes touch and pen only, so a mouse drag still
-selects text; its CSS touch-action comes from the same axes the region
-is declared with (`page_turn_axes` in `src/style.bats`). A drag's end
-suppresses the click the browser sends after it (`_dragged`). The shim
-captures a mouse pointer only once it has moved more than 4 px: capture
-at pointerdown would send the click to the reader view instead of the
-button under it, so no button in the reader could be clicked.
+(its classifier and drag state machine are proven there). Bridge's
+`listen_pointer` on the reader view (`OnPointer("reader")`) sends each raw
+pointer record. `_gesture_record` in `src/bin/quire.bats` hands it to the
+gestures package's pointer source (`gestures_raw`), which batches the
+records per frame and feeds the recognizer. The source answers with
+gesture events and with actions for the host: `CapturePointer` (done by
+`ui_pointer_capture`) or `WantFrame` (bridge's `animation_frame`, then
+`gestures_frame`, at most `FRAME_ROUNDS` frames in a row). A pan scrolls
+the page with the finger (`reader_pan`), a commit turns it and a cancel
+puts it back. The page (`page`, region 1, `data-gesture-region`) takes
+touch and pen only, so a mouse drag still selects text; its CSS
+touch-action comes from the same axes the region is declared with
+(`page_turn_axes` in `src/style.bats`). A drag's end suppresses the click
+the browser sends after it (`_dragged`). The source captures a mouse
+pointer only once it has moved more than 4 px: capture at pointerdown
+would send the click to the reader view instead of the button under it,
+so no button in the reader could be clicked.
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
@@ -403,3 +571,6 @@ each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot
 (of 128) is the media query listener's (`ui_media_listener`), which
 shares the bridge's table, so no listener of the table can take it.
+The platform's typed listeners take their slots in the same table:
+full screen's (`RFullscreen`), speech's (`RSpeech`) and the install
+offer's (`RInstallOffer`), each given its event as bridge decodes it.

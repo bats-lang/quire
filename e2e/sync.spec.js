@@ -7,10 +7,14 @@ import { test, expect } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
-  selectText, selectionButton, showChrome, control, oneColumn, pageShown, cards,
+  selectText, selectionButton, showChrome, control, clickControl, oneColumn, pageShown, cards,
+  librarySettings, settingsButton, settingsScreen, restoreInput,
 } from './helpers.js';
 
-const FOLDER = 'http://localhost:3737/dav/books/';
+/** The WebDAV folder: on the page's own origin, whatever port the
+    suite is served on (a request to another origin would be
+    cross-origin, and read as one the server does not let in) */
+const folder = page => new URL('/dav/books/', page.url()).href;
 const USER = 'reader';
 const PASSWORD = 'app-pass-4417';
 
@@ -68,17 +72,25 @@ const unexpected = d => d.errors.filter(e => !/status of 404/.test(e));
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 
-/** Opens the sync panel from the library menu */
+/** Opens the sync panel from Settings, opened from the library menu */
 async function openSync(page) {
-  await libraryMenu(page);
-  await menuItem(page, 'Sync').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Sync ›').click();
   await expect(panel(page)).toBeVisible();
+}
+
+/** Closes the sync panel with its Done, then Settings with its own */
+async function closeSync(page) {
+  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await expect(panel(page)).toBeHidden();
+  await settingsButton(page, 'Done').click();
+  await expect(settingsScreen(page)).toBeHidden();
 }
 
 /** Sync set up, and a first sync: the folder, user name and password */
 async function setUp(page, password = PASSWORD) {
   await openSync(page);
-  await panel(page).getByLabel('Folder URL').fill(FOLDER);
+  await panel(page).getByLabel('Folder URL').fill(folder(page));
   await panel(page).getByLabel('User name').fill(USER);
   await panel(page).getByLabel('Password').fill(password);
   await panel(page).getByRole('button', { name: 'Sync now' }).click();
@@ -88,8 +100,7 @@ async function setUp(page, password = PASSWORD) {
 async function joinSync(page) {
   await setUp(page);
   await expect(status(page)).toHaveText(/^Last synced on /);
-  await panel(page).getByRole('button', { name: 'Done' }).click();
-  await expect(panel(page)).toBeHidden();
+  await closeSync(page);
 }
 
 /** A sync from the library, done */
@@ -97,8 +108,7 @@ async function syncNow(page) {
   if (!(await panel(page).isVisible())) await openSync(page);
   await panel(page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(page)).toHaveText(/^Last synced on /);
-  await panel(page).getByRole('button', { name: 'Done' }).click();
-  await expect(panel(page)).toBeHidden();
+  await closeSync(page);
 }
 
 /** The page hidden (the app put in the background): a sync */
@@ -118,8 +128,7 @@ async function nextChapter(page, chapter) {
 
 const annotations = page => dialog(page, 'Annotations');
 async function openAnnotations(page) {
-  await showChrome(page);
-  await control(page, 'Annotations').click();
+  await clickControl(page, 'Annotations');
   await expect(annotations(page)).toBeVisible();
 }
 async function closeAnnotations(page) {
@@ -298,7 +307,7 @@ test('a sync that fails says why, and changes nothing here', async ({ browser })
   await expect(status(b.page)).toContainText("Can't reach the server.");
   server.offline = false;
   // the file was read each time, but nothing of it was taken
-  await panel(b.page).getByRole('button', { name: 'Done' }).click();
+  await closeSync(b.page);
   await openBook(b.page, 'Shared Book');
   expect((await place(b.page)).ch).toBe(1);
   await toLibrary(b.page);
@@ -314,9 +323,9 @@ test('the folder, user name and password are kept on the device, never in a back
   const a = await device(browser, server);
   await importFiles(a.page, [epubFile(book)], 1);
   await joinSync(a.page);
-  await libraryMenu(a.page);
+  await librarySettings(a.page);
   const download = a.page.waitForEvent('download');
-  await menuItem(a.page, 'Export backup').click();
+  await settingsButton(a.page, 'Export backup').click();
   const json = readFileSync(await (await download).path(), 'utf8');
   expect(json).not.toContain(PASSWORD);
   expect(json).not.toContain('dav/books');
@@ -324,7 +333,7 @@ test('the folder, user name and password are kept on the device, never in a back
   await a.page.reload();
   await expect(cards(a.page)).toHaveCount(1);
   await openSync(a.page);
-  await expect(panel(a.page).getByLabel('Folder URL')).toHaveValue(FOLDER);
+  await expect(panel(a.page).getByLabel('Folder URL')).toHaveValue(folder(a.page));
   await expect(panel(a.page).getByLabel('Password')).toHaveValue(PASSWORD);
   // turned off, and back with Undo
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
@@ -384,18 +393,19 @@ test('annotations from before ids, restored on two devices from one backup, sync
   await dialog(a.page, 'Note').getByRole('textbox', { name: 'Note' }).fill('An old note');
   await dialog(a.page, 'Note').getByRole('button', { name: 'Save' }).click();
   await toLibrary(a.page);
-  await libraryMenu(a.page);
+  await librarySettings(a.page);
   const download = a.page.waitForEvent('download');
-  await menuItem(a.page, 'Export backup').click();
+  await settingsButton(a.page, 'Export backup').click();
   const backup = JSON.parse(readFileSync(await (await download).path(), 'utf8'));
+  await settingsButton(a.page, 'Done').click();
   // as a version before ids wrote it
   for (const kept of backup.books) for (const n of kept.annotations) { delete n.id; delete n.modified; }
   const path = testInfo.outputPath('old-backup.json');
   writeFileSync(path, JSON.stringify(backup));
   for (const d of [a, b]) {
     if (d === b) await importFiles(b.page, [file], 1);
-    await libraryMenu(d.page);
-    await d.page.getByLabel('Import backup').setInputFiles([path]);
+    await librarySettings(d.page);
+    await restoreInput(d.page).setInputFiles([path]);
     await expect(dialog(d.page, 'Backup restored')).toBeVisible();
     await dialog(d.page, 'Backup restored').getByRole('button').first().click();
   }
@@ -412,4 +422,34 @@ test('annotations from before ids, restored on two devices from one backup, sync
   }
   await a.context.close();
   await b.context.close();
+});
+
+test('the Settings screen\'s Sync row says whether sync is on, and when it last synced', async ({ browser }) => {
+  const server = webdav();
+  const a = await device(browser, server, new Date('2026-06-01T10:00:00Z'));
+  const row = settingsScreen(a.page).getByRole('group', { name: 'Sync' }).getByRole('status');
+  await librarySettings(a.page);
+  await expect(row).toHaveText('Off');
+  await settingsButton(a.page, 'Done').click();
+  await joinSync(a.page);
+  await librarySettings(a.page);
+  await expect(row).toHaveText(/^WebDAV · synced (just now|1 min ago)$/);
+  await settingsButton(a.page, 'Done').click();
+  await a.page.clock.fastForward('02:00');
+  await librarySettings(a.page);
+  await expect(row).toHaveText(/^WebDAV · synced [23] min ago$/);
+  // a failure says why, in short
+  server.status = 401;
+  await settingsButton(a.page, 'Sync ›').click();
+  await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(a.page)).toContainText('The user name or password is wrong.');
+  await a.page.keyboard.press('Escape');
+  await expect(row).toHaveText('Wrong user name or password');
+  // turned off, it says so
+  server.status = null;
+  await settingsButton(a.page, 'Sync ›').click();
+  await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
+  await a.page.keyboard.press('Escape');
+  await expect(row).toHaveText('Off');
+  await a.context.close();
 });

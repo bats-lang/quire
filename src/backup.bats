@@ -11,9 +11,9 @@
 #use arith as AR
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/file-input as FI
 
 staload "ui.sats"
+staload "notice.sats"
 staload "modal.sats"
 staload "book.sats"
 staload "library.sats"
@@ -26,6 +26,7 @@ staload "app.sats"
 staload "dictionary.sats"
 staload "clock.sats"
 staload "catalogues.sats"
+staload "screen_controls.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -58,9 +59,25 @@ fn _say {text_len:pos | text_len < 256} (text: string text_len): void = let
   val () = modal_inform("Backup")
 in modal_text_lit(text) end
 
-(* The file's start: its settings, and the books' opening bracket *)
+(* The brightness: a level in percent, or "system" for the system's own *)
+fn _brightness_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 11 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 11] int stop =
+  case+ set_brightness_get() of
+  | BrightnessSystem() => jw_lit(out, position, "\"system\"")
+  | level => jw_int(out, position, brightness_percent(level))
+
+(* Whether the rotation is locked: true or false *)
+fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
+  case+ set_rotation_get() of
+  | RotationLocked() => jw_lit(out, position, "true")
+  | RotationFree() => jw_lit(out, position, "false")
+
+(* The file's start: its settings (reading aloud's speed and the voice
+   of each language, the brightness, the rotation lock among them), and
+   the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576) of
+  case+ piece_new(576 + 100 + 24866) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       val next = jw_lit(out, 0, "{\"quire\":1,\"settings\":{\"size\":")
@@ -97,6 +114,15 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, set_cols_get())
       val next = jw_lit(out, next, ",\"ruby\":")
       val next = jw_int(out, next, set_ruby_get())
+      val next = jw_lit(out, next, ",\"readingSpeed\":")
+      val next = jw_int(out, next, speech_rate_hundredths(set_speech_rate_get()))
+      (* a level in percent, or the system's own *)
+      val next = jw_lit(out, next, ",\"brightness\":")
+      val next = _brightness_json(out, next)
+      val next = jw_lit(out, next, ",\"rotationLocked\":")
+      val next = _rotation_json(out, next)
+      val next = jw_lit(out, next, ",\"voices\":")
+      val next = set_voices_json(out, next)
       val next = jw_lit(out, next, ",\"sort\":")
       val next = jw_int(out, next, lib_sort_get())
       val next = jw_lit(out, next, ",\"libraryGrid\":")
@@ -127,7 +153,7 @@ fun _names_json {l:agz}{owner:addr}{n:nat}{collection:nat | collection <= 8}
 (* The reading log's days from entries, as [day, minutes] pairs (days
    since 1970-01-01, local), each after a comma but the first *)
 fun _days_json {l:agz}{owner:addr}{n:nat}{count:nat}{position:nat | position + 26 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: days(count), first: bool)
+  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: !days(count), first: bool)
   : [stop:nat | stop <= position + 26 * count] int stop =
   case+ entries of
   | DaysNil() => position
@@ -148,6 +174,7 @@ fn _log_chunk (): jchunk =
       val @(entries, _) = stats_days()
       val next = jw_lit(out, 0, ",\"readingLog\":[")
       val next = _days_json(out, next, entries, true)
+      val () = stats_days_free(entries)
       val next = jw_lit(out, next, "]")
     in JChunk(owner, out, next) end
 
@@ -465,20 +492,24 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
-          val () = (case+ take_content(handle) of
-            | ~NoContentBytes() => _push(_text_chunk("[]"))
-            | ~ContentBytes(content_owner, content, content_len) => let
-                val annotations = annot_json(content, content_len)
-                val () = piece_free(content_owner, content)
-              in
-                case+ annotations of
+        $P.finish<$IDB.lookup>(pending, llam(found) =>
+          case+ lookup_content(found) of
+          | ~NoStoredContent() => let
+              val () = _push(_text_chunk("[]"))
+            in _export_books(book_index + 1, count, false) end
+          (* a backup that looks whole but lost a book's notes is worse
+             than none: it is not made (#174) *)
+          | ~ContentUnreadable() => let
+              val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
+            in _say("The backup could not be made: a book's notes could not be read. Try again.") end
+          | ~StoredContent(content_owner, content, content_len) => let
+              val annotations = annot_json(content, content_len)
+              val () = piece_free(content_owner, content)
+              val () = (case+ annotations of
                 | ~JNone() => _push(_text_chunk("[]"))
                 | ~JChunk(annotations_owner, annotations_bytes, annotations_len) =>
-                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len))
-              end)
-          val () = _export_books(book_index + 1, count, false)
-        in $P.ret<int>(0) end))
+                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len)))
+            in _export_books(book_index + 1, count, false) end)
       end)
 
 (* Downloads the backup, quire-backup.json *)
@@ -552,7 +583,7 @@ implement backup_orphan_put (id_high, id_low, numbers) = let
   val () = _orphan_write(record, numbers, 0)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, record_bytes, 4 + 4 * RECORD_NUMBERS))
+  val () = save_checked($IDB.idb_put(key_bytes, 15, record_bytes, 4 + 4 * RECORD_NUMBERS))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -589,7 +620,7 @@ implement backup_apply_numbers (book_index, numbers, shelf_most) = let
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
 in
-  lib_update(book_index, lam(before) => @{
+  (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(before) => lib_nums_set(book_index, @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
     added = (if added > 0 then added else before.added), opened = opened,
     chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor,
@@ -601,7 +632,7 @@ in
     shelf_modified = (if shelf_modified >= 0 then shelf_modified else before.shelf_modified),
     collections_modified = (if collections_modified >= 0 then collections_modified else before.collections_modified),
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
-    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere })
+    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)
@@ -624,12 +655,14 @@ implement backup_claim (id_high, id_low) = let
   val pending = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(record, n) =>
-      if n < 4 + 4 * RECORD_NUMBERS_FIRST then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(record, 1)) <> 79 then let val () = $A.free<byte>(record) in $P.ret<int>(0) end
+  $P.finish<$IDB.lookup>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => ()
+    (* kept, claimed on a later import: nothing is lost by waiting *)
+    | ~StoredUnreadable() => ()
+    | ~StoredBytes(record, n) =>
+      if n < 4 + 4 * RECORD_NUMBERS_FIRST then $A.free<byte>(record)
+      else if byte2int0($A.get<byte>(record, 1)) <> 79 then $A.free<byte>(record)
       else let
         val numbers = backup_numbers_new()
         val () = _orphan_read(record, n, numbers)
@@ -637,9 +670,10 @@ in
         val () = _claim_apply(id_high, id_low, numbers)
         val () = $A.free<Int>(numbers)
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
-        val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
-        val () = release_bytes(key_frozen, key_bytes)
-      in $P.ret<int>(0) end))
+        (* ignored: a record not deleted is applied again only if the
+           book is imported again, which is harmless *)
+        val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+      in release_bytes(key_frozen, key_bytes) end)
 end
 
 (* ============================================================
@@ -930,6 +964,49 @@ in
   else @(false, restored, next)
 end
 
+(* The voices object's members from position, to its closing brace:
+   each language's code (1 to 3 letters) and its voice's name (1 to 255
+   bytes), kept; any other member is passed over *)
+fun _voices_members {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16))
+  : [stop:int | position <= stop; stop <= n] @(bool, int stop) = let
+  val next = jr_ws(buf, n, position)
+in
+  if next >= n then @(false, n)
+  else if jr_is(buf, n, next, 125) then @(true, next + 1)
+  else if jr_is(buf, n, next, 44) then _voices_members(buf, n, next + 1, key)
+  else let
+    val @(found, key_len, value_start) = jr_key(buf, n, next, key, 16)
+  in
+    if ~found then @(false, value_start)
+    else if value_start >= n then @(false, n)
+    else let
+      val name = $A.alloc<byte>(255)
+      val @(is_string, name_len, stop) = jr_str(buf, n, value_start, name, 255)
+    in
+      if ~is_string then let
+        val () = $A.free<byte>(name)
+      in _voices_members(buf, n, jr_skip(buf, n, value_start), key) end
+      else if key_len < 1 then let val () = $A.free<byte>(name) in _voices_members(buf, n, stop, key) end
+      else if key_len > 3 then let val () = $A.free<byte>(name) in _voices_members(buf, n, stop, key) end
+      else if name_len < 1 then let val () = $A.free<byte>(name) in _voices_members(buf, n, stop, key) end
+      else let
+        val code = $A.alloc<byte>(3)
+        fun copy {source_loc,target_loc:agz}{source_size,target_size:nat}{count:nat | count <= source_size; count <= target_size}{i:nat | i <= count} .<count - i>.
+          (source: !$A.arr(byte, source_loc, source_size), target: !$A.arr(byte, target_loc, target_size), count: int count, i: int i): void =
+          if i >= count then ()
+          else let val () = $A.set<byte>(target, i, $A.get<byte>(source, i)) in copy(source, target, count, i + 1) end
+        val () = copy(key, code, key_len, 0)
+        val kept = $A.alloc<byte>(name_len)
+        val () = copy(name, kept, name_len, 0)
+        val () = $A.free<byte>(name)
+        val () = set_voice_set(code, key_len, KeptVoice(kept, name_len))
+        val () = $A.free<byte>(code)
+      in _voices_members(buf, n, stop, key) end
+    end
+  end
+end
+
 (* The settings object's members from position, to its closing brace,
    each applied when it is in range; the library's sort order *)
 fun _settings_members {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
@@ -947,7 +1024,31 @@ in
     else let
       val @(is_int, value, stop) = jr_int(buf, n, value_start)
     in
-      if ~is_int then _settings_members(buf, n, jr_skip(buf, n, value_start), key, sort)
+      (* the members that are not numbers: the brightness the system's
+         own, the rotation lock, the voices *)
+      if ~is_int then
+        (if jr_key_is(key, key_len, "brightness") then let
+           val () = set_brightness_set(BrightnessSystem())
+         in _settings_members(buf, n, jr_skip(buf, n, value_start), key, sort) end
+         else if jr_key_is(key, key_len, "rotationLocked") then let
+           val @(is_bool, locked, after) = jr_bool(buf, n, value_start)
+           val () = (if is_bool then set_rotation_set(if locked then RotationLocked() else RotationFree()) else ())
+           val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
+         in _settings_members(buf, n, next, key, sort) end
+         else if (if jr_key_is(key, key_len, "voices") then jr_is(buf, n, value_start, 123) else false) then let
+           val () = set_voices_clear()
+           val after = (if value_start < n then let
+               val @(_, voices_end) = _voices_members(buf, n, value_start + 1, key)
+             in voices_end end else n): [after:int | position < after; after <= n] int after
+         in _settings_members(buf, n, after, key, sort) end
+         else _settings_members(buf, n, jr_skip(buf, n, value_start), key, sort))
+        : [stop:int | position <= stop; stop <= n] @(bool, int, int stop)
+      else if jr_key_is(key, key_len, "readingSpeed") then let
+        val () = set_speech_rate_set(speech_rate_of_hundredths(value))
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "brightness") then let
+        val () = set_brightness_set(brightness_of_percent(value))
+      in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "size") then let
         val () = (if value >= 12 then (if value <= 32 then set_size_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
@@ -1128,6 +1229,8 @@ in
     val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())
     val () = set_sliders()
+    (* the brightness and the rotation lock restored, set *)
+    val () = screen_controls_apply()
     val () = lib_save()
     val () = lib_render()
   in
@@ -1146,7 +1249,7 @@ fn _backup_file_count (): int = let
   val () = release_bytes(id_frozen, id_bytes)
 in count end
 
-fn _backup_file_open (): $P.promise_pending(Int) = let
+fn _backup_file_open (): $P.promise($BF.opened, $P.Chained) = let
   val input_id = $A.alloc<byte>(11)
   val () = $A.write_text(input_id, 0, $A.text_lit("backup-file"), 11)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
@@ -1159,37 +1262,34 @@ in pending end
 
 implement backup_import () =
   if _backup_file_count() <= 0 then ()
-  else $P.discard<int>($P.and_then<Int><int>($P.vow(_backup_file_open()), lam(handle) => let
+  else $P.finish<$BF.opened>(_backup_file_open(), llam(opened) => let
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in
-    case+ $FI.claim(handle) of
-    | ~$R.none() => let
-        val () = _say("The backup could not be read.")
-      in $P.ret<int>(0) end
-    | ~$R.some(file) => let
-        val file_size = $FI.size(file)
+    case+ opened of
+    (* the choice was cleared before it was read: nothing to restore *)
+    | ~$BF.NotOpened() => ()
+    | ~$BF.OpenFailed() =>
+      _say("The backup could not be read.")
+    | ~$BF.Opened(file) => let
+        val file_size = $BF.file_size(file)
       in
         if file_size <= 0 then let
-          val () = $FI.close(file)
-          val () = _say("This file is not a Quire backup.")
-        in $P.ret<int>(0) end
+          val () = $BF.file_close(file)
+        in _say("This file is not a Quire backup.") end
         else if file_size > BACKUP_MAX_BYTES then let
-          val () = $FI.close(file)
-          val () = _say("This file is too large to be a Quire backup.")
-        in $P.ret<int>(0) end
+          val () = $BF.file_close(file)
+        in _say("This file is too large to be a Quire backup.") end
         else (case+ piece_new(file_size) of
           | ~NoPiece() => let
-              val () = $FI.close(file)
-              val () = _say("The backup could not be read: there is not enough memory.")
-            in $P.ret<int>(0) end
+              val () = $BF.file_close(file)
+            in _say("The backup could not be read: there is not enough memory.") end
           | ~Piece(owner, out) => let
-              val () = $FI.file_read(file, 0, out, file_size)
-              val () = $FI.close(file)
+              val () = $BF.file_read(file, 0, out, file_size)
+              val () = $BF.file_close(file)
               val () = _restore(out, file_size)
-              val () = piece_free(owner, out)
-            in $P.ret<int>(0) end)
+            in piece_free(owner, out) end)
       end
-  end))
+  end)
 
 end (* #target wasm *)

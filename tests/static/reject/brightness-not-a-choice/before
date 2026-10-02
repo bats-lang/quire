@@ -1,0 +1,1 @@
+(* Whether bytes[0, n) is text *)

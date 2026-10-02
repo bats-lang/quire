@@ -132,6 +132,23 @@ export async function libraryMenu(page) {
   await expect(page.getByRole('menu')).toBeVisible();
 }
 
+/** The Settings screen (sync, dictionaries, backup, the reading goal and
+    the resets) */
+export const settingsScreen = page => dialog(page, 'Settings');
+
+/** A button of the Settings screen, by its name */
+export const settingsButton = (page, name) => settingsScreen(page).getByRole('button', { name, exact: true });
+
+/** Opens the Settings screen from the library menu */
+export async function librarySettings(page) {
+  await libraryMenu(page);
+  await menuItem(page, 'Settings').click();
+  await expect(settingsScreen(page)).toBeVisible();
+}
+
+/** The Settings screen's input that restores a backup */
+export const restoreInput = page => page.getByLabel('Restore backup');
+
 /** Opens the book menu of the card with text, with its visible button */
 export async function bookMenu(page, text) {
   await card(page, text).getByRole('button', { name: 'Book menu' }).click();
@@ -294,10 +311,14 @@ export async function colours(page) {
   });
 }
 
-/** Leaves the reader for the library, through its back arrow */
+/** Leaves the reader for the library, through its back arrow (in the
+    bars, which hide themselves 5 s after they are shown: bringing them
+    up and clicking are tried again together, as clickControl does) */
 export async function toLibrary(page) {
-  await showChrome(page);
-  await page.getByRole('button', { name: 'Back to library' }).click();
+  await expect(async () => {
+    await showChrome(page);
+    await page.getByRole('button', { name: 'Back to library' }).click({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
   await expect(librarySearch(page)).toBeVisible();
 }
 

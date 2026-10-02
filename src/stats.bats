@@ -9,23 +9,26 @@
 #use promise as P
 #use result as R
 #use str as S
-#use wasm.bats-packages.dev/decompress as DC
 
 staload "ui.sats"
+staload "notice.sats"
 staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
+staload "local_time.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The days kept: a little over a year *)
 #define DAYS 400
 
 (* The days read, the latest first: each its local day (days since
    1970-01-01) and the minutes read on it *)
-#pub datatype days(int) =
-  | DaysNil(0)
+#pub datavtype days(int) =
+  | DaysNil(0) of ()
   | {count:nat} DaysCons(count + 1) of (Int, Int, days(count))
 
 val _days = ref<[count:nat] days(count)>(DaysNil())
@@ -33,6 +36,28 @@ val _days = ref<[count:nat] days(count)>(DaysNil())
    summed, as sync last saw them: shown with this device's, and kept
    apart from them (sync passes on only this device's) *)
 val _days_elsewhere = ref<[count:nat] days(count)>(DaysNil())
+
+fun _days_free {count:nat} .<count>. (entries: days(count)): void =
+  case+ entries of
+  | ~DaysNil() => ()
+  | ~DaysCons(_, _, rest) => _days_free(rest)
+
+(* entries (a copy stats_days made), let go *)
+#pub fn stats_days_free {count:nat} (entries: days(count)): void
+implement stats_days_free (entries) = _days_free(entries)
+
+(* The days a cell (_days or _days_elsewhere) holds, taken out of it *)
+fn _cell_take (cell: ref([count:nat] days(count))): [count:nat] days(count) = let
+  var taken: [count:nat] days(count) = DaysNil()
+  val () = ref_exch_elt<[count:nat] days(count)>(cell, taken)
+in taken end
+
+(* entries put in cell, the days it held let go *)
+fn _cell_put {count:nat} (cell: ref([count:nat] days(count)), entries: days(count)): void = let
+  var previous: [count:nat] days(count) = entries
+  val () = ref_exch_elt<[count:nat] days(count)>(cell, previous)
+in _days_free(previous) end
+
 (* The daily goal in minutes, 0 for none *)
 val _goal = ref<int>(0)
 
@@ -40,45 +65,8 @@ val _goal = ref<int>(0)
    The local day
    ============================================================ *)
 
-(* The digits at bytes[position, n) as a number, or -1 *)
-fun _digits_value {l:agz}{n:nat}{position:nat | position <= n} .<n - position>.
-  (bytes: !$A.arr(byte, l, n), n: int n, position: int position, value: int): int =
-  if position >= n then value
-  else let
-    val character = byte2int0($A.get<byte>(bytes, position))
-  in
-    if character < 48 || character > 57 then ~1
-    else _digits_value(bytes, n, position + 1, value * 10 + character - 48)
-  end
-
-(* The local time's offset from UTC in minutes east: the page's script
-   (pwa) keeps it in the id of an element, pwa-utc-offset- and the
-   minutes plus 1440; 0 (UTC) when it does not *)
-fn _utc_offset (): int = let
-  val selector = $A.alloc<byte>(22)
-  val () = $A.write_text(selector, 0, $A.text_lit("[id^=pwa-utc-offset-]"), 21)
-  val @(selector_frozen, selector_bytes) = $A.freeze<byte>(selector)
-  val @(selector_text, selector_rest) = $A.borrow_split<byte>(selector_frozen, selector_bytes, 21)
-  val found = $DR.query_selector(selector_text, 21)
-  val selector_bytes = $A.borrow_join<byte>(selector_frozen, selector_text, selector_rest)
-  val () = release_bytes(selector_frozen, selector_bytes)
-in
-  case+ found of
-  | ~$R.none() => 0
-  | ~$R.some(blob) => let
-      val id_len = $DC.blob_len(blob)
-    in
-      if id_len <= 15 then let val () = $DC.blob_free(blob) in 0 end
-      else if id_len > 24 then let val () = $DC.blob_free(blob) in 0 end
-      else let
-        val id_bytes = $A.alloc<byte>(id_len)
-        val () = $DC.blob_read(blob, 0, id_bytes, id_len)
-        val () = $DC.blob_free(blob)
-        val minutes = _digits_value(id_bytes, id_len, 15, 0)
-        val () = $A.free<byte>(id_bytes)
-      in if minutes < 0 then 0 else if minutes > 2880 then 0 else minutes - 1440 end
-    end
-end
+(* The local time's offset from UTC in minutes east (local_time) *)
+fn _utc_offset (): int = local_offset_minutes()
 
 #pub fn stats_offset (): int
 implement stats_offset () = _utc_offset()
@@ -95,13 +83,13 @@ in if minutes > 0 then minutes / 1440 else 0 end
 
 (* "QR1\n", the goal (i32), then each day: the day and its minutes
    (i32 each), the latest first *)
-fun _count {count:nat} .<count>. (entries: days(count)): int count =
+fun _count {count:nat} .<count>. (entries: !days(count)): int count =
   case+ entries of
   | DaysNil() => 0
   | DaysCons(_, _, rest) => 1 + _count(rest)
 
 fun _write_days {l:agz}{n:int}{count:nat}{position:nat | position + 8 * count <= n} .<count>.
-  (out: !$A.arr(byte, l, n), position: int position, entries: days(count)): void =
+  (out: !$A.arr(byte, l, n), position: int position, entries: !days(count)): void =
   case+ entries of
   | DaysNil() => ()
   | DaysCons(day, minutes, rest) => let
@@ -114,8 +102,8 @@ fn _storage_key (): [l:agz] $A.arr(byte, l, 4) = let
   val () = $A.write_text(key, 0, $A.text_lit("rlog"), 4)
 in key end
 
-(* entries with at most limit days *)
-fun _first {count:nat}{limit:nat} .<count>. (entries: days(count), limit: int limit)
+(* A copy of entries' first limit days *)
+fun _first {count:nat}{limit:nat} .<count>. (entries: !days(count), limit: int limit)
   : [kept:nat | kept <= limit] days(kept) =
   if limit <= 0 then DaysNil()
   else case+ entries of
@@ -123,7 +111,9 @@ fun _first {count:nat}{limit:nat} .<count>. (entries: days(count), limit: int li
   | DaysCons(day, minutes, rest) => DaysCons(day, minutes, _first(rest, limit - 1))
 
 fn _save (): void = let
-  val entries = _first(!_days, DAYS)
+  val all = _cell_take(_days)
+  val entries = _first(all, DAYS)
+  val () = _cell_put(_days, all)
   val count = _count(entries)
   val record = $A.alloc<byte>(8 + 8 * count)
   val () = $A.write_text(record, 0, $A.text_lit("QR1"), 3)
@@ -132,8 +122,10 @@ fn _save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count))
+  (* never over a log that could not be read (#174) *)
+  val () = (if storage_savable(StatisticsRecord()) then save_checked($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count)) else ())
   val () = release_bytes(key_frozen, key_bytes)
+  val () = _days_free(entries)
 in release_bytes(record_frozen, record_bytes) end
 
 (* The little-endian int at bytes[position, position + 4) *)
@@ -162,7 +154,9 @@ fn _elsewhere_key (): [l:agz] $A.arr(byte, l, 14) = let
 in key end
 
 fn _elsewhere_save (): void = let
-  val entries = _first(!_days_elsewhere, DAYS)
+  val all = _cell_take(_days_elsewhere)
+  val entries = _first(all, DAYS)
+  val () = _cell_put(_days_elsewhere, all)
   val count = _count(entries)
   val record = $A.alloc<byte>(8 + 8 * count)
   val () = $A.write_text(record, 0, $A.text_lit("QR1"), 3)
@@ -171,8 +165,9 @@ fn _elsewhere_save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_elsewhere_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count))
+  val () = (if storage_savable(StatisticsRecord()) then save_checked($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count)) else ())
   val () = release_bytes(key_frozen, key_bytes)
+  val () = _days_free(entries)
 in release_bytes(record_frozen, record_bytes) end
 
 fn _elsewhere_load (): void = let
@@ -180,16 +175,17 @@ fn _elsewhere_load (): void = let
   val pending = $IDB.idb_get(key_bytes, 14)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
+  $P.finish<$IDB.lookup>(pending, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ()
+      | ~StoredUnreadable() => storage_unreadable(StatisticsRecord())
+      | ~StoredBytes(record, n) =>
         if n < 8 then $A.free<byte>(record)
         else if byte2int0($A.get<byte>(record, 1)) <> 82 then $A.free<byte>(record)
         else let
-          val () = !_days_elsewhere := _read_days(record, n, 8, DAYS)
+          val () = _cell_put(_days_elsewhere, _read_days(record, n, 8, DAYS))
         in $A.free<byte>(record) end)
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 (* Reads the log stored in an earlier run *)
@@ -198,18 +194,20 @@ implement stats_load () = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
   val pending = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
-  val () = $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
+  val () = $P.finish<$IDB.lookup>(pending, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ()
+      (* a history that cannot be rebuilt: kept, not saved over *)
+      | ~StoredUnreadable() => storage_unreadable(StatisticsRecord())
+      | ~StoredBytes(record, n) =>
         if n < 8 then $A.free<byte>(record)
         else if byte2int0($A.get<byte>(record, 1)) <> 82 then $A.free<byte>(record)
         else let
           val goal = _read_i32(record, 4)
           val () = !_goal := (if goal >= 0 then (if goal <= 600 then goal else 0) else 0)
-          val () = !_days := _read_days(record, n, 8, DAYS)
+          val () = _cell_put(_days, _read_days(record, n, 8, DAYS))
         in $A.free<byte>(record) end)
-  in $P.ret<int>(0) end))
+  in () end)
   (* and the days read elsewhere *)
 in _elsewhere_load() end
 
@@ -223,15 +221,19 @@ implement stats_add (minutes) =
   if minutes <= 0 then ()
   else let
     val today = stats_today()
-    val () = (case+ !_days of
-      | DaysCons(day, day_minutes, rest) =>
-        if day = today then !_days := DaysCons(day, day_minutes + minutes, rest)
-        else !_days := _first(DaysCons(today, minutes, DaysCons(day, day_minutes, rest)), DAYS)
-      | DaysNil() => !_days := DaysCons(today, minutes, DaysNil()))
+    val () = (case+ _cell_take(_days) of
+      | ~DaysCons(day, day_minutes, rest) =>
+        if day = today then _cell_put(_days, DaysCons(day, day_minutes + minutes, rest))
+        else let
+          val longer = DaysCons(today, minutes, DaysCons(day, day_minutes, rest))
+          val kept = _first(longer, DAYS)
+          val () = _days_free(longer)
+        in _cell_put(_days, kept) end
+      | ~DaysNil() => _cell_put(_days, DaysCons(today, minutes, DaysNil())))
   in _save() end
 
 (* The minutes read on days from first_day to last_day *)
-fun _between {count:nat} .<count>. (entries: days(count), first_day: Int, last_day: Int, total: Int): Int =
+fun _between {count:nat} .<count>. (entries: !days(count), first_day: Int, last_day: Int, total: Int): Int =
   case+ entries of
   | DaysNil() => total
   | DaysCons(day, minutes, rest) =>
@@ -241,29 +243,40 @@ fun _between {count:nat} .<count>. (entries: days(count), first_day: Int, last_d
 (* The minutes read on days from first_day to last_day, here and on
    the other devices sync knows of *)
 #pub fn stats_minutes_between (first_day: Int, last_day: Int): Int
-implement stats_minutes_between (first_day, last_day) =
-  _between(!_days, first_day, last_day, 0) + _between(!_days_elsewhere, first_day, last_day, 0)
+implement stats_minutes_between (first_day, last_day) = let
+  val here = _cell_take(_days)
+  val elsewhere = _cell_take(_days_elsewhere)
+  val total = _between(here, first_day, last_day, 0) + _between(elsewhere, first_day, last_day, 0)
+  val () = _cell_put(_days, here)
+  val () = _cell_put(_days_elsewhere, elsewhere)
+in total end
 
 (* entries with minutes more read on day *)
 fun _add_day {count:nat} .<count>. (entries: days(count), day: Int, minutes: Int): [total:nat] days(total) =
   case+ entries of
-  | DaysNil() => DaysCons(day, minutes, DaysNil())
-  | DaysCons(entry_day, entry_minutes, rest) =>
+  | ~DaysNil() => DaysCons(day, minutes, DaysNil())
+  | ~DaysCons(entry_day, entry_minutes, rest) =>
     if entry_day = day then DaysCons(entry_day, entry_minutes + minutes, rest)
     else if entry_day < day then DaysCons(day, minutes, DaysCons(entry_day, entry_minutes, rest))
     else DaysCons(entry_day, entry_minutes, _add_day(rest, day, minutes))
 
 (* The days of entries added to into, the latest first *)
-fun _sum_days {count,into_count:nat} .<count>. (entries: days(count), into: days(into_count)): [total:nat] days(total) =
+fun _sum_days {count,into_count:nat} .<count>. (entries: !days(count), into: days(into_count)): [total:nat] days(total) =
   case+ entries of
   | DaysNil() => into
   | DaysCons(day, minutes, rest) => _sum_days(rest, _add_day(into, day, minutes))
 
 (* The days read, here and elsewhere, the latest first *)
-fn _all_days (): [count:nat] days(count) = _sum_days(!_days_elsewhere, !_days)
+fn _all_days (): [count:nat] days(count) = let
+  val here = _cell_take(_days)
+  val elsewhere = _cell_take(_days_elsewhere)
+  val all = _sum_days(elsewhere, _first(here, DAYS))
+  val () = _cell_put(_days, here)
+  val () = _cell_put(_days_elsewhere, elsewhere)
+in all end
 
 (* The days read in a row, back from the day wanted (the latest first) *)
-fun _in_a_row {count:nat} .<count>. (entries: days(count), wanted: Int, streak: int): int =
+fun _in_a_row {count:nat} .<count>. (entries: !days(count), wanted: Int, streak: int): int =
   case+ entries of
   | DaysNil() => streak
   | DaysCons(day, minutes, rest) =>
@@ -278,8 +291,10 @@ fun _in_a_row {count:nat} .<count>. (entries: days(count), wanted: Int, streak: 
 implement stats_streak () = let
   val today = stats_today()
   val all_days = _all_days()
-  val streak = _in_a_row(all_days, today, 0)
-in if streak > 0 then streak else _in_a_row(all_days, today - 1, 0) end
+  val up_to_today = _in_a_row(all_days, today, 0)
+  val up_to_yesterday = _in_a_row(all_days, today - 1, 0)
+  val () = _days_free(all_days)
+in if up_to_today > 0 then up_to_today else up_to_yesterday end
 
 #pub fn stats_goal_get (): int
 implement stats_goal_get () = !_goal
@@ -335,9 +350,29 @@ fn _put_books {l:agz}{position:nat | position <= 11}
   (buf: !$A.arr(byte, l, 64), position: int position, count: Int): [stop:nat | stop <= 17] int stop =
   if count = 1 then _put_text(buf, position, " book") else _put_text(buf, position, " books")
 
-(* The reading statistics panel's numbers, as they are now *)
+fn _pressed {id_len:pos | id_len < 256} (id: string id_len, pressed: bool): void =
+  if pressed then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
+
+(* The daily goal's choices, the goal's pressed: in the statistics
+   panel and on the Settings screen *)
+#pub fn stats_goal_show (): void
+implement stats_goal_show () = let
+  val goal = !_goal
+  val () = _pressed("stats-goal-off", goal = 0)
+  val () = _pressed("stats-goal-10", goal = 10)
+  val () = _pressed("stats-goal-20", goal = 20)
+  val () = _pressed("stats-goal-30", goal = 30)
+  val () = _pressed("stats-goal-60", goal = 60)
+  val () = _pressed("settings-goal-off", goal = 0)
+  val () = _pressed("settings-goal-10", goal = 10)
+  val () = _pressed("settings-goal-20", goal = 20)
+  val () = _pressed("settings-goal-30", goal = 30)
+in _pressed("settings-goal-60", goal = 60) end
+
+(* The reading statistics panel's numbers and goal, as they are now *)
 #pub fn stats_show (): void
 implement stats_show () = let
+  val () = stats_goal_show()
   val today = stats_today()
   val today_minutes = stats_minutes_between(today, today)
   val buf = $A.alloc<byte>(64)
@@ -357,12 +392,8 @@ implement stats_show () = let
   val buf = $A.alloc<byte>(64)
   val next = $S.int_to_str(buf, 0, 64, finished)
   val next = _put_books(buf, next, finished)
-  val () = ui_text_buf("stats-finished", buf, next)
-  val () = (if goal = 0 then ui_attr("stats-goal-off", APressed, "true") else ui_attr("stats-goal-off", APressed, "false"))
-  val () = (if goal = 10 then ui_attr("stats-goal-10", APressed, "true") else ui_attr("stats-goal-10", APressed, "false"))
-  val () = (if goal = 20 then ui_attr("stats-goal-20", APressed, "true") else ui_attr("stats-goal-20", APressed, "false"))
-  val () = (if goal = 30 then ui_attr("stats-goal-30", APressed, "true") else ui_attr("stats-goal-30", APressed, "false"))
-in if goal = 60 then ui_attr("stats-goal-60", APressed, "true") else ui_attr("stats-goal-60", APressed, "false") end
+in ui_text_buf("stats-finished", buf, next) end
+
 
 (* ============================================================
    Backup: the log's days, for backup.bats
@@ -371,14 +402,19 @@ in if goal = 60 then ui_attr("stats-goal-60", APressed, "true") else ui_attr("st
 (* The log's days, the latest first, as (day, minutes) pairs, and
    their count *)
 #pub fn stats_days (): [count:nat | count <= 400] @(days(count), int count)
-implement stats_days () = let val entries = _first(!_days, DAYS) in @(entries, _count(entries)) end
+implement stats_days () = let
+  val all = _cell_take(_days)
+  val entries = _first(all, DAYS)
+  val () = _cell_put(_days, all)
+  val count = _count(entries)
+in @(entries, count) end
 
 (* A restored backup's day: its minutes put where the log has none for
    it (the log keeps what this device read) *)
 fun _merge {count:nat} .<count>. (entries: days(count), day: Int, minutes: Int): [merged:nat] days(merged) =
   case+ entries of
-  | DaysNil() => DaysCons(day, minutes, DaysNil())
-  | DaysCons(entry_day, entry_minutes, rest) =>
+  | ~DaysNil() => DaysCons(day, minutes, DaysNil())
+  | ~DaysCons(entry_day, entry_minutes, rest) =>
     if entry_day = day then DaysCons(entry_day, (if entry_minutes >= minutes then entry_minutes else minutes), rest)
     else if entry_day < day then DaysCons(day, minutes, DaysCons(entry_day, entry_minutes, rest))
     else DaysCons(entry_day, entry_minutes, _merge(rest, day, minutes))
@@ -388,7 +424,11 @@ implement stats_restore_day (day, minutes) =
   if minutes <= 0 then ()
   else if day <= 0 then ()
   else if minutes > 1440 then ()
-  else !_days := _first(_merge(!_days, day, minutes), DAYS)
+  else let
+    val merged = _merge(_cell_take(_days), day, minutes)
+    val kept = _first(merged, DAYS)
+    val () = _days_free(merged)
+  in _cell_put(_days, kept) end
 
 (* Keeps the days a backup put back *)
 #pub fn stats_restored (): void
@@ -401,7 +441,7 @@ implement stats_restored () = _save()
 (* Forgets the days read elsewhere: those sync reads next are summed
    anew *)
 #pub fn stats_elsewhere_clear (): void
-implement stats_elsewhere_clear () = !_days_elsewhere := DaysNil()
+implement stats_elsewhere_clear () = _cell_put(_days_elsewhere, DaysNil())
 
 (* minutes read on day on another device *)
 #pub fn stats_elsewhere_add (day: Int, minutes: Int): void
@@ -409,7 +449,11 @@ implement stats_elsewhere_add (day, minutes) =
   if minutes <= 0 then ()
   else if day <= 0 then ()
   else if minutes > 1440 then ()
-  else !_days_elsewhere := _first(_add_day(!_days_elsewhere, day, minutes), DAYS)
+  else let
+    val added = _add_day(_cell_take(_days_elsewhere), day, minutes)
+    val kept = _first(added, DAYS)
+    val () = _days_free(added)
+  in _cell_put(_days_elsewhere, kept) end
 
 (* Keeps the days read elsewhere *)
 #pub fn stats_elsewhere_keep (): void

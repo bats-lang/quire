@@ -6,6 +6,7 @@ import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
+  librarySettings, settingsButton,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -223,7 +224,7 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   // items and the button beside it
   const colour = l => l.evaluate(e => getComputedStyle(e).color);
   const red = await colour(menuItem(page, 'Empty Trash'));
-  expect(red).not.toBe(await colour(menuItem(page, 'Factory reset')));
+  expect(red).not.toBe(await colour(menuItem(page, 'Close')));
   await menuItem(page, 'Empty Trash').click();
   const ask = dialog(page, 'Empty the Trash?');
   expect(await colour(ask.getByRole('button', { name: 'Empty' }))).toBe(red);
@@ -292,8 +293,8 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await expect.poll(() => bg(page)).not.toBe(plain);
   const sepia = await bg(page);
   // it asks nothing, and offers Undo
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText(empty)).toBeVisible();
@@ -308,8 +309,8 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   for (let i = 0; i < 3; i++) await shelf(page).click();
   // without Undo, the books wait in the Trash
   await expect(shelf(page)).toHaveText('Library');
-  await libraryMenu(page);
-  await menuItem(page, 'Factory reset').click();
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
   await reload(page);
   await expect(cards(page)).toHaveCount(0);
@@ -424,9 +425,26 @@ test('a file handed over by the host is imported', async ({ page }) => {
   const errors = await start(page);
   const epub = epubFile({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true });
   await page.route('**/_capacitor_file_/**', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
-  await page.evaluate(() => globalThis.batsFetchExternal('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/data/cache/incoming/in1.bin', 'smoke-share'));
   await expect(card(page, 'Shared With Quire')).toContainText('Smoke Test', { timeout: 30000 });
   expect(errors).toEqual([]);
+});
+
+// A handed-over file whose URL cannot be fetched is named in the error
+// banner, and the files handed over after it are still imported
+test('a file handed over by the host that cannot be read is said, and the next is imported', async ({ page }) => {
+  const errors = await start(page);
+  const epub = epubFile({ title: 'After The Gone One', author: 'Smoke Test', chapters: 1 });
+  await page.route('**/_capacitor_file_/gone', r => r.fulfill({ status: 404, body: '' }));
+  await page.route('**/_capacitor_file_/next', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/gone', 'gone.epub'));
+  const alert = page.getByRole('alert');
+  await expect(alert).toContainText('gone.epub could not be read.');
+  await expect(cards(page)).toHaveCount(0);
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/next', 'next.epub'));
+  await expect(card(page, 'After The Gone One')).toBeVisible({ timeout: 30000 });
+  // the browser's own report of the 404 is the one message
+  expect(errors).toEqual(['console: Failed to load resource: the server responded with a status of 404 (Not Found)']);
 });
 
 // EPUB Accessibility 1.1's discovery metadata, shown in the W3C
@@ -652,10 +670,19 @@ test('a collection is made from a book\'s menu, shows its books, and is renamed 
   expect(errors).toEqual([]);
 });
 
-// Installing: the page's script (pwa) marks the page pwa-can-install
-// where the browser offers to, and pwa-ios-browser on iOS Safari
-// outside the Home Screen; here the tests mark it
-const markPage = (page, name) => page.evaluate(n => document.documentElement.classList.add(n), name);
+// Installing (platform.bats, on bridge's app atoms): the browser's offer
+// (beforeinstallprompt, here made by the test, which counts the prompts
+// it is asked for); and iOS Safari outside the Home Screen
+// (navigator.standalone false, which only iOS defines)
+const offerInstall = page => page.evaluate(() => {
+  const offer = new Event('beforeinstallprompt', { cancelable: true });
+  offer.prompt = () => { window.prompted = (window.prompted || 0) + 1; return Promise.resolve(); };
+  offer.userChoice = Promise.resolve({ outcome: 'dismissed' });
+  window.dispatchEvent(offer);
+});
+const iosBrowser = page => page.addInitScript(() => {
+  Object.defineProperty(Navigator.prototype, 'standalone', { get: () => false, configurable: true });
+});
 
 test('Install Quire is offered in the library menu only where the browser can install it', async ({ page }) => {
   const errors = await start(page);
@@ -663,18 +690,21 @@ test('Install Quire is offered in the library menu only where the browser can in
   const install = menuItem(page, 'Install Quire');
   await expect(install).toBeHidden();
   await page.keyboard.press('Escape');
-  await markPage(page, 'pwa-can-install');
+  await offerInstall(page);
   await libraryMenu(page);
   await expect(install).toBeVisible();
-  await expect(install).toHaveAttribute('data-pwa-install', 'y');
   await install.click();
   await expect(page.getByRole('menu', { name: 'Library menu' })).toBeHidden();
+  await expect.poll(() => page.evaluate(() => window.prompted)).toBe(1);
+  // the offer is used up
+  await libraryMenu(page);
+  await expect(install).toBeHidden();
   expect(errors).toEqual([]);
 });
 
 test('on iOS Safari, once there is a book, a hint says to add Quire to the Home Screen, until it is dismissed', async ({ page }) => {
+  await iosBrowser(page);
   const errors = await start(page);
-  await markPage(page, 'pwa-ios-browser');
   const hint = page.getByRole('status').filter({ hasText: 'Add Quire to your Home Screen' });
   // not before there is a book
   await expect(hint).toBeHidden();
@@ -686,7 +716,6 @@ test('on iOS Safari, once there is a book, a hint says to add Quire to the Home 
   // never again
   await reload(page);
   await expect(card(page, 'Kept')).toBeVisible();
-  await markPage(page, 'pwa-ios-browser');
   await expect(hint).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -697,18 +726,31 @@ test('elsewhere, the Home Screen hint is not shown', async ({ page }) => {
   await expect(page.getByText('Add Quire to your Home Screen')).toBeHidden();
 });
 
+// The browser's storage, as navigator.storage says: kept or not (here
+// by what the test put in localStorage), with each persist() counted
+const storageOf = page => page.addInitScript(() => {
+  window.persistCalls = 0;
+  const kept = () => localStorage.getItem('test-kept') === 'y';
+  const storage = {
+    persisted: () => Promise.resolve(kept()),
+    persist: () => { window.persistCalls++; return Promise.resolve(kept()); },
+  };
+  Object.defineProperty(Navigator.prototype, 'storage', { get: () => storage, configurable: true });
+});
+
 test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }) => {
+  await storageOf(page);
   const errors = await start(page);
   const kept = menuItem(page, 'Your books are kept');
   const atRisk = menuItem(page, 'Your books may be cleared');
-  // as the page's script finds it: here, at risk
-  await page.evaluate(() => { const c = document.documentElement.classList; c.remove('pwa-storage-kept'); c.add('pwa-storage-at-risk'); });
+  // as the browser says: here, at risk
   await libraryMenu(page);
   await expect(kept).toBeHidden();
   await atRisk.click();
   await expect(dialog(page, 'Your books may be cleared')).toContainText('Keep your EPUB files');
   await dialog(page, 'Your books may be cleared').getByRole('button', { name: 'OK' }).click();
-  await page.evaluate(() => document.documentElement.classList.replace('pwa-storage-at-risk', 'pwa-storage-kept'));
+  await page.evaluate(() => localStorage.setItem('test-kept', 'y'));
+  await reload(page);
   await libraryMenu(page);
   await expect(atRisk).toBeHidden();
   await kept.click();
@@ -727,5 +769,54 @@ test('an EPUB the system opens with the installed app is imported', async ({ pag
     window.consume({ files: [{ getFile: () => Promise.resolve(new File([data], 'opened.epub', { type: 'application/epub+zip' })) }] });
   }, bytes);
   await expect(card(page, 'Opened From Files')).toBeVisible({ timeout: 30000 });
+  expect(errors).toEqual([]);
+});
+
+// Persistence is asked for once, after the first book is imported (the
+// files here are handed over by the host: a picked file is also asked
+// for by pwa's own page script until bats-lang/pwa#49's step 3 removes
+// it). The browser here refuses it, so every ask reaches persist()
+test('the storage is asked to be kept once, after the first book is imported', async ({ page }) => {
+  await storageOf(page);
+  const errors = await start(page);
+  const first = epubFile({ title: 'First Kept', author: 'Storage Test', chapters: 1 });
+  const second = epubFile({ title: 'Second Kept', author: 'Storage Test', chapters: 1 });
+  await page.route('**/_capacitor_file_/first', r => r.fulfill({ path: first, contentType: 'application/octet-stream' }));
+  await page.route('**/_capacitor_file_/second', r => r.fulfill({ path: second, contentType: 'application/octet-stream' }));
+  expect(await page.evaluate(() => window.persistCalls)).toBe(0);
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/first', 'first.epub'));
+  await expect(card(page, 'First Kept')).toBeVisible({ timeout: 30000 });
+  await expect.poll(() => page.evaluate(() => window.persistCalls)).toBe(1);
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/second', 'second.epub'));
+  await expect(card(page, 'Second Kept')).toBeVisible({ timeout: 30000 });
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.persistCalls)).toBe(1);
+  await libraryMenu(page);
+  await expect(menuItem(page, 'Your books may be cleared')).toBeVisible();
+  await expect(menuItem(page, 'Your books are kept')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+// A file shared with the installed web app (its manifest's
+// share_target): POSTed to share-target, kept by bridge's service
+// worker, and handed to the app as an external file once it opens at
+// ?shared=
+test('an EPUB shared with the installed web app is imported', async ({ page }) => {
+  const errors = await start(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await reload(page);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, { timeout: 15000 });
+  const bytes = (await import('node:fs')).readFileSync(epubFile({ title: 'Shared To The App', author: 'Share Target' })).toString('base64');
+  const redirected = await page.evaluate(async b64 => {
+    const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const form = new FormData();
+    form.append('file', new File([data], 'shared.epub', { type: 'application/epub+zip' }));
+    const r = await fetch('share-target', { method: 'POST', body: form, redirect: 'manual' });
+    return r.type;
+  }, bytes);
+  expect(redirected).toBe('opaqueredirect');
+  await page.goto('/?shared=1');
+  await expect(card(page, 'Shared To The App')).toBeVisible({ timeout: 30000 });
+  expect(await page.evaluate(() => location.search)).toBe('');
   expect(errors).toEqual([]);
 });

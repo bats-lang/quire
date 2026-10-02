@@ -7,14 +7,16 @@
 #use array as A
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
-#use wasm.bats-packages.dev/file-input as FI
 #use zip as Z
 #use str as S
 
 staload "pages.sats"
 staload "paths.sats"
 staload "mem.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
+staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
+staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
    [data_offset, data_offset + data_size) in the file of file_size
@@ -23,8 +25,11 @@ staload "mem.sats"
    entries *)
 #pub datavtype book_entries(file_size:int, directory_size:int, count:int) =
   | BookEntriesNil(file_size, directory_size, 0) of ()
-  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
-    BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, book_entries(file_size, directory_size, count))
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
+    BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, book_entries(file_size, directory_size, count))
+
+(* A write's answer no consumer took: nothing to free *)
+implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The file's central directory, at directory_offset, kept while the
    book is open (for its entries' names), and its entries: the archive
@@ -42,8 +47,8 @@ staload "mem.sats"
    or names no entry; count chapters *)
 #pub datavtype book_chapters(file_size:int, count:int) =
   | ChaptersNil(file_size, 0) of ()
-  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
-    Chapter(file_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
   | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
@@ -57,9 +62,9 @@ staload "mem.sats"
    reader uses them with no check. The book owns its file (a linear
    handle, closed when the book is replaced), and its index. *)
 #pub datavtype open_book =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    OpenBook of ($FI.infile(file_size), int file_size, book_index(file_size), book_spine(file_size), int data_offset, int data_size, int method, int name_offset, int name_len)
-  | {file_size:pos} Importing of ($FI.infile(file_size), int file_size, book_index(file_size))
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    OpenBook of ($BF.infile(file_size), int file_size, book_index(file_size), book_spine(file_size), int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
+  | {file_size:pos} Importing of ($BF.infile(file_size), int file_size, book_index(file_size))
   | NoBook of ()
 
 (* The open book, taken out of its cell, which is left with none: it
@@ -74,19 +79,19 @@ staload "mem.sats"
    once, into its index; when it is not an archive (or its central
    directory is over 1 MiB) book_file is closed and no book is open, so every read with the serial
    finds nothing *)
-#pub fn book_begin {file_size:pos} (book_file: $FI.infile(file_size), file_size: int file_size): int
+#pub fn book_begin {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size): int
 
 (* The book being imported, book `serial` of file_size bytes, opened
    with its OPF's regions; false when another book is open *)
-#pub fn book_finish {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: int method, name_offset: int name_offset, name_len: int name_len): bool
+#pub fn book_finish {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: $Z.compression, name_offset: int name_offset, name_len: int name_len): bool
 
 (* An entry of the file found by name: its data
    [data_offset, data_offset + data_size), method and name
    [name_offset, name_offset + name_len) *)
 #pub datavtype entry_hit(file_size:int) =
-  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    EntryHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    EntryHit(file_size) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
   | EntryMiss(file_size) of ()
 
 (* The entry named name[0, name_size) in the index of the open book,
@@ -109,8 +114,8 @@ staload "mem.sats"
 
 (* Chapter chapter_index of the open book, book `serial` *)
 #pub datavtype chapter_got =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
-    ChapterGot of (int file_size, int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, int chapter_count)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
+    ChapterGot of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, int chapter_count)
   (* The book has chapter_count chapters, but not a chapter_index-th one
      that names an entry *)
   | {chapter_count:nat} ChapterNone of (int chapter_count)
@@ -140,15 +145,16 @@ staload "mem.sats"
 
 (* The open book's size and the OPF's regions in it *)
 #pub typedef book_meta =
-  [file_size:pos][data_offset:nat][data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456][method:int | method == 0 || method == 8][name_offset:nat][name_len:pos | name_offset + name_len <= file_size; name_len < 65536]
-  @(int file_size, int data_offset, int data_size, int method, int name_offset, int name_len)
+  [file_size:pos][data_offset:nat][data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456][name_offset:nat][name_len:pos | name_offset + name_len <= file_size; name_len < 65536]
+  @(int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
 
 (* The open book's size and regions, or none when no book is open *)
 #pub fn book_meta_get(): $R.option(book_meta)
 
-(* Stores the open book's file in IndexedDB under key, from the JS side;
-   nothing when no book is open *)
-#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): void
+(* Stores the open book's file in IndexedDB under key, from the JS side:
+   the promise resolves with whether it was stored (NotStored when no
+   book is open) *)
+#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise($IDB.stored, $P.Chained)
 
 (* out[0, read_len) := bytes [offset, offset + read_len) of the open
    book, when it is book `serial` of file_size bytes; false, with out untouched, when another book is open *)
@@ -160,10 +166,20 @@ staload "mem.sats"
   | {l:agz}{n:pos | n <= 1048576} BlobBytes of ($A.arr(byte, l, n), int n)
   | NoBlobBytes of ()
 
-(* The blob a decompress promise resolved with, read whole and freed:
-   none when decompression failed, or the result is empty or over 1 MiB
-   (the book's data, checked here once) *)
-#pub fn take_blob (handle: Int): blob_bytes
+(* An event's bytes, read whole and freed: none when it has none, or
+   they are over 1 MiB *)
+#pub fn take_blob (payload: $EV.event_payload): blob_bytes
+
+(* What a read of storage found, read whole (at most 1 MiB): its bytes;
+   nothing stored there; or a read that failed. A failed read is never taken for an empty one:
+   what is saved over it would lose what could not be read (#174). One
+   too large for the reader's records (over 1 MiB) is unreadable too *)
+#pub datavtype stored_bytes =
+  | {l:agz}{n:pos | n <= 1048576} StoredBytes of ($A.arr(byte, l, n), int n)
+  | NothingStored of ()
+  | StoredUnreadable of ()
+
+#pub fn lookup_bytes (found: $IDB.lookup): stored_bytes
 
 (* The arena a piece of piece_size bytes at arena_loc came from: the
    current page's (lent out of the reader's window, see pages.bats), or
@@ -193,10 +209,32 @@ staload "mem.sats"
   | {arena_loc,piece_loc:agz}{content_size:pos} ContentBytes of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
   | NoContentBytes of ()
 
-(* The content a decompress promise resolved with, read whole and
-   freed: none when decompression failed, the result is empty, or no
-   piece can be had for it *)
-#pub fn take_content (handle: Int): content_bytes
+(* What decompress resolves with (bridge's decompressed: the content
+   as a blob, or DecompressFailed) *)
+#pub vtypedef decompressed = $BD.decompressed
+
+(* The content decompress resolved with, read whole and freed: none
+   when decompression failed, the result is empty, or no piece can be
+   had for it *)
+#pub fn take_decompressed (inflated: decompressed): content_bytes
+
+(* What a read of storage found, as content (in a piece): it, nothing
+   stored there, or a read that failed (or no piece could be had) *)
+#pub datavtype stored_content =
+  | {arena_loc,piece_loc:agz}{content_size:pos} StoredContent of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
+  | NoStoredContent of ()
+  | ContentUnreadable of ()
+
+#pub fn lookup_content (found: $IDB.lookup): stored_content
+
+(* How bridge decompresses a zip entry's data: a deflated entry is raw
+   deflate, a stored one is as it is *)
+#pub fn zip_compression (method: $Z.compression): $BD.compression
+
+(* Decompresses data[0, data_len) as method says; the promise resolves
+   with what came of it, for take_decompressed *)
+#pub fn decompress {lb:agz}{n:pos}
+  (data: !$A.borrow(byte, lb, n), data_len: int n, method: $BD.compression): $P.promise(decompressed, $P.Chained)
 
 (* An entry of an archive of file_size bytes, read by ranges: its
    compressed bytes (in a piece), method, where they are
@@ -204,8 +242,8 @@ staload "mem.sats"
    [name_offset, name_offset + name_len), both proven inside the
    archive *)
 #pub datavtype zip_got(file_size:int) =
-  | {arena_loc,piece_loc:agz}{data_size:pos | data_size <= 268435456}{method:int | method == 0 || method == 8}{data_offset:nat | data_offset + data_size <= file_size}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    ZipGot(file_size) of (piece_owner(data_size, arena_loc), $A.arrx(byte, piece_loc, data_size, arena_loc), int data_size, int method, int data_offset, int name_offset, int name_len)
+  | {arena_loc,piece_loc:agz}{data_size:pos | data_size <= 268435456}{data_offset:nat | data_offset + data_size <= file_size}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    ZipGot(file_size) of (piece_owner(data_size, arena_loc), $A.arrx(byte, piece_loc, data_size, arena_loc), int data_size, $Z.compression, int data_offset, int name_offset, int name_len)
   | ZipMissing(file_size) of ()
 
 (* index_read on the open book, when it is book `serial` of file_size
@@ -239,13 +277,13 @@ fun book_entries_rev {file_size,directory_size:int}{count,reversed_count:nat} .<
    and whose data is inside the file and fits a piece, onto found
    (newest first) *)
 fun book_entries_of {file_size:pos}{directory_size:int}{count,found_count:nat} .<count>.
-  (book_file: !$FI.infile(file_size), file_size: int file_size, refs: $Z.zip_refs(file_size, directory_size, count), found: book_entries(file_size, directory_size, found_count))
+  (book_file: !$BF.infile(file_size), file_size: int file_size, refs: $Z.zip_refs(file_size, directory_size, count), found: book_entries(file_size, directory_size, found_count))
   : [total_count:nat] book_entries(file_size, directory_size, total_count) =
   case+ refs of
   | ~$Z.zip_refs_nil() => found
   | ~$Z.zip_refs_cons(header_offset, compressed_size, method, uncompressed_size, name_offset, name_len, rest) => let
       val header = $A.alloc<byte>(30)
-      val () = $FI.file_read(book_file, header_offset, header, 30)
+      val () = $BF.file_read(book_file, header_offset, header, 30)
       val span = $Z.find_data_at(header, header_offset, compressed_size, method, uncompressed_size, file_size)
       val () = $A.free<byte>(header)
     in
@@ -260,10 +298,10 @@ fun book_entries_of {file_size:pos}{directory_size:int}{count,found_count:nat} .
 (* The file's index: its archive's end, central directory and
    every entry's local header, checked once; none when it is not an
    archive or its directory is over 1 MiB *)
-fn book_index_make {file_size:pos} (book_file: !$FI.infile(file_size), file_size: int file_size): $R.option(book_index(file_size)) = let
+fn book_index_make {file_size:pos} (book_file: !$BF.infile(file_size), file_size: int file_size): $R.option(book_index(file_size)) = let
   val tail_len = (if file_size < 65557 then file_size else 65557): [tail_len:pos | tail_len <= file_size; tail_len <= 65557] int tail_len
   val tail = $A.alloc<byte>(tail_len)
-  val () = $FI.file_read(book_file, file_size - tail_len, tail, tail_len)
+  val () = $BF.file_read(book_file, file_size - tail_len, tail, tail_len)
   val found = $Z.find_cd(tail, tail_len, file_size)
   val () = $A.free<byte>(tail)
 in
@@ -278,7 +316,7 @@ in
       in $R.none() end
       else let
         val directory = $A.alloc<byte>(directory_size)
-        val () = $FI.file_read(book_file, directory_offset, directory, directory_size)
+        val () = $BF.file_read(book_file, directory_offset, directory, directory_size)
         val refs = $Z.cd_refs(directory, end_record, file_size)
         val+ ~$Z.zip_cd_mk(_, _, _) = end_record
       in
@@ -297,8 +335,8 @@ end
    data_size), method, and its name [name_offset, name_offset +
    name_len) in the file *)
 datavtype book_hit(file_size:int) =
-  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    BookHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    BookHit(file_size) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
   | BookMiss(file_size) of ()
 
 (* The first of entries named name[0, name_size) in directory, whose
@@ -322,7 +360,7 @@ fun book_find {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_o
    index, its data read into a piece; missing when there is none, or
    when no piece can be had for the data *)
 fn index_read {file_size:pos}{name_loc:agz}{name_size:pos}
-  (book_file: !$FI.infile(file_size), index: !book_index(file_size), file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size) = let
+  (book_file: !$BF.infile(file_size), index: !book_index(file_size), file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size) = let
   val+ @BookIndex(directory, _, directory_offset, entries) = index
   val hit = book_find(directory, directory_offset, entries, name, name_size)
   prval () = fold@(index)
@@ -333,7 +371,7 @@ in
     (case+ piece_new(compressed_size) of
      | ~NoPiece() => ZipMissing()
      | ~Piece(owner, data) => let
-         val () = $FI.file_read(book_file, data_offset, data, compressed_size)
+         val () = $BF.file_read(book_file, data_offset, data, compressed_size)
        in ZipGot(owner, data, compressed_size, method, data_offset, name_offset, name_len) end)
 end
 
@@ -384,10 +422,10 @@ in
   | ~OpenBook(book_file, _, index, spine, _, _, _, _, _) => let
       val () = book_index_free(index)
       val () = book_spine_free(spine)
-    in $FI.close(book_file) end
+    in $BF.file_close(book_file) end
   | ~Importing(book_file, _, index) => let
       val () = book_index_free(index)
-    in $FI.close(book_file) end
+    in $BF.file_close(book_file) end
   | ~NoBook() => ()
 end
 
@@ -410,11 +448,13 @@ implement book_idb_put (key, key_size) = let
 in
   case+ book of
   | @OpenBook(book_file, _, _, _, _, _, _, _, _) => let
-      val stored = $FI.idb_put(key, key_size, book_file)
-      val () = $P.discard<Int>(stored)
+      val stored = $BF.file_idb_put(key, key_size, book_file)
       prval () = fold@(book)
-    in book_put(book) end
-  | _ => book_put(book)
+      val () = book_put(book)
+    in stored end
+  | _ => let
+      val () = book_put(book)
+    in $P.ret<$IDB.stored>($IDB.NotStored()) end
 end
 
 implement book_read {file_size}{offset,read_len}{out_loc}{out_owner}{out_size} (serial, file_size, offset, out, read_len) = let
@@ -424,7 +464,7 @@ in
   | @OpenBook(book_file, open_size, _, _, _, _, _, _, _) =>
     if serial = !_book_serial then
       (if open_size = file_size then let
-         val () = $FI.file_read(book_file, offset, out, read_len)
+         val () = $BF.file_read(book_file, offset, out, read_len)
          prval () = fold@(book)
          val () = book_put(book)
        in true end
@@ -433,7 +473,7 @@ in
   | @Importing(book_file, open_size, _) =>
     if serial = !_book_serial then
       (if open_size = file_size then let
-         val () = $FI.file_read(book_file, offset, out, read_len)
+         val () = $BF.file_read(book_file, offset, out, read_len)
          prval () = fold@(book)
          val () = book_put(book)
        in true end
@@ -442,20 +482,36 @@ in
   | NoBook() => let val () = book_put(book) in false end
 end
 
-implement take_blob (handle) =
-  case+ $DC.blob_claim(handle) of
+(* A blob's bytes, read whole and freed: none when it is empty or over
+   1 MiB *)
+fn _blob_bytes {n:nat} (blob: $BD.dblob(n)): blob_bytes = let
+  val blob_len = $BD.blob_len(blob)
+in
+  if blob_len <= 0 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
+  else if blob_len > 1048576 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
+  else let
+    val blob_data = $A.alloc<byte>(blob_len)
+    val () = $BD.blob_read(blob, 0, blob_data, blob_len)
+    val () = $BD.blob_free(blob)
+  in BlobBytes(blob_data, blob_len) end
+end
+
+implement take_blob (payload) =
+  case+ $EV.event_take(payload) of
   | ~$R.none() => NoBlobBytes()
-  | ~$R.some(blob) => let
-      val blob_len = $DC.blob_len(blob)
-    in
-      if blob_len <= 0 then let val () = $DC.blob_free(blob) in NoBlobBytes() end
-      else if blob_len > 1048576 then let val () = $DC.blob_free(blob) in NoBlobBytes() end
-      else let
-        val blob_data = $A.alloc<byte>(blob_len)
-        val () = $DC.blob_read(blob, 0, blob_data, blob_len)
-        val () = $DC.blob_free(blob)
-      in BlobBytes(blob_data, blob_len) end
-    end
+  | ~$R.some(blob) => _blob_bytes(blob)
+
+implement lookup_bytes (found) =
+  case+ found of
+  | ~$IDB.Found(blob) =>
+    if $BD.blob_len(blob) <= 0 then let val () = $BD.blob_free(blob) in NothingStored() end
+    else (case+ _blob_bytes(blob) of
+      | ~BlobBytes(bytes, n) => StoredBytes(bytes, n)
+      (* over 1 MiB: not one of the reader's records, and not to be
+         saved over *)
+      | ~NoBlobBytes() => StoredUnreadable())
+  | ~$IDB.Absent() => NothingStored()
+  | ~$IDB.Unreadable() => StoredUnreadable()
 
 implement piece_new (piece_size) =
   case+ page_lend(piece_size) of
@@ -474,28 +530,50 @@ implement piece_free (owner, piece) =
       val () = $A.arena_return<byte>(arena, piece)
     in $A.arena_destroy<byte>(arena) end
 
-implement take_content (handle) =
-  case+ $DC.blob_claim(handle) of
-  | ~$R.none() => NoContentBytes()
-  | ~$R.some(blob) => let
-      val content_size = $DC.blob_len(blob)
-    in
-      if content_size <= 0 then let val () = $DC.blob_free(blob) in NoContentBytes() end
-      else if content_size > 268435456 then let val () = $DC.blob_free(blob) in NoContentBytes() end
-      else (case+ piece_new(content_size) of
-        | ~NoPiece() => let val () = $DC.blob_free(blob) in NoContentBytes() end
-        | ~Piece(owner, piece) => let
-            val () = $DC.blob_read(blob, 0, piece, content_size)
-            val () = $DC.blob_free(blob)
-          in ContentBytes(owner, piece, content_size) end)
-    end
+(* A blob's content, read whole into a piece and freed *)
+fn _blob_content {n:nat} (blob: $BD.dblob(n)): content_bytes = let
+  val content_size = $BD.blob_len(blob)
+in
+  if content_size <= 0 then let val () = $BD.blob_free(blob) in NoContentBytes() end
+  else if content_size > 268435456 then let val () = $BD.blob_free(blob) in NoContentBytes() end
+  else (case+ piece_new(content_size) of
+    | ~NoPiece() => let val () = $BD.blob_free(blob) in NoContentBytes() end
+    | ~Piece(owner, piece) => let
+        val () = $BD.blob_read(blob, 0, piece, content_size)
+        val () = $BD.blob_free(blob)
+      in ContentBytes(owner, piece, content_size) end)
+end
+
+implement take_decompressed (inflated) =
+  case+ inflated of
+  | ~$BD.DecompressFailed() => NoContentBytes()
+  | ~$BD.Decompressed(blob) => _blob_content(blob)
+
+implement lookup_content (found) =
+  case+ found of
+  | ~$IDB.Found(blob) =>
+    if $BD.blob_len(blob) <= 0 then let val () = $BD.blob_free(blob) in NoStoredContent() end
+    else (case+ _blob_content(blob) of
+      | ~ContentBytes(owner, piece, size) => StoredContent(owner, piece, size)
+      (* no piece could be had for it: it could not be read *)
+      | ~NoContentBytes() => ContentUnreadable())
+  | ~$IDB.Absent() => NoStoredContent()
+  | ~$IDB.Unreadable() => ContentUnreadable()
+
+implement zip_compression (method) =
+  case+ method of
+  | $Z.Stored() => $BD.Uncompressed()
+  | $Z.Deflated() => $BD.DeflateRaw()
+
+implement decompress (data, data_len, method) =
+  $BD.decompress(data, data_len, method)
 
 implement book_begin {file_size} (book_file, file_size) = let
   val () = !_book_serial := !_book_serial + 1
   val () = (case+ book_index_make(book_file, file_size) of
     | ~$R.some(index) => book_put(Importing(book_file, file_size, index))
     | ~$R.none() => let
-        val () = $FI.close(book_file)
+        val () = $BF.file_close(book_file)
       in book_put(NoBook()) end)
 in !_book_serial end
 
@@ -712,7 +790,7 @@ implement book_abandon (serial) =
     case+ book of
     | ~Importing(book_file, _, index) => let
         val () = book_index_free(index)
-      in $FI.close(book_file) end
+      in $BF.file_close(book_file) end
     | _ => book_put(book)
   end
   else ()

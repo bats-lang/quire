@@ -49,7 +49,12 @@ function createZip(entries) {
 
     let compressedData;
     let method;
-    if (entry.store) {
+    if (entry.damaged) {
+      // deflated data that cannot be inflated: a block of the reserved
+      // type (BTYPE 3), as a damaged file has
+      compressedData = Buffer.from([0xff, 0xff, 0xff, 0xff]);
+      method = 8;
+    } else if (entry.store) {
       compressedData = rawData;
       method = 0; // stored
     } else {
@@ -210,6 +215,7 @@ function loremParagraph(seed) {
  * @param {number} opts.paragraphsPerChapter - Paragraphs per chapter (default 12)
  * @param {string|null} opts.language - The OPF's dc:language (default "en"; null leaves it out)
  * @param {string} opts.metadata - More of the OPF's metadata, as XML
+ * @param {number[]} opts.damagedChapters - Chapters (from 1) whose data cannot be inflated
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -290,7 +296,8 @@ ${rawBody}
 </body>
 </html>`;
     }
-    chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml });
+    // opts.damagedChapters: the chapters (from 1) whose data cannot be read
+    chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
 
   // Add cover image if requested (EPUB3: properties="cover-image")

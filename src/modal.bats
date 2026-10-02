@@ -5,13 +5,14 @@
 #include "share/atspre_staload.hats"
 #use array as A
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
+#use promise as P
 
 staload "ui.sats"
 staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload "mem.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The questions that lose nothing *)
 #pub datatype question =
@@ -25,31 +26,63 @@ staload "mem.sats"
    button and its red marking all come from its harm (_harm_words,
    _buttons), so a red button is always one that would lose what the
    dialog names, and nothing else is red. *)
-datatype ask =
-  | AskNothing
+datavtype ask =
   | Harmless of question
   | Harmful of harm
 
-typedef act = () -<cloref1> void
+fn _ask_free (asked: ask): void =
+  case+ asked of
+  | ~Harmless(_) => ()
+  | ~Harmful(_) => ()
 
-(* The open question with what its second button does (yes) and what
-   its first, Escape or a click outside do (no). Nothing outside this
-   module can run yes: it runs only from the second button's click,
-   whose listener this module registers (modal_listen), in _answer,
-   which is not exported. That is how what deletes or resets stays
-   behind a question: the modules that own those operations keep them
-   private and hand them to modal_confirm as yes. *)
-datatype pending = Pending of (ask, act, act)
+(* The answer a dialog was given: its second button (Accepted), or its
+   first, Escape or a click outside (Declined) *)
+#pub datatype reply = Accepted | Declined
 
-val _none: act = lam () =<cloref1> ()
-val _pending = ref<pending>(Pending(AskNothing(), _none, _none))
+implement $P.dispose<reply>(_) = ()
+
+(* The open question, with the resolver its answer resolves. Nothing
+   outside this module can answer Accepted: only the second button's
+   click does, whose listener this module registers (modal_listen), in
+   _answer, which is not exported. That is how what deletes or resets
+   stays behind a question: the modules that own those operations keep
+   them private, and do them only when the promise modal_confirm returns
+   resolves with Accepted. What a dialog leads to is a closure handed to
+   that promise, which runs it once and frees it. *)
+datavtype pending =
+  | NoPending of ()
+  | Pending of (ask, $P.resolver(reply))
+
+val _pending = ref<pending>(NoPending())
+
+fn _pending_swap (next: pending): pending = let
+  var previous: pending = next
+  val () = ref_exch_elt<pending>(_pending, previous)
+in previous end
+
+(* The question pending, answered Declined: one a new question takes
+   the place of is closed as Escape closes it *)
+fn _pending_decline (previous: pending): void =
+  case+ previous of
+  | ~NoPending() => ()
+  | ~Pending(asked, resolver) => let
+      val () = _ask_free(asked)
+    in $P.resolve<reply>(resolver, Declined()) end
+
+fn _pending_put (next: pending): void = _pending_decline(_pending_swap(next))
+
+fn _is_open (current: !pending): bool =
+  case+ current of
+  | NoPending() => false
+  | Pending(_, _) => true
 
 (* Whether a dialog is open *)
 #pub fn modal_open_now (): bool
-implement modal_open_now () =
-  case+ !_pending of
-  | Pending(AskNothing(), _, _) => false
-  | _ => true
+implement modal_open_now () = let
+  val current = _pending_swap(NoPending())
+  val open = _is_open(current)
+  val () = _pending_put(current)
+in open end
 
 typedef lit = [length:pos | length < 256] string length
 
@@ -60,9 +93,8 @@ fn _harm_words (the_harm: harm): @(lit, lit, lit) =
 
 (* The buttons' labels and the second one's tone for question asked:
    Danger(the_harm) exactly when asked is Harmful(the_harm) *)
-fn _buttons (asked: ask): @(lit, lit, tone) =
+fn _buttons (asked: !ask): @(lit, lit, tone) =
   case+ asked of
-  | AskNothing() => @("OK", "-", Plain)
   | Harmless(QInform()) => @("OK", "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
   | Harmless(QNote()) => @("Cancel", "Save", Plain)
@@ -70,9 +102,10 @@ fn _buttons (asked: ask): @(lit, lit, tone) =
   | Harmless(QRenameCollection()) => @("Cancel", "Rename", Plain)
   | Harmful(the_harm) => let val @(_, _, verb) = _harm_words(the_harm) in @("Cancel", verb, Danger(the_harm)) end
 
-fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len, yes: act, no: act): void = let
-  val () = !_pending := Pending(asked, yes, no)
+fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len): $P.promise(reply, $P.Pending) = let
   val @(first_label, second_label, second_tone) = _buttons(asked)
+  val @(answered, resolver) = $P.create<reply>()
+  val () = _pending_put(Pending(asked, resolver))
   val () = ui_text("dialog-title", title)
   val () = ui_text("dialog-button1", first_label)
   val () = ui_text("dialog-button2", second_label)
@@ -85,23 +118,28 @@ fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len,
   val () = ui_show("dialog-note", false)
   val () = ui_show("dialog-name-box", false)
   val () = ui_show("dialog", true)
-in ui_focus("dialog-button1") end
+  val () = ui_focus("dialog-button1")
+in answered end
 
-(* Opens the dialog asking the question asked, with its title: yes runs on its second
-   button, no on its first (or Escape, or a click outside) *)
-#pub fn modal_open {title_len:pos | title_len < 256} (asked: question, title: string title_len, yes: () -<cloref1> void, no: () -<cloref1> void): void
-implement modal_open (asked, title, yes, no) = _show(Harmless(asked), title, yes, no)
+(* Opens the dialog asking the question asked, with its title: the
+   promise resolves with its answer, Accepted for its second button,
+   Declined for its first (or Escape, or a click outside) *)
+#pub fn modal_open {title_len:pos | title_len < 256} (asked: question, title: string title_len): $P.promise(reply, $P.Pending)
+implement modal_open (asked, title) = _show(Harmless(asked), title)
 
 (* A message with its title: OK *)
 #pub fn modal_inform {title_len:pos | title_len < 256} (title: string title_len): void
-implement modal_inform (title) = _show(Harmless(QInform()), title, _none, _none)
+(* its one button, OK, answers nothing: the answer is let go *)
+implement modal_inform (title) = $P.finish<reply>(_show(Harmless(QInform()), title), llam(_) => ())
 
-(* Asks whether to do the_harm, which yes does: the_harm's title, text and red button *)
-#pub fn modal_confirm (the_harm: harm, yes: () -<cloref1> void): void
-implement modal_confirm (the_harm, yes) = let
+(* Asks whether to do the_harm: the_harm's title, text and red button.
+   The promise resolves Accepted only from that button *)
+#pub fn modal_confirm (the_harm: harm): $P.promise(reply, $P.Pending)
+implement modal_confirm (the_harm) = let
   val @(title, text, _) = _harm_words(the_harm)
-  val () = _show(Harmful(the_harm), title, yes, _none)
-in ui_text("dialog-text", text) end
+  val answered = _show(Harmful(the_harm), title)
+  val () = ui_text("dialog-text", text)
+in answered end
 
 (* The dialog's text: buf[0, text_len) *)
 #pub fn modal_text {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536} (buf: $A.arr(byte, l, n), text_len: int text_len): void
@@ -144,25 +182,27 @@ in
   case+ value_read of
   | ~$R.none() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
   | ~$R.some(value) => let
-      val value_len = $DC.blob_len(value)
+      val value_len = $BD.blob_len(value)
     in
-      if value_len <= 0 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
-      else if value_len > 1024 then let val () = $DC.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
+      if value_len <= 0 then let val () = $BD.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
+      else if value_len > 1024 then let val () = $BD.blob_free(value) in let val empty = $A.alloc<byte>(1) in @(empty, 0) end end
       else let
         val name = $A.alloc<byte>(value_len)
-        val () = $DC.blob_read(value, 0, name, value_len)
-        val () = $DC.blob_free(value)
+        val () = $BD.blob_read(value, 0, name, value_len)
+        val () = $BD.blob_free(value)
       in @(name, value_len) end
     end
 end
 
-(* Closes the dialog and runs what its answer does: yes for the second
-   button (second), no otherwise *)
-fn _answer (second: bool): void = let
-  val+ Pending(_, yes, no) = !_pending
-  val () = !_pending := Pending(AskNothing(), _none, _none)
-  val () = ui_show("dialog", false)
-in if second then yes() else no() end
+(* Closes the dialog and resolves its promise with its answer: Accepted
+   for the second button (second), Declined otherwise *)
+fn _answer (second: bool): void =
+  case+ _pending_swap(NoPending()) of
+  | ~NoPending() => ()
+  | ~Pending(asked, resolver) => let
+      val () = _ask_free(asked)
+      val () = ui_show("dialog", false)
+    in $P.resolve<reply>(resolver, (if second then Accepted() else Declined()): reply) end
 
 (* Closes the dialog as Escape does: its first answer (no), never its
    second *)
@@ -192,18 +232,24 @@ fn _enter {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): bool =
   else byte2int0($A.get<byte>(key_bytes, 5)) = 114
 
 (* Whether the open question asks for a name *)
-fn _asks_name (): bool =
-  case+ !_pending of
-  | Pending(Harmless(QNewCollection()), _, _) => true
-  | Pending(Harmless(QRenameCollection()), _, _) => true
+fn _names (current: !pending): bool =
+  case+ current of
+  | Pending(Harmless(QNewCollection()), _) => true
+  | Pending(Harmless(QRenameCollection()), _) => true
   | _ => false
+
+fn _asks_name (): bool = let
+  val current = _pending_swap(NoPending())
+  val names = _names(current)
+  val () = _pending_put(current)
+in names end
 
 (* The dialog's listeners: its buttons and a click outside its box; and
    Enter in its name field, which answers as its second button does
    (only a question asking for a name has that field) *)
 #pub fn modal_listen {count:nat} (listeners: regs(count)): regs(count + 2)
 implement modal_listen (listeners) = let
-  val listeners = RCons(listeners, OnEl("dialog-name-box"), "keydown", lam(h) =>
+  val listeners = RCons(listeners, OnEl("dialog-name-box"), "keydown", llam(h) =>
     case+ take_blob(h) of
     | ~NoBlobBytes() => 0
     | ~BlobBytes(event_bytes, n) => let
@@ -216,7 +262,7 @@ implement modal_listen (listeners) = let
         in 0 end
         else 0
       end)
-in RCons(listeners, OnEl("dialog"), "click", lam(h) =>
+in RCons(listeners, OnEl("dialog"), "click", llam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(event_bytes, n) => let

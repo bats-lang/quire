@@ -41,7 +41,10 @@ fn _keep (): void = let
   val () = $A.write_i32(record, 0, !_latest)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 5, record_bytes, 4))
+  (* ignored: each change keeps its own stamp with it, and the next
+     stamp is at least the minute it is made in, so a latest stamp not
+     stored costs at most an order among changes of the same minute *)
+  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 5, record_bytes, 4), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -95,10 +98,13 @@ implement stamp_load () = let
   val pending = $IDB.idb_get(key_bytes, 5)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
+  $P.finish<$IDB.lookup>(pending, llam(found) => let
+    (* one that could not be read is taken as none: a stamp only orders
+       changes, and the latest is kept as they are made *)
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ()
+      | ~StoredUnreadable() => ()
+      | ~StoredBytes(record, n) =>
         if n < 4 then $A.free<byte>(record)
         else let
           val lowest = $AR.low_byte(byte2int0($A.get<byte>(record, 0)))
@@ -108,7 +114,7 @@ in
           val () = $A.free<byte>(record)
           val stored = lowest + second * 256 + third * 65536 + ((if highest < 128 then highest else 0): Int) * 16777216
         in if stored > !_latest then !_latest := stored else () end)
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 end (* #target wasm *)

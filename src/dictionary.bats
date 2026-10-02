@@ -35,10 +35,9 @@
 #use arith as AR
 #use promise as P
 #use result as R
-#use wasm.bats-packages.dev/decompress as DC
-#use wasm.bats-packages.dev/file-input as FI
 
 staload "ui.sats"
+staload "notice.sats"
 staload "layer.sats"
 staload "modal.sats"
 staload "undo.sats"
@@ -48,9 +47,14 @@ staload "library.sats"
 staload "jsonio.sats"
 staload "app.sats"
 staload "stardict.sats"
+staload "storage.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+
+(* A write's answer no consumer took: nothing to free *)
+implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The most dictionaries kept *)
 #define MOST_DICTIONARIES 64
@@ -343,7 +347,8 @@ fn _file_key {letter:nat | letter < 256} (letter: int letter, id: int): [l:agz] 
 
 fn _file_delete {letter:nat | letter < 256} (letter: int letter, id: int): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
-  val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 15))
+  (* ignored: a delete that fails leaves bytes nothing reads *)
+  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 fn _files_delete (id: int): void = let
@@ -394,7 +399,8 @@ in
     val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
     val @(key, key_len) = _id_bytes("dicts")
     val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val () = $P.discard<Int>($IDB.idb_put(key_bytes, key_len, used, stop))
+    (* never over a list that could not be read *)
+    val () = (if storage_savable(DictionariesRecord()) then save_checked($IDB.idb_put(key_bytes, key_len, used, stop)) else ())
     val () = release_bytes(key_frozen, key_bytes)
     val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
   in release_bytes(out_frozen, out_bytes) end
@@ -439,10 +445,11 @@ implement dict_load () = let
   val stored = $IDB.idb_get(key_bytes, key_len)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(data, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    | ~StoredUnreadable() => let val () = storage_unreadable(DictionariesRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, n) =>
       if n < 12 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 0) <> 81 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 1) <> 68 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
@@ -461,12 +468,12 @@ end
    ============================================================ *)
 
 datavtype file_slot =
-  | {n:nat} FileSlot of ($FI.infile(n), int n)
+  | {n:nat} FileSlot of ($BF.infile(n), int n)
   | NoFile of ()
 
 fn _slot_close (slot: file_slot): void =
   case+ slot of
-  | ~FileSlot(file, _) => $FI.close(file)
+  | ~FileSlot(file, _) => $BF.file_close(file)
   | ~NoFile() => ()
 
 fn _slot_take (cell: ref(file_slot)): file_slot = let
@@ -498,7 +505,7 @@ end
    or none *)
 datavtype loaded =
   | {idx_size,dict_size,table_size:nat}
-    Loaded of (int, $FI.infile(idx_size), int idx_size, $FI.infile(dict_size), int dict_size, file_slot, $FI.infile(table_size), int table_size)
+    Loaded of (int, $BF.infile(idx_size), int idx_size, $BF.infile(dict_size), int dict_size, file_slot, $BF.infile(table_size), int table_size)
   | Loading of (int)
   | NotLoaded of ()
 
@@ -507,10 +514,10 @@ val _loaded = ref<loaded>(NotLoaded())
 fn _loaded_free (open_dictionary: loaded): void =
   case+ open_dictionary of
   | ~Loaded(_, idx, _, dict, _, syn, table, _) => let
-      val () = $FI.close(idx)
-      val () = $FI.close(dict)
+      val () = $BF.file_close(idx)
+      val () = $BF.file_close(dict)
       val () = _slot_close(syn)
-    in $FI.close(table) end
+    in $BF.file_close(table) end
   | ~Loading(_) => ()
   | ~NotLoaded() => ()
 
@@ -538,16 +545,19 @@ val _reading = ref<int>(0)
    number reading *)
 fn _fetch {letter:nat | letter < 256} (letter: int letter, id: int, cell: ref(file_slot), reading: int): $P.promise(int, $P.Chained) = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
-  val stored = $FI.idb_get(key_bytes, 15)
+  val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ $FI.claim(handle) of
-    | ~$R.none() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
-    | ~$R.some(file) =>
-      if !_reading <> reading then let val () = $FI.close(file) in $P.ret<int>(0) end
+  $P.and_then<$BF.file_lookup><int>(stored, llam(found) =>
+    case+ found of
+    | ~$BF.FileAbsent() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    (* not read: the dictionary stays unopened, and is read again at
+       the next lookup *)
+    | ~$BF.FileUnreadable() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    | ~$BF.FileFound(file) =>
+      if !_reading <> reading then let val () = $BF.file_close(file) in $P.ret<int>(0) end
       else let
-        val size = $FI.size(file)
+        val size = $BF.file_size(file)
         val () = _slot_put(cell, FileSlot(file, size))
       in $P.ret<int>(0) end)
 end
@@ -565,15 +575,15 @@ fn _assemble (id: int, table: file_slot, idx: file_slot, dict: file_slot, syn: f
   | ~FileSlot(table_file, table_size) =>
     (case+ idx of
      | ~NoFile() => let
-         val () = $FI.close(table_file)
+         val () = $BF.file_close(table_file)
          val () = _slot_close(dict)
          val () = _slot_close(syn)
        in Loading(id) end
      | ~FileSlot(idx_file, idx_size) =>
        (case+ dict of
         | ~NoFile() => let
-            val () = $FI.close(table_file)
-            val () = $FI.close(idx_file)
+            val () = $BF.file_close(table_file)
+            val () = $BF.file_close(idx_file)
             val () = _slot_close(syn)
           in Loading(id) end
         | ~FileSlot(dict_file, dict_size) => Loaded(id, idx_file, idx_size, dict_file, dict_size, syn, table_file, table_size)))
@@ -583,8 +593,10 @@ fn _is_loaded (open_dictionary: !loaded): bool =
   | @Loaded(_, _, _, _, _, _, _, _) => let prval () = fold@(open_dictionary) in true end
   | _ => false
 
-fn _gather_finish (id: int, reading: int, again: () -<cloref1> void): void =
-  if !_reading <> reading then ()
+(* The files read for dictionary id (the reading-th read) put together:
+   true when the dictionary is open then *)
+fn _gather_finish (id: int, reading: int): bool =
+  if !_reading <> reading then false
   else let
   val table = _slot_take(_gather_table)
   val idx = _slot_take(_gather_idx)
@@ -600,25 +612,27 @@ in
       val assembled = _assemble(id, table, idx, dict, syn)
       val opened = _is_loaded(assembled)
       val () = _loaded_put(assembled)
-    in if opened then again() else () end
+    in opened end
     else let
       prval () = fold@(current)
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   | _ => let
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   end
 
 (* Reads dictionary id's files (with its .syn when kind says it has
-   one); again runs once they are open *)
-fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
+   one); the promise resolves true once they are open *)
+fn _load (id: int, kind: int): $P.promise(bool, $P.Chained) = let
   val () = _loaded_put(Loading(id))
   val reading = !_reading + 1
   val () = !_reading := reading
@@ -627,15 +641,15 @@ fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
   val () = _slot_put(_gather_dict, NoFile())
   val () = _slot_put(_gather_syn, NoFile())
   val with_syn = $AR.band_int_int(kind, 2) <> 0
-  val gathered = $P.and_then<int><int>(_fetch(88, id, _gather_table, reading), lam(_) =>
-    $P.and_then<int><int>(_fetch(73, id, _gather_idx, reading), lam(_) =>
-      $P.and_then<int><int>(_fetch(68, id, _gather_dict, reading), lam(_) =>
+  val gathered = $P.and_then<int><int>(_fetch(88, id, _gather_table, reading), llam(_) =>
+    $P.and_then<int><int>(_fetch(73, id, _gather_idx, reading), llam(_) =>
+      $P.and_then<int><int>(_fetch(68, id, _gather_dict, reading), llam(_) =>
         if with_syn then _fetch(83, id, _gather_syn, reading)
         else let val () = _slot_put(_gather_syn, NoFile()) in $P.ret<int>(0) end)))
 in
-  $P.discard<int>($P.and_then<int><int>(gathered, lam(_) => let
-    val () = _gather_finish(id, reading, again)
-  in $P.ret<int>(0) end))
+  (* each file's read keeps what it found in its slot, which
+     _gather_finish checks *)
+  $P.and_then<int><bool>(gathered, llam(_) => $P.ret<bool>(_gather_finish(id, reading)))
 end
 
 (* The dictionary closed: the next lookup reads its files again *)
@@ -647,28 +661,28 @@ fn _unload (): void = _loaded_put(NotLoaded())
 
 (* The big-endian u32 at file[at, at + 4): -1 when it is outside the
    file or 2^31 or more *)
-fn _file_u32 {n:nat} (file: !$FI.infile(n), size: int n, at: int): [value:int | value >= ~1] int value = let
+fn _file_u32 {n:nat} (file: !$BF.infile(n), size: int n, at: int): [value:int | value >= ~1] int value = let
   val at = g1ofg0(at)
 in
   if at < 0 then ~1
   else if at + 4 > size then ~1
   else let
     val bytes = $A.alloc<byte>(4)
-    val () = $FI.file_read(file, at, bytes, 4)
+    val () = $BF.file_read(file, at, bytes, 4)
     val value = u32_at(bytes, 0)
     val () = $A.free<byte>(bytes)
   in value end
 end
 
 (* Sample `sample` of the table's directory at dir_at: where its entry is, or -1 *)
-fn _entry_at {n:nat} (table: !$FI.infile(n), table_size: int n, dir_at: int, sample: int): int =
+fn _entry_at {n:nat} (table: !$BF.infile(n), table_size: int n, dir_at: int, sample: int): int =
   if sample < 0 then ~1
   else if sample > 100000000 then ~1
   else _file_u32(table, table_size, dir_at + 4 * sample)
 
 (* Sample `sample`'s record's position in its file, and its word at
    word[0, word_len); the position -1 when the table does not have it *)
-fn _sample {n:nat}{l:agz} (table: !$FI.infile(n), table_size: int n, dir_at: int, sample: int, word: !$A.arr(byte, l, 256))
+fn _sample {n:nat}{l:agz} (table: !$BF.infile(n), table_size: int n, dir_at: int, sample: int, word: !$A.arr(byte, l, 256))
   : @(int, [word_len:nat | word_len <= 255] int word_len) = let
   val entry = g1ofg0(_entry_at(table, table_size, dir_at, sample))
 in
@@ -676,7 +690,7 @@ in
   else if entry + 5 > table_size then @(~1, 0)
   else let
     val head = $A.alloc<byte>(5)
-    val () = $FI.file_read(table, entry, head, 5)
+    val () = $BF.file_read(table, entry, head, 5)
     val position = u32_at(head, 0)
     val word_len = _byte_at(head, 4)
     val () = $A.free<byte>(head)
@@ -684,18 +698,18 @@ in
     if word_len > 255 then @(~1, 0)
     else if entry + 5 + word_len > table_size then @(~1, 0)
     else let
-      val () = $FI.file_read(table, entry + 5, word, word_len)
+      val () = $BF.file_read(table, entry + 5, word, word_len)
     in @(position, word_len) end
   end
 end
 
-fn _sample_position {n:nat} (table: !$FI.infile(n), table_size: int n, dir_at: int, sample: int): int =
+fn _sample_position {n:nat} (table: !$BF.infile(n), table_size: int n, dir_at: int, sample: int): int =
   _file_u32(table, table_size, _entry_at(table, table_size, dir_at, sample))
 
 (* The first of samples [low, high) whose word does not sort before
    query (ASCII case set aside), or high *)
 fun _lower_bound {n:nat}{query_loc,word_loc:agz}{query_len:nat | query_len <= 65}{low,high:nat | low <= high} .<high - low>.
-  (table: !$FI.infile(n), table_size: int n, dir_at: int, query: !$A.arr(byte, query_loc, 65), query_len: int query_len,
+  (table: !$BF.infile(n), table_size: int n, dir_at: int, query: !$A.arr(byte, query_loc, 65), query_len: int query_len,
    low: int low, high: int high, word: !$A.arr(byte, word_loc, 256)): [found:nat | found <= high] int found =
   if low >= high then low
   else let
@@ -738,7 +752,7 @@ fun _walk {l,query_loc:agz}{n:nat}{at:nat | at <= n}{tail:nat}{query_len:nat | q
 (* query among file's records [block_start, stop) (at most BLOCK_MOST bytes
    of them): as _walk finds it, with its position in the file *)
 fn _scan {n:nat}{query_loc:agz}{tail:nat}{query_len:nat | query_len <= 65}
-  (file: !$FI.infile(n), size: int n, block_start: int, stop: int, tail: int tail,
+  (file: !$BF.infile(n), size: int n, block_start: int, stop: int, tail: int tail,
    query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(int, int) = let
   val block_start = g1ofg0(block_start)
   val stop = g1ofg0(stop)
@@ -749,7 +763,7 @@ in
   else let
     val block_len = _least(stop - block_start, BLOCK_MOST)
     val block = $A.alloc<byte>(block_len)
-    val () = $FI.file_read(file, block_start, block, block_len)
+    val () = $BF.file_read(file, block_start, block, block_len)
     val @(kind, at) = _walk(block, block_len, 0, tail, query, query_len, ~1)
     val () = $A.free<byte>(block)
   in @(kind, block_start + at) end
@@ -758,7 +772,7 @@ end
 (* query in file's records, whose samples are the table's directory at
    dir_at (samples of them): where it is, and how it matched (as _walk) *)
 fn _search {n,table_n:nat}{query_loc:agz}{tail:nat}{query_len:nat | query_len <= 65}
-  (file: !$FI.infile(n), size: int n, table: !$FI.infile(table_n), table_size: int table_n, dir_at: int, samples: int, tail: int tail,
+  (file: !$BF.infile(n), size: int n, table: !$BF.infile(table_n), table_size: int table_n, dir_at: int, samples: int, tail: int tail,
    query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(int, int) = let
   val samples = g1ofg0(samples)
 in
@@ -781,7 +795,7 @@ datavtype record_got =
   | {l:agz}{word_len:nat | word_len <= 255} RecordGot of ($A.arr(byte, l, 256), int word_len, int, int)
   | NoRecord of ()
 
-fn _idx_record {n:nat} (idx: !$FI.infile(n), size: int n, position: int): record_got = let
+fn _idx_record {n:nat} (idx: !$BF.infile(n), size: int n, position: int): record_got = let
   val position = g1ofg0(position)
 in
   if position < 0 then NoRecord()
@@ -789,7 +803,7 @@ in
   else let
     val record_len = _least(size - position, RECORD_MOST)
     val record = $A.alloc<byte>(RECORD_MOST)
-    val () = $FI.file_read(idx, position, record, record_len)
+    val () = $BF.file_read(idx, position, record, record_len)
     val zero = zero_at(record, 0, record_len)
   in
     if zero > 255 then let val () = $A.free<byte>(record) in NoRecord() end
@@ -815,7 +829,7 @@ fn _target_at {l:agz}{record_len:nat | record_len <= 261}{zero:nat | zero <= rec
   if zero + 5 > record_len then ~1 else u32_at(record, zero + 1)
 
 (* The .idx record a .syn record at position names: its number, or -1 *)
-fn _syn_target {n:nat} (syn: !$FI.infile(n), size: int n, position: int): int = let
+fn _syn_target {n:nat} (syn: !$BF.infile(n), size: int n, position: int): int = let
   val position = g1ofg0(position)
 in
   if position < 0 then ~1
@@ -823,7 +837,7 @@ in
   else let
     val record_len = _least(size - position, 261)
     val record = $A.alloc<byte>(261)
-    val () = $FI.file_read(syn, position, record, record_len)
+    val () = $BF.file_read(syn, position, record, record_len)
     val zero = zero_at(record, 0, record_len)
     val target = _target_at(record, zero, record_len)
     val () = $A.free<byte>(record)
@@ -846,7 +860,7 @@ fun _skip {l:agz}{n:nat}{at:nat | at <= n}{tail:nat} .<n - at>.
   end
 
 (* The position of the .idx's record number nth, or -1 *)
-fn _nth_position {n,table_n:nat} (idx: !$FI.infile(n), size: int n, table: !$FI.infile(table_n), table_size: int table_n, nth: int): int =
+fn _nth_position {n,table_n:nat} (idx: !$BF.infile(n), size: int n, table: !$BF.infile(table_n), table_size: int table_n, nth: int): int =
   if nth < 0 then ~1
   else let
     val sample = nth / 64
@@ -858,7 +872,7 @@ fn _nth_position {n,table_n:nat} (idx: !$FI.infile(n), size: int n, table: !$FI.
     else let
       val block_len = _least(size - block_start, 64 * RECORD_MOST)
       val block = $A.alloc<byte>(block_len)
-      val () = $FI.file_read(idx, block_start, block, block_len)
+      val () = $BF.file_read(idx, block_start, block, block_len)
       val at = _skip(block, block_len, 0, 8, nth - sample * 64)
       val () = $A.free<byte>(block)
     in if at < 0 then ~1 else block_start + at end
@@ -867,7 +881,7 @@ fn _nth_position {n,table_n:nat} (idx: !$FI.infile(n), size: int n, table: !$FI.
 (* query (query_len bytes) in the open dictionary: its headword, then
    it with ASCII case set aside, then among the .syn's other forms *)
 fn _lookup {idx_n,table_n:nat}{query_loc:agz}{query_len:nat | query_len <= 65}
-  (idx: !$FI.infile(idx_n), idx_size: int idx_n, syn: !file_slot, table: !$FI.infile(table_n), table_size: int table_n,
+  (idx: !$BF.infile(idx_n), idx_size: int idx_n, syn: !file_slot, table: !$BF.infile(table_n), table_size: int table_n,
    query: !$A.arr(byte, query_loc, 65), query_len: int query_len): record_got = let
   val idx_samples = _file_u32(table, table_size, 4)
   val @(kind, position) = _search(idx, idx_size, table, table_size, 32, idx_samples, 8, query, query_len)
@@ -926,23 +940,22 @@ fun _trim_end {l:agz}{n:pos}{start:nat}{stop:nat | start <= stop; stop <= n} .<s
   else if _trimmed(_byte_at(word, stop - 1)) then _trim_end(word, start, stop - 1)
   else stop
 
+(* What a lookup found: the word, which dict_show then shows (DictFound);
+   not the word (DictMissing); or that the dictionary's files are being
+   read for it (DictReading): its promise resolves true once they are
+   open, when the lookup can be made again *)
+#pub datavtype dict_found =
+  | DictFound of ()
+  | DictMissing of ()
+  | DictReading of $P.promise(bool, $P.Chained)
+
 (* Looks word[0, word_len) up in the first dictionary of the language
-   code[0, code_len) names: true when it is found there, and then
-   dict_show shows it. When that dictionary's files are not read yet,
-   they are read, and what dict_when_read was given runs once they are *)
+   code[0, code_len) names. When that dictionary's files are not read
+   yet, they are read (DictReading) *)
 #pub fn dict_find {code_loc,word_loc:agz}{word_size:pos}{word_len:nat | word_len <= word_size}
-  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): bool
-
-typedef act = () -<cloref1> void
-val _nothing: act = lam () =<cloref1> ()
-val _when_read = ref<act>(_nothing)
-
-(* What runs once a dictionary's files are read (a lookup again) *)
-#pub fn dict_when_read (again: () -<cloref1> void): void
-implement dict_when_read (again) = !_when_read := again
+  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): dict_found
 
 implement dict_find (code, code_len, word, word_len) = let
-  val again = !_when_read
   val () = _hit_put(NoHit())
   val code_len = g1ofg0(code_len)
   val language = (if code_len >= 0 then (if code_len <= 3 then _language_of_bytes(code, code_len) else ~1) else ~1): int
@@ -952,9 +965,9 @@ implement dict_find (code, code_len, word, word_len) = let
   val @(id, kind) = _dicts_for(list, language)
   val () = _dicts_put(DictCell(list, next_id))
 in
-  if id < 0 then false
-  else if stop - start <= 0 then false
-  else if stop - start > 64 then false
+  if id < 0 then DictMissing()
+  else if stop - start <= 0 then DictMissing()
+  else if stop - start > 64 then DictMissing()
   else let
     val current = _loaded_take()
   in
@@ -971,25 +984,24 @@ in
         case+ found of
         | ~RecordGot(headword, headword_len, offset, size) => let
             val () = _hit_put(Hit(id, headword, headword_len, offset, size))
-          in true end
-        | ~NoRecord() => false
+          in DictFound() end
+        | ~NoRecord() => DictMissing()
       end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
+    (* the files are being read already: that read's lookup is made
+       again once they are open *)
     | @Loading(loading_id) =>
-      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in false end
+      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in DictMissing() end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
     | NotLoaded() => let
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
   end
 end
 
@@ -1037,7 +1049,7 @@ end
    file's last ends with a full flush, so a final empty block is put
    after the last of them), into an arena piece *)
 fn _article_dz {dict_n,table_n:nat}{read_len:pos}
-  (id: int, dict: !$FI.infile(dict_n), dict_size: int dict_n, table: !$FI.infile(table_n), table_size: int table_n,
+  (id: int, dict: !$BF.infile(dict_n), dict_size: int dict_n, table: !$BF.infile(table_n), table_size: int table_n,
    offset: int, read_len: int read_len): void = let
   val chunk_length = _file_u32(table, table_size, 20)
   val chunk_count = _file_u32(table, table_size, 24)
@@ -1068,7 +1080,7 @@ in
         else (case+ piece_new(piece_len) of
           | ~NoPiece() => _article_unread()
           | ~Piece(owner, compressed) => let
-              val () = $FI.file_read(dict, compressed_start, compressed, compressed_len)
+              val () = $BF.file_read(dict, compressed_start, compressed, compressed_len)
               (* a stored block, final and empty: 1, then LEN 0 and NLEN 0xFFFF *)
               val () = $A.write_byte(compressed, compressed_len, 1)
               val () = $A.write_byte(compressed, compressed_len + 1, 0)
@@ -1078,19 +1090,18 @@ in
               val inflate_len = piece_len - ((if finishing then 0 else 5): [cut:int | cut == 0 || cut == 5] int cut)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
               val @(used, rest) = $A.borrow_split<byte>(compressed_frozen, compressed_bytes, inflate_len)
-              val inflating = $DC.decompress(used, inflate_len, 8)
+              val inflating = decompress(used, inflate_len, $BD.DeflateRaw())
               val compressed_bytes = $A.borrow_join<byte>(compressed_frozen, used, rest)
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
               val relative = offset - first * chunk_length
             in
-              $P.discard<int>($P.and_then<Int><int>($P.vow(inflating), lam(handle) =>
-                case+ take_content(handle) of
-                | ~NoContentBytes() => let val () = _article_unread() in $P.ret<int>(0) end
+              $P.finish<decompressed>(inflating, llam(inflated) =>
+                case+ take_decompressed(inflated) of
+                | ~NoContentBytes() => _article_unread()
                 | ~ContentBytes(content_owner, content, content_size) => let
                     val () = _inflated_show(id, content, content_size, relative, read_len)
-                    val () = piece_free(content_owner, content)
-                  in $P.ret<int>(0) end))
+                  in piece_free(content_owner, content) end)
             end)
       end
     end
@@ -1131,7 +1142,7 @@ in
           val () = _loaded_put(current)
         in _article_unread() end
       | ~Piece(owner, data) => let
-          val () = $FI.file_read(dict, offset, data, read_len)
+          val () = $BF.file_read(dict, offset, data, read_len)
           prval () = fold@(current)
           val () = _loaded_put(current)
           val () = _article_show(id, data, 0, read_len)
@@ -1284,7 +1295,10 @@ in
   else let
     val () = _unload()
     val () = _render()
-  in undo_offer("Dictionary removed", lam () => _restore(id, index), lam () => _forget(id)) end
+  in $P.finish<settled>(undo_offer("Dictionary removed"), llam(how) =>
+    case+ how of
+    | Undone() => _restore(id, index)
+    | Final() => _forget(id)) end
 end
 
 (* ============================================================
@@ -1321,14 +1335,14 @@ in
   case+ value of
   | ~$R.none() => ENGLISH
   | ~$R.some(blob) => let
-      val value_len = $DC.blob_len(blob)
+      val value_len = $BD.blob_len(blob)
     in
-      if value_len < 2 then let val () = $DC.blob_free(blob) in ENGLISH end
-      else if value_len > 3 then let val () = $DC.blob_free(blob) in ENGLISH end
+      if value_len < 2 then let val () = $BD.blob_free(blob) in ENGLISH end
+      else if value_len > 3 then let val () = $BD.blob_free(blob) in ENGLISH end
       else let
         val code = $A.alloc<byte>(3)
-        val () = $DC.blob_read(blob, 0, code, value_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, 0, code, value_len)
+        val () = $BD.blob_free(blob)
         val language = _language_of_bytes(code, value_len)
         val () = $A.free<byte>(code)
       in if language > 0 then language else ENGLISH end
@@ -1362,42 +1376,46 @@ fn _name_kind {l:agz}{name_len:nat | name_len <= 16} (tail: !$A.arr(byte, l, 16)
 
 (* What a file is, by its name's end: 1 an .ifo, 2 an .idx, 3 a .dict,
    4 a .dict.dz, 5 a .syn, 0 none of them *)
-fn _file_kind {n:nat} (file: !$FI.infile(n)): int =
+fn _file_kind {n:nat} (file: !$BF.infile(n)): int =
   case+ $BF.file_name(file) of
   | ~$R.none() => 0
   | ~$R.some(blob) => let
-      val name_len = $DC.blob_len(blob)
+      val name_len = $BD.blob_len(blob)
     in
-      if name_len <= 0 then let val () = $DC.blob_free(blob) in 0 end
+      if name_len <= 0 then let val () = $BD.blob_free(blob) in 0 end
       else let
         val tail_len = _least(name_len, 16)
         val tail = $A.alloc<byte>(16)
-        val () = $DC.blob_read(blob, name_len - tail_len, tail, tail_len)
-        val () = $DC.blob_free(blob)
+        val () = $BD.blob_read(blob, name_len - tail_len, tail, tail_len)
+        val () = $BD.blob_free(blob)
         val kind = _name_kind(tail, tail_len)
         val () = $A.free<byte>(tail)
       in kind end
     end
 
-(* The file an open promise resolved with, kept by what it is *)
-fn _keep_file (handle: Int): void =
-  case+ $FI.claim(handle) of
-  | ~$R.none() => ()
-  | ~$R.some(file) => let
-      val size = $FI.size(file)
+(* The file an open promise resolved with, kept by what it is; false
+   when it could not be read *)
+fn _keep_file (opened: $BF.opened): bool =
+  case+ opened of
+  (* gone from the input before it was read: the check finds it
+     missing *)
+  | ~$BF.NotOpened() => true
+  | ~$BF.OpenFailed() => false
+  | ~$BF.Opened(file) => let
+      val size = $BF.file_size(file)
       val kind = _file_kind(file)
-    in
-      if kind = 1 then _slot_put(_import_ifo, FileSlot(file, size))
-      else if kind = 2 then _slot_put(_import_idx, FileSlot(file, size))
-      else if kind = 3 then let
-        val () = !_import_compressed := false
-      in _slot_put(_import_dict, FileSlot(file, size)) end
-      else if kind = 4 then let
-        val () = !_import_compressed := true
-      in _slot_put(_import_dict, FileSlot(file, size)) end
-      else if kind = 5 then _slot_put(_import_syn, FileSlot(file, size))
-      else $FI.close(file)
-    end
+      val () =
+        if kind = 1 then _slot_put(_import_ifo, FileSlot(file, size))
+        else if kind = 2 then _slot_put(_import_idx, FileSlot(file, size))
+        else if kind = 3 then let
+          val () = !_import_compressed := false
+        in _slot_put(_import_dict, FileSlot(file, size)) end
+        else if kind = 4 then let
+          val () = !_import_compressed := true
+        in _slot_put(_import_dict, FileSlot(file, size)) end
+        else if kind = 5 then _slot_put(_import_syn, FileSlot(file, size))
+        else $BF.file_close(file)
+    in true end
 
 (* An index file (an .idx or a .syn) read whole, for its import *)
 datavtype index_piece =
@@ -1420,7 +1438,7 @@ fn _index_read (cell: ref(file_slot)): index_piece =
     else (case+ piece_new(size) of
       | ~NoPiece() => let val () = _slot_put(cell, FileSlot(file, size)) in BadIndex() end
       | ~Piece(owner, data) => let
-          val () = $FI.file_read(file, 0, data, size)
+          val () = $BF.file_read(file, 0, data, size)
           val () = _slot_put(cell, FileSlot(file, size))
         in IndexPiece(owner, data, size) end)
 
@@ -1597,7 +1615,7 @@ fn _dz_read (): dz_head =
       else let
         val head_len = _least(size, 70000)
         val head = $A.alloc<byte>(head_len)
-        val () = $FI.file_read(file, 0, head, head_len)
+        val () = $BF.file_read(file, 0, head, head_len)
         val () = _slot_put(_import_dict, FileSlot(file, size))
       in _dz_parse(head, head_len, size) end)
 
@@ -1676,25 +1694,31 @@ in
         val _ = _index_samples(syn, 4, table, table_size, 32 + 4 * idx_samples, syn_entries_at)
         val @(table_frozen, table_bytes) = $A.freeze<byte>(table)
         val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(88, id))
-        val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, table_bytes, table_size))
+        val () = save_checked($IDB.idb_put(key_bytes, 15, table_bytes, table_size))
         val () = release_bytes(key_frozen, key_bytes)
         val () = $A.drop<byte>(table_frozen, table_bytes)
         val () = piece_free(owner, $A.thaw<byte>(table_frozen))
       in true end)
 end
 
+(* Two stores, both kept (Stored), or not *)
+fn _both_stored (first: $IDB.stored, second: $IDB.stored): $IDB.stored =
+  case+ first of
+  | $IDB.Stored() => second
+  | $IDB.NotStored() => $IDB.NotStored()
+
 (* The file cell holds, stored under letter for dictionary id from the
    JS side, and closed *)
-fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise(Int, $P.Chained) =
+fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise($IDB.stored, $P.Chained) =
   case+ _slot_take(cell) of
-  | ~NoFile() => $P.ret<Int>(0)
+  | ~NoFile() => $P.ret<$IDB.stored>($IDB.Stored())
   | ~FileSlot(file, _) => let
       val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
-      val stored = $FI.idb_put(key_bytes, 15, file)
+      val stored = $BF.file_idb_put(key_bytes, 15, file)
       val () = release_bytes(key_frozen, key_bytes)
       (* the JS side took the file's bytes as the call was made *)
-      val () = $FI.close(file)
-    in $P.vow(stored) end
+      val () = $BF.file_close(file)
+    in stored end
 
 fn _free_entry {name_loc,types_loc:agz} (name: $A.arr(byte, name_loc, 256), types: $A.arr(byte, types_loc, 16)): void = let
   val () = $A.free<byte>(name)
@@ -1746,19 +1770,25 @@ in
     else let
       val kind = ((if compressed then 1 else 0): int) + ((if has_syn then 2 else 0): int)
       val language = !_import_language
-      val stored = $P.and_then<Int><Int>(_file_store(_import_idx, 73, id), lam(_) =>
-        $P.and_then<Int><Int>(_file_store(_import_dict, 68, id), lam(_) =>
-          _file_store(_import_syn, 83, id)))
+      (* each file stored in turn; NotStored when one was not, so one
+         that failed is not lost *)
+      val stored = $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_idx, 73, id), llam(idx_status) =>
+        $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_dict, 68, id), llam(dict_status) =>
+          $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_syn, 83, id), llam(syn_status) =>
+            $P.ret<$IDB.stored>(_both_stored(_both_stored(idx_status, dict_status), syn_status)))))
       val () = _slot_put(_import_ifo, NoFile())
       val+ ~DictCell(list, next_id) = _dicts_take()
       val () = _dicts_put(DictCell(_dicts_join(list, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil())), next_id))
       val () = _unload()
       val () = _render()
     in
-      $P.discard<Int>($P.and_then<Int><Int>(stored, lam(_) => let
+      $P.finish<$IDB.stored>(stored, llam(status) => let
         val () = _save()
-        val () = ui_text("dictionaries-status", "Dictionary added.")
-      in $P.ret<Int>(0) end))
+      in
+        case+ status of
+        | $IDB.Stored() => ui_text("dictionaries-status", "Dictionary added.")
+        | $IDB.NotStored() => ui_text("dictionaries-status", "The dictionary's files could not be stored. The browser's storage may be full: free some space, remove it and import it again.")
+      end)
     end
   end
 end
@@ -1782,12 +1812,12 @@ fn _import_check (): void =
   case+ _slot_take(_import_ifo) of
   | ~NoFile() => _refuse("The dictionary's .ifo file is missing.")
   | ~FileSlot(ifo_file, ifo_size) =>
-    if ifo_size <= 0 then let val () = $FI.close(ifo_file) in _refuse("This is not a StarDict dictionary's .ifo file.") end
-    else if ifo_size > 65536 then let val () = $FI.close(ifo_file) in _refuse("This is not a StarDict dictionary's .ifo file.") end
+    if ifo_size <= 0 then let val () = $BF.file_close(ifo_file) in _refuse("This is not a StarDict dictionary's .ifo file.") end
+    else if ifo_size > 65536 then let val () = $BF.file_close(ifo_file) in _refuse("This is not a StarDict dictionary's .ifo file.") end
     else let
       val ifo = $A.alloc<byte>(ifo_size)
-      val () = $FI.file_read(ifo_file, 0, ifo, ifo_size)
-      val () = $FI.close(ifo_file)
+      val () = $BF.file_read(ifo_file, 0, ifo, ifo_size)
+      val () = $BF.file_close(ifo_file)
       val stardict = ifo_is_stardict(ifo, ifo_size)
       val offset_bits = ifo_number(ifo, ifo_size, "idxoffsetbits")
       val idx_file_size = ifo_number(ifo, ifo_size, "idxfilesize")
@@ -1844,10 +1874,12 @@ fun _open_files {file_index,file_count:nat | file_index <= file_count} .<file_co
     val opened = $BF.file_open_at(id_bytes, input_len, file_index)
     val () = release_bytes(id_frozen, id_bytes)
   in
-    $P.discard<Int>($P.and_then<Int><Int>($P.vow(opened), lam(handle) => let
-      val () = _keep_file(handle)
-      val () = _open_files(file_index + 1, file_count)
-    in $P.ret<Int>(0) end))
+    $P.finish<$BF.opened>(opened, llam(opened) =>
+      if _keep_file(opened) then _open_files(file_index + 1, file_count)
+      else let
+        (* the input's choice is cleared, as when every file is read *)
+        val () = app_dictionary_input()
+      in _refuse("One of the dictionary's files could not be read.") end)
   end
 
 (* Imports the dictionary whose files are picked in the dictionaries'
