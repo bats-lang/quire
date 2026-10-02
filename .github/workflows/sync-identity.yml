@@ -40,6 +40,10 @@ jobs:
           sha1=$(printf '%s\n' "$listing" | sed -n 's/^[[:space:]]*SHA1: *//p' | head -1)
           sha256=$(printf '%s\n' "$listing" | sed -n 's/^[[:space:]]*SHA256: *//p' | head -1)
           test -n "$sha1" || { echo "::error::No SHA-1 for alias KEY_ALIAS in the keystore"; exit 1; }
+          # The fingerprints are public (every signed APK carries them), so
+          # they go to the log too, where the API can read them.
+          echo "Upload key SHA-1: $sha1"
+          echo "Upload key SHA-256: $sha256"
           {
             echo "| | |"
             echo "|---|---|"
@@ -70,6 +74,7 @@ jobs:
             echo "|---|---|"
             for name in GOOGLE_WEB_CLIENT_ID GOOGLE_ANDROID_CLIENT_ID DROPBOX_CLIENT_ID PLAY_SIGNING_SHA1; do
               if [ -n "${!name}" ]; then state=set; else state=missing; fi
+              echo "$name: $state" >&2
               echo "| \`$name\` | $state |"
             done
             echo
