@@ -1212,7 +1212,7 @@ in
         val () = (if is_open then (if further then _offer(chapter, page, anchor) else ()) else ())
         val () = backup_numbers_merge(own, numbers, is_open)
         val () = backup_numbers_reading(own, ~1, ~1)
-        val () = backup_apply_numbers(book_index, own, 3)
+        val () = backup_apply_numbers(book_index, own, true)
       in $A.free<Int>(own) end)
 end
 
