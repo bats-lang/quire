@@ -350,13 +350,13 @@ in
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
     in key end
     else let
-      val () = lib_update(library_index, llam(record) => @{
+      val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(library_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = 0, added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
         file_size = file_size, cover = (if cover > 0 then (cover: Int) else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
         (* back on the shelf: a change sync passes on *)
         shelf_modified = (if record.shelf <> 0 then stamp_now() else record.shelf_modified), collections_modified = record.collections_modified,
-        finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
+        finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
       val key = (case+ lib_nums(library_index) of
         | ~$R.some(record) => record.key
@@ -548,8 +548,10 @@ in
           val () = _copy_into(title, title_len, message, 0, 0)
           val () = $A.free<byte>(title)
           val text_end = _put_string(message, title_len, " is already in your library.")
-          val () = modal_open(QDuplicate(), "Already in library",
-            llam () => _duplicate_answer(true), llam () => _duplicate_answer(false))
+          val () = $P.finish<reply>(modal_open(QDuplicate(), "Already in library"), llam(reply_given) =>
+            case+ reply_given of
+            | Accepted() => _duplicate_answer(true)
+            | Declined() => _duplicate_answer(false))
           val () = modal_text(message, text_end)
         in
           $P.and_then<Int><Int>($P.vow(answer_promise), llam(answer) =>

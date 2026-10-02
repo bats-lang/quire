@@ -19,6 +19,8 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
+implement $P.dispose<settled>(_) = ()
+
 (* The settings, each in its range:
    size               font size in px, 12 to 32
    line_height        line spacing in tenths, 12 to 24
@@ -606,24 +608,28 @@ fn _reset (): void = let
   val () = !_set := _defaults()
 in !_ruby := 1 end
 
-(* Puts the defaults back at once, then runs after (which applies
-   them); what it returns puts the settings they replaced back, and
-   runs after again *)
-#pub fn set_reset_undoable (after: () -<cloref1> void): () -<cloref1> void
-implement set_reset_undoable (after) = let
+(* Puts the defaults back at once. how is the Undo offer made for it:
+   when it settles Undone, the settings the defaults replaced are put
+   back. The promise resolves with how once that is done (the caller
+   applies the settings now, and again when they are put back) *)
+#pub fn set_reset_undoable {state:int} (how: $P.promise(settled, state)): $P.promise(settled, $P.Chained)
+implement set_reset_undoable (how) = let
   val before = !_set
   val ruby_before = !_ruby
   val () = _reset()
-  val () = after()
-in llam () => let
-  val () = !_set := before
-  val () = !_ruby := ruby_before
-in after() end end
+in
+  $P.and_then<settled><settled>(how, llam(settling) =>
+    case+ settling of
+    | Undone() => let
+        val () = !_set := before
+        val () = !_ruby := ruby_before
+      in $P.ret<settled>(Undone()) end
+    | Final() => $P.ret<settled>(Final()))
+end
 
 (* The same, offering Undo *)
-#pub fn set_reset (after: () -<cloref1> void): void
-implement set_reset (after) =
-  undo_offer("Settings reset", set_reset_undoable(after), llam () => ())
+#pub fn set_reset (): $P.promise(settled, $P.Chained)
+implement set_reset () = set_reset_undoable(undo_offer("Settings reset"))
 
 (* A byte stored by an earlier run, as a value in [low, high]: checked
    here, once; fallback when it is out of range *)

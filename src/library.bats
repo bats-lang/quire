@@ -20,6 +20,8 @@ staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
+implement $P.dispose<reply>(_) = ()
+
 (* ============================================================
    Records
    ============================================================ *)
@@ -262,30 +264,32 @@ implement lib_nums (index) =
     val () = lib_put(cell)
   in nums end
 
-(* Changes the numbers of the book at index with change *)
-fun _update_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int index, change: (bnums) -<cloref1> bnums): void =
+(* Sets the numbers of the book at index to changed *)
+fun _set_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int index, changed: bnums): void =
   case+ books of
   | books_nil() => ()
   | @books_cons(book, rest) =>
     if index = 0 then let
       val+ @Book(_, _, _, _, _, _, nums) = book
-      val () = nums := change(nums)
+      val () = nums := changed
       prval () = fold@(book)
       prval () = fold@(books)
     in end
     else let
-      val () = _update_at(rest, index - 1, change)
+      val () = _set_at(rest, index - 1, changed)
       prval () = fold@(books)
     in end
 
-#pub fn lib_update {index:int} (index: int index, change: (bnums) -<cloref1> bnums): void
+(* The numbers of the book at index set to changed (a change made from
+   what lib_nums read) *)
+#pub fn lib_nums_set {index:int} (index: int index, changed: bnums): void
 
-implement lib_update (index, change) =
+implement lib_nums_set (index, changed) =
   if index < 0 then ()
   else let
     val cell = lib_take()
     val+ @LibCell(books, _) = cell
-    val () = _update_at(books, index, change)
+    val () = _set_at(books, index, changed)
     prval () = fold@(cell)
   in lib_put(cell) end
 
@@ -320,13 +324,13 @@ in lib_put(cell) end
 #pub fn lib_elsewhere_add {index:int} (index: int index, minutes: Int, pages: Int): void
 implement lib_elsewhere_add (index, minutes, pages) =
   if minutes <= 0 then ()
-  else lib_update(index, llam(nums) => @{
+  else (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
     finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere + minutes,
-    pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int) })
+    pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int) }))
 
 (* source[j, source_len) into dest[start + j, start + source_len) *)
 fun _copy {source_loc,dest_loc:agz}{source_len,source_size,dest_size:nat | source_len <= source_size}
@@ -546,12 +550,12 @@ in release_bytes(key_frozen, key_bytes) end
 #pub fn lib_set_shelf {index:int} (index: int index, shelf: Int): void
 
 implement lib_set_shelf (index, shelf) = let
-  val () = lib_update(index, llam(nums) => @{
+  val () = (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
+    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
   val () = lib_save()
 in lib_render() end
 
@@ -568,10 +572,12 @@ implement lib_trash (index) =
       val old_shelf = nums.shelf
       val () = lib_set_shelf(index, 3)
     in
-      undo_offer("Moved to Trash", llam () => let
-          val index_now = lib_index_of_key(key)
-        in if index_now >= 0 then lib_set_shelf(index_now, old_shelf) else () end,
-        llam () => ())
+      $P.finish<settled>(undo_offer("Moved to Trash"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val index_now = lib_index_of_key(key)
+          in if index_now >= 0 then lib_set_shelf(index_now, old_shelf) else () end
+        | Final() => ())
     end
 
 (* The book at index and everything stored for it, deleted *)
@@ -601,26 +607,32 @@ fun _empty_trash {left:nat} .<left>. (left: int left): void =
     if index < 0 then () else let val () = _delete_book(index) in _empty_trash(left - 1) end
   end
 
-(* Asks about harm, with the action that does it; if the answer is yes,
-   it is done, then after runs. HEmptyTrash: every book in the Trash and
-   everything stored for it go (and any Undo offer, which could only
-   put back what is gone) *)
-#pub fn lib_ask_harm (harm: harm, after: () -<cloref1> void): void
+(* Asks about harm, with the action that does it; if the answer is yes
+   (Accepted), it is done. The promise resolves with the answer once
+   that is done. HEmptyTrash: every book in the Trash and everything
+   stored for it go (and any Undo offer, which could only put back what
+   is gone) *)
+#pub fn lib_ask_harm (harm: harm): $P.promise(reply, $P.Chained)
 
-implement lib_ask_harm (harm, after) =
+implement lib_ask_harm (harm) =
   case+ harm of
-  | HEmptyTrash() => modal_confirm(harm, llam () => let
-      val () = undo_close()
-      val () = _empty_trash(lib_count())
-    in after() end)
+  | HEmptyTrash() => $P.and_then<reply><reply>(modal_confirm(harm), llam(answer) =>
+    case+ answer of
+    | Accepted() => let
+        val () = undo_close()
+        val () = _empty_trash(lib_count())
+      in $P.ret<reply>(Accepted()) end
+    | Declined() => $P.ret<reply>(Declined()))
 
 (* Each book's key and the shelf it was on *)
-datatype shelved(int) =
-  | ShelvedNil(0)
-  | {count:nat} ShelvedCons(count + 1) of (int, Int, shelved(count))
+#pub datavtype shelved_list(int) =
+  | ShelvedNil(0) of ()
+  | {count:nat} ShelvedCons(count + 1) of (int, Int, shelved_list(count))
 
-fun _shelves {i,count:nat | i <= count}{so_far:nat} .<count - i>. (i: int i, count: int count, shelved: shelved(so_far))
-  : [total:nat] shelved(total) =
+#pub vtypedef shelved = [count:nat] shelved_list(count)
+
+fun _shelves {i,count:nat | i <= count}{so_far:nat} .<count - i>. (i: int i, count: int count, shelved: shelved_list(so_far))
+  : [total:nat] shelved_list(total) =
   if i >= count then shelved
   else (case+ lib_nums(i) of
     | ~$R.none() => _shelves(i + 1, count, shelved)
@@ -630,32 +642,32 @@ fun _shelves {i,count:nat | i <= count}{so_far:nat} .<count - i>. (i: int i, cou
 fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count): void =
   if i >= count then ()
   else let
-    val () = lib_update(i, llam(nums) => @{
+    val () = (case+ lib_nums(i) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(i, @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = 3, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
   in _trash_all(i + 1, count) end
 
 (* Each book of shelved put back on its shelf *)
-fun _unshelve {count:nat} .<count>. (shelved: shelved(count)): void =
+fun _unshelve {count:nat} .<count>. (shelved: shelved_list(count)): void =
   case+ shelved of
-  | ShelvedNil() => ()
-  | ShelvedCons(key, shelf, rest) => let
+  | ~ShelvedNil() => ()
+  | ~ShelvedCons(key, shelf, rest) => let
       val index = lib_index_of_key(key)
-      val () = (if index >= 0 then lib_update(index, llam(nums) => @{
+      val () = (if index >= 0 then (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
           key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
           file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
           shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }) else ())
+          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
-   where it can still be restored. What it returns puts each back on the
-   shelf it was on *)
-#pub fn lib_trash_all (): () -<cloref1> void
+   where it can still be restored. What it returns is each book's shelf
+   before, which lib_untrash_all puts back, or lib_shelved_free lets go *)
+#pub fn lib_trash_all (): shelved
 
 implement lib_trash_all () = let
   val count = lib_count()
@@ -663,7 +675,23 @@ implement lib_trash_all () = let
   val () = _trash_all(0, count)
   val () = lib_save()
   val () = lib_render()
-in llam () => let val () = _unshelve(shelved) val () = lib_save() in lib_render() end end
+in shelved end
+
+(* Each book of shelved put back on its shelf *)
+#pub fn lib_untrash_all (shelved: shelved): void
+implement lib_untrash_all (shelved) = let
+  val () = _unshelve(shelved)
+  val () = lib_save()
+in lib_render() end
+
+fun _shelved_free {count:nat} .<count>. (shelved: shelved_list(count)): void =
+  case+ shelved of
+  | ~ShelvedNil() => ()
+  | ~ShelvedCons(_, _, rest) => _shelved_free(rest)
+
+(* shelved, let go: the reset was not undone *)
+#pub fn lib_shelved_free (shelved: shelved): void
+implement lib_shelved_free (shelved) = _shelved_free(shelved)
 
 (* ============================================================
    Sorting
@@ -860,26 +888,6 @@ fun _colls_rename {count:nat}{name_loc:agz}{name_len:pos | name_len <= COLL_NAME
     if position = 0 then let val () = $A.free<byte>(other) in colls_cons(name, name_len, rest) end
     else colls_cons(other, other_len, _colls_rename(rest, position - 1, name, name_len))
 
-(* Every book's collections, as change makes them from its key and its
-   collections now *)
-fun _map_collections {count:nat} .<count>. (books: !books(count), change: (Int, Int) -<cloref1> Int): void =
-  case+ books of
-  | books_nil() => ()
-  | @books_cons(book, rest) => let
-      val+ @Book(_, _, _, _, _, _, nums) = book
-      val membership = change(nums.key, nums.collections)
-      val () = nums := @{
-        key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
-        chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
-        shelf_modified = nums.shelf_modified,
-        collections_modified = (if membership <> nums.collections then stamp_now() else nums.collections_modified),
-        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }
-      prval () = fold@(book)
-      val () = _map_collections(rest, change)
-      prval () = fold@(books)
-    in end
-
 (* The books in collection: their collections changed now (the
    collection was renamed: by name, which sync goes by, they are in
    another one) *)
@@ -898,13 +906,6 @@ fun _stamp_members {count:nat} .<count>. (books: !books(count), collection: int)
       val () = _stamp_members(rest, collection)
       prval () = fold@(books)
     in end
-
-fn _map_all_collections (change: (Int, Int) -<cloref1> Int): void = let
-  val cell = lib_take()
-  val+ @LibCell(books, _) = cell
-  val () = _map_collections(books, change)
-  prval () = fold@(cell)
-in lib_put(cell) end
 
 (* The bit of collection *)
 fn _collection_bit (collection: int): Int = g1ofg0($AR.bsl_int_int(1, collection))
@@ -928,8 +929,8 @@ fn _put_bit (membership: Int, collection: int, on: bool): Int = let
 in g1ofg0($AR.add_int_int($AR.add_int_int(_below(bits, collection), above), bit)) end
 
 (* The keys of the books in a collection, onto keys *)
-datatype keys(int) =
-  | KeysNil(0)
+datavtype keys(int) =
+  | KeysNil(0) of ()
   | {count:nat} KeysCons(count + 1) of (Int, keys(count))
 
 fun _keys_in {count:nat}{so_far:nat} .<count>. (books: !books(count), collection: int, keys: keys(so_far)): [total:nat] keys(total) =
@@ -942,10 +943,61 @@ fun _keys_in {count:nat}{so_far:nat} .<count>. (books: !books(count), collection
       else _keys_in(rest, collection, keys)
     end
 
-fun _keys_has {count:nat} .<count>. (keys: keys(count), key: Int): bool =
+fun _keys_free {count:nat} .<count>. (keys: keys(count)): void =
+  case+ keys of
+  | ~KeysNil() => ()
+  | ~KeysCons(_, rest) => _keys_free(rest)
+
+fun _keys_has {count:nat} .<count>. (keys: !keys(count), key: Int): bool =
   case+ keys of
   | KeysNil() => false
   | KeysCons(listed, rest) => if listed = key then true else _keys_has(rest, key)
+
+(* How a collection's deletion changes each book's collections: its
+   bit dropped (the bits above moved down), or, when it is put back,
+   its bit put in again, set for the books whose keys it kept *)
+datavtype regroup =
+  | DropCollection of (int)
+  | {count:nat} PutCollection of (int, keys(count))
+
+fn _regroup_free (change: regroup): void =
+  case+ change of
+  | ~DropCollection(_) => ()
+  | ~PutCollection(_, keys) => _keys_free(keys)
+
+(* The collections of the book whose key is key, which were membership,
+   changed by change *)
+fn _regrouped (change: !regroup, key: Int, membership: Int): Int =
+  case+ change of
+  | DropCollection(collection) => _drop_bit(membership, collection)
+  | PutCollection(collection, keys) => _put_bit(membership, collection, _keys_has(keys, key))
+
+(* Every book's collections, as change makes them from its key and its
+   collections now *)
+fun _map_collections {count:nat} .<count>. (books: !books(count), change: !regroup): void =
+  case+ books of
+  | books_nil() => ()
+  | @books_cons(book, rest) => let
+      val+ @Book(_, _, _, _, _, _, nums) = book
+      val membership = _regrouped(change, nums.key, nums.collections)
+      val () = nums := @{
+        key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+        chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        shelf_modified = nums.shelf_modified,
+        collections_modified = (if membership <> nums.collections then stamp_now() else nums.collections_modified),
+        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }
+      prval () = fold@(book)
+      val () = _map_collections(rest, change)
+      prval () = fold@(books)
+    in end
+
+fn _map_all_collections (change: !regroup): void = let
+  val cell = lib_take()
+  val+ @LibCell(books, _) = cell
+  val () = _map_collections(books, change)
+  prval () = fold@(cell)
+in lib_put(cell) end
 
 (* The collection the library view shows, or -1 *)
 #pub fn lib_coll_shown (): int
@@ -1116,13 +1168,13 @@ implement lib_coll_toggle (index, collection) =
   else if collection >= lib_coll_count() then ()
   else let
     val on = lib_coll_has(index, collection)
-    val () = lib_update(index, llam(nums) => @{
+    val () = (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
       collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = nums.shelf_modified, collections_modified = stamp_now(), finished_modified = nums.finished_modified,
-      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
   in lib_save() end
 
 (* Collection deleted, with an Undo offer that puts it back: its books
@@ -1133,17 +1185,20 @@ implement lib_coll_toggle (index, collection) =
    are keys in it *)
 fn _coll_restore (collection: int, keys: [count:nat] keys(count)): void =
   case+ _gone_take() of
-  | ~CollNotGone() => ()
+  | ~CollNotGone() => _keys_free(keys)
   | ~CollGone(name, name_len) => let
       val cell = colls_take()
       val+ ~CollCell(collections, count) = cell
     in
       if count >= 8 then let
         val () = $A.free<byte>(name)
+        val () = _keys_free(keys)
       in colls_put(CollCell(collections, count)) end
       else let
         val () = colls_put(CollCell(_colls_insert(collections, collection, name, name_len), count + 1))
-        val () = _map_all_collections(llam(key, membership) => _put_bit(membership, collection, _keys_has(keys, key)))
+        val change = PutCollection(collection, keys)
+        val () = _map_all_collections(change)
+        val () = _regroup_free(change)
         val () = lib_save()
       in lib_render() end
     end
@@ -1163,13 +1218,18 @@ in
     val keys = _keys_in(books, collection, KeysNil())
     prval () = fold@(library)
     val () = lib_put(library)
-    val () = _map_all_collections(llam(_, membership) => _drop_bit(membership, collection))
+    val change = DropCollection(collection)
+    val () = _map_all_collections(change)
+    val () = _regroup_free(change)
     val shown = !_coll_shown
     val () = !_coll_shown := (if shown = collection then ~1 else if shown > collection then shown - 1 else shown)
     val () = _gone_put(CollGone(name, name_len))
     val () = lib_save()
     val () = lib_render()
-  in undo_offer("Collection deleted", llam () => _coll_restore(collection, keys), llam () => _gone_put(CollNotGone())) end
+  in $P.finish<settled>(undo_offer("Collection deleted"), llam(how) =>
+    case+ how of
+    | Undone() => _coll_restore(collection, keys)
+    | Final() => let val () = _keys_free(keys) in _gone_put(CollNotGone()) end) end
 end
 
 (* Shows the books of collection only, or every book for -1 *)

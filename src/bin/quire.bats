@@ -478,23 +478,25 @@ fn _archive {book:int} (book: int book): void =
       val id_low = book_numbers.id_low
       val () = _set_shelf(book, 2)
     in
-      undo_offer("Archived", llam () => let
-          val index = lib_index_of_key(key)
-        in if index >= 0 then _set_shelf(index, was) else () end,
+      $P.finish<settled>(undo_offer("Archived"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val index = lib_index_of_key(key)
+          in if index >= 0 then _set_shelf(index, was) else () end
         (* the file goes only if the book is still archived (it may have
            been restored meanwhile, by importing it again) *)
-        llam () => let
-          val index = lib_index_of_key(key)
-        in
-          if index < 0 then ()
-          else (case+ lib_nums(index) of
-            | ~$R.none() => ()
-            | ~$R.some(numbers_now) =>
-              if numbers_now.shelf = 2 then let
-                val () = _idb_delete(98, id_high, id_low)
-              in if open_key_get() = key then open_key_set(0) else () end
-              else ())
-        end)
+        | Final() => let
+            val index = lib_index_of_key(key)
+          in
+            if index < 0 then ()
+            else (case+ lib_nums(index) of
+              | ~$R.none() => ()
+              | ~$R.some(numbers_now) =>
+                if numbers_now.shelf = 2 then let
+                  val () = _idb_delete(98, id_high, id_low)
+                in if open_key_get() = key then open_key_set(0) else () end
+                else ())
+          end)
     end
 
 (* Hides or unhides the book, offering Undo *)
@@ -506,10 +508,12 @@ fn _hide_toggle {book:int} (book: int book): void =
       val was = book_numbers.shelf
       val () = _set_shelf(book, (if was = 1 then 0 else 1))
     in
-      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len, llam () => let
-          val index = lib_index_of_key(key)
-        in if index >= 0 then _set_shelf(index, was) else () end,
-        llam () => ())
+      $P.finish<settled>(undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val index = lib_index_of_key(key)
+          in if index >= 0 then _set_shelf(index, was) else () end
+        | Final() => ())
     end
 
 
@@ -644,6 +648,23 @@ fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
 in if !_view = 1 then reader_relayout() else () end
 
+(* The settings, applied: their sliders and everything they change *)
+fn _settings_apply (): void = let
+  val () = set_sliders()
+in _settings_changed() end
+
+(* The settings reset, offering Undo: applied now, and again when
+   they are put back *)
+fn _settings_reset (): void = let
+  val how = set_reset()
+  val () = _settings_apply()
+in
+  $P.finish<settled>(how, llam(settling) =>
+    case+ settling of
+    | Undone() => _settings_apply()
+    | Final() => ())
+end
+
 fn _clamp {low,high:int | low <= high} (value: Int, low: int low, high: int high): [clamped:int | low <= clamped; clamped <= high] int clamped =
   if value < low then low else if value > high then high else value
 
@@ -773,8 +794,9 @@ fn _online_href {url_loc:agz}{url_len:nat | url_len <= 256} (url: !$A.arr(byte, 
    has the word, the button that shows it there instead (the dictionary
    panel's "Look up online" keeps the link). A dictionary whose files
    are still being read looks the selection up again once they are
-   (dict_when_read) *)
-fn _lookup_update (): void =
+   (DictReading), when the reader is still shown: again times more at
+   most *)
+fun _lookup_update {again:nat} .<again>. (again: int again): void =
   case+ $DR.get_selection_text() of
   | ~$R.none() => ()
   | ~$R.some(selection) => let
@@ -798,7 +820,16 @@ fn _lookup_update (): void =
         val at = _put_array(out, at, language, language_len)
         val at = _put_literal(out, at, ".wiktionary.org/wiki/Special:Search?search=")
         val url_len = _percent_encode(word, word_len, 0, out, at)
-        val found = dict_find(language, language_len, word, word_len)
+        val found = (case+ dict_find(language, language_len, word, word_len) of
+          | ~DictFound() => true
+          | ~DictMissing() => false
+          | ~DictReading(reading) => let
+              val () = $P.finish<bool>(reading, llam(opened) =>
+                if ~opened then ()
+                else if again <= 0 then ()
+                else if !_view = 1 then _lookup_update(again - 1)
+                else ())
+            in false end): bool
         val () = $A.free<byte>(language)
         val () = $A.free<byte>(word)
         val () = ui_show("selection-define", found)
@@ -845,14 +876,16 @@ in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
    restored until the Trash is emptied) and the settings go back to
    their defaults; Undo puts both back *)
 fn _factory_reset (): void = let
-  val back_books = lib_trash_all()
-  val back_settings = set_reset_undoable(llam () => let
-      val () = set_sliders()
-    in _settings_changed() end)
+  val shelved = lib_trash_all()
+  val how = set_reset_undoable(undo_offer("Library moved to the Trash, settings reset"))
+  val () = _settings_apply()
 in
-  undo_offer("Library moved to the Trash, settings reset", llam () => let
-      val () = back_books()
-    in back_settings() end, llam () => ())
+  $P.finish<settled>(how, llam(settling) =>
+    case+ settling of
+    | Undone() => let
+        val () = lib_untrash_all(shelved)
+      in _settings_apply() end
+    | Final() => lib_shelved_free(shelved))
 end
 
 (* The collections panel for the book, its toggles pressed as the book's
@@ -875,12 +908,15 @@ fn _collection_put {book:int}{collection:int} (book: int book, collection: int c
 
 (* A new collection, named in the dialog, with the book in it *)
 fn _collection_new {book:int} (book: int book): void = let
-  val () = modal_open(QNewCollection(), "New collection", llam () => let
-      val @(name, name_len) = modal_name_read()
-      val collection = lib_coll_add(name, name_len)
-      val () = (if collection >= 0 then lib_coll_toggle(book, collection) else ())
-      val () = lib_coll_panel(book)
-    in lib_render() end, llam () => ())
+  val () = $P.finish<reply>(modal_open(QNewCollection(), "New collection"), llam(answer) =>
+    case+ answer of
+    | Accepted() => let
+        val @(name, name_len) = modal_name_read()
+        val collection = lib_coll_add(name, name_len)
+        val () = (if collection >= 0 then lib_coll_toggle(book, collection) else ())
+        val () = lib_coll_panel(book)
+      in lib_render() end
+    | Declined() => ())
 in modal_name_field() end
 
 (* The collection shown, named again in the dialog *)
@@ -889,9 +925,12 @@ fn _collection_rename (): void = let
 in
   if collection < 0 then ()
   else let
-    val () = modal_open(QRenameCollection(), "Rename collection", llam () => let
-        val @(name, name_len) = modal_name_read()
-      in lib_coll_rename(collection, name, name_len) end, llam () => ())
+    val () = $P.finish<reply>(modal_open(QRenameCollection(), "Rename collection"), llam(answer) =>
+      case+ answer of
+      | Accepted() => let
+          val @(name, name_len) = modal_name_read()
+        in lib_coll_rename(collection, name, name_len) end
+      | Declined() => ())
     val () = modal_name_field()
   in lib_coll_name_show(collection) end
 end
@@ -935,9 +974,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
         else if export then backup_export()
-        else if reset then set_reset(llam () => let
-            val () = set_sliders()
-          in _settings_changed() end)
+        else if reset then _settings_reset()
         else if factory_reset then let
           val () = layer_close(LSettings())
           val () = (if !_view = 1 then _show_library() else ())
@@ -1087,7 +1124,10 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) => let
             val () = layer_close(LLibraryMenu())
-          in lib_ask_harm(the_harm, llam () => _save_render()) end
+          in $P.finish<reply>(lib_ask_harm(the_harm), llam(answer) =>
+            case+ answer of
+            | Accepted() => _save_render()
+            | Declined() => ()) end
         | ~None_vt() =>
         if _is(clicked, "menu-settings") then let
           val () = layer_close(LLibraryMenu())
@@ -1214,9 +1254,7 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
         else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
         else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
         else if _is(clicked, "typography-reset") then let
-            val () = set_reset(llam () => let
-                val () = set_sliders()
-              in _settings_changed() end)
+            val () = _settings_reset()
           in false end
         else false): bool
       val close = _is(clicked, "typography-close")
@@ -1450,17 +1488,17 @@ end
 fn _escape_overlay (): bool =
   if modal_open_now() then let val () = modal_dismiss() in true end
   else case+ layer_escape() of
-  | NothingOpen() => false
-  | Escaped(LSearch()) => let
+  | ~NothingOpen() => false
+  | ~Escaped(LSearch()) => let
       val () = (if _shown("search-nav") then ui_focus("page") else _search_end())
     in true end
-  | Escaped(LContents()) => let val () = ui_focus("page") in true end
-  | Escaped(LTypography()) => let val () = ui_focus("page") in true end
-  | Escaped(LAnnotations()) => let val () = ui_focus("page") in true end
-  | Escaped(LNote()) => let val () = ui_focus("page") in true end
-  | Escaped(LImage()) => let val () = ui_focus("page") in true end
-  | Escaped(LDictionary()) => let val () = ui_focus("page") in true end
-  | Escaped(_) => true
+  | ~Escaped(LContents()) => let val () = ui_focus("page") in true end
+  | ~Escaped(LTypography()) => let val () = ui_focus("page") in true end
+  | ~Escaped(LAnnotations()) => let val () = ui_focus("page") in true end
+  | ~Escaped(LNote()) => let val () = ui_focus("page") in true end
+  | ~Escaped(LImage()) => let val () = ui_focus("page") in true end
+  | ~Escaped(LDictionary()) => let val () = ui_focus("page") in true end
+  | ~Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
    (Shift+Enter the one before), Escape closes the panel *)
@@ -1690,7 +1728,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       if !_view = 1 then let
         val selected = _has_selection()
         val () = ui_show("selection-toolbar", selected)
-        val () = (if selected then _lookup_update() else ())
+        val () = (if selected then _lookup_update(1) else ())
       in 0 end else 0)
   val listeners = RCons(listeners, OnEl("selection-toolbar"), "click", llam(h) => let
       val clicked = _target(h)
@@ -1922,7 +1960,6 @@ implement main0 () = let
   val () = stamp_load()
   val () = $P.finish<int>(dict_load(), llam(_) => ())
   val () = $P.finish<int>(catalogue_load(), llam(_) => ())
-  val () = dict_when_read(llam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)

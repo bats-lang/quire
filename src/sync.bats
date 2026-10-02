@@ -574,7 +574,20 @@ datavtype read_answer =
 
 (* What a write gives: written, a conflict (another device wrote the
    file since its version was read), or how it failed *)
-datatype write_answer = Written | WriteConflict | WriteFailed of (int, Int)
+datavtype write_answer = Written of () | WriteConflict of () | WriteFailed of (int, Int)
+
+(* An answer nobody took (its promise let go), freed *)
+implement $P.dispose<read_answer>(answer) =
+  case+ answer of
+  | ~ReadFile(owner, file, _) => piece_free(owner, file)
+  | ~ReadNothing() => ()
+  | ~ReadFailed(_, _) => ()
+
+implement $P.dispose<write_answer>(answer) =
+  case+ answer of
+  | ~Written() => ()
+  | ~WriteConflict() => ()
+  | ~WriteFailed(_, _) => ()
 
 (* What a status a store refused with says: the credentials, the place
    the file is kept, or the server *)
@@ -590,74 +603,74 @@ fn _failure_kind (status: Int): int =
 fn _unreached (): int = if _cross_origin() then RESULT_BLOCKED else RESULT_UNREACHABLE
 
 (* WebDAV: GET the file; its ETag is its version, and 404 is no file yet *)
-fn _webdav_read (answer: read_answer -<cloref1> void): void = let
+fn _webdav_read (): $P.promise(read_answer, $P.Chained) = let
   val empty = $A.alloc<byte>(1)
   val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
   val pending = _send("GET", empty_bytes, 0, false)
   val () = release_bytes(empty_frozen, empty_bytes)
 in
-  $P.finish<Int>($P.vow(pending), llam(handle) => let
+  $P.and_then<Int><read_answer>($P.vow(pending), llam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
-    val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
-      | ~$R.none() => let val () = $A.free<byte>(etag) in answer(ReadFailed(_unreached(), 0)) end
+    val answer = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
+      | ~$R.none() => let val () = $A.free<byte>(etag) in ReadFailed(_unreached(), 0) end
       | ~$R.some(@(status, etag_len, body)) =>
         if status = 404 then let
           val () = $BD.blob_free(body)
           (* no file yet: it is written without a version to match *)
           val () = _etag_set(etag, 0)
-        in answer(ReadNothing()) end
+        in ReadNothing() end
         else if (if status < 200 then true else status >= 300) then let
           val () = $BD.blob_free(body)
           val () = $A.free<byte>(etag)
-        in answer(ReadFailed(_failure_kind(status), status)) end
+        in ReadFailed(_failure_kind(status), status) end
         else let
           val size = $BD.blob_len(body)
           val () = _etag_set(etag, etag_len)
         in
-          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in answer(ReadFailed(RESULT_TOO_LARGE, 0)) end
-          else if size <= 0 then let val () = $BD.blob_free(body) in answer(ReadNothing()) end
+          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in ReadFailed(RESULT_TOO_LARGE, 0) end
+          else if size <= 0 then let val () = $BD.blob_free(body) in ReadNothing() end
           else (case+ piece_new(size) of
-            | ~NoPiece() => let val () = $BD.blob_free(body) in answer(ReadFailed(RESULT_MEMORY, 0)) end
+            | ~NoPiece() => let val () = $BD.blob_free(body) in ReadFailed(RESULT_MEMORY, 0) end
             | ~Piece(owner, file) => let
                 val () = $BD.blob_read(body, 0, file, size)
                 val () = $BD.blob_free(body)
-              in answer(ReadFile(owner, file, size)) end)
-        end)
-  in () end)
+              in ReadFile(owner, file, size) end)
+        end): read_answer
+  in $P.ret<read_answer>(answer) end)
 end
 
 (* WebDAV: PUT the file, If-Match the ETag read (unconditional when
    there was none); 412 is a conflict *)
 fn _webdav_write {body_loc:agz}{body_size:pos}
-  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size, answer: write_answer -<cloref1> void): void = let
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val pending = _send("PUT", body, body_size, true)
 in
-  $P.finish<Int>($P.vow(pending), llam(handle) => let
+  $P.and_then<Int><write_answer>($P.vow(pending), llam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
-    val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
-      | ~$R.none() => let val () = $A.free<byte>(etag) in answer(WriteFailed(_unreached(), 0)) end
+    val answer = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
+      | ~$R.none() => let val () = $A.free<byte>(etag) in WriteFailed(_unreached(), 0) end
       | ~$R.some(@(status, _, reply)) => let
           val () = $A.free<byte>(etag)
           val () = $BD.blob_free(reply)
         in
-          if status = 412 then answer(WriteConflict())
-          else if (if status >= 200 then status < 300 else false) then answer(Written())
-          else answer(WriteFailed(_failure_kind(status), status))
-        end)
-  in () end)
+          if status = 412 then WriteConflict()
+          else if (if status >= 200 then status < 300 else false) then Written()
+          else WriteFailed(_failure_kind(status), status)
+        end): write_answer
+  in $P.ret<write_answer>(answer) end)
 end
 
 (* Reads the file from the store *)
-fn store_read (answer: read_answer -<cloref1> void): void =
-  if _store_kind() = STORE_WEBDAV then _webdav_read(answer)
-  else answer(ReadFailed(RESULT_NONE, 0))
+fn store_read (): $P.promise(read_answer, $P.Chained) =
+  if _store_kind() = STORE_WEBDAV then _webdav_read()
+  else $P.ret<read_answer>(ReadFailed(RESULT_NONE, 0))
 
 (* Writes body[0, body_size) to the store, as a change of the version
    read *)
 fn store_write {body_loc:agz}{body_size:pos}
-  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size, answer: write_answer -<cloref1> void): void =
-  if _store_kind() = STORE_WEBDAV then _webdav_write(body, body_size, answer)
-  else answer(WriteFailed(RESULT_NONE, 0))
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
+  if _store_kind() = STORE_WEBDAV then _webdav_write(body, body_size)
+  else $P.ret<write_answer>(WriteFailed(RESULT_NONE, 0))
 
 (* ============================================================
    A sync file, read: where its books and devices are
@@ -665,8 +678,8 @@ fn store_write {body_loc:agz}{body_size:pos}
 
 (* The objects of a file's array, each its id (a book's two halves; a
    device's number, and 0) and where it is, file[start, stop) *)
-datatype spans(int, int) =
-  | {n:int} SpansNil(n, 0)
+datavtype spans(int, int) =
+  | {n:int} SpansNil(n, 0) of ()
   | {n:int}{count:nat}{start,stop:nat | start < stop; stop <= n} SpansCons(n, count + 1) of (Int, Int, int start, int stop, spans(n, count))
 
 (* A sync file in a piece, file[0, n): where its collections' array is
@@ -676,10 +689,18 @@ datavtype held =
   | {owner,l:agz}{n:pos | n <= 268435456}{names_at:int | ~1 <= names_at; names_at <= n}{books_count,devices_count:nat}
     Held of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n, int names_at, spans(n, books_count), spans(n, devices_count))
 
+fun _spans_free {n:int}{count:nat} .<count>. (spans: spans(n, count)): void =
+  case+ spans of
+  | ~SpansNil() => ()
+  | ~SpansCons(_, _, _, _, rest) => _spans_free(rest)
+
 fn _held_free (file: held): void =
   case+ file of
   | ~NoHeld() => ()
-  | ~Held(owner, bytes, _, _, _, _) => piece_free(owner, bytes)
+  | ~Held(owner, bytes, _, _, books, devices) => let
+      val () = _spans_free(books)
+      val () = _spans_free(devices)
+    in piece_free(owner, bytes) end
 
 (* The file read (while the merge is made), and the file written (until
    it is taken here) *)
@@ -789,7 +810,11 @@ in
     val () = $A.free<byte>(key)
   in
     if whole then Held(owner, file, n, names_at, books, devices)
-    else let val () = piece_free(owner, file) in NoHeld() end
+    else let
+      val () = _spans_free(books)
+      val () = _spans_free(devices)
+      val () = piece_free(owner, file)
+    in NoHeld() end
   end
 end
 
@@ -803,7 +828,7 @@ fn _empty (): held =
     in Held(owner, file, 2, ~1, SpansNil(), SpansNil()) end
 
 (* Where the book id_high, id_low starts in the file, or -1 *)
-fun _book_start {n:nat}{count:nat} .<count>. (spans: spans(n, count), id_high: Int, id_low: Int): [start:int | ~1 <= start; start < n] int start =
+fun _book_start {n:nat}{count:nat} .<count>. (spans: !spans(n, count), id_high: Int, id_low: Int): [start:int | ~1 <= start; start < n] int start =
   case+ spans of
   | SpansNil() => ~1
   | SpansCons(high, low, start, _, rest) =>
@@ -811,13 +836,14 @@ fun _book_start {n:nat}{count:nat} .<count>. (spans: spans(n, count), id_high: I
     else _book_start(rest, id_high, id_low)
 
 (* Whether a device is numbered device in spans *)
-fun _has_device {n:int}{count:nat} .<count>. (spans: spans(n, count), device: Int): bool =
+fun _has_device {n:int}{count:nat} .<count>. (spans: !spans(n, count), device: Int): bool =
   case+ spans of
   | SpansNil() => false
   | SpansCons(number, _, _, _, rest) => if number = device then true else _has_device(rest, device)
 
-(* spans in the order of the file (they are found the last first) *)
-fun _reversed {n:int}{count,reversed_count:nat} .<count>. (spans: spans(n, count), reversed: spans(n, reversed_count)): spans(n, count + reversed_count) =
+(* A copy of spans in the order of the file (they are found the last
+   first), onto reversed *)
+fun _reversed {n:int}{count,reversed_count:nat} .<count>. (spans: !spans(n, count), reversed: spans(n, reversed_count)): spans(n, count + reversed_count) =
   case+ spans of
   | SpansNil() => reversed
   | SpansCons(high, low, start, stop, rest) => _reversed(rest, SpansCons(high, low, start, stop, reversed))
@@ -830,13 +856,28 @@ fun _reversed {n:int}{count,reversed_count:nat} .<count>. (spans: spans(n, count
    merge writes the file's first, then this device's it does not have.
    numbering: each of this device's collections (as the library numbers
    them) and its number in the file *)
-datatype numbering(int) =
-  | NumberingNil(0)
+datavtype numbering(int) =
+  | NumberingNil(0) of ()
   | {count:nat} NumberingCons(count + 1) of (int, int, numbering(count))
 
 val _numbering = ref<[count:nat] numbering(count)>(NumberingNil())
 
-fun _file_number {count:nat} .<count>. (numbering: numbering(count), collection: int): int =
+fun _numbering_free {count:nat} .<count>. (numbering: numbering(count)): void =
+  case+ numbering of
+  | ~NumberingNil() => ()
+  | ~NumberingCons(_, _, rest) => _numbering_free(rest)
+
+fn _numbering_take (): [count:nat] numbering(count) = let
+  var taken: [count:nat] numbering(count) = NumberingNil()
+  val () = ref_exch_elt<[count:nat] numbering(count)>(_numbering, taken)
+in taken end
+
+fn _numbering_put {count:nat} (numbering: numbering(count)): void = let
+  var previous: [count:nat] numbering(count) = numbering
+  val () = ref_exch_elt<[count:nat] numbering(count)>(_numbering, previous)
+in _numbering_free(previous) end
+
+fun _file_number {count:nat} .<count>. (numbering: !numbering(count), collection: int): int =
   case+ numbering of
   | NumberingNil() => ~1
   | NumberingCons(here, there, rest) => if here = collection then there else _file_number(rest, collection)
@@ -846,7 +887,9 @@ fun _to_file {collection:nat | collection <= 8} .<8 - collection>. (mask: int, c
   if collection >= 8 then mapped
   else if $AR.band_int_int(mask, $AR.bsl_int_int(1, collection)) = 0 then _to_file(mask, collection + 1, mapped)
   else let
-    val there = _file_number(!_numbering, collection)
+    val numbering = _numbering_take()
+    val there = _file_number(numbering, collection)
+    val () = _numbering_put(numbering)
   in
     if there < 0 then _to_file(mask, collection + 1, mapped)
     else if there >= 31 then _to_file(mask, collection + 1, mapped)
@@ -973,14 +1016,36 @@ val _further_anchor = ref<Int>(~1)
 val _busy = ref<bool>(false)
 val _again = ref<bool>(false)
 val _tries = ref<int>(0)
-(* How the file is read again, when another device wrote it first; how
-   another sync starts, when one was asked for during this one (both set
-   at startup, sync_start) *)
-val _read_again = ref<() -<cloref1> void>(llam () => ())
-val _run_again = ref<() -<cloref1> void>(llam () => ())
+(* How a round of a sync (the file read, merged and written) ended: the
+   sync ended (RoundEnded), or another device wrote the file first, and
+   it is read and merged again (RoundConflict). The round under way
+   holds the resolver of the promise sync_run's rounds wait on: the
+   code that ends a round comes before sync_run's, and calls it only
+   through that promise, so no function calls itself, and the rounds
+   are counted (_rounds' metric) *)
+datatype round_end = RoundEnded | RoundConflict
 
-(* The end of a sync: how it ended, kept and shown; another, when one
-   was asked for meanwhile *)
+implement $P.dispose<round_end>(_) = ()
+
+datavtype round =
+  | NoRound of ()
+  | Round of $P.resolver(round_end)
+
+val _round = ref<round>(NoRound())
+
+fn _round_swap (next: round): round = let
+  var previous: round = next
+  val () = ref_exch_elt<round>(_round, previous)
+in previous end
+
+(* The round under way, ended as how *)
+fn _round_settle (how: round_end): void =
+  case+ _round_swap(NoRound()) of
+  | ~NoRound() => ()
+  | ~Round(resolver) => $P.resolve<round_end>(resolver, how)
+
+(* The end of a sync: how it ended, kept and shown; its round ended
+   (another starts when one was asked for meanwhile) *)
 fn _end (result: int, status: Int): void = let
   val () = _held_free(_held_swap(_remote, NoHeld()))
   val () = _held_free(_held_swap(_written, NoHeld()))
@@ -991,12 +1056,7 @@ fn _end (result: int, status: Int): void = let
   val () = _state_save()
   val () = _status_show()
   val () = !_busy := false
-in
-  if !_again then let
-    val () = !_again := false
-  in (!_run_again)() end
-  else ()
-end
+in _round_settle(RoundEnded()) end
 
 fn _fail (result: int, status: Int): void = _end(result, status)
 
@@ -1127,7 +1187,7 @@ in
   end
 end
 
-fun _devices_take {l,key_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), n: int n, devices: spans(n, count), device: Int, key: !$A.arr(byte, key_loc, 16)): void =
+fun _devices_take {l,key_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), n: int n, devices: !spans(n, count), device: Int, key: !$A.arr(byte, key_loc, 16)): void =
   case+ devices of
   | SpansNil() => ()
   | SpansCons(number, _, start, _, rest) => let
@@ -1174,7 +1234,7 @@ end
 (* The file's books' numbers, taken: a library book's merged with its
    own (the open book's place offered, not taken); one this device does
    not have, kept for when it is imported *)
-fun _books_take {l,map_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), n: int n, books: spans(n, count), map: !$A.arr(Int, map_loc, MAP_SIZE)): void =
+fun _books_take {l,map_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), n: int n, books: !spans(n, count), map: !$A.arr(Int, map_loc, MAP_SIZE)): void =
   case+ books of
   | SpansNil() => ()
   | SpansCons(id_high, id_low, start, _, rest) => let
@@ -1183,13 +1243,13 @@ fun _books_take {l,map_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file: !
       val () = $A.free<Int>(numbers)
     in _books_take(file, n, rest, map) end
 
-fun _spans_count {n:int}{count:nat} .<count>. (spans: spans(n, count)): int count =
+fun _spans_count {n:int}{count:nat} .<count>. (spans: !spans(n, count)): int count =
   case+ spans of
   | SpansNil() => 0
   | SpansCons(_, _, _, _, rest) => 1 + _spans_count(rest)
 
 (* The k-th of spans: its id, and where it starts (-1 none) *)
-fun _span_at {n:nat}{count:nat} .<count>. (spans: spans(n, count), k: int): [start:int | ~1 <= start; start < n] @(Int, Int, int start) =
+fun _span_at {n:nat}{count:nat} .<count>. (spans: !spans(n, count), k: int): [start:int | ~1 <= start; start < n] @(Int, Int, int start) =
   case+ spans of
   | SpansNil() => @(0, 0, ~1)
   | SpansCons(id_high, id_low, start, _, rest) => if k <= 0 then @(id_high, id_low, start) else _span_at(rest, k - 1)
@@ -1277,21 +1337,21 @@ fn _write (): void =
   | ~NoHeld() => _fail(RESULT_MEMORY, 0)
   | ~Held(owner, file, n, names_at, books, devices) => let
       val @(file_frozen, file_bytes) = $A.freeze<byte>(file)
-      val () = store_write(file_bytes, n, llam(answer) =>
+      val () = $P.finish<write_answer>(store_write(file_bytes, n), llam(answer) =>
         case+ answer of
-        | Written() => _take()
-        | WriteConflict() => let
+        | ~Written() => _take()
+        | ~WriteConflict() => let
             val () = _held_free(_held_swap(_written, NoHeld()))
             val () = !_tries := !_tries + 1
-          in if !_tries >= TRIES then _fail(RESULT_CONFLICT, 412) else (!_read_again)() end
-        | WriteFailed(kind, status) => _fail(kind, status))
+          in if !_tries >= TRIES then _fail(RESULT_CONFLICT, 412) else _round_settle(RoundConflict()) end
+        | ~WriteFailed(kind, status) => _fail(kind, status))
       val () = $A.drop<byte>(file_frozen, file_bytes)
       val file = $A.thaw<byte>(file_frozen)
     in _held_free(_held_swap(_written, Held(owner, file, n, names_at, books, devices))) end
 
 (* This device's number when it has none: the minute, or the next one
    free in the file *)
-fun _free_number {n:int}{count:nat}{left:nat} .<left>. (devices: spans(n, count), number: Int, left: int left): Int =
+fun _free_number {n:int}{count:nat}{left:nat} .<left>. (devices: !spans(n, count), number: Int, left: int left): Int =
   if left <= 0 then number
   else if _has_device(devices, number) then _free_number(devices, number + 1, left - 1)
   else number
@@ -1299,7 +1359,7 @@ fun _free_number {n:int}{count:nat}{left:nat} .<left>. (devices: spans(n, count)
 (* The reading log's days from entries, as [day, minutes] pairs, each
    after a comma but the first *)
 fun _days_json {l:agz}{owner:addr}{n:nat}{count:nat}{position:nat | position + 26 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: days(count), first: bool)
+  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: !days(count), first: bool)
   : [stop:nat | stop <= position + 26 * count] int stop =
   case+ entries of
   | DaysNil() => position
@@ -1346,6 +1406,7 @@ in
       val next = jw_lit(out, next, ",\"readingLog\":[")
       val @(entries, _) = stats_days()
       val next = _days_json(out, next, entries, true)
+      val () = stats_days_free(entries)
       val next = jw_lit(out, next, "],\"books\":[")
       val next = _reading_json(out, next, 0, count, true)
       val next = jw_lit(out, next, "]}")
@@ -1353,7 +1414,7 @@ in
 end
 
 (* The file's other devices' entries, each after a comma *)
-fun _other_devices {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), devices: spans(n, count), device: Int): void =
+fun _other_devices {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), devices: !spans(n, count), device: Int): void =
   case+ devices of
   | SpansNil() => ()
   | SpansCons(number, _, start, stop, rest) => let
@@ -1393,7 +1454,7 @@ in
         | ~NoPiece() => _push(JNone())
         | ~Piece(piece_owner, out) => let
             val @(stop, numbering) = _numbering_make(out, 0, file, n, names_at, file_count, 0, 0, NumberingNil(), file_count = 0)
-            val () = !_numbering := numbering
+            val () = _numbering_put(numbering)
           in
             if stop > 0 then _push(JChunk(piece_owner, out, stop)) else piece_free(piece_owner, out)
           end)
@@ -1454,7 +1515,7 @@ fn _annotations_chunk (own: content_bytes, id_high: Int, id_low: Int): jchunk =
 
 (* The file's books this device does not have, each as the file has
    it, after a comma but the first *)
-fun _remote_books {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), books: spans(n, count), first: bool): void =
+fun _remote_books {l:agz}{owner:addr}{n:nat | n <= 268435456}{count:nat} .<count>. (file: !$A.arrx(byte, l, n, owner), books: !spans(n, count), first: bool): void =
   case+ books of
   | SpansNil() => ()
   | SpansCons(id_high, id_low, start, stop, rest) =>
@@ -1472,7 +1533,9 @@ fn _tail (): void = let
   val () = (case+ _held_swap(_remote, NoHeld()) of
     | ~NoHeld() => ()
     | ~Held(owner, file, n, names_at, books, devices) => let
-        val () = _remote_books(file, _reversed(books, SpansNil()), ~written)
+        val in_order = _reversed(books, SpansNil())
+        val () = _remote_books(file, in_order, ~written)
+        val () = _spans_free(in_order)
       in _held_free(Held(owner, file, n, names_at, books, devices)) end)
   val () = _push(_text_chunk("]}"))
 in
@@ -1539,7 +1602,7 @@ fn _merge_held (file: held): void =
     in _merge() end
 
 (* Reads the file from the store, and merges it *)
-fn _read (): void = store_read(llam(answer) =>
+fn _read (): void = $P.finish<read_answer>(store_read(), llam(answer) =>
   case+ answer of
   | ~ReadNothing() => _merge_held(_empty())
   | ~ReadFailed(kind, status) => _fail(kind, status)
@@ -1548,28 +1611,58 @@ fn _read (): void = store_read(llam(answer) =>
      | ~NoHeld() => _fail(RESULT_DAMAGED, 0)
      | ~Held(file_owner, bytes, n, names_at, books, devices) => _merge_held(Held(file_owner, bytes, n, names_at, books, devices))))
 
+(* A sync begun: under way, with no try made yet *)
+fn _run_begin (): void = let
+  val () = !_busy := true
+  val () = !_tries := 0
+  val () = !_last_result := RESULT_RUNNING
+in _status_show() end
+
+(* The most rounds one sync_run makes: each sync's tries, for each of
+   the syncs asked for while the one before was under way, one after
+   another. A sync asked for after them is made at the next one asked
+   for (it is kept asked for, in _again) *)
+#define ROUNDS_MOST 300
+
+(* The rounds of a sync from now, left more at most: the file read and
+   merged again after a conflict; another sync made when one was asked
+   for meanwhile *)
+fun _rounds {left:nat} .<left>. (left: int left): void = let
+  val @(ended, resolver) = $P.create<round_end>()
+  val () = (case+ _round_swap(Round(resolver)) of
+    | ~NoRound() => ()
+    | ~Round(previous) => $P.resolve<round_end>(previous, RoundEnded()))
+  val () = _read()
+in
+  $P.finish<round_end>(ended, llam(how) =>
+    if left <= 0 then (case+ how of
+      | RoundConflict() => _fail(RESULT_CONFLICT, 412)
+      | RoundEnded() => ())
+    else (case+ how of
+      | RoundConflict() => _rounds(left - 1)
+      | RoundEnded() =>
+        if ~(!_again) then ()
+        else let
+          val () = !_again := false
+        in
+          if ~_store_on() then ()
+          else let val () = _run_begin() in _rounds(left - 1) end
+        end))
+end
+
 (* Syncs, when sync is on: at once, or once the sync under way ends *)
 #pub fn sync_run (): void
 implement sync_run () =
   if ~_store_on() then ()
   else if !_busy then !_again := true
   else let
-    val () = !_busy := true
-    val () = !_tries := 0
-    val () = !_last_result := RESULT_RUNNING
-    val () = _status_show()
-  in _read() end
-
-(* ============================================================
-   Startup, the reader, and the screen
-   ============================================================ *)
+    val () = _run_begin()
+  in _rounds(ROUNDS_MOST) end
 
 (* Reads the state and the store kept, then syncs (when sync is on):
    once the library is read *)
 #pub fn sync_start (): void
 implement sync_start () = let
-  val () = !_read_again := (llam () =<cloref1> _read())
-  val () = !_run_again := (llam () =<cloref1> sync_run())
   val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
   val state_pending = $IDB.idb_get(state_bytes, 10)
   val () = release_bytes(state_frozen, state_bytes)
@@ -1790,15 +1883,18 @@ implement sync_off () =
       val () = _status_show()
       val () = ui_show("sync-off", false)
     in
-      undo_offer("Sync turned off", llam () => let
-          val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
-          val () = _store_save()
-          val () = (if layer_is_open(LSync()) then let
+      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
+            val () = _store_save()
+          in
+            if layer_is_open(LSync()) then let
               val () = _fields_show()
               val () = ui_show("sync-off", true)
-            in _status_show() end else ())
-        in end,
-        llam () => _store_free(_store_swap(_store_off, NoStore())))
+            in _status_show() end else ()
+          end
+        | Final() => _store_free(_store_swap(_store_off, NoStore())))
     end
 
 end (* #target wasm *)

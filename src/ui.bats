@@ -540,10 +540,10 @@ implement ui_harm_id (the_harm) = let val @(id, _) = _harm_item(the_harm) in id 
    is the stylesheet's mark for [data-harm], which only this module
    sets, and only from a harm: on the_harm's menu item (ui_harm_item) and on
    the button that does the_harm (ui_tone) *)
-#pub datatype tone = Plain | Danger of harm
+#pub datavtype tone = Plain | Danger of harm
 
 (* The kinds of control, each carrying what names it *)
-datatype control =
+datavtype control =
   | {class_len,label_len:pos | class_len < 256; label_len < 256} CText of (string class_len, string label_len)
   | {class_len,name_len:pos | class_len < 256; name_len < 256} CIcon of (string class_len, icon, string name_len)
   | {class_len:pos | class_len < 256} CNamedByContent of (string class_len)
@@ -563,38 +563,38 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
   (document: !$D.document(document_loc), parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len,
    id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, the_control: control): void =
   case+ the_control of
-  | CText(class_name, label) => let
+  | ~CText(class_name, label) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
     in _document_text(document, id_bytes, id_len, label) end
-  | CIcon(class_name, the_icon, name) => let
+  | ~CIcon(class_name, the_icon, name) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
       val () = _document_attr(document, id_bytes, id_len, "aria-label", name)
     in _document_text(document, id_bytes, id_len, _glyph(the_icon)) end
-  | CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
-  | CLinkOut(class_name, label) => let
+  | ~CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+  | ~CLinkOut(class_name, label) => let
       val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
       val () = _document_attr(document, id_bytes, id_len, "class", class_name)
       val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
       val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
     in _document_text(document, id_bytes, id_len, label) end
-  | CDownload(class_name, label) => let
+  | ~CDownload(class_name, label) => let
       val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
       val () = _document_attr(document, id_bytes, id_len, "class", class_name)
       val () = _document_empty_attr(document, id_bytes, id_len, "download")
       val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
       val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
     in _document_text(document, id_bytes, id_len, label) end
-  | CMenuItem(label) => let
+  | ~CMenuItem(label) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
       val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
     in _document_text(document, id_bytes, id_len, label) end
-  | CHarmItem(the_harm) => let
+  | ~CHarmItem(the_harm) => let
       val @(_, label) = _harm_item(the_harm)
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
       val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
       val () = _document_attr(document, id_bytes, id_len, "data-harm", "y")
     in _document_text(document, id_bytes, id_len, label) end
-  | CTab(label, controls, selected) => let
+  | ~CTab(label, controls, selected) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "tab")
       val () = _document_attr(document, id_bytes, id_len, "role", "tab")
       val () = _document_attr(document, id_bytes, id_len, "aria-controls", controls)
@@ -755,8 +755,8 @@ in _control_literal(parent, id, CHarmItem(the_harm)) end
 
 implement ui_tone(id, button_tone) =
   case+ button_tone of
-  | Danger(_) => _set_attr(id, "data-harm", "y")
-  | Plain() => _set_attr(id, "data-harm", "n")
+  | ~Danger(_) => _set_attr(id, "data-harm", "y")
+  | ~Plain() => _set_attr(id, "data-harm", "n")
 
 (* A tab named by its label, controlling the panel controls *)
 #pub fn ui_tab {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}{controls_len:pos | controls_len < 256}
@@ -944,7 +944,7 @@ in _set_attr(id, "aria-labelledby", by) end
    ============================================================ *)
 
 (* What a listener listens on *)
-#pub datatype on =
+#pub datavtype on =
   | {id_len:pos | id_len < 256} OnEl of (string id_len)
   | OnDocument
   | OnWindow
@@ -960,25 +960,25 @@ in _set_attr(id, "aria-labelledby", by) end
    bridge's 128 slots, which is the media query listener's (listen_media
    shares the slots). The table is registered at once by ui_listen_all;
    there is no other way to register a listener. *)
-#pub datatype regs(int) =
+#pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
-      (regs(count), on, string event_len, ($EV.event_payload) -<cloref1> int)
+      (regs(count), on, string event_len, ($EV.event_payload) -<lincloptr1> int)
 
 fn _listen_one {event_len:pos | event_len < 256}
-  (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<cloref1> int): void = let
+  (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
   val event_len = _length(event)
   val @(event_frozen, event_bytes) = $A.freeze<byte>(_literal_bytes(event, event_len))
   val () = (case+ target of
-    | OnEl(id) => let
+    | ~OnEl(id) => let
         val id_len = _length(id)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
         val () = $EV.listen(id_bytes, id_len, event_bytes, event_len, listener, callback)
       in release_bytes(id_frozen, id_bytes) end
-    | OnDocument() => $EV.listen_document(event_bytes, event_len, listener, callback)
-    | OnWindow() => $EV.listen_window(event_bytes, event_len, listener, callback)
-    | OnExternalFiles() => $EV.listen_external_files(listener, callback)
-    | OnGestures(id) => let
+    | ~OnDocument() => $EV.listen_document(event_bytes, event_len, listener, callback)
+    | ~OnWindow() => $EV.listen_window(event_bytes, event_len, listener, callback)
+    | ~OnExternalFiles() => $EV.listen_external_files(listener, callback)
+    | ~OnGestures(id) => let
         val id_len = _length(id)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
         val () = $EV.listen_gestures(id_bytes, id_len, listener, callback)
@@ -989,8 +989,8 @@ in release_bytes(event_frozen, event_bytes) end
    number registered *)
 fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): int count =
   case+ listeners of
-  | RNil() => 0
-  | RCons(rest, target, event, callback) => let
+  | ~RNil() => 0
+  | ~RCons(rest, target, event, callback) => let
       val position = _listen_all(rest)
       val () = _listen_one(target, event, position, callback)
     in position + 1 end

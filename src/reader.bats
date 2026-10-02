@@ -693,7 +693,7 @@ in
       val pages_read = !_book_pages
       val () = !_book_minutes := 0
       val () = !_book_pages := 0
-      val () = lib_update(book_index, llam(record) => @{
+      val () = (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(book_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
@@ -701,7 +701,7 @@ in
         shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
         (* finished now: a change sync passes on *)
         finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
-        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
+        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
       val () = lib_touch(book_index)
     in lib_save() end
 end
@@ -2172,8 +2172,8 @@ dataprop TIMED_(int) = {timeout:int} TimedArmed(timeout) of ()
 in
 stadef TIMED = TIMED_
 
-fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<cloref1> void): (TIMED(timeout) | void) = let
-  val () = $P.finish<Int>($P.vow($TM.timer_set(BACK_SHOWN)), llam(_) => done(timeout))
+fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<lincloptr1> void): (TIMED(timeout) | void) = let
+  val () = $P.finish<Int>($P.and_then<Int><Int>($P.vow($TM.timer_set(BACK_SHOWN)), llam(_) => $P.ret<Int>(timeout)), done)
 in (TimedArmed() | ()) end
 end
 

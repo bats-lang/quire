@@ -127,7 +127,7 @@ fun _names_json {l:agz}{owner:addr}{n:nat}{collection:nat | collection <= 8}
 (* The reading log's days from entries, as [day, minutes] pairs (days
    since 1970-01-01, local), each after a comma but the first *)
 fun _days_json {l:agz}{owner:addr}{n:nat}{count:nat}{position:nat | position + 26 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: days(count), first: bool)
+  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: !days(count), first: bool)
   : [stop:nat | stop <= position + 26 * count] int stop =
   case+ entries of
   | DaysNil() => position
@@ -148,6 +148,7 @@ fn _log_chunk (): jchunk =
       val @(entries, _) = stats_days()
       val next = jw_lit(out, 0, ",\"readingLog\":[")
       val next = _days_json(out, next, entries, true)
+      val () = stats_days_free(entries)
       val next = jw_lit(out, next, "]")
     in JChunk(owner, out, next) end
 
@@ -588,7 +589,7 @@ implement backup_apply_numbers (book_index, numbers, shelf_most) = let
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
 in
-  lib_update(book_index, llam(before) => @{
+  (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(before) => lib_nums_set(book_index, @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
     added = (if added > 0 then added else before.added), opened = opened,
     chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor,
@@ -600,7 +601,7 @@ in
     shelf_modified = (if shelf_modified >= 0 then shelf_modified else before.shelf_modified),
     collections_modified = (if collections_modified >= 0 then collections_modified else before.collections_modified),
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
-    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere })
+    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)

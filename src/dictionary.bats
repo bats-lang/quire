@@ -584,8 +584,10 @@ fn _is_loaded (open_dictionary: !loaded): bool =
   | @Loaded(_, _, _, _, _, _, _, _) => let prval () = fold@(open_dictionary) in true end
   | _ => false
 
-fn _gather_finish (id: int, reading: int, again: () -<cloref1> void): void =
-  if !_reading <> reading then ()
+(* The files read for dictionary id (the reading-th read) put together:
+   true when the dictionary is open then *)
+fn _gather_finish (id: int, reading: int): bool =
+  if !_reading <> reading then false
   else let
   val table = _slot_take(_gather_table)
   val idx = _slot_take(_gather_idx)
@@ -601,25 +603,27 @@ in
       val assembled = _assemble(id, table, idx, dict, syn)
       val opened = _is_loaded(assembled)
       val () = _loaded_put(assembled)
-    in if opened then again() else () end
+    in opened end
     else let
       prval () = fold@(current)
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   | _ => let
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   end
 
 (* Reads dictionary id's files (with its .syn when kind says it has
-   one); again runs once they are open *)
-fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
+   one); the promise resolves true once they are open *)
+fn _load (id: int, kind: int): $P.promise(bool, $P.Chained) = let
   val () = _loaded_put(Loading(id))
   val reading = !_reading + 1
   val () = !_reading := reading
@@ -636,7 +640,7 @@ fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
 in
   (* each file's read keeps what it found in its slot, which
      _gather_finish checks *)
-  $P.finish<int>(gathered, llam(_) => _gather_finish(id, reading, again))
+  $P.and_then<int><bool>(gathered, llam(_) => $P.ret<bool>(_gather_finish(id, reading)))
 end
 
 (* The dictionary closed: the next lookup reads its files again *)
@@ -927,23 +931,22 @@ fun _trim_end {l:agz}{n:pos}{start:nat}{stop:nat | start <= stop; stop <= n} .<s
   else if _trimmed(_byte_at(word, stop - 1)) then _trim_end(word, start, stop - 1)
   else stop
 
+(* What a lookup found: the word, which dict_show then shows (DictFound);
+   not the word (DictMissing); or that the dictionary's files are being
+   read for it (DictReading): its promise resolves true once they are
+   open, when the lookup can be made again *)
+#pub datavtype dict_found =
+  | DictFound of ()
+  | DictMissing of ()
+  | DictReading of $P.promise(bool, $P.Chained)
+
 (* Looks word[0, word_len) up in the first dictionary of the language
-   code[0, code_len) names: true when it is found there, and then
-   dict_show shows it. When that dictionary's files are not read yet,
-   they are read, and what dict_when_read was given runs once they are *)
+   code[0, code_len) names. When that dictionary's files are not read
+   yet, they are read (DictReading) *)
 #pub fn dict_find {code_loc,word_loc:agz}{word_size:pos}{word_len:nat | word_len <= word_size}
-  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): bool
-
-typedef act = () -<cloref1> void
-val _nothing: act = llam () =<cloref1> ()
-val _when_read = ref<act>(_nothing)
-
-(* What runs once a dictionary's files are read (a lookup again) *)
-#pub fn dict_when_read (again: () -<cloref1> void): void
-implement dict_when_read (again) = !_when_read := again
+  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): dict_found
 
 implement dict_find (code, code_len, word, word_len) = let
-  val again = !_when_read
   val () = _hit_put(NoHit())
   val code_len = g1ofg0(code_len)
   val language = (if code_len >= 0 then (if code_len <= 3 then _language_of_bytes(code, code_len) else ~1) else ~1): int
@@ -953,9 +956,9 @@ implement dict_find (code, code_len, word, word_len) = let
   val @(id, kind) = _dicts_for(list, language)
   val () = _dicts_put(DictCell(list, next_id))
 in
-  if id < 0 then false
-  else if stop - start <= 0 then false
-  else if stop - start > 64 then false
+  if id < 0 then DictMissing()
+  else if stop - start <= 0 then DictMissing()
+  else if stop - start > 64 then DictMissing()
   else let
     val current = _loaded_take()
   in
@@ -972,25 +975,24 @@ in
         case+ found of
         | ~RecordGot(headword, headword_len, offset, size) => let
             val () = _hit_put(Hit(id, headword, headword_len, offset, size))
-          in true end
-        | ~NoRecord() => false
+          in DictFound() end
+        | ~NoRecord() => DictMissing()
       end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
+    (* the files are being read already: that read's lookup is made
+       again once they are open *)
     | @Loading(loading_id) =>
-      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in false end
+      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in DictMissing() end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
     | NotLoaded() => let
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
   end
 end
 
@@ -1284,7 +1286,10 @@ in
   else let
     val () = _unload()
     val () = _render()
-  in undo_offer("Dictionary removed", llam () => _restore(id, index), llam () => _forget(id)) end
+  in $P.finish<settled>(undo_offer("Dictionary removed"), llam(how) =>
+    case+ how of
+    | Undone() => _restore(id, index)
+    | Final() => _forget(id)) end
 end
 
 (* ============================================================

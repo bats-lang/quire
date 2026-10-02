@@ -504,7 +504,10 @@ in
   else let
     val () = _render()
     val () = _save()
-  in undo_offer("Catalogue removed", llam () => _restore(id, index), llam () => _forget(id)) end
+  in $P.finish<settled>(undo_offer("Catalogue removed"), llam(how) =>
+    case+ how of
+    | Undone() => _restore(id, index)
+    | Final() => _forget(id)) end
 end
 
 (* ============================================================
