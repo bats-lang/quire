@@ -93,9 +93,12 @@ fn _defaults (): settings =
      volume_keys = 0, readout = 0, scrolled = 0, columns = 0 }
 
 val _set = ref<settings>(_defaults())
-(* Whether a ruby's annotations are shown (1, the default) or hidden:
-   kept apart from the record, which one field more would make too
-   large for wasm to copy without memmove, which it is not given *)
+(* Whether a ruby's annotations are shown (1, the default) or hidden.
+   Kept apart from the record in memory (it is byte 19 of the stored
+   one): each of the record's setters writes the record out whole, so a
+   field there costs a line in every one of them, and a cell of its own
+   costs one setter. (Wasm builds now have memmove, bats-lang/bats#220,
+   so the record's size is no longer a limit) *)
 val _ruby = ref<int>(1)
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)

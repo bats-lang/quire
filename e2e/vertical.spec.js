@@ -78,10 +78,14 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
 
 test('set vertically, the space after a paragraph is beside it, not below it, and its row is offered', async ({ page }) => {
   await start(page);
-  await readBook(page, verticalBook('段落の間'));
+  // short paragraphs, so the first two are on the first page whatever
+  // the font's measures: a long one can fill the page, the next on
+  // the page after it
+  const shortParagraphs = Array.from({ length: 8 }, (_, k) => `<p>短い段落 ${k}。吾輩は猫である。</p>`).join('');
+  await readBook(page, { ...verticalBook('段落の間'), chapters: 1, rawChapters: [{ body: `<h1>第1章</h1>${shortParagraphs}` }] });
   const boxes = await bookPage(page).evaluate(doc => {
     const [first, second] = [...doc.querySelectorAll('p')];
-    const a = first.getClientRects()[0];
+    const a = first.getClientRects()[first.getClientRects().length - 1];
     const b = second.getClientRects()[0];
     const style = getComputedStyle(first);
     return {
