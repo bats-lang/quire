@@ -724,6 +724,21 @@ fn _is_https {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n
 implement ui_https_href (id, url, url_len) =
   if _is_https(url, url_len) then _set_url_buf(id, $D.Href, url, url_len) else $A.free<byte>(url)
 
+(* A link out of the app (ui_link_out) to a fixed https address:
+   https:// and then address, set by dom's set_url_literal, whose
+   scheme is its constructor's *)
+#pub fn ui_link_out_https {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}{address_len:pos | address_len < 240}
+  (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len, address: string address_len): void
+
+implement ui_link_out_https(parent, id, class_name, label, address) = let
+  val () = ui_link_out(parent, id, class_name, label)
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.set_url_literal(document, id_bytes, id_len, $D.Href, $D.Https(address))
+  val () = $D.destroy(document)
+in release_bytes(id_frozen, id_bytes) end
+
 (* A numbered download link (ui_download_nn), showing label (its name) *)
 #pub fn ui_download_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
   (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len, label: string label_len): void

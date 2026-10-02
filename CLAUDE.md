@@ -537,9 +537,22 @@ gear after Search: the bottom bar, with Contents and Typography, has
 no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
 (Export backup, and Restore backup: the input `backup-file`), the daily
 reading goal (also in the statistics panel; `stats_goal_show` marks
-both), and Reset settings and Factory reset, each with its Undo. A
+both), Reset settings and Factory reset, each with its Undo, and
+About Quire › (`LAbout`, `about-screen`): the app's name and links out
+of the app (`ui_link_out_https`, an address dom's `set_url_literal`
+sets) to the home page, privacy policy, terms and source. A
 restore or a factory reset from the reader goes back to the library
-first. The library menu keeps Install, the storage notes, Settings,
+first.
+
+The home page, privacy policy and terms are plain static HTML in
+`homepage/` (#216), published by `deploy.yml` beside the app at
+`https://bats-lang.github.io/quire/homepage/` (`privacy.html`,
+`terms.html`). They are not the app's: gen-pwa does not read them, the
+Android project does not hold them, and the service worker (bridge's
+`produce_service_worker`) answers only files directly in its scope, so
+it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
+policy states what the code does: change it with any change to what is
+stored, what leaves the device, or the Google scopes asked for. The library menu keeps Install, the storage notes, Settings,
 Reading statistics, Catalogues, Empty Trash (the red harm item) and
 Close. While Settings is open over the reader, keys are its own, not
 page turns.

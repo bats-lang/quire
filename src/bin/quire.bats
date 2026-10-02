@@ -1007,7 +1007,7 @@ in ui_focus("settings-sync") end
    menu's item is wired with the menu), its rows, and a backup picked to
    restore. A restore or a factory reset changes the library, so the
    reader goes back to it first, as it does for files handed to the app *)
-fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) = let
+fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 4) = let
   val listeners = RCons(listeners, OnEl("reader-settings"), "click", llam(_) => let
       val () = _settings_open()
     in 0 end)
@@ -1024,6 +1024,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
       val export = _is(clicked, "settings-export-backup")
       val reset = _is(clicked, "settings-reset-settings")
       val factory_reset = _is(clicked, "settings-factory-reset")
+      val about = _is(clicked, "settings-about")
       val done = _is(clicked, "settings-done")
       val () = _target_free(clicked)
       val () = (if goal >= 0 then let
@@ -1040,8 +1041,17 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = layer_close(LSettings())
           val () = (if !_view = 1 then _show_library() else ())
         in _factory_reset() end
+        else if about then let
+          val () = layer_open(LAbout())
+        in ui_focus("about-done") end
         else if done then layer_close(LSettings())
         else ())
+    in 0 end)
+  (* the About screen: its links leave the app by themselves; Done
+     goes back to Settings *)
+  val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
+      val () = layer_close(LAbout())
+      val () = ui_focus("settings-about")
     in 0 end)
   val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
       val () = layer_close(LSettings())

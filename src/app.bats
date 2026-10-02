@@ -327,9 +327,37 @@ fn _settings_screen (): void = let
   val () = ui_named("settings-reset", NGroup, "Reset")
   val () = ui_text_btn("settings-reset", "settings-reset-settings", "btn", "Reset settings")
   val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
+  (* the About screen *)
+  val () = ui_el("settings-box", "settings-about-row", TDiv, "srow")
+  val () = ui_text_btn("settings-about-row", "settings-about", "btn", "About Quire \xE2\x80\xBA")
   val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
   val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
 in _hide("settings-screen") end
+
+(* The About screen, opened from Settings, the same in the web app and
+   the Android app: the app's name, what it is, and links out of the app
+   to its home page, privacy policy, terms and source. The pages are
+   published beside the app (homepage/, by deploy.yml) but are not the
+   app's: the service worker leaves them to the network. A link out
+   opens in a new tab on the web; on Android the WebView hands an
+   address outside the app to the system's browser *)
+fn _about_screen (): void = let
+  val () = ui_el("bats-root", "about-screen", TDiv, "info")
+  val () = ui_labelled("about-screen", NDialog, "about-title")
+  val () = ui_el("about-screen", "about-box", TDiv, "info-in")
+  val () = ui_el("about-box", "about-title", TDiv, "mtitle")
+  val () = ui_text("about-title", "About Quire")
+  val () = ui_el("about-box", "about-text", TDiv, "sabout")
+  val () = ui_text_long("about-text", "Quire, an EPUB reader. Your books and reading data are kept on this device.")
+  val () = ui_el("about-box", "about-links", TDiv, "sfields")
+  val () = ui_named("about-links", NGroup, "Links")
+  val () = ui_link_out_https("about-links", "about-home", "btn linkout", "Home page", "bats-lang.github.io/quire/homepage/")
+  val () = ui_link_out_https("about-links", "about-privacy", "btn linkout", "Privacy policy", "bats-lang.github.io/quire/homepage/privacy.html")
+  val () = ui_link_out_https("about-links", "about-terms", "btn linkout", "Terms of service", "bats-lang.github.io/quire/homepage/terms.html")
+  val () = ui_link_out_https("about-links", "about-source", "btn linkout", "Source code", "github.com/bats-lang/quire")
+  val () = ui_el("about-box", "about-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("about-buttons", "about-done", "btn btn-p", "Done")
+in _hide("about-screen") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)
 fn _modal (): void = let
@@ -755,6 +783,7 @@ implement app_build () = let
   val () = _stats()
   val () = _library_menu()
   val () = _settings_screen()
+  val () = _about_screen()
   val () = _info()
   val () = _reader()
   val () = _toc()
