@@ -11,6 +11,7 @@
 #use xml-tree as X
 #use wasm.bats-packages.dev/dom as D
 #use widget as W
+#use zip as Z
 
 staload "epub_xml.sats"
 staload "book.sats"
@@ -1613,12 +1614,13 @@ in
   case+ book_zip_read(serial, file_size, path, path_len) of
   | ~ZipMissing() => ()
   | ~ZipGot(owner, compressed, compressed_size, method, _, _, _) =>
-    if method = 0 then let
+    case+ method of
+    | $Z.Stored() => let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
       val () = _set_src(node, in_viewer, compressed_bytes, compressed_size, mime)
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
     in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
-    else let
+    | $Z.Deflated() => let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
       val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
@@ -1810,8 +1812,8 @@ fn _page_book_lang {doc_location:agz} (doc: !$D.document(doc_location)): void =
     in _book_lang_put(BookLang($A.thaw<byte>(lang_frozen), lang_len)) end
 
 datavtype font_source =
-  | {file_size:pos}{data_start:nat}{compressed_size:pos | data_start + compressed_size <= file_size; compressed_size <= 268435456}{method:int | method == 0 || method == 8}
-    FontSource of (int file_size, int data_start, int compressed_size, int method)
+  | {file_size:pos}{data_start:nat}{compressed_size:pos | data_start + compressed_size <= file_size; compressed_size <= 268435456}
+    FontSource of (int file_size, int data_start, int compressed_size, $Z.compression)
   | FontNone of ()
 
 val _font = ref<font_source>(FontNone())
