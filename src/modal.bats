@@ -129,7 +129,8 @@ implement modal_open (asked, title) = _show(Harmless(asked), title)
 
 (* A message with its title: OK *)
 #pub fn modal_inform {title_len:pos | title_len < 256} (title: string title_len): void
-implement modal_inform (title) = $P.discard<reply>(_show(Harmless(QInform()), title))
+(* its one button, OK, answers nothing: the answer is let go *)
+implement modal_inform (title) = $P.finish<reply>(_show(Harmless(QInform()), title), llam(_) => ())
 
 (* Asks whether to do the_harm: the_harm's title, text and red button.
    The promise resolves Accepted only from that button *)

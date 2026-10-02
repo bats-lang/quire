@@ -262,6 +262,33 @@ again.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+## What allocates is linear
+
+wasm has no garbage collector, so outside `$UNSAFE` nothing that
+allocates is non-linear (bats-lang/bats#224): a type whose constructor
+carries data is a `datavtype`, consumed by a `case+ ~` match (a list
+has a `_free` walk); a closure is a `lincloptr1`, made with `llam`.
+
+Quire never frees a closure itself (`cloptr_free` needs `$UNSAFE`):
+each one is handed to a library that runs it once and frees it, a
+promise (`$P.finish`, `$P.and_then`) or the bridge (a listener of the
+`regs` table, `ui_listen_all`). What waits for a later answer keeps a
+promise's resolver, not a closure: the Undo offer (`undo_offer`
+returns the promise of how it `settled`: `Undone` or `Final`), the
+dialog (`modal_open` and `modal_confirm` return the promise of its
+`reply`: `Accepted` or `Declined`), a sync's round (`_rounds` in
+`src/sync.bats`). The caller hands its continuation to that promise,
+and the cell resolves it exactly once, so what would not have run
+before (an undo made final, a dialog's other button) still runs,
+told so by the value, and is freed. A function that called a closure
+for each item takes data that says what to do instead (`lib_nums_set`,
+`counted` in `src/annot.bats`, `regroup` in `src/library.bats`).
+
+A promise's payload type implements `$P.dispose`, before its first use
+in each module that makes a promise of it (`$P.create`, `$P.ret`,
+`$P.resolved`): `bats check` does not catch a missing one, only the C
+compile of `bats build` does.
+
 ## What the types guarantee about the interface
 
 The stylesheet is built in `src/style.bats`, not written as CSS:
@@ -338,17 +365,18 @@ Nothing is lost at a click, except by emptying the Trash:
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
-annotation (`src/annot.bats`) have no `#pub`. Emptying runs only as the
-action handed to the dialog by `lib_ask_empty_trash`, and the dialog
-runs it only from its second button's click: the dialog registers
-that listener itself (`modal_listen`) and its answer function is not
-exported, so other code can dismiss a dialog (`modal_dismiss`) but
-never confirm one. A destructive question's title, text, button verb
+annotation (`src/annot.bats`) have no `#pub`. Emptying runs only in
+`lib_ask_harm`, when the promise of the dialog's answer
+(`modal_confirm`) resolves `Accepted`, and only the dialog's second
+button's click resolves it so: the dialog registers that listener
+itself (`modal_listen`) and its answer function is not exported, so
+other code can dismiss a dialog (`modal_dismiss`, which answers
+`Declined`) but never confirm one. A destructive question's title, text, button verb
 and red marking all come from one `harm` value.
 
 No promise's value is dropped unread (`$P.discard` is not used): a
 chain ends with `$P.finish`, and a value it ignores is written out as
-`lam(_) => ()`, with a comment saying why losing it is harmless (a
+`llam(_) => ()`, with a comment saying why losing it is harmless (a
 cover, a hint, a delete nothing reads again). What fails is said
 (`src/notice.bats`): the error banner (`error-banner`, `RAlert`) is a
 child of `bats-root`, so it shows over the library and the reader

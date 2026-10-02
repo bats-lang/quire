@@ -524,8 +524,8 @@ in
 end
 
 (* Removes the book at index from the library. Private: a book is
-   removed only when the Trash is emptied, the yes of a confirmed dialog
-   (lib_ask_empty_trash) *)
+   removed only when the Trash is emptied, once the dialog lib_ask_harm
+   opens is answered Accepted *)
 fn _remove {index:int} (index: int index): void = let
   val cell = lib_take()
   val+ ~LibCell(books, count) = cell
