@@ -622,9 +622,22 @@ gear after Search: the bottom bar, with Contents and Typography, has
 no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
 (Export backup, and Restore backup: the input `backup-file`), the daily
 reading goal (also in the statistics panel; `stats_goal_show` marks
-both), and Reset settings and Factory reset, each with its Undo. A
+both), Reset settings and Factory reset, each with its Undo, and
+About Quire › (`LAbout`, `about-screen`): the app's name and links out
+of the app (`ui_link_out_https`, an address dom's `set_url_literal`
+sets) to the home page, privacy policy, terms and source. A
 restore or a factory reset from the reader goes back to the library
-first. The library menu keeps Install, the storage notes, Settings,
+first.
+
+The home page, privacy policy and terms are plain static HTML in
+`homepage/` (#216), published by `deploy.yml` beside the app at
+`https://bats-lang.github.io/quire/homepage/` (`privacy.html`,
+`terms.html`). They are not the app's: gen-pwa does not read them, the
+Android project does not hold them, and the service worker (bridge's
+`produce_service_worker`) answers only files directly in its scope, so
+it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
+policy states what the code does: change it with any change to what is
+stored, what leaves the device, or the Google scopes asked for. The library menu keeps Install, the storage notes, Settings,
 Reading statistics, Catalogues, Empty Trash (the red harm item) and
 Close. While Settings is open over the reader, keys are its own, not
 page turns.
@@ -647,6 +660,27 @@ the browser sends after it (`_dragged`). The source captures a mouse
 pointer only once it has moved more than 4 px: capture at pointerdown
 would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
+
+A book is set vertically as Readium sets it, from its OPF (the book's
+CSS is dropped): `vertical-rl` when its spine reads right to left and
+its language is Chinese, Japanese or Korean, `vertical-lr` for
+Mongolian in its script (mn-Mong) read left to right. `spine_vertical`
+in `src/epub_xml.bats` answers a `writing_mode` (`Horizontal |
+VerticalRightToLeft | VerticalLeftToRight`), from the spine's
+`spine_progression`, and `src/reader.bats` keeps it in `_vertical`.
+CSS columns follow the inline axis, which then runs down, so its pages
+go down the page: the page's class is `caf vertical` (not `rtl`, whose
+`direction` would turn that axis upward), a column and its gap (the
+page's top and bottom paddings) are exactly the page's height, and
+`_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
+shows pages, by scrollTop for `Down`. Such a book is always paged, one
+column a screen, a drag does not follow the finger (a committed one
+turns the page), and the settings of the page's layout and of its
+words' spacing and breaking are hidden while it is open. A paragraph's
+margins are logical (`margin-block`, and the Paragraph spacing setting
+as `margin-block-end`), so set vertically the space after it is beside
+it and its lines keep their length; that row stays. Taps, keys and
+swipes keep the meaning of a book read right to left.
 
 The back button a jump leaves (to the place jumped from) never stays
 up: `ps_cell` in `src/reader.bats` holds the positions it offers, and
