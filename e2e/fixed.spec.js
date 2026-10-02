@@ -91,7 +91,7 @@ test('a fixed page is fitted again when the window changes size', async ({ page 
   expectFitted(await boxes(page));
 });
 
-test('a fixed-layout book is offered only the theme and how the reader turns its pages', async ({ page }) => {
+test('a fixed-layout book is offered only the theme, its spreads and how the reader turns its pages', async ({ page }) => {
   await start(page);
   await importFiles(page, [epubFile(fixedBook('Not Restyled')), epubFile({ title: 'Reflowed', author: 'Fixed Tests', rawChapters: chapters(1) })], 2);
   await card(page, 'Not Restyled').click();
@@ -103,7 +103,8 @@ test('a fixed-layout book is offered only the theme and how the reader turns its
   await expect(sheet.getByRole('button', { name: 'Literata', exact: true })).toBeHidden();
   await expect(sheet.getByRole('slider', { name: 'Margins' })).toBeHidden();
   await expect(sheet.getByRole('group', { name: 'Layout' })).toBeHidden();
-  await expect(sheet.getByRole('group', { name: 'Columns' })).toBeHidden();
+  // its Columns are its spreads (spreads.spec.js)
+  await expect(sheet.getByRole('group', { name: 'Columns' })).toBeVisible();
   await expect(sheet.getByRole('group', { name: 'Alignment' })).toBeHidden();
   await page.keyboard.press('Escape');
   await toLibrary(page);
