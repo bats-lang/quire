@@ -127,8 +127,10 @@ test('the place is kept when the book is opened again, and after a reload', asyn
   await toLibrary(page);
   await reload(page);
   await openBook(page, 'Keep Place');
-  expect(await place(page)).toEqual(at);
-  expect((await startsOnPage(page))[0]).toBe(top);
+  // after a reload the book's font may come after the page is first
+  // laid out (font-display: swap), and the page is laid out again then
+  await expect.poll(() => place(page)).toEqual(at);
+  await expect.poll(async () => (await startsOnPage(page))[0]).toBe(top);
 });
 
 test('the place is kept in a later chapter too', async ({ page }) => {
@@ -142,7 +144,7 @@ test('the place is kept in a later chapter too', async ({ page }) => {
   await toLibrary(page);
   await reload(page);
   await openBook(page, 'Later Chapter');
-  expect(await place(page)).toEqual(at);
+  await expect.poll(() => place(page)).toEqual(at);
 });
 
 test('a new type size or window size keeps the page\'s text in view', async ({ page }) => {
