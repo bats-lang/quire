@@ -25,8 +25,8 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
    entries *)
 #pub datavtype book_entries(file_size:int, directory_size:int, count:int) =
   | BookEntriesNil(file_size, directory_size, 0) of ()
-  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
-    BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, book_entries(file_size, directory_size, count))
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
+    BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, book_entries(file_size, directory_size, count))
 
 (* A write's answer no consumer took: nothing to free *)
 implement $P.dispose<$IDB.stored>(_) = ()
@@ -47,8 +47,8 @@ implement $P.dispose<$IDB.stored>(_) = ()
    or names no entry; count chapters *)
 #pub datavtype book_chapters(file_size:int, count:int) =
   | ChaptersNil(file_size, 0) of ()
-  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
-    Chapter(file_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
+  | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
   | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
@@ -62,8 +62,8 @@ implement $P.dispose<$IDB.stored>(_) = ()
    reader uses them with no check. The book owns its file (a linear
    handle, closed when the book is replaced), and its index. *)
 #pub datavtype open_book =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    OpenBook of ($BF.infile(file_size), int file_size, book_index(file_size), book_spine(file_size), int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    OpenBook of ($BF.infile(file_size), int file_size, book_index(file_size), book_spine(file_size), int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
   | {file_size:pos} Importing of ($BF.infile(file_size), int file_size, book_index(file_size))
   | NoBook of ()
 
@@ -83,15 +83,15 @@ implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The book being imported, book `serial` of file_size bytes, opened
    with its OPF's regions; false when another book is open *)
-#pub fn book_finish {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: int method, name_offset: int name_offset, name_len: int name_len): bool
+#pub fn book_finish {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, data_offset: int data_offset, data_size: int data_size, method: $Z.compression, name_offset: int name_offset, name_len: int name_len): bool
 
 (* An entry of the file found by name: its data
    [data_offset, data_offset + data_size), method and name
    [name_offset, name_offset + name_len) *)
 #pub datavtype entry_hit(file_size:int) =
-  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    EntryHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    EntryHit(file_size) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
   | EntryMiss(file_size) of ()
 
 (* The entry named name[0, name_size) in the index of the open book,
@@ -114,8 +114,8 @@ implement $P.dispose<$IDB.stored>(_) = ()
 
 (* Chapter chapter_index of the open book, book `serial` *)
 #pub datavtype chapter_got =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
-    ChapterGot of (int file_size, int data_offset, int data_size, int method, int name_offset, int name_len, int dir_len, int chapter_count)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
+    ChapterGot of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, int chapter_count)
   (* The book has chapter_count chapters, but not a chapter_index-th one
      that names an entry *)
   | {chapter_count:nat} ChapterNone of (int chapter_count)
@@ -145,8 +145,8 @@ implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The open book's size and the OPF's regions in it *)
 #pub typedef book_meta =
-  [file_size:pos][data_offset:nat][data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456][method:int | method == 0 || method == 8][name_offset:nat][name_len:pos | name_offset + name_len <= file_size; name_len < 65536]
-  @(int file_size, int data_offset, int data_size, int method, int name_offset, int name_len)
+  [file_size:pos][data_offset:nat][data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456][name_offset:nat][name_len:pos | name_offset + name_len <= file_size; name_len < 65536]
+  @(int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
 
 (* The open book's size and regions, or none when no book is open *)
 #pub fn book_meta_get(): $R.option(book_meta)
@@ -227,10 +227,9 @@ implement $P.dispose<$IDB.stored>(_) = ()
 
 #pub fn lookup_content (found: $IDB.lookup): stored_content
 
-(* How a zip entry's data is stored, as its method says: 8 is raw
-   deflate, and the rest (0, the only other an entry is proven to have)
-   stored as it is *)
-#pub fn zip_compression (method: int): $BD.compression
+(* How bridge decompresses a zip entry's data: a deflated entry is raw
+   deflate, a stored one is as it is *)
+#pub fn zip_compression (method: $Z.compression): $BD.compression
 
 (* Decompresses data[0, data_len) as method says; the promise resolves
    with what came of it, for take_decompressed *)
@@ -243,8 +242,8 @@ implement $P.dispose<$IDB.stored>(_) = ()
    [name_offset, name_offset + name_len), both proven inside the
    archive *)
 #pub datavtype zip_got(file_size:int) =
-  | {arena_loc,piece_loc:agz}{data_size:pos | data_size <= 268435456}{method:int | method == 0 || method == 8}{data_offset:nat | data_offset + data_size <= file_size}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    ZipGot(file_size) of (piece_owner(data_size, arena_loc), $A.arrx(byte, piece_loc, data_size, arena_loc), int data_size, int method, int data_offset, int name_offset, int name_len)
+  | {arena_loc,piece_loc:agz}{data_size:pos | data_size <= 268435456}{data_offset:nat | data_offset + data_size <= file_size}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    ZipGot(file_size) of (piece_owner(data_size, arena_loc), $A.arrx(byte, piece_loc, data_size, arena_loc), int data_size, $Z.compression, int data_offset, int name_offset, int name_len)
   | ZipMissing(file_size) of ()
 
 (* index_read on the open book, when it is book `serial` of file_size
@@ -336,8 +335,8 @@ end
    data_size), method, and its name [name_offset, name_offset +
    name_len) in the file *)
 datavtype book_hit(file_size:int) =
-  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    BookHit(file_size) of (int data_offset, int data_size, int method, int name_offset, int name_len)
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    BookHit(file_size) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len)
   | BookMiss(file_size) of ()
 
 (* The first of entries named name[0, name_size) in directory, whose
@@ -562,7 +561,9 @@ implement lookup_content (found) =
   | ~$IDB.Unreadable() => ContentUnreadable()
 
 implement zip_compression (method) =
-  if method = 8 then $BD.DeflateRaw() else $BD.Uncompressed()
+  case+ method of
+  | $Z.Stored() => $BD.Uncompressed()
+  | $Z.Deflated() => $BD.DeflateRaw()
 
 implement decompress (data, data_len, method) =
   $BD.decompress(data, data_len, method)

@@ -1747,7 +1747,7 @@ fn _gesture_record (h: $EV.event_payload): void =
    touch or pen only (a mouse drag over the page selects text) *)
 fn _gestures_start (): void = let
   val state = $GT.gestures_new()
-  val () = $GT.gestures_region(state, PAGE_REGION, ~1, page_turn_axes(), false, false, $GT.DevTouch())
+  val () = $GT.gestures_region(state, PAGE_REGION, $GP.NoRegion(), page_turn_axes(), false, false, $GT.DevTouch())
 in _gestures_put(GSome(state, $GS.gestures_source_new())) end
 
 (* The page's scrolls, numbered, so only the last one's rest counts *)
