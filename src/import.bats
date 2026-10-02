@@ -24,6 +24,7 @@ staload "mem.sats"
 staload "clock.sats"
 staload "app.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -203,7 +204,7 @@ fn _store_a11y {l:agz}{n:pos}
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: losing the summary only hides it until the next import,
      and a full storage is told by the saves that matter *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -245,14 +246,14 @@ in
           val key = lib_key(99, id_high, id_low)
           val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
           (* ignored: a cover not stored shows as the placeholder *)
-          val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size), llam(_) => ())
+          val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size), llam(_) => ())
           val () = release_bytes(key_frozen, key_bytes)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
         in code end
         else let
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
-          val decompressing = decompress(cover_bytes, cover_size, cover_method)
+          val decompressing = decompress(cover_bytes, cover_size, zip_compression(cover_method))
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
           val () = $P.finish<Int>($P.vow(decompressing), llam(content_handle) =>
@@ -263,7 +264,7 @@ in
                 val key = lib_key(99, id_high, id_low)
                 val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
                 (* ignored: a cover not stored shows as the placeholder *)
-                val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, content_bytes, content_size), llam(_) => ())
+                val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 15, content_bytes, content_size), llam(_) => ())
                 val () = release_bytes(key_frozen, key_bytes)
                 val () = $A.drop<byte>(content_frozen, content_bytes)
               in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
@@ -296,10 +297,11 @@ in
   in _put_string(buffer, 0, "This book") end
 end
 
-fn _book_store_checked (storing: $P.promise(Int, $P.Chained), key: Int): void =
-  $P.finish<Int>(storing, llam(status) =>
-    if status >= 0 then ()
-    else let
+fn _book_store_checked (storing: $P.promise($IDB.stored, $P.Chained), key: Int): void =
+  $P.finish<$IDB.stored>(storing, llam(status) =>
+    case+ status of
+    | $IDB.Stored() => ()
+    | $IDB.NotStored() => let
       val message = $A.alloc<byte>(512)
       val name_end = _title_into(message, key)
       val text_end = _put_string(message, name_end, " is open, but could not be stored, so it will not open next time. Free some space and import it again.")
@@ -381,7 +383,7 @@ in
   | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~3) end
   | ~ZipGot(container_owner, container_data, container_size, container_method, _, _, _) => let
       val @(data_frozen, data_bytes) = $A.freeze<byte>(container_data)
-      val decompressing = decompress(data_bytes, container_size, container_method)
+      val decompressing = decompress(data_bytes, container_size, zip_compression(container_method))
       val () = $A.drop<byte>(data_frozen, data_bytes)
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
@@ -427,7 +429,7 @@ in
                 | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~7) end
                 | ~ZipGot(opf_owner, opf_data, opf_compressed_size, opf_method, opf_offset, opf_name_offset, opf_name_len) => let
                     val @(opf_data_frozen, opf_data_bytes) = $A.freeze<byte>(opf_data)
-                    val opf_decompressing = decompress(opf_data_bytes, opf_compressed_size, opf_method)
+                    val opf_decompressing = decompress(opf_data_bytes, opf_compressed_size, zip_compression(opf_method))
                     val () = $A.drop<byte>(opf_data_frozen, opf_data_bytes)
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
@@ -521,7 +523,15 @@ in
 end
 
 (* Imports book_file, of file_size bytes, whose name is kept *)
-fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) = let
+fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) =
+  (* a book added to a library that could not be read could not be kept
+     without saving that library over the one stored (#174) *)
+  if ~storage_savable(LibraryRecord()) then let
+    val () = $BF.file_close(book_file)
+    val () = _kept_name_put(NoKeptName())
+    val () = notice_error("Books cannot be added: Quire could not read your library. Reopen Quire to try again.")
+  in $P.ret<Int>(~1) end
+  else let
   val () = _stage_name()
   val () = _stage("Reading file", 10)
   val () = notice_dismiss()
@@ -653,10 +663,16 @@ implement import_external (handle) = $P.finish<Int>(_import_handle(handle), llam
    Reopening a stored book
    ============================================================ *)
 
+(* How a stored book's opening went: opened; its file not stored (an
+   archived book) or not a book quire can open; or its file could not be
+   read from storage, which another try may mend (#174) *)
+#pub datatype book_opening = BookOpened | BookFileMissing | BookFileUnreadable
+
+implement $P.dispose<book_opening>(_) = ()
+
 (* Puts library book (id_high, id_low), whose key is key, in the book cell from
-   its stored file; the promise resolves with 0, or below 0 when its
-   file is not stored (an archived book) or cannot be read *)
-#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(Int, $P.Chained)
+   its stored file *)
+#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained)
 
 implement open_stored (key, id_high, id_low) = let
   val file_key = lib_key(98, id_high, id_low)
@@ -664,19 +680,20 @@ implement open_stored (key, id_high, id_low) = let
   val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><Int>($P.vow(stored), llam(handle) =>
-    case+ $BF.file_claim(handle) of
-    | ~$R.none() => $P.ret<Int>(~1)
-    | ~$R.some(book_file) => let
+  $P.and_then<$BF.file_lookup><book_opening>(stored, llam(found) =>
+    case+ found of
+    | ~$BF.FileAbsent() => $P.ret<book_opening>(BookFileMissing())
+    | ~$BF.FileUnreadable() => $P.ret<book_opening>(BookFileUnreadable())
+    | ~$BF.FileFound(book_file) => let
         val file_size = $BF.file_size(book_file)
       in
-        if file_size <= 0 then let val () = $BF.file_close(book_file) in $P.ret<Int>(~1) end
+        if file_size <= 0 then let val () = $BF.file_close(book_file) in $P.ret<book_opening>(BookFileMissing()) end
         else let
           val serial = book_begin(book_file, file_size)
         in
-          $P.and_then<Int><Int>(_open_archive(serial, file_size, MODE_OPEN, ~1, id_high, id_low), llam(outcome) =>
-            if outcome < 0 then $P.ret<Int>(outcome)
-            else let val () = open_key_set(key) in $P.ret<Int>(0) end)
+          $P.and_then<Int><book_opening>(_open_archive(serial, file_size, MODE_OPEN, ~1, id_high, id_low), llam(outcome) =>
+            if outcome < 0 then $P.ret<book_opening>(BookFileMissing())
+            else let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end)
         end
       end)
 end

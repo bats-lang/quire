@@ -27,6 +27,7 @@ staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -347,7 +348,10 @@ fn _key (): [l:agz] $A.arr(byte, l, 15) = lib_key(97, !_book_id_high, !_book_id_
 
 (* Stores annotations and deletions under the key of book id_high,
    id_low *)
-fn _store {count:nat | count <= ANNOTATIONS_MAX}{tomb_count:nat} (id_high: int, id_low: int, annotations: !annotations(count), count: int count, tombs: !tombs(tomb_count)): void = let
+fn _store {count:nat | count <= ANNOTATIONS_MAX}{tomb_count:nat} (id_high: int, id_low: int, annotations: !annotations(count), count: int count, tombs: !tombs(tomb_count)): void =
+  (* never over annotations that could not be read *)
+  if ~storage_annotations_savable(id_high, id_low) then ()
+  else let
   val kept = _tombs_kept(tombs)
   val kept_count = _tombs_count(kept)
   val piece_size = 8 + 12 * kept_count + STORED_MAX * count
@@ -369,7 +373,11 @@ in
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
     in piece_free(owner, $A.thaw<byte>(out_frozen)) end
-end
+  end
+
+(* Whether the open book's annotations may be changed: they were read
+   (#174) *)
+fn _changeable (): bool = storage_annotations_savable(!_book_id_high, !_book_id_low)
 
 fn _save (): void = let
   val cell = _take()
@@ -515,12 +523,17 @@ implement annot_load (id_high, id_low) = let
   val loaded = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(loaded), llam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => let
+  $P.and_then<$IDB.lookup><int>(loaded, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => let
         val () = (if !_book_id_high = id_high then (if !_book_id_low = id_low then !_book_open := true else ()) else ())
       in $P.ret<int>(0) end
-    | ~ContentBytes(owner, stored, stored_size) => let
+    (* not taken for none: nothing is saved for the book, or made, so
+       the annotations that could not be read are kept *)
+    | ~ContentUnreadable() => let
+        val () = storage_annotations_unreadable(id_high, id_low)
+      in $P.ret<int>(0) end
+    | ~StoredContent(owner, stored, stored_size) => let
         val @(annotations, count, tombs) = _parse_record(stored, stored_size)
         val () = piece_free(owner, stored)
         (* only while the same book is open *)
@@ -591,8 +604,8 @@ fn _on_page (node: Int): bool =
     val () = release_bytes(node_frozen, node_bytes)
   in
     case+ measured of
-    | ~$R.err(_) => false
-    | ~$R.ok(found) => if found <= 0 then false else let
+    | $DR.NoElement() => false
+    | $DR.Measured() => let
         val node_x = $DR.get_measure_x()
         val () = ui_measure("page")
         val page_x = $DR.get_measure_x()
@@ -751,7 +764,8 @@ end
 implement annot_bookmark_toggle (anchor) = let
   val index = _here()
 in
-  if index >= 0 then let
+  if ~_changeable() then ()
+  else if index >= 0 then let
     val () = _delete(index)
   in annot_star() end
   else let
@@ -818,7 +832,8 @@ implement annot_highlight (style) = let
   val start_node = _node_number_of(start_blob)
   val end_node = _node_number_of(end_blob)
 in
-  if start_node < 0 then ~1
+  if ~_changeable() then ~1
+  else if start_node < 0 then ~1
   else if end_node < 0 then ~1
   else if (if start_node = end_node then start_offset >= end_offset else start_node > end_node) then ~1
   else (case+ $DR.get_selection_text() of
@@ -865,7 +880,9 @@ fn _note_len {l:agz}{n:pos}{text_len:nat | text_len <= n} (text: !$A.arr(byte, l
    bytes of it *)
 #pub fn annot_note_set {l:agz}{n:pos}{text_len:nat | text_len <= n} (index: int, text: $A.arr(byte, l, n), text_len: int text_len): void
 
-implement annot_note_set (index, text, text_len) = let
+implement annot_note_set (index, text, text_len) =
+  if ~_changeable() then $A.free<byte>(text)
+  else let
   val note_len = _note_len(text, text_len)
   val note = $A.alloc<byte>(note_len + 1)
   val () = _copy_bytes(text, note, note_len, 0)
@@ -1018,13 +1035,13 @@ end
 #pub fn annot_delete_highlight {index:int} (index: int index): void
 
 implement annot_delete_highlight (index) =
-  _delete_undoable(index, "Highlight deleted", HighlightList())
+  if ~_changeable() then () else _delete_undoable(index, "Highlight deleted", HighlightList())
 
 (* Deletes bookmark index, offering Undo *)
 #pub fn annot_delete_bookmark {index:int} (index: int index): void
 
 implement annot_delete_bookmark (index) =
-  _delete_undoable(index, "Bookmark deleted", BookmarkList())
+  if ~_changeable() then () else _delete_undoable(index, "Bookmark deleted", BookmarkList())
 
 (* Both lists, after a note changed: the highlights' and the bookmarks' *)
 fn _lists_render (): void = let

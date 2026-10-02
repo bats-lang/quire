@@ -466,19 +466,24 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), llam(handle) => let
-          val () = (case+ take_content(handle) of
-            | ~NoContentBytes() => _push(_text_chunk("[]"))
-            | ~ContentBytes(content_owner, content, content_len) => let
-                val annotations = annot_json(content, content_len)
-                val () = piece_free(content_owner, content)
-              in
-                case+ annotations of
+        $P.finish<$IDB.lookup>(pending, llam(found) =>
+          case+ lookup_content(found) of
+          | ~NoStoredContent() => let
+              val () = _push(_text_chunk("[]"))
+            in _export_books(book_index + 1, count, false) end
+          (* a backup that looks whole but lost a book's notes is worse
+             than none: it is not made (#174) *)
+          | ~ContentUnreadable() => let
+              val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
+            in _say("The backup could not be made: a book's notes could not be read. Try again.") end
+          | ~StoredContent(content_owner, content, content_len) => let
+              val annotations = annot_json(content, content_len)
+              val () = piece_free(content_owner, content)
+              val () = (case+ annotations of
                 | ~JNone() => _push(_text_chunk("[]"))
                 | ~JChunk(annotations_owner, annotations_bytes, annotations_len) =>
-                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len))
-              end)
-        in _export_books(book_index + 1, count, false) end)
+                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len)))
+            in _export_books(book_index + 1, count, false) end)
       end)
 
 (* Downloads the backup, quire-backup.json *)
@@ -624,10 +629,12 @@ implement backup_claim (id_high, id_low) = let
   val pending = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), llam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => ()
-    | ~BlobBytes(record, n) =>
+  $P.finish<$IDB.lookup>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => ()
+    (* kept, claimed on a later import: nothing is lost by waiting *)
+    | ~StoredUnreadable() => ()
+    | ~StoredBytes(record, n) =>
       if n < 4 + 4 * RECORD_NUMBERS_FIRST then $A.free<byte>(record)
       else if byte2int0($A.get<byte>(record, 1)) <> 79 then $A.free<byte>(record)
       else let
@@ -639,7 +646,7 @@ in
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
         (* ignored: a record not deleted is applied again only if the
            book is imported again, which is harmless *)
-        val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+        val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
       in release_bytes(key_frozen, key_bytes) end)
 end
 

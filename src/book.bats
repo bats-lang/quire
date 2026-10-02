@@ -15,6 +15,7 @@ staload "paths.sats"
 staload "mem.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
+staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
 (* A book's entries, found once when it is opened: an entry's data
    [data_offset, data_offset + data_size) in the file of file_size
@@ -25,6 +26,9 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
   | BookEntriesNil(file_size, directory_size, 0) of ()
   | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= directory_size; name_len < 65536}
     BookEntry(file_size, directory_size, count + 1) of (int data_offset, int data_size, int method, int name_offset, int name_len, book_entries(file_size, directory_size, count))
+
+(* A write's answer no consumer took: nothing to free *)
+implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The file's central directory, at directory_offset, kept while the
    book is open (for its entries' names), and its entries: the archive
@@ -147,9 +151,9 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 #pub fn book_meta_get(): $R.option(book_meta)
 
 (* Stores the open book's file in IndexedDB under key, from the JS side:
-   the promise resolves with 0, or below 0 when it was not stored (or
-   no book is open) *)
-#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise(Int, $P.Chained)
+   the promise resolves with whether it was stored (NotStored when no
+   book is open) *)
+#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise($IDB.stored, $P.Chained)
 
 (* out[0, read_len) := bytes [offset, offset + read_len) of the open
    book, when it is book `serial` of file_size bytes; false, with out untouched, when another book is open *)
@@ -165,6 +169,17 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
    none when decompression failed, or the result is empty or over 1 MiB
    (the book's data, checked here once) *)
 #pub fn take_blob (handle: Int): blob_bytes
+
+(* What a read of storage found, read whole (at most 1 MiB): its bytes;
+   nothing stored there; or a read that failed. A failed read is never taken for an empty one:
+   what is saved over it would lose what could not be read (#174). One
+   too large for the reader's records (over 1 MiB) is unreadable too *)
+#pub datavtype stored_bytes =
+  | {l:agz}{n:pos | n <= 1048576} StoredBytes of ($A.arr(byte, l, n), int n)
+  | NothingStored of ()
+  | StoredUnreadable of ()
+
+#pub fn lookup_bytes (found: $IDB.lookup): stored_bytes
 
 (* The arena a piece of piece_size bytes at arena_loc came from: the
    current page's (lent out of the reader's window, see pages.bats), or
@@ -199,11 +214,24 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
    piece can be had for it *)
 #pub fn take_content (handle: Int): content_bytes
 
-(* Decompresses data[0, data_len) (method 0 stored, 1 gzip, 2 deflate,
-   8 raw deflate); the promise resolves with a handle for take_content,
-   take_blob or $BD.blob_claim *)
+(* What a read of storage found, as content (in a piece): it, nothing
+   stored there, or a read that failed (or no piece could be had) *)
+#pub datavtype stored_content =
+  | {arena_loc,piece_loc:agz}{content_size:pos} StoredContent of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
+  | NoStoredContent of ()
+  | ContentUnreadable of ()
+
+#pub fn lookup_content (found: $IDB.lookup): stored_content
+
+(* How a zip entry's data is stored, as its method says: 8 is raw
+   deflate, and the rest (0, the only other an entry is proven to have)
+   stored as it is *)
+#pub fn zip_compression (method: int): $BD.compression
+
+(* Decompresses data[0, data_len) as method says; the promise resolves
+   with a handle for take_content, take_blob or $BD.blob_claim *)
 #pub fn decompress {lb:agz}{n:pos}
-  (data: !$A.borrow(byte, lb, n), data_len: int n, method: int): $P.promise(Int, $P.Pending)
+  (data: !$A.borrow(byte, lb, n), data_len: int n, method: $BD.compression): $P.promise(Int, $P.Pending)
 
 (* An entry of an archive of file_size bytes, read by ranges: its
    compressed bytes (in a piece), method, where they are
@@ -420,10 +448,10 @@ in
       val stored = $BF.file_idb_put(key, key_size, book_file)
       prval () = fold@(book)
       val () = book_put(book)
-    in $P.vow(stored) end
+    in stored end
   | _ => let
       val () = book_put(book)
-    in $P.ret<Int>(~1) end
+    in $P.ret<$IDB.stored>($IDB.NotStored()) end
 end
 
 implement book_read {file_size}{offset,read_len}{out_loc}{out_owner}{out_size} (serial, file_size, offset, out, read_len) = let
@@ -451,20 +479,36 @@ in
   | NoBook() => let val () = book_put(book) in false end
 end
 
+(* A blob's bytes, read whole and freed: none when it is empty or over
+   1 MiB *)
+fn _blob_bytes {n:nat} (blob: $BD.dblob(n)): blob_bytes = let
+  val blob_len = $BD.blob_len(blob)
+in
+  if blob_len <= 0 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
+  else if blob_len > 1048576 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
+  else let
+    val blob_data = $A.alloc<byte>(blob_len)
+    val () = $BD.blob_read(blob, 0, blob_data, blob_len)
+    val () = $BD.blob_free(blob)
+  in BlobBytes(blob_data, blob_len) end
+end
+
 implement take_blob (handle) =
   case+ $BD.blob_claim(handle) of
   | ~$R.none() => NoBlobBytes()
-  | ~$R.some(blob) => let
-      val blob_len = $BD.blob_len(blob)
-    in
-      if blob_len <= 0 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
-      else if blob_len > 1048576 then let val () = $BD.blob_free(blob) in NoBlobBytes() end
-      else let
-        val blob_data = $A.alloc<byte>(blob_len)
-        val () = $BD.blob_read(blob, 0, blob_data, blob_len)
-        val () = $BD.blob_free(blob)
-      in BlobBytes(blob_data, blob_len) end
-    end
+  | ~$R.some(blob) => _blob_bytes(blob)
+
+implement lookup_bytes (found) =
+  case+ found of
+  | ~$IDB.Found(blob) =>
+    if $BD.blob_len(blob) <= 0 then let val () = $BD.blob_free(blob) in NothingStored() end
+    else (case+ _blob_bytes(blob) of
+      | ~BlobBytes(bytes, n) => StoredBytes(bytes, n)
+      (* over 1 MiB: not one of the reader's records, and not to be
+         saved over *)
+      | ~NoBlobBytes() => StoredUnreadable())
+  | ~$IDB.Absent() => NothingStored()
+  | ~$IDB.Unreadable() => StoredUnreadable()
 
 implement piece_new (piece_size) =
   case+ page_lend(piece_size) of
@@ -483,21 +527,38 @@ implement piece_free (owner, piece) =
       val () = $A.arena_return<byte>(arena, piece)
     in $A.arena_destroy<byte>(arena) end
 
+(* A blob's content, read whole into a piece and freed *)
+fn _blob_content {n:nat} (blob: $BD.dblob(n)): content_bytes = let
+  val content_size = $BD.blob_len(blob)
+in
+  if content_size <= 0 then let val () = $BD.blob_free(blob) in NoContentBytes() end
+  else if content_size > 268435456 then let val () = $BD.blob_free(blob) in NoContentBytes() end
+  else (case+ piece_new(content_size) of
+    | ~NoPiece() => let val () = $BD.blob_free(blob) in NoContentBytes() end
+    | ~Piece(owner, piece) => let
+        val () = $BD.blob_read(blob, 0, piece, content_size)
+        val () = $BD.blob_free(blob)
+      in ContentBytes(owner, piece, content_size) end)
+end
+
 implement take_content (handle) =
   case+ $BD.blob_claim(handle) of
   | ~$R.none() => NoContentBytes()
-  | ~$R.some(blob) => let
-      val content_size = $BD.blob_len(blob)
-    in
-      if content_size <= 0 then let val () = $BD.blob_free(blob) in NoContentBytes() end
-      else if content_size > 268435456 then let val () = $BD.blob_free(blob) in NoContentBytes() end
-      else (case+ piece_new(content_size) of
-        | ~NoPiece() => let val () = $BD.blob_free(blob) in NoContentBytes() end
-        | ~Piece(owner, piece) => let
-            val () = $BD.blob_read(blob, 0, piece, content_size)
-            val () = $BD.blob_free(blob)
-          in ContentBytes(owner, piece, content_size) end)
-    end
+  | ~$R.some(blob) => _blob_content(blob)
+
+implement lookup_content (found) =
+  case+ found of
+  | ~$IDB.Found(blob) =>
+    if $BD.blob_len(blob) <= 0 then let val () = $BD.blob_free(blob) in NoStoredContent() end
+    else (case+ _blob_content(blob) of
+      | ~ContentBytes(owner, piece, size) => StoredContent(owner, piece, size)
+      (* no piece could be had for it: it could not be read *)
+      | ~NoContentBytes() => ContentUnreadable())
+  | ~$IDB.Absent() => NoStoredContent()
+  | ~$IDB.Unreadable() => ContentUnreadable()
+
+implement zip_compression (method) =
+  if method = 8 then $BD.DeflateRaw() else $BD.Uncompressed()
 
 implement decompress (data, data_len, method) = let
   val @(p, r) = $P.create<Int>()

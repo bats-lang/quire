@@ -30,6 +30,7 @@ staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload FE = "wasm.bats-packages.dev/bridge/src/fetch.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
@@ -200,7 +201,8 @@ fn _state_save (): void = let
   val () = $A.write_i32(record, 16, !_last_status)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_state_key())
-  val () = save_checked($IDB.idb_put(key_bytes, 10, record_bytes, 20))
+  (* never over a state that could not be read (#174) *)
+  val () = (if storage_savable(SyncStateRecord()) then save_checked($IDB.idb_put(key_bytes, 10, record_bytes, 20)) else ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -541,9 +543,7 @@ fn _shorter {first,second:nat} (first: int first, second: int second): [shorter:
 
 fn _cross_origin (): bool = let
   val page = $A.alloc<byte>(2048)
-  val page_len = (case+ $NAV.get_url(page, 2048) of
-    | ~$R.ok(length) => let val length = g1ofg0(length) in (if length >= 0 then (if length <= 2048 then length else 0) else 0) end
-    | ~$R.err(_) => 0): [length:nat | length <= 2048] int length
+  val page_len = $NAV.get_url(page, 2048)
   val page_origin = _origin_end(page, page_len)
   val folder = $A.alloc<byte>(1041)
   val folder_len = _store_url(folder)
@@ -1254,6 +1254,14 @@ fun _span_at {n:nat}{count:nat} .<count>. (spans: !spans(n, count), k: int): [st
   | SpansNil() => @(0, 0, ~1)
   | SpansCons(id_high, id_low, start, _, rest) => if k <= 0 then @(id_high, id_low, start) else _span_at(rest, k - 1)
 
+(* What a read of a stored record found, as its content: none when
+   there is none, or it could not be read (the callers tell which) *)
+fn _content_of (stored: stored_content): content_bytes =
+  case+ stored of
+  | ~StoredContent(owner, piece, size) => ContentBytes(owner, piece, size)
+  | ~NoStoredContent() => NoContentBytes()
+  | ~ContentUnreadable() => NoContentBytes()
+
 (* A stored record's content, let go of *)
 fn _content_free (content: content_bytes): void =
   case+ content of
@@ -1276,19 +1284,22 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), llam(handle) => let
+        $P.finish<$IDB.lookup>(pending, llam(found) => let
+          val stored = lookup_content(found)
+          val readable = (case+ stored of ContentUnreadable() => false | _ => true): bool
+          val own = _content_of(stored)
           (* a record that could not be read is left as it is *)
-          val () = (if handle < 0 then ()
+          val () = (if ~readable then _content_free(own)
             else (case+ _held_swap(_written, NoHeld()) of
-              | ~NoHeld() => _content_free(take_content(handle))
+              | ~NoHeld() => _content_free(own)
               | ~Held(file_owner, bytes, size, names_at, books, devices) => let
                   val @(_, _, book_start) = _span_at(books, k)
                   val () = (if book_start >= 0 then let
                       val numbers = backup_numbers_new()
                       val @(_, annotations_at, deleted_at, _) = backup_book_members(bytes, size, book_start, numbers)
                       val () = $A.free<Int>(numbers)
-                    in annot_sync_store(take_content(handle), bytes, size, annotations_at, deleted_at, id_high, id_low) end
-                    else _content_free(take_content(handle)))
+                    in annot_sync_store(own, bytes, size, annotations_at, deleted_at, id_high, id_low) end
+                    else _content_free(own))
                 in _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices))) end))
         in _annotations_take(k + 1, left - 1) end)
       end
@@ -1573,10 +1584,10 @@ fun _books {book_index,count:nat | book_index <= count} .<count - book_index>. (
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), llam(handle) => let
+        $P.finish<$IDB.lookup>(pending, llam(found) => let
           (* a record that could not be read is not taken for none: the
              file's annotations go back as they are *)
-          val own = (if handle < 0 then NoContentBytes() else take_content(handle)): content_bytes
+          val own = _content_of(lookup_content(found))
           val () = _push(_annotations_chunk(own, id_high, id_low))
         in _books(book_index + 1, count) end)
       end)
@@ -1666,11 +1677,12 @@ implement sync_start () = let
   val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
   val state_pending = $IDB.idb_get(state_bytes, 10)
   val () = release_bytes(state_frozen, state_bytes)
-  val state_read = $P.and_then<Int><int>($P.vow(state_pending), llam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
-        if n < 20 then $A.free<byte>(record)
+  val state_read = $P.and_then<$IDB.lookup><bool>(state_pending, llam(found) => let
+    val readable = (case+ lookup_bytes(found) of
+      | ~NothingStored() => true
+      | ~StoredUnreadable() => let val () = storage_unreadable(SyncStateRecord()) in false end
+      | ~StoredBytes(record, n) =>
+        if n < 20 then let val () = $A.free<byte>(record) in true end
         else let
           val () = !_device := _i32_at(record, 4)
           val () = !_last_minutes := _i32_at(record, 8)
@@ -1678,21 +1690,28 @@ implement sync_start () = let
           (* a sync the last run left under way did not end *)
           val () = !_last_result := (if result = RESULT_RUNNING then RESULT_NONE else result)
           val () = !_last_status := _i32_at(record, 16)
-        in $A.free<byte>(record) end)
-  in $P.ret<int>(0) end)
+          val () = $A.free<byte>(record)
+        in true end): bool
+  in $P.ret<bool>(readable) end)
 in
   (* ignored: each read in the chain deals with its own value (none read
      leaves sync off, as at its first run) *)
-  $P.finish<int>($P.and_then<int><int>(state_read, llam(_) => let
+  $P.finish<int>($P.and_then<bool><int>(state_read, llam(readable) =>
+    (* a state that could not be read leaves sync off this session: a
+       sync would save this device's state over it (its number, #174) *)
+    if ~readable then $P.ret<int>(0)
+    else let
     val @(choice_frozen, choice_bytes) = $A.freeze<byte>(_choice_key())
     val choice_pending = $IDB.idb_get(choice_bytes, 4)
     val () = release_bytes(choice_frozen, choice_bytes)
   in
-    $P.and_then<Int><int>($P.vow(choice_pending), llam(handle) => let
-      (* the store chosen: its kind *)
-      val kind = (case+ take_blob(handle) of
-        | ~NoBlobBytes() => 0
-        | ~BlobBytes(record, n) => let
+    $P.and_then<$IDB.lookup><int>(choice_pending, llam(found) => let
+      (* the store chosen: its kind (none, and sync off, when it could
+         not be read) *)
+      val kind = (case+ lookup_bytes(found) of
+        | ~NothingStored() => 0
+        | ~StoredUnreadable() => 0
+        | ~StoredBytes(record, n) => let
             val kind = (if n >= 5 then (if byte2int0($A.get<byte>(record, 1)) = 83 then byte2int0($A.get<byte>(record, 4)) else 0) else 0): int
             val () = $A.free<byte>(record)
           in kind end): int
@@ -1703,10 +1722,12 @@ in
         val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
         val () = release_bytes(webdav_frozen, webdav_bytes)
       in
-        $P.and_then<Int><int>($P.vow(webdav_pending), llam(webdav_handle) => let
-          val () = (case+ take_blob(webdav_handle) of
-            | ~NoBlobBytes() => ()
-            | ~BlobBytes(record, n) => let
+        $P.and_then<$IDB.lookup><int>(webdav_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
                 val read = _store_of_record(record, n)
                 val () = $A.free<byte>(record)
               in _store_free(_store_swap(_store, read)) end)

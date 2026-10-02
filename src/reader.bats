@@ -31,6 +31,7 @@ staload "clock.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
@@ -160,8 +161,9 @@ fn _speed_save (): void = let
   val () = $A.write_i32(data, 4, !_speed_pages)
   val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
-  (* ignored: a speed not stored only starts the time-left estimates over *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8), llam(_) => ())
+  (* ignored: a speed not stored only starts the time-left estimates
+     over; never stored over one that could not be read (#174) *)
+  val () = (if storage_savable(ReadingSpeedRecord()) then $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 3, data_bytes, 8), llam(_) => ()) else ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(data_frozen, data_bytes) end
 
@@ -303,7 +305,7 @@ fn _measure_literal {id_len:pos | id_len < 256} (id: string id_len): void = let
   val id_buf = $A.alloc<byte>(id_len)
   val () = $A.write_text(id_buf, 0, $A.text_lit(id), id_len)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id_buf)
-  val _ = $R.discard<int><int>($DR.measure(id_bytes, id_len))
+  val _ = $DR.measure(id_bytes, id_len)
 in release_bytes(id_frozen, id_bytes) end
 
 (* Whether a screen shows two columns, a spread: the probe the
@@ -466,8 +468,8 @@ fn _measure_node {node:nat} (node: int node): bool = let
   val () = release_bytes(id_frozen, id_bytes)
 in
   case+ measured of
-  | ~$R.ok(found) => found > 0
-  | ~$R.err(_) => false
+  | $DR.Measured() => true
+  | $DR.NoElement() => false
 end
 
 (* The content node at x, y (its number), or -1 *)
@@ -658,9 +660,8 @@ fn _measure_pagination(): void = let
   (* both ways: a switch between pages and scrolled leaves the other *)
   val () = $SC.set_scroll_top(page_id_bytes, 4, 0)
   val () = $SC.set_scroll_left(page_id_bytes, 4, 0)
-  val measured = $DR.measure(page_id_bytes, 4)
+  val _ = $DR.measure(page_id_bytes, 4)
   val () = release_bytes(page_id_frozen, page_id_bytes)
-  val _ = $R.discard<int><int>(measured)
   (* The page's widths, checked here: the chapter has scroll width /
      width pages, and at least one *)
   val page_width = $DR.get_measure_w()
@@ -932,8 +933,7 @@ fn _show_page_down {page_count:pos}{page:nat | page < page_count}{chapter,chapte
   val page_id = $A.alloc<byte>(4)
   val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
-  val measured = $DR.measure(page_id_bytes, 4)
-  val _ = $R.discard<int><int>(measured)
+  val _ = $DR.measure(page_id_bytes, 4)
   val page_width = $DR.get_measure_w()
   val () = !_page_width := page_width
   val () = !_page_height := $DR.get_measure_h()
@@ -1619,7 +1619,7 @@ in
     in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
     else let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-      val decompressing = decompress(compressed_bytes, compressed_size, method)
+      val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
       val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
       val decompressing = $P.vow(decompressing)
@@ -1868,7 +1868,7 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
@@ -1915,7 +1915,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
      | ~Piece(compressed_owner, opf_compressed) => let
          val _ = book_read(serial, file_size, opf_data_start, opf_compressed, opf_compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(opf_compressed)
-         val decompressing = decompress(compressed_bytes, opf_compressed_size, opf_method)
+         val decompressing = decompress(compressed_bytes, opf_compressed_size, zip_compression(opf_method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          val decompressing = $P.vow(decompressing)
@@ -1960,7 +1960,7 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
       | ~Piece(compressed_owner, compressed) => let
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-              val decompressing = decompress(compressed_bytes, compressed_size, method)
+              val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
 
@@ -2647,7 +2647,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
            val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-           val decompressing = decompress(compressed_bytes, compressed_size, method)
+           val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
@@ -2870,10 +2870,12 @@ implement reader_speed_load () = let
   val stored = $IDB.idb_get(key_bytes, 3)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(data, data_len) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    (* the default speed this session, and the one learned is kept *)
+    | ~StoredUnreadable() => let val () = storage_unreadable(ReadingSpeedRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, data_len) =>
       if data_len < 8 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else let
         val minutes = _int32_at(data, 0)
@@ -3025,7 +3027,7 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in

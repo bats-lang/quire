@@ -15,6 +15,7 @@ staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -397,7 +398,8 @@ fn _save (sort: int): void = let
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = save_checked($IDB.idb_put(key_bytes, 3, record_bytes, 20))
+  (* never over settings that could not be read (#174) *)
+  val () = (if storage_savable(SettingsRecord()) then save_checked($IDB.idb_put(key_bytes, 3, record_bytes, 20)) else ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -640,6 +642,12 @@ fn _in_range {low,high,fallback:int | low <= fallback; fallback <= high}
 
 (* Reads the settings stored under "set" and applies them (without
    saving); the promise resolves with the sort order stored with them *)
+(* Whether a media query matches *)
+fn _matches (answer: $MEDIA.media_match): bool =
+  case+ answer of
+  | $MEDIA.Matches() => true
+  | $MEDIA.NoMatch() => false
+
 #pub fn set_load (): $P.promise(int, $P.Chained)
 
 implement set_load () = let
@@ -655,18 +663,23 @@ implement set_load () = let
   val () = $A.write_text(media_query, 0, $A.text_lit("(prefers-color-scheme: dark)"), 28)
   val @(query_frozen, query_bytes) = $A.freeze<byte>(media_query)
   val @(query_text, query_rest) = $A.borrow_split<byte>(query_frozen, query_bytes, 28)
-  val () = !_system_dark := ($MEDIA.match_media(query_text, 28) > 0)
+  val () = !_system_dark := _matches($MEDIA.match_media(query_text, 28))
   val () = $MEDIA.listen_media(query_text, 28, ui_media_listener(), llam(matches) => let
-      val () = !_system_dark := (matches > 0)
+      val () = !_system_dark := _matches(matches)
       val () = _apply_theme()
     in 0 end)
   val query_bytes = $A.borrow_join<byte>(query_frozen, query_text, query_rest)
   val () = release_bytes(query_frozen, query_bytes)
 in
-  $P.and_then<Int><int>($P.vow(pending), llam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => let val () = set_show() in $P.ret<int>(0) end
-    | ~BlobBytes(record, n) =>
+  $P.and_then<$IDB.lookup><int>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => let val () = set_show() in $P.ret<int>(0) end
+    (* the defaults this session, and the settings stored are kept *)
+    | ~StoredUnreadable() => let
+        val () = storage_unreadable(SettingsRecord())
+        val () = set_show()
+      in $P.ret<int>(0) end
+    | ~StoredBytes(record, n) =>
       if n < 8 then let
         val () = $A.free<byte>(record)
         val () = set_show()

@@ -47,10 +47,14 @@ staload "library.sats"
 staload "jsonio.sats"
 staload "app.sats"
 staload "stardict.sats"
+staload "storage.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+
+(* A write's answer no consumer took: nothing to free *)
+implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The most dictionaries kept *)
 #define MOST_DICTIONARIES 64
@@ -344,7 +348,7 @@ fn _file_key {letter:nat | letter < 256} (letter: int letter, id: int): [l:agz] 
 fn _file_delete {letter:nat | letter < 256} (letter: int letter, id: int): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 fn _files_delete (id: int): void = let
@@ -395,7 +399,8 @@ in
     val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
     val @(key, key_len) = _id_bytes("dicts")
     val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val () = save_checked($IDB.idb_put(key_bytes, key_len, used, stop))
+    (* never over a list that could not be read *)
+    val () = (if storage_savable(DictionariesRecord()) then save_checked($IDB.idb_put(key_bytes, key_len, used, stop)) else ())
     val () = release_bytes(key_frozen, key_bytes)
     val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
   in release_bytes(out_frozen, out_bytes) end
@@ -440,10 +445,11 @@ implement dict_load () = let
   val stored = $IDB.idb_get(key_bytes, key_len)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(data, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    | ~StoredUnreadable() => let val () = storage_unreadable(DictionariesRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, n) =>
       if n < 12 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 0) <> 81 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 1) <> 68 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
@@ -542,10 +548,13 @@ fn _fetch {letter:nat | letter < 256} (letter: int letter, id: int, cell: ref(fi
   val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
-    case+ $BF.file_claim(handle) of
-    | ~$R.none() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
-    | ~$R.some(file) =>
+  $P.and_then<$BF.file_lookup><int>(stored, llam(found) =>
+    case+ found of
+    | ~$BF.FileAbsent() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    (* not read: the dictionary stays unopened, and is read again at
+       the next lookup *)
+    | ~$BF.FileUnreadable() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    | ~$BF.FileFound(file) =>
       if !_reading <> reading then let val () = $BF.file_close(file) in $P.ret<int>(0) end
       else let
         val size = $BF.file_size(file)
@@ -1081,7 +1090,7 @@ in
               val inflate_len = piece_len - ((if finishing then 0 else 5): [cut:int | cut == 0 || cut == 5] int cut)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
               val @(used, rest) = $A.borrow_split<byte>(compressed_frozen, compressed_bytes, inflate_len)
-              val inflating = decompress(used, inflate_len, 8)
+              val inflating = decompress(used, inflate_len, $BD.DeflateRaw())
               val compressed_bytes = $A.borrow_join<byte>(compressed_frozen, used, rest)
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
@@ -1688,21 +1697,24 @@ in
       in true end)
 end
 
-(* The lesser of two stores' statuses: below 0 when either failed *)
-fn _least_status (first: Int, second: Int): Int = if first < second then first else second
+(* Two stores, both kept (Stored), or not *)
+fn _both_stored (first: $IDB.stored, second: $IDB.stored): $IDB.stored =
+  case+ first of
+  | $IDB.Stored() => second
+  | $IDB.NotStored() => $IDB.NotStored()
 
 (* The file cell holds, stored under letter for dictionary id from the
    JS side, and closed *)
-fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise(Int, $P.Chained) =
+fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise($IDB.stored, $P.Chained) =
   case+ _slot_take(cell) of
-  | ~NoFile() => $P.ret<Int>(0)
+  | ~NoFile() => $P.ret<$IDB.stored>($IDB.Stored())
   | ~FileSlot(file, _) => let
       val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
       val stored = $BF.file_idb_put(key_bytes, 15, file)
       val () = release_bytes(key_frozen, key_bytes)
       (* the JS side took the file's bytes as the call was made *)
       val () = $BF.file_close(file)
-    in $P.vow(stored) end
+    in stored end
 
 fn _free_entry {name_loc,types_loc:agz} (name: $A.arr(byte, name_loc, 256), types: $A.arr(byte, types_loc, 16)): void = let
   val () = $A.free<byte>(name)
@@ -1754,23 +1766,24 @@ in
     else let
       val kind = ((if compressed then 1 else 0): int) + ((if has_syn then 2 else 0): int)
       val language = !_import_language
-      (* each file stored in turn; the least of their statuses, so one
+      (* each file stored in turn; NotStored when one was not, so one
          that failed is not lost *)
-      val stored = $P.and_then<Int><Int>(_file_store(_import_idx, 73, id), llam(idx_status) =>
-        $P.and_then<Int><Int>(_file_store(_import_dict, 68, id), llam(dict_status) =>
-          $P.and_then<Int><Int>(_file_store(_import_syn, 83, id), llam(syn_status) =>
-            $P.ret<Int>(_least_status(_least_status(idx_status, dict_status), syn_status)))))
+      val stored = $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_idx, 73, id), llam(idx_status) =>
+        $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_dict, 68, id), llam(dict_status) =>
+          $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_syn, 83, id), llam(syn_status) =>
+            $P.ret<$IDB.stored>(_both_stored(_both_stored(idx_status, dict_status), syn_status)))))
       val () = _slot_put(_import_ifo, NoFile())
       val+ ~DictCell(list, next_id) = _dicts_take()
       val () = _dicts_put(DictCell(_dicts_join(list, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil())), next_id))
       val () = _unload()
       val () = _render()
     in
-      $P.finish<Int>(stored, llam(status) => let
+      $P.finish<$IDB.stored>(stored, llam(status) => let
         val () = _save()
       in
-        if status >= 0 then ui_text("dictionaries-status", "Dictionary added.")
-        else ui_text("dictionaries-status", "The dictionary's files could not be stored. The browser's storage may be full: free some space, remove it and import it again.")
+        case+ status of
+        | $IDB.Stored() => ui_text("dictionaries-status", "Dictionary added.")
+        | $IDB.NotStored() => ui_text("dictionaries-status", "The dictionary's files could not be stored. The browser's storage may be full: free some space, remove it and import it again.")
       end)
     end
   end

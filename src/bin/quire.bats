@@ -231,7 +231,7 @@ fn _view_save (book_key: int): void = let
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
   (* ignored: a view not stored only opens the library next time *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 4, value_bytes, 4), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
@@ -295,10 +295,12 @@ fn _hint_load (): void = let
   val stored = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), llam(h) => let
-    val () = (case+ take_blob(h) of
-      | ~NoBlobBytes() => !_hint_seen := false
-      | ~BlobBytes(value_bytes, _) => $A.free<byte>(value_bytes))
+  $P.finish<$IDB.lookup>(stored, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => !_hint_seen := false
+      (* taken as shown: a hint each session would nag *)
+      | ~StoredUnreadable() => ()
+      | ~StoredBytes(value_bytes, _) => $A.free<byte>(value_bytes))
   in () end)
 end
 
@@ -315,7 +317,7 @@ fn _hint_offer (): void =
     val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
     val @(key_frozen, key_bytes) = $A.freeze<byte>(_hint_key())
     (* ignored: a hint not stored as shown only shows once more *)
-    val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1), llam(_) => ())
+    val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 4, value_bytes, 1), llam(_) => ())
     val () = release_bytes(key_frozen, key_bytes)
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
@@ -414,12 +416,18 @@ fn _open_book {book:int} (book: int book): void =
         $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor)), llam(result) =>
           _opened_checked(result))
       else
-        $P.finish<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), llam(result) =>
-          if result < 0 then let
-            val () = _show_library()
-            val () = notice_error("This book's file could not be read. Import it again.")
-          in $P.ret<int>(0) end
-          else $P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor))), llam(result) =>
+        $P.finish<int>($P.and_then<book_opening><int>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
+          case+ opening of
+          | BookFileMissing() => let
+              val () = _show_library()
+              val () = notice_error("This book's file could not be read. Import it again.")
+            in $P.ret<int>(0) end
+          (* a passing failure of storage: importing again is not the fix *)
+          | BookFileUnreadable() => let
+              val () = _show_library()
+              val () = notice_error("This book could not be read from storage. Try again, or reopen Quire if it keeps happening.")
+            in $P.ret<int>(0) end
+          | BookOpened() => $P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor))), llam(result) =>
           _opened_checked(result))
     end
 
@@ -430,10 +438,12 @@ fn _view_restore (): $P.promise(int, $P.Chained) = let
   val stored = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), llam(h) => let
-    val key = (case+ take_blob(h) of
-      | ~NoBlobBytes() => ~1
-      | ~BlobBytes(value_bytes, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) => let
+    val key = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ~1
+      (* the library, as when none is kept: only where it opens is lost *)
+      | ~StoredUnreadable() => ~1
+      | ~StoredBytes(value_bytes, n) =>
         if n < 4 then let val () = $A.free<byte>(value_bytes) in ~1 end
         else let val stored_key = _int32_at(value_bytes, 0) val () = $A.free<byte>(value_bytes) in stored_key end): Int
     val book = (if key < 0 then ~1 else lib_index_of_key(key)): [index:int | index >= ~1] int index
@@ -462,7 +472,7 @@ fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Archives the book: its record is kept and its file deleted. The file
@@ -853,9 +863,10 @@ fn _copy_selection (): void =
         val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
         (* a copy that failed is said in the banner: the reader would
            otherwise paste something stale *)
-        val () = $P.finish<Int>($CB.clipboard_write(text_bytes, selection_len), llam(copied) =>
-          if copied = 1 then notice_copied()
-          else notice_error("The text could not be copied: the browser did not allow it."))
+        val () = $P.finish<$CB.copied>($CB.clipboard_write(text_bytes, selection_len), llam(copied) =>
+          case+ copied of
+          | $CB.Copied() => notice_copied()
+          | $CB.NotCopied() => notice_error("The text could not be copied: the browser did not allow it."))
       in release_bytes(text_frozen, text_bytes) end
     end
 
@@ -1215,7 +1226,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         else ())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
-      val () = (if $WN.get_visibility() = 1 then sync_run() else ())
+      val () = (case+ $WN.get_visibility() of $WN.Hidden() => sync_run() | $WN.Visible() => ())
     in 0 end)
 in listeners end
 

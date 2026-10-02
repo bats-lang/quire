@@ -16,6 +16,7 @@ staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -157,7 +158,8 @@ fn _save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
-  val () = save_checked($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count))
+  (* never over a log that could not be read (#174) *)
+  val () = (if storage_savable(StatisticsRecord()) then save_checked($IDB.idb_put(key_bytes, 4, record_bytes, 8 + 8 * count)) else ())
   val () = release_bytes(key_frozen, key_bytes)
   val () = _days_free(entries)
 in release_bytes(record_frozen, record_bytes) end
@@ -199,7 +201,7 @@ fn _elsewhere_save (): void = let
   val () = _write_days(record, 8, entries)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_elsewhere_key())
-  val () = save_checked($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count))
+  val () = (if storage_savable(StatisticsRecord()) then save_checked($IDB.idb_put(key_bytes, 14, record_bytes, 8 + 8 * count)) else ())
   val () = release_bytes(key_frozen, key_bytes)
   val () = _days_free(entries)
 in release_bytes(record_frozen, record_bytes) end
@@ -209,10 +211,11 @@ fn _elsewhere_load (): void = let
   val pending = $IDB.idb_get(key_bytes, 14)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), llam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
+  $P.finish<$IDB.lookup>(pending, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ()
+      | ~StoredUnreadable() => storage_unreadable(StatisticsRecord())
+      | ~StoredBytes(record, n) =>
         if n < 8 then $A.free<byte>(record)
         else if byte2int0($A.get<byte>(record, 1)) <> 82 then $A.free<byte>(record)
         else let
@@ -227,10 +230,12 @@ implement stats_load () = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
   val pending = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
-  val () = $P.finish<Int>($P.vow(pending), llam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => ()
-      | ~BlobBytes(record, n) =>
+  val () = $P.finish<$IDB.lookup>(pending, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => ()
+      (* a history that cannot be rebuilt: kept, not saved over *)
+      | ~StoredUnreadable() => storage_unreadable(StatisticsRecord())
+      | ~StoredBytes(record, n) =>
         if n < 8 then $A.free<byte>(record)
         else if byte2int0($A.get<byte>(record, 1)) <> 82 then $A.free<byte>(record)
         else let

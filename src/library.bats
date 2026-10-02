@@ -18,6 +18,7 @@ staload "epub_xml.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 
 implement $P.dispose<reply>(_) = ()
@@ -542,7 +543,7 @@ fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Sets the shelf of the book at index, and keeps and shows the
@@ -1451,7 +1452,8 @@ in
       val key = $A.alloc<byte>(3)
       val () = $A.write_text(key, 0, $A.text_lit("lib"), 3)
       val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-      val () = save_checked($IDB.idb_put(key_bytes, 3, used, stop))
+      (* never over a library that could not be read *)
+      val () = (if storage_savable(LibraryRecord()) then save_checked($IDB.idb_put(key_bytes, 3, used, stop)) else ())
       val () = release_bytes(key_frozen, key_bytes)
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
@@ -1603,10 +1605,12 @@ implement lib_load () = let
   val stored = $IDB.idb_get(key_bytes, 3)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => $P.ret<int>(0)
-    | ~ContentBytes(owner, buf, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => $P.ret<int>(0)
+    (* shown as it can be read (empty), and never saved over (#174) *)
+    | ~ContentUnreadable() => let val () = storage_unreadable(LibraryRecord()) in $P.ret<int>(0) end
+    | ~StoredContent(owner, buf, n) =>
       if n < 4 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
@@ -1728,10 +1732,12 @@ fn _show_cover {base_len:pos | base_len <= 16}{index:nat}
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), llam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => ()
-    | ~ContentBytes(owner, buf, n) =>
+  $P.finish<$IDB.lookup>(stored, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => ()
+    (* the placeholder, as for a book without a cover *)
+    | ~ContentUnreadable() => ()
+    | ~StoredContent(owner, buf, n) =>
       if !_render_gen <> generation then piece_free(owner, buf)
       else let
         val mime = mime_str(code)
@@ -1853,13 +1859,15 @@ implement lib_a11y_show (id_high, id_low) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), llam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => let
+  $P.finish<$IDB.lookup>(stored, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => let
         (* imported before this was read *)
         val _ = _a11y_line(0, "Import this book's file again to see its accessibility information.")
       in () end
-    | ~ContentBytes(owner, buf, n) =>
+    (* no summary: importing again is not what would mend it *)
+    | ~ContentUnreadable() => ()
+    | ~StoredContent(owner, buf, n) =>
       if n < 6 then piece_free(owner, buf)
       else let
         val flags = _int32_at(buf, 2)
@@ -1884,10 +1892,11 @@ implement lib_show_cover_in (id, id_high, id_low, code) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), llam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => ()
-    | ~ContentBytes(owner, buf, n) => let
+  $P.finish<$IDB.lookup>(stored, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => ()
+    | ~ContentUnreadable() => ()
+    | ~StoredContent(owner, buf, n) => let
         val mime = mime_str(code)
         val mime_len = g1u2i(string1_length(mime))
         val mime_text = $A.alloc<byte>(mime_len)
@@ -2125,10 +2134,12 @@ implement lib_install_hint_load () = let
   val stored = $IDB.idb_get(key_bytes, 12)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), llam(handle) => let
-    val () = (case+ take_blob(handle) of
-      | ~NoBlobBytes() => !_install_hint_dismissed := false
-      | ~BlobBytes(blob, _) => $A.free<byte>(blob))
+  $P.finish<$IDB.lookup>(stored, llam(found) => let
+    val () = (case+ lookup_bytes(found) of
+      | ~NothingStored() => !_install_hint_dismissed := false
+      (* taken as dismissed: a hint each session would nag *)
+      | ~StoredUnreadable() => !_install_hint_dismissed := true
+      | ~StoredBytes(blob, _) => $A.free<byte>(blob))
   in _install_hint_show() end)
 end
 
@@ -2141,7 +2152,7 @@ implement lib_install_hint_dismiss () = let
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_install_hint_key())
   (* ignored: a dismissal not stored only shows the hint once more *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 12, value_bytes, 1), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 12, value_bytes, 1), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
   val () = release_bytes(value_frozen, value_bytes)
 in _install_hint_show() end

@@ -1049,7 +1049,7 @@ implement ui_listen_all (listeners) = let val _ = _listen_all(listeners) in end
 implement ui_measure(id) = let
   val id_len = _length(id)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
-  val _ = $R.discard<int><int>($DR.measure(id_bytes, id_len))
+  val _ = $DR.measure(id_bytes, id_len)
 in release_bytes(id_frozen, id_bytes) end
 
 #pub fn ui_focus {id_len:pos | id_len < 256} (id: string id_len): void
