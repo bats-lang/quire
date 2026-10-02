@@ -315,7 +315,7 @@ implement catalogue_load () = let
   val stored = $IDB.idb_get(key_bytes, key_len)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
     case+ take_blob(handle) of
     | ~NoBlobBytes() => let val () = _list_put(CatalogueCell(_preset(), 2)) in $P.ret<int>(0) end
     | ~BlobBytes(data, n) =>
@@ -504,7 +504,7 @@ in
   else let
     val () = _render()
     val () = _save()
-  in undo_offer("Catalogue removed", lam () => _restore(id, index), lam () => _forget(id)) end
+  in undo_offer("Catalogue removed", llam () => _restore(id, index), llam () => _forget(id)) end
 end
 
 (* ============================================================

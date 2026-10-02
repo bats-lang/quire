@@ -203,7 +203,7 @@ fn _store_a11y {l:agz}{n:pos}
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: losing the summary only hides it until the next import,
      and a full storage is told by the saves that matter *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -245,7 +245,7 @@ in
           val key = lib_key(99, id_high, id_low)
           val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
           (* ignored: a cover not stored shows as the placeholder *)
-          val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size), lam(_) => ())
+          val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size), llam(_) => ())
           val () = release_bytes(key_frozen, key_bytes)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
@@ -255,7 +255,7 @@ in
           val decompressing = decompress(cover_bytes, cover_size, cover_method)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
-          val () = $P.finish<Int>($P.vow(decompressing), lam(content_handle) =>
+          val () = $P.finish<Int>($P.vow(decompressing), llam(content_handle) =>
             case+ take_content(content_handle) of
             | ~NoContentBytes() => ()
             | ~ContentBytes(content_owner, content, content_size) => let
@@ -263,7 +263,7 @@ in
                 val key = lib_key(99, id_high, id_low)
                 val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
                 (* ignored: a cover not stored shows as the placeholder *)
-                val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, content_bytes, content_size), lam(_) => ())
+                val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, content_bytes, content_size), llam(_) => ())
                 val () = release_bytes(key_frozen, key_bytes)
                 val () = $A.drop<byte>(content_frozen, content_bytes)
               in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
@@ -297,7 +297,7 @@ in
 end
 
 fn _book_store_checked (storing: $P.promise(Int, $P.Chained), key: Int): void =
-  $P.finish<Int>(storing, lam(status) =>
+  $P.finish<Int>(storing, llam(status) =>
     if status >= 0 then ()
     else let
       val message = $A.alloc<byte>(512)
@@ -350,7 +350,7 @@ in
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
     in key end
     else let
-      val () = lib_update(library_index, lam(record) => @{
+      val () = lib_update(library_index, llam(record) => @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = 0, added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
         file_size = file_size, cover = (if cover > 0 then (cover: Int) else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
@@ -385,7 +385,7 @@ in
       val () = $A.drop<byte>(data_frozen, data_bytes)
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
-      $P.and_then<Int><Int>($P.vow(decompressing), lam(container_handle) =>
+      $P.and_then<Int><Int>($P.vow(decompressing), llam(container_handle) =>
         case+ take_content(container_handle) of
         | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~5) end
         | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
@@ -431,7 +431,7 @@ in
                     val () = $A.drop<byte>(opf_data_frozen, opf_data_bytes)
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
-                    $P.and_then<Int><Int>($P.vow(opf_decompressing), lam(opf_handle) =>
+                    $P.and_then<Int><Int>($P.vow(opf_decompressing), llam(opf_handle) =>
                       case+ take_content(opf_handle) of
                       | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~9) end
                       | ~ContentBytes(opf_content_owner, opf_content, opf_size) => let
@@ -507,7 +507,7 @@ fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int 
   val serial = book_begin(book_file, file_size)
   val mode = (if library_index < 0 then MODE_NEW else MODE_REPLACE): int
 in
-  $P.and_then<Int><Int>(_open_archive(serial, file_size, mode, library_index, id_high, id_low), lam(outcome) =>
+  $P.and_then<Int><Int>(_open_archive(serial, file_size, mode, library_index, id_high, id_low), llam(outcome) =>
     if outcome < 0 then let
       val () = _error()
     in $P.ret<Int>(outcome) end
@@ -549,10 +549,10 @@ in
           val () = $A.free<byte>(title)
           val text_end = _put_string(message, title_len, " is already in your library.")
           val () = modal_open(QDuplicate(), "Already in library",
-            lam () => _duplicate_answer(true), lam () => _duplicate_answer(false))
+            llam () => _duplicate_answer(true), llam () => _duplicate_answer(false))
           val () = modal_text(message, text_end)
         in
-          $P.and_then<Int><Int>($P.vow(answer_promise), lam(answer) =>
+          $P.and_then<Int><Int>($P.vow(answer_promise), llam(answer) =>
             case+ _duplicate_take() of
             | ~NoDuplicate() => let
                 val () = ui_show("import-progress", false)
@@ -620,7 +620,7 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
     (* each import's result is already reported (_import_handle shows
        the error banner on a failure, and a duplicate is answered in its
        own dialog): the next file is imported whatever it was *)
-    $P.finish<Int>($P.and_then<Int><Int>($P.vow(opened), lam(handle) => _import_handle(handle)), lam(_) =>
+    $P.finish<Int>($P.and_then<Int><Int>($P.vow(opened), llam(handle) => _import_handle(handle)), llam(_) =>
       _import_seq(source, file_index + 1, file_count))
   end
 
@@ -645,7 +645,7 @@ implement import_dropped () = _import_seq(1, 0, $BF.dropped_count())
 
 (* ignored: the import's result is already reported, as each one's of
    _import_seq *)
-implement import_external (handle) = $P.finish<Int>(_import_handle(handle), lam(_) => ())
+implement import_external (handle) = $P.finish<Int>(_import_handle(handle), llam(_) => ())
 
 (* ============================================================
    Reopening a stored book
@@ -662,7 +662,7 @@ implement open_stored (key, id_high, id_low) = let
   val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><Int>($P.vow(stored), lam(handle) =>
+  $P.and_then<Int><Int>($P.vow(stored), llam(handle) =>
     case+ $BF.file_claim(handle) of
     | ~$R.none() => $P.ret<Int>(~1)
     | ~$R.some(book_file) => let
@@ -672,7 +672,7 @@ in
         else let
           val serial = book_begin(book_file, file_size)
         in
-          $P.and_then<Int><Int>(_open_archive(serial, file_size, MODE_OPEN, ~1, id_high, id_low), lam(outcome) =>
+          $P.and_then<Int><Int>(_open_archive(serial, file_size, MODE_OPEN, ~1, id_high, id_low), llam(outcome) =>
             if outcome < 0 then $P.ret<Int>(outcome)
             else let val () = open_key_set(key) in $P.ret<Int>(0) end)
         end

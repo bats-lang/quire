@@ -62,7 +62,7 @@ val _save_failure_told = ref<bool>(false)
    book, and says to free space too): it waits for a later failure *)
 #pub fn save_checked {s:int} (saving: $P.promise(Int, s)): void
 
-implement save_checked (saving) = $P.finish<Int>(saving, lam(status) =>
+implement save_checked (saving) = $P.finish<Int>(saving, llam(status) =>
   if status >= 0 then ()
   else if !_save_failure_told then ()
   else if !_banner_up then ()
@@ -86,7 +86,7 @@ implement notice_copied () = let
   val () = ui_show("copy-status", true)
 in
   (* a timer's status carries nothing *)
-  $P.finish<Int>($P.vow($TM.timer_set(COPIED_SHOWN)), lam(_) =>
+  $P.finish<Int>($P.vow($TM.timer_set(COPIED_SHOWN)), llam(_) =>
     if !_copied_serial = serial then ui_show("copy-status", false) else ())
 end
 

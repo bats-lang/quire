@@ -596,7 +596,7 @@ fn _webdav_read (answer: read_answer -<cloref1> void): void = let
   val pending = _send("GET", empty_bytes, 0, false)
   val () = release_bytes(empty_frozen, empty_bytes)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), llam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
     val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(ReadFailed(_unreached(), 0)) end
@@ -632,7 +632,7 @@ fn _webdav_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size, answer: write_answer -<cloref1> void): void = let
   val pending = _send("PUT", body, body_size, true)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), llam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
     val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(WriteFailed(_unreached(), 0)) end
@@ -976,8 +976,8 @@ val _tries = ref<int>(0)
 (* How the file is read again, when another device wrote it first; how
    another sync starts, when one was asked for during this one (both set
    at startup, sync_start) *)
-val _read_again = ref<() -<cloref1> void>(lam () => ())
-val _run_again = ref<() -<cloref1> void>(lam () => ())
+val _read_again = ref<() -<cloref1> void>(llam () => ())
+val _run_again = ref<() -<cloref1> void>(llam () => ())
 
 (* The end of a sync: how it ended, kept and shown; another, when one
    was asked for meanwhile *)
@@ -1216,7 +1216,7 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), llam(handle) => let
           (* a record that could not be read is left as it is *)
           val () = (if handle < 0 then ()
             else (case+ _held_swap(_written, NoHeld()) of
@@ -1277,7 +1277,7 @@ fn _write (): void =
   | ~NoHeld() => _fail(RESULT_MEMORY, 0)
   | ~Held(owner, file, n, names_at, books, devices) => let
       val @(file_frozen, file_bytes) = $A.freeze<byte>(file)
-      val () = store_write(file_bytes, n, lam(answer) =>
+      val () = store_write(file_bytes, n, llam(answer) =>
         case+ answer of
         | Written() => _take()
         | WriteConflict() => let
@@ -1510,7 +1510,7 @@ fun _books {book_index,count:nat | book_index <= count} .<count - book_index>. (
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), llam(handle) => let
           (* a record that could not be read is not taken for none: the
              file's annotations go back as they are *)
           val own = (if handle < 0 then NoContentBytes() else take_content(handle)): content_bytes
@@ -1539,7 +1539,7 @@ fn _merge_held (file: held): void =
     in _merge() end
 
 (* Reads the file from the store, and merges it *)
-fn _read (): void = store_read(lam(answer) =>
+fn _read (): void = store_read(llam(answer) =>
   case+ answer of
   | ~ReadNothing() => _merge_held(_empty())
   | ~ReadFailed(kind, status) => _fail(kind, status)
@@ -1568,12 +1568,12 @@ implement sync_run () =
    once the library is read *)
 #pub fn sync_start (): void
 implement sync_start () = let
-  val () = !_read_again := (lam () =<cloref1> _read())
-  val () = !_run_again := (lam () =<cloref1> sync_run())
+  val () = !_read_again := (llam () =<cloref1> _read())
+  val () = !_run_again := (llam () =<cloref1> sync_run())
   val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
   val state_pending = $IDB.idb_get(state_bytes, 10)
   val () = release_bytes(state_frozen, state_bytes)
-  val state_read = $P.and_then<Int><int>($P.vow(state_pending), lam(handle) => let
+  val state_read = $P.and_then<Int><int>($P.vow(state_pending), llam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>
@@ -1590,12 +1590,12 @@ implement sync_start () = let
 in
   (* ignored: each read in the chain deals with its own value (none read
      leaves sync off, as at its first run) *)
-  $P.finish<int>($P.and_then<int><int>(state_read, lam(_) => let
+  $P.finish<int>($P.and_then<int><int>(state_read, llam(_) => let
     val @(choice_frozen, choice_bytes) = $A.freeze<byte>(_choice_key())
     val choice_pending = $IDB.idb_get(choice_bytes, 4)
     val () = release_bytes(choice_frozen, choice_bytes)
   in
-    $P.and_then<Int><int>($P.vow(choice_pending), lam(handle) => let
+    $P.and_then<Int><int>($P.vow(choice_pending), llam(handle) => let
       (* the store chosen: its kind *)
       val kind = (case+ take_blob(handle) of
         | ~NoBlobBytes() => 0
@@ -1610,7 +1610,7 @@ in
         val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
         val () = release_bytes(webdav_frozen, webdav_bytes)
       in
-        $P.and_then<Int><int>($P.vow(webdav_pending), lam(webdav_handle) => let
+        $P.and_then<Int><int>($P.vow(webdav_pending), llam(webdav_handle) => let
           val () = (case+ take_blob(webdav_handle) of
             | ~NoBlobBytes() => ()
             | ~BlobBytes(record, n) => let
@@ -1621,7 +1621,7 @@ in
         in $P.ret<int>(0) end)
       end
     end)
-  end), lam(_) => ())
+  end), llam(_) => ())
 end
 
 (* A book opened in the reader (its library key): sync, to bring its
@@ -1790,7 +1790,7 @@ implement sync_off () =
       val () = _status_show()
       val () = ui_show("sync-off", false)
     in
-      undo_offer("Sync turned off", lam () => let
+      undo_offer("Sync turned off", llam () => let
           val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
           val () = _store_save()
           val () = (if layer_is_open(LSync()) then let
@@ -1798,7 +1798,7 @@ implement sync_off () =
               val () = ui_show("sync-off", true)
             in _status_show() end else ())
         in end,
-        lam () => _store_free(_store_swap(_store_off, NoStore())))
+        llam () => _store_free(_store_swap(_store_off, NoStore())))
     end
 
 end (* #target wasm *)

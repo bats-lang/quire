@@ -320,7 +320,7 @@ in lib_put(cell) end
 #pub fn lib_elsewhere_add {index:int} (index: int index, minutes: Int, pages: Int): void
 implement lib_elsewhere_add (index, minutes, pages) =
   if minutes <= 0 then ()
-  else lib_update(index, lam(nums) => @{
+  else lib_update(index, llam(nums) => @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
@@ -538,7 +538,7 @@ fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Sets the shelf of the book at index, and keeps and shows the
@@ -546,7 +546,7 @@ in release_bytes(key_frozen, key_bytes) end
 #pub fn lib_set_shelf {index:int} (index: int index, shelf: Int): void
 
 implement lib_set_shelf (index, shelf) = let
-  val () = lib_update(index, lam(nums) => @{
+  val () = lib_update(index, llam(nums) => @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
@@ -568,10 +568,10 @@ implement lib_trash (index) =
       val old_shelf = nums.shelf
       val () = lib_set_shelf(index, 3)
     in
-      undo_offer("Moved to Trash", lam () => let
+      undo_offer("Moved to Trash", llam () => let
           val index_now = lib_index_of_key(key)
         in if index_now >= 0 then lib_set_shelf(index_now, old_shelf) else () end,
-        lam () => ())
+        llam () => ())
     end
 
 (* The book at index and everything stored for it, deleted *)
@@ -609,7 +609,7 @@ fun _empty_trash {left:nat} .<left>. (left: int left): void =
 
 implement lib_ask_harm (harm, after) =
   case+ harm of
-  | HEmptyTrash() => modal_confirm(harm, lam () => let
+  | HEmptyTrash() => modal_confirm(harm, llam () => let
       val () = undo_close()
       val () = _empty_trash(lib_count())
     in after() end)
@@ -630,7 +630,7 @@ fun _shelves {i,count:nat | i <= count}{so_far:nat} .<count - i>. (i: int i, cou
 fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count): void =
   if i >= count then ()
   else let
-    val () = lib_update(i, lam(nums) => @{
+    val () = lib_update(i, llam(nums) => @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = 3, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
@@ -644,7 +644,7 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved(count)): void =
   | ShelvedNil() => ()
   | ShelvedCons(key, shelf, rest) => let
       val index = lib_index_of_key(key)
-      val () = (if index >= 0 then lib_update(index, lam(nums) => @{
+      val () = (if index >= 0 then lib_update(index, llam(nums) => @{
           key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
           file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
@@ -663,7 +663,7 @@ implement lib_trash_all () = let
   val () = _trash_all(0, count)
   val () = lib_save()
   val () = lib_render()
-in lam () => let val () = _unshelve(shelved) val () = lib_save() in lib_render() end end
+in llam () => let val () = _unshelve(shelved) val () = lib_save() in lib_render() end end
 
 (* ============================================================
    Sorting
@@ -1116,7 +1116,7 @@ implement lib_coll_toggle (index, collection) =
   else if collection >= lib_coll_count() then ()
   else let
     val on = lib_coll_has(index, collection)
-    val () = lib_update(index, lam(nums) => @{
+    val () = lib_update(index, llam(nums) => @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
@@ -1143,7 +1143,7 @@ fn _coll_restore (collection: int, keys: [count:nat] keys(count)): void =
       in colls_put(CollCell(collections, count)) end
       else let
         val () = colls_put(CollCell(_colls_insert(collections, collection, name, name_len), count + 1))
-        val () = _map_all_collections(lam(key, membership) => _put_bit(membership, collection, _keys_has(keys, key)))
+        val () = _map_all_collections(llam(key, membership) => _put_bit(membership, collection, _keys_has(keys, key)))
         val () = lib_save()
       in lib_render() end
     end
@@ -1163,13 +1163,13 @@ in
     val keys = _keys_in(books, collection, KeysNil())
     prval () = fold@(library)
     val () = lib_put(library)
-    val () = _map_all_collections(lam(_, membership) => _drop_bit(membership, collection))
+    val () = _map_all_collections(llam(_, membership) => _drop_bit(membership, collection))
     val shown = !_coll_shown
     val () = !_coll_shown := (if shown = collection then ~1 else if shown > collection then shown - 1 else shown)
     val () = _gone_put(CollGone(name, name_len))
     val () = lib_save()
     val () = lib_render()
-  in undo_offer("Collection deleted", lam () => _coll_restore(collection, keys), lam () => _gone_put(CollNotGone())) end
+  in undo_offer("Collection deleted", llam () => _coll_restore(collection, keys), llam () => _gone_put(CollNotGone())) end
 end
 
 (* Shows the books of collection only, or every book for -1 *)
@@ -1543,7 +1543,7 @@ implement lib_load () = let
   val stored = $IDB.idb_get(key_bytes, 3)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => $P.ret<int>(0)
     | ~ContentBytes(owner, buf, n) =>
@@ -1668,7 +1668,7 @@ fn _show_cover {base_len:pos | base_len <= 16}{index:nat}
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), llam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => ()
     | ~ContentBytes(owner, buf, n) =>
@@ -1793,7 +1793,7 @@ implement lib_a11y_show (id_high, id_low) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), llam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => let
         (* imported before this was read *)
@@ -1824,7 +1824,7 @@ implement lib_show_cover_in (id, id_high, id_low, code) = let
   val stored = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), lam(handle) =>
+  $P.finish<Int>($P.vow(stored), llam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => ()
     | ~ContentBytes(owner, buf, n) => let
@@ -2065,7 +2065,7 @@ implement lib_install_hint_load () = let
   val stored = $IDB.idb_get(key_bytes, 12)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), lam(handle) => let
+  $P.finish<Int>($P.vow(stored), llam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => !_install_hint_dismissed := false
       | ~BlobBytes(blob, _) => $A.free<byte>(blob))
@@ -2081,7 +2081,7 @@ implement lib_install_hint_dismiss () = let
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_install_hint_key())
   (* ignored: a dismissal not stored only shows the hint once more *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 12, value_bytes, 1), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 12, value_bytes, 1), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
   val () = release_bytes(value_frozen, value_bytes)
 in _install_hint_show() end

@@ -181,7 +181,7 @@ fn _elsewhere_load (): void = let
   val pending = $IDB.idb_get(key_bytes, 14)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), llam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>
@@ -199,7 +199,7 @@ implement stats_load () = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_storage_key())
   val pending = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
-  val () = $P.finish<Int>($P.vow(pending), lam(handle) => let
+  val () = $P.finish<Int>($P.vow(pending), llam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>

@@ -41,7 +41,7 @@ typedef act = () -<cloref1> void
    private and hand them to modal_confirm as yes. *)
 datatype pending = Pending of (ask, act, act)
 
-val _none: act = lam () =<cloref1> ()
+val _none: act = llam () =<cloref1> ()
 val _pending = ref<pending>(Pending(AskNothing(), _none, _none))
 
 (* Whether a dialog is open *)
@@ -203,7 +203,7 @@ fn _asks_name (): bool =
    (only a question asking for a name has that field) *)
 #pub fn modal_listen {count:nat} (listeners: regs(count)): regs(count + 2)
 implement modal_listen (listeners) = let
-  val listeners = RCons(listeners, OnEl("dialog-name-box"), "keydown", lam(h) =>
+  val listeners = RCons(listeners, OnEl("dialog-name-box"), "keydown", llam(h) =>
     case+ take_blob(h) of
     | ~NoBlobBytes() => 0
     | ~BlobBytes(event_bytes, n) => let
@@ -216,7 +216,7 @@ implement modal_listen (listeners) = let
         in 0 end
         else 0
       end)
-in RCons(listeners, OnEl("dialog"), "click", lam(h) =>
+in RCons(listeners, OnEl("dialog"), "click", llam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(event_bytes, n) => let

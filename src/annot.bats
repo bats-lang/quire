@@ -497,7 +497,7 @@ implement annot_load (id_high, id_low) = let
   val loaded = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(loaded), lam(handle) =>
+  $P.and_then<Int><int>($P.vow(loaded), llam(handle) =>
     case+ take_content(handle) of
     | ~NoContentBytes() => let
         val () = (if !_book_id_high = id_high then (if !_book_id_low = id_low then !_book_open := true else ()) else ())
@@ -981,19 +981,19 @@ fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string te
   val () = annot_star()
   val () = _removed_free(_held_swap(pulled))
   val () = shown()
-in undo_offer(text, lam () => let val () = _put_back(offer) in shown() end, lam () => _let_go(offer)) end
+in undo_offer(text, llam () => let val () = _put_back(offer) in shown() end, llam () => _let_go(offer)) end
 
 (* Deletes highlight index, offering Undo *)
 #pub fn annot_delete_highlight {index:int} (index: int index): void
 
 implement annot_delete_highlight (index) =
-  _delete_undoable(index, "Highlight deleted", lam () => annot_render())
+  _delete_undoable(index, "Highlight deleted", llam () => annot_render())
 
 (* Deletes bookmark index, offering Undo *)
 #pub fn annot_delete_bookmark {index:int} (index: int index): void
 
 implement annot_delete_bookmark (index) =
-  _delete_undoable(index, "Bookmark deleted", lam () => annot_render_bookmarks())
+  _delete_undoable(index, "Bookmark deleted", llam () => annot_render_bookmarks())
 
 (* Both lists, after a note changed: the highlights' and the bookmarks' *)
 fn _lists_render (): void = let
@@ -1042,8 +1042,8 @@ end
 implement annot_ask_note (index, fresh) =
   if index < 0 then ()
   else let
-    val () = modal_open(QNote(), "Note", lam () => _note_save(index),
-      lam () => if fresh then let val () = _drop(index) in _lists_render() end else ())
+    val () = modal_open(QNote(), "Note", llam () => _note_save(index),
+      llam () => if fresh then let val () = _drop(index) in _lists_render() end else ())
     val () = modal_textarea()
   in annot_note_show(index) end
 
@@ -1210,8 +1210,8 @@ implement annot_render () = let
   val () = _filter_show()
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
-  val highlight_count = _count_where(annotations, lam (kind) => _is_highlight(kind))
-  val listed_count = _count_where(annotations, lam (kind) => _listed(kind))
+  val highlight_count = _count_where(annotations, llam (kind) => _is_highlight(kind))
+  val listed_count = _count_where(annotations, llam (kind) => _listed(kind))
   val _ = _highlight_rows(annotations, 0, ~1)
   prval () = fold@(cell)
   val () = _put(cell)
@@ -1268,7 +1268,7 @@ implement annot_render_bookmarks () = let
   val () = ui_clear("bookmarks-list")
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
-  val bookmark_count = _count_where(annotations, lam (kind) => kind = 0)
+  val bookmark_count = _count_where(annotations, llam (kind) => kind = 0)
   val () = _bookmark_rows(annotations, 0)
   prval () = fold@(cell)
   val () = _put(cell)

@@ -231,7 +231,7 @@ fn _view_save (book_key: int): void = let
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
   (* ignored: a view not stored only opens the library next time *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 4), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
@@ -274,7 +274,7 @@ fn _chrome_set (shown: bool): void = let
   val () = !_chrome_generation := !_chrome_generation + 1
   val generation = !_chrome_generation
 in
-  if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), lam(_) =>
+  if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), llam(_) =>
       if !_chrome_generation = generation then _chrome_set_off() else ())
   else ()
 end
@@ -295,7 +295,7 @@ fn _hint_load (): void = let
   val stored = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(stored), lam(h) => let
+  $P.finish<Int>($P.vow(stored), llam(h) => let
     val () = (case+ take_blob(h) of
       | ~NoBlobBytes() => !_hint_seen := false
       | ~BlobBytes(value_bytes, _) => $A.free<byte>(value_bytes))
@@ -315,12 +315,12 @@ fn _hint_offer (): void =
     val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
     val @(key_frozen, key_bytes) = $A.freeze<byte>(_hint_key())
     (* ignored: a hint not stored as shown only shows once more *)
-    val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1), lam(_) => ())
+    val () = $P.finish<Int>($IDB.idb_put(key_bytes, 4, value_bytes, 1), llam(_) => ())
     val () = release_bytes(key_frozen, key_bytes)
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
-    $P.finish<Int>($P.vow($TM.timer_set(8000)), lam(_) => _hint_hide())
+    $P.finish<Int>($P.vow($TM.timer_set(8000)), llam(_) => _hint_hide())
   end
 
 fn _show_reader (): void = let
@@ -411,15 +411,15 @@ fn _open_book {book:int} (book: int book): void =
     in
       (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
-        $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor)), lam(result) =>
+        $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor)), llam(result) =>
           _opened_checked(result))
       else
-        $P.finish<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), lam(result) =>
+        $P.finish<int>($P.and_then<Int><int>(open_stored(book_numbers.key, id_high, id_low), llam(result) =>
           if result < 0 then let
             val () = _show_library()
             val () = notice_error("This book's file could not be read. Import it again.")
           in $P.ret<int>(0) end
-          else $P.and_then<int><int>(annot_load(id_high, id_low), lam(_) => reader_goto(chapter, page, anchor))), lam(result) =>
+          else $P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor))), llam(result) =>
           _opened_checked(result))
     end
 
@@ -430,7 +430,7 @@ fn _view_restore (): $P.promise(int, $P.Chained) = let
   val stored = $IDB.idb_get(key_bytes, 4)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(h) => let
+  $P.and_then<Int><int>($P.vow(stored), llam(h) => let
     val key = (case+ take_blob(h) of
       | ~NoBlobBytes() => ~1
       | ~BlobBytes(value_bytes, n) =>
@@ -462,7 +462,7 @@ fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id
   val key = lib_key(letter, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 (* Archives the book: its record is kept and its file deleted. The file
@@ -478,12 +478,12 @@ fn _archive {book:int} (book: int book): void =
       val id_low = book_numbers.id_low
       val () = _set_shelf(book, 2)
     in
-      undo_offer("Archived", lam () => let
+      undo_offer("Archived", llam () => let
           val index = lib_index_of_key(key)
         in if index >= 0 then _set_shelf(index, was) else () end,
         (* the file goes only if the book is still archived (it may have
            been restored meanwhile, by importing it again) *)
-        lam () => let
+        llam () => let
           val index = lib_index_of_key(key)
         in
           if index < 0 then ()
@@ -506,10 +506,10 @@ fn _hide_toggle {book:int} (book: int book): void =
       val was = book_numbers.shelf
       val () = _set_shelf(book, (if was = 1 then 0 else 1))
     in
-      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len, lam () => let
+      undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len, llam () => let
           val index = lib_index_of_key(key)
         in if index >= 0 then _set_shelf(index, was) else () end,
-        lam () => ())
+        llam () => ())
     end
 
 
@@ -822,7 +822,7 @@ fn _copy_selection (): void =
         val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
         (* a copy that failed is said in the banner: the reader would
            otherwise paste something stale *)
-        val () = $P.finish<Int>($CB.clipboard_write(text_bytes, selection_len), lam(copied) =>
+        val () = $P.finish<Int>($CB.clipboard_write(text_bytes, selection_len), llam(copied) =>
           if copied = 1 then notice_copied()
           else notice_error("The text could not be copied: the browser did not allow it."))
       in release_bytes(text_frozen, text_bytes) end
@@ -846,13 +846,13 @@ in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
    their defaults; Undo puts both back *)
 fn _factory_reset (): void = let
   val back_books = lib_trash_all()
-  val back_settings = set_reset_undoable(lam () => let
+  val back_settings = set_reset_undoable(llam () => let
       val () = set_sliders()
     in _settings_changed() end)
 in
-  undo_offer("Library moved to the Trash, settings reset", lam () => let
+  undo_offer("Library moved to the Trash, settings reset", llam () => let
       val () = back_books()
-    in back_settings() end, lam () => ())
+    in back_settings() end, llam () => ())
 end
 
 (* The collections panel for the book, its toggles pressed as the book's
@@ -875,12 +875,12 @@ fn _collection_put {book:int}{collection:int} (book: int book, collection: int c
 
 (* A new collection, named in the dialog, with the book in it *)
 fn _collection_new {book:int} (book: int book): void = let
-  val () = modal_open(QNewCollection(), "New collection", lam () => let
+  val () = modal_open(QNewCollection(), "New collection", llam () => let
       val @(name, name_len) = modal_name_read()
       val collection = lib_coll_add(name, name_len)
       val () = (if collection >= 0 then lib_coll_toggle(book, collection) else ())
       val () = lib_coll_panel(book)
-    in lib_render() end, lam () => ())
+    in lib_render() end, llam () => ())
 in modal_name_field() end
 
 (* The collection shown, named again in the dialog *)
@@ -889,9 +889,9 @@ fn _collection_rename (): void = let
 in
   if collection < 0 then ()
   else let
-    val () = modal_open(QRenameCollection(), "Rename collection", lam () => let
+    val () = modal_open(QRenameCollection(), "Rename collection", llam () => let
         val @(name, name_len) = modal_name_read()
-      in lib_coll_rename(collection, name, name_len) end, lam () => ())
+      in lib_coll_rename(collection, name, name_len) end, llam () => ())
     val () = modal_name_field()
   in lib_coll_name_show(collection) end
 end
@@ -908,10 +908,10 @@ in ui_focus("settings-sync") end
    restore. A restore or a factory reset changes the library, so the
    reader goes back to it first, as it does for files handed to the app *)
 fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) = let
-  val listeners = RCons(listeners, OnEl("reader-settings"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("reader-settings"), "click", llam(_) => let
       val () = _settings_open()
     in 0 end)
-  val listeners = RCons(listeners, OnEl("settings-screen"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("settings-screen"), "click", llam(h) => let
       val clicked = _target(h)
       val goal = (if _is(clicked, "settings-goal-off") then 0
         else if _is(clicked, "settings-goal-10") then 10
@@ -935,7 +935,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
         else if export then backup_export()
-        else if reset then set_reset(lam () => let
+        else if reset then set_reset(llam () => let
             val () = set_sliders()
           in _settings_changed() end)
         else if factory_reset then let
@@ -945,7 +945,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
         else if done then layer_close(LSettings())
         else ())
     in 0 end)
-  val listeners = RCons(listeners, OnEl("settings-restore"), "change", lam(_) => let
+  val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
       val () = layer_close(LSettings())
       val () = (if !_view = 1 then _show_library() else ())
       val () = backup_import()
@@ -954,21 +954,21 @@ in listeners end
 
 fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
   (* import *)
-  val listeners = RCons(listeners, OnEl("import-button"), "change", lam(_) => let val () = import_picked() in 0 end)
+  val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
-  val listeners = RCons(listeners, OnEl("library"), "dragover", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "dragover", llam(_) => let
       val () = $EV.prevent_default()
     in let val () = ui_attr("library", AClass, "lib drag") in 0 end end)
-  val listeners = RCons(listeners, OnEl("library"), "dragleave", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "dragleave", llam(_) => let
       val () = ui_attr("library", AClass, "lib")
     in 0 end)
-  val listeners = RCons(listeners, OnEl("library"), "drop", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library"), "drop", llam(_) => let
       val () = $EV.prevent_default()
       val () = ui_attr("library", AClass, "lib")
       val () = import_dropped()
     in 0 end)
   (* the cards: open, and the book menu *)
-  val listeners = RCons(listeners, OnEl("book-list"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("book-list"), "click", llam(h) => let
       val clicked = _target(h)
       val book = _row_of(clicked, "book")
       val menu_book = _row_of(clicked, "book-more")
@@ -979,7 +979,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       else 0
     end)
   (* the view: which books, as a list or a grid; kept with the settings *)
-  val listeners = RCons(listeners, OnEl("library-view"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("library-view"), "click", llam(h) => let
       val clicked = _target(h)
       val filter = (if _is(clicked, "filter-books-all") then 0 else if _is(clicked, "filter-unread") then 1
         else if _is(clicked, "filter-reading") then 2 else if _is(clicked, "filter-finished") then 3 else ~1): int
@@ -996,16 +996,16 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       val () = (if filter >= 0 then lib_filter_set(filter) else if grid >= 0 then lib_grid_set(grid) else ())
     in if filter >= 0 || grid >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
   (* the book to continue: opened *)
-  val listeners = RCons(listeners, OnEl("continue-list"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("continue-list"), "click", llam(h) => let
       val clicked = _target(h)
       val book = _row_of(clicked, "continue")
       val () = _target_free(clicked)
     in if book >= 0 then let val () = _open_book(book) in 0 end else 0 end)
-  val listeners = RCons(listeners, OnEl("book-list"), "contextmenu", lam(h) => let
+  val listeners = RCons(listeners, OnEl("book-list"), "contextmenu", llam(h) => let
       val () = $EV.prevent_default()
       val book = _target_number(h, "book")
     in if book >= 0 then let val () = _menu_open(book) in 0 end else 0 end)
-  val listeners = RCons(listeners, OnEl("card-menu"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("card-menu"), "click", llam(h) => let
       val clicked = _target(h)
       val book = !_menu_index
       val () = layer_close(LBookMenu())
@@ -1019,7 +1019,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
     in let val () = _target_free(clicked) in 0 end end)
   (* a book's collections: each toggled, a new one, or done (or a
      click outside) *)
-  val listeners = RCons(listeners, OnEl("collections-menu"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("collections-menu"), "click", llam(h) => let
       val clicked = _target(h)
       val book = !_menu_index
       val collection = _row_of(clicked, "collection-put")
@@ -1033,7 +1033,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         else ())
     in 0 end)
   (* the info view *)
-  val listeners = RCons(listeners, OnEl("book-info"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("book-info"), "click", llam(h) => let
       val clicked = _target(h)
       val book = !_menu_index
       val () = (if _is(clicked, "book-info-back") then layer_close(LBookInfo())
@@ -1044,26 +1044,26 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         else ())
     in let val () = _target_free(clicked) in 0 end end)
   (* sort and shelf *)
-  val listeners = RCons(listeners, OnEl("sort-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("sort-button"), "click", llam(_) => let
       val sort_order = lib_sort_get()
       val sort_order = (if sort_order >= 4 then 0 else sort_order + 1): int
       val () = lib_sort(sort_order)
       val () = lib_sort_label(sort_order)
       val () = set_apply(lib_state_get())
     in let val () = lib_render() in 0 end end)
-  val listeners = RCons(listeners, OnEl("shelf-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("shelf-button"), "click", llam(_) => let
       val shelf = lib_shelf_get()
       val () = lib_shelf_set((if shelf >= 3 then 0 else shelf + 1): int)
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
-  val listeners = RCons(listeners, OnEl("library-search-box"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("library-search-box"), "input", llam(h) => let
       val @(query, query_len) = _input_text(h)
       val () = ui_show("library-search-clear", query_len > 0)
       val () = lib_query_set(query, query_len)
     in let val () = lib_render() in 0 end end)
-  val listeners = RCons(listeners, OnEl("library-search-box"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("library-search-box"), "click", llam(h) => let
       val clicked = _target(h)
       val clear = _is(clicked, "library-search-clear")
       val () = _target_free(clicked)
@@ -1076,18 +1076,18 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       else 0
     end)
   (* the error banner *)
-  val listeners = RCons(listeners, OnEl("error-dismiss"), "click", lam(_) => let val () = notice_dismiss() in 0 end)
-  val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", lam(_) => let val () = lib_install_hint_dismiss() in 0 end)
+  val listeners = RCons(listeners, OnEl("error-dismiss"), "click", llam(_) => let val () = notice_dismiss() in 0 end)
+  val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", llam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
-  val listeners = RCons(listeners, OnEl("library-menu-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("library-menu-button"), "click", llam(_) => let
       val () = layer_open(LLibraryMenu())
     in let val () = ui_focus("menu-settings") in 0 end end)
-  val listeners = RCons(listeners, OnEl("library-menu"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("library-menu"), "click", llam(h) => let
       val clicked = _target(h)
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) => let
             val () = layer_close(LLibraryMenu())
-          in lib_ask_harm(the_harm, lam () => _save_render()) end
+          in lib_ask_harm(the_harm, llam () => _save_render()) end
         | ~None_vt() =>
         if _is(clicked, "menu-settings") then let
           val () = layer_close(LLibraryMenu())
@@ -1116,7 +1116,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
     in let val () = _target_free(clicked) in 0 end end)
   (* the reading statistics: a daily goal chosen, or done (or a click
      outside) *)
-  val listeners = RCons(listeners, OnEl("stats-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("stats-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val goal = (if _is(clicked, "stats-goal-off") then 0
         else if _is(clicked, "stats-goal-10") then 10
@@ -1133,7 +1133,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         else ())
     in 0 end)
   (* the dictionaries: one removed, or done (or a click outside) *)
-  val listeners = RCons(listeners, OnEl("dictionaries-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("dictionaries-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val removed = _row_of(clicked, "drop-dictionary")
       val done = (if _is(clicked, "dictionaries-done") then true else _is(clicked, "dictionaries-panel")): bool
@@ -1144,7 +1144,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
     in 0 end)
   (* a dictionary's files picked to import (the input is made again to
      be cleared: its events are taken on its box) *)
-  val listeners = RCons(listeners, OnEl("dictionary-import"), "change", lam(_) => let
+  val listeners = RCons(listeners, OnEl("dictionary-import"), "change", llam(_) => let
       val () = dict_import_picked()
     in 0 end)
 in listeners end
@@ -1152,7 +1152,7 @@ in listeners end
 (* Sync: its screen's buttons, its toast's, and the page hidden (a sync,
    so what was read here is on the other devices) *)
 fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
-  val listeners = RCons(listeners, OnEl("sync-screen"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("sync-screen"), "click", llam(h) => let
       val clicked = _target(h)
       val now = _is(clicked, "sync-now")
       val off = _is(clicked, "sync-off")
@@ -1163,7 +1163,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         else if done then layer_close(LSync())
         else ())
     in 0 end)
-  val listeners = RCons(listeners, OnEl("sync-toast"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("sync-toast"), "click", llam(h) => let
       val clicked = _target(h)
       val go = _is(clicked, "sync-go")
       val dismiss = _is(clicked, "sync-toast-close")
@@ -1174,16 +1174,16 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         else if dismiss then sync_further_dismiss()
         else ())
     in 0 end)
-  val listeners = RCons(listeners, OnDocument(), "visibilitychange", lam(_) => let
+  val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
       val () = (if $WN.get_visibility() = 1 then sync_run() else ())
     in 0 end)
 in listeners end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
-  val listeners = RCons(listeners, OnEl("typography-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
       val () = layer_open(LTypography())
     in let val () = ui_focus("typography-close") in 0 end end)
-  val listeners = RCons(listeners, OnEl("typography-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("typography-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(0) in true end
         else if _is(clicked, "font-inter") then let val () = set_font_set(1) in true end
@@ -1214,7 +1214,7 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
         else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
         else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
         else if _is(clicked, "typography-reset") then let
-            val () = set_reset(lam () => let
+            val () = set_reset(llam () => let
                 val () = set_sliders()
               in _settings_changed() end)
           in false end
@@ -1223,22 +1223,22 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
       val () = _target_free(clicked)
       val () = (if close then layer_close(LTypography()) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val listeners = RCons(listeners, OnEl("size-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("size-row"), "input", llam(h) => let
       val () = set_size_set(_clamp(_input_number(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
-  val listeners = RCons(listeners, OnEl("line-height-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("line-height-row"), "input", llam(h) => let
       val () = set_lh_set(_clamp(_input_number(h), 12, 24))
     in let val () = _settings_changed() in 0 end end)
-  val listeners = RCons(listeners, OnEl("margins-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("margins-row"), "input", llam(h) => let
       val () = set_margin_set(_clamp(_input_number(h), 0, 4))
     in let val () = _settings_changed() in 0 end end)
-  val listeners = RCons(listeners, OnEl("paragraph-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("paragraph-row"), "input", llam(h) => let
       val () = set_ps_set(_clamp(_input_number(h), 0, 20))
     in let val () = _settings_changed() in 0 end end)
-  val listeners = RCons(listeners, OnEl("letter-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("letter-row"), "input", llam(h) => let
       val () = set_ls_set(_clamp(_input_number(h), 0, 12))
     in let val () = _settings_changed() in 0 end end)
-  val listeners = RCons(listeners, OnEl("word-row"), "input", lam(h) => let
+  val listeners = RCons(listeners, OnEl("word-row"), "input", llam(h) => let
       val () = set_ws_set(_clamp(_input_number(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
 in listeners end
@@ -1305,7 +1305,7 @@ fn _search_input (): void = let
   val () = !_search_tick := !_search_tick + 1
   val tick = !_search_tick
 in
-  $P.finish<Int>($P.vow($TM.timer_set(300)), lam(_) =>
+  $P.finish<Int>($P.vow($TM.timer_set(300)), llam(_) =>
     if !_search_tick = tick then _search_run() else ())
 end
 
@@ -1518,7 +1518,7 @@ in ui_show("pages-list", true) end
    drops once the click has had its turn *)
 fn _drag_ended (): void = let
   val () = !_dragged := true
-in $P.finish<Int>($P.vow($TM.timer_set(0)), lam(_) => !_dragged := false) end
+in $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => !_dragged := false) end
 
 (* The page turn's events: a pan moves the page with the finger, a
    commit turns it (a drag to the left shows the page to the right),
@@ -1584,7 +1584,7 @@ val _scroll_generation = ref<int>(0)
    Close, the next and previous pages, and its search (its button, or
    Enter in its field) *)
 fn _wire_catalogues {count:nat} (listeners: regs(count)): regs(count + 3) = let
-  val listeners = RCons(listeners, OnEl("catalogues-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("catalogues-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val opened = _row_of(clicked, "catalogue-open")
       val removed = _row_of(clicked, "drop-catalogue")
@@ -1597,7 +1597,7 @@ fn _wire_catalogues {count:nat} (listeners: regs(count)): regs(count + 3) = let
         else if done then layer_close(LCatalogues())
         else ())
     in 0 end)
-  val listeners = RCons(listeners, OnEl("catalogue-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("catalogue-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val followed = _row_of(clicked, "feed-link")
       val got = _row_of(clicked, "book-get")
@@ -1616,7 +1616,7 @@ fn _wire_catalogues {count:nat} (listeners: regs(count)): regs(count + 3) = let
         else if search then catalogue_search()
         else ())
     in 0 end)
-in RCons(listeners, OnEl("catalogue-search-bar"), "keydown", lam(h) =>
+in RCons(listeners, OnEl("catalogue-search-bar"), "keydown", llam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(key_bytes, n) => let
@@ -1625,8 +1625,8 @@ in RCons(listeners, OnEl("catalogue-search-bar"), "keydown", lam(h) =>
     in if enter then let val () = catalogue_search() in 0 end else 0 end) end
 
 fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
-  val listeners = RCons(listeners, OnEl("contents-button"), "click", lam(_) => let val () = _toc_open() in 0 end)
-  val listeners = RCons(listeners, OnEl("contents-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("contents-button"), "click", llam(_) => let val () = _toc_open() in 0 end)
+  val listeners = RCons(listeners, OnEl("contents-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val contents_row = _row_of(clicked, "toc-row")
       val bookmark_go = _row_of(clicked, "bookmark-go")
@@ -1649,28 +1649,28 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         else ())
       val () = _target_free(clicked)
     in 0 end)
-  val listeners = RCons(listeners, OnEl("jump-back"), "click", lam(_) => let val () = reader_back() in 0 end)
-  val listeners = RCons(listeners, OnEl("next-chapter"), "click", lam(_) => let val () = page_next() in 0 end)
+  val listeners = RCons(listeners, OnEl("jump-back"), "click", llam(_) => let val () = reader_back() in 0 end)
+  val listeners = RCons(listeners, OnEl("next-chapter"), "click", llam(_) => let val () = page_next() in 0 end)
   (* scrolled, the place follows the page, once it rests a moment *)
-  val listeners = RCons(listeners, OnEl("page"), "scroll", lam(_) => let
+  val listeners = RCons(listeners, OnEl("page"), "scroll", llam(_) => let
       val () = !_scroll_generation := !_scroll_generation + 1
       val generation = !_scroll_generation
-      val () = $P.finish<Int>($P.vow($TM.timer_set(150)), lam(_) =>
+      val () = $P.finish<Int>($P.vow($TM.timer_set(150)), llam(_) =>
           if !_scroll_generation = generation then reader_scrolled() else ())
     in 0 end)
   (* the scrubber: a drag shows where it would go, letting go goes there *)
-  val listeners = RCons(listeners, OnEl("scrubber-track"), "pointerdown", lam(h) => let
+  val listeners = RCons(listeners, OnEl("scrubber-track"), "pointerdown", llam(h) => let
       val x = _event_x(h)
       val () = !_scrubbing := true
       val () = _chrome_set(true)
     in let val () = reader_scrub_preview(x) in 0 end end)
-  val listeners = RCons(listeners, OnDocument(), "pointermove", lam(h) =>
+  val listeners = RCons(listeners, OnDocument(), "pointermove", llam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = _chrome_set(true)
       in let val () = reader_scrub_preview(x) in 0 end end
       else 0)
-  val listeners = RCons(listeners, OnDocument(), "pointerup", lam(h) =>
+  val listeners = RCons(listeners, OnDocument(), "pointerup", llam(h) =>
       if !_scrubbing then let
         val x = _event_x(h)
         val () = !_scrubbing := false
@@ -1678,21 +1678,21 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
       else 0)
   (* the app hidden (another tab, another app): where the reader is is
      stored *)
-  val listeners = RCons(listeners, OnDocument(), "visibilitychange", lam(_) =>
+  val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) =>
       if !_view = 1 then let val () = reader_save() in 0 end else 0)
 in listeners end
 
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
-  val listeners = RCons(listeners, OnEl("bookmark-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("bookmark-button"), "click", llam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
-  val listeners = RCons(listeners, OnDocument(), "selectionchange", lam(_) =>
+  val listeners = RCons(listeners, OnDocument(), "selectionchange", llam(_) =>
       if !_view = 1 then let
         val selected = _has_selection()
         val () = ui_show("selection-toolbar", selected)
         val () = (if selected then _lookup_update() else ())
       in 0 end else 0)
-  val listeners = RCons(listeners, OnEl("selection-toolbar"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("selection-toolbar"), "click", llam(h) => let
       val clicked = _target(h)
       val highlight = _is(clicked, "selection-highlight")
       val orange = _is(clicked, "selection-orange")
@@ -1712,18 +1712,18 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         else ())
     in let val () = ui_show("selection-toolbar", false) in 0 end end)
   (* a word's dictionary entry: closed, or looked up online instead *)
-  val listeners = RCons(listeners, OnEl("dictionary-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("dictionary-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val close = _is(clicked, "dictionary-close")
       val online = _is(clicked, "dictionary-online")
       val () = _target_free(clicked)
       val () = (if close then layer_close(LDictionary()) else if online then layer_close(LDictionary()) else ())
     in if close then let val () = ui_focus("page") in 0 end else 0 end)
-  val listeners = RCons(listeners, OnEl("annotations-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("annotations-button"), "click", llam(_) => let
       val () = annot_render()
       val () = layer_open(LAnnotations())
     in let val () = ui_focus("annotations-close") in 0 end end)
-  val listeners = RCons(listeners, OnEl("annotations-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("annotations-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val go_row = _row_of(clicked, "highlight-go")
       val note_row = _row_of(clicked, "highlight-edit")
@@ -1744,7 +1744,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         else ())
     in 0 end)
   (* a note opened over the page: gone to, or closed *)
-  val listeners = RCons(listeners, OnEl("footnote"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("footnote"), "click", llam(h) => let
       val clicked = _target(h)
       val go = _is(clicked, "footnote-go")
       val close = _is(clicked, "footnote-close")
@@ -1761,13 +1761,13 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
 in listeners end
 
 fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
-  val listeners = RCons(listeners, OnEl("search-button"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("search-button"), "click", llam(_) => let
       val () = (if layer_is_open(LSearch()) then layer_close(LSearch()) else _search_open())
     in 0 end)
   (* the field is made again for a selection's search: its events are
      taken on the panel *)
-  val listeners = RCons(listeners, OnEl("search-panel"), "input", lam(_) => let val () = _search_input() in 0 end)
-  val listeners = RCons(listeners, OnEl("search-panel"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("search-panel"), "input", llam(_) => let val () = _search_input() in 0 end)
+  val listeners = RCons(listeners, OnEl("search-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val hit = _row_of(clicked, "search-hit")
       val close = _is(clicked, "search-close")
@@ -1778,7 +1778,7 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
         in reader_search_go(hit) end
         else ())
     in 0 end)
-  val listeners = RCons(listeners, OnEl("search-nav"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("search-nav"), "click", llam(h) => let
       val clicked = _target(h)
       val previous = _is(clicked, "search-previous")
       val next = _is(clicked, "search-next")
@@ -1792,10 +1792,10 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
 in listeners end
 
 fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
-  val listeners = RCons(listeners, OnEl("back-to-library"), "click", lam(_) => let val () = _show_library() in 0 end)
-  val listeners = RCons(listeners, OnEl("previous-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
-  val listeners = RCons(listeners, OnEl("next-page"), "click", lam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
-  val listeners = RCons(listeners, OnEl("page"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
+  val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
+  val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  val listeners = RCons(listeners, OnEl("page"), "click", llam(h) => let
       val clicked = _target(h)
       val node = _row_of(clicked, "c")
       val x = _target_x(clicked)
@@ -1812,7 +1812,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown
      full screen *)
-  val listeners = RCons(listeners, OnEl("page"), "contextmenu", lam(h) => let
+  val listeners = RCons(listeners, OnEl("page"), "contextmenu", llam(h) => let
       val clicked = _target(h)
       val node = _row_of(clicked, "c")
       val () = _target_free(clicked)
@@ -1821,7 +1821,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
       else 0
     end)
-  val listeners = RCons(listeners, OnEl("image-viewer"), "click", lam(h) => let
+  val listeners = RCons(listeners, OnEl("image-viewer"), "click", llam(h) => let
       val clicked = _target(h)
       val close = _is(clicked, "image-close")
       val () = _target_free(clicked)
@@ -1833,14 +1833,14 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
     end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
-  val listeners = RCons(listeners, OnEl("page"), "focusin", lam(h) => let
+  val listeners = RCons(listeners, OnEl("page"), "focusin", llam(h) => let
       val clicked = _target(h)
       val node = _row_of(clicked, "c")
       val () = _target_free(clicked)
       val () = !_focus_link := node
     in 0 end)
-  val listeners = RCons(listeners, OnEl("page"), "focusout", lam(_) => let val () = !_focus_link := ~1 in 0 end)
-  val listeners = RCons(listeners, OnDocument(), "keydown", lam(h) =>
+  val listeners = RCons(listeners, OnEl("page"), "focusout", llam(_) => let val () = !_focus_link := ~1 in 0 end)
+  val listeners = RCons(listeners, OnDocument(), "keydown", llam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(key_bytes, n) => let
@@ -1856,7 +1856,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
           val () = $A.free<byte>(key_bytes)
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
-  val listeners = RCons(listeners, OnEl("page"), "wheel", lam(h) =>
+  val listeners = RCons(listeners, OnEl("page"), "wheel", llam(h) =>
       case+ take_blob(h) of
       | ~NoBlobBytes() => 0
       | ~BlobBytes(wheel_bytes, n) =>
@@ -1870,28 +1870,28 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
           else let
             val () = !_wheel_busy := true
             val () = (if delta_y > 0 then _next() else _previous())
-            val () = $P.finish<Int>($P.vow($TM.timer_set(250)), lam(_) => !_wheel_busy := false)
+            val () = $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) => !_wheel_busy := false)
           in 0 end
         end)
   (* a tap on the footer's readout shows the next, and keeps it *)
-  val listeners = RCons(listeners, OnEl("footer-readout"), "click", lam(_) => let
+  val listeners = RCons(listeners, OnEl("footer-readout"), "click", llam(_) => let
       val () = reader_readout_next()
       val () = set_save(lib_state_get())
     in 0 end)
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
-  val listeners = RCons(listeners, OnGestures("reader"), "gestures", lam(h) => let
+  val listeners = RCons(listeners, OnGestures("reader"), "gestures", llam(h) => let
       val () = _gesture_batch(h)
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
-  val listeners = RCons(listeners, OnWindow(), "resize", lam(_) => let
+  val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
       val () = !_resize_generation := !_resize_generation + 1
       val generation = !_resize_generation
-      val () = $P.finish<Int>($P.vow($TM.timer_set(200)), lam(_) =>
+      val () = $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
           if !_resize_generation = generation then (if !_view = 1 then reader_relayout() else ()) else ())
     in 0 end)
   (* the browser's back button: out of the reader *)
-  val () = $NAV.set_popstate_callback(lam(_) => let
+  val () = $NAV.set_popstate_callback(llam(_) => let
       val () = (if !_view = 1 then _show_library() else ())
     in 0 end)
 in listeners end
@@ -1908,28 +1908,28 @@ implement main0 () = let
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil())))))))))))
   (* files handed to the app from outside it (an Android intent) *)
-  val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
+  val listeners = RCons(listeners, OnExternalFiles(), "files", llam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
       val () = import_external(h)
     in 0 end)
   val () = ui_listen_all(listeners)
   (* ignored: each load deals with its own value (a speed, the
      dictionaries and the catalogues not read start as none) *)
-  val () = $P.finish<int>(reader_speed_load(), lam(_) => ())
+  val () = $P.finish<int>(reader_speed_load(), llam(_) => ())
   val () = _hint_load()
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = stamp_load()
-  val () = $P.finish<int>(dict_load(), lam(_) => ())
-  val () = $P.finish<int>(catalogue_load(), lam(_) => ())
-  val () = dict_when_read(lam () => if !_view = 1 then _lookup_update() else ())
+  val () = $P.finish<int>(dict_load(), llam(_) => ())
+  val () = $P.finish<int>(catalogue_load(), llam(_) => ())
+  val () = dict_when_read(llam () => if !_view = 1 then _lookup_update() else ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
-  val loaded = $P.and_then<int><int>(set_load(), lam(state) => let
+  val loaded = $P.and_then<int><int>(set_load(), llam(state) => let
       val () = lib_sort_label($AR.band_int_int(state, 7))
     in
-      $P.and_then<int><int>(lib_load(), lam(_) => let
+      $P.and_then<int><int>(lib_load(), llam(_) => let
         val () = lib_state_set(state)
         val () = lib_render()
         (* sync, once the library is read *)
@@ -1938,4 +1938,4 @@ implement main0 () = let
     end)
 (* ignored: each step deals with its own value (but see bats-lang/bridge#87:
    a library that could not be read is taken for none) *)
-in $P.finish<int>(loaded, lam(_) => ()) end
+in $P.finish<int>(loaded, llam(_) => ()) end

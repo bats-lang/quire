@@ -161,7 +161,7 @@ fn _speed_save (): void = let
   val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
   (* ignored: a speed not stored only starts the time-left estimates over *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(data_frozen, data_bytes) end
 
@@ -693,7 +693,7 @@ in
       val pages_read = !_book_pages
       val () = !_book_minutes := 0
       val () = !_book_pages := 0
-      val () = lib_update(book_index, lam(record) => @{
+      val () = lib_update(book_index, llam(record) => @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
@@ -1609,7 +1609,7 @@ in
     in
       (* an image that cannot be read stays empty, as a browser leaves an
          image it cannot load: a book's images are decorative (alt="") *)
-      $P.finish<Int>(decompressing, lam(handle) =>
+      $P.finish<Int>(decompressing, llam(handle) =>
         case+ take_content(handle) of
         | ~NoContentBytes() => ()
         | ~ContentBytes(content_owner, content, content_len) => let
@@ -1855,7 +1855,7 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<Int><int>($P.vow(decompressing), lam(handle) =>
+         $P.and_then<Int><int>($P.vow(decompressing), llam(handle) =>
            case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(font_owner, font, font_len) => let
@@ -1903,7 +1903,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          val decompressing = $P.vow(decompressing)
        in
-         $P.and_then<Int><int>(decompressing, lam(handle) =>
+         $P.and_then<Int><int>(decompressing, llam(handle) =>
            case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(~2)
            | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
@@ -1950,7 +1950,7 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
               val decompressing = $P.vow(decompressing)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<Int><int>(decompressing, lam(handle) => let
+              $P.and_then<Int><int>(decompressing, llam(handle) => let
                 val content = take_content(handle)
               in
                 case+ content of
@@ -2005,10 +2005,10 @@ fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.prom
 in
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() =>
-    $P.and_then<int><int>(_spine_build(serial), lam(result) =>
+    $P.and_then<int><int>(_spine_build(serial), llam(result) =>
       if result < 0 then $P.ret<int>(result)
-      else $P.and_then<int><int>(toc_build(serial), lam(_) =>
-        $P.and_then<int><int>(_font_load(serial), lam(_) => _chapter_open(serial, chapter_index, generation))))
+      else $P.and_then<int><int>(toc_build(serial), llam(_) =>
+        $P.and_then<int><int>(_font_load(serial), llam(_) => _chapter_open(serial, chapter_index, generation))))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_index, generation)
   | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
 end
@@ -2064,7 +2064,7 @@ in if page_width > 0 then _count_pages() else ~1 end
    shown since (generation) *)
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
   if times <= 0 then ()
-  else $P.finish<Int>($P.vow($TM.timer_set(250)), lam(_) =>
+  else $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) =>
     if generation <> !_settle_generation then ()
     else let
       val () = (case+ reading_get() of
@@ -2098,7 +2098,7 @@ in _settle(!_settle_generation, 12) end
 fn _goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
     if result < 0 then $P.ret<int>(result)
     else let
       val () = _show_target(page, anchor)
@@ -2117,7 +2117,7 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
     val () = !_fragment_node := ~1
     val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
   in
-    $P.and_then<int><int>(_load_chapter(chapter), lam(result) => let
+    $P.and_then<int><int>(_load_chapter(chapter), llam(result) => let
       val () = _fragment_put(FragmentNone())
     in
       if result < 0 then $P.ret<int>(result)
@@ -2134,7 +2134,7 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
    was on, shown again (a drag may have moved it), never a blank one,
    and the banner says why *)
 fn _jump_checked (jumping: $P.promise(int, $P.Chained)): void =
-  $P.finish<int>(jumping, lam(result) =>
+  $P.finish<int>(jumping, llam(result) =>
     if result >= 0 then ()
     else let
       val () = (case+ reading_get() of
@@ -2173,7 +2173,7 @@ in
 stadef TIMED = TIMED_
 
 fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<cloref1> void): (TIMED(timeout) | void) = let
-  val () = $P.finish<Int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => done(timeout))
+  val () = $P.finish<Int>($P.vow($TM.timer_set(BACK_SHOWN)), llam(_) => done(timeout))
 in (TimedArmed() | ()) end
 end
 
@@ -2225,7 +2225,7 @@ end
 fn _back_arm (): [timeout:int] (TIMED(timeout) | int timeout) = let
   val timeout = !_ps_timed + 1
   val () = !_ps_timed := timeout
-  val (armed | ()) = _timed_arm(timeout, lam(fired) => _back_timeout(fired))
+  val (armed | ()) = _timed_arm(timeout, llam(fired) => _back_timeout(fired))
 in (armed | timeout) end
 
 (* Shows the button offering the positions, with a new timeout *)
@@ -2263,7 +2263,7 @@ end
 fn _goto_part (chapter: Int, thousandth: Int): $P.promise(int, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
     if result < 0 then $P.ret<int>(result)
     else let
       val () = (case+ reading_get() of
@@ -2634,7 +2634,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.finish<Int>($P.vow(decompressing), lam(handle) => let
+           $P.finish<Int>($P.vow(decompressing), llam(handle) => let
              val () = (case+ take_content(handle) of
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -2853,7 +2853,7 @@ implement reader_speed_load () = let
   val stored = $IDB.idb_get(key_bytes, 3)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
+  $P.and_then<Int><int>($P.vow(stored), llam(handle) =>
     case+ take_blob(handle) of
     | ~NoBlobBytes() => $P.ret<int>(0)
     | ~BlobBytes(data, data_len) =>
@@ -3012,7 +3012,7 @@ in
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.finish<Int>($P.vow(decompressing), lam(handle) => let
+         $P.finish<Int>($P.vow(decompressing), llam(handle) => let
            val () = (case+ take_content(handle) of
              | ~NoContentBytes() => _note_follow()
              | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -3226,7 +3226,7 @@ in
   in
     (* the hit is marked only once its chapter is shown; a failure is
        told by _jump_checked *)
-    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), lam(result) => let
+    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), llam(result) => let
       val () = (if result >= 0 then (if node >= 0 then let
           val () = $BDOM.clear_marks(2)
           val @(start_id, start_id_len) = nid_pad3("c", node)

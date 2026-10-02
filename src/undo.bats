@@ -50,7 +50,7 @@ implement undo_offer (text, undo, final) = let
   val () = ui_text("undo-text", text)
   val () = ui_show("undo-toast", true)
 in
-  $P.finish<Int>($P.vow($TM.timer_set(SHOWN)), lam(_) =>
+  $P.finish<Int>($P.vow($TM.timer_set(SHOWN)), llam(_) =>
     case+ !_offer of
     | Offer(shown_serial, _, _) =>
       if shown_serial = serial then let
@@ -86,7 +86,7 @@ fun _id_is {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
 
 (* The toast's listener: its Undo button *)
 #pub fn undo_listen {count:nat} (listeners: regs(count)): regs(count + 1)
-implement undo_listen (listeners) = RCons(listeners, OnEl("undo-toast"), "click", lam(h) =>
+implement undo_listen (listeners) = RCons(listeners, OnEl("undo-toast"), "click", llam(h) =>
   case+ take_blob(h) of
   | ~NoBlobBytes() => 0
   | ~BlobBytes(event_bytes, n) => let

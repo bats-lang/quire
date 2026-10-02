@@ -44,7 +44,7 @@ fn _keep (): void = let
   (* ignored: each change keeps its own stamp with it, and the next
      stamp is at least the minute it is made in, so a latest stamp not
      stored costs at most an order among changes of the same minute *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 5, record_bytes, 4), lam(_) => ())
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 5, record_bytes, 4), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -98,7 +98,7 @@ implement stamp_load () = let
   val pending = $IDB.idb_get(key_bytes, 5)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), llam(handle) => let
     val () = (case+ take_blob(handle) of
       | ~NoBlobBytes() => ()
       | ~BlobBytes(record, n) =>

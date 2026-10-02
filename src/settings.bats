@@ -615,7 +615,7 @@ implement set_reset_undoable (after) = let
   val ruby_before = !_ruby
   val () = _reset()
   val () = after()
-in lam () => let
+in llam () => let
   val () = !_set := before
   val () = !_ruby := ruby_before
 in after() end end
@@ -623,7 +623,7 @@ in after() end end
 (* The same, offering Undo *)
 #pub fn set_reset (after: () -<cloref1> void): void
 implement set_reset (after) =
-  undo_offer("Settings reset", set_reset_undoable(after), lam () => ())
+  undo_offer("Settings reset", set_reset_undoable(after), llam () => ())
 
 (* A byte stored by an earlier run, as a value in [low, high]: checked
    here, once; fallback when it is out of range *)
@@ -650,14 +650,14 @@ implement set_load () = let
   val @(query_frozen, query_bytes) = $A.freeze<byte>(media_query)
   val @(query_text, query_rest) = $A.borrow_split<byte>(query_frozen, query_bytes, 28)
   val () = !_system_dark := ($MEDIA.match_media(query_text, 28) > 0)
-  val () = $MEDIA.listen_media(query_text, 28, ui_media_listener(), lam(matches) => let
+  val () = $MEDIA.listen_media(query_text, 28, ui_media_listener(), llam(matches) => let
       val () = !_system_dark := (matches > 0)
       val () = _apply_theme()
     in 0 end)
   val query_bytes = $A.borrow_join<byte>(query_frozen, query_text, query_rest)
   val () = release_bytes(query_frozen, query_bytes)
 in
-  $P.and_then<Int><int>($P.vow(pending), lam(handle) =>
+  $P.and_then<Int><int>($P.vow(pending), llam(handle) =>
     case+ take_blob(handle) of
     | ~NoBlobBytes() => let val () = set_show() in $P.ret<int>(0) end
     | ~BlobBytes(record, n) =>

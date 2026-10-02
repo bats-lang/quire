@@ -465,7 +465,7 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), llam(handle) => let
           val () = (case+ take_content(handle) of
             | ~NoContentBytes() => _push(_text_chunk("[]"))
             | ~ContentBytes(content_owner, content, content_len) => let
@@ -588,7 +588,7 @@ implement backup_apply_numbers (book_index, numbers, shelf_most) = let
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
 in
-  lib_update(book_index, lam(before) => @{
+  lib_update(book_index, llam(before) => @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
     added = (if added > 0 then added else before.added), opened = opened,
     chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor,
@@ -623,7 +623,7 @@ implement backup_claim (id_high, id_low) = let
   val pending = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) =>
+  $P.finish<Int>($P.vow(pending), llam(handle) =>
     case+ take_blob(handle) of
     | ~NoBlobBytes() => ()
     | ~BlobBytes(record, n) =>
@@ -638,7 +638,7 @@ in
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
         (* ignored: a record not deleted is applied again only if the
            book is imported again, which is harmless *)
-        val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+        val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
       in release_bytes(key_frozen, key_bytes) end)
 end
 
@@ -1159,7 +1159,7 @@ in pending end
 
 implement backup_import () =
   if _backup_file_count() <= 0 then ()
-  else $P.finish<Int>($P.vow(_backup_file_open()), lam(handle) => let
+  else $P.finish<Int>($P.vow(_backup_file_open()), llam(handle) => let
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in
