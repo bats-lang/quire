@@ -239,8 +239,34 @@ fn _view_save (book_key: int): void = let
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
+(* While a book is open the auto theme follows the clock: night is
+   checked each minute (22:00 to 07:00, local_time.bats), as well as at
+   each page turn. Each opening of the reader is a watch of its own,
+   numbered; leaving it ends the watch *)
+val _night_watch_number = ref<int>(0)
+
+(* A minute, in milliseconds *)
+#define NIGHT_CHECK_EVERY 60000
+(* How many minutes a watch checks, at most (about two years) *)
+#define NIGHT_CHECKS_MAX 1000000
+
+fun _night_watch {checks:nat} .<checks>. (watch: int, checks: int checks): void =
+  if checks <= 0 then ()
+  else $P.finish<Int>($P.vow($TM.timer_set(NIGHT_CHECK_EVERY)), lam(_) =>
+    if watch <> !_night_watch_number then ()
+    else let
+      val () = set_theme_recheck()
+    in _night_watch(watch, checks - 1) end)
+
+fn _night_watch_start (): void = let
+  val () = !_night_watch_number := !_night_watch_number + 1
+in _night_watch(!_night_watch_number, NIGHT_CHECKS_MAX) end
+
+fn _night_watch_stop (): void = !_night_watch_number := !_night_watch_number + 1
+
 fn _show_library (): void = let
   val () = !_view := 0
+  val () = _night_watch_stop()
   val () = ui_show("reader", false)
   (* the screen may sleep again, as it does outside the reader *)
   val () = $WN.keep_awake(false)
@@ -331,6 +357,7 @@ fn _hint_offer (): void =
 
 fn _show_reader (): void = let
   val () = !_view := 1
+  val () = _night_watch_start()
   val () = ui_show("library", false)
   val () = layer_close(LBookInfo())
   val () = ui_show("reader", true)
@@ -652,6 +679,15 @@ fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
 in if !_view = 1 then reader_relayout() else () end
 
+(* Every setting put back (a reset, or its Undo): the panel's sliders,
+   the page, the screen's brightness and lock, and reading aloud's
+   speed and voice *)
+fn _settings_reapplied (): void = let
+  val () = set_sliders()
+  val () = _settings_changed()
+  val () = screen_controls_apply()
+in aloud_choices_show() end
+
 fn _clamp {low,high:int | low <= high} (value: Int, low: int low, high: int high): [clamped:int | low <= clamped; clamped <= high] int clamped =
   if value < low then low else if value > high then high else value
 
@@ -858,9 +894,7 @@ in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
    their defaults; Undo puts both back *)
 fn _factory_reset (): void = let
   val back_books = lib_trash_all()
-  val back_settings = set_reset_undoable(lam () => let
-      val () = set_sliders()
-    in _settings_changed() end)
+  val back_settings = set_reset_undoable(lam () => _settings_reapplied())
 in
   undo_offer("Library moved to the Trash, settings reset", lam () => let
       val () = back_books()
@@ -947,9 +981,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
         else if export then backup_export()
-        else if reset then set_reset(lam () => let
-            val () = set_sliders()
-          in _settings_changed() end)
+        else if reset then set_reset(lam () => _settings_reapplied())
         else if factory_reset then let
           val () = layer_close(LSettings())
           val () = (if !_view = 1 then _show_library() else ())
@@ -1232,9 +1264,7 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
         else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
         else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
         else if _is(clicked, "typography-reset") then let
-            val () = set_reset(lam () => let
-                val () = set_sliders()
-              in _settings_changed() end)
+            val () = set_reset(lam () => _settings_reapplied())
           in false end
         else false): bool
       val close = _is(clicked, "typography-close")

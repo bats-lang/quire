@@ -27,6 +27,12 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload "mem.sats"
 
+(* Whether the screen's rotation is locked now (by this module) *)
+val _locked = ref<bool>(false)
+
+(* The brightness last set on the screen *)
+val _brightness_on_screen = ref<brightness_choice>(BrightnessSystem())
+
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
@@ -48,6 +54,7 @@ in
   else case+ set_rotation_get() of
   | RotationFree() => ()
   | RotationLocked() => let
+      val () = !_locked := false
       val () = set_rotation_set(RotationFree())
     in _pressed("screen-lock", false) end
 end
@@ -82,10 +89,12 @@ fn _lock (): void =
   $P.finish<$SCR.lock_outcome>($SCR.orientation_lock_current(), lam(outcome) =>
     case+ outcome of
     | $SCR.Locked() => let
+        val () = !_locked := true
         val () = set_rotation_set(RotationLocked())
         val () = set_save(lib_state_get())
       in _pressed("screen-lock", true) end
     | $SCR.LockRefused() => let
+        val () = !_locked := false
         val () = set_rotation_set(RotationFree())
         val () = set_save(lib_state_get())
       in _pressed("screen-lock", false) end)
@@ -97,6 +106,7 @@ implement screen_lock_toggle () =
   case+ set_rotation_get() of
   | RotationLocked() => let
       val () = $SCR.orientation_unlock()
+      val () = !_locked := false
       val () = set_rotation_set(RotationFree())
       val () = set_save(lib_state_get())
     in _pressed("screen-lock", false) end
@@ -213,11 +223,43 @@ in
         val choice = _choice_of(bytes, n)
         val () = $A.free<byte>(bytes)
         val () = set_brightness_set(choice)
+        val () = !_brightness_on_screen := choice
         val () = set_save(lib_state_get())
       in
         if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(choice)) else ()
       end
     end
+end
+
+(* ============================================================
+   The settings, set again
+   ============================================================ *)
+
+(* The settings' brightness and rotation lock set on the screen, where
+   they differ from what is set (a reset of the settings, its Undo, a
+   backup restored): the select and the toggle follow *)
+#pub fn screen_controls_apply (): void
+
+implement screen_controls_apply () = let
+  val chosen = set_brightness_get()
+  val () = _brightness_options()
+  val () = (if _same(chosen, !_brightness_on_screen) then ()
+    else let
+      val () = !_brightness_on_screen := chosen
+    in if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(chosen)) else () end)
+in
+  case+ set_rotation_get() of
+  | RotationFree() => let
+      (* let go when it was locked *)
+      val () = (if !_locked then $SCR.orientation_unlock() else ())
+      val () = !_locked := false
+    in _pressed("screen-lock", false) end
+  | RotationLocked() =>
+    if !_locked then ()
+    else if $SCR.orientation_available() then _lock()
+    else let
+      val () = set_rotation_set(RotationFree())
+    in _pressed("screen-lock", false) end
 end
 
 (* ============================================================
@@ -235,7 +277,9 @@ implement screen_controls_start () = let
   val () = screen_controls_show()
   val () = (if $SCR.brightness_available() then (case+ set_brightness_get() of
       | BrightnessSystem() => ()
-      | _ => $SCR.brightness_set(_setting_of(set_brightness_get())))
+      | _ => let
+          val () = !_brightness_on_screen := set_brightness_get()
+        in $SCR.brightness_set(_setting_of(set_brightness_get())) end)
     else ())
 in
   case+ set_rotation_get() of

@@ -311,8 +311,11 @@ only where its platform has it, by its own `data-hide`.
   (`speech_rate`, 0.75 to 2 times) and the voice of each language (by
   the language's primary subtag, the voices whose language has it)
   are kept with the settings, outside the settings record (bytes 20
-  and 23 on of "S2", as `ruby` is), neither in the backup nor reset with
-  the settings: they are the device's. Going to the library, opening
+  and 23 on of "S2", as `ruby` is). They are settings like the others,
+  and so are the brightness and the rotation lock: in the backup
+  (`readingSpeed`, `voices`, `brightness`, `rotationLocked`) and reset
+  with the settings, Undo putting them back (`set_reset_undoable`;
+  `screen_controls_apply` sets the screen again). Going to the library, opening
   another book, or the page going away (`pagehide`) stops reading.
 * **The screen** (`src/screen_controls.bats`, the typography panel's
   Screen row): Full screen (`fullscreen_*`, pressed as
@@ -335,14 +338,15 @@ only where its platform has it, by its own `data-hide`.
   the library menu says whether it is (`storage_persisted` at startup).
 * **The local time** (`src/local_time.bats`): its offset from UTC
   (`timezone_offset_minutes`) and whether it is night (22:00 to 07:00,
-  from `epoch_millis`), for the auto theme (checked at each page turn)
-  and the reading statistics' local day.
+  from `epoch_millis`), for the auto theme (checked each minute while a
+  book is open, through the timer, and at each page turn) and the
+  reading statistics' local day.
 * **Files opened with the app** (`launchQueue`, the share target, the
   Android app's files) arrive on bridge's external-file path, which the
-  library imports (`OnExternalFiles`). Until pwa's own JS is gone
-  (bats-lang/pwa#49, step 3), its service worker's share-target handler
-  answers first and keeps a file shared with the installed web app
-  where only its page script looked for it.
+  library imports (`OnExternalFiles`); pwa writes no JS of its own
+  (bats-lang/pwa#49), so bridge's service worker keeps a file shared
+  with the installed web app, and bridge's `batsNative` entry points
+  are what the Android activity calls.
 
 ## What the types guarantee about the interface
 

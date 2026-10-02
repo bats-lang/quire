@@ -15,6 +15,7 @@ staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
 staload "local_time.sats"
+staload "jsonio.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
@@ -96,11 +97,10 @@ val _ruby = ref<int>(1)
 val _system_dark = ref<bool>(false)
 
 (* ============================================================
-   The device's own choices: reading aloud's speed and voices, the
-   screen's brightness and its rotation lock. Kept with the settings
-   (bytes 20 on of their record), apart from the record in memory, as
-   _ruby is; not in a backup and not reset with the settings, since a
-   voice, a brightness and a lock are this device's
+   Reading aloud's speed and voices, the screen's brightness and its
+   rotation lock. Kept with the settings (bytes 20 on of their record),
+   apart from the record in memory, as _ruby is; in the backup, and
+   reset (and put back by Undo) with the settings
    ============================================================ *)
 
 (* How fast a book is read aloud, three quarters of the normal speed to
@@ -130,6 +130,14 @@ fn _rate_of_code (code: int): speech_rate =
   else if code = 3 then RateOneAndAHalf() else if code = 4 then RateOneAndThreeQuarters()
   else if code = 5 then RateDouble() else RateNormal()
 
+(* The speed of so many hundredths of the normal one (a backup's):
+   checked here, once; the normal speed when it is not one of them *)
+#pub fn speech_rate_of_hundredths (hundredths: int): speech_rate
+implement speech_rate_of_hundredths (hundredths) =
+  if hundredths = 75 then RateThreeQuarters() else if hundredths = 125 then RateOneAndAQuarter()
+  else if hundredths = 150 then RateOneAndAHalf() else if hundredths = 175 then RateOneAndThreeQuarters()
+  else if hundredths = 200 then RateDouble() else RateNormal()
+
 (* The screen's brightness while the app is shown: the system's own, or
    a level (the app only: a web page cannot set it) *)
 #pub datatype brightness_choice =
@@ -140,6 +148,22 @@ fn _brightness_code (choice: brightness_choice): [code:nat | code <= 5] int code
   case+ choice of
   | BrightnessSystem() => 0 | BrightnessTenth() => 1 | BrightnessQuarter() => 2
   | BrightnessHalf() => 3 | BrightnessThreeQuarters() => 4 | BrightnessFull() => 5
+
+(* A level's percent, as a backup has it; none (0) for the system's
+   own *)
+#pub fn brightness_percent (choice: brightness_choice): [percent:nat | percent <= 100] int percent
+implement brightness_percent (choice) =
+  case+ choice of
+  | BrightnessSystem() => 0 | BrightnessTenth() => 10 | BrightnessQuarter() => 25
+  | BrightnessHalf() => 50 | BrightnessThreeQuarters() => 75 | BrightnessFull() => 100
+
+(* The level of a percent (a backup's): checked here, once; the
+   system's own when it is not one of them *)
+#pub fn brightness_of_percent (percent: int): brightness_choice
+implement brightness_of_percent (percent) =
+  if percent = 10 then BrightnessTenth() else if percent = 25 then BrightnessQuarter()
+  else if percent = 50 then BrightnessHalf() else if percent = 75 then BrightnessThreeQuarters()
+  else if percent = 100 then BrightnessFull() else BrightnessSystem()
 
 fn _brightness_of_code (code: int): brightness_choice =
   if code = 1 then BrightnessTenth() else if code = 2 then BrightnessQuarter()
@@ -286,6 +310,37 @@ in
       val () = _name_copy(code, code_copy, code_len, 0)
     in _voices_put(VoicesCell(VoiceChoice(code_copy, code_len, name, name_len, others), left + 1)) end
 end
+
+(* The voices kept as a JSON object's members, "code":"name", from
+   position (each after a comma but the first) *)
+fun _voices_json {count:nat}{l:agz}{owner:addr}{n:nat}{position:nat | position + 1554 * count <= n} .<count>.
+  (choices: !voice_choices(count), out: !$A.arrx(byte, l, n, owner), position: int position, first: bool)
+  : [stop:nat | stop <= position + 1554 * count] int stop =
+  case+ choices of
+  | VoiceChoicesEnd() => position
+  | VoiceChoice(code, code_len, name, name_len, rest) => let
+      val at = (if first then position else jw_lit(out, position, ",")): [at:nat | position <= at; at <= position + 1] int at
+      val at = jw_str(out, at, code, code_len)
+      val at = jw_lit(out, at, ":")
+      val at = jw_str(out, at, name, name_len)
+    in _voices_json(rest, out, at, false) end
+
+(* The voices kept, as a JSON object at out[position, stop) *)
+#pub fn set_voices_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 24866 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 24866] int stop
+
+implement set_voices_json (out, position) = let
+  val cell = _voices_take()
+  val+ @VoicesCell(choices, _) = cell
+  val at = jw_lit(out, position, "{")
+  val at = _voices_json(choices, out, at, true)
+  prval () = fold@(cell)
+  val () = _voices_put(cell)
+in jw_lit(out, at, "}") end
+
+(* No voice kept for any language (a backup's are put in their place) *)
+#pub fn set_voices_clear (): void
+implement set_voices_clear () = _voices_put(VoicesCell(VoiceChoicesEnd(), 0))
 
 (* The bytes the voices take in the record: for each, its code's length
    and code, its name's length and name *)
@@ -854,11 +909,22 @@ in !_set := @{
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
   readout = current.readout, scrolled = current.scrolled, columns = value } end
 
+(* The voices a reset put aside, for its Undo to put back *)
+val _voices_reset = ref<voices_cell>(VoicesCell(VoiceChoicesEnd(), 0))
+
 (* The defaults. Private: the settings go back to them only by
-   set_reset, which offers the ones they replace back *)
+   set_reset, which offers the ones they replace back. The voices kept
+   are put aside (_voices_reset), for its Undo *)
 fn _reset (): void = let
   val () = !_set := _defaults()
-in !_ruby := 1 end
+  val () = !_ruby := 1
+  val () = !_speech_rate := RateNormal()
+  val () = !_brightness := BrightnessSystem()
+  val () = !_rotation := RotationFree()
+  var aside: voices_cell = _voices_take()
+  val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
+  val+ ~VoicesCell(older, _) = aside
+in _voice_choices_free(older) end
 
 (* Puts the defaults back at once, then runs after (which applies
    them); what it returns puts the settings they replaced back, and
@@ -867,11 +933,20 @@ in !_ruby := 1 end
 implement set_reset_undoable (after) = let
   val before = !_set
   val ruby_before = !_ruby
+  val rate_before = !_speech_rate
+  val brightness_before = !_brightness
+  val rotation_before = !_rotation
   val () = _reset()
   val () = after()
 in lam () => let
   val () = !_set := before
   val () = !_ruby := ruby_before
+  val () = !_speech_rate := rate_before
+  val () = !_brightness := brightness_before
+  val () = !_rotation := rotation_before
+  var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
+  val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
+  val () = _voices_put(aside)
 in after() end end
 
 (* The same, offering Undo *)
