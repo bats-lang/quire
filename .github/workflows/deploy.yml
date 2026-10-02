@@ -79,6 +79,13 @@ jobs:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
         run: scripts/sync-clients.sh dist/pwa
 
+      # The home page, privacy policy and terms (#216), published beside
+      # the app at homepage/. They are not the app's: gen-pwa does not
+      # read them, the Android project does not hold them, and the
+      # service worker leaves them to the network
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

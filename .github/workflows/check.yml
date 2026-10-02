@@ -108,6 +108,12 @@ jobs:
             dist/pwa
           retention-days: 1
 
+      # The home page beside the app, as deploy.yml publishes it, for the
+      # e2e test that the service worker leaves it to the network. Added
+      # after the Android project is uploaded, which never holds it
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -141,7 +147,7 @@ jobs:
   android:
     needs: check
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@52e9674847b4d0db60fd93d5c2f75b784485d245
+    uses: bats-lang/pwa/.github/workflows/android.yml@eab70ce5066eb2f2815f7dbee011f13b6fb5603d
     secrets: inherit
     with:
       artifact: quire-android

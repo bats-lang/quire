@@ -316,8 +316,10 @@ again.
   were made `div`s. They are now kept as themselves (`_tag_of`), so a
   reading sits over its base and `rp` is not shown. The settings' Ruby
   row (Show / Hide, byte 19 of the "S2" record, `ruby` in the backup;
-  held apart from the settings record, which one field more would make
-  too large to copy without memmove, which wasm is not given)
+  held apart from the settings record in memory, as the device's own
+  settings are: each of the record's setters writes it out whole, so a
+  field there costs a line in every setter, and a cell of its own one
+  setter; quire#210)
   is offered once a chapter of the open book has shown a ruby
   (`_ruby_seen`); Hide adds `.caf rt,.caf rtc{display:none}` to
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
@@ -433,6 +435,20 @@ in each module that makes a promise of it (`$P.create`, `$P.ret`,
 `$P.resolved`): `bats check` does not catch a missing one, only the C
 compile of `bats build` does.
 
+## A choice is a datatype
+
+An int never encodes one of a fixed set of cases (bats-lang/quire#192):
+a choice is a datatype matched with `case+`, so a case left out does
+not type-check ("pattern match is nonexhaustive"), and "none" is an
+option, not -1. Ints are quantities, offsets and indexes. Stored bytes
+stay as they are, decoded once as they are read and encoded once as
+they are written: a book's `shelf` (`shelf_of_code`, `shelf_code`) and
+cover (`image_of_code`, `image_code`), and the library view's
+`sort_order`, `layout` and `book_filter` (`lib_state_set`,
+`lib_state_get`, which packs them only to be saved with the settings).
+`tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
+`case+`), in CI through `tests/static/run.sh`.
+
 ## What the types guarantee about the interface
 
 The stylesheet is built in `src/style.bats`, not written as CSS:
@@ -485,7 +501,7 @@ Elements are made through `src/ui.bats`:
 
 Nothing is lost at a click, except by emptying the Trash:
 
-* Removing a book moves it to the Trash (shelf 3), where it can only be
+* Removing a book moves it to the Trash (the shelf `Trash`), where it can only be
   restored; archiving, hiding, deleting a highlight or bookmark and
   resetting the settings are done at once. Each is offered back by the
   Undo toast (`undo_offer` in `src/undo.bats`), whose undo runs only
@@ -563,9 +579,22 @@ gear after Search: the bottom bar, with Contents and Typography, has
 no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
 (Export backup, and Restore backup: the input `backup-file`), the daily
 reading goal (also in the statistics panel; `stats_goal_show` marks
-both), and Reset settings and Factory reset, each with its Undo. A
+both), Reset settings and Factory reset, each with its Undo, and
+About Quire › (`LAbout`, `about-screen`): the app's name and links out
+of the app (`ui_link_out_https`, an address dom's `set_url_literal`
+sets) to the home page, privacy policy, terms and source. A
 restore or a factory reset from the reader goes back to the library
-first. The library menu keeps Install, the storage notes, Settings,
+first.
+
+The home page, privacy policy and terms are plain static HTML in
+`homepage/` (#216), published by `deploy.yml` beside the app at
+`https://bats-lang.github.io/quire/homepage/` (`privacy.html`,
+`terms.html`). They are not the app's: gen-pwa does not read them, the
+Android project does not hold them, and the service worker (bridge's
+`produce_service_worker`) answers only files directly in its scope, so
+it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
+policy states what the code does: change it with any change to what is
+stored, what leaves the device, or the Google scopes asked for. The library menu keeps Install, the storage notes, Settings,
 Reading statistics, Catalogues, Empty Trash (the red harm item) and
 Close. While Settings is open over the reader, keys are its own, not
 page turns.
@@ -588,6 +617,27 @@ the browser sends after it (`_dragged`). The source captures a mouse
 pointer only once it has moved more than 4 px: capture at pointerdown
 would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
+
+A book is set vertically as Readium sets it, from its OPF (the book's
+CSS is dropped): `vertical-rl` when its spine reads right to left and
+its language is Chinese, Japanese or Korean, `vertical-lr` for
+Mongolian in its script (mn-Mong) read left to right. `spine_vertical`
+in `src/epub_xml.bats` answers a `writing_mode` (`Horizontal |
+VerticalRightToLeft | VerticalLeftToRight`), from the spine's
+`spine_progression`, and `src/reader.bats` keeps it in `_vertical`.
+CSS columns follow the inline axis, which then runs down, so its pages
+go down the page: the page's class is `caf vertical` (not `rtl`, whose
+`direction` would turn that axis upward), a column and its gap (the
+page's top and bottom paddings) are exactly the page's height, and
+`_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
+shows pages, by scrollTop for `Down`. Such a book is always paged, one
+column a screen, a drag does not follow the finger (a committed one
+turns the page), and the settings of the page's layout and of its
+words' spacing and breaking are hidden while it is open. A paragraph's
+margins are logical (`margin-block`, and the Paragraph spacing setting
+as `margin-block-end`), so set vertically the space after it is beside
+it and its lines keep their length; that row stays. Taps, keys and
+swipes keep the meaning of a book read right to left.
 
 The back button a jump leaves (to the place jumped from) never stays
 up: `ps_cell` in `src/reader.bats` holds the positions it offers, and

@@ -18,6 +18,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "backup.sats"
 staload "library.sats"
+staload "paths.sats"
 staload "settings.sats"
 staload "import.sats"
 staload "reader.sats"
@@ -53,8 +54,13 @@ staload BW = "wasm.bats-packages.dev/bridge/src/build_watch.sats"
    State
    ============================================================ *)
 
-(* 0 the library is shown, 1 the reader *)
-val _view = ref<int>(0)
+(* What is shown: the library or the reader *)
+datatype view = LibraryView | ReaderView
+
+val _view = ref<view>(LibraryView())
+
+(* Whether the reader is shown *)
+fn _in_reader (): bool = case+ !_view of ReaderView() => true | LibraryView() => false
 (* The library book whose menu or info view is open *)
 val _menu_index = ref<Int>(~1)
 (* Whether the reader's bars are shown, and the latest hide timer's *)
@@ -269,7 +275,7 @@ in _night_watch(!_night_watch_number, NIGHT_CHECKS_MAX) end
 fn _night_watch_stop (): void = !_night_watch_number := !_night_watch_number + 1
 
 fn _show_library (): void = let
-  val () = !_view := 0
+  val () = !_view := LibraryView()
   val () = _night_watch_stop()
   val () = ui_show("reader", false)
   (* the screen may sleep again, as it does outside the reader *)
@@ -362,7 +368,7 @@ fn _hint_offer (): void =
   end
 
 fn _show_reader (): void = let
-  val () = !_view := 1
+  val () = !_view := ReaderView()
   val () = _night_watch_start()
   val () = ui_show("library", false)
   val () = layer_close(LBookInfo())
@@ -395,8 +401,8 @@ fn _copy_into {source_loc,destination_loc:agz}{source_size,destination_size:nat}
    the export's) *)
 fn _share_selection (): void = let
   val book = lib_index_of_key(open_key_get())
-  val @(title, title_len) = lib_text(book, 0)
-  val @(author, author_len) = lib_text(book, 1)
+  val @(title, title_len) = lib_text(book, TitleText())
+  val @(author, author_len) = lib_text(book, AuthorText())
   val citation = $A.alloc<byte>(520)
   val () = _copy_into(author, author_len, citation, 0)
   val () = $A.set<byte>(citation, author_len, $A.int2byte(44))
@@ -412,20 +418,21 @@ in share_selection(citation, author_len + 2 + title_len) end
 fn _opened_checked (result: int): void =
   if result >= 0 then ()
   else let
-    val () = (if !_view = 1 then _show_library() else ())
+    val () = (if _in_reader() then _show_library() else ())
   in notice_part_unread() end
 
 fn _open_book {book:int} (book: int book): void =
   case+ lib_nums(book) of
   | ~$R.none() => ()
   | ~$R.some(book_numbers) =>
-    if book_numbers.shelf = 3 then let
+    case+ book_numbers.shelf of
+    | Trash() => let
       val () = modal_inform("In the Trash")
     in modal_text_lit("Restore this book from the Trash to read it.") end
-    else if book_numbers.shelf = 2 then let
+    | Archived() => let
       val () = modal_inform("Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
-    else let
+    | _ => let
       val () = _show_reader()
       val () = _hint_offer()
       (* what another book was reading aloud stops *)
@@ -488,7 +495,7 @@ in
     val book = (if key < 0 then ~1 else lib_index_of_key(key)): [index:int | index >= ~1] int index
     val readable = (if book < 0 then false else (case+ lib_nums(book) of
       | ~$R.none() => false
-      | ~$R.some(book_numbers) => book_numbers.shelf < 2)): bool
+      | ~$R.some(book_numbers) => (case+ book_numbers.shelf of OnShelf() => true | Hidden() => true | _ => false))): bool
   in
     if readable then let val () = _open_book(book) in $P.ret<int>(0) end
     else let val () = _show_library() in $P.ret<int>(0) end
@@ -504,7 +511,7 @@ fn _save_render (): void = let
 in lib_render() end
 
 (* Sets the book's shelf *)
-fn _set_shelf {book:int} (book: int book, shelf: Int): void = lib_set_shelf(book, shelf)
+fn _set_shelf {book:int} (book: int book, shelf: shelf): void = lib_set_shelf(book, shelf)
 
 (* Deletes the stored data of book (id_high, id_low) under the key of letter *)
 fn _idb_delete {letter:nat | letter < 256} (letter: int letter, id_high: int, id_low: int): void = let
@@ -525,7 +532,7 @@ fn _archive {book:int} (book: int book): void =
       val was = book_numbers.shelf
       val id_high = book_numbers.id_high
       val id_low = book_numbers.id_low
-      val () = _set_shelf(book, 2)
+      val () = _set_shelf(book, Archived())
     in
       $P.finish<settled>(undo_offer("Archived"), llam(how) =>
         case+ how of
@@ -541,7 +548,7 @@ fn _archive {book:int} (book: int book): void =
             else (case+ lib_nums(index) of
               | ~$R.none() => ()
               | ~$R.some(numbers_now) =>
-                if numbers_now.shelf = 2 then let
+                if same_shelf(numbers_now.shelf, Archived()) then let
                   val () = _idb_delete(98, id_high, id_low)
                 in if open_key_get() = key then open_key_set(0) else () end
                 else ())
@@ -555,9 +562,10 @@ fn _hide_toggle {book:int} (book: int book): void =
   | ~$R.some(book_numbers) => let
       val key = book_numbers.key
       val was = book_numbers.shelf
-      val () = _set_shelf(book, (if was = 1 then 0 else 1))
+      val was_hidden = same_shelf(was, Hidden())
+      val () = _set_shelf(book, (if was_hidden then OnShelf() else Hidden()): shelf)
     in
-      $P.finish<settled>(undo_offer((if was = 1 then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len), llam(how) =>
+      $P.finish<settled>(undo_offer((if was_hidden then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -571,15 +579,16 @@ fn _hide_toggle {book:int} (book: int book): void =
    for good only when it is emptied); elsewhere Hide or Unhide, Archive
    or Restore, and Move to Trash *)
 fn _shelf_labels {hide_len,archive_len,trash_len:pos | hide_len < 256; archive_len < 256; trash_len < 256}
-  (hide: string hide_len, archive: string archive_len, trash: string trash_len, shelf: Int): void =
-  if shelf = 3 then let
+  (hide: string hide_len, archive: string archive_len, trash: string trash_len, shelf: shelf): void =
+  case+ shelf of
+  | Trash() => let
     val () = ui_text(hide, "Restore")
     val () = ui_show(archive, false)
   in ui_show(trash, false) end
-  else let
-    val () = (if shelf = 1 then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
+  | _ => let
+    val () = (if same_shelf(shelf, Hidden()) then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
     val () = ui_show(archive, true)
-    val () = (if shelf = 2 then ui_text(archive, "Restore") else ui_text(archive, "Archive"))
+    val () = (if same_shelf(shelf, Archived()) then ui_text(archive, "Restore") else ui_text(archive, "Archive"))
   in ui_show(trash, true) end
 
 (* The book menu for the book, its items as its shelf asks *)
@@ -624,9 +633,9 @@ fn _info_open {book:int} (book: int book): void =
   | ~$R.none() => ()
   | ~$R.some(book_numbers) => let
       val () = !_menu_index := book
-      val @(title, title_len) = lib_text(book, 0)
+      val @(title, title_len) = lib_text(book, TitleText())
       val () = ui_text_buf("book-info-title", title, title_len)
-      val @(author, author_len) = lib_text(book, 1)
+      val @(author, author_len) = lib_text(book, AuthorText())
       val () = ui_text_buf("book-info-author", author, author_len)
       (* progress: "N% · chapter C of T" *)
       val progress = $A.alloc<byte>(64)
@@ -662,32 +671,38 @@ fn _info_open {book:int} (book: int book): void =
       val () = ui_show("info-speed-row", minutes_read > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", book_numbers.shelf)
       val () = ui_src_empty("book-info-cover")
-      val () = (if book_numbers.cover > 0 then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
+      val () = (if is_image(book_numbers.cover) then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
       (* a book without a cover shows none, not a broken image *)
-      val () = ui_show("book-info-cover", book_numbers.cover > 0)
+      val () = ui_show("book-info-cover", is_image(book_numbers.cover))
       val () = lib_a11y_show(book_numbers.id_high, book_numbers.id_low)
       val () = layer_open(LBookInfo())
     in ui_focus("book-info-back") end
 
-(* A book menu or info view action on the book: 1 hide, unhide or (from
-   the Trash) restore; 2 archive, or say how to restore; 3 move to the
-   Trash *)
-fn _book_action {book:int} (book: int book, action: int): void =
+(* What a book menu or info view action does: hide, unhide or (from the
+   Trash) restore; archive, or say how to restore; move to the Trash *)
+datatype book_action = HideOrRestore | Archive | MoveToTrash
+
+(* The action on the book *)
+fn _book_action {book:int} (book: int book, action: book_action): void =
   case+ lib_nums(book) of
   | ~$R.none() => ()
   | ~$R.some(book_numbers) =>
-    if action = 1 then
-      (if book_numbers.shelf = 3 then _set_shelf(book, 0) else _hide_toggle(book))
-    else if action = 2 then
-      (if book_numbers.shelf = 2 then let
-         val () = modal_inform("Restore")
-       in modal_text_lit("To restore this book, import its file again.") end
-       else if book_numbers.shelf = 3 then ()
-       else _archive(book))
-    else if book_numbers.shelf = 3 then ()
-    else let
-      val () = layer_close(LBookInfo())
-    in lib_trash(book) end
+    (case+ action of
+    | HideOrRestore() =>
+      (case+ book_numbers.shelf of Trash() => _set_shelf(book, OnShelf()) | _ => _hide_toggle(book))
+    | Archive() =>
+      (case+ book_numbers.shelf of
+       | Archived() => let
+           val () = modal_inform("Restore")
+         in modal_text_lit("To restore this book, import its file again.") end
+       | Trash() => ()
+       | _ => _archive(book))
+    | MoveToTrash() =>
+      (case+ book_numbers.shelf of
+       | Trash() => ()
+       | _ => let
+           val () = layer_close(LBookInfo())
+         in lib_trash(book) end))
 
 (* ============================================================
    Settings
@@ -695,7 +710,7 @@ fn _book_action {book:int} (book: int book, action: int): void =
 
 fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
-in if !_view = 1 then reader_relayout() else () end
+in if _in_reader() then reader_relayout() else () end
 
 (* The settings, applied (a reset, or its Undo): their sliders and
    everything they change, the screen's brightness and lock, and
@@ -880,7 +895,7 @@ fun _lookup_update {again:nat} .<again>. (again: int again): void =
               val () = $P.finish<bool>(reading, llam(opened) =>
                 if ~opened then ()
                 else if again <= 0 then ()
-                else if !_view = 1 then _lookup_update(again - 1)
+                else if _in_reader() then _lookup_update(again - 1)
                 else ())
             in false end): bool
         val () = $A.free<byte>(language)
@@ -916,8 +931,8 @@ fn _copy_selection (): void =
 (* Exports the open book's annotations: downloaded, or shared *)
 fn _export (destination: export_to): $P.promise(share_end, $P.Chained) = let
   val book = lib_index_of_key(open_key_get())
-  val @(title, title_len) = lib_text(book, 0)
-  val @(author, author_len) = lib_text(book, 1)
+  val @(title, title_len) = lib_text(book, TitleText())
+  val @(author, author_len) = lib_text(book, AuthorText())
 in annot_export(title, title_len, author, author_len, destination) end
 
 (* The annotations shared: as a file where the platform shares files,
@@ -1007,7 +1022,7 @@ in ui_focus("settings-sync") end
    menu's item is wired with the menu), its rows, and a backup picked to
    restore. A restore or a factory reset changes the library, so the
    reader goes back to it first, as it does for files handed to the app *)
-fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) = let
+fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 4) = let
   val listeners = RCons(listeners, OnEl("reader-settings"), "click", llam(_) => let
       val () = _settings_open()
     in 0 end)
@@ -1024,6 +1039,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
       val export = _is(clicked, "settings-export-backup")
       val reset = _is(clicked, "settings-reset-settings")
       val factory_reset = _is(clicked, "settings-factory-reset")
+      val about = _is(clicked, "settings-about")
       val done = _is(clicked, "settings-done")
       val () = _target_free(clicked)
       val () = (if goal >= 0 then let
@@ -1038,14 +1054,23 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
         else if reset then _settings_reset()
         else if factory_reset then let
           val () = layer_close(LSettings())
-          val () = (if !_view = 1 then _show_library() else ())
+          val () = (if _in_reader() then _show_library() else ())
         in _factory_reset() end
+        else if about then let
+          val () = layer_open(LAbout())
+        in ui_focus("about-done") end
         else if done then layer_close(LSettings())
         else ())
     in 0 end)
+  (* the About screen: its links leave the app by themselves; Done
+     goes back to Settings *)
+  val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
+      val () = layer_close(LAbout())
+      val () = ui_focus("settings-about")
+    in 0 end)
   val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
       val () = layer_close(LSettings())
-      val () = (if !_view = 1 then _show_library() else ())
+      val () = (if _in_reader() then _show_library() else ())
       val () = backup_import()
     in 0 end)
 in listeners end
@@ -1079,9 +1104,11 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
   (* the view: which books, as a list or a grid; kept with the settings *)
   val listeners = RCons(listeners, OnEl("library-view"), "click", llam(h) => let
       val clicked = _target(h)
-      val filter = (if _is(clicked, "filter-books-all") then 0 else if _is(clicked, "filter-unread") then 1
-        else if _is(clicked, "filter-reading") then 2 else if _is(clicked, "filter-finished") then 3 else ~1): int
-      val grid = (if _is(clicked, "view-list") then 0 else if _is(clicked, "view-grid") then 1 else ~1): int
+      val filter = (if _is(clicked, "filter-books-all") then $R.some(AllBooks()) else if _is(clicked, "filter-unread") then $R.some(Unread())
+        else if _is(clicked, "filter-reading") then $R.some(BeingRead()) else if _is(clicked, "filter-finished") then $R.some(Finished())
+        else $R.none()): $R.option(book_filter)
+      val grid = (if _is(clicked, "view-list") then $R.some(ListLayout()) else if _is(clicked, "view-grid") then $R.some(GridLayout())
+        else $R.none()): $R.option(layout)
       (* the collections: which is shown, and the one shown renamed or
          deleted *)
       val collection = _row_of(clicked, "collection")
@@ -1091,8 +1118,13 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       val () = _target_free(clicked)
       val () = (if all_collections then lib_coll_show(~1) else if collection >= 0 then lib_coll_show(collection)
         else if rename_collection then _collection_rename() else if delete_collection then lib_coll_delete(lib_coll_shown()) else ())
-      val () = (if filter >= 0 then lib_filter_set(filter) else if grid >= 0 then lib_grid_set(grid) else ())
-    in if filter >= 0 || grid >= 0 then let val () = set_save(lib_state_get()) in 0 end else 0 end)
+      val changed = (case+ filter of
+        | ~$R.some(chosen) => let val () = lib_filter_set(chosen) in true end
+        | ~$R.none() => false): bool
+      val changed = (case+ grid of
+        | ~$R.some(chosen) => (if changed then true else let val () = lib_grid_set(chosen) in true end)
+        | ~$R.none() => changed): bool
+    in if changed then let val () = set_save(lib_state_get()) in 0 end else 0 end)
   (* the book to continue: opened *)
   val listeners = RCons(listeners, OnEl("continue-list"), "click", llam(h) => let
       val clicked = _target(h)
@@ -1110,9 +1142,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       val () = (if book >= 0 then
           (if _is(clicked, "card-menu-info") then _info_open(book)
            else if _is(clicked, "card-menu-collections") then _collections_open(book)
-           else if _is(clicked, "card-menu-hide") then _book_action(book, 1)
-           else if _is(clicked, "card-menu-archive") then _book_action(book, 2)
-           else if _is(clicked, "card-menu-trash") then _book_action(book, 3)
+           else if _is(clicked, "card-menu-hide") then _book_action(book, HideOrRestore())
+           else if _is(clicked, "card-menu-archive") then _book_action(book, Archive())
+           else if _is(clicked, "card-menu-trash") then _book_action(book, MoveToTrash())
            else ()) else ())
     in let val () = _target_free(clicked) in 0 end end)
   (* a book's collections: each toggled, a new one, or done (or a
@@ -1136,22 +1168,20 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
       val book = !_menu_index
       val () = (if _is(clicked, "book-info-back") then layer_close(LBookInfo())
         else if book < 0 then ()
-        else if _is(clicked, "book-info-hide") then let val () = layer_close(LBookInfo()) in _book_action(book, 1) end
-        else if _is(clicked, "book-info-archive") then let val () = layer_close(LBookInfo()) in _book_action(book, 2) end
-        else if _is(clicked, "book-info-trash") then _book_action(book, 3)
+        else if _is(clicked, "book-info-hide") then let val () = layer_close(LBookInfo()) in _book_action(book, HideOrRestore()) end
+        else if _is(clicked, "book-info-archive") then let val () = layer_close(LBookInfo()) in _book_action(book, Archive()) end
+        else if _is(clicked, "book-info-trash") then _book_action(book, MoveToTrash())
         else ())
     in let val () = _target_free(clicked) in 0 end end)
   (* sort and shelf *)
   val listeners = RCons(listeners, OnEl("sort-button"), "click", llam(_) => let
-      val sort_order = lib_sort_get()
-      val sort_order = (if sort_order >= 4 then 0 else sort_order + 1): int
+      val sort_order = sort_next(lib_sort_get())
       val () = lib_sort(sort_order)
       val () = lib_sort_label(sort_order)
       val () = set_apply(lib_state_get())
     in let val () = lib_render() in 0 end end)
   val listeners = RCons(listeners, OnEl("shelf-button"), "click", llam(_) => let
-      val shelf = lib_shelf_get()
-      val () = lib_shelf_set((if shelf >= 3 then 0 else shelf + 1): int)
+      val () = lib_shelf_set(shelf_next(lib_shelf_get()))
     in let val () = lib_render() in 0 end end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
@@ -1275,7 +1305,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val () = _target_free(clicked)
       val () = (if go then let
           val @(chapter, page, anchor) = sync_further_take()
-        in if chapter >= 0 then (if !_view = 1 then reader_jump_to(chapter, page, anchor) else ()) else () end
+        in if chapter >= 0 then (if _in_reader() then reader_jump_to(chapter, page, anchor) else ()) else () end
         else if dismiss then sync_further_dismiss()
         else ())
     in 0 end)
@@ -1678,7 +1708,7 @@ end
 
 (* The gesture events, acted on in the reader and dropped elsewhere *)
 fn _gestures_show (events: $GT.gevents): void =
-  if !_view = 1 then _on_gestures(events) else $GT.gevents_free(events)
+  if _in_reader() then _on_gestures(events) else $GT.gevents_free(events)
 
 (* How many animation frames one pointer record may ask for, one after
    another, while a pointer is down (a frame asks for the next): about
@@ -1835,7 +1865,7 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
   (* the app hidden (another tab, another app): where the reader is is
      stored *)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) =>
-      if !_view = 1 then let val () = reader_save() in 0 end else 0)
+      if _in_reader() then let val () = reader_save() in 0 end else 0)
 in listeners end
 
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
@@ -1843,7 +1873,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "selectionchange", llam(_) =>
-      if !_view = 1 then let
+      if _in_reader() then let
         val selected = _has_selection()
         val () = ui_show("selection-toolbar", selected)
         val () = (if selected then _lookup_update(1) else ())
@@ -2006,7 +2036,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       | ~BlobBytes(key_bytes, n) => let
           val escape = _key_is(key_bytes, n, "Escape")
           val () = (if (if escape then _escape_overlay() else false) then ()
-            else if !_view <> 1 then ()
+            else if ~_in_reader() then ()
             else if _shown("dialog") then ()
             (* the Settings screen, and the screens it opens (sync's
                fields), are over the reader: keys are theirs *)
@@ -2048,13 +2078,13 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       val () = !_resize_generation := !_resize_generation + 1
       val generation = !_resize_generation
       val () = $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
-          if !_resize_generation = generation then (if !_view = 1 then reader_relayout() else ()) else ())
+          if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
     in 0 end)
   (* the browser's back button: out of the reader *)
   (* the URL itself is not needed: the view is the library's *)
   val () = $NAV.set_popstate_callback(llam(url) => let
       val () = (case+ url of ~$R.some(bytes) => $BD.blob_free(bytes) | ~$R.none() => ())
-      val () = (if !_view = 1 then _show_library() else ())
+      val () = (if _in_reader() then _show_library() else ())
     in 0 end)
 in listeners end
 
@@ -2127,7 +2157,7 @@ fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
 fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
   if rounds <= 0 then ()
   else $P.finish<Int>($P.and_then<$BE.external><Int>($BE.external_next(), llam(handed) => let
-      val () = (if !_view = 1 then _show_library() else ())
+      val () = (if _in_reader() then _show_library() else ())
     in import_external(handed) end), llam(_) => _external_wait(rounds - 1))
 
 implement main0 () = let
@@ -2161,7 +2191,7 @@ implement main0 () = let
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
   val loaded = $P.and_then<int><int>(set_load(), llam(state) => let
-      val () = lib_sort_label($AR.band_int_int(state, 7))
+      val () = lib_sort_label(lib_state_sort(state))
     in
       $P.and_then<int><int>(lib_load(), llam(_) => let
         val () = lib_state_set(state)
