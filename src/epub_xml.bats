@@ -794,21 +794,30 @@ implement find_ncx_href (data, data_len, nodes) =
 
 implement span_has (data, offset, span_len, pattern, pattern_len) = _span_has(data, offset, span_len, pattern, pattern_len, 0)
 
-(* Whether the first <spine> reads right to left *)
+(* What the first <spine>'s page-progression-direction says: right to
+   left, left to right, or nothing (absent, or "default": the reading
+   system's choice); NoSpine where there is no spine *)
+datatype spine_progression =
+  | NoSpine
+  | SpineRightToLeft
+  | SpineLeftToRight
+  | SpineDefault
+
 fun _spine_rtl_nodes
   {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): int =
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): spine_progression =
   case+ nodes of
-  | $X.xml_nodes_cons(node, rest) => let
-      val direction = _spine_rtl(data, node)
-    in if direction >= 0 then direction else _spine_rtl_nodes(data, rest) end
-  | $X.xml_nodes_nil() => ~1
+  | $X.xml_nodes_cons(node, rest) => (case+ _spine_rtl(data, node) of
+    | NoSpine() => _spine_rtl_nodes(data, rest)
+    | SpineRightToLeft() => SpineRightToLeft()
+    | SpineLeftToRight() => SpineLeftToRight()
+    | SpineDefault() => SpineDefault())
+  | $X.xml_nodes_nil() => NoSpine()
 
-(* At a <spine>: 1 right to left, 0 left to right, 2 when it does not
-   say (or says "default"); -1 when the node has none *)
+(* At a node: what its <spine> (it, or one in it) says *)
 and _spine_rtl
   {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
-  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): int =
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): spine_progression =
   case+ node of
   | $X.xml_element(tag_offset, tag_len, attrs, children) => let
     var spine_chars = @[char][5]('s', 'p', 'i', 'n', 'e')
@@ -818,15 +827,14 @@ and _spine_rtl
       var rtl_chars = @[char][3]('r', 't', 'l')
       var ltr_chars = @[char][3]('l', 't', 'r')
     in
-      (* 2: none said, or "default" *)
       case+ _find_attr_value(data, attrs, page_progression_chars, 26) of
-      | ~xspan_at(value_offset, value_len) => if xml_name_eq(data, value_offset, value_len, rtl_chars, 3) then 1
-          else if xml_name_eq(data, value_offset, value_len, ltr_chars, 3) then 0 else 2
-      | ~xspan_none() => 2
+      | ~xspan_at(value_offset, value_len) => if xml_name_eq(data, value_offset, value_len, rtl_chars, 3) then SpineRightToLeft()
+          else if xml_name_eq(data, value_offset, value_len, ltr_chars, 3) then SpineLeftToRight() else SpineDefault()
+      | ~xspan_none() => SpineDefault()
     end
     else _spine_rtl_nodes(data, children)
   end
-  | $X.xml_text(_, _) => ~1
+  | $X.xml_text(_, _) => NoSpine()
 
 (* Where a language tag's primary subtag ends in
    data[offset, offset + language_len): at its first '-' or '_' at or
@@ -862,14 +870,78 @@ end
   {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool
 
-implement spine_rtl (data, nodes) = let
-  val direction = _spine_rtl_nodes(data, nodes)
+(* The book's language says, when its spine does not *)
+fn _language_says_rtl {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool =
+  case+ _opf_language_nodes(data, nodes) of
+  | ~xspan_at(language_offset, language_len) => _language_rtl(data, language_offset, language_len)
+  | ~xspan_none() => false
+
+implement spine_rtl (data, nodes) =
+  case+ _spine_rtl_nodes(data, nodes) of
+  | SpineRightToLeft() => true
+  | SpineLeftToRight() => false
+  | SpineDefault() => _language_says_rtl(data, nodes)
+  | NoSpine() => _language_says_rtl(data, nodes)
+
+(* Whether the language tag data[offset, offset + language_len) is
+   Chinese, Japanese or Korean, which a book read right to left sets
+   vertically *)
+fn _language_east_asian {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len): bool = let
+  val @(offset, language_len) = _trim_front(data, offset, language_len)
+  val subtag_len = _subtag_end(data, offset, language_len, 0)
+in _span_is(data, offset, subtag_len, "ja") || _span_is(data, offset, subtag_len, "zh") || _span_is(data, offset, subtag_len, "ko") end
+
+(* Whether the language tag data[offset, offset + language_len) is
+   Mongolian in its traditional script (mn-Mong), which is set
+   vertically, its lines going on to the right *)
+fn _language_mongolian_script {l:agz}{n:pos}{offset,language_len:nat | offset + language_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, language_len: int language_len): bool = let
+  val @(offset, language_len) = _trim_front(data, offset, language_len)
+  val subtag_len = _subtag_end(data, offset, language_len, 0)
 in
-  if direction = 1 then true
-  else if direction = 0 then false
-  else case+ _opf_language_nodes(data, nodes) of
-    | ~xspan_at(language_offset, language_len) => _language_rtl(data, language_offset, language_len)
-    | ~xspan_none() => false
+  if ~_span_is(data, offset, subtag_len, "mn") then false
+  else if subtag_len + 5 > language_len then false
+  else let
+    val script_offset = offset + subtag_len + 1
+    val script_end = _subtag_end(data, script_offset, language_len - subtag_len - 1, 0)
+  in
+    _span_is(data, script_offset, script_end, "Mong") || _span_is(data, script_offset, script_end, "mong") || _span_is(data, script_offset, script_end, "MONG")
+  end
+end
+
+(* How a book is set: horizontally; vertically, its lines going on to
+   the left (vertical-rl); or vertically, its lines going on to the
+   right (vertical-lr) *)
+#pub datatype writing_mode =
+  | Horizontal
+  | VerticalRightToLeft
+  | VerticalLeftToRight
+
+(* How the book is set, as Readium decides it from its OPF (the book's
+   own CSS is not used): vertical-rl when its spine reads right to left
+   and its language is Chinese, Japanese or Korean; vertical-lr when it
+   is Mongolian in its traditional script and its spine does not read
+   right to left; else horizontally *)
+#pub fn spine_vertical
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): writing_mode
+
+implement spine_vertical (data, nodes) = let
+  val right_to_left = (case+ _spine_rtl_nodes(data, nodes) of
+    | SpineRightToLeft() => true
+    | SpineLeftToRight() => false
+    | SpineDefault() => false
+    | NoSpine() => false): bool
+in
+  case+ _opf_language_nodes(data, nodes) of
+  | ~xspan_at(language_offset, language_len) =>
+    if right_to_left then
+      (if _language_east_asian(data, language_offset, language_len) then VerticalRightToLeft() else Horizontal())
+    else if _language_mongolian_script(data, language_offset, language_len) then VerticalLeftToRight()
+    else Horizontal()
+  | ~xspan_none() => Horizontal()
 end
 
 (* The href of the first manifest item that is a font *)

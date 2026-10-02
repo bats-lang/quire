@@ -578,6 +578,27 @@ pointer only once it has moved more than 4 px: capture at pointerdown
 would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
 
+A book is set vertically as Readium sets it, from its OPF (the book's
+CSS is dropped): `vertical-rl` when its spine reads right to left and
+its language is Chinese, Japanese or Korean, `vertical-lr` for
+Mongolian in its script (mn-Mong) read left to right. `spine_vertical`
+in `src/epub_xml.bats` answers a `writing_mode` (`Horizontal |
+VerticalRightToLeft | VerticalLeftToRight`), from the spine's
+`spine_progression`, and `src/reader.bats` keeps it in `_vertical`.
+CSS columns follow the inline axis, which then runs down, so its pages
+go down the page: the page's class is `caf vertical` (not `rtl`, whose
+`direction` would turn that axis upward), a column and its gap (the
+page's top and bottom paddings) are exactly the page's height, and
+`_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
+shows pages, by scrollTop for `Down`. Such a book is always paged, one
+column a screen, a drag does not follow the finger (a committed one
+turns the page), and the settings of the page's layout and of its
+words' spacing and breaking are hidden while it is open. A paragraph's
+margins are logical (`margin-block`, and the Paragraph spacing setting
+as `margin-block-end`), so set vertically the space after it is beside
+it and its lines keep their length; that row stays. Taps, keys and
+swipes keep the meaning of a book read right to left.
+
 The back button a jump leaves (to the place jumped from) never stays
 up: `ps_cell` in `src/reader.bats` holds the positions it offers, and
 its only shown state, `PsShown`, needs a proof `TIMED(g)` that a timeout
