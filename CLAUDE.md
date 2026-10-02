@@ -311,7 +311,8 @@ only where its platform has it, by its own `data-hide`.
   (`speech_rate`, 0.75 to 2 times) and the voice of each language (by
   the language's primary subtag, the voices whose language has it)
   are kept with the settings, outside the settings record (bytes 20
-  and 23 on of "S2", as `ruby` is). They are settings like the others,
+  and 23 on of "S2", as `ruby` is), so like them they are not saved
+  over settings that could not be read (`storage_savable`, #174). They are settings like the others,
   and so are the brightness and the rotation lock: in the backup
   (`readingSpeed`, `voices`, `brightness`, `rotationLocked`) and reset
   with the settings, Undo putting them back (`set_reset_undoable`;

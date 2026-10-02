@@ -142,3 +142,41 @@ test('a backup that could not read a book\'s notes is not made', async ({ page }
   await said.getByRole('button', { name: 'OK' }).click();
   expect(downloaded).toBe(false);
 });
+
+// Reading aloud's speed is kept in the settings record (bytes 20 on),
+// so it follows the settings' flag: not saved over settings that could
+// not be read
+test('reading aloud\'s speed is not saved over settings that cannot be read', async ({ page }) => {
+  await stubReads(page);
+  await page.addInitScript(() => {
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    const voices = [{ name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true }];
+    const synth = { getVoices: () => voices, speak() {}, cancel() {}, addEventListener() {} };
+    Object.defineProperty(window, 'speechSynthesis', { value: synth });
+  });
+  await start(page);
+  await readBook(page, { title: 'Spoken Once', author: 'Storage Tests', rawChapters: chapters(1) });
+  const sheet = dialog(page, 'Typography and theme');
+  const speed = sheet.getByRole('combobox', { name: 'Reading speed' });
+  await openSettings(page);
+  await speed.selectOption('1.5');
+  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await toLibrary(page);
+  await failReads(page, 'set');
+  await reload(page);
+  await expect(alert(page)).toContainText('Quire could not read your settings.');
+  await alert(page).getByRole('button', { name: 'Dismiss' }).click();
+  await openBook(page, 'Spoken Once');
+  await openSettings(page);
+  await expect(speed).toHaveValue('1');
+  // a change now is used, but not saved over the settings stored
+  await speed.selectOption('2');
+  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await toLibrary(page);
+  await healReads(page);
+  await reload(page);
+  await expect(librarySearch(page)).toBeVisible();
+  await openBook(page, 'Spoken Once');
+  await openSettings(page);
+  await expect(speed).toHaveValue('1.5');
+});
