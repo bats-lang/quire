@@ -1158,13 +1158,15 @@ test('read aloud reads the page from its top, the sentence read marked, turning 
   expect(await page.evaluate(() => CSS.highlights.has('bats-mark-5'))).toBe(true);
   // sentence after sentence, the page turned when the next is not on it
   const first = await place(page);
+  // how many were said when the sentence that led to the turn ended
+  // (counted with its end, as the next is said a moment after the turn)
+  let before = 0;
   for (let k = 0; k < 40 && (await place(page)).p === first.p; k++) {
-    await page.evaluate(() => window.sentenceSpoken());
+    before = await page.evaluate(() => { const n = window.spoken.length; window.sentenceSpoken(); return n; });
     await page.waitForTimeout(50);
   }
   expect((await place(page)).p).toBe(first.p + 1);
   // the sentence the turn was for, said once the page has turned
-  const before = (await spoken(page)).length;
   await expect.poll(async () => (await spoken(page)).length).toBe(before + 1);
   const said = (await spoken(page)).map(s => s.text);
   expect(said[1]).toMatch(/^Para 1\.0 /);
