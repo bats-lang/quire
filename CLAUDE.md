@@ -458,6 +458,9 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+How a sync ended is a `sync_result`, stored as its code in
+"sync-state" (`_result_code`, `_result_of_code`); the store's kind a
+`store_kind`; and an HTTP status is read once into an `http_answer`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 

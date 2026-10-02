@@ -87,31 +87,66 @@ fn _store_on (): bool = let
 in configured end
 
 (* This device's number in the sync file (0 until it has one), the
-   minute of the last sync and how it ended (SyncResult's number), and,
+   minute of the last sync, and,
    when the server answered with an error, its status *)
 val _device = ref<Int>(0)
 val _last_minutes = ref<Int>(0)
-val _last_result = ref<int>(0)
 val _last_status = ref<Int>(0)
 
-(* How a sync ended *)
-#define RESULT_NONE 0
-#define RESULT_DONE 1
-#define RESULT_UNREACHABLE 2
-#define RESULT_CREDENTIALS 3
-#define RESULT_FOLDER 4
-#define RESULT_CONFLICT 5
-#define RESULT_SERVER 6
-#define RESULT_TOO_LARGE 7
-#define RESULT_DAMAGED 8
-#define RESULT_MEMORY 9
-#define RESULT_BLOCKED 10
-#define RESULT_RUNNING 11
-#define RESULT_ADDRESS 12
+(* How a sync ended: not yet; synced; the server not reached, or (from
+   another origin) refused by the browser; the credentials refused; the
+   folder not found; the file kept changing; another error from the
+   server; the file too large, or not one Quire can read; no memory for
+   it; under way; or no folder's address *)
+datatype sync_result =
+  | NotSyncedYet | Synced | Unreachable | WrongCredentials | FolderNotFound | KeptChanging | ServerError
+  | TooLarge | Damaged | NoMemory | Blocked | Syncing | NoAddress
 
-(* The store chosen, under "sync": "QS2\n" and its kind (STORE_WEBDAV);
-   each kind's credentials under a key of its own, "sync-webdav" *)
-#define STORE_WEBDAV 1
+(* A result as "sync-state" stores it, and back: decoded once, as it is
+   read (an unknown number is not synced yet) *)
+fn _result_code (result: sync_result): [code:nat | code <= 12] int code =
+  case+ result of
+  | NotSyncedYet() => 0
+  | Synced() => 1
+  | Unreachable() => 2
+  | WrongCredentials() => 3
+  | FolderNotFound() => 4
+  | KeptChanging() => 5
+  | ServerError() => 6
+  | TooLarge() => 7
+  | Damaged() => 8
+  | NoMemory() => 9
+  | Blocked() => 10
+  | Syncing() => 11
+  | NoAddress() => 12
+
+fn _result_of_code (code: int): sync_result =
+  if code = 1 then Synced()
+  else if code = 2 then Unreachable()
+  else if code = 3 then WrongCredentials()
+  else if code = 4 then FolderNotFound()
+  else if code = 5 then KeptChanging()
+  else if code = 6 then ServerError()
+  else if code = 7 then TooLarge()
+  else if code = 8 then Damaged()
+  else if code = 9 then NoMemory()
+  else if code = 10 then Blocked()
+  else if code = 11 then Syncing()
+  else if code = 12 then NoAddress()
+  else NotSyncedYet()
+
+(* How the last sync ended *)
+val _last_result = ref<sync_result>(NotSyncedYet())
+
+(* The store chosen, under "sync": "QS2\n" and its kind's byte
+   (_kind_code); each kind's credentials under a key of its own,
+   "sync-webdav" *)
+datatype store_kind = WebDavKind | NoStoreKind
+
+fn _kind_code (kind: store_kind): [code:nat | code <= 1] int code =
+  case+ kind of WebDavKind() => 1 | NoStoreKind() => 0
+
+fn _kind_of_code (code: int): store_kind = if code = 1 then WebDavKind() else NoStoreKind()
 
 fn _choice_key (): [l:agz] $A.arr(byte, l, 4) = let
   val key = $A.alloc<byte>(4)
@@ -123,10 +158,10 @@ fn _webdav_key (): [l:agz] $A.arr(byte, l, 11) = let
   val () = $A.write_text(key, 0, $A.text_lit("sync-webdav"), 11)
 in key end
 
-(* The store's kind, 0 none *)
-fn _store_kind (): int = let
+(* The store's kind *)
+fn _store_kind (): store_kind = let
   val held = _store_swap(_store, NoStore())
-  val kind = (case+ held of WebDav(_, _, _, _, _, _) => STORE_WEBDAV | NoStore() => 0): int
+  val kind = (case+ held of WebDav(_, _, _, _, _, _) => WebDavKind() | NoStore() => NoStoreKind()): store_kind
   val () = _store_free(_store_swap(_store, held))
 in kind end
 
@@ -170,7 +205,7 @@ fn _store_save (): void =
       val choice = $A.alloc<byte>(5)
       val () = $A.write_text(choice, 0, $A.text_lit("QS2"), 3)
       val () = $A.write_byte(choice, 3, 10)
-      val () = $A.write_byte(choice, 4, STORE_WEBDAV)
+      val () = $A.write_byte(choice, 4, _kind_code(WebDavKind()))
       val @(choice_frozen, choice_bytes) = $A.freeze<byte>(choice)
       val @(choice_key_frozen, choice_key_bytes) = $A.freeze<byte>(_choice_key())
       val () = save_checked($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
@@ -197,7 +232,7 @@ fn _state_save (): void = let
   val () = $A.write_byte(record, 3, 10)
   val () = $A.write_i32(record, 4, !_device)
   val () = $A.write_i32(record, 8, !_last_minutes)
-  val () = $A.write_i32(record, 12, !_last_result)
+  val () = $A.write_i32(record, 12, _result_code(!_last_result))
   val () = $A.write_i32(record, 16, !_last_status)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_state_key())
@@ -272,23 +307,32 @@ fn _put_literal {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len 
   val () = $A.write_text(out, position, $A.text_lit(text), text_len)
 in position + text_len end
 
+(* "The server answered with an error (status).", at out[position] *)
+fn _server_error {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, status: Int)
+  : [stop:nat | stop <= position + 200] int stop = let
+  val after = _put_literal(out, position, "The server answered with an error (")
+  val after = $S.int_to_str(out, after, 512, status)
+in _put_literal(out, after, ").") end
+
 (* What a sync's end says (at most 200 bytes), at out[position] *)
-fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: int, status: Int)
+fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: sync_result, status: Int)
   : [stop:nat | stop <= position + 200] int stop =
-  if result = RESULT_UNREACHABLE then _put_literal(out, position, "Can't reach the server.")
-  else if result = RESULT_BLOCKED then
+  case+ result of
+  | Unreachable() => _put_literal(out, position, "Can't reach the server.")
+  | Blocked() =>
     _put_literal(out, position, "Can't reach the server, or it doesn't let a browser in (CORS): Quire works on without it; to sync, allow this app's origin on the server.")
-  else if result = RESULT_CREDENTIALS then _put_literal(out, position, "The user name or password is wrong.")
-  else if result = RESULT_FOLDER then _put_literal(out, position, "The folder wasn't found.")
-  else if result = RESULT_CONFLICT then _put_literal(out, position, "The file kept changing on the server. Try again.")
-  else if result = RESULT_TOO_LARGE then _put_literal(out, position, "The sync file is over 16 MB.")
-  else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file isn't one Quire can read.")
-  else if result = RESULT_MEMORY then _put_literal(out, position, "There isn't enough memory to sync.")
-  else if result = RESULT_ADDRESS then _put_literal(out, position, "Enter the folder's address, starting with https://.")
-  else let
-    val after = _put_literal(out, position, "The server answered with an error (")
-    val after = $S.int_to_str(out, after, 512, status)
-  in _put_literal(out, after, ").") end
+  | WrongCredentials() => _put_literal(out, position, "The user name or password is wrong.")
+  | FolderNotFound() => _put_literal(out, position, "The folder wasn't found.")
+  | KeptChanging() => _put_literal(out, position, "The file kept changing on the server. Try again.")
+  | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB.")
+  | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
+  | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
+  | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
+  | ServerError() => _server_error(out, position, status)
+  (* not failures: their own lines are _status_text's *)
+  | NotSyncedYet() => _put_literal(out, position, "Not synced yet.")
+  | Synced() => _put_literal(out, position, "Synced.")
+  | Syncing() => _put_literal(out, position, "Syncing...")
 
 (* minutes (since the epoch) as the local date and time, "2026-10-01 at
    14:05", at out[position] *)
@@ -315,43 +359,60 @@ fn _when_text {l:agz}{position:nat | position + 48 <= 512} (out: !$A.arr(byte, l
   val () = $A.write_byte(out, after + 4, $AR.low_byte(48 + minute - (minute / 10) * 10))
 in after + 5 end
 
+(* How a sync failed, and when it was tried *)
+fn _tried {l:agz} (out: !$A.arr(byte, l, 512), result: sync_result): [stop:nat | stop <= 512] int stop = let
+  val after = _result_text(out, 0, result, !_last_status)
+  val after = _put_literal(out, after, " (Sync tried on ")
+  val after = _when_text(out, after, !_last_minutes)
+in _put_literal(out, after, ".)") end
+
 (* The screen's status line: syncing, or how the last sync ended and
    when *)
 fn _status_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] int stop = let
   val result = !_last_result
 in
   if ~_store_on() then _put_literal(out, 0, "Sync is off.")
-    else if result = RESULT_RUNNING then _put_literal(out, 0, "Syncing...")
-    else if result = RESULT_NONE then _put_literal(out, 0, "Not synced yet.")
-    else if result = RESULT_ADDRESS then _result_text(out, 0, result, 0)
-    else if result = RESULT_DONE then let
+  else case+ result of
+    | Syncing() => _put_literal(out, 0, "Syncing...")
+    | NotSyncedYet() => _put_literal(out, 0, "Not synced yet.")
+    | NoAddress() => _result_text(out, 0, result, 0)
+    | Synced() => let
       val after = _put_literal(out, 0, "Last synced on ")
       val after = _when_text(out, after, !_last_minutes)
     in _put_literal(out, after, ".") end
-    else let
-      val after = _result_text(out, 0, result, !_last_status)
-      val after = _put_literal(out, after, " (Sync tried on ")
-      val after = _when_text(out, after, !_last_minutes)
-    in _put_literal(out, after, ".)") end
+    | Unreachable() => _tried(out, result)
+    | Blocked() => _tried(out, result)
+    | WrongCredentials() => _tried(out, result)
+    | FolderNotFound() => _tried(out, result)
+    | KeptChanging() => _tried(out, result)
+    | ServerError() => _tried(out, result)
+    | TooLarge() => _tried(out, result)
+    | Damaged() => _tried(out, result)
+    | NoMemory() => _tried(out, result)
 end
 
 (* How the last sync failed, in a few words (at most 40 bytes), at
    out[position] *)
-fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: int, status: Int)
+fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: sync_result, status: Int)
   : [stop:nat | stop <= position + 64] int stop =
-  if result = RESULT_UNREACHABLE then _put_literal(out, position, "Can't reach the server")
-  else if result = RESULT_BLOCKED then _put_literal(out, position, "Can't reach the server")
-  else if result = RESULT_CREDENTIALS then _put_literal(out, position, "Wrong user name or password")
-  else if result = RESULT_FOLDER then _put_literal(out, position, "Folder not found")
-  else if result = RESULT_CONFLICT then _put_literal(out, position, "The file kept changing")
-  else if result = RESULT_TOO_LARGE then _put_literal(out, position, "The sync file is over 16 MB")
-  else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file can't be read")
-  else if result = RESULT_MEMORY then _put_literal(out, position, "Not enough memory")
-  else if result = RESULT_ADDRESS then _put_literal(out, position, "No folder address")
-  else let
-    val after = _put_literal(out, position, "Server error (")
-    val after = $S.int_to_str(out, after, 512, status)
-  in _put_literal(out, after, ")") end
+  case+ result of
+  | Unreachable() => _put_literal(out, position, "Can't reach the server")
+  | Blocked() => _put_literal(out, position, "Can't reach the server")
+  | WrongCredentials() => _put_literal(out, position, "Wrong user name or password")
+  | FolderNotFound() => _put_literal(out, position, "Folder not found")
+  | KeptChanging() => _put_literal(out, position, "The file kept changing")
+  | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB")
+  | Damaged() => _put_literal(out, position, "The sync file can't be read")
+  | NoMemory() => _put_literal(out, position, "Not enough memory")
+  | NoAddress() => _put_literal(out, position, "No folder address")
+  | ServerError() => let
+      val after = _put_literal(out, position, "Server error (")
+      val after = $S.int_to_str(out, after, 512, status)
+    in _put_literal(out, after, ")") end
+  (* not failures: _summary_text says them *)
+  | NotSyncedYet() => _put_literal(out, position, "not synced yet")
+  | Synced() => _put_literal(out, position, "synced")
+  | Syncing() => _put_literal(out, position, "syncing...")
 
 (* The Settings screen's Sync row's state: "Off", the store and how long
    ago it last synced ("WebDAV \xC2\xB7 synced 2 min ago"), or how the
@@ -363,9 +424,10 @@ in
   else let
     val after = _put_literal(out, 0, "WebDAV \xC2\xB7 ")
   in
-    if result = RESULT_RUNNING then _put_literal(out, after, "syncing...")
-    else if result = RESULT_NONE then _put_literal(out, after, "not synced yet")
-    else if result = RESULT_DONE then let
+    case+ result of
+    | Syncing() => _put_literal(out, after, "syncing...")
+    | NotSyncedYet() => _put_literal(out, after, "not synced yet")
+    | Synced() => let
       val elapsed = $TM.epoch_minutes() - !_last_minutes
     in
       if elapsed < 1 then _put_literal(out, after, "synced just now")
@@ -381,7 +443,16 @@ in
         val after = _put_literal(out, after, "synced on ")
       in _when_text(out, after, !_last_minutes) end
     end
-    else _result_short(out, 0, result, !_last_status)
+    | Unreachable() => _result_short(out, 0, result, !_last_status)
+    | Blocked() => _result_short(out, 0, result, !_last_status)
+    | WrongCredentials() => _result_short(out, 0, result, !_last_status)
+    | FolderNotFound() => _result_short(out, 0, result, !_last_status)
+    | KeptChanging() => _result_short(out, 0, result, !_last_status)
+    | ServerError() => _result_short(out, 0, result, !_last_status)
+    | TooLarge() => _result_short(out, 0, result, !_last_status)
+    | Damaged() => _result_short(out, 0, result, !_last_status)
+    | NoMemory() => _result_short(out, 0, result, !_last_status)
+    | NoAddress() => _result_short(out, 0, result, !_last_status)
   end
 end
 
@@ -565,16 +636,15 @@ in cross end
    ============================================================ *)
 
 (* What a read gives: the file (its bytes in a piece, its version kept
-   for the write), none yet, or how it failed (a RESULT_ kind, and the
-   server's status) *)
+   for the write), none yet, or how it failed (and the server's status) *)
 datavtype read_answer =
   | {owner,l:agz}{n:pos | n <= 268435456} ReadFile of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
   | ReadNothing of ()
-  | ReadFailed of (int, Int)
+  | ReadFailed of (sync_result, Int)
 
 (* What a write gives: written, a conflict (another device wrote the
    file since its version was read), or how it failed *)
-datavtype write_answer = Written of () | WriteConflict of () | WriteFailed of (int, Int)
+datavtype write_answer = Written of () | WriteConflict of () | WriteFailed of (sync_result, Int)
 
 (* An answer nobody took (its promise let go), freed *)
 implement $P.dispose<read_answer>(answer) =
@@ -589,14 +659,28 @@ implement $P.dispose<write_answer>(answer) =
   | ~WriteConflict() => ()
   | ~WriteFailed(_, _) => ()
 
+(* An HTTP status, read once: success (2xx); 401 or 403, the credentials
+   refused; 404, not found; 409, the folder missing (a PUT into one that
+   is not there); 412, the version changed; or another *)
+datatype http_answer = HttpSuccess | HttpRefused | HttpNotFound | HttpNoFolder | HttpChanged | HttpOther
+
+fn _http_answer (status: Int): http_answer =
+  if status >= 200 then (if status < 300 then HttpSuccess()
+    else if status = 401 then HttpRefused() else if status = 403 then HttpRefused()
+    else if status = 404 then HttpNotFound() else if status = 409 then HttpNoFolder()
+    else if status = 412 then HttpChanged() else HttpOther())
+  else HttpOther()
+
 (* What a status a store refused with says: the credentials, the place
    the file is kept, or the server *)
-fn _failure_kind (status: Int): int =
-  if status = 401 then RESULT_CREDENTIALS
-  else if status = 403 then RESULT_CREDENTIALS
-  else if status = 404 then RESULT_FOLDER
-  else if status = 409 then RESULT_FOLDER
-  else RESULT_SERVER
+fn _failure_kind (answer: http_answer): sync_result =
+  case+ answer of
+  | HttpRefused() => WrongCredentials()
+  | HttpNotFound() => FolderNotFound()
+  | HttpNoFolder() => FolderNotFound()
+  | HttpSuccess() => ServerError()
+  | HttpChanged() => ServerError()
+  | HttpOther() => ServerError()
 
 (* What a request came to, with the response's ETag written to etag:
    its status, the tag's length (0 when it has none) and its body; none
@@ -618,7 +702,13 @@ fn _tagged {l:agz}{etag_size:pos}
 
 (* A request that never reached the store: offline, or (another origin)
    refused by the browser *)
-fn _unreached (): int = if _cross_origin() then RESULT_BLOCKED else RESULT_UNREACHABLE
+fn _unreached (): sync_result = if _cross_origin() then Blocked() else Unreachable()
+
+(* A read the server refused with status *)
+fn _read_failed {n:nat}{l:agz} (body: $BD.dblob(n), etag: $A.arr(byte, l, ETAG_MAX), status: Int): read_answer = let
+  val () = $BD.blob_free(body)
+  val () = $A.free<byte>(etag)
+in ReadFailed(_failure_kind(_http_answer(status)), status) end
 
 (* WebDAV: GET the file; its ETag is its version, and 404 is no file yet *)
 fn _webdav_read (): $P.promise(read_answer, $P.Chained) = let
@@ -632,28 +722,29 @@ in
     val answer = (case+ _tagged(got, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in ReadFailed(_unreached(), 0) end
       | ~$R.some(@(status, etag_len, body)) =>
-        if status = 404 then let
+        (case+ _http_answer(status) of
+        | HttpNotFound() => let
           val () = $BD.blob_free(body)
           (* no file yet: it is written without a version to match *)
           val () = _etag_set(etag, 0)
         in ReadNothing() end
-        else if (if status < 200 then true else status >= 300) then let
-          val () = $BD.blob_free(body)
-          val () = $A.free<byte>(etag)
-        in ReadFailed(_failure_kind(status), status) end
-        else let
+        | HttpSuccess() => let
           val size = $BD.blob_len(body)
           val () = _etag_set(etag, etag_len)
         in
-          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in ReadFailed(RESULT_TOO_LARGE, 0) end
+          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in ReadFailed(TooLarge(), 0) end
           else if size <= 0 then let val () = $BD.blob_free(body) in ReadNothing() end
           else (case+ piece_new(size) of
-            | ~NoPiece() => let val () = $BD.blob_free(body) in ReadFailed(RESULT_MEMORY, 0) end
+            | ~NoPiece() => let val () = $BD.blob_free(body) in ReadFailed(NoMemory(), 0) end
             | ~Piece(owner, file) => let
                 val () = $BD.blob_read(body, 0, file, size)
                 val () = $BD.blob_free(body)
               in ReadFile(owner, file, size) end)
-        end): read_answer
+        end
+        | HttpRefused() => _read_failed(body, etag, status)
+        | HttpNoFolder() => _read_failed(body, etag, status)
+        | HttpChanged() => _read_failed(body, etag, status)
+        | HttpOther() => _read_failed(body, etag, status))): read_answer
   in $P.ret<read_answer>(answer) end)
 end
 
@@ -671,24 +762,30 @@ in
           val () = $A.free<byte>(etag)
           val () = $BD.blob_free(reply)
         in
-          if status = 412 then WriteConflict()
-          else if (if status >= 200 then status < 300 else false) then Written()
-          else WriteFailed(_failure_kind(status), status)
+          case+ _http_answer(status) of
+          | HttpChanged() => WriteConflict()
+          | HttpSuccess() => Written()
+          | HttpRefused() => WriteFailed(WrongCredentials(), status)
+          | HttpNotFound() => WriteFailed(FolderNotFound(), status)
+          | HttpNoFolder() => WriteFailed(FolderNotFound(), status)
+          | HttpOther() => WriteFailed(ServerError(), status)
         end): write_answer
   in $P.ret<write_answer>(answer) end)
 end
 
 (* Reads the file from the store *)
 fn store_read (): $P.promise(read_answer, $P.Chained) =
-  if _store_kind() = STORE_WEBDAV then _webdav_read()
-  else $P.ret<read_answer>(ReadFailed(RESULT_NONE, 0))
+  case+ _store_kind() of
+  | WebDavKind() => _webdav_read()
+  | NoStoreKind() => $P.ret<read_answer>(ReadFailed(NotSyncedYet(), 0))
 
 (* Writes body[0, body_size) to the store, as a change of the version
    read *)
 fn store_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
-  if _store_kind() = STORE_WEBDAV then _webdav_write(body, body_size)
-  else $P.ret<write_answer>(WriteFailed(RESULT_NONE, 0))
+  case+ _store_kind() of
+  | WebDavKind() => _webdav_write(body, body_size)
+  | NoStoreKind() => $P.ret<write_answer>(WriteFailed(NotSyncedYet(), 0))
 
 (* ============================================================
    A sync file, read: where its books and devices are
@@ -1064,7 +1161,7 @@ fn _round_settle (how: round_end): void =
 
 (* The end of a sync: how it ended, kept and shown; its round ended
    (another starts when one was asked for meanwhile) *)
-fn _end (result: int, status: Int): void = let
+fn _end (result: sync_result, status: Int): void = let
   val () = _held_free(_held_swap(_remote, NoHeld()))
   val () = _held_free(_held_swap(_written, NoHeld()))
   val () = _out_put(jfile_new{SYNC_MAX_BYTES}())
@@ -1076,12 +1173,12 @@ fn _end (result: int, status: Int): void = let
   val () = !_busy := false
 in _round_settle(RoundEnded()) end
 
-fn _fail (result: int, status: Int): void = _end(result, status)
+fn _fail (result: sync_result, status: Int): void = _end(result, status)
 
 fn _done (): void = let
   (* this device's number is its own once the file has it *)
   val () = (if !_device <= 0 then !_device := !_device_now else ())
-in _end(RESULT_DONE, 0) end
+in _end(Synced(), 0) end
 
 (* ============================================================
    The merge, taken: once the file is written
@@ -1363,7 +1460,7 @@ fn _take (): void =
    was read), read and merged again, up to TRIES times *)
 fn _write (): void =
   case+ _held_swap(_written, NoHeld()) of
-  | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+  | ~NoHeld() => _fail(NoMemory(), 0)
   | ~Held(owner, file, n, names_at, books, devices) => let
       val @(file_frozen, file_bytes) = $A.freeze<byte>(file)
       val () = $P.finish<write_answer>(store_write(file_bytes, n), llam(answer) =>
@@ -1372,7 +1469,7 @@ fn _write (): void =
         | ~WriteConflict() => let
             val () = _held_free(_held_swap(_written, NoHeld()))
             val () = !_tries := !_tries + 1
-          in if !_tries >= TRIES then _fail(RESULT_CONFLICT, 412) else _round_settle(RoundConflict()) end
+          in if !_tries >= TRIES then _fail(KeptChanging(), 412) else _round_settle(RoundConflict()) end
         | ~WriteFailed(kind, status) => _fail(kind, status))
       val () = $A.drop<byte>(file_frozen, file_bytes)
       val file = $A.thaw<byte>(file_frozen)
@@ -1569,10 +1666,10 @@ fn _tail (): void = let
   val () = _push(_text_chunk("]}"))
 in
   case+ jfile_join(_out_take()) of
-  | ~JNoWhole() => _fail(RESULT_MEMORY, 0)
+  | ~JNoWhole() => _fail(NoMemory(), 0)
   | ~JWhole(owner, file, n) =>
     (case+ _hold(owner, file, n) of
-     | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+     | ~NoHeld() => _fail(NoMemory(), 0)
      | ~Held(file_owner, bytes, size, names_at, books, devices) => let
          val () = _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices)))
        in _write() end)
@@ -1625,7 +1722,7 @@ in _books(0, lib_count()) end
 (* The file read in a piece, held as _remote, merged *)
 fn _merge_held (file: held): void =
   case+ file of
-  | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+  | ~NoHeld() => _fail(NoMemory(), 0)
   | ~Held(owner, bytes, n, names_at, books, devices) => let
       val () = _held_free(_held_swap(_remote, Held(owner, bytes, n, names_at, books, devices)))
     in _merge() end
@@ -1637,14 +1734,14 @@ fn _read (): void = $P.finish<read_answer>(store_read(), llam(answer) =>
   | ~ReadFailed(kind, status) => _fail(kind, status)
   | ~ReadFile(owner, file, size) =>
     (case+ _hold(owner, file, size) of
-     | ~NoHeld() => _fail(RESULT_DAMAGED, 0)
+     | ~NoHeld() => _fail(Damaged(), 0)
      | ~Held(file_owner, bytes, n, names_at, books, devices) => _merge_held(Held(file_owner, bytes, n, names_at, books, devices))))
 
 (* A sync begun: under way, with no try made yet *)
 fn _run_begin (): void = let
   val () = !_busy := true
   val () = !_tries := 0
-  val () = !_last_result := RESULT_RUNNING
+  val () = !_last_result := Syncing()
 in _status_show() end
 
 (* The most rounds one sync_run makes: each sync's tries, for each of
@@ -1665,7 +1762,7 @@ fun _rounds {left:nat} .<left>. (left: int left): void = let
 in
   $P.finish<round_end>(ended, llam(how) =>
     if left <= 0 then (case+ how of
-      | RoundConflict() => _fail(RESULT_CONFLICT, 412)
+      | RoundConflict() => _fail(KeptChanging(), 412)
       | RoundEnded() => ())
     else (case+ how of
       | RoundConflict() => _rounds(left - 1)
@@ -1704,9 +1801,10 @@ implement sync_start () = let
         else let
           val () = !_device := _i32_at(record, 4)
           val () = !_last_minutes := _i32_at(record, 8)
-          val result = g0ofg1(_i32_at(record, 12))
           (* a sync the last run left under way did not end *)
-          val () = !_last_result := (if result = RESULT_RUNNING then RESULT_NONE else result)
+          val () = !_last_result := (case+ _result_of_code(g0ofg1(_i32_at(record, 12))) of
+            | Syncing() => NotSyncedYet()
+            | result => result)
           val () = !_last_status := _i32_at(record, 16)
           val () = $A.free<byte>(record)
         in true end): bool
@@ -1727,15 +1825,16 @@ in
       (* the store chosen: its kind (none, and sync off, when it could
          not be read) *)
       val kind = (case+ lookup_bytes(found) of
-        | ~NothingStored() => 0
-        | ~StoredUnreadable() => 0
+        | ~NothingStored() => NoStoreKind()
+        | ~StoredUnreadable() => NoStoreKind()
         | ~StoredBytes(record, n) => let
-            val kind = (if n >= 5 then (if byte2int0($A.get<byte>(record, 1)) = 83 then byte2int0($A.get<byte>(record, 4)) else 0) else 0): int
+            val kind = (if n >= 5 then (if byte2int0($A.get<byte>(record, 1)) = 83 then _kind_of_code(byte2int0($A.get<byte>(record, 4))) else NoStoreKind()) else NoStoreKind()): store_kind
             val () = $A.free<byte>(record)
-          in kind end): int
+          in kind end): store_kind
     in
-      if kind <> STORE_WEBDAV then $P.ret<int>(0)
-      else let
+      case+ kind of
+      | NoStoreKind() => $P.ret<int>(0)
+      | WebDavKind() => let
         val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
         val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
         val () = release_bytes(webdav_frozen, webdav_bytes)
@@ -1894,13 +1993,13 @@ in
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-    val () = !_last_result := RESULT_ADDRESS
+    val () = !_last_result := NoAddress()
   in _status_show() end
   else if ~web then let
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-    val () = !_last_result := RESULT_ADDRESS
+    val () = !_last_result := NoAddress()
   in _status_show() end
   else let
     val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
