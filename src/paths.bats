@@ -150,11 +150,43 @@ implement src_end (data, src_offset, src_len) = _src_end(data, src_offset, src_l
 
 implement mime_of (path, path_len) = _mime_of(path, path_len)
 
-(* The same as a code: 1 png, 2 jpeg, 3 gif, 4 svg, 5 webp, 0 other *)
-#pub fn mime_code_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
-  : [code:nat | code <= 5] int code
+(* An image's type, as a book's cover is kept: NotAnImage for a name of
+   no image type (and so for a book with no cover) *)
+#pub datatype image_type = PngImage | JpegImage | GifImage | SvgImage | WebpImage | NotAnImage
 
-implement mime_code_of (path, path_len) = let
+(* Whether t is an image's type *)
+#pub fn is_image (t: image_type): bool
+
+implement is_image (t) = case+ t of NotAnImage() => false | _ => true
+
+(* The mime type of t *)
+#pub fn image_mime (t: image_type): [mime_len:pos | mime_len <= 24] string mime_len
+
+implement image_mime (t) =
+  case+ t of
+  | PngImage() => "image/png" | JpegImage() => "image/jpeg" | GifImage() => "image/gif"
+  | SvgImage() => "image/svg+xml" | WebpImage() => "image/webp" | NotAnImage() => "application/octet-stream"
+
+(* t as the library stores it (QLB): 1 png, 2 jpeg, 3 gif, 4 svg, 5
+   webp, 0 none *)
+#pub fn image_code (t: image_type): [code:nat | code <= 5] int code
+
+implement image_code (t) =
+  case+ t of
+  | PngImage() => 1 | JpegImage() => 2 | GifImage() => 3 | SvgImage() => 4 | WebpImage() => 5 | NotAnImage() => 0
+
+(* The type a stored code stands for (image_code) *)
+#pub fn image_of_code (code: int): image_type
+
+implement image_of_code (code) =
+  if code = 1 then PngImage() else if code = 2 then JpegImage() else if code = 3 then GifImage()
+  else if code = 4 then SvgImage() else if code = 5 then WebpImage() else NotAnImage()
+
+(* The image type the name path[0, path_len) says (by its extension) *)
+#pub fn image_type_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
+  : image_type
+
+implement image_type_of (path, path_len) = let
   var png = @[char][4]('.', 'p', 'n', 'g')
   var jpg = @[char][4]('.', 'j', 'p', 'g')
   var jpeg = @[char][5]('.', 'j', 'p', 'e', 'g')
@@ -162,12 +194,12 @@ implement mime_code_of (path, path_len) = let
   var svg = @[char][4]('.', 's', 'v', 'g')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
 in
-  if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then 2
-  else if path_len >= 5 && _ends_with(path, path_len, webp, 5, 0) then 5
-  else if path_len < 4 then 0
-  else if _ends_with(path, path_len, png, 4, 0) then 1
-  else if _ends_with(path, path_len, jpg, 4, 0) then 2
-  else if _ends_with(path, path_len, gif, 4, 0) then 3
-  else if _ends_with(path, path_len, svg, 4, 0) then 4
-  else 0
+  if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then JpegImage()
+  else if path_len >= 5 && _ends_with(path, path_len, webp, 5, 0) then WebpImage()
+  else if path_len < 4 then NotAnImage()
+  else if _ends_with(path, path_len, png, 4, 0) then PngImage()
+  else if _ends_with(path, path_len, jpg, 4, 0) then JpegImage()
+  else if _ends_with(path, path_len, gif, 4, 0) then GifImage()
+  else if _ends_with(path, path_len, svg, 4, 0) then SvgImage()
+  else NotAnImage()
 end

@@ -409,6 +409,20 @@ in each module that makes a promise of it (`$P.create`, `$P.ret`,
 `$P.resolved`): `bats check` does not catch a missing one, only the C
 compile of `bats build` does.
 
+## A choice is a datatype
+
+An int never encodes one of a fixed set of cases (bats-lang/quire#192):
+a choice is a datatype matched with `case+`, so a case left out does
+not type-check ("pattern match is nonexhaustive"), and "none" is an
+option, not -1. Ints are quantities, offsets and indexes. Stored bytes
+stay as they are, decoded once as they are read and encoded once as
+they are written: a book's `shelf` (`shelf_of_code`, `shelf_code`) and
+cover (`image_of_code`, `image_code`), and the library view's
+`sort_order`, `layout` and `book_filter` (`lib_state_set`,
+`lib_state_get`, which packs them only to be saved with the settings).
+`tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
+`case+`), in CI through `tests/static/run.sh`.
+
 ## What the types guarantee about the interface
 
 The stylesheet is built in `src/style.bats`, not written as CSS:
@@ -461,7 +475,7 @@ Elements are made through `src/ui.bats`:
 
 Nothing is lost at a click, except by emptying the Trash:
 
-* Removing a book moves it to the Trash (shelf 3), where it can only be
+* Removing a book moves it to the Trash (the shelf `Trash`), where it can only be
   restored; archiving, hiding, deleting a highlight or bookmark and
   resetting the settings are done at once. Each is offered back by the
   Undo toast (`undo_offer` in `src/undo.bats`), whose undo runs only

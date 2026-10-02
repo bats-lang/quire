@@ -1,6 +1,7 @@
 #!/bin/sh
 # Static tests: every element id made at one place and every id named
-# made (ids.py); code that must type-check, and code that must not.
+# made (ids.py); every match a case+ (case_plus.py); code that must
+# type-check, and code that must not.
 # What they test is private to a module (a dataprop's constructor, a
 # cell's states), so a fixture is not a package of its own: it is a
 # snippet (snippet.bats) that is put into a copy of this checkout, in the
@@ -52,6 +53,18 @@ for d in "$ROOT"/tests/static/ids/reject/*/; do
   if python3 "$ROOT/tests/static/ids.py" "$d" > "$TMP/ids-$n.log" 2>&1; then echo "FAIL ids/reject/$n: should be rejected"; fail=1
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/ids-$n.log"; then echo "ok   ids/reject/$n"
   else echo "FAIL ids/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/ids-$n.log"; fail=1; fi
+done
+
+# Every match a case+ (case_plus.py): the app's own, and the checker's
+# fixtures, each a src.bats that must fail it with its `expect`
+if python3 "$ROOT/tests/static/case_plus.py" "$ROOT/src" > "$TMP/case.log" 2>&1; then echo "ok   case+: $(tail -1 "$TMP/case.log")"
+else echo "FAIL case+:"; cat "$TMP/case.log"; fail=1; fi
+for d in "$ROOT"/tests/static/case/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/case_plus.py" "$d" > "$TMP/case-$n.log" 2>&1; then echo "FAIL case/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/case-$n.log"; then echo "ok   case/reject/$n"
+  else echo "FAIL case/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/case-$n.log"; fail=1; fi
 done
 
 for d in "$ROOT"/tests/static/accept/*/; do
