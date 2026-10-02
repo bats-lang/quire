@@ -6,7 +6,7 @@
 // files, directly in its scope).
 
 import { test, expect } from '@playwright/test';
-import { start, dialog, librarySettings, settingsScreen, settingsButton } from './helpers.js';
+import { start, dialog, librarySettings, settingsScreen, settingsButton, libraryMenu, menuItem, librarySearch } from './helpers.js';
 
 const about = page => dialog(page, 'About Quire');
 // each link's href, and the address it leads to from the app at
@@ -53,6 +53,32 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   await expect(settingsScreen(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('the library menu opens About, next to Settings, and Escape goes back to the library', async ({ page, baseURL }) => {
+  const errors = await start(page);
+  await libraryMenu(page);
+  const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
+  expect(items.indexOf('About Quire')).toBe(items.indexOf('Settings') + 1);
+  await menuItem(page, 'About Quire').click();
+  await expect(about(page)).toBeVisible();
+  await expect(page.getByRole('menu')).toBeHidden();
+  await expect(settingsScreen(page)).toBeHidden();
+  // its first link is the home page, beside the app
+  const first = about(page).getByRole('group', { name: 'Links' }).getByRole('link').first();
+  await expect(first).toHaveAccessibleName('Home page');
+  await expect(first).toHaveAttribute('href', './homepage/');
+  expect(await first.evaluate(a => a.href)).toBe(new URL('/homepage/', baseURL).href);
+  await page.keyboard.press('Escape');
+  await expect(about(page)).toBeHidden();
+  await expect(librarySearch(page)).toBeVisible();
+  // and Done, back at the library menu's button
+  await libraryMenu(page);
+  await menuItem(page, 'About Quire').click();
+  await about(page).getByRole('button', { name: 'Done' }).click();
+  await expect(about(page)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Library menu' })).toBeFocused();
   expect(errors).toEqual([]);
 });
 
