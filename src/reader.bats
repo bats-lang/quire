@@ -193,16 +193,16 @@ in
   in if !_speed_pages - (!_speed_pages / 10) * 10 = 0 then _speed_save() else () end
 end
 
-(* How the open book is set, from its OPF (epub_xml's spine_vertical):
-   0 horizontally, 1 vertically with its lines going on to the left
-   (vertical-rl: Chinese, Japanese or Korean read right to left), 2
-   vertically with its lines going on to the right (vertical-lr:
-   Mongolian in its traditional script). Vertically, its pages go down
-   the page (CSS columns follow the inline axis, which runs down), and
-   it is always paged *)
-val _vertical = ref<int>(0)
+(* How the open book is set, from its OPF (epub_xml's spine_vertical).
+   Vertically, its pages go down the page (CSS columns follow the inline
+   axis, which runs down), and it is always paged *)
+val _vertical = ref<writing_mode>(Horizontal())
 
-fn _is_vertical (): bool = !_vertical > 0
+fn _is_vertical (): bool =
+  case+ !_vertical of
+  | Horizontal() => false
+  | VerticalRightToLeft() => true
+  | VerticalLeftToRight() => true
 
 (* Whether the chapter is scrolled down (the Layout setting), not turned
    across in pages. Scrolled, a page is a screenful: a turn scrolls one
@@ -603,12 +603,14 @@ fn _anchor_now (): [node:int | node >= ~1] int node = let
   (* the first column's middle: of a spread's two, the left one, or the
      right one in a book read right to left; set vertically, the first
      line, at the page's right edge (or its left, for vertical-lr) *)
-  val x = (if !_vertical = 1 then page_left + page_width - 12
-    else if !_vertical = 2 then page_left + 12
-    else if _spread() then (if !_right_to_left then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
+  val x = (case+ !_vertical of
+    | VerticalRightToLeft() => page_left + page_width - 12
+    | VerticalLeftToRight() => page_left + 12
+    | Horizontal() =>
+      if _spread() then (if !_right_to_left then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
   val node = _node_down(x, page_top + 24, 8)
   (* across the page, or down it *)
-  val down = (case+ _page_axis() of Down() => true | _ => false): bool
+  val down = (case+ _page_axis() of Down() => true | Across() => false | AcrossBack() => false): bool
   val low = (if down then page_top - 1 else page_left - 1): int
   val high = (if down then page_top + page_height else page_left + page_width): int
 in
@@ -669,7 +671,10 @@ fn _page_of_node {page_count:pos}{current:nat | current < page_count}{node:nat} 
          takes a node there (columns can fall between pixels); right to
          left, the pages go on to the left, and a node starts at its
          right edge *)
-      val distance = (case+ _page_axis() of AcrossBack() => page_left + page_width - node_right + 2 | _ => node_left - page_left + 2): Int
+      val distance = (case+ _page_axis() of
+        | AcrossBack() => page_left + page_width - node_right + 2
+        | Across() => node_left - page_left + 2
+        | Down() => node_left - page_left + 2): Int
       (* whole pages from the one shown, rounded down *)
       val pages_away = (if distance >= 0 then distance / page_width else ~((page_width - 1 - distance) / page_width)): Int
       val page = current + pages_away
@@ -680,6 +685,14 @@ fn _page_of_node {page_count:pos}{current:nat | current < page_count}{node:nat} 
    layout (another size or type, measured after it changed) keeps in
    view *)
 val _anchor_last = ref<Int>(~1)
+
+(* The chapter's pages across, its scroll width over its width: a
+   spread's last screen can hold one column, half a screen, so its
+   screens are counted up, past a few pixels of rounding *)
+fn _count_across (): [count:int] int count = let
+  val page_width = $DR.get_measure_w()
+  val scroll_width = $DR.get_measure_scroll_w()
+in if page_width > 8 then (scroll_width + page_width - 8) / page_width else 1 end
 
 (* The chapter's pages as it is laid out (the page just measured):
    across, its scroll width over its width; scrolled, its screenfuls;
@@ -698,12 +711,8 @@ fn _count_pages (): [count:int] int count =
       else if _is_vertical() then (scroll_height + height - 3) / height
       else 1 + (extra + step - 1) / step
     end
-  | _ => let
-    val page_width = $DR.get_measure_w()
-    val scroll_width = $DR.get_measure_scroll_w()
-    (* a spread's last screen can hold one column, half a screen: its
-       screens are counted up, past a few pixels of rounding *)
-  in if page_width > 8 then (scroll_width + page_width - 8) / page_width else 1 end
+  | Across() => _count_across()
+  | AcrossBack() => _count_across()
 
 fn _measure_pagination(): void = let
   val page_id = $A.alloc<byte>(4)
@@ -1963,8 +1972,8 @@ end
    always paged, one column a screen, and its words and lines are the
    book's own, so the settings of the page's layout and of its words'
    spacing and breaking are not offered (as Readium does) *)
-fn _vertical_set (vertical: int): void = let
-  val () = !_vertical := (if vertical = 1 then 1 else if vertical = 2 then 2 else 0)
+fn _vertical_set (vertical: writing_mode): void = let
+  val () = !_vertical := vertical
   val horizontal = ~_is_vertical()
   val () = ui_show("layout-row", horizontal)
   val () = ui_show("columns-row", horizontal)
@@ -2062,9 +2071,10 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
                   val () = _breaks_put(BreaksCell(breaks_nil()))
                   (* set vertically, not rtl: direction:rtl would turn the
                      inline axis, down the page, upward *)
-                  val () = (if !_vertical = 1 then ui_attr("page", AClass, "caf vertical")
-                    else if !_vertical = 2 then ui_attr("page", AClass, "caf vertical-lr")
-                    else if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf"))
+                  val () = (case+ !_vertical of
+                    | VerticalRightToLeft() => ui_attr("page", AClass, "caf vertical")
+                    | VerticalLeftToRight() => ui_attr("page", AClass, "caf vertical-lr")
+                    | Horizontal() => if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf"))
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
                   val found = _render_nodes(doc, xhtml_bytes, xhtml_size, ~1, nodes, images_nil(), fragment)
@@ -2765,19 +2775,25 @@ implement measure_pagination() = _measure_pagination()
    preview; 0 puts it back) *)
 #pub fun reader_pan(shift: int): void
 
+(* The page shown, scrolled across by the finger's shift; its pages go
+   on the way sign says (1 to the right, ~1 to the left) *)
+fn _pan_across (sign: int, shift: int): void =
+  case+ reading_get() of
+  | @(page, _, _, _) => let
+      val page_id = $A.alloc<byte>(4)
+      val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+      val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
+      val () = $SC.set_scroll_left(page_id_bytes, 4, sign * page * !_page_width - shift)
+    in release_bytes(page_id_frozen, page_id_bytes) end
+
 implement reader_pan(shift) =
   (* down the page (scrolled, or set vertically), a drag across moves
      nothing: a committed drag turns the page *)
   case+ _page_axis() of
   | Down() => ()
-  | axis => (case+ reading_get() of
-  | @(page, _, _, _) => let
-      val page_id = $A.alloc<byte>(4)
-      val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
-      val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
-      val scroll_left = (case+ axis of AcrossBack() => ~(page * !_page_width) | _ => page * !_page_width): int
-      val () = $SC.set_scroll_left(page_id_bytes, 4, scroll_left - shift)
-    in release_bytes(page_id_frozen, page_id_bytes) end)
+  (* right to left, the pages go on to the left: a scroll below 0 *)
+  | AcrossBack() => _pan_across(~1, shift)
+  | Across() => _pan_across(1, shift)
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)

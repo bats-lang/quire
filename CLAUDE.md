@@ -535,8 +535,10 @@ so no button in the reader could be clicked.
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for
-Mongolian in its script (mn-Mong) read left to right (`spine_vertical`
-in `src/epub_xml.bats`, kept in `_vertical` in `src/reader.bats`).
+Mongolian in its script (mn-Mong) read left to right. `spine_vertical`
+in `src/epub_xml.bats` answers a `writing_mode` (`Horizontal |
+VerticalRightToLeft | VerticalLeftToRight`), from the spine's
+`spine_progression`, and `src/reader.bats` keeps it in `_vertical`.
 CSS columns follow the inline axis, which then runs down, so its pages
 go down the page: the page's class is `caf vertical` (not `rtl`, whose
 `direction` would turn that axis upward), a column and its gap (the
