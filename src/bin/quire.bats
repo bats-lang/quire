@@ -2069,7 +2069,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
           if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
     in 0 end)
   (* the browser's back button: out of the reader *)
-  val () = $NAV.set_popstate_callback(llam(_) => let
+  (* the URL itself is not needed: the view is the library's *)
+  val () = $NAV.set_popstate_callback(llam(url) => let
+      val () = (case+ url of ~$R.some(bytes) => $BD.blob_free(bytes) | ~$R.none() => ())
       val () = (if _in_reader() then _show_library() else ())
     in 0 end)
 in listeners end
