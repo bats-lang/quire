@@ -5,7 +5,7 @@
  * using Node.js zlib for deflate compression. No external dependencies.
  */
 
-import { deflateRawSync, inflateRawSync } from 'node:zlib';
+import { deflateRawSync, deflateSync, inflateRawSync } from 'node:zlib';
 
 // CRC-32 lookup table
 const crcTable = (() => {
@@ -216,6 +216,8 @@ function loremParagraph(seed) {
  * @param {string|null} opts.language - The OPF's dc:language (default "en"; null leaves it out)
  * @param {string} opts.metadata - More of the OPF's metadata, as XML
  * @param {number[]} opts.damagedChapters - Chapters (from 1) whose data cannot be inflated
+ * @param {object[]} opts.rawChapters - Chapters given whole: each {body, images?, lang?,
+ *   head? (more of its head, such as a viewport meta), itemref? (its itemref's properties)}
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -223,6 +225,33 @@ export const TINY_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8D4HwAFBQIAX8jx0gAAAABJRU5ErkJggg==',
   'base64'
 );
+
+/**
+ * A PNG of width by height pixels, all of one colour (r, g, b): a fixed
+ * layout's page image, whose shape the tests measure.
+ */
+export function solidPng(width, height, [r, g, b] = [40, 90, 160]) {
+  const row = Buffer.alloc(1 + 3 * width);
+  for (let x = 0; x < width; x++) { row[1 + 3 * x] = r; row[2 + 3 * x] = g; row[3 + 3 * x] = b; }
+  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 2; // colour type: RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
 
 export function createEpub(opts = {}) {
   const title = opts.title || 'Test Book';
@@ -260,7 +289,9 @@ export function createEpub(opts = {}) {
   const effectiveChapters = rawChapters ? rawChapters.length : numChapters;
   for (let i = 1; i <= effectiveChapters; i++) {
     manifestItems += `    <item id="ch${i}" href="chapter${i}.xhtml" media-type="application/xhtml+xml"/>\n`;
-    spineItems += `    <itemref idref="ch${i}"/>\n`;
+    // a raw chapter's itemref properties (rendition:layout-pre-paginated, say)
+    const itemref = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].itemref;
+    spineItems += `    <itemref idref="ch${i}"${itemref ? ` properties="${itemref}"` : ''}/>\n`;
 
     let xhtml;
     if (rawChapters && rawChapters[i - 1]) {
@@ -272,7 +303,7 @@ export function createEpub(opts = {}) {
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
-<head><title>Chapter ${i}</title></head>
+<head><title>Chapter ${i}</title>${rawChapters[i - 1].head || ''}</head>
 <body>
 ${rawBody}
 </body>

@@ -469,9 +469,12 @@ Elements are made through `src/ui.bats`:
   reset it (a search field, a file input) is made by one function,
   called at startup and at the reset.
 * `ui_attr` takes a typed attribute that cannot be a name, a role or a
-  style. The one inline style is a place (`ui_place`: left or width,
-  in tenths of a percent up to 100%), so no inline style can set a
-  colour or anything else the stylesheet proves.
+  style. The inline styles are a place (`ui_place`: left or width,
+  in tenths of a percent up to 100%) and a fixed page's box
+  (`ui_fixed_box_n`: width and height, 1 to 10000 px, and a zoom of 1
+  to 10000 thousandths, so a zoom of 0 does not type-check), each
+  written from numbers alone, so no inline style can set a colour or
+  anything else the stylesheet proves.
 
 Nothing is lost at a click, except by emptying the Trash:
 
@@ -615,6 +618,30 @@ margins are logical (`margin-block`, and the Paragraph spacing setting
 as `margin-block-end`), so set vertically the space after it is beside
 it and its lines keep their length; that row stays. Taps, keys and
 swipes keep the meaning of a book read right to left.
+
+A fixed-layout book (EPUB 3.3 §8.2, `rendition:layout` pre-paginated)
+is shown a spine item a page, as Thorium shows it. `src/epub_xml.bats`
+reads the OPF's layout (`opf_layout`), each itemref's own
+(`itemref_layout_n`: `rendition:layout-pre-paginated` or
+`-reflowable` outranks the book's) as a `rendition_layout`
+(`Reflowable | PrePaginated`), kept with each chapter in `Chapter`, and
+a page's viewport meta (`xhtml_viewport`: a `viewport`, its width and
+height 1 to 10000, or `NoViewport`). The reader (`_layout`, `_is_fixed`)
+renders a fixed page into a box (`page-box`, `_box_add`, the page's one
+child; `_render_into` says which element a chapter's top-level nodes go
+into, so its content nodes are numbered as ever), laid out as its
+viewport (else the last fixed page's, in `_page_size`, as EPUB RS 3.3
+§8.1.2 allows; else the view's) and scaled with CSS `zoom` to fit whole,
+letter-boxed (`_fixed_fit`, at every layout, so a resize fits it
+again). The page (class `caf fixed`) is then the whole reader view, the
+bars over it as over a reflowed page, the box centred in it, so taps
+and drags beside a letter-boxed page turn it. It is one page, never
+scrolled or in columns, its images fit it (`100cqw`, `100cqh`), and it
+is set horizontally whatever the book's `_vertical` (`_writing`). The indicator counts spine items ("page 5 of
+24 in book"). It is not restyled: only the theme and what the reader
+does (taps, keys, reading aloud, the screen) are offered (`_rows_set`).
+The book's own CSS is dropped as for every book, so text a publisher
+placed over art shows in flow.
 
 The back button a jump leaves (to the place jumped from) never stays
 up: `ps_cell` in `src/reader.bats` holds the positions it offers, and

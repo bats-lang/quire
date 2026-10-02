@@ -198,8 +198,25 @@ end
    axis, which runs down), and it is always paged *)
 val _vertical = ref<writing_mode>(Horizontal())
 
+(* How the chapter shown is laid out (its itemref's rendition:layout,
+   else the book's): reflowed into the reader's pages, or a fixed page,
+   one spine item a page, scaled to fit the page whole (_fixed_fit) *)
+val _layout = ref<rendition_layout>(Reflowable())
+
+fn _is_fixed (): bool =
+  case+ !_layout of
+  | Reflowable() => false
+  | PrePaginated() => true
+
+(* How the chapter shown is set: as the book is, unless it is a fixed
+   page, which is laid out as its own size, not in the reader's columns *)
+fn _writing (): writing_mode =
+  case+ !_layout of
+  | PrePaginated() => Horizontal()
+  | Reflowable() => !_vertical
+
 fn _is_vertical (): bool =
-  case+ !_vertical of
+  case+ _writing() of
   | Horizontal() => false
   | VerticalRightToLeft() => true
   | VerticalLeftToRight() => true
@@ -207,9 +224,9 @@ fn _is_vertical (): bool =
 (* Whether the chapter is scrolled down (the Layout setting), not turned
    across in pages. Scrolled, a page is a screenful: a turn scrolls one
    down or up, and the reader's place, its anchor and the arenas' window
-   count screenfuls as they count pages. A book set vertically is never
-   scrolled *)
-fn _scrolled (): bool = if _is_vertical() then false else set_flow_get() = 1
+   count screenfuls as they count pages. A book set vertically, and a
+   fixed page, are never scrolled *)
+fn _scrolled (): bool = if _is_vertical() then false else if _is_fixed() then false else set_flow_get() = 1
 
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
@@ -226,7 +243,7 @@ datatype page_axis = Across | AcrossBack | Down
 
 fn _page_axis (): page_axis =
   if _is_vertical() then Down
-  else if set_flow_get() = 1 then Down
+  else if _scrolled() then Down
   else if !_right_to_left then AcrossBack
   else Across
 
@@ -343,17 +360,27 @@ in release_bytes(id_frozen, id_bytes) end
 (* Whether a screen shows two columns, a spread: the probe the
    typography's style shows then (settings.bats, _put_cols) *)
 fn _spread (): bool =
-  (* set vertically, a screen is always one page *)
+  (* set vertically, a screen is always one page, and so is a fixed
+     page's *)
   if _is_vertical() then false
+  else if _is_fixed() then false
   else let
     val () = _measure_literal("spread-probe")
   in $DR.get_measure_w() > 0 end
 
 (* "13 of 75 in chapter", for a page (from 0) of page_count, at buf[at, end_at); for a
-   spread, both of its pages: "25–26 of 150 in chapter" *)
+   spread, both of its pages: "25–26 of 150 in chapter"; for a fixed
+   page, which is a spine item, the spine item of the book's: "5 of 24 in
+   book" *)
 fn _put_page_of {l:agz}{at:nat | at + 55 <= 96}
   (buf: !$A.arr(byte, l, 96), at: int at, page: Int, page_count: Int): [end_at:nat | end_at <= at + 55] int end_at =
-  if _spread() then let
+  if _is_fixed() then (case+ reading_get() of
+    | @(_, _, chapter, chapter_count) => let
+        val offset = $S.int_to_str(buf, at, 96, chapter)
+        val offset = _put(buf, offset, " of ")
+        val offset = $S.int_to_str(buf, offset, 96, chapter_count)
+      in _put(buf, offset, " in book") end)
+  else if _spread() then let
     val offset = $S.int_to_str(buf, at, 96, 2 * page + 1)
     (* an en dash *)
     val offset = _put(buf, offset, "\xE2\x80\x93")
@@ -414,6 +441,18 @@ in
     val more = (if rest > 0 then rest else 0): Int
     val offset = _put_duration(buf, at, 96, _minutes_for_pages(left + more))
   in _put(buf, offset, " left in book") end
+  (* a fixed page is its chapter: the pages left are the book's *)
+  else if _is_fixed() then let
+    val pages_left = (if chapter_count > chapter then chapter_count - chapter else 0): Int
+  in
+    if pages_left = 0 then _put(buf, at, "last page")
+    else let
+      val offset = $S.int_to_str(buf, at, 96, pages_left)
+    in
+      if pages_left = 1 then _put(buf, offset, " page left in book")
+      else _put(buf, offset, " pages left in book")
+    end
+  end
   else if left = 0 then _put(buf, at, "last page in chapter")
   else let
     (* a spread's screens are two pages each *)
@@ -603,7 +642,7 @@ fn _anchor_now (): [node:int | node >= ~1] int node = let
   (* the first column's middle: of a spread's two, the left one, or the
      right one in a book read right to left; set vertically, the first
      line, at the page's right edge (or its left, for vertical-lr) *)
-  val x = (case+ !_vertical of
+  val x = (case+ _writing() of
     | VerticalRightToLeft() => page_left + page_width - 12
     | VerticalLeftToRight() => page_left + 12
     | Horizontal() =>
@@ -700,7 +739,9 @@ in if page_width > 8 then (scroll_width + page_width - 8) / page_width else 1 en
    column and its gap, exactly the page's height), past a few pixels of
    rounding *)
 fn _count_pages (): [count:int] int count =
-  case+ _page_axis() of
+  (* a fixed page is the page shown whole *)
+  if _is_fixed() then 1
+  else case+ _page_axis() of
   | Down() => let
       val height = $DR.get_measure_h()
       val scroll_height = $DR.get_measure_scroll_h()
@@ -714,7 +755,75 @@ fn _count_pages (): [count:int] int count =
   | Across() => _count_across()
   | AcrossBack() => _count_across()
 
+(* The id of a fixed page's box *)
+fn _box_id (): [l:agz] @($A.arr(byte, l, 8), int 8) = let
+  val box_id = $A.alloc<byte>(8)
+  val () = $A.write_text(box_id, 0, $A.text_lit("page-box"), 8)
+in @(box_id, 8) end
+
+(* The size of the last fixed page shown that had one (its viewport
+   meta): a fixed page without one is given it, as EPUB RS 3.3 §8.1.2
+   allows. Forgotten when a book opens (_spine_build) *)
+val _page_size = ref<viewport>(NoViewport())
+
+fn _page_size_take (): viewport = let
+  var cell: viewport = NoViewport()
+  val () = ref_exch_elt<viewport>(_page_size, cell)
+in cell end
+
+fn _page_size_put (size: viewport): void = let
+  var cell: viewport = size
+  val () = ref_exch_elt<viewport>(_page_size, cell)
+in viewport_free(cell) end
+
+(* A fixed page's viewport, kept for it and the pages after it that
+   have none *)
+fn _page_size_keep (size: viewport): void =
+  case+ size of
+  | ~NoViewport() => ()
+  | ~Viewport(width, height) => _page_size_put(Viewport(width, height))
+
+(* A length measured on the screen, as a fixed page's size: 1 to 10000
+   CSS pixels *)
+fn _box_length (length: int): [box_length:pos | box_length <= 10000] int box_length = let
+  val length = g1ofg0(length)
+in if length < 1 then 1 else if length > 10000 then 10000 else length end
+
+(* How much a page of width by height is scaled to fit whole in a slot
+   of slot_width by slot_height, in thousandths: the smaller of the two
+   ratios, letter-boxed (as Thorium's Fit does) *)
+fn _fit_zoom (slot_width: int, slot_height: int, width: int, height: int): [zoom:pos | zoom <= 10000] int zoom = let
+  val across = (if width > 0 then slot_width * 1000 / width else 1000): int
+  val down = (if height > 0 then slot_height * 1000 / height else 1000): int
+  val smaller = (if across < down then across else down): int
+  val zoom = g1ofg0(smaller)
+in if zoom < 1 then 1 else if zoom > 10000 then 10000 else zoom end
+
+(* A fixed page is laid out as its own size, its viewport (else the
+   last fixed page's; else the slot's), and scaled to fit the slot: the
+   page, the whole reader view, the bars over it as they are over a
+   reflowed page. Its box is centred in the page (.caf.fixed); this
+   sizes and scales it, at each layout, so a resize fits it again *)
+fn _fixed_fit (): void =
+  if ~_is_fixed() then ()
+  else let
+    val () = _measure_literal("page")
+    val slot_width = $DR.get_measure_w()
+    val slot_height = $DR.get_measure_h()
+    val size = _page_size_take()
+    val @(box_id, box_id_len) = _box_id()
+  in
+    case+ size of
+    | Viewport(width, height) => let
+        val () = ui_fixed_box_n(box_id, box_id_len, width, height, _fit_zoom(slot_width, slot_height, width, height))
+      in _page_size_put(size) end
+    | ~NoViewport() => let
+        val () = _page_size_put(NoViewport())
+      in ui_fixed_box_n(box_id, box_id_len, _box_length(slot_width), _box_length(slot_height), 1000) end
+  end
+
 fn _measure_pagination(): void = let
+  val () = _fixed_fit()
   val page_id = $A.alloc<byte>(4)
   val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
@@ -1022,11 +1131,21 @@ val _content_count = ref<[count:nat] int count>(0)
    id as a borrow *)
 (* The id of a content node (or of the content area page, for ~1) in a
    fresh array; with its length *)
+(* What a chapter is rendered into: the page, or a fixed page's box in
+   it (page-box, _box_add) *)
+datatype render_into =
+  | IntoPage
+  | IntoPageBox
+
+val _render_into = ref<render_into>(IntoPage())
+
 fn _node_id {node:int | node >= ~1} (node: int node): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
-  if node < 0 then let
-    val page_id = $A.alloc<byte>(4)
-    val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
-  in @(page_id, 4) end
+  if node < 0 then (case+ !_render_into of
+    | IntoPage() => let
+        val page_id = $A.alloc<byte>(4)
+        val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+      in @(page_id, 4) end
+    | IntoPageBox() => _box_id())
   else _number_id("c", node, 3)
 
 (* A new element <tag> for a content node, the last child of the node parent *)
@@ -1779,11 +1898,12 @@ fun _load_images {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len
 
 (* The chapters from spine itemref item down to the first, onto found: each
    href, after the OPF's directory (prefix_len bytes of the name at
-   opf_name_offset), found in book serial's index; the OPF's data checked here, once *)
+   opf_name_offset), found in book serial's index, with its layout (its
+   itemref's, else book_layout); the OPF's data checked here, once *)
 fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
   {l:agz}{n:pos}{tree_size:nat}{item:int | item >= ~1}{found_count:nat} .<item + 1>.
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
-   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size),
+   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), book_layout: rendition_layout,
    item: int item, found: book_chapters(file_size, found_count)): book_chapters(file_size, found_count + item + 1) =
   if item < 0 then found
   else let
@@ -1807,9 +1927,10 @@ fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_na
           case+ hit of
           | ~EntryMiss() => ChapterMissing(found)
           | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
-              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len), found)
+              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
+                itemref_layout_n(opf_bytes, nodes, item, book_layout), found)
         end): book_chapters(file_size, found_count + 1)
-  in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item - 1, chapters) end
+  in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout, item - 1, chapters) end
 
 (* ============================================================
    The book's own font, for the "Book" font setting
@@ -1968,22 +2089,34 @@ in
        end)
 end
 
-(* The book is set as vertical says (_vertical): set vertically, it is
+(* The typography's rows the chapter shown takes. Set vertically, it is
    always paged, one column a screen, and its words and lines are the
    book's own, so the settings of the page's layout and of its words'
-   spacing and breaking are not offered (as Readium does) *)
-fn _vertical_set (vertical: writing_mode): void = let
-  val () = !_vertical := vertical
-  val horizontal = ~_is_vertical()
+   spacing and breaking are not offered (as Readium does). A fixed page
+   is not restyled at all (as Thorium does): only the theme, and what
+   the reader does rather than how the page looks (taps, keys, reading
+   aloud, the screen), are offered *)
+fn _rows_set (): void = let
+  val reflowed = ~_is_fixed()
+  val horizontal = (if reflowed then ~_is_vertical() else false): bool
+  val () = ui_show("font-row", reflowed)
+  val () = ui_show("size-row", reflowed)
+  val () = ui_show("line-height-row", reflowed)
+  (* the paragraphs' spacing stays set vertically: it is logical
+     (margin-block-end), between their columns of lines *)
+  val () = ui_show("paragraph-row", reflowed)
   val () = ui_show("layout-row", horizontal)
   val () = ui_show("columns-row", horizontal)
   val () = ui_show("margins-row", horizontal)
-  (* the paragraphs' spacing stays: it is logical (margin-block-end),
-     between their columns of lines when set vertically *)
   val () = ui_show("letter-row", horizontal)
   val () = ui_show("word-row", horizontal)
   val () = ui_show("align-row", horizontal)
 in ui_show("hyphens-row", horizontal) end
+
+(* The book is set as vertical says (_vertical) *)
+fn _vertical_set (vertical: writing_mode): void = let
+  val () = !_vertical := vertical
+in _rows_set() end
 
 (* Finds book s's chapters from its OPF and keeps them in the book: its
    chapter count, or below 0 when the OPF cannot be read *)
@@ -2012,11 +2145,13 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                   prefixes chapter hrefs *)
                val prefix_len = _opf_prefix_len(serial, file_size, opf_name_offset, opf_name_len)
                val chapters = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
-                           opf_bytes, opf_size, opf_nodes, total - 1, ChaptersNil())
+                           opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil())
                val () = book_spine_set(serial, file_size, chapters, total)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = !_right_to_left := spine_rtl(opf_bytes, opf_nodes)
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
+               (* a new book's fixed pages take no size from another's *)
+               val () = _page_size_put(NoViewport())
                val () = _lang_locate(opf_bytes, opf_nodes)
                val () = _font_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
@@ -2024,6 +2159,25 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val () = piece_free(opf_owner, $A.thaw<byte>(opf_frozen))
              in $P.ret<int>(total) end)
        end)
+
+(* A fixed page's box, page-box, the page's one child (styled as .caf.fixed>* is):
+   its content is rendered into it, and it is sized and scaled by
+   _fixed_fit *)
+fn _box_make {doc_location:agz} (doc: !$D.document(doc_location)): void = let
+  val page_id = $A.alloc<byte>(4)
+  val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
+  val @(page_frozen, page_bytes) = $A.freeze<byte>(page_id)
+  val @(box_id, box_id_len) = _box_id()
+  val @(box_frozen, box_bytes) = $A.freeze<byte>(box_id)
+  val () = $D.add_element(doc, page_bytes, 4, box_bytes, box_id_len, $D.Div)
+  val () = release_bytes(box_frozen, box_bytes)
+in release_bytes(page_frozen, page_bytes) end
+
+(* The box, for a fixed page *)
+fn _box_add {doc_location:agz} (doc: !$D.document(doc_location), layout: rendition_layout): void =
+  case+ layout of
+  | Reflowable() => ()
+  | PrePaginated() => _box_make(doc)
 
 (* Shows chapter chapter_index of book serial, from its chapters *)
 fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
@@ -2033,7 +2187,7 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in $P.ret<int>(~4) end
-  | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, chapter_count) => let
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, layout, chapter_count) => let
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
@@ -2069,15 +2223,30 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pictures_put(PicturesCell(pictures_nil()))
                   val () = _breaks_put(BreaksCell(breaks_nil()))
-                  (* set vertically, not rtl: direction:rtl would turn the
-                     inline axis, down the page, upward *)
-                  val () = (case+ !_vertical of
+                  (* a fixed page, its own size (_fixed_fit); reflowed, the
+                     page's inline style taken away. Set vertically, not
+                     rtl: direction:rtl would turn the inline axis, down
+                     the page, upward *)
+                  val () = !_layout := layout
+                  val size = xhtml_viewport(xhtml_bytes, nodes)
+                  val () = (case+ layout of
+                    | PrePaginated() => let
+                        val () = ui_attr("page", AClass, "caf fixed")
+                        val () = !_render_into := IntoPageBox()
+                      in _page_size_keep(size) end
+                    | Reflowable() => viewport_free(size))
+                  val () = _box_add(doc, layout)
+                  val () = (case+ _writing() of
                     | VerticalRightToLeft() => ui_attr("page", AClass, "caf vertical")
                     | VerticalLeftToRight() => ui_attr("page", AClass, "caf vertical-lr")
-                    | Horizontal() => if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf"))
+                    | Horizontal() => (case+ layout of
+                      | PrePaginated() => ()
+                      | Reflowable() => if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf")))
+                  val () = _rows_set()
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
                   val found = _render_nodes(doc, xhtml_bytes, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
@@ -2112,7 +2281,7 @@ in
       else $P.and_then<int><int>(toc_build(serial), llam(_) =>
         $P.and_then<int><int>(_font_load(serial), llam(_) => _chapter_open(serial, chapter_index, generation))))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_index, generation)
-  | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
+  | ~ChapterGot(_, _, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
 end
 
 (* Shows the page of the chapter just loaded that target names: the
@@ -2726,7 +2895,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
   else (case+ book_chapter_get(serial, chapter) of
     | ~ChaptersUnknown() => _search_done(generation)
     | ~ChapterNone(_) => _search_chapters(serial, chapter + 1, chapter_count, generation)
-    | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+    | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
       (case+ piece_new(compressed_size) of
        | ~NoPiece() => _search_chapters(serial, chapter + 1, chapter_count, generation)
        | ~Piece(compressed_owner, compressed) => let
@@ -3114,7 +3283,7 @@ in
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() => _note_follow()
   | ~ChapterNone(_) => _note_follow()
-  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
     (case+ piece_new(compressed_size) of
      | ~NoPiece() => _note_follow()
      | ~Piece(compressed_owner, compressed) => let
@@ -3923,7 +4092,7 @@ in
   case+ book_chapter_get(serial, chapter) of
   | ~ChaptersUnknown() => $P.ret<script>(NoScript())
   | ~ChapterNone(_) => $P.ret<script>(NoScript())
-  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
     (case+ piece_new(compressed_size) of
      | ~NoPiece() => $P.ret<script>(NoScript())
      | ~Piece(compressed_owner, compressed) => let
