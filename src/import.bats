@@ -215,14 +215,14 @@ fn _store_a11y {l:agz}{n:pos}
 in release_bytes(record_frozen, record_bytes) end
 
 (* The cover, the entry named dir(opf) + href, stored under 'c' for book
-   (id_high, id_low); its type code, 0 when there is none *)
+   (id_high, id_low); its type, NotAnImage when there is none *)
 fn _store_cover {file_size:pos}{l:agz}{n:pos}{href_offset,href_len:nat | href_offset + href_len <= n}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
-   data: !$A.borrow(byte, l, n), n: int n, href_offset: int href_offset, href_len: int href_len, id_high: Int, id_low: Int): [type_code:nat | type_code <= 5] int type_code = let
+   data: !$A.borrow(byte, l, n), n: int n, href_offset: int href_offset, href_len: int href_len, id_high: Int, id_low: Int): image_type = let
   val href_path_len = src_end(data, href_offset, href_len)
 in
-  if href_path_len <= 0 then 0
-  else if href_path_len >= 65536 then 0
+  if href_path_len <= 0 then NotAnImage()
+  else if href_path_len >= 65536 then NotAnImage()
   else let
     val opf_name = $A.alloc<byte>(opf_name_len)
     val _ = book_read(serial, file_size, opf_name_offset, opf_name, opf_name_len)
@@ -234,18 +234,18 @@ in
     val () = $S.copy_from_borrow(data, href_offset, n, path, dir_len, path_size, href_path_len)
     val resolved_len = path_norm(path, path_size)
   in
-    if resolved_len <= 0 then let val () = $A.free<byte>(path) in 0 end
+    if resolved_len <= 0 then let val () = $A.free<byte>(path) in NotAnImage() end
     else let
       val exact = $A.alloc<byte>(resolved_len)
       val path = $S.copy_arr_region(path, 0, path_size, exact, resolved_len, resolved_len)
       val () = $A.free<byte>(path)
       val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
-      val code = mime_code_of(exact_bytes, resolved_len)
+      val image = image_type_of(exact_bytes, resolved_len)
       val got = book_zip_read(serial, file_size, exact_bytes, resolved_len)
       val () = release_bytes(exact_frozen, exact_bytes)
     in
       case+ got of
-      | ~ZipMissing() => 0
+      | ~ZipMissing() => NotAnImage()
       | ~ZipGot(owner, cover_data, cover_size, cover_method, _, _, _) =>
         case+ cover_method of
         | $Z.Stored() => let
@@ -257,7 +257,7 @@ in
           val () = release_bytes(key_frozen, key_bytes)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
-        in code end
+        in image end
         | $Z.Deflated() => let
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
           val decompressing = decompress(cover_bytes, cover_size, zip_compression(cover_method))
@@ -275,25 +275,25 @@ in
                 val () = release_bytes(key_frozen, key_bytes)
                 val () = $A.drop<byte>(content_frozen, content_bytes)
               in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
-        in code end
+        in image end
     end
   end
 end
 
 fn _cover_of {file_size:pos}{l:agz}{n:pos}{tree_size:nat}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
   (mode: int, serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len, opf_bytes: !$A.borrow(byte, l, n), n: int n,
-   nodes: !$X.xml_node_list(n, tree_size), id_high: Int, id_low: Int): [type_code:nat | type_code <= 5] int type_code =
-  if mode = MODE_OPEN then 0
+   nodes: !$X.xml_node_list(n, tree_size), id_high: Int, id_low: Int): image_type =
+  if mode = MODE_OPEN then NotAnImage()
   else case+ find_cover_href(opf_bytes, n, nodes) of
   | ~xspan_at(href_offset, href_len) => _store_cover(serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, href_offset, href_len, id_high, id_low)
-  | ~xspan_none() => 0
+  | ~xspan_none() => NotAnImage()
 
 (* The store of the book of key's file (in a new import, or over its
    old one) has ended: when it failed, the banner says so by its title.
    The book is open, but nothing can open it again once it is closed,
    so this is said each time *)
 fn _title_into {l:agz} (buffer: !$A.arr(byte, l, 512), key: Int): [name_len:nat | name_len < 256] int name_len = let
-  val @(title, title_len) = lib_text(lib_index_of_key(key), 0)
+  val @(title, title_len) = lib_text(lib_index_of_key(key), TitleText())
 in
   if title_len > 0 then let
     val () = _copy_into(title, title_len, buffer, 0, 0)
@@ -362,11 +362,11 @@ in
     in key end
     else let
       val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(library_index, @{
-        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = 0, added = record.added, opened = record.opened,
+        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = OnShelf(), added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
-        file_size = file_size, cover = (if cover > 0 then (cover: Int) else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
+        file_size = file_size, cover = (if is_image(cover) then cover else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
         (* back on the shelf: a change sync passes on *)
-        shelf_modified = (if record.shelf <> 0 then stamp_now() else record.shelf_modified), collections_modified = record.collections_modified,
+        shelf_modified = (if same_shelf(record.shelf, OnShelf()) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
         finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
       val key = (case+ lib_nums(library_index) of
@@ -558,11 +558,11 @@ in
       | ~$R.none() => _import_go(book_file, file_size, id_high, id_low, ~1)
       | ~$R.some(record) =>
         (* An archived book is restored by importing it again *)
-        if record.shelf = 2 then _import_go(book_file, file_size, id_high, id_low, library_index)
+        if same_shelf(record.shelf, Archived()) then _import_go(book_file, file_size, id_high, id_low, library_index)
         else let
           val @(answer_promise, resolver) = $P.create<Int>()
           val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
-          val @(title, title_len) = lib_text(library_index, 0)
+          val @(title, title_len) = lib_text(library_index, TitleText())
           val message = $A.alloc<byte>(320)
           val () = _copy_into(title, title_len, message, 0, 0)
           val () = $A.free<byte>(title)

@@ -137,11 +137,11 @@ fn _settings_chunk (): jchunk =
       val next = jw_lit(out, next, ",\"narrationReadsNotes\":")
       val next = _narration_notes_json(out, next)
       val next = jw_lit(out, next, ",\"sort\":")
-      val next = jw_int(out, next, lib_sort_get())
+      val next = jw_int(out, next, sort_code(lib_sort_get()))
       val next = jw_lit(out, next, ",\"libraryGrid\":")
-      val next = jw_int(out, next, lib_grid_get())
+      val next = jw_int(out, next, layout_code(lib_grid_get()))
       val next = jw_lit(out, next, ",\"libraryFilter\":")
-      val next = jw_int(out, next, lib_filter_get())
+      val next = jw_int(out, next, filter_code(lib_filter_get()))
       val next = jw_lit(out, next, ",\"dailyGoal\":")
       val next = jw_int(out, next, stats_goal_get())
       val next = jw_lit(out, next, "}")
@@ -259,7 +259,7 @@ implement backup_numbers_of (nums, numbers) = let
   val () = $A.set<Int>(numbers, 0, nums.id_high)
   val () = $A.set<Int>(numbers, 1, nums.id_low)
   val () = $A.set<Int>(numbers, 2, 1)
-  val () = $A.set<Int>(numbers, SLOT_SHELF, nums.shelf)
+  val () = $A.set<Int>(numbers, SLOT_SHELF, shelf_code(nums.shelf))
   val () = $A.set<Int>(numbers, SLOT_ADDED, nums.added)
   val () = $A.set<Int>(numbers, SLOT_OPENED, nums.opened)
   val () = $A.set<Int>(numbers, SLOT_CHAPTER, nums.chapter)
@@ -415,8 +415,8 @@ implement backup_book_chunk (book_index, numbers, first) =
   case+ piece_new(4096) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
-      val @(title, title_len) = lib_text(book_index, 0)
-      val @(author, author_len) = lib_text(book_index, 1)
+      val @(title, title_len) = lib_text(book_index, TitleText())
+      val @(author, author_len) = lib_text(book_index, AuthorText())
       val next = (if first then jw_lit(out, 0, "{\"id\":") else jw_lit(out, 0, "},{\"id\":"))
         : [after:int | 6 <= after; after <= 8] int after
       val next = jw_id(out, next, $A.get<Int>(numbers, 0), $A.get<Int>(numbers, 1))
@@ -606,12 +606,13 @@ fn _in_range (value: Int, low: Int, high: Int, fallback: Int): Int =
 
 (* Library book book_index's numbers set from numbers (its collections
    as the library numbers them), each one the numbers do not give left
-   as it is: a shelf up to shelf_most (2 from a backup, which puts
-   nothing in the Trash; 3 from sync) *)
+   as it is: any shelf when to_trash (from sync), any but the Trash when
+   not (from a backup, which puts nothing in the Trash) *)
 #pub fn backup_apply_numbers {book_index:int}{numbers_loc:agz}
-  (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), shelf_most: int): void
-implement backup_apply_numbers (book_index, numbers, shelf_most) = let
-  val shelf = _in_range($A.get<Int>(numbers, SLOT_SHELF), 0, g1ofg0(shelf_most), 0)
+  (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), to_trash: bool): void
+implement backup_apply_numbers (book_index, numbers, to_trash) = let
+  val shelf = shelf_of_code($A.get<Int>(numbers, SLOT_SHELF))
+  val shelf = (if to_trash then shelf else (case+ shelf of Trash() => OnShelf() | _ => shelf)): shelf
   val added = $A.get<Int>(numbers, SLOT_ADDED)
   val opened = _in_range($A.get<Int>(numbers, SLOT_OPENED), 0, 2147483647, 0)
   val chapter = _in_range($A.get<Int>(numbers, SLOT_CHAPTER), 0, 2147483647, 0)
@@ -653,7 +654,7 @@ fn _claim_apply {numbers_loc:agz} (id_high: Int, id_low: Int, numbers: !$A.arr(I
   val book_index = lib_find(id_high, id_low)
 in
   if book_index >= 0 then let
-    val () = backup_apply_numbers(book_index, numbers, 3)
+    val () = backup_apply_numbers(book_index, numbers, true)
     val () = lib_save()
   in lib_render() end
   else ()
@@ -950,7 +951,7 @@ fn _restore_book {l,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{annotations_star
     val () = backup_map_collections(numbers, map)
     val () = _dated(numbers)
     val book_index = lib_find(id_high, id_low)
-    val () = (if book_index >= 0 then backup_apply_numbers(book_index, numbers, 2) else backup_orphan_put(id_high, id_low, numbers))
+    val () = (if book_index >= 0 then backup_apply_numbers(book_index, numbers, false) else backup_orphan_put(id_high, id_low, numbers))
     val () = (if annotations >= 0 then let
         val _ = annot_json_store(buf, n, annotations, id_high, id_low)
       in () end else ())
@@ -1023,8 +1024,8 @@ end
 (* The settings object's members from position, to its closing brace,
    each applied when it is in range; the library's sort order *)
 fun _settings_members {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16), sort: int)
-  : [stop:int | position <= stop; stop <= n] @(bool, int, int stop) = let
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16), sort: sort_order)
+  : [stop:int | position <= stop; stop <= n] @(bool, sort_order, int stop) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, sort, n)
@@ -1060,7 +1061,7 @@ in
              in voices_end end else n): [after:int | position < after; after <= n] int after
          in _settings_members(buf, n, after, key, sort) end
          else _settings_members(buf, n, jr_skip(buf, n, value_start), key, sort))
-        : [stop:int | position <= stop; stop <= n] @(bool, int, int stop)
+        : [stop:int | position <= stop; stop <= n] @(bool, sort_order, int stop)
       else if jr_key_is(key, key_len, "readingSpeed") then let
         val () = set_speech_rate_set(speech_rate_of_hundredths(value))
       in _settings_members(buf, n, stop, key, sort) end
@@ -1096,11 +1097,11 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "libraryGrid") then let
         val () = (if value >= 0 then (if value <= 1 then
-          lib_state_set(lib_sort_get() + 8 * value + 16 * lib_filter_get()) else ()) else ())
+          lib_view_set(layout_of_code(value), lib_filter_get()) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "libraryFilter") then let
         val () = (if value >= 0 then (if value <= 3 then
-          lib_state_set(lib_sort_get() + 8 * lib_grid_get() + 16 * value) else ()) else ())
+          lib_view_set(lib_grid_get(), filter_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "dailyGoal") then let
         val () = (if value >= 0 then (if value <= 600 then stats_goal_set(value) else ()) else ())
@@ -1134,7 +1135,7 @@ in
         val () = (if value >= 0 then (if value <= 16 then set_ws_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "sort") then
-        _settings_members(buf, n, stop, key, (if value >= 0 then (if value <= 4 then value else sort) else sort))
+        _settings_members(buf, n, stop, key, (if value >= 0 then (if value <= 4 then sort_of_code(value) else sort) else sort))
       else _settings_members(buf, n, stop, key, sort)
     end
   end
@@ -1176,8 +1177,8 @@ end
    is 1), the books put back, and the sort order *)
 fun _top_members {l,key_loc,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
   (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16),
-   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), map: !$A.arr(Int, map_loc, MAP_SIZE), quire: bool, books: int, sort: int)
-  : @(bool, int, int) = let
+   numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), map: !$A.arr(Int, map_loc, MAP_SIZE), quire: bool, books: int, sort: sort_order)
+  : @(bool, int, sort_order) = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then @(false, books, sort)

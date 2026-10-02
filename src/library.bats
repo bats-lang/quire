@@ -19,6 +19,7 @@ staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
+staload "paths.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
@@ -28,6 +29,33 @@ implement $P.dispose<reply>(_) = ()
    Records
    ============================================================ *)
 
+(* Where a book is kept: on the shelf, hidden, archived, or in the
+   Trash *)
+#pub datatype shelf = OnShelf | Hidden | Archived | Trash
+
+(* Whether two shelves are the same *)
+#pub fn same_shelf (a: shelf, b: shelf): bool
+
+implement same_shelf (a, b) =
+  case+ (a, b) of
+  | (OnShelf(), OnShelf()) => true | (Hidden(), Hidden()) => true
+  | (Archived(), Archived()) => true | (Trash(), Trash()) => true
+  | (_, _) => false
+
+(* A shelf as the library and backups store it: 0 the shelf, 1 hidden,
+   2 archived, 3 the Trash *)
+#pub fn shelf_code (s: shelf): [code:nat | code <= 3] int code
+
+implement shelf_code (s) =
+  case+ s of OnShelf() => 0 | Hidden() => 1 | Archived() => 2 | Trash() => 3
+
+(* The shelf a stored code stands for (shelf_code); the shelf for any
+   other *)
+#pub fn shelf_of_code (code: int): shelf
+
+implement shelf_of_code (code) =
+  if code = 1 then Hidden() else if code = 2 then Archived() else if code = 3 then Trash() else OnShelf()
+
 (* A book's numbers. Its id is the first 14 hex digits of its file's
    SHA-256, as two 28-bit halves (id_high the first 7 digits, id_low
    the last 7); its key numbers it in this run (it is not stored).
@@ -35,7 +63,7 @@ implement $P.dispose<reply>(_) = ()
 #pub typedef bnums = @{
   key = Int,
   id_high = Int, id_low = Int,
-  shelf = Int,          (* 0 on the shelf, 1 hidden, 2 archived, 3 in the Trash *)
+  shelf = shelf,
   added = Int,
   opened = Int,         (* 0 when never read *)
   chapter = Int,        (* the chapter read last, from 0 *)
@@ -44,7 +72,7 @@ implement $P.dispose<reply>(_) = ()
   pages = Int,
   anchor = Int,         (* the content node at that page's start, -1 none *)
   file_size = Int,      (* the file's bytes *)
-  cover = Int,          (* the cover image's type (mime_str), 0 none *)
+  cover = image_type,   (* the cover image's type, NotAnImage when none *)
   done = Int,           (* 1 when the last page was reached *)
   series_number = Int,  (* its number in its series, 0 when none is given *)
   collections = Int,    (* the collections it is in: collection j is bit j *)
@@ -101,10 +129,35 @@ datavtype lib_cell =
 val _lib = ref<lib_cell>(LibCell(books_nil(), 0))
 val _next_key = ref<Int>(1)
 
-(* 0 last opened, 1 title, 2 author, 3 date added *)
-val _sort_order = ref<int>(0)
-(* 0 the shelf, 1 hidden, 2 archived, 3 the Trash *)
-val _shelf = ref<int>(0)
+(* The orders the library sorts its books in *)
+#pub datatype sort_order = LastOpened | ByTitle | ByAuthor | DateAdded | BySeries
+
+(* The next order the sort button gives *)
+#pub fn sort_next (order: sort_order): sort_order
+
+implement sort_next (order) =
+  case+ order of
+  | LastOpened() => ByTitle() | ByTitle() => ByAuthor() | ByAuthor() => DateAdded()
+  | DateAdded() => BySeries() | BySeries() => LastOpened()
+
+(* An order as backups and the settings keep it: 0 last opened, 1 title,
+   2 author, 3 date added, 4 series *)
+#pub fn sort_code (order: sort_order): [code:nat | code <= 4] int code
+
+implement sort_code (order) =
+  case+ order of
+  | LastOpened() => 0 | ByTitle() => 1 | ByAuthor() => 2 | DateAdded() => 3 | BySeries() => 4
+
+(* The order a kept code stands for (sort_code); last opened for any
+   other *)
+#pub fn sort_of_code (code: int): sort_order
+
+implement sort_of_code (code) =
+  if code = 1 then ByTitle() else if code = 2 then ByAuthor() else if code = 3 then DateAdded()
+  else if code = 4 then BySeries() else LastOpened()
+
+val _sort_order = ref<sort_order>(LastOpened())
+val _shelf = ref<shelf>(OnShelf())
 (* The library view's render: an image that arrives after another
    render is not shown *)
 val _render_gen = ref<int>(0)
@@ -149,10 +202,10 @@ implement lib_count () = let
   val () = lib_put(cell)
 in count end
 
-#pub fn lib_sort_get (): int
+#pub fn lib_sort_get (): sort_order
 implement lib_sort_get () = !_sort_order
 
-#pub fn lib_shelf_get (): int
+#pub fn lib_shelf_get (): shelf
 implement lib_shelf_get () = !_shelf
 
 (* ============================================================
@@ -344,9 +397,11 @@ fun _copy {source_loc,dest_loc:agz}{source_len,source_size,dest_size:nat | sourc
     val () = $A.set<byte>(dest, start + j, $A.get<byte>(source, j))
   in _copy(source, source_len, dest, start, j + 1) end
 
-(* The title or author (which: 0 title, 1 author) of the book at index,
-   in a fresh array *)
-fun _text_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int index, which: int)
+(* Which text of a book: its title or its author *)
+#pub datatype book_text = TitleText | AuthorText
+
+(* The title or author (which) of the book at index, in a fresh array *)
+fun _text_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int index, which: book_text)
   : [l:agz][n:nat | n < 256] @($A.arr(byte, l, n + 1), int n) =
   case+ books of
   | books_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
@@ -354,21 +409,21 @@ fun _text_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int 
     if index = 0 then let
       val+ Book(title, title_len, author, author_len, _, _, _) = book
     in
-      if which = 0 then let
-        val text = $A.alloc<byte>(title_len + 1)
-        val () = _copy(title, title_len, text, 0, 0)
-      in @(text, title_len) end
-      else let
-        val text = $A.alloc<byte>(author_len + 1)
-        val () = _copy(author, author_len, text, 0, 0)
-      in @(text, author_len) end
+      case+ which of
+      | TitleText() => let
+          val text = $A.alloc<byte>(title_len + 1)
+          val () = _copy(title, title_len, text, 0, 0)
+        in @(text, title_len) end
+      | AuthorText() => let
+          val text = $A.alloc<byte>(author_len + 1)
+          val () = _copy(author, author_len, text, 0, 0)
+        in @(text, author_len) end
     end
     else _text_at(rest, index - 1, which)
 
-(* The title (which 0) or author (which 1) of the book at index: the
-   bytes and their count (0 when there is no such book) in an array one
-   longer *)
-#pub fn lib_text {index:int} (index: int index, which: int): [l:agz][n:nat | n < 256] @($A.arr(byte, l, n + 1), int n)
+(* The title or author (which) of the book at index: the bytes and their
+   count (0 when there is no such book) in an array one longer *)
+#pub fn lib_text {index:int} (index: int index, which: book_text): [l:agz][n:nat | n < 256] @($A.arr(byte, l, n + 1), int n)
 
 implement lib_text (index, which) =
   if index < 0 then let val empty = $A.alloc<byte>(1) in @(empty, 0) end
@@ -444,7 +499,7 @@ fn _span_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_len 
   (id_high: Int, id_low: Int, data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len,
    title_start: int title_start, title_span: int title_span, author_start: int author_start, author_span: int author_span,
    series_start: int series_start, series_span: int series_span, series_index: Int,
-   file_size: Int, cover: Int, now: Int): Int
+   file_size: Int, cover: image_type, now: Int): Int
 
 implement lib_add (id_high, id_low, data, data_len, title_start, title_span, author_start, author_span,
                    series_start, series_span, series_index, file_size, cover, now) = let
@@ -461,7 +516,7 @@ in
     val @(author, author_len) = _span_arr(data, data_len, author_start, author_span, "Unknown Author")
     val @(series, series_len) = _series_arr(data, data_len, series_start, series_span)
     val nums = @{
-      key = key, id_high = id_high, id_low = id_low, shelf = 0, added = now, opened = 0,
+      key = key, id_high = id_high, id_low = id_low, shelf = OnShelf(), added = now, opened = 0,
       chapter = 0, chapters = 0, page = 0, pages = 0, anchor = ~1, file_size = file_size, cover = cover, done = 0,
       series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
       shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
@@ -549,7 +604,7 @@ in release_bytes(key_frozen, key_bytes) end
 
 (* Sets the shelf of the book at index, and keeps and shows the
    library *)
-#pub fn lib_set_shelf {index:int} (index: int index, shelf: Int): void
+#pub fn lib_set_shelf {index:int} (index: int index, shelf: shelf): void
 
 implement lib_set_shelf (index, shelf) = let
   val () = (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
@@ -572,7 +627,7 @@ implement lib_trash (index) =
   | ~$R.some(nums) => let
       val key = nums.key
       val old_shelf = nums.shelf
-      val () = lib_set_shelf(index, 3)
+      val () = lib_set_shelf(index, Trash())
     in
       $P.finish<settled>(undo_offer("Moved to Trash"), llam(how) =>
         case+ how of
@@ -598,7 +653,7 @@ fun _first_trashed {i,count:nat | i <= count} .<count - i>. (i: int i, count: in
   if i >= count then ~1
   else (case+ lib_nums(i) of
     | ~$R.none() => _first_trashed(i + 1, count)
-    | ~$R.some(nums) => if nums.shelf = 3 then i else _first_trashed(i + 1, count))
+    | ~$R.some(nums) => if same_shelf(nums.shelf, Trash()) then i else _first_trashed(i + 1, count))
 
 (* Deletes the books in the Trash, at most left of them *)
 fun _empty_trash {left:nat} .<left>. (left: int left): void =
@@ -629,7 +684,7 @@ implement lib_ask_harm (harm) =
 (* Each book's key and the shelf it was on *)
 #pub datavtype shelved_list(int) =
   | ShelvedNil(0) of ()
-  | {count:nat} ShelvedCons(count + 1) of (int, Int, shelved_list(count))
+  | {count:nat} ShelvedCons(count + 1) of (int, shelf, shelved_list(count))
 
 #pub vtypedef shelved = [count:nat] shelved_list(count)
 
@@ -645,7 +700,7 @@ fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int co
   if i >= count then ()
   else let
     val () = (case+ lib_nums(i) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(i, @{
-      key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = 3, added = nums.added, opened = nums.opened,
+      key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = Trash(), added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
@@ -702,59 +757,67 @@ implement lib_shelved_free (shelved) = _shelved_free(shelved)
 fn _lower (byte_value: int): int =
   if byte_value >= 65 then (if byte_value <= 90 then byte_value + 32 else byte_value) else byte_value
 
+(* How one text compares with another *)
+datatype comparison = Before | Same | After
+
 (* first[0, first_len) before second[0, second_len), letters in any case *)
 fun _less {first_loc,second_loc:agz}{first_len,second_len:nat}
   {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i:nat | i <= first_len} .<first_len - i>.
   (first: !$A.arr(byte, first_loc, first_size), first_len: int first_len,
-   second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, i: int i): int =
-  if i >= first_len then (if i >= second_len then 0 else ~1)
-  else if i >= second_len then 1
+   second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, i: int i): comparison =
+  if i >= first_len then (if i >= second_len then Same() else Before())
+  else if i >= second_len then After()
   else let
     val first_byte = _lower(byte2int0($A.get<byte>(first, i)))
     val second_byte = _lower(byte2int0($A.get<byte>(second, i)))
-  in if first_byte < second_byte then ~1 else if first_byte > second_byte then 1
+  in if first_byte < second_byte then Before() else if first_byte > second_byte then After()
      else _less(first, first_len, second, second_len, i + 1) end
 
+fn _is_before (c: comparison): bool = case+ c of Before() => true | _ => false
+
 (* Whether first comes before second in order *)
-fn _before (first: !book, second: !book, order: int): bool = let
+fn _before (first: !book, second: !book, order: sort_order): bool = let
   val+ Book(first_title, first_title_len, first_author, first_author_len, first_series, first_series_len, first_nums) = first
   val+ Book(second_title, second_title_len, second_author, second_author_len, second_series, second_series_len, second_nums) = second
 in
   (* by series: each series together, in its numbers' order, then the
      books of none, by title *)
-  if order = 4 then (if first_series_len > 0 then (if second_series_len > 0 then let
-      val compared = _less(first_series, first_series_len, second_series, second_series_len, 0)
-    in
-      if compared < 0 then true else if compared > 0 then false
-      else if first_nums.series_number <> second_nums.series_number then first_nums.series_number < second_nums.series_number
-      else _less(first_title, first_title_len, second_title, second_title_len, 0) < 0
-    end else true)
-    else (if second_series_len > 0 then false else _less(first_title, first_title_len, second_title, second_title_len, 0) < 0))
-  else if order = 1 then _less(first_title, first_title_len, second_title, second_title_len, 0) < 0
-  else if order = 2 then let
-    val compared = _less(first_author, first_author_len, second_author, second_author_len, 0)
-  in if compared < 0 then true else if compared > 0 then false
-     else _less(first_title, first_title_len, second_title, second_title_len, 0) < 0 end
-  else if order = 3 then first_nums.added > second_nums.added
-  else (if first_nums.opened <> second_nums.opened then first_nums.opened > second_nums.opened
+  case+ order of
+  | BySeries() => (if first_series_len > 0 then (if second_series_len > 0 then
+      (case+ _less(first_series, first_series_len, second_series, second_series_len, 0) of
+       | Before() => true
+       | After() => false
+       | Same() =>
+         if first_nums.series_number <> second_nums.series_number then first_nums.series_number < second_nums.series_number
+         else _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0)))
+      else true)
+    else (if second_series_len > 0 then false else _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0))))
+  | ByTitle() => _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0))
+  | ByAuthor() =>
+    (case+ _less(first_author, first_author_len, second_author, second_author_len, 0) of
+     | Before() => true
+     | After() => false
+     | Same() => _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0)))
+  | DateAdded() => first_nums.added > second_nums.added
+  | LastOpened() => (if first_nums.opened <> second_nums.opened then first_nums.opened > second_nums.opened
         else first_nums.added > second_nums.added)
 end
 
-fun _insert {count:nat} .<count>. (book: book, books: books(count), order: int): books(count + 1) =
+fun _insert {count:nat} .<count>. (book: book, books: books(count), order: sort_order): books(count + 1) =
   case+ books of
   | ~books_nil() => books_cons(book, books_nil())
   | ~books_cons(other, rest) =>
     if _before(book, other, order) then books_cons(book, books_cons(other, rest))
     else books_cons(other, _insert(book, rest, order))
 
-fun _sort {count,sorted_count:nat} .<count>. (books: books(count), sorted: books(sorted_count), order: int)
+fun _sort {count,sorted_count:nat} .<count>. (books: books(count), sorted: books(sorted_count), order: sort_order)
   : books(count + sorted_count) =
   case+ books of
   | ~books_nil() => sorted
   | ~books_cons(book, rest) => _sort(rest, _insert(book, sorted, order), order)
 
 (* Sorts the library in order (and keeps order for later sorts) *)
-#pub fn lib_sort (order: int): void
+#pub fn lib_sort (order: sort_order): void
 
 implement lib_sort (order) = let
   val () = !_sort_order := order
@@ -1393,7 +1456,7 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 856 *
       val () = $A.write_byte(out, author_at, author_len)
       val () = _put_bytes(author, author_len, out, author_at + 1, 0)
       val numbers_at = author_at + 1 + author_len
-      val () = $A.write_i32(out, numbers_at, nums.shelf)
+      val () = $A.write_i32(out, numbers_at, shelf_code(nums.shelf))
       val () = $A.write_i32(out, numbers_at + 4, nums.added)
       val () = $A.write_i32(out, numbers_at + 8, nums.opened)
       val () = $A.write_i32(out, numbers_at + 12, nums.chapter)
@@ -1402,7 +1465,7 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 856 *
       val () = $A.write_i32(out, numbers_at + 24, nums.pages)
       val () = $A.write_i32(out, numbers_at + 28, nums.anchor)
       val () = $A.write_i32(out, numbers_at + 32, nums.file_size)
-      val () = $A.write_i32(out, numbers_at + 36, nums.cover + nums.done * 256)
+      val () = $A.write_i32(out, numbers_at + 36, image_code(nums.cover) + nums.done * 256)
       (* QLB2: the series' name and the book's number in it *)
       val series_at = numbers_at + 40
       val () = $A.write_byte(out, series_at, series_len)
@@ -1519,10 +1582,10 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
         val cover_done = _int32_at(buf, numbers_at + 36)
         val nums = @{
           key = key, id_high = id_high, id_low = id_low,
-          shelf = _int32_at(buf, numbers_at), added = _int32_at(buf, numbers_at + 4), opened = _int32_at(buf, numbers_at + 8),
+          shelf = shelf_of_code(_int32_at(buf, numbers_at)), added = _int32_at(buf, numbers_at + 4), opened = _int32_at(buf, numbers_at + 8),
           chapter = _int32_at(buf, numbers_at + 12), chapters = _int32_at(buf, numbers_at + 16), page = _int32_at(buf, numbers_at + 20),
           pages = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), file_size = _int32_at(buf, numbers_at + 32),
-          cover = $AR.low_byte(cover_done), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
+          cover = image_of_code($AR.low_byte(cover_done)), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
           series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
           shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
         }: bnums
@@ -1715,19 +1778,11 @@ end
 #pub fn lib_progress (nums: bnums): [percent:nat | percent <= 100] int percent
 implement lib_progress (nums) = _progress(nums)
 
-(* The image type code of a mime (the types _mime_of gives) *)
-#pub fn mime_str (code: int): [mime_len:pos | mime_len <= 24] string mime_len
-
-implement mime_str (code) =
-  if code = 1 then "image/png" else if code = 2 then "image/jpeg"
-  else if code = 3 then "image/gif" else if code = 4 then "image/svg+xml"
-  else if code = 5 then "image/webp" else "application/octet-stream"
-
 (* Shows the cover of the book with this id (stored under 'c') in
    element base<index>-cover, unless the view was rendered again since
    generation *)
 fn _show_cover {base_len:pos | base_len <= 16}{index:nat}
-  (base: string base_len, index: int index, id_high: int, id_low: int, code: int, generation: int): void = let
+  (base: string base_len, index: int index, id_high: int, id_low: int, cover: image_type, generation: int): void = let
   val key = lib_key(99, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   val stored = $IDB.idb_get(key_bytes, 15)
@@ -1741,7 +1796,7 @@ in
     | ~StoredContent(owner, buf, n) =>
       if !_render_gen <> generation then piece_free(owner, buf)
       else let
-        val mime = mime_str(code)
+        val mime = image_mime(cover)
         val mime_len = g1u2i(string1_length(mime))
         val mime_text = $A.alloc<byte>(mime_len)
         val () = $A.write_text(mime_text, 0, $A.text_lit(mime), mime_len)
@@ -1885,9 +1940,9 @@ in
       in piece_free(owner, buf) end)
 end
 
-#pub fn lib_show_cover_in {id_len:pos | id_len < 256} (id: string id_len, id_high: int, id_low: int, code: int): void
+#pub fn lib_show_cover_in {id_len:pos | id_len < 256} (id: string id_len, id_high: int, id_low: int, cover: image_type): void
 
-implement lib_show_cover_in (id, id_high, id_low, code) = let
+implement lib_show_cover_in (id, id_high, id_low, cover) = let
   val key = lib_key(99, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
   val stored = $IDB.idb_get(key_bytes, 15)
@@ -1898,7 +1953,7 @@ in
     | ~NoStoredContent() => ()
     | ~ContentUnreadable() => ()
     | ~StoredContent(owner, buf, n) => let
-        val mime = mime_str(code)
+        val mime = image_mime(cover)
         val mime_len = g1u2i(string1_length(mime))
         val mime_text = $A.alloc<byte>(mime_len)
         val () = $A.write_text(mime_text, 0, $A.text_lit(mime), mime_len)
@@ -1956,8 +2011,8 @@ fn _card {index:nat}{base_len,row_len,more_len,parent_len:pos | base_len <= 16; 
   (* cover: decorative, the title is beside it *)
   val @(parent_id, parent_id_len) = nid_make(base, index)
   val @(cover_id, cover_id_len) = nid_make2(base, index, "-cover")
-  val () = ui_img_nn(parent_id, parent_id_len, cover_id, cover_id_len, (if nums.cover > 0 then "cov" else "cov cov0"): [class_len:pos | class_len < 256] string class_len)
-  val () = (if nums.cover > 0 then _show_cover(base, index, nums.id_high, nums.id_low, nums.cover, generation) else ())
+  val () = ui_img_nn(parent_id, parent_id_len, cover_id, cover_id_len, (if is_image(nums.cover) then "cov" else "cov cov0"): [class_len:pos | class_len < 256] string class_len)
+  val () = (if is_image(nums.cover) then _show_cover(base, index, nums.id_high, nums.id_low, nums.cover, generation) else ())
   (* title, author *)
   val @(parent_id, parent_id_len) = nid_make(base, index)
   val @(info_id, info_id_len) = nid_make2(base, index, "-info")
@@ -2020,27 +2075,29 @@ in
   in ui_text_n_buf(percent_id, percent_id_len, percent_text, percent_len) end
 end
 
-(* The library's view: its cards (0 a list, 1 a grid of covers), and
-   which books it shows (0 all, 1 unread, 2 reading, 3 finished) *)
-val _grid = ref<int>(0)
-val _filter = ref<int>(0)
+(* How the library's cards are laid out: a list, or a grid of covers *)
+#pub datatype layout = ListLayout | GridLayout
+
+(* Which books the library shows *)
+#pub datatype book_filter = AllBooks | Unread | BeingRead | Finished
+
+val _grid = ref<layout>(ListLayout())
+val _filter = ref<book_filter>(AllBooks())
 
 (* Whether a book with numbers nums passes the filter *)
-fn _passes (nums: bnums): bool = let
-  val filter = !_filter
-in
-  if filter = 1 then nums.opened <= 0
-  else if filter = 2 then (if nums.opened > 0 then nums.done <= 0 else false)
-  else if filter = 3 then nums.done > 0
-  else true
-end
+fn _passes (nums: bnums): bool =
+  case+ !_filter of
+  | Unread() => nums.opened <= 0
+  | BeingRead() => (if nums.opened > 0 then nums.done <= 0 else false)
+  | Finished() => nums.done > 0
+  | AllBooks() => true
 
-fun _cards {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, shelf: int, query: !query, generation: int, shown: int): int =
+fun _cards {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, shelf: shelf, query: !query, generation: int, shown: int): int =
   case+ books of
   | books_nil() => shown
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-      val visible = (if nums.shelf = shelf then (if _passes(nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
+      val visible = (if same_shelf(nums.shelf, shelf) then (if _passes(nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
       val () = (if visible then _card(book, i, generation, "book", "book-row", "book-more", "book-list", true) else ())
     in _cards(rest, i + 1, shelf, query, generation, (if visible then shown + 1 else shown)) end
 
@@ -2052,7 +2109,7 @@ fun _latest {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, best: 
   | books_nil() => best
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-      val better = (if nums.shelf = 0 then (if nums.done <= 0 then (if nums.opened > 0 then nums.opened > latest_opened else false) else false) else false): bool
+      val better = (if same_shelf(nums.shelf, OnShelf()) then (if nums.done <= 0 then (if nums.opened > 0 then nums.opened > latest_opened else false) else false) else false): bool
     in if better then _latest(rest, i + 1, i, nums.opened) else _latest(rest, i + 1, best, latest_opened) end
 
 (* Card want of books, into the Continue reading section *)
@@ -2064,46 +2121,78 @@ fun _continue_card {count:nat}{i:nat} .<count>. (books: !books(count), i: int i,
     else _continue_card(rest, i + 1, want, generation)
 
 (* The view's controls, pressed as the view is *)
-fn _view_show (): void = let
-  val grid = !_grid
-  val filter = !_filter
-  val () = (if grid = 1 then ui_attr("book-list", AClass, "list grid") else ui_attr("book-list", AClass, "list"))
-  val () = (if grid = 1 then ui_attr("view-grid", APressed, "true") else ui_attr("view-grid", APressed, "false"))
-  val () = (if grid = 1 then ui_attr("view-list", APressed, "false") else ui_attr("view-list", APressed, "true"))
-  val () = (if filter = 0 then ui_attr("filter-books-all", APressed, "true") else ui_attr("filter-books-all", APressed, "false"))
-  val () = (if filter = 1 then ui_attr("filter-unread", APressed, "true") else ui_attr("filter-unread", APressed, "false"))
-  val () = (if filter = 2 then ui_attr("filter-reading", APressed, "true") else ui_attr("filter-reading", APressed, "false"))
-in if filter = 3 then ui_attr("filter-finished", APressed, "true") else ui_attr("filter-finished", APressed, "false") end
+fn _pressed {id_len:pos | id_len < 256} (id: string id_len, pressed: bool): void =
+  if pressed then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
-(* The library's view state, kept with the settings: its sort order
-   (below 8), plus 8 for a grid, plus 16 times the filter *)
+fn _view_show (): void = let
+  val is_grid = (case+ !_grid of GridLayout() => true | ListLayout() => false): bool
+  val filter = !_filter
+  val () = (if is_grid then ui_attr("book-list", AClass, "list grid") else ui_attr("book-list", AClass, "list"))
+  val () = _pressed("view-grid", is_grid)
+  val () = _pressed("view-list", ~is_grid)
+  val () = _pressed("filter-books-all", (case+ filter of AllBooks() => true | _ => false))
+  val () = _pressed("filter-unread", (case+ filter of Unread() => true | _ => false))
+  val () = _pressed("filter-reading", (case+ filter of BeingRead() => true | _ => false))
+in _pressed("filter-finished", (case+ filter of Finished() => true | _ => false)) end
+
+(* A layout as backups and the settings keep it: 0 a list, 1 a grid *)
+#pub fn layout_code (l: layout): [code:nat | code <= 1] int code
+implement layout_code (l) = case+ l of ListLayout() => 0 | GridLayout() => 1
+
+#pub fn layout_of_code (code: int): layout
+implement layout_of_code (code) = if code = 1 then GridLayout() else ListLayout()
+
+(* A filter as backups and the settings keep it: 0 all, 1 unread, 2
+   being read, 3 finished *)
+#pub fn filter_code (f: book_filter): [code:nat | code <= 3] int code
+implement filter_code (f) = case+ f of AllBooks() => 0 | Unread() => 1 | BeingRead() => 2 | Finished() => 3
+
+#pub fn filter_of_code (code: int): book_filter
+implement filter_of_code (code) =
+  if code = 1 then Unread() else if code = 2 then BeingRead() else if code = 3 then Finished() else AllBooks()
+
+(* The library's view as the settings keep it: its sort order (below
+   8), plus 8 for a grid, plus 16 times the filter; packed only to be
+   saved *)
 #pub fn lib_state_get (): int
-implement lib_state_get () = !_sort_order + 8 * !_grid + 16 * !_filter
+implement lib_state_get () = sort_code(!_sort_order) + 8 * layout_code(!_grid) + 16 * filter_code(!_filter)
+
+(* The sort order a kept state holds *)
+#pub fn lib_state_sort (state: int): sort_order
+implement lib_state_sort (state) =
+  if state >= 0 then (if state < 64 then sort_of_code($AR.band_int_int(state, 7)) else LastOpened()) else LastOpened()
 
 (* Sets the view from a kept state (sorts, but does not render) *)
 #pub fn lib_state_set (state: int): void
 implement lib_state_set (state) = let
   val state = (if state >= 0 then (if state < 64 then state else 0) else 0): int
-  val () = !_grid := $AR.band_int_int(state / 8, 1)
-  val () = !_filter := $AR.band_int_int(state / 16, 3)
+  val () = !_grid := layout_of_code($AR.band_int_int(state / 8, 1))
+  val () = !_filter := filter_of_code($AR.band_int_int(state / 16, 3))
   val () = _view_show()
-in lib_sort($AR.band_int_int(state, 7)) end
+in lib_sort(sort_of_code($AR.band_int_int(state, 7))) end
 
-#pub fn lib_grid_set (grid: int): void
+(* Sets the layout and the filter (does not render) *)
+#pub fn lib_view_set (grid: layout, filter: book_filter): void
+implement lib_view_set (grid, filter) = let
+  val () = !_grid := grid
+  val () = !_filter := filter
+in _view_show() end
+
+#pub fn lib_grid_set (grid: layout): void
 implement lib_grid_set (grid) = let
-  val () = !_grid := (if grid = 1 then 1 else 0)
+  val () = !_grid := grid
   val () = _view_show()
 in lib_render() end
 
-#pub fn lib_filter_set (filter: int): void
+#pub fn lib_filter_set (filter: book_filter): void
 implement lib_filter_set (filter) = let
-  val () = !_filter := (if filter >= 0 then (if filter <= 3 then filter else 0) else 0)
+  val () = !_filter := filter
   val () = _view_show()
 in lib_render() end
 
-#pub fn lib_grid_get (): int
+#pub fn lib_grid_get (): layout
 implement lib_grid_get () = !_grid
-#pub fn lib_filter_get (): int
+#pub fn lib_filter_get (): book_filter
 implement lib_filter_get () = !_filter
 
 (* ============================================================
@@ -2178,7 +2267,8 @@ implement lib_render () = let
   (* the book to continue, above the rest: on the shelf, unsearched, in
      no one collection, and unless only unread or finished books are
      shown *)
-  val want = (if shelf = 0 then (if ~has_query then (if !_coll_shown < 0 then (if !_filter = 0 || !_filter = 2 then _latest(books, 0, ~1, 0) else ~1) else ~1) else ~1) else ~1): int
+  val shows_reading = (case+ !_filter of AllBooks() => true | BeingRead() => true | _ => false): bool
+  val want = (if same_shelf(shelf, OnShelf()) then (if ~has_query then (if !_coll_shown < 0 then (if shows_reading then _latest(books, 0, ~1, 0) else ~1) else ~1) else ~1) else ~1): int
   val () = (if want >= 0 then _continue_card(books, 0, want, generation) else ())
   prval () = fold@(library)
   val () = lib_put(library)
@@ -2191,36 +2281,45 @@ in
   if shown > 0 then ()
   else if has_query then ui_text("library-empty", "No books match")
   else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
-  else if !_filter = 1 then ui_text("library-empty", "No unread books")
-  else if !_filter = 2 then ui_text("library-empty", "No books being read")
-  else if !_filter = 3 then ui_text("library-empty", "No finished books")
-  else if shelf = 1 then ui_text("library-empty", "No hidden books")
-  else if shelf = 2 then ui_text("library-empty", "No archived books")
-  else if shelf = 3 then ui_text("library-empty", "The Trash is empty")
-  else ui_text("library-empty", "Import an EPUB file to start reading.")
+  else (case+ !_filter of
+    | Unread() => ui_text("library-empty", "No unread books")
+    | BeingRead() => ui_text("library-empty", "No books being read")
+    | Finished() => ui_text("library-empty", "No finished books")
+    | AllBooks() => (case+ shelf of
+      | Hidden() => ui_text("library-empty", "No hidden books")
+      | Archived() => ui_text("library-empty", "No archived books")
+      | Trash() => ui_text("library-empty", "The Trash is empty")
+      | OnShelf() => ui_text("library-empty", "Import an EPUB file to start reading.")))
 end
 
-(* Shows shelf (0 the shelf, 1 hidden, 2 archived, 3 the Trash) *)
-#pub fn lib_shelf_set (shelf: int): void
+(* Shows shelf *)
+#pub fn lib_shelf_set (shelf: shelf): void
 
 implement lib_shelf_set (shelf) = let
   val () = !_shelf := shelf
 in
-  if shelf = 1 then ui_text("shelf-button", "Hidden")
-  else if shelf = 2 then ui_text("shelf-button", "Archived")
-  else if shelf = 3 then ui_text("shelf-button", "Trash")
-  else ui_text("shelf-button", "Library")
+  case+ shelf of
+  | Hidden() => ui_text("shelf-button", "Hidden")
+  | Archived() => ui_text("shelf-button", "Archived")
+  | Trash() => ui_text("shelf-button", "Trash")
+  | OnShelf() => ui_text("shelf-button", "Library")
 end
 
+(* The next shelf the shelf button shows *)
+#pub fn shelf_next (shelf: shelf): shelf
+implement shelf_next (shelf) =
+  case+ shelf of OnShelf() => Hidden() | Hidden() => Archived() | Archived() => Trash() | Trash() => OnShelf()
+
 (* The sort button's label for order *)
-#pub fn lib_sort_label (order: int): void
+#pub fn lib_sort_label (order: sort_order): void
 
 implement lib_sort_label (order) =
-  if order = 1 then ui_text("sort-button", "Sort: Title")
-  else if order = 2 then ui_text("sort-button", "Sort: Author")
-  else if order = 3 then ui_text("sort-button", "Sort: Date added")
-  else if order = 4 then ui_text("sort-button", "Sort: Series")
-  else ui_text("sort-button", "Sort: Last opened")
+  case+ order of
+  | ByTitle() => ui_text("sort-button", "Sort: Title")
+  | ByAuthor() => ui_text("sort-button", "Sort: Author")
+  | DateAdded() => ui_text("sort-button", "Sort: Date added")
+  | BySeries() => ui_text("sort-button", "Sort: Series")
+  | LastOpened() => ui_text("sort-button", "Sort: Last opened")
 
 (* ============================================================
    Dates and sizes, as text
