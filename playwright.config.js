@@ -13,14 +13,14 @@ export default defineConfig({
   timeout: 90000,
   expect: { timeout: 15000 },
   use: {
-    baseURL: 'http://localhost:3737',
+    baseURL: 'http://localhost:3748',
     screenshot: 'on',
     trace: 'on',
     headless: true,
   },
   webServer: {
-    command: 'npx serve dist/pwa -l 3737 --no-clipboard',
-    port: 3737,
+    command: 'npx serve dist/pwa -l 3748 --no-clipboard',
+    port: 3748,
     reuseExistingServer: !process.env.CI,
   },
   projects: [

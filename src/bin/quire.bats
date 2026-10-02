@@ -1902,10 +1902,10 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val read = _is(clicked, "selection-read")
       val share = _is(clicked, "selection-share")
       val () = _target_free(clicked)
-      val () = (if highlight then let val _ = annot_highlight(0) in () end
-        else if orange then let val _ = annot_highlight(1) in () end
-        else if underline then let val _ = annot_highlight(2) in () end
-        else if note then annot_ask_note(annot_highlight(0), true)
+      val () = (if highlight then let val _ = annot_highlight(Yellow()) in () end
+        else if orange then let val _ = annot_highlight(Orange()) in () end
+        else if underline then let val _ = annot_highlight(Underlined()) in () end
+        else if note then annot_ask_note(annot_highlight(Yellow()), true)
         else if copy then _copy_selection()
         else if search then _search_selection()
         else if define then dict_show()
@@ -1933,13 +1933,18 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val close = _is(clicked, "annotations-close")
       val export_asked = _is(clicked, "annotations-export")
       val share_asked = _is(clicked, "annotations-share")
-      val filter = (if _is(clicked, "filter-all") then ~1 else if _is(clicked, "filter-yellow") then 0
-        else if _is(clicked, "filter-orange") then 1 else if _is(clicked, "filter-underlined") then 2 else ~2): int
+      val filter = (if _is(clicked, "filter-all") then $R.some(EveryStyle())
+        else if _is(clicked, "filter-yellow") then $R.some(OnlyYellow())
+        else if _is(clicked, "filter-orange") then $R.some(OnlyOrange())
+        else if _is(clicked, "filter-underlined") then $R.some(OnlyUnderlined())
+        else $R.none()): $R.option(style_filter)
       val () = _target_free(clicked)
-      val () = (if close then layer_close(LAnnotations())
+      val () = (case+ filter of
+        | ~$R.some(chosen) => annot_filter_set(chosen)
+        | ~$R.none() =>
+        if close then layer_close(LAnnotations())
         else if export_asked then $P.finish<share_end>(_export(ToDownload()), llam(_) => ())
         else if share_asked then _share_annotations(share_as_now())
-        else if filter >= ~1 then annot_filter_set(filter)
         else if go_row >= 0 then let val () = layer_close(LAnnotations()) in _annotation_go(go_row) end
         else if note_row >= 0 then annot_ask_note(note_row, false)
         else if delete_row >= 0 then annot_delete_highlight(delete_row)
