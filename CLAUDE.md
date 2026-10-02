@@ -438,6 +438,9 @@ they are written: a book's `shelf` (`shelf_of_code`, `shelf_code`) and
 cover (`image_of_code`, `image_code`), and the library view's
 `sort_order`, `layout` and `book_filter` (`lib_state_set`,
 `lib_state_get`, which packs them only to be saved with the settings).
+How a sync ended is a `sync_result`, stored as its code in
+"sync-state" (`_result_code`, `_result_of_code`); the store's kind a
+`store_kind`; and an HTTP status is read once into an `http_answer`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
