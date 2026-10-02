@@ -17,6 +17,7 @@ staload "epub_xml.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
+staload "overlay.sats"
 staload "ui.sats"
 staload "notice.sats"
 staload "layer.sats"
@@ -910,6 +911,24 @@ fn _show_print_page {page_count:pos}{current:nat | current < page_count} (page_c
   val () = $A.free<byte>(label)
 in _set_text_of("footer-page", buf, _in_print(buf, offset + label_len, label_len)) end
 
+(* Who waits for the next page shown (narration.bats: a page the reader
+   moved to is where narration goes on): the resolver of its promise,
+   resolved once that page is shown *)
+datavtype page_waiter = PageWaiter of ($P.resolver(int)) | NoPageWaiter of ()
+
+val _page_waiter = ref<page_waiter>(NoPageWaiter())
+
+fn _page_waiter_swap (next: page_waiter): page_waiter = let
+  var cell: page_waiter = next
+  val () = ref_exch_elt<page_waiter>(_page_waiter, cell)
+in cell end
+
+(* The page shown is told to whoever waits for it *)
+fn _page_hook_run (): void =
+  case+ _page_waiter_swap(NoPageWaiter()) of
+  | ~PageWaiter(waiting) => $P.resolve<int>(waiting, 0)
+  | ~NoPageWaiter() => ()
+
 (* A page of page_count is the one shown: the reader's place, and everything that
    says it, without moving the page *)
 fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
@@ -922,7 +941,8 @@ fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_c
   val () = annot_star()
   (* scrolled, the last screen offers the next chapter *)
   val () = ui_show("next-chapter", (if _scrolled() then (if page + 1 >= page_count then chapter < chapter_count else false) else false))
-in _record_position() end
+  val () = _record_position()
+in _page_hook_run() end
 
 (* Shows a page of page_count, scrolled down by top when scrolled (the page's
    own step otherwise) *)
@@ -1416,6 +1436,177 @@ in
   | ~xspan_at(start, span_len) => if _lang_ok(data, start, span_len) then (if span_len < 65536 then _page_lang(doc, data, start, span_len) else ()) else ()
 end
 
+(* ============================================================
+   Media Overlays: a narrated chapter's clips (overlay.bats), matched to
+   its content nodes as the chapter is rendered
+   ============================================================ *)
+
+(* The overlay of the chapter loading, chapter `chapter` of chapter load
+   `generation`, parsed: its SMIL (a piece, its bytes lent until the
+   chapter is rendered, which finds the elements its clips' fragments
+   name) and its clip table, matched up to cursor *)
+datavtype overlay_pending =
+  | {arena_loc,smil_loc:agz}{smil_size:pos}{count:pos | count <= CLIP_MAX}{cursor:nat | cursor <= count}
+    OverlayPending of (piece_owner(smil_size, arena_loc), $A.frozenx(byte, smil_loc, smil_size, 1, arena_loc),
+      $A.borrow(byte, smil_loc, smil_size), int smil_size, clip_table(count), int count, int cursor, int, int)
+  | NoOverlayPending of ()
+
+fn _overlay_pending_free (pending: overlay_pending): void =
+  case+ pending of
+  | ~OverlayPending(owner, smil_frozen, smil_bytes, _, table, _, _, _, _) => let
+      val () = $A.drop<byte>(smil_frozen, smil_bytes)
+      val () = piece_free(owner, $A.thaw<byte>(smil_frozen))
+    in clip_table_free(table) end
+  | ~NoOverlayPending() => ()
+
+val _overlay_pending = ref<overlay_pending>(NoOverlayPending())
+
+fn _overlay_pending_take (): overlay_pending = let
+  var cell: overlay_pending = NoOverlayPending()
+  val () = ref_exch_elt<overlay_pending>(_overlay_pending, cell)
+in cell end
+
+fn _overlay_pending_put (pending: overlay_pending): void = let
+  var cell: overlay_pending = pending
+  val () = ref_exch_elt<overlay_pending>(_overlay_pending, cell)
+in _overlay_pending_free(cell) end
+
+(* The clips of the chapter rendered last, for the narration to take:
+   its clip table, with each clip's content nodes; or that it has none;
+   or nothing since they were taken *)
+#pub datavtype chapter_clips =
+  | {count:pos | count <= CLIP_MAX} ChapterClips of (clip_table(count), int count, int)
+  | ChapterSilent of (int)
+  | ClipsUnchanged of ()
+
+fn _chapter_clips_free (clips: chapter_clips): void =
+  case+ clips of
+  | ~ChapterClips(table, _, _) => clip_table_free(table)
+  | ~ChapterSilent(_) => ()
+  | ~ClipsUnchanged() => ()
+
+val _clips_ready = ref<chapter_clips>(ClipsUnchanged())
+
+fn _clips_ready_take (): chapter_clips = let
+  var cell: chapter_clips = ClipsUnchanged()
+  val () = ref_exch_elt<chapter_clips>(_clips_ready, cell)
+in cell end
+
+(* Its clips, the last chapter rendered's; the ones not yet taken are
+   freed *)
+fn _clips_ready_put (clips: chapter_clips): void = let
+  var cell: chapter_clips = clips
+  val () = ref_exch_elt<chapter_clips>(_clips_ready, cell)
+in _chapter_clips_free(cell) end
+
+(* Whether the open book has Media Overlays: its narration is offered,
+   in place of reading aloud by the browser's speech *)
+val _book_narrated = ref<bool>(false)
+
+fn _narration_offered (narrated: bool): void = let
+  val () = !_book_narrated := narrated
+  val () = ui_show("narration-controls", narrated)
+  (* reading aloud by speech, where the platform speaks, for a book with
+     no narration of its own *)
+  val speaks = (if narrated then false else $SP.speech_available()): bool
+  val () = ui_show("read-aloud", speaks)
+  val () = ui_show("selection-read", speaks)
+  val () = ui_show("speech-row", speaks)
+  val () = ui_show("narration-speed-row", narrated)
+in ui_show("narration-skip-row", narrated) end
+
+(* Whether data[data_offset + i, data_offset + span_len) is
+   smil[smil_offset + i, smil_offset + span_len) *)
+fun _same_bytes {data_loc,smil_loc:agz}{data_size,smil_size:pos}{data_offset,smil_offset,span_len:nat | data_offset + span_len <= data_size; smil_offset + span_len <= smil_size}{i:nat | i <= span_len} .<span_len - i>.
+  (data: !$A.borrow(byte, data_loc, data_size), data_offset: int data_offset,
+   smil: !$A.borrow(byte, smil_loc, smil_size), smil_offset: int smil_offset, span_len: int span_len, i: int i): bool =
+  if i >= span_len then true
+  else if byte2int0($A.read<byte>(data, data_offset + i)) <> byte2int0($A.read<byte>(smil, smil_offset + i)) then false
+  else _same_bytes(data, data_offset, smil, smil_offset, span_len, i + 1)
+
+(* Whether the fragment of clip, in the SMIL, is the id
+   data[id_start, id_start + id_len) *)
+fn _fragment_is {data_loc,smil_loc:agz}{data_size,smil_size:pos}{id_start,id_len:nat | id_start + id_len <= data_size}{count:pos}{clip:nat | clip < count}
+  (data: !$A.borrow(byte, data_loc, data_size), id_start: int id_start, id_len: int id_len,
+   smil: !$A.borrow(byte, smil_loc, smil_size), smil_size: int smil_size, table: !clip_table(count), clip: int clip): bool = let
+  val fragment_offset = clip_fragment_offset(table, clip)
+  val fragment_len = clip_fragment_len(table, clip)
+in
+  if fragment_len <> id_len then false
+  else if fragment_offset < 0 then false
+  else if fragment_offset > smil_size - id_len then false
+  else _same_bytes(data, id_start, smil, fragment_offset, id_len, 0)
+end
+
+(* The first of the next `left` clips from clip on not yet matched whose
+   fragment is the id: matched to content nodes [first_node, end_node) *)
+fun _match_window {data_loc,smil_loc:agz}{data_size,smil_size:pos}{id_start,id_len:nat | id_start + id_len <= data_size}{count:pos}{clip:nat | clip <= count}{left:nat} .<count - clip>.
+  (data: !$A.borrow(byte, data_loc, data_size), id_start: int id_start, id_len: int id_len,
+   smil: !$A.borrow(byte, smil_loc, smil_size), smil_size: int smil_size, table: !clip_table(count), count: int count,
+   clip: int clip, left: int left, first_node: int, end_node: int): void =
+  if clip >= count then ()
+  else if left <= 0 then ()
+  else if clip_matched(table, clip) then _match_window(data, id_start, id_len, smil, smil_size, table, count, clip + 1, left, first_node, end_node)
+  else if _fragment_is(data, id_start, id_len, smil, smil_size, table, clip) then clip_nodes_set(table, clip, first_node, end_node)
+  else _match_window(data, id_start, id_len, smil, smil_size, table, count, clip + 1, left - 1, first_node, end_node)
+
+(* The first clip from clip on not yet matched *)
+fun _cursor_after {count:pos}{clip:nat | clip <= count} .<count - clip>.
+  (table: !clip_table(count), count: int count, clip: int clip): [after:nat | clip <= after; after <= count] int after =
+  if clip >= count then clip
+  else if clip_matched(table, clip) then _cursor_after(table, count, clip + 1)
+  else clip
+
+(* An element rendered as content nodes [first_node, end_node): when it
+   has an id, the clip that reads it, among the next 8 not yet matched,
+   is matched to them *)
+fn _clip_match {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), first_node: int, end_node: int): void = let
+  var _attr_id = @[char][2]('i', 'd')
+in
+  case+ find_attr(data, attrs, _attr_id, 2) of
+  | ~xspan_none() => ()
+  | ~xspan_at(id_start, id_len) =>
+    if id_len <= 0 then ()
+    else let
+      val pending = _overlay_pending_take()
+    in
+      case+ pending of
+      | @OverlayPending(_, _, smil, smil_size, table, count, cursor, _, _) => let
+          val () = _match_window(data, id_start, id_len, smil, smil_size, table, count, cursor, 8, first_node, end_node)
+          val () = cursor := _cursor_after(table, count, cursor)
+          prval () = fold@(pending)
+        in _overlay_pending_put(pending) end
+      | NoOverlayPending() => _overlay_pending_put(pending)
+    end
+end
+
+(* The clips from clip on not matched: no content nodes (they play with
+   nothing marked) *)
+fun _clips_unmatched {count:pos}{clip:nat | clip <= count} .<count - clip>.
+  (table: !clip_table(count), count: int count, clip: int clip): void =
+  if clip >= count then ()
+  else let
+    val () = (if clip_matched(table, clip) then () else clip_nodes_none(table, clip))
+  in _clips_unmatched(table, count, clip + 1) end
+
+(* Chapter chapter of load generation is rendered: its SMIL is freed, and
+   its clip table kept for the narration (or that it has none) *)
+fn _overlay_finish (chapter: int, generation: int): void =
+  case+ _overlay_pending_take() of
+  | ~OverlayPending(owner, smil_frozen, smil_bytes, _, table, count, _, pending_chapter, pending_generation) => let
+      val () = $A.drop<byte>(smil_frozen, smil_bytes)
+      val () = piece_free(owner, $A.thaw<byte>(smil_frozen))
+    in
+      if (if pending_chapter = chapter then pending_generation = generation else false) then let
+        val () = _clips_unmatched(table, count, 0)
+      in _clips_ready_put(ChapterClips(table, count, chapter)) end
+      else let
+        val () = clip_table_free(table)
+      in _clips_ready_put(ChapterSilent(chapter)) end
+    end
+  | ~NoOverlayPending() => _clips_ready_put(ChapterSilent(chapter))
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
@@ -1520,12 +1711,14 @@ and _render_node
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
       var _tag_a = @[char][1]('a')
-    in
-      if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
-        val found = _render_nodes(doc, data, data_len, content_node, children, found, fragment)
-      in _link(doc, data, attrs, content_node, !_content_count, found) end
-      else _render_nodes(doc, data, data_len, content_node, children, found, fragment)
-    end
+      val found = (if xml_name_eq(data, name_offset, name_len, _tag_a, 1) then let
+          val found = _render_nodes(doc, data, data_len, content_node, children, found, fragment)
+        in _link(doc, data, attrs, content_node, !_content_count, found) end
+        else _render_nodes(doc, data, data_len, content_node, children, found, fragment)): [new_count:nat] images(n, new_count)
+      (* the clip of the chapter's overlay that reads this element, by its
+         id: its content nodes, this one's and its children's *)
+      val () = _clip_match(data, attrs, content_node, !_content_count)
+    in found end
   end
 
 (* The length of the directory part of the name [name_offset, name_offset + name_len) of the
@@ -1714,6 +1907,23 @@ fun _load_images {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len
       val () = _link_resolve(serial, file_size, name_offset, dir_len, current, data, n, first_node, end_node, src_start, src_len, note)
     in _load_images(serial, file_size, name_offset, dir_len, data, n, rest, generation, current) end
 
+(* The Media Overlay of spine itemref item: its SMIL's entry, the href
+   of the item its manifest item's media-overlay names, found relative
+   to the OPF's directory (prefix_len bytes of the name at
+   opf_name_offset); the OPF's data checked here, once *)
+fn _overlay_of {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{tree_size:nat}
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), item: int): chapter_overlay(file_size) =
+  case+ find_chapter_overlay_href_n(opf_bytes, opf_size, nodes, item) of
+  | ~xspan_none() => NoOverlay()
+  | ~xspan_at(href_offset, href_len) =>
+    if href_len <= 0 then NoOverlay()
+    else (case+ book_find_relative(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, href_offset, href_len) of
+      | ~EntryHit(data_start, data_size, method, name_offset, name_len) =>
+        Overlay(data_start, data_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len))
+      | ~EntryMiss() => NoOverlay())
+
 (* The chapters from spine itemref item down to the first, onto found: each
    href, after the OPF's directory (prefix_len bytes of the name at
    opf_name_offset), found in book serial's index; the OPF's data checked here, once *)
@@ -1744,7 +1954,8 @@ fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_na
           case+ hit of
           | ~EntryMiss() => ChapterMissing(found)
           | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
-              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len), found)
+              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
+                _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
         end): book_chapters(file_size, found_count + 1)
   in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item - 1, chapters) end
 
@@ -1934,6 +2145,8 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val chapters = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
                            opf_bytes, opf_size, opf_nodes, total - 1, ChaptersNil())
                val () = book_spine_set(serial, file_size, chapters, total)
+               (* a book with Media Overlays is read aloud by its narration *)
+               val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = !_right_to_left := spine_rtl(opf_bytes, opf_nodes)
                val () = _lang_locate(opf_bytes, opf_nodes)
@@ -1944,11 +2157,15 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
              in $P.ret<int>(total) end)
        end)
 
-(* Shows chapter chapter_index of book serial, from its chapters *)
-fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
+(* Shows chapter chapter_index of book serial, from its chapters, its
+   overlay's clips matched to its content nodes as they are made *)
+fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
   case+ book_chapter_get(serial, chapter_index) of
-  | ~ChaptersUnknown() => $P.ret<int>(~1)
+  | ~ChaptersUnknown() => let
+      val () = _overlay_pending_put(NoOverlayPending())
+    in $P.ret<int>(~1) end
   | ~ChapterNone(chapter_count) => let
+      val () = _overlay_pending_put(NoOverlayPending())
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in $P.ret<int>(~4) end
@@ -1957,7 +2174,9 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
       case+ piece_new(compressed_size) of
-      | ~NoPiece() => $P.ret<int>(~5)
+      | ~NoPiece() => let
+          val () = _overlay_pending_put(NoOverlayPending())
+        in $P.ret<int>(~5) end
       | ~Piece(compressed_owner, compressed) => let
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
@@ -1970,7 +2189,9 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
                 val content = take_decompressed(inflated)
               in
                 case+ content of
-                | ~NoContentBytes() => $P.ret<int>(~6)
+                | ~NoContentBytes() => let
+                    val () = _overlay_pending_put(NoOverlayPending())
+                  in $P.ret<int>(~6) end
                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
 
                   (* Parse XHTML with xml-tree *)
@@ -1995,6 +2216,8 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
                   val () = $X.free_nodes(nodes)
+                  (* only the clip table is kept, for the narration *)
+                  val () = _overlay_finish(chapter_index, generation)
                   (* Its images, named relative to the chapter's directory *)
                   val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, chapter_index)
                   val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
@@ -2011,6 +2234,128 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
               end)
             end
     end
+
+(* The type of the audio entry whose name is [name_offset, name_offset +
+   name_len) in the book's file (audio_type_of) *)
+fn _audio_kind {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, name_len: int name_len): audio_type = let
+  val name = $A.alloc<byte>(name_len)
+  val _ = book_read(serial, file_size, name_offset, name, name_len)
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+  val kind = audio_type_of(name_bytes, name_len)
+  val () = release_bytes(name_frozen, name_bytes)
+in kind end
+
+(* The clip's audio: the entry at [data_offset, data_offset + data_size),
+   stored as method says, of type kind; none when data_size is 0 *)
+fn _audio_put {count:pos}{clip:nat | clip < count}
+  (table: !clip_table(count), clip: int clip, data_offset: int, data_size: int, method: $Z.compression, kind: audio_type): void =
+  if data_size <= 0 then clip_audio_none(table, clip)
+  else clip_audio_set(table, clip, data_offset, data_size, method, kind)
+
+(* Each clip's audio from clip on, its src's path in the SMIL smil[0,
+   smil_size), found in book serial's index relative to the SMIL's
+   directory (the first dir_len bytes of its name, at name_offset): the
+   entry's data, or none. A src the clip before had too (last_src,
+   last_len) is the entry found for it (last_offset, last_size, 0 for
+   none, last_method, last_kind) *)
+fun _audio_resolve {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{count:pos}{clip:nat | clip <= count} .<count - clip>.
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   smil: !$A.borrow(byte, l, n), smil_size: int n, table: !clip_table(count), count: int count, clip: int clip,
+   last_src: Int, last_len: Int, last_offset: int, last_size: int, last_method: $Z.compression, last_kind: audio_type): void =
+  if clip >= count then ()
+  else let
+    val src_offset = clip_src_offset(table, clip)
+    val src_len = clip_src_len(table, clip)
+  in
+    if src_offset < 0 then let
+      val () = clip_audio_none(table, clip)
+    in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, ~1, 0, 0, 0, $Z.Stored(), AudioOther()) end
+    else if src_len <= 0 then let
+      val () = clip_audio_none(table, clip)
+    in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, ~1, 0, 0, 0, $Z.Stored(), AudioOther()) end
+    else if src_offset > smil_size - src_len then let
+      val () = clip_audio_none(table, clip)
+    in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, ~1, 0, 0, 0, $Z.Stored(), AudioOther()) end
+    else let
+      val same = (if last_len <> src_len then false
+        else if last_src < 0 then false
+        else if last_src > smil_size - src_len then false
+        else $S.borrow_region_eq(smil, smil_size, last_src, src_offset, src_len)): bool
+    in
+      if same then let
+        val () = _audio_put(table, clip, last_offset, last_size, last_method, last_kind)
+      in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, src_offset, src_len, last_offset, last_size, last_method, last_kind) end
+      else (case+ book_find_relative(serial, file_size, name_offset, dir_len, smil, smil_size, src_offset, src_len) of
+        | ~EntryHit(data_offset, data_size, method, entry_name_offset, entry_name_len) => let
+            val kind = _audio_kind(serial, file_size, entry_name_offset, entry_name_len)
+            val () = clip_audio_set(table, clip, data_offset, data_size, method, kind)
+          in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, src_offset, src_len, data_offset, data_size, method, kind) end
+        | ~EntryMiss() => let
+            val () = clip_audio_none(table, clip)
+          in _audio_resolve(serial, file_size, name_offset, dir_len, smil, smil_size, table, count, clip + 1, src_offset, src_len, 0, 0, $Z.Stored(), AudioOther()) end)
+    end
+  end
+
+(* Reads and parses the Media Overlay of chapter chapter_index of book
+   serial, when it has one, for load generation: its clips, each with its
+   audio found in the book, wait in the pending cell for the chapter's
+   render *)
+fn _overlay_load {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) = let
+  val () = _overlay_pending_put(NoOverlayPending())
+in
+  case+ book_overlay_get(serial, chapter_index) of
+  | ~OverlayNone() => $P.ret<int>(0)
+  | ~OverlayGot(file_size, data_start, compressed_size, method, name_offset, _, dir_len) =>
+    (case+ piece_new(compressed_size) of
+     | ~NoPiece() => $P.ret<int>(0)
+     | ~Piece(compressed_owner, compressed) => let
+         val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+       in
+         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+           case+ take_decompressed(inflated) of
+           | ~NoContentBytes() => $P.ret<int>(0)
+           | ~ContentBytes(smil_owner, smil, smil_size) => let
+               val @(smil_frozen, smil_bytes) = $A.freeze<byte>(smil)
+               val nodes = $X.parse_document(smil_bytes, smil_size)
+               val found = overlay_count(smil_bytes, nodes)
+               val count = (if found > 32768 then 32768 else found): [count:nat | count <= CLIP_MAX] int count
+             in
+               if count <= 0 then let
+                 val () = $X.free_nodes(nodes)
+                 val () = $A.drop<byte>(smil_frozen, smil_bytes)
+                 val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
+               in $P.ret<int>(0) end
+               else (case+ clip_table_new(count) of
+                 | ~ClipTableNone() => let
+                     val () = $X.free_nodes(nodes)
+                     val () = $A.drop<byte>(smil_frozen, smil_bytes)
+                     val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
+                   in $P.ret<int>(0) end
+                 | ~ClipTableMade(table) => let
+                     val _ = overlay_fill(smil_bytes, nodes, table, count)
+                     val () = $X.free_nodes(nodes)
+                     val () = _audio_resolve(serial, file_size, name_offset, dir_len, smil_bytes, smil_size, table, count, 0, ~1, 0, 0, 0, $Z.Stored(), AudioOther())
+                   in
+                     let
+                       val () = _overlay_pending_put(OverlayPending(smil_owner, smil_frozen, smil_bytes, smil_size, table, count, 0, chapter_index, generation))
+                     in $P.ret<int>(0) end
+                   end)
+             end)
+       end)
+end
+
+(* Shows chapter chapter_index of book serial: its overlay first, then
+   the chapter *)
+fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
+  (* the overlay's outcome carries nothing: a chapter without one is
+     shown as any is *)
+  $P.and_then<int><int>(_overlay_load(serial, chapter_index, generation), llam(_) =>
+    _chapter_render(serial, chapter_index, generation))
 
 (* Loads chapter chapter_index: first the book's chapters, from its OPF,
    when they are not found yet *)
@@ -3310,8 +3655,7 @@ implement update_page_indicator() = _update_page_indicator()
 implement num_id(id_prefix, number, width) = _number_id(id_prefix, number, width)
 
 
-(* ============================================================
-   Reading aloud: the page turned on, and a chapter's sentences
+(* =====================================================   Reading aloud: the page turned on, and a chapter's sentences
    (read_aloud.bats reads them)
    ============================================================ *)
 
@@ -3912,5 +4256,61 @@ implement script_text (script, index) =
           val () = _bytes_out(text, start, length, copy, 0)
         in SentenceText(copy_owner, copy, length) end
     end
+
+(* ============================================================
+   For the narration (narration.bats)
+   ============================================================ *)
+
+(* The clips of the chapter rendered last, when they were not taken
+   yet *)
+#pub fun reader_clips_take (): chapter_clips
+implement reader_clips_take () = _clips_ready_take()
+
+(* The clips not taken are freed: the book is closed *)
+#pub fun reader_clips_forget (): void
+implement reader_clips_forget () = let
+  val () = _overlay_pending_put(NoOverlayPending())
+in _clips_ready_put(ClipsUnchanged()) end
+
+(* Whether the open book has Media Overlays *)
+#pub fun reader_narrated (): bool
+implement reader_narrated () = !_book_narrated
+
+(* Where a content node is, against the page shown *)
+#pub datatype node_place = BeforePage | OnPage | AfterPage | NotInChapter
+
+#pub fun reader_node_place (node: int): node_place
+implement reader_node_place (node) = let
+  val node = g1ofg0(node)
+in
+  if node < 0 then NotInChapter()
+  else if ~_measure_node(node) then NotInChapter()
+  else case+ reading_get() of
+    | @(page, page_count, _, _) => let
+        val node_page = _page_of_node(node, page_count, page)
+      in if node_page < page then BeforePage() else if node_page > page then AfterPage() else OnPage() end
+end
+
+(* Shows the page content node node is on, when it is not the one shown *)
+#pub fun reader_show_node (node: int): void
+implement reader_show_node (node) = let
+  val node = g1ofg0(node)
+in
+  if node < 0 then ()
+  else if ~_measure_node(node) then ()
+  else case+ reading_get() of
+    | @(page, page_count, _, _) =>
+      if _page_of_node(node, page_count, page) = page then () else _show_target(page, node)
+end
+
+(* The promise of the next page shown: it resolves once one is. A
+   waiter it replaces is told at once, so it is not left waiting *)
+#pub fun reader_page_shown (): $P.promise(int, $P.Chained)
+implement reader_page_shown () = let
+  val @(shown, waiting) = $P.create<int>()
+  val () = (case+ _page_waiter_swap(PageWaiter(waiting)) of
+    | ~PageWaiter(earlier) => $P.resolve<int>(earlier, 0)
+    | ~NoPageWaiter() => ())
+in $P.vow(shown) end
 
 end (* #target wasm *)

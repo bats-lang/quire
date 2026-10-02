@@ -9,6 +9,8 @@
 #use result as R
 #use zip as Z
 #use str as S
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 
 staload "pages.sats"
 staload "paths.sats"
@@ -38,17 +40,29 @@ implement $P.dispose<$IDB.stored>(_) = ()
   | {directory_loc:agz}{directory_size:pos | directory_size <= 1048576}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}
     BookIndex(file_size) of ($A.arr(byte, directory_loc, directory_size), int directory_size, int directory_offset, book_entries(file_size, directory_size, count))
 
+(* A chapter's Media Overlay (its manifest item's media-overlay, a SMIL
+   document), found once with the chapters: the SMIL's entry, its data
+   [data_offset, data_offset + data_size) in the file of file_size bytes,
+   its method, its name [name_offset, name_offset + name_len) in the file
+   and the length dir_len of that name's directory part (its audio is
+   named relative to it); none when the chapter has none, or it names no
+   entry *)
+#pub datavtype chapter_overlay(file_size:int) =
+  | {data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
+    Overlay(file_size) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len)
+  | NoOverlay(file_size) of ()
+
 (* The book's chapters, in spine order, each found once in its index
    (the first time a chapter is loaded, book_spine_set): a chapter's
    data [data_offset, data_offset + data_size) in the file of file_size
    bytes, its method, its name [name_offset, name_offset + name_len) in
-   the file and the length dir_len of that name's directory part;
-   missing when its href is empty, over 1 MiB with the OPF's directory,
-   or names no entry; count chapters *)
+   the file and the length dir_len of that name's directory part, and
+   its Media Overlay; missing when its href is empty, over 1 MiB with the
+   OPF's directory, or names no entry; count chapters *)
 #pub datavtype book_chapters(file_size:int, count:int) =
   | ChaptersNil(file_size, 0) of ()
   | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
-    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, chapter_overlay(file_size), book_chapters(file_size, count))
   | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
@@ -124,6 +138,36 @@ implement $P.dispose<$IDB.stored>(_) = ()
   | ChaptersUnknown of ()
 
 #pub fn book_chapter_get {chapter_index:nat} (serial: int, chapter_index: int chapter_index): chapter_got
+
+(* The Media Overlay of chapter chapter_index of the open book, book
+   `serial`: its SMIL's entry (as chapter_overlay has it), in the file of
+   file_size bytes *)
+#pub datavtype overlay_got =
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
+    OverlayGot of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len)
+  | OverlayNone of ()
+
+#pub fn book_overlay_get {chapter_index:nat} (serial: int, chapter_index: int chapter_index): overlay_got
+
+(* The first chapter of the open book, book `serial`, after chapter
+   chapter_index (-1 for the first) that has a Media Overlay; none when
+   none does *)
+#pub fn book_narrated_after (serial: int, chapter_index: int): $R.option(Int)
+
+(* A blob URL, url[0, url_len), made on the JS side *)
+#pub datavtype blob_url =
+  | {l:agz}{url_len:pos | url_len < 2000} BlobUrl of ($A.arr(byte, l, url_len), int url_len)
+  | NoBlobUrl of ()
+
+(* The blob URL a call made, read and freed: none when there is none, or
+   it is empty or 2000 bytes or more (the host's, checked here) *)
+#pub fn blob_url_take (made: $R.option([k:nat] $BD.dblob(k))): blob_url
+
+(* A blob URL of type mime for bytes [data_offset, data_offset +
+   data_size) of the open book's file, book `serial`, made on the JS side
+   from the bytes it holds (they never pass through wasm memory); none
+   when another book is open or the bytes are not inside its file *)
+#pub fn book_blob_url {mime_len:pos | mime_len <= 24} (serial: int, data_offset: int, data_size: int, mime: string mime_len): blob_url
 
 (* The index of the chapter of the open book, book `serial`, whose
    entry's name is at name_offset in the file; -1 when none is (or book
@@ -375,10 +419,17 @@ in
        in ZipGot(owner, data, compressed_size, method, data_offset, name_offset, name_len) end)
 end
 
+fn chapter_overlay_free {file_size:int} (overlay: chapter_overlay(file_size)): void =
+  case+ overlay of
+  | ~Overlay(_, _, _, _, _, _) => ()
+  | ~NoOverlay() => ()
+
 fun book_chapters_free {file_size:int}{count:nat} .<count>. (chapters: book_chapters(file_size, count)): void =
   case+ chapters of
   | ~ChaptersNil() => ()
-  | ~Chapter(_, _, _, _, _, _, rest) => book_chapters_free(rest)
+  | ~Chapter(_, _, _, _, _, _, overlay, rest) => let
+      val () = chapter_overlay_free(overlay)
+    in book_chapters_free(rest) end
   | ~ChapterMissing(rest) => book_chapters_free(rest)
 
 fn book_spine_free {file_size:int} (spine: book_spine(file_size)): void =
@@ -391,7 +442,7 @@ fun book_chapter_at {file_size:pos}{remaining:nat}{chapter_index:nat}{chapter_co
   (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index, chapter_count: int chapter_count): chapter_got =
   case+ chapters of
   | ChaptersNil() => ChapterNone(chapter_count)
-  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, rest) =>
+  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, _, rest) =>
     if chapter_index = 0 then let
       val got = ChapterGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len, chapter_count)
       prval () = fold@(chapters)
@@ -693,7 +744,7 @@ fun book_chapter_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remain
   (chapters: !book_chapters(file_size, remaining), name_offset: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
   case+ chapters of
   | ChaptersNil() => ~1
-  | @Chapter(_, _, _, chapter_name_offset, _, _, rest) =>
+  | @Chapter(_, _, _, chapter_name_offset, _, _, _, rest) =>
     if chapter_name_offset = name_offset then let prval () = fold@(chapters) in chapter_index end
     else let
       val found = book_chapter_find(rest, name_offset, chapter_index + 1)
@@ -730,7 +781,7 @@ fun book_weigh {file_size:pos}{remaining:nat} .<remaining>.
   (chapters: !book_chapters(file_size, remaining), chapter_index: int, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
   case+ chapters of
   | ChaptersNil() => @(before, own, total)
-  | @Chapter(_, data_size, _, _, _, _, rest) => let
+  | @Chapter(_, data_size, _, _, _, _, _, rest) => let
       val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, before + data_size, own, total + data_size)
         else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, before, data_size, total + data_size)
         else book_weigh(rest, chapter_index - 1, before, own, total + data_size)): @(Nat, Nat, Nat)
@@ -826,5 +877,133 @@ val _reading = ref<reading>(@(0, 1, 0, 0))
 implement reading_get() = !_reading
 
 implement reading_set(place) = !_reading := place
+
+(* The overlay of chapter chapter_index of chapters *)
+fun book_overlay_at {file_size:pos}{remaining:nat}{chapter_index:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index): overlay_got =
+  case+ chapters of
+  | ChaptersNil() => OverlayNone()
+  | @Chapter(_, _, _, _, _, _, overlay, rest) =>
+    if chapter_index = 0 then let
+      val got = (case+ overlay of
+        | Overlay(data_offset, data_size, method, name_offset, name_len, dir_len) =>
+          OverlayGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len)
+        | NoOverlay() => OverlayNone()): overlay_got
+      prval () = fold@(chapters)
+    in got end
+    else let
+      val got = book_overlay_at(rest, file_size, chapter_index - 1)
+      prval () = fold@(chapters)
+    in got end
+  | @ChapterMissing(rest) =>
+    if chapter_index = 0 then let
+      prval () = fold@(chapters)
+    in OverlayNone() end
+    else let
+      val got = book_overlay_at(rest, file_size, chapter_index - 1)
+      prval () = fold@(chapters)
+    in got end
+
+implement book_overlay_get {chapter_index} (serial, chapter_index) = let
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(_, open_size, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val got = (case+ spine of
+        | @Spine(chapters, _) => let
+            val got = book_overlay_at(chapters, open_size, chapter_index)
+            prval () = fold@(spine)
+          in got end
+        | NoSpine() => OverlayNone()): overlay_got
+      prval () = fold@(book)
+      val () = book_put(book)
+    in got end
+    else let prval () = fold@(book); val () = book_put(book) in OverlayNone() end
+  | _ => let val () = book_put(book) in OverlayNone() end
+end
+
+(* The index, from chapter_index, of the first of chapters numbered
+   after after that has an overlay *)
+fun book_narrated_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), after: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
+  case+ chapters of
+  | ChaptersNil() => ~1
+  | @Chapter(_, _, _, _, _, _, overlay, rest) => let
+      val narrated = (case+ overlay of Overlay(_, _, _, _, _, _) => true | NoOverlay() => false): bool
+    in
+      if (if narrated then chapter_index > after else false) then let prval () = fold@(chapters) in chapter_index end
+      else let
+        val found = book_narrated_find(rest, after, chapter_index + 1)
+        prval () = fold@(chapters)
+      in found end
+    end
+  | @ChapterMissing(rest) => let
+      val found = book_narrated_find(rest, after, chapter_index + 1)
+      prval () = fold@(chapters)
+    in found end
+
+(* The chapter found, or -1 *)
+fn _narrated_after (serial: int, chapter_index: int): [found:int | found >= ~1] int found = let
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(_, _, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val found = (case+ spine of
+        | @Spine(chapters, _) => let
+            val found = book_narrated_find(chapters, chapter_index, 0)
+            prval () = fold@(spine)
+          in found end
+        | NoSpine() => ~1): [found:int | found >= ~1] int found
+      prval () = fold@(book)
+      val () = book_put(book)
+    in found end
+    else let prval () = fold@(book); val () = book_put(book) in ~1 end
+  | _ => let val () = book_put(book) in ~1 end
+end
+
+implement book_narrated_after (serial, chapter_index) = let
+  val found = _narrated_after(serial, chapter_index)
+in if found < 0 then $R.none() else $R.some(found) end
+
+implement blob_url_take (made) =
+  case+ made of
+  | ~$R.none() => NoBlobUrl()
+  | ~$R.some(url_blob) => let
+      val url_len = $BD.blob_len(url_blob)
+    in
+      if url_len <= 0 then let val () = $BD.blob_free(url_blob) in NoBlobUrl() end
+      else if url_len >= 2000 then let val () = $BD.blob_free(url_blob) in NoBlobUrl() end
+      else let
+        val url = $A.alloc<byte>(url_len)
+        val () = $BD.blob_read(url_blob, 0, url, url_len)
+        val () = $BD.blob_free(url_blob)
+      in BlobUrl(url, url_len) end
+    end
+
+implement book_blob_url (serial, data_offset, data_size, mime) = let
+  val data_offset = g1ofg0(data_offset)
+  val data_size = g1ofg0(data_size)
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(book_file, file_size, _, _, _, _, _, _, _) =>
+    if serial <> !_book_serial then let prval () = fold@(book); val () = book_put(book) in NoBlobUrl() end
+    else if data_offset < 0 then let prval () = fold@(book); val () = book_put(book) in NoBlobUrl() end
+    else if data_size <= 0 then let prval () = fold@(book); val () = book_put(book) in NoBlobUrl() end
+    else if data_offset > file_size - data_size then let prval () = fold@(book); val () = book_put(book) in NoBlobUrl() end
+    else let
+      val mime_len = g1u2i(string1_length(mime))
+      val mime_buf = $A.alloc<byte>(mime_len)
+      val () = $A.write_text(mime_buf, 0, $A.text_lit(mime), mime_len)
+      val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime_buf)
+      val made = $BF.file_blob_url(book_file, data_offset, data_size, mime_bytes, mime_len)
+      val () = release_bytes(mime_frozen, mime_bytes)
+      prval () = fold@(book)
+      val () = book_put(book)
+    in blob_url_take(made) end
+  | _ => let val () = book_put(book) in NoBlobUrl() end
+end
 
 end (* #target wasm *)

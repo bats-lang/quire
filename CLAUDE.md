@@ -117,7 +117,17 @@ page's arena, or the one piece of an arena sized to it, so it has no
 * a chapter's text read aloud (its `script`, `reader_script_load` in
   `src/reader.bats`), held while the chapter is read aloud; each
   block's copy while it is cut into sentences; and each sentence's copy
-  while it is said (`script_text`).
+  while it is said (`script_text`);
+* a narrated chapter's SMIL, its compressed data and its content, from
+  when it is read until the chapter is rendered (`_overlay_load` in
+  `src/reader.bats`), and a deflated audio entry's data and inflated
+  bytes while a blob URL is made of them (`_source_then` in
+  `src/narration.bats`).
+
+The one long-lived arena piece is a narrated chapter's clip table
+(`clip_table` in `src/overlay.bats`): the one piece of an arena of its
+own (so it never holds a page's arena out of the window), at most 1 MiB,
+kept until the next chapter is rendered.
 
 Each piece lives only while it is parsed or written, except the
 script read aloud, which outlives page turns (the arena it was lent from
@@ -221,6 +231,77 @@ about. Where the fetch fails (in a browser, a page without CORS), Get
 gives way to a download link (`ui_download_nn`) "then import it". A
 page that cannot be read says why: not readable by a browser, not
 found (404), needs a sign-in (401, 403), or not a catalogue.
+
+### Narration
+
+A book with EPUB 3 Media Overlays (EPUB 3.3 §9) is read aloud by its
+own recorded narration (issue #133). Its chapters' overlays are found
+once, with the chapters (`_spine_build`): a spine item's manifest
+`media-overlay` names the SMIL's item, whose entry is kept in the
+chapter (`chapter_overlay` in `src/book.bats`); `_book_narrated` is set
+when any chapter has one, and the bottom bar's `narration-controls`
+then take the place of reading aloud by speech (`_narration_offered`).
+
+`src/overlay.bats` reads a SMIL's bytes (the format alone, as
+`src/stardict.bats` reads a dictionary's): its body, seq and par
+elements flattened, in order, into clips, each a par with an audio
+element (one without is passed over; `media:duration` is not read).
+Each clip is 32 bytes of a `clip_table(count)`, at most 32768: its
+begin and end (clock values as H.4 has them; no clipEnd is the audio's
+end; a value over 2^31 - 1 ms makes the clip invalid), its audio entry
+(found relative to the SMIL's directory when the chapter loads), its
+text's fragment, whether it is skippable (it or a seq around it is a
+footnote, endnote or pagebreak) and the clip after the innermost
+escapable table, list, figure or aside it is in. A clip's index is
+proven below the table's count, so reading past the table does not
+type-check (`tests/static/reject/clip-past-end`).
+
+As a narrated chapter is rendered, an element with an id is matched
+against the next 8 clips not yet matched (`_clip_match` in
+`src/reader.bats`): a match keeps the element's first content node and
+the one after its last (`!_content_count` after its children, as
+`_link` does). An unmatched clip still plays, with nothing marked and
+no page turned. Then the SMIL is freed and only the clip table is kept,
+for the narration to take (`reader_clips_take`).
+
+`src/narration.bats` plays it on one `<audio id="narration">` (made by
+`ui_audio`: no controls, `aria-hidden`; not a control, so the tag type
+stays closed to them), for the whole book, so the permission a click
+gave it holds clip after clip. Its state is `Idle`, `Playing(clip,
+generation)` or `Paused(clip, at)`, each clip proven below the table's
+count. The source is a blob URL of the audio entry, made on the JS side
+from the book's file when it is stored (`book_blob_url`, file's
+`file_blob_url`), or from its bytes inflated into a piece when it is
+deflated; the URL is revoked when the entry changes and when the book
+is closed. Each clip is played from its begin (one that follows the
+last in the same audio plays on without a seek), marked with
+`mark_range` kind 5 (`::highlight(bats-mark-5)`, the proven pair of
+read-aloud's highlight), and its page shown when its text is not on
+the page. A timer at its end, by the speed, checks `audio_time` and
+moves on within 20 ms of the end, else sets itself again; the timer
+reaches `_tick` through a cell (`_tick_handler`), as an event reaches
+its listener, so playing on is not a recursion. `timeupdate` is a
+backstop, and `ended` covers an audio file shorter than its clip. A
+generation number drops the timers and answers of earlier clips. At a
+chapter's end the narration goes on into the next chapter with an
+overlay (`book_narrated_after`). A page the reader shows (a turn, a
+jump, a new chapter; the reader's `reader_on_page_shown`) moves it
+there: from the first clip on or after the page, or the chapter's
+first; so does a tap on text a clip reads. A play the browser refuses,
+or an `error`, stops it with "This narration cannot be played"; a
+`pause` it did not ask for (a headset, a call) leaves it paused. The
+screen stays awake while the reader is open, so while it plays.
+
+The controls: Read aloud (`aria-pressed`), Previous phrase, Next phrase,
+and, inside an escapable structure, Skip table (list, figure, aside).
+The typography panel offers, for a narrated book, its speed (0.5× to
+2× in quarters, `audio_rate`, the pitch kept) and whether page numbers
+and notes are read (Skip by default: skippable clips are passed over).
+Both are the device's own, kept outside the settings record as `_ruby`
+is; in its storage they follow the voices, after an "N" (a record
+written before them has their defaults); the reset's Undo and the
+backup's settings (`narrationSpeed` in hundredths, `narrationReadsNotes`)
+cover them.
 
 ### The archive is checked once
 
@@ -412,7 +493,8 @@ Elements are made through `src/ui.bats`:
   button, a field or an image can only be made by a constructor that
   names it. A text button is named by its text alone, so its name
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
-  images are decorative (`alt=""`); a role that needs a name (dialog,
+  images are decorative (`alt=""`); an audio element (`ui_audio`) has no
+  controls and is hidden from assistive technology; a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
 * Each element id is made at one place in the code, no numbered id
   (`nid_make`, a prefix and a number) can spell another, and every id

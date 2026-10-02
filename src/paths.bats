@@ -97,6 +97,36 @@ fun _ends_with {path_loc:agz}{path_len:pos}{suffix_len:pos | suffix_len <= path_
     else _ends_with(path, path_len, suffix, suffix_len, position + 1)
   end
 
+(* An audio file's type, by its extension *)
+#pub datatype audio_type = AudioMpeg | AudioMp4 | AudioOgg | AudioWav | AudioOther
+
+fn _audio_type {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len): audio_type = let
+  var mp3 = @[char][4]('.', 'm', 'p', '3')
+  var m4a = @[char][4]('.', 'm', '4', 'a')
+  var mp4 = @[char][4]('.', 'm', 'p', '4')
+  var ogg = @[char][4]('.', 'o', 'g', 'g')
+  var opus = @[char][5]('.', 'o', 'p', 'u', 's')
+  var wav = @[char][4]('.', 'w', 'a', 'v')
+in
+  if path_len >= 5 && _ends_with(path, path_len, opus, 5, 0) then AudioOgg()
+  else if path_len < 4 then AudioOther()
+  else if _ends_with(path, path_len, mp3, 4, 0) then AudioMpeg()
+  else if _ends_with(path, path_len, m4a, 4, 0) then AudioMp4()
+  else if _ends_with(path, path_len, mp4, 4, 0) then AudioMp4()
+  else if _ends_with(path, path_len, ogg, 4, 0) then AudioOgg()
+  else if _ends_with(path, path_len, wav, 4, 0) then AudioWav()
+  else AudioOther()
+end
+
+(* An audio type's media type *)
+fn _audio_mime (kind: audio_type): [type_len:pos | type_len <= 24] string type_len =
+  case+ kind of
+  | AudioMpeg() => "audio/mpeg"
+  | AudioMp4() => "audio/mp4"
+  | AudioOgg() => "audio/ogg"
+  | AudioWav() => "audio/wav"
+  | AudioOther() => "application/octet-stream"
+
 (* The image type the name path[0, path_len) says (by its extension) *)
 fn _mime_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len)
   : [type_len:pos | type_len <= 24] string type_len = let
@@ -114,7 +144,7 @@ in
   else if _ends_with(path, path_len, jpg, 4, 0) then "image/jpeg"
   else if _ends_with(path, path_len, gif, 4, 0) then "image/gif"
   else if _ends_with(path, path_len, svg, 4, 0) then "image/svg+xml"
-  else "application/octet-stream"
+  else _audio_mime(_audio_type(path, path_len))
 end
 
 
@@ -171,3 +201,14 @@ in
   else if _ends_with(path, path_len, svg, 4, 0) then 4
   else 0
 end
+
+(* The audio type the name path[0, path_len) says: MP3, MP4 (.m4a,
+   .mp4), Ogg (.ogg, .opus), WAV, or none of them *)
+#pub fn audio_type_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len: int path_len): audio_type
+
+implement audio_type_of (path, path_len) = _audio_type(path, path_len)
+
+(* The media type of an audio type *)
+#pub fn audio_mime (kind: audio_type): [type_len:pos | type_len <= 24] string type_len
+
+implement audio_mime (kind) = _audio_mime(kind)

@@ -34,6 +34,7 @@ staload "platform.sats"
 staload "screen_controls.sats"
 staload "sharing.sats"
 staload "read_aloud.sats"
+staload "narration.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -289,6 +290,8 @@ fn _show_library (): void = let
   val () = reader_search_stop()
   val () = reader_stack_clear()
   val () = reader_timer_stop()
+  (* the narration stops with the book *)
+  val () = narration_close()
   val () = window_close()
   (* what sync brings for the book now goes to its stored record, and
      no place of another device's is offered *)
@@ -1282,7 +1285,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
     in 0 end)
 in listeners end
 
-fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
+fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
       (* the screen's controls as the platform has them now, and the
          speeds and the book's voices to read aloud *)
@@ -1320,6 +1323,8 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
         else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(2) in true end
         else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
         else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
+        else if _is(clicked, "narration-skip") then let val () = set_narration_notes_set(NotesSkipped()) in true end
+        else if _is(clicked, "narration-read") then let val () = set_narration_notes_set(NotesRead()) in true end
         else if _is(clicked, "typography-reset") then let
             val () = _settings_reset()
           in false end
@@ -1349,6 +1354,12 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
   val listeners = RCons(listeners, OnEl("word-row"), "input", llam(h) => let
       val () = set_ws_set(_clamp(_input_number(h), 0, 16))
     in let val () = _settings_changed() in 0 end end)
+  (* the narration's speed, in quarters: kept, and applied to the audio
+     at once *)
+  val listeners = RCons(listeners, OnEl("narration-speed-row"), "input", llam(h) => let
+      val () = set_narration_speed_set(_clamp(_input_number(h), 2, 8))
+      val () = set_apply(lib_state_get())
+    in let val () = narration_rate() in 0 end end)
 in listeners end
 
 (* ============================================================
@@ -1966,7 +1977,12 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       (* with the sides' zones, a tap on an image between them shows it
          full screen, rather than the bars *)
       else if (if node >= 0 then (if set_taps_get() = 0 then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
-      else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
+      else if x >= 0 then let
+        (* a tap on text the narration reads, between the sides' zones,
+           plays on from there; the bars come up or go as ever *)
+        val () = (if node >= 0 then (if _in_middle(x) then narration_tap(node) else ()) else ())
+      in let val () = _zone_click(x, y) in 0 end end
+      else 0
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown
      full screen *)
@@ -2136,6 +2152,8 @@ implement main0 () = let
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
   val listeners = _wire_update(listeners)
+  (* the narration's controls and its audio's events *)
+  val listeners = narration_listen(listeners)
   val () = ui_listen_all(listeners)
   val () = _build_watch()
   (* files handed to the app from outside it (an Android intent, the
