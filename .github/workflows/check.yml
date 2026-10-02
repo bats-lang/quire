@@ -73,6 +73,13 @@ jobs:
       - name: Generate PWA
         run: ./dist/debug/gen-pwa
 
+      # The OAuth clients it signs in with: public IDs, from the
+      # repository's variables (a secret of the same name works too)
+      - name: Sync clients
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
+        run: scripts/sync-clients.sh dist/pwa
+
       - name: Verify PWA output
         run: |
           test -f dist/pwa/index.html
@@ -134,7 +141,7 @@ jobs:
   android:
     needs: check
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@80d4a473699b6479bd2fbe5a0467c2918e8de9fc
+    uses: bats-lang/pwa/.github/workflows/android.yml@52e9674847b4d0db60fd93d5c2f75b784485d245
     secrets: inherit
     with:
       artifact: quire-android

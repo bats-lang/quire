@@ -72,6 +72,13 @@ jobs:
       - name: Generate PWA
         run: ./dist/debug/gen-pwa
 
+      # The OAuth clients it signs in with: public IDs, from the
+      # repository's variables (a secret of the same name works too)
+      - name: Sync clients
+        env:
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
+        run: scripts/sync-clients.sh dist/pwa
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
