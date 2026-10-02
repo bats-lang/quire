@@ -459,6 +459,12 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+A link found on the page is a `link_found` (`NoLink`, `InBook`,
+`OutOfBook`); a spine's direction a `spine_progression`; a book's
+accessibility metadata an `a11y_feature` each (its bit in the stored
+flags made by `a11y_bit` alone, asked by `a11y_has`) and a
+`wcag_level`; an OPDS list of links a `link_list`; the catalogue's
+fields `entry_field` and `page_field`, and a refused fetch a `refusal`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
