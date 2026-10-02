@@ -10,6 +10,7 @@
 #use sha256 as SHA
 #use str as S
 #use xml-tree as X
+#use zip as Z
 
 staload "ui.sats"
 staload "notice.sats"
@@ -246,7 +247,8 @@ in
       case+ got of
       | ~ZipMissing() => 0
       | ~ZipGot(owner, cover_data, cover_size, cover_method, _, _, _) =>
-        if cover_method = 0 then let
+        case+ cover_method of
+        | $Z.Stored() => let
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
           val key = lib_key(99, id_high, id_low)
           val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
@@ -256,7 +258,7 @@ in
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
         in code end
-        else let
+        | $Z.Deflated() => let
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
           val decompressing = decompress(cover_bytes, cover_size, zip_compression(cover_method))
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
@@ -316,9 +318,9 @@ fn _book_store_checked (storing: $P.promise($IDB.stored, $P.Chained), key: Int):
    adds the book to the library, in MODE_REPLACE updates library book
    library_index; stores the
    file under 'b' in both. The book's key, or below 0. *)
-fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{method:int | method == 0 || method == 8}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
+fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
   (serial: int, file_size: int file_size, opf_bytes: !$A.borrow(byte, l, n), n: int n,
-   compressed_offset: int compressed_offset, compressed_size: int compressed_size, method: int method, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
+   compressed_offset: int compressed_offset, compressed_size: int compressed_size, method: $Z.compression, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
    mode: int, library_index: Int, id_high: Int, id_low: Int): Int = let
   val nodes = $X.parse_document(opf_bytes, n)
   val @(title, author) = walk_opf_metadata(opf_bytes, nodes)

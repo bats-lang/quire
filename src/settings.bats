@@ -935,7 +935,7 @@ in _voice_choices_free(older) end
    when it settles Undone, the settings the defaults replaced are put
    back. The promise resolves with how once that is done (the caller
    applies the settings now, and again when they are put back) *)
-#pub fn set_reset_undoable {state:int} (how: $P.promise(settled, state)): $P.promise(settled, $P.Chained)
+#pub fn set_reset_undoable {state:$P.promise_state} (how: $P.promise(settled, state)): $P.promise(settled, $P.Chained)
 implement set_reset_undoable (how) = let
   val before = !_set
   val ruby_before = !_ruby

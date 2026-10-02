@@ -10,6 +10,7 @@
 #use promise as P
 #use str as S
 #use xml-tree as X
+#use zip as Z
 
 staload "epub_xml.sats"
 staload "book.sats"
@@ -81,8 +82,8 @@ in toc_free(entries) end
    with compression method method and its name [name_offset, name_offset +
    name_len); ncx when it is an NCX *)
 datavtype toc_source =
-  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{method:int | method == 0 || method == 8}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
-    TocSource of (int file_size, int data_offset, int data_size, int method, int name_offset, int name_len, bool)
+  | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}
+    TocSource of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, bool)
   | TocNone of ()
 
 val _source = ref<toc_source>(TocNone())
