@@ -14,6 +14,7 @@ staload "pages.sats"
 staload "paths.sats"
 staload "mem.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
@@ -165,10 +166,9 @@ implement $P.dispose<$IDB.stored>(_) = ()
   | {l:agz}{n:pos | n <= 1048576} BlobBytes of ($A.arr(byte, l, n), int n)
   | NoBlobBytes of ()
 
-(* The blob a decompress promise resolved with, read whole and freed:
-   none when decompression failed, or the result is empty or over 1 MiB
-   (the book's data, checked here once) *)
-#pub fn take_blob (handle: Int): blob_bytes
+(* An event's bytes, read whole and freed: none when it has none, or
+   they are over 1 MiB *)
+#pub fn take_blob (payload: $EV.event_payload): blob_bytes
 
 (* What a read of storage found, read whole (at most 1 MiB): its bytes;
    nothing stored there; or a read that failed. A failed read is never taken for an empty one:
@@ -497,8 +497,8 @@ in
   in BlobBytes(blob_data, blob_len) end
 end
 
-implement take_blob (handle) =
-  case+ $BD.blob_claim(handle) of
+implement take_blob (payload) =
+  case+ $EV.event_take(payload) of
   | ~$R.none() => NoBlobBytes()
   | ~$R.some(blob) => _blob_bytes(blob)
 

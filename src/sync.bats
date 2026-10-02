@@ -504,7 +504,7 @@ in $A.free<byte>(old) end
    If-Match the ETag read when with_match; the promise resolves as
    fetch's does *)
 fn _send {method_len:pos | method_len <= 16}{body_loc:agz}{body_size:nat}{body_len:nat | body_len <= body_size}
-  (method: string method_len, body: !$A.borrow(byte, body_loc, body_size), body_len: int body_len, with_match: bool): $P.promise_pending(Int) = let
+  (method: string method_len, body: !$A.borrow(byte, body_loc, body_size), body_len: int body_len, with_match: bool): $P.promise($FE.fetched, $P.Chained) = let
   val method_len = g1u2i(string1_length(method))
   val method_bytes = $A.alloc<byte>(method_len)
   val () = $A.write_text(method_bytes, 0, $A.text_lit(method), method_len)
@@ -598,6 +598,24 @@ fn _failure_kind (status: Int): int =
   else if status = 409 then RESULT_FOLDER
   else RESULT_SERVER
 
+(* What a request came to, with the response's ETag written to etag:
+   its status, the tag's length (0 when it has none) and its body; none
+   when no response came *)
+fn _tagged {l:agz}{etag_size:pos}
+  (got: $FE.fetched, etag: !$A.arr(byte, l, etag_size), etag_size: int etag_size)
+  : $R.option(@([s:int] int s, [k:nat | k <= etag_size] int k, [n:nat] $BD.dblob(n))) =
+  case+ got of
+  | ~$FE.NoResponse() => $R.none()
+  | ~$FE.Responded(response) => let
+      val name = $A.alloc<byte>(4)
+      val () = $A.write_text(name, 0, $A.text_lit("ETag"), 4)
+      val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+      val found = $FE.fetch_header(response, name_bytes, 4, etag, etag_size)
+      val () = release_bytes(name_frozen, name_bytes)
+      val etag_len = (case+ found of ~$R.some(k) => k | ~$R.none() => 0): [k:nat | k <= etag_size] int k
+      val status = $FE.fetch_status(response)
+    in $R.some(@(status, etag_len, $FE.fetch_body(response))) end
+
 (* A request that never reached the store: offline, or (another origin)
    refused by the browser *)
 fn _unreached (): int = if _cross_origin() then RESULT_BLOCKED else RESULT_UNREACHABLE
@@ -609,9 +627,9 @@ fn _webdav_read (): $P.promise(read_answer, $P.Chained) = let
   val pending = _send("GET", empty_bytes, 0, false)
   val () = release_bytes(empty_frozen, empty_bytes)
 in
-  $P.and_then<Int><read_answer>($P.vow(pending), llam(handle) => let
+  $P.and_then<$FE.fetched><read_answer>(pending, llam(got) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
-    val answer = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
+    val answer = (case+ _tagged(got, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in ReadFailed(_unreached(), 0) end
       | ~$R.some(@(status, etag_len, body)) =>
         if status = 404 then let
@@ -645,9 +663,9 @@ fn _webdav_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val pending = _send("PUT", body, body_size, true)
 in
-  $P.and_then<Int><write_answer>($P.vow(pending), llam(handle) => let
+  $P.and_then<$FE.fetched><write_answer>(pending, llam(got) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
-    val answer = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
+    val answer = (case+ _tagged(got, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in WriteFailed(_unreached(), 0) end
       | ~$R.some(@(status, _, reply)) => let
           val () = $A.free<byte>(etag)
