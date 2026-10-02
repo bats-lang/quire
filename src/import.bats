@@ -29,6 +29,7 @@ staload "storage.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BE = "wasm.bats-packages.dev/bridge/src/external.sats"
 
 (* ============================================================
    What the open book is
@@ -74,8 +75,8 @@ fn _at_most_200 {name_len:pos} (name_len: int name_len): [kept_len:pos | kept_le
   if name_len > 200 then 200 else name_len
 
 (* Keeps book_file's name (its first 200 bytes) for the banner *)
-fn _keep_name_of {file_size:nat} (book_file: !$BF.infile(file_size)): void =
-  case+ $BF.file_name(book_file) of
+fn _keep_name (name: $R.option([name_size:nat] $BD.dblob(name_size))): void =
+  case+ name of
   | ~$R.none() => _kept_name_put(NoKeptName())
   | ~$R.some(blob) => let
       val name_len = $BD.blob_len(blob)
@@ -88,6 +89,9 @@ fn _keep_name_of {file_size:nat} (book_file: !$BF.infile(file_size)): void =
         val () = $BD.blob_free(blob)
       in _kept_name_put(KeptName(name_bytes, kept_len)) end
     end
+
+fn _keep_name_of {file_size:nat} (book_file: !$BF.infile(file_size)): void =
+  _keep_name($BF.file_name(book_file))
 
 (* text's bytes at buffer[start, start + text_len), from position on *)
 fun _put_text {l:agz}{n:pos}{text_len:nat}{start:nat | start + text_len <= n}{position:nat | position <= text_len} .<text_len - position>.
@@ -257,8 +261,8 @@ in
           val decompressing = decompress(cover_bytes, cover_size, zip_compression(cover_method))
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
-          val () = $P.finish<Int>($P.vow(decompressing), llam(content_handle) =>
-            case+ take_content(content_handle) of
+          val () = $P.finish<decompressed>(decompressing, llam(cover_inflated) =>
+            case+ take_decompressed(cover_inflated) of
             | ~NoContentBytes() => ()
             | ~ContentBytes(content_owner, content, content_size) => let
                 val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
@@ -390,8 +394,8 @@ in
       val () = $A.drop<byte>(data_frozen, data_bytes)
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
-      $P.and_then<Int><Int>($P.vow(decompressing), llam(container_handle) =>
-        case+ take_content(container_handle) of
+      $P.and_then<decompressed><Int>(decompressing, llam(container_inflated) =>
+        case+ take_decompressed(container_inflated) of
         | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~5) end
         | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
             val @(xml_frozen, xml_bytes) = $A.freeze<byte>(xml_buffer)
@@ -436,8 +440,8 @@ in
                     val () = $A.drop<byte>(opf_data_frozen, opf_data_bytes)
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
-                    $P.and_then<Int><Int>($P.vow(opf_decompressing), llam(opf_handle) =>
-                      case+ take_content(opf_handle) of
+                    $P.and_then<decompressed><Int>(opf_decompressing, llam(opf_inflated) =>
+                      case+ take_decompressed(opf_inflated) of
                       | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~9) end
                       | ~ContentBytes(opf_content_owner, opf_content, opf_size) => let
                           val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_content)
@@ -587,14 +591,25 @@ in
   end
 end
 
-(* Imports the file an open promise resolved with (its handle) *)
-fn _import_handle (handle: Int): $P.promise(Int, $P.Chained) =
-  case+ $BF.file_claim(handle) of
-  | ~$R.none() => let
+(* "<name> could not be read.", for a file that came but could not be
+   read (its name is the one kept) *)
+fn _unread (): void = let
+  val message = $A.alloc<byte>(512)
+  val name_end = _kept_name_into(message)
+  val text_end = _put_string(message, name_end, " could not be read.")
+  val () = notice_error_buf(message, text_end)
+in ui_show("import-progress", false) end
+
+(* Imports the file an open promise resolved with *)
+fn _import_opened (opened: $BF.opened): $P.promise(Int, $P.Chained) =
+  case+ opened of
+  (* gone from the input before it was read: nothing to import *)
+  | ~$BF.NotOpened() => $P.ret<Int>(~1)
+  | ~$BF.OpenFailed() => let
       val () = _kept_name_put(NoKeptName())
-      val () = _error()
+      val () = _unread()
     in $P.ret<Int>(~1) end
-  | ~$R.some(book_file) => let
+  | ~$BF.Opened(book_file) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name_of(book_file)
     in _import_file(book_file, file_size) end
@@ -630,12 +645,12 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
         val opened = $BF.file_open_at(id_bytes, 11, file_index)
         val () = release_bytes(id_frozen, id_bytes)
       in opened end
-      else $BF.dropped_open_at(file_index)): $P.promise_pending(Int)
+      else $BF.dropped_open_at(file_index)): $P.promise($BF.opened, $P.Chained)
   in
-    (* each import's result is already reported (_import_handle shows
+    (* each import's result is already reported (_import_opened shows
        the error banner on a failure, and a duplicate is answered in its
        own dialog): the next file is imported whatever it was *)
-    $P.finish<Int>($P.and_then<Int><Int>($P.vow(opened), llam(handle) => _import_handle(handle)), llam(_) =>
+    $P.finish<Int>($P.and_then<$BF.opened><Int>(opened, llam(opened) => _import_opened(opened)), llam(_) =>
       _import_seq(source, file_index + 1, file_count))
   end
 
@@ -655,12 +670,22 @@ in _import_seq(0, 0, file_count) end
 
 implement import_dropped () = _import_seq(1, 0, $BF.dropped_count())
 
-(* Imports a file handed to the app from outside it (its handle) *)
-#pub fn import_external (handle: Int): void
+(* Imports a file handed to the app from outside it; the promise
+   resolves when its import is done, as an import's does *)
+#pub fn import_external (handed: $BE.external): $P.promise(Int, $P.Chained)
 
 (* ignored: the import's result is already reported, as each one's of
    _import_seq *)
-implement import_external (handle) = $P.finish<Int>(_import_handle(handle), llam(_) => ())
+implement import_external (handed) =
+  case+ handed of
+  | ~$BE.ExternalUnreadable(name) => let
+      val () = _keep_name(name)
+      val () = _unread()
+    in $P.ret<Int>(~1) end
+  | ~$BE.External(book_file, name) => let
+      val file_size = $BF.file_size(book_file)
+      val () = _keep_name(name)
+    in _import_file(book_file, file_size) end
 
 (* ============================================================
    Reopening a stored book

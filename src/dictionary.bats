@@ -1096,8 +1096,8 @@ in
               val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
               val relative = offset - first * chunk_length
             in
-              $P.finish<Int>($P.vow(inflating), llam(handle) =>
-                case+ take_content(handle) of
+              $P.finish<decompressed>(inflating, llam(inflated) =>
+                case+ take_decompressed(inflated) of
                 | ~NoContentBytes() => _article_unread()
                 | ~ContentBytes(content_owner, content, content_size) => let
                     val () = _inflated_show(id, content, content_size, relative, read_len)
@@ -1393,25 +1393,29 @@ fn _file_kind {n:nat} (file: !$BF.infile(n)): int =
       in kind end
     end
 
-(* The file an open promise resolved with, kept by what it is *)
-fn _keep_file (handle: Int): void =
-  case+ $BF.file_claim(handle) of
-  | ~$R.none() => ()
-  | ~$R.some(file) => let
+(* The file an open promise resolved with, kept by what it is; false
+   when it could not be read *)
+fn _keep_file (opened: $BF.opened): bool =
+  case+ opened of
+  (* gone from the input before it was read: the check finds it
+     missing *)
+  | ~$BF.NotOpened() => true
+  | ~$BF.OpenFailed() => false
+  | ~$BF.Opened(file) => let
       val size = $BF.file_size(file)
       val kind = _file_kind(file)
-    in
-      if kind = 1 then _slot_put(_import_ifo, FileSlot(file, size))
-      else if kind = 2 then _slot_put(_import_idx, FileSlot(file, size))
-      else if kind = 3 then let
-        val () = !_import_compressed := false
-      in _slot_put(_import_dict, FileSlot(file, size)) end
-      else if kind = 4 then let
-        val () = !_import_compressed := true
-      in _slot_put(_import_dict, FileSlot(file, size)) end
-      else if kind = 5 then _slot_put(_import_syn, FileSlot(file, size))
-      else $BF.file_close(file)
-    end
+      val () =
+        if kind = 1 then _slot_put(_import_ifo, FileSlot(file, size))
+        else if kind = 2 then _slot_put(_import_idx, FileSlot(file, size))
+        else if kind = 3 then let
+          val () = !_import_compressed := false
+        in _slot_put(_import_dict, FileSlot(file, size)) end
+        else if kind = 4 then let
+          val () = !_import_compressed := true
+        in _slot_put(_import_dict, FileSlot(file, size)) end
+        else if kind = 5 then _slot_put(_import_syn, FileSlot(file, size))
+        else $BF.file_close(file)
+    in true end
 
 (* An index file (an .idx or a .syn) read whole, for its import *)
 datavtype index_piece =
@@ -1870,9 +1874,12 @@ fun _open_files {file_index,file_count:nat | file_index <= file_count} .<file_co
     val opened = $BF.file_open_at(id_bytes, input_len, file_index)
     val () = release_bytes(id_frozen, id_bytes)
   in
-    $P.finish<Int>($P.vow(opened), llam(handle) => let
-      val () = _keep_file(handle)
-    in _open_files(file_index + 1, file_count) end)
+    $P.finish<$BF.opened>(opened, llam(opened) =>
+      if _keep_file(opened) then _open_files(file_index + 1, file_count)
+      else let
+        (* the input's choice is cleared, as when every file is read *)
+        val () = app_dictionary_input()
+      in _refuse("One of the dictionary's files could not be read.") end)
   end
 
 (* Imports the dictionary whose files are picked in the dictionaries'

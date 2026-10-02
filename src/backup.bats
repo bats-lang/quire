@@ -1249,7 +1249,7 @@ fn _backup_file_count (): int = let
   val () = release_bytes(id_frozen, id_bytes)
 in count end
 
-fn _backup_file_open (): $P.promise_pending(Int) = let
+fn _backup_file_open (): $P.promise($BF.opened, $P.Chained) = let
   val input_id = $A.alloc<byte>(11)
   val () = $A.write_text(input_id, 0, $A.text_lit("backup-file"), 11)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
@@ -1262,14 +1262,16 @@ in pending end
 
 implement backup_import () =
   if _backup_file_count() <= 0 then ()
-  else $P.finish<Int>($P.vow(_backup_file_open()), llam(handle) => let
+  else $P.finish<$BF.opened>(_backup_file_open(), llam(opened) => let
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in
-    case+ $BF.file_claim(handle) of
-    | ~$R.none() =>
+    case+ opened of
+    (* the choice was cleared before it was read: nothing to restore *)
+    | ~$BF.NotOpened() => ()
+    | ~$BF.OpenFailed() =>
       _say("The backup could not be read.")
-    | ~$R.some(file) => let
+    | ~$BF.Opened(file) => let
         val file_size = $BF.file_size(file)
       in
         if file_size <= 0 then let

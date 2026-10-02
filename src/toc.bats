@@ -453,10 +453,9 @@ in
          val decompressed = decompress(compressed_bytes, data_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
-         val decompressed = $P.vow(decompressed)
        in
-         $P.and_then<Int><int>(decompressed, llam(handle) =>
-           case+ take_content(handle) of
+         $P.and_then<decompressed><int>(decompressed, llam(inflated) =>
+           case+ take_decompressed(inflated) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(content_owner, content, content_size) => let
                val @(content_frozen, content_bytes) = $A.freeze<byte>(content)

@@ -970,10 +970,9 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {id_len:pos | id_len < 256} OnEl of (string id_len)
   | OnDocument
   | OnWindow
-  | OnExternalFiles   (* files handed to the app from outside it *)
-  (* pointer events under an element, for the gestures package (bridge's
-     listen_gestures) *)
-  | {id_len:pos | id_len < 256} OnGestures of (string id_len)
+  (* pointer events under an element, one raw record each, for the
+     gestures package's pointer source (bridge's listen_pointer) *)
+  | {id_len:pos | id_len < 256} OnPointer of (string id_len)
 
 (* The app's listeners, as one table: the last added is at its head.
    A listener's id is its position in the table (the first added is 0),
@@ -1007,11 +1006,10 @@ fn _listen_one {event_len:pos | event_len < 256}
       in release_bytes(id_frozen, id_bytes) end
     | ~OnDocument() => $EV.listen_document(event_bytes, event_len, listener, callback)
     | ~OnWindow() => $EV.listen_window(event_bytes, event_len, listener, callback)
-    | ~OnExternalFiles() => $EV.listen_external_files(listener, callback)
-    | ~OnGestures(id) => let
+    | ~OnPointer(id) => let
         val id_len = _length(id)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
-        val () = $EV.listen_gestures(id_bytes, id_len, listener, callback)
+        val () = $EV.listen_pointer(id_bytes, id_len, listener, callback)
       in release_bytes(id_frozen, id_bytes) end)
 in release_bytes(event_frozen, event_bytes) end
 
@@ -1061,6 +1059,16 @@ implement ui_focus(id) = let
   val id_len = _length(id)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val () = $BDOM.focus_node(id_bytes, id_len)
+in release_bytes(id_frozen, id_bytes) end
+
+(* Captures pointer pointer_id to element id (as the gestures package's
+   pointer source asks, once a mouse has moved) *)
+#pub fn ui_pointer_capture {id_len:pos | id_len < 256} (id: string id_len, pointer_id: int): void
+
+implement ui_pointer_capture(id, pointer_id) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val () = $EV.pointer_capture(id_bytes, id_len, pointer_id)
 in release_bytes(id_frozen, id_bytes) end
 
 end (* #target wasm *)
