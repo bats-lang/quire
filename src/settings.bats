@@ -17,7 +17,11 @@ staload "mem.sats"
 staload "local_time.sats"
 staload "jsonio.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
+staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
+
+implement $P.dispose<settled>(_) = ()
 
 (* The settings, each in its range:
    size               font size in px, 12 to 32
@@ -704,7 +708,8 @@ fn _save (sort: int): void = let
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = save_checked($IDB.idb_put(key_bytes, 3, record_bytes, record_size))
+  (* never over settings that could not be read (#174) *)
+  val () = (if storage_savable(SettingsRecord()) then save_checked($IDB.idb_put(key_bytes, 3, record_bytes, record_size)) else ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -926,33 +931,42 @@ fn _reset (): void = let
   val+ ~VoicesCell(older, _) = aside
 in _voice_choices_free(older) end
 
-(* Puts the defaults back at once, then runs after (which applies
-   them); what it returns puts the settings they replaced back, and
-   runs after again *)
-#pub fn set_reset_undoable (after: () -<cloref1> void): () -<cloref1> void
-implement set_reset_undoable (after) = let
+(* Puts the defaults back at once. how is the Undo offer made for it:
+   when it settles Undone, the settings the defaults replaced are put
+   back. The promise resolves with how once that is done (the caller
+   applies the settings now, and again when they are put back) *)
+#pub fn set_reset_undoable {state:int} (how: $P.promise(settled, state)): $P.promise(settled, $P.Chained)
+implement set_reset_undoable (how) = let
   val before = !_set
   val ruby_before = !_ruby
   val rate_before = !_speech_rate
   val brightness_before = !_brightness
   val rotation_before = !_rotation
   val () = _reset()
-  val () = after()
-in lam () => let
-  val () = !_set := before
-  val () = !_ruby := ruby_before
-  val () = !_speech_rate := rate_before
-  val () = !_brightness := brightness_before
-  val () = !_rotation := rotation_before
-  var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
-  val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
-  val () = _voices_put(aside)
-in after() end end
+in
+  $P.and_then<settled><settled>(how, llam(settling) =>
+    case+ settling of
+    | Undone() => let
+        val () = !_set := before
+        val () = !_ruby := ruby_before
+        val () = !_speech_rate := rate_before
+        val () = !_brightness := brightness_before
+        val () = !_rotation := rotation_before
+        var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
+        val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
+        val () = _voices_put(aside)
+      in $P.ret<settled>(Undone()) end
+    | Final() => let
+        var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
+        val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
+        val+ ~VoicesCell(older, _) = aside
+        val () = _voice_choices_free(older)
+      in $P.ret<settled>(Final()) end)
+end
 
 (* The same, offering Undo *)
-#pub fn set_reset (after: () -<cloref1> void): void
-implement set_reset (after) =
-  undo_offer("Settings reset", set_reset_undoable(after), lam () => ())
+#pub fn set_reset (): $P.promise(settled, $P.Chained)
+implement set_reset () = set_reset_undoable(undo_offer("Settings reset"))
 
 (* A byte stored by an earlier run, as a value in [low, high]: checked
    here, once; fallback when it is out of range *)
@@ -963,6 +977,12 @@ fn _in_range {low,high,fallback:int | low <= fallback; fallback <= high}
 
 (* Reads the settings stored under "set" and applies them (without
    saving); the promise resolves with the sort order stored with them *)
+(* Whether a media query matches *)
+fn _matches (answer: $MEDIA.media_match): bool =
+  case+ answer of
+  | $MEDIA.Matches() => true
+  | $MEDIA.NoMatch() => false
+
 #pub fn set_load (): $P.promise(int, $P.Chained)
 
 implement set_load () = let
@@ -978,18 +998,23 @@ implement set_load () = let
   val () = $A.write_text(media_query, 0, $A.text_lit("(prefers-color-scheme: dark)"), 28)
   val @(query_frozen, query_bytes) = $A.freeze<byte>(media_query)
   val @(query_text, query_rest) = $A.borrow_split<byte>(query_frozen, query_bytes, 28)
-  val () = !_system_dark := ($MEDIA.match_media(query_text, 28) > 0)
-  val () = $MEDIA.listen_media(query_text, 28, ui_media_listener(), lam(matches) => let
-      val () = !_system_dark := (matches > 0)
+  val () = !_system_dark := _matches($MEDIA.match_media(query_text, 28))
+  val () = $MEDIA.listen_media(query_text, 28, ui_media_listener(), llam(matches) => let
+      val () = !_system_dark := _matches(matches)
       val () = _apply_theme()
     in 0 end)
   val query_bytes = $A.borrow_join<byte>(query_frozen, query_text, query_rest)
   val () = release_bytes(query_frozen, query_bytes)
 in
-  $P.and_then<Int><int>($P.vow(pending), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => let val () = set_show() in $P.ret<int>(0) end
-    | ~BlobBytes(record, n) =>
+  $P.and_then<$IDB.lookup><int>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => let val () = set_show() in $P.ret<int>(0) end
+    (* the defaults this session, and the settings stored are kept *)
+    | ~StoredUnreadable() => let
+        val () = storage_unreadable(SettingsRecord())
+        val () = set_show()
+      in $P.ret<int>(0) end
+    | ~StoredBytes(record, n) =>
       if n < 8 then let
         val () = $A.free<byte>(record)
         val () = set_show()

@@ -13,6 +13,7 @@
 
 staload "ui.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 
 (* Whether the error banner is up *)
 val _banner_up = ref<bool>(false)
@@ -56,15 +57,17 @@ implement notice_part_unread () =
 val _save_failure_told = ref<bool>(false)
 
 (* Ends a write of the reader's own data to storage (an IndexedDB put):
-   a status below 0 (the transaction aborted, as it does when storage
-   is full) shows the banner, once a session. It never takes the place
+   NotStored (the transaction aborted, as it does when storage is full)
+   shows the banner, once a session. It never takes the place
    of a message still up (the failure of a book's own file names the
    book, and says to free space too): it waits for a later failure *)
-#pub fn save_checked {s:int} (saving: $P.promise(Int, s)): void
+#pub fn save_checked {s:int} (saving: $P.promise($IDB.stored, s)): void
 
-implement save_checked (saving) = $P.finish<Int>(saving, lam(status) =>
-  if status >= 0 then ()
-  else if !_save_failure_told then ()
+implement save_checked (saving) = $P.finish<$IDB.stored>(saving, llam(status) =>
+  case+ status of
+  | $IDB.Stored() => ()
+  | $IDB.NotStored() =>
+  if !_save_failure_told then ()
   else if !_banner_up then ()
   else let
     val () = !_save_failure_told := true
@@ -86,7 +89,7 @@ implement notice_copied () = let
   val () = ui_show("copy-status", true)
 in
   (* a timer's status carries nothing *)
-  $P.finish<Int>($P.vow($TM.timer_set(COPIED_SHOWN)), lam(_) =>
+  $P.finish<Int>($P.vow($TM.timer_set(COPIED_SHOWN)), llam(_) =>
     if !_copied_serial = serial then ui_show("copy-status", false) else ())
 end
 

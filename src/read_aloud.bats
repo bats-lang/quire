@@ -68,7 +68,15 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 
 (* What a page turn is for: a sentence past the page shown (after so
    many turns for it), or the chapter's end *)
-datatype turn_for = ForSentence of Nat | ForChapterEnd
+implement $P.dispose<turned>(_) = ()
+implement $P.dispose<script>(script) = script_free(script)
+
+datavtype turn_for = ForSentence of Nat | ForChapterEnd of ()
+
+fn _turn_for_free (purpose: turn_for): void =
+  case+ purpose of
+  | ~ForSentence(_) => ()
+  | ~ForChapterEnd() => ()
 
 (* Reading aloud: silent; a chapter's script being made; a sentence of
    the script being said (its utterance's number); a page turn awaited
@@ -92,7 +100,9 @@ fn _aloud_free (state: aloud): void =
   | ~Silent() => ()
   | ~Loading() => ()
   | ~Saying(script, _, _) => script_free(script)
-  | ~Turning(script, _, _) => script_free(script)
+  | ~Turning(script, _, purpose) => let
+      val () = _turn_for_free(purpose)
+    in script_free(script) end
   | ~Paused(script, _) => script_free(script)
 
 fn _take (): aloud = let
@@ -149,8 +159,10 @@ fn _placement (node: Int, offset: Int): placement =
     val x = $DR.get_measure_x()
     val y = $DR.get_measure_y()
   in
-    if measured < 0 then OnPage()
-    else if page_width <= 0 then OnPage()
+    case+ measured of
+    | $DR.NoElement() => OnPage()
+    | $DR.Measured() =>
+    if page_width <= 0 then OnPage()
     else if reader_scrolls() then
       (if y >= page_y + page_height then After() else if y < page_y then Before() else OnPage())
     (* right to left, the pages go on to the left *)
@@ -273,20 +285,33 @@ end
    Going on: the next sentence, the page turned, the next chapter
    ============================================================ *)
 
-(* The script of the chapter shown made, then given to next (in this
-   run, else dropped) *)
-fn _load (run: int, next: (script) -<cloref1> void): void = let
+(* A script loaded for a run: still wanted (the run is the current one,
+   and it is loading), or dropped *)
+datavtype loaded = Loaded of script | Dropped of ()
+implement $P.dispose<loaded>(result) =
+  case+ result of
+  | ~Loaded(script) => script_free(script)
+  | ~Dropped() => ()
+
+(* The script of the chapter shown made: the promise resolves with it
+   when this run still waits for it, else it is dropped *)
+fn _load (run: int): $P.promise(loaded, $P.Chained) = let
   val chapter = _chapter_shown()
   val () = _put(Loading())
 in
-  if chapter < 0 then _stop()
-  else reader_script_load(chapter, lam(script) =>
-    if run <> !_run then script_free(script)
+  if chapter < 0 then let
+    val () = _stop()
+  in $P.ret<loaded>(Dropped()) end
+  else $P.and_then<script><loaded>(reader_script_load(chapter), llam(script) =>
+    if run <> !_run then let
+      val () = script_free(script)
+    in $P.ret<loaded>(Dropped()) end
     else (case+ _take() of
-      | ~Loading() => next(script)
+      | ~Loading() => $P.ret<loaded>(Loaded(script))
       | other => let
           val () = _put(other)
-        in script_free(script) end))
+          val () = script_free(script)
+        in $P.ret<loaded>(Dropped()) end))
 end
 
 (* Sentence index of script said, when it is on the page shown; the
@@ -315,54 +340,66 @@ fun _go {steps:nat} .<steps>. (steps: int steps, run: int, script: script, index
    read from its start. Reading stops where nothing turns *)
 and _turn {steps:nat} .<steps>. (steps: int steps, run: int, script: script, index: Nat, purpose: turn_for): void = let
   val () = _put(Turning(script, index, purpose))
-  val turning = $P.and_then<turned><turned>(reader_turn_on(), lam(result) =>
-    $P.and_then<Int><turned>($P.vow($TM.timer_set(TURN_PAUSE)), lam(_) => $P.ret<turned>(result)))
+  val turning = $P.and_then<turned><turned>(reader_turn_on(), llam(result) =>
+    $P.and_then<Int><turned>($P.vow($TM.timer_set(TURN_PAUSE)), llam(_) => $P.ret<turned>(result)))
 in
-  $P.finish<turned>(turning, lam(result) =>
+  $P.finish<turned>(turning, llam(result) =>
     if run <> !_run then ()
     else case+ _take() of
     | ~Turning(script, index, purpose) =>
       if steps <= 0 then let
+        val () = _turn_for_free(purpose)
         val () = script_free(script)
       in _stop() end
       else (case+ result of
        | NotTurned() => let
+           val () = _turn_for_free(purpose)
            val () = script_free(script)
          in _stop() end
        | TurnedChapter() => let
+           val () = _turn_for_free(purpose)
            val () = script_free(script)
          in _from_start(steps - 1, run) end
        | TurnedPage() =>
          (case+ purpose of
-          | ForSentence(tries) => _go(steps - 1, run, script, index, tries + 1)
-          | ForChapterEnd() => _turn(steps - 1, run, script, index, ForChapterEnd())))
+          | ~ForSentence(tries) => _go(steps - 1, run, script, index, tries + 1)
+          | ~ForChapterEnd() => _turn(steps - 1, run, script, index, ForChapterEnd())))
     | other => _put(other))
 end
 
 (* The chapter shown read from its first sentence *)
 and _from_start {steps:nat} .<steps>. (steps: int steps, run: int): void =
-  _load(run, lam(script) =>
-    if steps <= 0 then let
-      val () = script_free(script)
-    in _stop() end
-    else _go(steps - 1, run, script, 0, 0))
+  $P.finish<loaded>(_load(run), llam(result) =>
+    case+ result of
+    | ~Dropped() => ()
+    | ~Loaded(script) =>
+      if steps <= 0 then let
+        val () = script_free(script)
+      in _stop() end
+      else _go(steps - 1, run, script, 0, 0))
 
 (* The chapter shown read from the first sentence on the page shown *)
 and _from_page {steps:nat} .<steps>. (steps: int steps, run: int): void =
-  _load(run, lam(script) =>
-    if steps <= 0 then let
-      val () = script_free(script)
-    in _stop() end
-    else let
-      val first = _first_shown(script, 0, script_count(script))
-    in _go(steps - 1, run, script, first, 0) end)
+  $P.finish<loaded>(_load(run), llam(result) =>
+    case+ result of
+    | ~Dropped() => ()
+    | ~Loaded(script) =>
+      if steps <= 0 then let
+        val () = script_free(script)
+      in _stop() end
+      else let
+        val first = _first_shown(script, 0, script_count(script))
+      in _go(steps - 1, run, script, first, 0) end)
 
 (* The chapter shown read from the sentence at offset of content node
    node *)
 fn _from_point (run: int, node: Int, offset: Int): void =
-  _load(run, lam(script) => let
-    val first = _script_index_at(script, node, offset)
-  in _go(STEPS_MAX, run, script, first, 0) end)
+  $P.finish<loaded>(_load(run), llam(result) =>
+    case+ result of
+    | ~Dropped() => ()
+    | ~Loaded(script) => let
+        val first = _script_index_at(script, node, offset)
+      in _go(STEPS_MAX, run, script, first, 0) end)
 
 (* A run starts: Read aloud pressed, and the screen kept awake *)
 fn _begin (): int = let
@@ -639,7 +676,8 @@ implement aloud_toggle () =
       val () = _unmark()
       val () = _pressed(false)
     in $SP.speech_cancel() end
-  | ~Turning(script, index, _) => let
+  | ~Turning(script, index, purpose) => let
+      val () = _turn_for_free(purpose)
       val _ = _run_next()
       val () = _put(Paused(script, index))
       val () = _unmark()

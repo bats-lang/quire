@@ -450,12 +450,12 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, data_offset, compressed, data_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressed = decompress(compressed_bytes, data_size, method)
+         val decompressed = decompress(compressed_bytes, data_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          val decompressed = $P.vow(decompressed)
        in
-         $P.and_then<Int><int>(decompressed, lam(handle) =>
+         $P.and_then<Int><int>(decompressed, llam(handle) =>
            case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(content_owner, content, content_size) => let

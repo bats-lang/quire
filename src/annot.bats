@@ -28,6 +28,7 @@ staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
@@ -120,20 +121,35 @@ in id end
 #define TOMBSTONES_MAX 1000
 #define TOMBSTONE_DAYS 180
 
-datatype tombs(int) =
-  | TombsNil(0)
+datavtype tombs(int) =
+  | TombsNil(0) of ()
   | {count:nat} TombsCons(count + 1) of (Int, Int, Int, tombs(count))
 
 (* The open book's *)
 val _tombs = ref<[count:nat] tombs(count)>(TombsNil())
 
-fun _tombs_count {count:nat} .<count>. (tombs: tombs(count)): int count =
+fun _tombs_free {count:nat} .<count>. (tombs: tombs(count)): void =
+  case+ tombs of
+  | ~TombsNil() => ()
+  | ~TombsCons(_, _, _, rest) => _tombs_free(rest)
+
+fn _tombs_take (): [count:nat] tombs(count) = let
+  var taken: [count:nat] tombs(count) = TombsNil()
+  val () = ref_exch_elt<[count:nat] tombs(count)>(_tombs, taken)
+in taken end
+
+fn _tombs_put {count:nat} (tombs: tombs(count)): void = let
+  var previous: [count:nat] tombs(count) = tombs
+  val () = ref_exch_elt<[count:nat] tombs(count)>(_tombs, previous)
+in _tombs_free(previous) end
+
+fun _tombs_count {count:nat} .<count>. (tombs: !tombs(count)): int count =
   case+ tombs of
   | TombsNil() => 0
   | TombsCons(_, _, _, rest) => 1 + _tombs_count(rest)
 
-(* When the annotation id_high, id_low was deleted, or -1 *)
-fun _tomb_stamp {count:nat} .<count>. (tombs: tombs(count), id_high: Int, id_low: Int): Int =
+(* When tombs has id_high, id_low deleted, or -1 *)
+fun _tomb_stamp {count:nat} .<count>. (tombs: !tombs(count), id_high: Int, id_low: Int): Int =
   case+ tombs of
   | TombsNil() => ~1
   | TombsCons(high, low, stamp, rest) =>
@@ -143,8 +159,8 @@ fun _tomb_stamp {count:nat} .<count>. (tombs: tombs(count), id_high: Int, id_low
 (* tombs without id_high, id_low *)
 fun _tomb_drop {count:nat} .<count>. (tombs: tombs(count), id_high: Int, id_low: Int): [left:nat | left <= count] tombs(left) =
   case+ tombs of
-  | TombsNil() => TombsNil()
-  | TombsCons(high, low, stamp, rest) =>
+  | ~TombsNil() => TombsNil()
+  | ~TombsCons(high, low, stamp, rest) =>
     if high = id_high then (if low = id_low then _tomb_drop(rest, id_high, id_low) else TombsCons(high, low, stamp, _tomb_drop(rest, id_high, id_low)))
     else TombsCons(high, low, stamp, _tomb_drop(rest, id_high, id_low))
 
@@ -154,14 +170,14 @@ fn _tomb_put {count:nat} (tombs: tombs(count), id_high: Int, id_low: Int, stamp:
   val known = _tomb_stamp(tombs, id_high, id_low)
 in TombsCons(id_high, id_low, (if known > stamp then known else stamp), _tomb_drop(tombs, id_high, id_low)) end
 
-(* Every deletion of either *)
+(* tombs with others' deletions *)
 fun _tombs_union {count,other_count:nat} .<other_count>. (tombs: tombs(count), others: tombs(other_count)): [total:nat] tombs(total) =
   case+ others of
-  | TombsNil() => tombs
-  | TombsCons(high, low, stamp, rest) => _tombs_union(_tomb_put(tombs, high, low, stamp), rest)
+  | ~TombsNil() => tombs
+  | ~TombsCons(high, low, stamp, rest) => _tombs_union(_tomb_put(tombs, high, low, stamp), rest)
 
-(* The deletions made since oldest, at most limit of them *)
-fun _tombs_recent {count:nat}{limit:nat} .<count>. (tombs: tombs(count), oldest: Int, limit: int limit): [kept:nat | kept <= limit] tombs(kept) =
+(* A copy of the deletions of tombs made since oldest, at most limit *)
+fun _tombs_recent {count:nat}{limit:nat} .<count>. (tombs: !tombs(count), oldest: Int, limit: int limit): [kept:nat | kept <= limit] tombs(kept) =
   if limit <= 0 then TombsNil()
   else case+ tombs of
   | TombsNil() => TombsNil()
@@ -169,8 +185,8 @@ fun _tombs_recent {count:nat}{limit:nat} .<count>. (tombs: tombs(count), oldest:
     if stamp < oldest then _tombs_recent(rest, oldest, limit)
     else TombsCons(high, low, stamp, _tombs_recent(rest, oldest, limit - 1))
 
-(* The deletions still kept: those of the last TOMBSTONE_DAYS *)
-fn _tombs_kept {count:nat} (tombs: tombs(count)): [kept:nat | kept <= TOMBSTONES_MAX] tombs(kept) =
+(* A copy of the deletions still kept: those of the last TOMBSTONE_DAYS *)
+fn _tombs_kept {count:nat} (tombs: !tombs(count)): [kept:nat | kept <= TOMBSTONES_MAX] tombs(kept) =
   _tombs_recent(tombs, stamp_of_minutes($TM.epoch_minutes() - TOMBSTONE_DAYS * 1440), TOMBSTONES_MAX)
 
 (* The print page of the page shown (the reader's, from the book's
@@ -319,7 +335,7 @@ fun _serialize {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | position + S
 
 (* The first left deletions of tombs, at out[position] *)
 fun _serialize_tombs {l:agz}{arena:addr}{n:int}{count:nat}{left:nat}{position:nat | position + 12 * left <= n} .<left>.
-  (out: !$A.arrx(byte, l, n, arena), position: int position, tombs: tombs(count), left: int left): void =
+  (out: !$A.arrx(byte, l, n, arena), position: int position, tombs: !tombs(count), left: int left): void =
   if left <= 0 then ()
   else case+ tombs of
   | TombsNil() => ()
@@ -333,18 +349,22 @@ fn _key (): [l:agz] $A.arr(byte, l, 15) = lib_key(97, !_book_id_high, !_book_id_
 
 (* Stores annotations and deletions under the key of book id_high,
    id_low *)
-fn _store {count:nat | count <= ANNOTATIONS_MAX}{tomb_count:nat} (id_high: int, id_low: int, annotations: !annotations(count), count: int count, tombs: tombs(tomb_count)): void = let
+fn _store {count:nat | count <= ANNOTATIONS_MAX}{tomb_count:nat} (id_high: int, id_low: int, annotations: !annotations(count), count: int count, tombs: !tombs(tomb_count)): void =
+  (* never over annotations that could not be read *)
+  if ~storage_annotations_savable(id_high, id_low) then ()
+  else let
   val kept = _tombs_kept(tombs)
   val kept_count = _tombs_count(kept)
   val piece_size = 8 + 12 * kept_count + STORED_MAX * count
 in
   case+ piece_new(piece_size) of
-  | ~NoPiece() => ()
+  | ~NoPiece() => _tombs_free(kept)
   | ~Piece(owner, out) => let
       val () = $A.write_text(out, 0, $A.text_lit("QA3"), 3)
       val () = $A.write_byte(out, 3, 10)
       val () = $A.write_i32(out, 4, kept_count)
       val () = _serialize_tombs(out, 8, kept, kept_count)
+      val () = _tombs_free(kept)
       val used_len = _serialize(out, 8 + 12 * kept_count, annotations)
       val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, used_len)
@@ -354,12 +374,18 @@ in
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
     in piece_free(owner, $A.thaw<byte>(out_frozen)) end
-end
+  end
+
+(* Whether the open book's annotations may be changed: they were read
+   (#174) *)
+fn _changeable (): bool = storage_annotations_savable(!_book_id_high, !_book_id_low)
 
 fn _save (): void = let
   val cell = _take()
   val+ @AnnotationsCell(annotations, count) = cell
-  val () = _store(!_book_id_high, !_book_id_low, annotations, count, !_tombs)
+  val tombs = _tombs_take()
+  val () = _store(!_book_id_high, !_book_id_low, annotations, count, tombs)
+  val () = _tombs_put(tombs)
   prval () = fold@(cell)
 in _put(cell) end
 
@@ -493,28 +519,33 @@ implement annot_load (id_high, id_low) = let
   val () = !_book_id_low := id_low
   val () = !_book_open := false
   val () = _put(AnnotationsCell(annotations_nil(), 0))
-  val () = !_tombs := TombsNil()
+  val () = _tombs_put(TombsNil())
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_key())
   val loaded = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(loaded), lam(handle) =>
-    case+ take_content(handle) of
-    | ~NoContentBytes() => let
+  $P.and_then<$IDB.lookup><int>(loaded, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => let
         val () = (if !_book_id_high = id_high then (if !_book_id_low = id_low then !_book_open := true else ()) else ())
       in $P.ret<int>(0) end
-    | ~ContentBytes(owner, stored, stored_size) => let
+    (* not taken for none: nothing is saved for the book, or made, so
+       the annotations that could not be read are kept *)
+    | ~ContentUnreadable() => let
+        val () = storage_annotations_unreadable(id_high, id_low)
+      in $P.ret<int>(0) end
+    | ~StoredContent(owner, stored, stored_size) => let
         val @(annotations, count, tombs) = _parse_record(stored, stored_size)
         val () = piece_free(owner, stored)
         (* only while the same book is open *)
       in
         if !_book_id_high = id_high then (if !_book_id_low = id_low then let
             val () = _put(AnnotationsCell(annotations, count))
-            val () = !_tombs := tombs
+            val () = _tombs_put(tombs)
             val () = !_book_open := true
           in $P.ret<int>(count) end
-          else let val () = annotations_free(annotations) in $P.ret<int>(0) end)
-        else let val () = annotations_free(annotations) in $P.ret<int>(0) end
+          else let val () = annotations_free(annotations) val () = _tombs_free(tombs) in $P.ret<int>(0) end)
+        else let val () = annotations_free(annotations) val () = _tombs_free(tombs) in $P.ret<int>(0) end
       end)
 end
 
@@ -574,8 +605,8 @@ fn _on_page (node: Int): bool =
     val () = release_bytes(node_frozen, node_bytes)
   in
     case+ measured of
-    | ~$R.err(_) => false
-    | ~$R.ok(found) => if found <= 0 then false else let
+    | $DR.NoElement() => false
+    | $DR.Measured() => let
         val node_x = $DR.get_measure_x()
         val () = ui_measure("page")
         val page_x = $DR.get_measure_x()
@@ -662,7 +693,7 @@ fn _deleting (index: int): void = let
   val @(found, id_high, id_low) = _id_at(annotations, index)
   prval () = fold@(cell)
   val () = _put(cell)
-in if found then !_tombs := _tomb_put(!_tombs, id_high, id_low, stamp_now()) else () end
+in if found then _tombs_put(_tomb_put(_tombs_take(), id_high, id_low, stamp_now())) else () end
 
 fn _delete (index: int): void = let
   val () = _deleting(index)
@@ -734,7 +765,8 @@ end
 implement annot_bookmark_toggle (anchor) = let
   val index = _here()
 in
-  if index >= 0 then let
+  if ~_changeable() then ()
+  else if index >= 0 then let
     val () = _delete(index)
   in annot_star() end
   else let
@@ -801,7 +833,8 @@ implement annot_highlight (style) = let
   val start_node = _node_number_of(start_blob)
   val end_node = _node_number_of(end_blob)
 in
-  if start_node < 0 then ~1
+  if ~_changeable() then ~1
+  else if start_node < 0 then ~1
   else if end_node < 0 then ~1
   else if (if start_node = end_node then start_offset >= end_offset else start_node > end_node) then ~1
   else (case+ $DR.get_selection_text() of
@@ -848,7 +881,9 @@ fn _note_len {l:agz}{n:pos}{text_len:nat | text_len <= n} (text: !$A.arr(byte, l
    bytes of it *)
 #pub fn annot_note_set {l:agz}{n:pos}{text_len:nat | text_len <= n} (index: int, text: $A.arr(byte, l, n), text_len: int text_len): void
 
-implement annot_note_set (index, text, text_len) = let
+implement annot_note_set (index, text, text_len) =
+  if ~_changeable() then $A.free<byte>(text)
+  else let
   val note_len = _note_len(text, text_len)
   val note = $A.alloc<byte>(note_len + 1)
   val () = _copy_bytes(text, note, note_len, 0)
@@ -950,7 +985,7 @@ fn _put_back (offer: int): void =
       else let
         (* put back: a change after its deletion, which sync passes on *)
         val @(id_high, id_low) = _id_of(kind, chapter, start_node, start_offset, end_node, end_offset, made_at)
-        val () = !_tombs := _tomb_drop(!_tombs, id_high, id_low)
+        val () = _tombs_put(_tomb_drop(_tombs_take(), id_high, id_low))
         val () = _put(AnnotationsCell(_insert(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, stamp_now(), text, text_len, note, note_len, label, label_len, annotations), count + 1))
         val () = _save()
         val () = annot_marks()
@@ -968,9 +1003,17 @@ fn _let_go (offer: int): void =
       val () = $A.free<byte>(note)
     in $A.free<byte>(label) end
 
+(* The list an annotation is shown in *)
+datatype annotation_list = HighlightList | BookmarkList
+
+fn _list_render (shown: annotation_list): void =
+  case+ shown of
+  | HighlightList() => annot_render()
+  | BookmarkList() => annot_render_bookmarks()
+
 (* Deletes annotation index at once, offering it back: Undo puts it
-   back, and then again runs shown (which shows the list it was in) *)
-fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string text_len, shown: () -<cloref1> void): void = let
+   back, and then shows the list it was in (shown) again *)
+fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string text_len, shown: annotation_list): void = let
   val offer = !_held_serial + 1
   val () = !_held_serial := offer
   val () = _deleting(index)
@@ -981,20 +1024,25 @@ fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string te
   val () = annot_marks()
   val () = annot_star()
   val () = _removed_free(_held_swap(pulled))
-  val () = shown()
-in undo_offer(text, lam () => let val () = _put_back(offer) in shown() end, lam () => _let_go(offer)) end
+  val () = _list_render(shown)
+in
+  $P.finish<settled>(undo_offer(text), llam(how) =>
+    case+ how of
+    | Undone() => let val () = _put_back(offer) in _list_render(shown) end
+    | Final() => _let_go(offer))
+end
 
 (* Deletes highlight index, offering Undo *)
 #pub fn annot_delete_highlight {index:int} (index: int index): void
 
 implement annot_delete_highlight (index) =
-  _delete_undoable(index, "Highlight deleted", lam () => annot_render())
+  if ~_changeable() then () else _delete_undoable(index, "Highlight deleted", HighlightList())
 
 (* Deletes bookmark index, offering Undo *)
 #pub fn annot_delete_bookmark {index:int} (index: int index): void
 
 implement annot_delete_bookmark (index) =
-  _delete_undoable(index, "Bookmark deleted", lam () => annot_render_bookmarks())
+  if ~_changeable() then () else _delete_undoable(index, "Bookmark deleted", BookmarkList())
 
 (* Both lists, after a note changed: the highlights' and the bookmarks' *)
 fn _lists_render (): void = let
@@ -1043,8 +1091,10 @@ end
 implement annot_ask_note (index, fresh) =
   if index < 0 then ()
   else let
-    val () = modal_open(QNote(), "Note", lam () => _note_save(index),
-      lam () => if fresh then let val () = _drop(index) in _lists_render() end else ())
+    val () = $P.finish<reply>(modal_open(QNote(), "Note"), llam(answer) =>
+      case+ answer of
+      | Accepted() => _note_save(index)
+      | Declined() => if fresh then let val () = _drop(index) in _lists_render() end else ())
     val () = modal_textarea()
   in annot_note_show(index) end
 
@@ -1175,15 +1225,25 @@ fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(coun
       prval () = fold@(annotations)
     in rows_end end
 
-(* How many of annotations pass keep *)
-fun _count_where {count:nat} .<count>. (annotations: !annotations(count), keep: int -<cloref1> bool): int =
+(* Which annotations a count counts: the highlights, the highlights the
+   filter lists, or the bookmarks *)
+datatype counted = CountHighlights | CountListed | CountBookmarks
+
+fn _counts (which: counted, kind: int): bool =
+  case+ which of
+  | CountHighlights() => _is_highlight(kind)
+  | CountListed() => _listed(kind)
+  | CountBookmarks() => kind = 0
+
+(* How many of annotations are of which *)
+fun _count_where {count:nat} .<count>. (annotations: !annotations(count), which: counted): int =
   case+ annotations of
   | annotations_nil() => 0
   | @annotations_cons(kind, _, _, _, _, _, _, _, _, _, _, _, _, _, _, rest) => let
       val kind_copy = kind
-      val counted = _count_where(rest, keep)
+      val counted = _count_where(rest, which)
       prval () = fold@(annotations)
-    in if keep(kind_copy) then counted + 1 else counted end
+    in if _counts(which, kind_copy) then counted + 1 else counted end
 
 (* The filter's buttons, pressed as it is *)
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
@@ -1211,8 +1271,8 @@ implement annot_render () = let
   val () = _filter_show()
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
-  val highlight_count = _count_where(annotations, lam (kind) => _is_highlight(kind))
-  val listed_count = _count_where(annotations, lam (kind) => _listed(kind))
+  val highlight_count = _count_where(annotations, CountHighlights())
+  val listed_count = _count_where(annotations, CountListed())
   val _ = _highlight_rows(annotations, 0, ~1)
   prval () = fold@(cell)
   val () = _put(cell)
@@ -1269,7 +1329,7 @@ implement annot_render_bookmarks () = let
   val () = ui_clear("bookmarks-list")
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
-  val bookmark_count = _count_where(annotations, lam (kind) => kind = 0)
+  val bookmark_count = _count_where(annotations, CountBookmarks())
   val () = _bookmark_rows(annotations, 0)
   prval () = fold@(cell)
   val () = _put(cell)
@@ -1430,17 +1490,19 @@ fn _markdown_download {used_loc:agz}{used_len:pos} (used: !$A.borrow(byte, used_
 in release_bytes(mime_frozen, mime_bytes) end
 
 (* Where the annotations' Markdown file goes: downloaded, or shared (as
-   a file, or as its text; as_text shares it as its text when the
-   platform refuses it as a file) *)
-#pub datatype export_to =
-  | ToDownload
-  | ToShare of (share_as, () -<cloref1> void)
+   a file, or as its text) *)
+implement $P.dispose<share_end>(_) = ()
+
+#pub datavtype export_to =
+  | ToDownload of ()
+  | ToShare of share_as
 
 (* The highlights and notes as a Markdown file, headed by the book's
    title title[0, title_len) and author author[0, author_len):
-   downloaded, or shared *)
+   downloaded, or shared. The promise says how a share ended (a
+   download, or nothing made, is over at once) *)
 #pub fn annot_export {title_loc,author_loc:agz}{title_size,author_size:pos}{title_len:nat | title_len < title_size; title_len < 256}{author_len:nat | author_len < author_size; author_len < 256}
-  (title: $A.arr(byte, title_loc, title_size), title_len: int title_len, author: $A.arr(byte, author_loc, author_size), author_len: int author_len, destination: export_to): void
+  (title: $A.arr(byte, title_loc, title_size), title_len: int title_len, author: $A.arr(byte, author_loc, author_size), author_len: int author_len, destination: export_to): $P.promise(share_end, $P.Chained)
 
 implement annot_export (title, title_len, author, author_len, destination) = let
   val cell = _take()
@@ -1452,7 +1514,9 @@ in
       prval () = fold@(cell)
       val () = _put(cell)
       val () = $A.free<byte>(title)
-    in $A.free<byte>(author) end
+      val () = $A.free<byte>(author)
+      val () = (case+ destination of ~ToDownload() => () | ~ToShare(_) => ())
+    in $P.ret<share_end>(ShareOver()) end
   | ~Piece(owner, out) => let
       val title_at = _literal(out, 0, "# ")
       val () = _flat_at(title, title_len, out, title_at, 0)
@@ -1467,12 +1531,15 @@ in
       val file_end = _literal(out, list_end, "---\n*Exported from Quire*\n")
       val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, file_end)
-      val () = (case+ destination of
-        | ToDownload() => _markdown_download(used, file_end)
-        | ToShare(way, as_text) => share_markdown(used, file_end, way, as_text))
+      val ending = (case+ destination of
+        | ~ToDownload() => let
+            val () = _markdown_download(used, file_end)
+          in $P.ret<share_end>(ShareOver()) end
+        | ~ToShare(way) => share_markdown(used, file_end, way)): $P.promise(share_end, $P.Chained)
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
-    in piece_free(owner, $A.thaw<byte>(out_frozen)) end
+      val () = piece_free(owner, $A.thaw<byte>(out_frozen))
+    in ending end
 end
 
 (* ============================================================
@@ -1545,7 +1612,7 @@ fun _json_annotations {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | posit
 
 (* The first left deletions of tombs, each after a comma but the first *)
 fun _json_tombs {l:agz}{arena:addr}{n:int}{count:nat}{left:nat}{position:nat | position + TOMB_JSON_MAX * left <= n} .<left>.
-  (out: !$A.arrx(byte, l, n, arena), position: int position, tombs: tombs(count), left: int left, first: bool)
+  (out: !$A.arrx(byte, l, n, arena), position: int position, tombs: !tombs(count), left: int left, first: bool)
   : [next:nat | next <= position + TOMB_JSON_MAX * left] int next =
   if left <= 0 then position
   else case+ tombs of
@@ -1760,7 +1827,9 @@ implement annot_json_store (json, json_size, position, id_high, id_low) =
     val @(ok, annotations, count) = _array(json, json_size, position)
   in
     if ok then let
-      val () = _store(id_high, id_low, annotations, count, TombsNil())
+      val none = TombsNil()
+      val () = _store(id_high, id_low, annotations, count, none)
+      val () = _tombs_free(none)
       val () = annotations_free(annotations)
     in count end
     else let val () = annotations_free(annotations) in ~1 end
@@ -1951,6 +2020,7 @@ fn _merged {count,tomb_count:nat | count <= ANNOTATIONS_MAX}{json_loc:agz}{arena
   val tombs = _tombs_union(own_tombs, _tomb_array(json, json_size, deleted_at))
   val @(kept, kept_count, left) = _undeleted(merged, tombs)
   val kept_tombs = _tombs_kept(left)
+  val () = _tombs_free(left)
 in @(kept, kept_count, kept_tombs) end
 
 (* A book's stored record (its "a" key's content), read *)
@@ -1978,13 +2048,14 @@ implement annot_sync_json (own, json, json_size, annotations_at, deleted_at) = l
   val kept_count = _tombs_count(kept)
 in
   case+ piece_new(16 + JSON_MAX * merged_count + TOMB_JSON_MAX * kept_count) of
-  | ~NoPiece() => let val () = annotations_free(merged) in JNone() end
+  | ~NoPiece() => let val () = annotations_free(merged) val () = _tombs_free(kept) in JNone() end
   | ~Piece(owner, out) => let
       val () = $A.write_byte(out, 0, 91)
       val array_end = _json_annotations(out, 1, merged, true)
       val () = annotations_free(merged)
       val deleted_start = jw_lit(out, array_end, "],\"deleted\":[")
       val deleted_end = _json_tombs(out, deleted_start, kept, kept_count, true)
+      val () = _tombs_free(kept)
       val () = $A.write_byte(out, deleted_end, 93)
     in JChunk(owner, out, deleted_end + 1) end
 end
@@ -2000,7 +2071,7 @@ fun _stamps_seen {count:nat} .<count>. (annotations: !annotations(count)): void 
       prval () = fold@(annotations)
     in end
 
-fun _tomb_stamps_seen {count:nat} .<count>. (tombs: tombs(count)): void =
+fun _tomb_stamps_seen {count:nat} .<count>. (tombs: !tombs(count)): void =
   case+ tombs of
   | TombsNil() => ()
   | TombsCons(_, _, stamp, rest) => let val () = stamp_seen(stamp) in _tomb_stamps_seen(rest) end
@@ -2021,11 +2092,11 @@ implement annot_sync_store (own, json, json_size, annotations_at, deleted_at, id
       | ~NoContentBytes() => ()
       | ~ContentBytes(owner, stored, _) => piece_free(owner, stored))
     val+ ~AnnotationsCell(annotations, count) = _take()
-    val @(merged, merged_count, kept) = _merged(annotations, count, !_tombs, json, json_size, annotations_at, deleted_at)
+    val @(merged, merged_count, kept) = _merged(annotations, count, _tombs_take(), json, json_size, annotations_at, deleted_at)
     val () = _stamps_seen(merged)
     val () = _tomb_stamps_seen(kept)
     val () = _put(AnnotationsCell(merged, merged_count))
-    val () = !_tombs := kept
+    val () = _tombs_put(kept)
     val () = _save()
     val () = annot_marks()
     val () = annot_star()
@@ -2036,6 +2107,7 @@ implement annot_sync_store (own, json, json_size, annotations_at, deleted_at, id
     val () = _stamps_seen(merged)
     val () = _tomb_stamps_seen(kept)
     val () = _store(id_high, id_low, merged, merged_count, kept)
+    val () = _tombs_free(kept)
   in annotations_free(merged) end
 
 end (* #target wasm *)

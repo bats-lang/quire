@@ -33,6 +33,12 @@ in ui_show("annotations-share", shareable) end
 (* How a file is shared: as a file, or as its text *)
 #pub datatype share_as = AsFile | AsText
 
+(* How sharing a file ended: over (shared, cancelled or failed: the
+   share sheet's to show), or refused as a file, since the platform
+   cannot share it *)
+#pub datatype share_end = ShareOver | RefusedAsFile
+implement $P.dispose<share_end>(_) = ()
+
 #pub fn share_as_now (): share_as
 implement share_as_now () = if $SH.share_file_available() then AsFile() else AsText()
 
@@ -52,12 +58,12 @@ fn _bytes_of {text_len:pos | text_len < 256} (text: string text_len): [l:agz] @(
 in @(bytes, text_len) end
 
 (* The Markdown file bytes[0, len), named quire-annotations.md, shared:
-   as a file (AsFile), or as its text, titled by its name (AsText);
-   as_text runs when the file is refused as one (the platform cannot
-   share it), to share its text instead *)
-#pub fn share_markdown {l:agz}{len:pos} (bytes: !$A.borrow(byte, l, len), len: int len, way: share_as, as_text: () -<cloref1> void): void
+   as a file (AsFile), or as its text, titled by its name (AsText).
+   The promise says whether it was refused as a file, for the caller
+   to share its text instead *)
+#pub fn share_markdown {l:agz}{len:pos} (bytes: !$A.borrow(byte, l, len), len: int len, way: share_as): $P.promise(share_end, $P.Chained)
 
-implement share_markdown (bytes, len, way, as_text) = let
+implement share_markdown (bytes, len, way) = let
   val @(name, name_len) = _bytes_of("quire-annotations.md")
   val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
 in
@@ -69,19 +75,19 @@ in
       val () = release_bytes(mime_frozen, mime_bytes)
       val () = release_bytes(name_frozen, name_bytes)
     in
-      $P.finish<$SH.file_share_outcome>(sharing, lam(outcome) =>
+      $P.and_then<$SH.file_share_outcome><share_end>(sharing, llam(outcome) =>
         case+ outcome of
-        | $SH.FilesNotShareable() => as_text()
-        | $SH.FileShared() => ()
-        | $SH.FileShareCancelled() => ()
-        | $SH.FileShareFailed() => ())
+        | $SH.FilesNotShareable() => $P.ret<share_end>(RefusedAsFile())
+        | $SH.FileShared() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareCancelled() => $P.ret<share_end>(ShareOver())
+        | $SH.FileShareFailed() => $P.ret<share_end>(ShareOver()))
     end
   | AsText() => let
       val sharing = $SH.share_text(name_bytes, name_len, bytes, len)
       val () = release_bytes(name_frozen, name_bytes)
     in
       (* how it ended is the share sheet's to show *)
-      $P.finish<$SH.share_outcome>(sharing, lam(_) => ())
+      $P.and_then<$SH.share_outcome><share_end>(sharing, llam(_) => $P.ret<share_end>(ShareOver()))
     end
 end
 
@@ -166,7 +172,7 @@ implement share_selection (citation, citation_len) =
           val () = release_bytes(out_frozen, out_bytes)
         in
           (* how it ended is the share sheet's to show *)
-          $P.finish<$SH.share_outcome>(sharing, lam(_) => ())
+          $P.finish<$SH.share_outcome>(sharing, llam(_) => ())
         end
         end
       end

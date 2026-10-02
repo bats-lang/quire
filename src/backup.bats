@@ -153,7 +153,7 @@ fun _names_json {l:agz}{owner:addr}{n:nat}{collection:nat | collection <= 8}
 (* The reading log's days from entries, as [day, minutes] pairs (days
    since 1970-01-01, local), each after a comma but the first *)
 fun _days_json {l:agz}{owner:addr}{n:nat}{count:nat}{position:nat | position + 26 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: days(count), first: bool)
+  (out: !$A.arrx(byte, l, n, owner), position: int position, entries: !days(count), first: bool)
   : [stop:nat | stop <= position + 26 * count] int stop =
   case+ entries of
   | DaysNil() => position
@@ -174,6 +174,7 @@ fn _log_chunk (): jchunk =
       val @(entries, _) = stats_days()
       val next = jw_lit(out, 0, ",\"readingLog\":[")
       val next = _days_json(out, next, entries, true)
+      val () = stats_days_free(entries)
       val next = jw_lit(out, next, "]")
     in JChunk(owner, out, next) end
 
@@ -491,19 +492,24 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.finish<Int>($P.vow(pending), lam(handle) => let
-          val () = (case+ take_content(handle) of
-            | ~NoContentBytes() => _push(_text_chunk("[]"))
-            | ~ContentBytes(content_owner, content, content_len) => let
-                val annotations = annot_json(content, content_len)
-                val () = piece_free(content_owner, content)
-              in
-                case+ annotations of
+        $P.finish<$IDB.lookup>(pending, llam(found) =>
+          case+ lookup_content(found) of
+          | ~NoStoredContent() => let
+              val () = _push(_text_chunk("[]"))
+            in _export_books(book_index + 1, count, false) end
+          (* a backup that looks whole but lost a book's notes is worse
+             than none: it is not made (#174) *)
+          | ~ContentUnreadable() => let
+              val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
+            in _say("The backup could not be made: a book's notes could not be read. Try again.") end
+          | ~StoredContent(content_owner, content, content_len) => let
+              val annotations = annot_json(content, content_len)
+              val () = piece_free(content_owner, content)
+              val () = (case+ annotations of
                 | ~JNone() => _push(_text_chunk("[]"))
                 | ~JChunk(annotations_owner, annotations_bytes, annotations_len) =>
-                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len))
-              end)
-        in _export_books(book_index + 1, count, false) end)
+                  _push(JChunk(annotations_owner, annotations_bytes, annotations_len)))
+            in _export_books(book_index + 1, count, false) end)
       end)
 
 (* Downloads the backup, quire-backup.json *)
@@ -614,7 +620,7 @@ implement backup_apply_numbers (book_index, numbers, shelf_most) = let
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
 in
-  lib_update(book_index, lam(before) => @{
+  (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(before) => lib_nums_set(book_index, @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
     added = (if added > 0 then added else before.added), opened = opened,
     chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor,
@@ -626,7 +632,7 @@ in
     shelf_modified = (if shelf_modified >= 0 then shelf_modified else before.shelf_modified),
     collections_modified = (if collections_modified >= 0 then collections_modified else before.collections_modified),
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
-    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere })
+    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)
@@ -649,10 +655,12 @@ implement backup_claim (id_high, id_low) = let
   val pending = $IDB.idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.finish<Int>($P.vow(pending), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => ()
-    | ~BlobBytes(record, n) =>
+  $P.finish<$IDB.lookup>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => ()
+    (* kept, claimed on a later import: nothing is lost by waiting *)
+    | ~StoredUnreadable() => ()
+    | ~StoredBytes(record, n) =>
       if n < 4 + 4 * RECORD_NUMBERS_FIRST then $A.free<byte>(record)
       else if byte2int0($A.get<byte>(record, 1)) <> 79 then $A.free<byte>(record)
       else let
@@ -664,7 +672,7 @@ in
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(111, id_high, id_low))
         (* ignored: a record not deleted is applied again only if the
            book is imported again, which is harmless *)
-        val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+        val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
       in release_bytes(key_frozen, key_bytes) end)
 end
 
@@ -1254,7 +1262,7 @@ in pending end
 
 implement backup_import () =
   if _backup_file_count() <= 0 then ()
-  else $P.finish<Int>($P.vow(_backup_file_open()), lam(handle) => let
+  else $P.finish<Int>($P.vow(_backup_file_open()), llam(handle) => let
     (* the file is taken from the input: its choice is cleared *)
     val () = app_backup_input()
   in

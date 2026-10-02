@@ -86,7 +86,7 @@ in screen_controls_show() end
 (* The rotation locked to the one the screen has now; the toggle and the
    setting follow once it is (or is refused) *)
 fn _lock (): void =
-  $P.finish<$SCR.lock_outcome>($SCR.orientation_lock_current(), lam(outcome) =>
+  $P.finish<$SCR.lock_outcome>($SCR.orientation_lock_current(), llam(outcome) =>
     case+ outcome of
     | $SCR.Locked() => let
         val () = !_locked := true

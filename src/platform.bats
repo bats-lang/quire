@@ -49,7 +49,7 @@ fn _install_now (): $BAPP.install_offer =
 #pub fn platform_install (): void
 
 implement platform_install () =
-  $P.finish<$BAPP.install_outcome>($BAPP.install_prompt(), lam(outcome) =>
+  $P.finish<$BAPP.install_outcome>($BAPP.install_prompt(), llam(outcome) =>
     case+ outcome of
     | $BAPP.InstallAccepted() => ()
     | $BAPP.InstallDismissed() => ()
@@ -98,7 +98,7 @@ implement platform_keep_storage () =
     if ~($STORE.storage_available()) then ()
     else let
       val () = !_asked := Asked()
-    in $P.finish<$STORE.persist_outcome>($STORE.storage_persist(), lam(outcome) => _kept_show(_kept_of(outcome))) end
+    in $P.finish<$STORE.persist_outcome>($STORE.storage_persist(), llam(outcome) => _kept_show(_kept_of(outcome))) end
 
 (* ============================================================
    Startup
@@ -113,7 +113,7 @@ implement platform_start () = let
   val () = _kept_show(KeptUnknown())
 in
   if ~($STORE.storage_available()) then ()
-  else $P.finish<$STORE.persist_outcome>($STORE.storage_persisted(), lam(outcome) => _kept_show(_kept_of(outcome)))
+  else $P.finish<$STORE.persist_outcome>($STORE.storage_persisted(), llam(outcome) => _kept_show(_kept_of(outcome)))
 end
 
 end (* #target wasm *)

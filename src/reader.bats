@@ -31,6 +31,7 @@ staload "clock.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload "storage.sats"
 staload ST = "wasm.bats-packages.dev/bridge/src/stash.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SC = "wasm.bats-packages.dev/bridge/src/scroll.sats"
@@ -161,8 +162,9 @@ fn _speed_save (): void = let
   val () = $A.write_i32(data, 4, !_speed_pages)
   val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_speed_key())
-  (* ignored: a speed not stored only starts the time-left estimates over *)
-  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 3, data_bytes, 8), lam(_) => ())
+  (* ignored: a speed not stored only starts the time-left estimates
+     over; never stored over one that could not be read (#174) *)
+  val () = (if storage_savable(ReadingSpeedRecord()) then $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 3, data_bytes, 8), llam(_) => ()) else ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(data_frozen, data_bytes) end
 
@@ -304,7 +306,7 @@ fn _measure_literal {id_len:pos | id_len < 256} (id: string id_len): void = let
   val id_buf = $A.alloc<byte>(id_len)
   val () = $A.write_text(id_buf, 0, $A.text_lit(id), id_len)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id_buf)
-  val _ = $R.discard<int><int>($DR.measure(id_bytes, id_len))
+  val _ = $DR.measure(id_bytes, id_len)
 in release_bytes(id_frozen, id_bytes) end
 
 (* Whether a screen shows two columns, a spread: the probe the
@@ -467,8 +469,8 @@ fn _measure_node {node:nat} (node: int node): bool = let
   val () = release_bytes(id_frozen, id_bytes)
 in
   case+ measured of
-  | ~$R.ok(found) => found > 0
-  | ~$R.err(_) => false
+  | $DR.Measured() => true
+  | $DR.NoElement() => false
 end
 
 (* The content node at x, y (its number), or -1 *)
@@ -659,9 +661,8 @@ fn _measure_pagination(): void = let
   (* both ways: a switch between pages and scrolled leaves the other *)
   val () = $SC.set_scroll_top(page_id_bytes, 4, 0)
   val () = $SC.set_scroll_left(page_id_bytes, 4, 0)
-  val measured = $DR.measure(page_id_bytes, 4)
+  val _ = $DR.measure(page_id_bytes, 4)
   val () = release_bytes(page_id_frozen, page_id_bytes)
-  val _ = $R.discard<int><int>(measured)
   (* The page's widths, checked here: the chapter has scroll width /
      width pages, and at least one *)
   val page_width = $DR.get_measure_w()
@@ -694,7 +695,7 @@ in
       val pages_read = !_book_pages
       val () = !_book_minutes := 0
       val () = !_book_pages := 0
-      val () = lib_update(book_index, lam(record) => @{
+      val () = (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(book_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
@@ -702,7 +703,7 @@ in
         shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
         (* finished now: a change sync passes on *)
         finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
-        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
+        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
       val () = lib_touch(book_index)
     in lib_save() end
 end
@@ -933,8 +934,7 @@ fn _show_page_down {page_count:pos}{page:nat | page < page_count}{chapter,chapte
   val page_id = $A.alloc<byte>(4)
   val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
-  val measured = $DR.measure(page_id_bytes, 4)
-  val _ = $R.discard<int><int>(measured)
+  val _ = $DR.measure(page_id_bytes, 4)
   val page_width = $DR.get_measure_w()
   val () = !_page_width := page_width
   val () = !_page_height := $DR.get_measure_h()
@@ -966,8 +966,8 @@ fn _node_id {node:int | node >= ~1} (node: int node): [l:agz][id_len:pos | id_le
   else _number_id("c", node, 3)
 
 (* A new element <tag> for a content node, the last child of the node parent *)
-fn _add_node {doc_location:agz}{parent:int | parent >= ~1}{node:nat}{tag_len:pos | tag_len < 256}
-  (doc: !$D.document(doc_location), parent: int parent, node: int node, tag: string tag_len): void = let
+fn _add_node {doc_location:agz}{parent:int | parent >= ~1}{node:nat}
+  (doc: !$D.document(doc_location), parent: int parent, node: int node, tag: $D.tag): void = let
   val @(parent_id, parent_id_len) = _node_id(parent)
   val @(node_id, node_id_len) = _node_id(node)
   val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
@@ -1014,22 +1014,39 @@ fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_l
   else 65535
 
 (* A content node's attribute name: data[offset, offset + value_len) *)
-fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{name_len:pos | name_len < 256}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
-  (doc: !$D.document(doc_location), node: int node, name: string name_len, data: !$A.borrow(byte, l, n), offset: int offset, value_len: int value_len): void = let
+fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
+  (doc: !$D.document(doc_location), node: int node, name: $D.attribute, data: !$A.borrow(byte, l, n), offset: int offset, value_len: int value_len): void = let
   val @(node_id, node_id_len) = _node_id(node)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
   val () = $D.set_attr(doc, id_bytes, node_id_len, name, data, offset, value_len)
 in release_bytes(id_frozen, id_bytes) end
 
 (* A content node's attribute name: the literal value *)
-fn _node_attr_literal {doc_location:agz}{node:nat}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
-  (doc: !$D.document(doc_location), node: int node, name: string name_len, value: string value_len): void = let
+fn _node_attr_literal {doc_location:agz}{node:nat}{value_len:pos | value_len < 256}
+  (doc: !$D.document(doc_location), node: int node, name: $D.attribute, value: string value_len): void = let
   val value_len = g1u2i(string1_length(value))
   val value_buf = $A.alloc<byte>(value_len)
   val () = $A.write_text(value_buf, 0, $A.text_lit(value), value_len)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value_buf)
   val () = _node_attr(doc, node, name, value_bytes, 0, value_len)
 in release_bytes(value_frozen, value_bytes) end
+
+(* A content node's URL attribute name: data[offset, offset + value_len),
+   set only when dom's set_url finds it a URL that runs no script *)
+fn _node_url {doc_location,l:agz}{n:pos}{node:nat}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
+  (doc: !$D.document(doc_location), node: int node, name: $D.url_attribute, data: !$A.borrow(byte, l, n), offset: int offset, value_len: int value_len): void = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
+  val _ = $D.set_url(doc, id_bytes, node_id_len, name, data, offset, value_len)
+in release_bytes(id_frozen, id_bytes) end
+
+(* A content node's source emptied: "data:,", an empty text, until its
+   image is read *)
+fn _node_src_empty {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node): void = let
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(node_id)
+  val () = $D.set_url_literal(doc, id_bytes, node_id_len, $D.Src, $D.EmptyData)
+in release_bytes(id_frozen, id_bytes) end
 
 (* Content nodes are numbered from 0 in each chapter *)
 val _content_count = ref<[count:nat] int count>(0)
@@ -1046,7 +1063,7 @@ in node end
 fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
   (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len): void = let
   val node = _next_content_node()
-  val () = _add_node(doc, parent, node, "span")
+  val () = _add_node(doc, parent, node, $D.Span)
 in
   if text_len < 65536 then _node_text(doc, node, data, offset, text_len)
   else let
@@ -1071,7 +1088,7 @@ in if text_len < 65536 then () else _skip_spans(offset, text_len - 65533) end
    shows, a span for a, b, i, u and s, and a div for anything else *)
 fn _tag_of
   {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
-  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): [tag_len:pos | tag_len < 256] string tag_len = let
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): $D.tag = let
   fn is {pattern_len:pos} (data: !$A.borrow(byte, l, n), pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
     xml_name_eq(data, name_offset, name_len, pattern, pattern_len)
   var p_ = @[char][1]('p')
@@ -1129,37 +1146,37 @@ fn _tag_of
   var ruby_text_container = @[char][3]('r', 't', 'c')
   var ruby_parenthesis = @[char][2]('r', 'p')
 in
-  if is(data, p_, 1) then "p"
-  else if is(data, h1, 2) then "h1" else if is(data, h2, 2) then "h2"
-  else if is(data, h3, 2) then "h3" else if is(data, h4, 2) then "h4"
-  else if is(data, h5, 2) then "h5" else if is(data, h6, 2) then "h6"
-  else if is(data, span, 4) then "span" else if is(data, em, 2) then "em"
-  else if is(data, strong, 6) then "strong" else if is(data, blockquote, 10) then "blockquote"
-  else if is(data, pre, 3) then "pre" else if is(data, code, 4) then "code"
-  else if is(data, ul, 2) then "ul" else if is(data, ol, 2) then "ol"
-  else if is(data, li, 2) then "li" else if is(data, section, 7) then "section"
-  else if is(data, article, 7) then "article" else if is(data, small, 5) then "small"
-  else if is(data, mark, 4) then "mark" else if is(data, del, 3) then "del"
-  else if is(data, ins, 3) then "ins" else if is(data, sub, 3) then "sub"
-  else if is(data, sup, 3) then "sup"
-  else if is(data, a_, 1) then "a" else if is(data, b_, 1) then "b"
-  else if is(data, i_, 1) then "i" else if is(data, u_, 1) then "u"
-  else if is(data, s_, 1) then "s"
-  else if is(data, q_, 1) then "q" else if is(data, cite, 4) then "cite"
-  else if is(data, abbr, 4) then "abbr" else if is(data, kbd, 3) then "kbd"
-  else if is(data, dl, 2) then "dl" else if is(data, dt, 2) then "dt"
-  else if is(data, dd, 2) then "dd" else if is(data, caption, 7) then "caption"
-  else if is(data, tfoot, 5) then "tfoot" else if is(data, samp, 4) then "samp"
-  else if is(data, var_, 3) then "var" else if is(data, big, 3) then "span"
-  else if is(data, figure, 6) then "figure" else if is(data, figcaption, 10) then "figcaption"
-  else if is(data, table, 5) then "table" else if is(data, tr, 2) then "tr"
-  else if is(data, td, 2) then "td" else if is(data, th, 2) then "th"
-  else if is(data, thead, 5) then "thead" else if is(data, tbody, 5) then "tbody"
+  if is(data, p_, 1) then $D.P
+  else if is(data, h1, 2) then $D.H1 else if is(data, h2, 2) then $D.H2
+  else if is(data, h3, 2) then $D.H3 else if is(data, h4, 2) then $D.H4
+  else if is(data, h5, 2) then $D.H5 else if is(data, h6, 2) then $D.H6
+  else if is(data, span, 4) then $D.Span else if is(data, em, 2) then $D.Em
+  else if is(data, strong, 6) then $D.Strong else if is(data, blockquote, 10) then $D.Blockquote
+  else if is(data, pre, 3) then $D.Pre else if is(data, code, 4) then $D.Code
+  else if is(data, ul, 2) then $D.Ul else if is(data, ol, 2) then $D.Ol
+  else if is(data, li, 2) then $D.Li else if is(data, section, 7) then $D.Section
+  else if is(data, article, 7) then $D.Article else if is(data, small, 5) then $D.Small
+  else if is(data, mark, 4) then $D.Mark else if is(data, del, 3) then $D.Del
+  else if is(data, ins, 3) then $D.Ins else if is(data, sub, 3) then $D.Sub
+  else if is(data, sup, 3) then $D.Sup
+  else if is(data, a_, 1) then $D.A else if is(data, b_, 1) then $D.B
+  else if is(data, i_, 1) then $D.I else if is(data, u_, 1) then $D.U
+  else if is(data, s_, 1) then $D.S
+  else if is(data, q_, 1) then $D.Q else if is(data, cite, 4) then $D.Cite
+  else if is(data, abbr, 4) then $D.Abbr else if is(data, kbd, 3) then $D.Kbd
+  else if is(data, dl, 2) then $D.Dl else if is(data, dt, 2) then $D.Dt
+  else if is(data, dd, 2) then $D.Dd else if is(data, caption, 7) then $D.Caption
+  else if is(data, tfoot, 5) then $D.Tfoot else if is(data, samp, 4) then $D.Samp
+  else if is(data, var_, 3) then $D.Var else if is(data, big, 3) then $D.Span
+  else if is(data, figure, 6) then $D.Figure else if is(data, figcaption, 10) then $D.Figcaption
+  else if is(data, table, 5) then $D.Table else if is(data, tr, 2) then $D.Tr
+  else if is(data, td, 2) then $D.Td else if is(data, th, 2) then $D.Th
+  else if is(data, thead, 5) then $D.Thead else if is(data, tbody, 5) then $D.Tbody
   (* a ruby keeps its parts, so its annotations sit over its base *)
-  else if is(data, ruby, 4) then "ruby" else if is(data, ruby_base, 2) then "rb"
-  else if is(data, ruby_text, 2) then "rt" else if is(data, ruby_text_container, 3) then "rtc"
-  else if is(data, ruby_parenthesis, 2) then "rp"
-  else "div"
+  else if is(data, ruby, 4) then $D.Ruby else if is(data, ruby_base, 2) then $D.Rb
+  else if is(data, ruby_text, 2) then $D.Rt else if is(data, ruby_text_container, 3) then $D.Rtc
+  else if is(data, ruby_parenthesis, 2) then $D.Rp
+  else $D.Div
 end
 
 (* Whether a chapter of the open book has shown a ruby: the settings'
@@ -1299,12 +1316,12 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
       var _colspan = @[char][7]('c', 'o', 'l', 's', 'p', 'a', 'n')
       var _rowspan = @[char][7]('r', 'o', 'w', 's', 'p', 'a', 'n')
       val () = (if value_len >= 65536 then ()
-        else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, "dir", data, value_offset, value_len)
-        else if xml_name_eq(data, name_offset, name_len, _lang, 4) then _node_attr(doc, node, "lang", data, value_offset, value_len)
-        else if xml_name_eq(data, name_offset, name_len, _xml_lang, 8) then _node_attr(doc, node, "lang", data, value_offset, value_len)
-        else if xml_name_eq(data, name_offset, name_len, _title, 5) then _node_attr(doc, node, "title", data, value_offset, value_len)
-        else if xml_name_eq(data, name_offset, name_len, _colspan, 7) then _node_attr(doc, node, "colspan", data, value_offset, value_len)
-        else if xml_name_eq(data, name_offset, name_len, _rowspan, 7) then _node_attr(doc, node, "rowspan", data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, $D.Dir, data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _lang, 4) then _node_attr(doc, node, $D.Lang, data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _xml_lang, 8) then _node_attr(doc, node, $D.Lang, data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _title, 5) then _node_attr(doc, node, $D.Title, data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _colspan, 7) then _node_attr(doc, node, $D.Colspan, data, value_offset, value_len)
+        else if xml_name_eq(data, name_offset, name_len, _rowspan, 7) then _node_attr(doc, node, $D.Rowspan, data, value_offset, value_len)
         else ())
     in _pass_attrs(doc, data, rest, node) end
 
@@ -1346,16 +1363,16 @@ in
     in
       if outside then
         (if href_len < 65536 then let
-           val () = _node_attr(doc, first_node, "href", data, href_start, href_len)
-           val () = _node_attr_literal(doc, first_node, "target", "_blank")
-           val () = _node_attr_literal(doc, first_node, "rel", "noopener noreferrer")
+           val () = _node_url(doc, first_node, $D.Href, data, href_start, href_len)
+           val () = _node_attr_literal(doc, first_node, $D.Target, "_blank")
+           val () = _node_attr_literal(doc, first_node, $D.Rel, "noopener noreferrer")
            val () = _links_push(first_node, end_node, ~1, $A.alloc<byte>(1), 0, false)
          in found end
          else found)
       else let
         (* announced and reached from the keyboard as a link *)
-        val () = _node_attr_literal(doc, first_node, "role", "link")
-        val () = _node_attr_literal(doc, first_node, "tabindex", "0")
+        val () = _node_attr_literal(doc, first_node, $D.Role, "link")
+        val () = _node_attr_literal(doc, first_node, $D.Tabindex, "0")
       in images_link(first_node, end_node, href_start, href_len, _noteref(data, attrs), found) end
     end
 end
@@ -1379,7 +1396,7 @@ fn _page_lang {doc_location,l:agz}{n:pos}{offset,lang_len:nat | offset + lang_le
   (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), offset: int offset, lang_len: int lang_len): void = let
   val @(page_id, page_id_len) = _node_id(~1)
   val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
-  val () = $D.set_attr(doc, page_id_bytes, page_id_len, "lang", data, offset, lang_len)
+  val () = $D.set_attr(doc, page_id_bytes, page_id_len, $D.Lang, data, offset, lang_len)
 in release_bytes(page_id_frozen, page_id_bytes) end
 
 (* An html or body element's language (xml:lang, else lang), when it has
@@ -1454,23 +1471,23 @@ and _render_node
     in _render_nodes(doc, data, data_len, parent, children, found, fragment) end
     (* Void: br, hr, img *)
     else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), "br")
+      val () = _add_node(doc, parent, _next_content_node(), $D.Br)
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let
-      val () = _add_node(doc, parent, _next_content_node(), "hr")
+      val () = _add_node(doc, parent, _next_content_node(), $D.Hr)
     in found end
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let
       (* An image: shown once its bytes are read from the book
          (_load_images); until then its src is an empty data URL *)
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, "img")
-      val () = _node_attr_literal(doc, content_node, "src", "data:,")
+      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _node_src_empty(doc, content_node)
       var _attr_alt = @[char][3]('a', 'l', 't')
       val () = (case+ find_attr(data, attrs, _attr_alt, 3) of
         | ~xspan_at(alt_start, alt_len) =>
-          if alt_len < 65536 then _node_attr(doc, content_node, "alt", data, alt_start, alt_len)
-          else _node_attr(doc, content_node, "alt", data, alt_start, _text_cut(data, alt_start, alt_len))
-        | ~xspan_none() => _node_attr_literal(doc, content_node, "alt", "image")): void
+          if alt_len < 65536 then _node_attr(doc, content_node, $D.Alt, data, alt_start, alt_len)
+          else _node_attr(doc, content_node, $D.Alt, data, alt_start, _text_cut(data, alt_start, alt_len))
+        | ~xspan_none() => _node_attr_literal(doc, content_node, $D.Alt, "image")): void
       var _attr_src = @[char][3]('s', 'r', 'c')
     in
       case+ find_attr(data, attrs, _attr_src, 3) of
@@ -1481,9 +1498,9 @@ and _render_node
        its source xlink:href, or href *)
     else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then let
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, "img")
-      val () = _node_attr_literal(doc, content_node, "src", "data:,")
-      val () = _node_attr_literal(doc, content_node, "alt", "image")
+      val () = _add_node(doc, parent, content_node, $D.Img)
+      val () = _node_src_empty(doc, content_node)
+      val () = _node_attr_literal(doc, content_node, $D.Alt, "image")
       var _attr_xlink_href = @[char][10]('x', 'l', 'i', 'n', 'k', ':', 'h', 'r', 'e', 'f')
       var _attr_href = @[char][4]('h', 'r', 'e', 'f')
     in
@@ -1603,14 +1620,14 @@ in
     in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
     else let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-      val decompressing = decompress(compressed_bytes, compressed_size, method)
+      val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
       val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
       val decompressing = $P.vow(decompressing)
     in
       (* an image that cannot be read stays empty, as a browser leaves an
          image it cannot load: a book's images are decorative (alt="") *)
-      $P.finish<Int>(decompressing, lam(handle) =>
+      $P.finish<Int>(decompressing, llam(handle) =>
         case+ take_content(handle) of
         | ~NoContentBytes() => ()
         | ~ContentBytes(content_owner, content, content_len) => let
@@ -1852,11 +1869,11 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<Int><int>($P.vow(decompressing), lam(handle) =>
+         $P.and_then<Int><int>($P.vow(decompressing), llam(handle) =>
            case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(font_owner, font, font_len) => let
@@ -1899,12 +1916,12 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
      | ~Piece(compressed_owner, opf_compressed) => let
          val _ = book_read(serial, file_size, opf_data_start, opf_compressed, opf_compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(opf_compressed)
-         val decompressing = decompress(compressed_bytes, opf_compressed_size, opf_method)
+         val decompressing = decompress(compressed_bytes, opf_compressed_size, zip_compression(opf_method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          val decompressing = $P.vow(decompressing)
        in
-         $P.and_then<Int><int>(decompressing, lam(handle) =>
+         $P.and_then<Int><int>(decompressing, llam(handle) =>
            case+ take_content(handle) of
            | ~NoContentBytes() => $P.ret<int>(~2)
            | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
@@ -1944,14 +1961,14 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
       | ~Piece(compressed_owner, compressed) => let
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-              val decompressing = decompress(compressed_bytes, compressed_size, method)
+              val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
 
               val decompressing = $P.vow(decompressing)
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<Int><int>(decompressing, lam(handle) => let
+              $P.and_then<Int><int>(decompressing, llam(handle) => let
                 val content = take_content(handle)
               in
                 case+ content of
@@ -2006,10 +2023,10 @@ fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.prom
 in
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() =>
-    $P.and_then<int><int>(_spine_build(serial), lam(result) =>
+    $P.and_then<int><int>(_spine_build(serial), llam(result) =>
       if result < 0 then $P.ret<int>(result)
-      else $P.and_then<int><int>(toc_build(serial), lam(_) =>
-        $P.and_then<int><int>(_font_load(serial), lam(_) => _chapter_open(serial, chapter_index, generation))))
+      else $P.and_then<int><int>(toc_build(serial), llam(_) =>
+        $P.and_then<int><int>(_font_load(serial), llam(_) => _chapter_open(serial, chapter_index, generation))))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_index, generation)
   | ~ChapterGot(_, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
 end
@@ -2065,7 +2082,7 @@ in if page_width > 0 then _count_pages() else ~1 end
    shown since (generation) *)
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
   if times <= 0 then ()
-  else $P.finish<Int>($P.vow($TM.timer_set(250)), lam(_) =>
+  else $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) =>
     if generation <> !_settle_generation then ()
     else let
       val () = (case+ reading_get() of
@@ -2099,7 +2116,7 @@ in _settle(!_settle_generation, 12) end
 fn _goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
     if result < 0 then $P.ret<int>(result)
     else let
       val () = _show_target(page, anchor)
@@ -2118,7 +2135,7 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
     val () = !_fragment_node := ~1
     val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
   in
-    $P.and_then<int><int>(_load_chapter(chapter), lam(result) => let
+    $P.and_then<int><int>(_load_chapter(chapter), llam(result) => let
       val () = _fragment_put(FragmentNone())
     in
       if result < 0 then $P.ret<int>(result)
@@ -2135,7 +2152,7 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
    was on, shown again (a drag may have moved it), never a blank one,
    and the banner says why *)
 fn _jump_checked (jumping: $P.promise(int, $P.Chained)): void =
-  $P.finish<int>(jumping, lam(result) =>
+  $P.finish<int>(jumping, llam(result) =>
     if result >= 0 then ()
     else let
       val () = (case+ reading_get() of
@@ -2173,8 +2190,8 @@ dataprop TIMED_(int) = {timeout:int} TimedArmed(timeout) of ()
 in
 stadef TIMED = TIMED_
 
-fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<cloref1> void): (TIMED(timeout) | void) = let
-  val () = $P.finish<Int>($P.vow($TM.timer_set(BACK_SHOWN)), lam(_) => done(timeout))
+fn _timed_arm {timeout:int} (timeout: int timeout, done: (Int) -<lincloptr1> void): (TIMED(timeout) | void) = let
+  val () = $P.finish<Int>($P.and_then<Int><Int>($P.vow($TM.timer_set(BACK_SHOWN)), llam(_) => $P.ret<Int>(timeout)), done)
 in (TimedArmed() | ()) end
 end
 
@@ -2226,7 +2243,7 @@ end
 fn _back_arm (): [timeout:int] (TIMED(timeout) | int timeout) = let
   val timeout = !_ps_timed + 1
   val () = !_ps_timed := timeout
-  val (armed | ()) = _timed_arm(timeout, lam(fired) => _back_timeout(fired))
+  val (armed | ()) = _timed_arm(timeout, llam(fired) => _back_timeout(fired))
 in (armed | timeout) end
 
 (* Shows the button offering the positions, with a new timeout *)
@@ -2264,7 +2281,7 @@ end
 fn _goto_part (chapter: Int, thousandth: Int): $P.promise(int, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), lam(result) =>
+  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
     if result < 0 then $P.ret<int>(result)
     else let
       val () = (case+ reading_get() of
@@ -2631,11 +2648,11 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
        | ~Piece(compressed_owner, compressed) => let
            val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
            val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-           val decompressing = decompress(compressed_bytes, compressed_size, method)
+           val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
            val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
-           $P.finish<Int>($P.vow(decompressing), lam(handle) => let
+           $P.finish<Int>($P.vow(decompressing), llam(handle) => let
              val () = (case+ take_content(handle) of
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -2854,10 +2871,12 @@ implement reader_speed_load () = let
   val stored = $IDB.idb_get(key_bytes, 3)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(data, data_len) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    (* the default speed this session, and the one learned is kept *)
+    | ~StoredUnreadable() => let val () = storage_unreadable(ReadingSpeedRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, data_len) =>
       if data_len < 8 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else let
         val minutes = _int32_at(data, 0)
@@ -3009,11 +3028,11 @@ in
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.finish<Int>($P.vow(decompressing), lam(handle) => let
+         $P.finish<Int>($P.vow(decompressing), llam(handle) => let
            val () = (case+ take_content(handle) of
              | ~NoContentBytes() => _note_follow()
              | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
@@ -3227,7 +3246,7 @@ in
   in
     (* the hit is marked only once its chapter is shown; a failure is
        told by _jump_checked *)
-    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), lam(result) => let
+    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), llam(result) => let
       val () = (if result >= 0 then (if node >= 0 then let
           val () = $BDOM.clear_marks(2)
           val @(start_id, start_id_len) = nid_pad3("c", node)
@@ -3302,6 +3321,7 @@ implement num_id(id_prefix, number, width) = _number_id(id_prefix, number, width
    chapter's first page shown, or nothing (the book's last page, or a
    chapter that could not be shown) *)
 #pub datatype turned = TurnedPage | TurnedChapter | NotTurned
+implement $P.dispose<turned>(_) = ()
 
 (* The page turned on, as the next page button turns it (into the next
    chapter too); the promise resolves once the page is shown *)
@@ -3320,7 +3340,7 @@ in
     else if chapter < chapter_count then let
       val () = _speed_turn()
     in
-      $P.and_then<int><turned>(_goto(chapter, 0, ~1), lam(result) =>
+      $P.and_then<int><turned>(_goto(chapter, 0, ~1), llam(result) =>
         if result >= 0 then $P.ret<turned>(TurnedChapter())
         else let
           (* as _jump_checked: the page that was shown, and the banner
@@ -3770,6 +3790,7 @@ implement script_free (script) =
   | ~Script(owner, text, sentences, _, _) => let
       val () = _sentences_of_free(sentences)
     in piece_free(owner, text) end
+implement $P.dispose<script>(script) = script_free(script)
 
 (* The script of the chapter data[0, n), whose nodes are nodes, of
    index chapter *)
@@ -3800,28 +3821,29 @@ in
 end
 
 (* Reads chapter chapter (from 0) of the open book, and makes its
-   script; done is given it (none when the chapter cannot be read) *)
-#pub fun reader_script_load {chapter:nat} (chapter: int chapter, done: (script) -<cloref1> void): void
+   script: the promise resolves with it (NoScript when the chapter
+   cannot be read) *)
+#pub fun reader_script_load {chapter:nat} (chapter: int chapter): $P.promise(script, $P.Chained)
 
-implement reader_script_load (chapter, done) = let
+implement reader_script_load (chapter) = let
   val serial = book_serial()
 in
   case+ book_chapter_get(serial, chapter) of
-  | ~ChaptersUnknown() => done(NoScript())
-  | ~ChapterNone(_) => done(NoScript())
+  | ~ChaptersUnknown() => $P.ret<script>(NoScript())
+  | ~ChapterNone(_) => $P.ret<script>(NoScript())
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
     (case+ piece_new(compressed_size) of
-     | ~NoPiece() => done(NoScript())
+     | ~NoPiece() => $P.ret<script>(NoScript())
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.finish<Int>($P.vow(decompressing), lam(handle) =>
+         $P.and_then<Int><script>($P.vow(decompressing), llam(handle) =>
            case+ take_content(handle) of
-           | ~NoContentBytes() => done(NoScript())
+           | ~NoContentBytes() => $P.ret<script>(NoScript())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
                val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
@@ -3829,7 +3851,7 @@ in
                val () = $X.free_nodes(nodes)
                val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
-             in done(script) end)
+             in $P.ret<script>(script) end)
        end)
 end
 
