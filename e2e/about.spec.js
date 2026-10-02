@@ -24,6 +24,10 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   await settingsButton(page, 'About Quire ›').click();
   await expect(about(page)).toBeVisible();
   await expect(about(page)).toContainText('Quire, an EPUB reader');
+  // the version: the commit's UTC date, as packages are versioned, and its short SHA (#219)
+  const version = about(page).getByText(/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+ \([0-9a-f]{7,}\)$/);
+  await expect(version).toBeVisible();
+  await expect(about(page)).toContainText('Version');
   const group = about(page).getByRole('group', { name: 'Links' });
   for (const [name, [href, address]] of Object.entries(links)) {
     const link = group.getByRole('link', { name, exact: true });

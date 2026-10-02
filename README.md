@@ -53,6 +53,10 @@ Key packages used:
 ## Development
 
 ```bash
+# Write the version (src/version.bats, not in git): the date and short
+# SHA of the commit built from
+scripts/version.sh
+
 # Build the app (wasm) and the PWA generator (native)
 bats build --repository ../repository-prototype
 

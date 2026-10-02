@@ -13,7 +13,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # Two commits deep: a pull request's checkout is the merge, and its
+      # own head (its second parent) is what the version names (#219)
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
       - name: Install ATS2
         run: |
@@ -60,6 +64,13 @@ jobs:
           # them: never this workflow.
           test -f bats.lock || { echo "::error::bats.lock is missing: run 'bats lock --repository <dir>' and commit it"; exit 1; }
 
+      # The version the app and gen-pwa are built with: the date and short
+      # SHA of the commit built from, a pull request's own head (#219)
+      - name: Write the version
+        env:
+          QUIRE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: scripts/version.sh
+
       - name: bats check
         run: |
           bats check --repository $HOME/repository
@@ -72,6 +83,13 @@ jobs:
 
       - name: Generate PWA
         run: ./dist/debug/gen-pwa
+
+      # The same commit always gives the same version, whatever the clock
+      # or time zone, and the Android project carries it (#219)
+      - name: Check the version
+        env:
+          QUIRE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: tests/version/same.sh
 
       - name: Verify PWA output
         run: |

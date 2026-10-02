@@ -54,6 +54,23 @@ breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
 workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
 `android.yml` pin as not moved; move it in a PR of its own.
 
+## The version is the commit's
+
+Quire's version is the date of the commit it is built from, never of the
+build, so the same commit always gives the same version (#219): the
+committer date in UTC as bats packages are versioned,
+`YEAR.MONTH.DAY.SECONDS` (seconds since midnight), and the short SHA,
+`2026.10.2.61373 (f95ce82)`. `scripts/version.sh` writes it into
+`src/version.bats` (not in git; run it before `bats check` or `build`),
+which the app and gen-pwa compile in: About shows it, a backup records
+it (`appVersion`), and gen-pwa appends it to the Android project's
+`android-release.gradle` as `versionName`, with `versionCode` the same
+time in minutes since 2025 (so it grows from release to release, and
+pwa's run-number code is overridden). CI writes it for a pull request's
+own head (`QUIRE_COMMIT`, the merge's second parent, hence
+`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+same in other time zones and that the Android project carries it.
+
 ## To do: book memory in a rolling window of page arenas
 
 Partly done: the window exists (`src/pages.bats`), and the buffers a
