@@ -10,6 +10,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "notice.sats"
 staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
@@ -394,7 +395,7 @@ fn _save (sort: int): void = let
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 3, record_bytes, 20))
+  val () = save_checked($IDB.idb_put(key_bytes, 3, record_bytes, 20))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 

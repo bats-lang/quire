@@ -12,6 +12,7 @@
 #use xml-tree as X
 
 staload "ui.sats"
+staload "notice.sats"
 staload "modal.sats"
 staload "book.sats"
 staload "paths.sats"
@@ -120,8 +121,7 @@ fn _error (): void = let
   val message = $A.alloc<byte>(512)
   val name_end = _kept_name_into(message)
   val text_end = _put_string(message, name_end, " could not be imported. Quire supports .epub files without DRM.")
-  val () = ui_text_buf("error-text", message, text_end)
-  val () = ui_show("error-banner", true)
+  val () = notice_error_buf(message, text_end)
 in ui_show("import-progress", false) end
 
 (* The import card: stage text and progress in percent *)
@@ -201,7 +201,9 @@ fn _store_a11y {l:agz}{n:pos}
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val key = lib_key(121, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6))
+  (* ignored: losing the summary only hides it until the next import,
+     and a full storage is told by the saves that matter *)
+  val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, record_bytes, decoded_len + 6), lam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -242,7 +244,8 @@ in
           val @(cover_frozen, cover_bytes) = $A.freeze<byte>(cover_data)
           val key = lib_key(99, id_high, id_low)
           val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-          val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size))
+          (* ignored: a cover not stored shows as the placeholder *)
+          val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, cover_bytes, cover_size), lam(_) => ())
           val () = release_bytes(key_frozen, key_bytes)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
@@ -252,18 +255,18 @@ in
           val decompressing = decompress(cover_bytes, cover_size, cover_method)
           val () = $A.drop<byte>(cover_frozen, cover_bytes)
           val () = piece_free(owner, $A.thaw<byte>(cover_frozen))
-          val () = $P.discard<int>($P.and_then<Int><int>($P.vow(decompressing), lam(content_handle) =>
+          val () = $P.finish<Int>($P.vow(decompressing), lam(content_handle) =>
             case+ take_content(content_handle) of
-            | ~NoContentBytes() => $P.ret<int>(0)
+            | ~NoContentBytes() => ()
             | ~ContentBytes(content_owner, content, content_size) => let
                 val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
                 val key = lib_key(99, id_high, id_low)
                 val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-                val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, content_bytes, content_size))
+                (* ignored: a cover not stored shows as the placeholder *)
+                val () = $P.finish<Int>($IDB.idb_put(key_bytes, 15, content_bytes, content_size), lam(_) => ())
                 val () = release_bytes(key_frozen, key_bytes)
                 val () = $A.drop<byte>(content_frozen, content_bytes)
-                val () = piece_free(content_owner, $A.thaw<byte>(content_frozen))
-              in $P.ret<int>(0) end))
+              in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
         in code end
     end
   end
@@ -276,6 +279,31 @@ fn _cover_of {file_size:pos}{l:agz}{n:pos}{tree_size:nat}{opf_name_offset:nat}{o
   else case+ find_cover_href(opf_bytes, n, nodes) of
   | ~xspan_at(href_offset, href_len) => _store_cover(serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, href_offset, href_len, id_high, id_low)
   | ~xspan_none() => 0
+
+(* The store of the book of key's file (in a new import, or over its
+   old one) has ended: when it failed, the banner says so by its title.
+   The book is open, but nothing can open it again once it is closed,
+   so this is said each time *)
+fn _title_into {l:agz} (buffer: !$A.arr(byte, l, 512), key: Int): [name_len:nat | name_len < 256] int name_len = let
+  val @(title, title_len) = lib_text(lib_index_of_key(key), 0)
+in
+  if title_len > 0 then let
+    val () = _copy_into(title, title_len, buffer, 0, 0)
+    val () = $A.free<byte>(title)
+  in title_len end
+  else let
+    val () = $A.free<byte>(title)
+  in _put_string(buffer, 0, "This book") end
+end
+
+fn _book_store_checked (storing: $P.promise(Int, $P.Chained), key: Int): void =
+  $P.finish<Int>(storing, lam(status) =>
+    if status >= 0 then ()
+    else let
+      val message = $A.alloc<byte>(512)
+      val name_end = _title_into(message, key)
+      val text_end = _put_string(message, name_end, " is open, but could not be stored, so it will not open next time. Free some space and import it again.")
+    in notice_error_buf(message, text_end) end)
 
 (* After the OPF of book `serial` (file_size bytes) is read: in MODE_NEW
    adds the book to the library, in MODE_REPLACE updates library book
@@ -310,13 +338,14 @@ in
     (* The file, stored from the JS side under 'b' *)
     val key = lib_key(98, id_high, id_low)
     val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val () = book_idb_put(key_bytes, 15)
+    val storing = book_idb_put(key_bytes, 15)
     val () = release_bytes(key_frozen, key_bytes)
     val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
     val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
   in
     if mode = MODE_NEW then let
       val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes())
+      val () = _book_store_checked(storing, key)
       (* the record a backup kept for it, if any *)
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
     in key end
@@ -329,11 +358,11 @@ in
         shelf_modified = (if record.shelf <> 0 then stamp_now() else record.shelf_modified), collections_modified = record.collections_modified,
         finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere })
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
-    in
-      case+ lib_nums(library_index) of
-      | ~$R.some(record) => record.key
-      | ~$R.none() => ~21
-    end
+      val key = (case+ lib_nums(library_index) of
+        | ~$R.some(record) => record.key
+        | ~$R.none() => ~21): Int
+      val () = _book_store_checked(storing, key)
+    in key end
   end
 end
 
@@ -495,7 +524,7 @@ end
 fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) = let
   val () = _stage_name()
   val () = _stage("Reading file", 10)
-  val () = ui_show("error-banner", false)
+  val () = notice_dismiss()
 in
   if file_size <= 0 then let
     val () = $BF.file_close(book_file)
@@ -588,10 +617,11 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
       in opened end
       else $BF.dropped_open_at(file_index)): $P.promise_pending(Int)
   in
-    $P.discard<Int>($P.and_then<Int><Int>($P.vow(opened), lam(handle) =>
-      $P.and_then<Int><Int>(_import_handle(handle), lam(_) => let
-        val () = _import_seq(source, file_index + 1, file_count)
-      in $P.ret<Int>(0) end)))
+    (* each import's result is already reported (_import_handle shows
+       the error banner on a failure, and a duplicate is answered in its
+       own dialog): the next file is imported whatever it was *)
+    $P.finish<Int>($P.and_then<Int><Int>($P.vow(opened), lam(handle) => _import_handle(handle)), lam(_) =>
+      _import_seq(source, file_index + 1, file_count))
   end
 
 (* Imports the files picked in the file input import-file *)
@@ -613,7 +643,9 @@ implement import_dropped () = _import_seq(1, 0, $BF.dropped_count())
 (* Imports a file handed to the app from outside it (its handle) *)
 #pub fn import_external (handle: Int): void
 
-implement import_external (handle) = $P.discard<Int>(_import_handle(handle))
+(* ignored: the import's result is already reported, as each one's of
+   _import_seq *)
+implement import_external (handle) = $P.finish<Int>(_import_handle(handle), lam(_) => ())
 
 (* ============================================================
    Reopening a stored book

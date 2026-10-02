@@ -18,6 +18,7 @@
 
 staload "book.sats"
 staload "ui.sats"
+staload "notice.sats"
 staload "modal.sats"
 staload "undo.sats"
 staload "library.sats"
@@ -347,7 +348,7 @@ in
       val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, used_len)
       val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(97, id_high, id_low))
-      val () = $P.discard<Int>($IDB.idb_put(key_bytes, 15, used, used_len))
+      val () = save_checked($IDB.idb_put(key_bytes, 15, used, used_len))
       val () = release_bytes(key_frozen, key_bytes)
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)

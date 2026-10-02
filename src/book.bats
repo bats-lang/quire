@@ -146,9 +146,10 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 (* The open book's size and regions, or none when no book is open *)
 #pub fn book_meta_get(): $R.option(book_meta)
 
-(* Stores the open book's file in IndexedDB under key, from the JS side;
-   nothing when no book is open *)
-#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): void
+(* Stores the open book's file in IndexedDB under key, from the JS side:
+   the promise resolves with 0, or below 0 when it was not stored (or
+   no book is open) *)
+#pub fn book_idb_put {key_loc:agz}{key_size:pos} (key: !$A.borrow(byte, key_loc, key_size), key_size: int key_size): $P.promise(Int, $P.Chained)
 
 (* out[0, read_len) := bytes [offset, offset + read_len) of the open
    book, when it is book `serial` of file_size bytes; false, with out untouched, when another book is open *)
@@ -417,10 +418,12 @@ in
   case+ book of
   | @OpenBook(book_file, _, _, _, _, _, _, _, _) => let
       val stored = $BF.file_idb_put(key, key_size, book_file)
-      val () = $P.discard<Int>(stored)
       prval () = fold@(book)
-    in book_put(book) end
-  | _ => book_put(book)
+      val () = book_put(book)
+    in $P.vow(stored) end
+  | _ => let
+      val () = book_put(book)
+    in $P.ret<Int>(~1) end
 end
 
 implement book_read {file_size}{offset,read_len}{out_loc}{out_owner}{out_size} (serial, file_size, offset, out, read_len) = let

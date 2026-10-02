@@ -18,6 +18,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "notice.sats"
 staload "layer.sats"
 staload "undo.sats"
 staload "book.sats"
@@ -161,7 +162,7 @@ fn _store_save (): void =
       val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
       val @(used, rest) = $A.borrow_split<byte>(record_frozen, record_bytes, record_len)
       val @(key_frozen, key_bytes) = $A.freeze<byte>(_webdav_key())
-      val () = $P.discard<Int>($IDB.idb_put(key_bytes, 11, used, record_len))
+      val () = save_checked($IDB.idb_put(key_bytes, 11, used, record_len))
       val () = release_bytes(key_frozen, key_bytes)
       val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
       val () = release_bytes(record_frozen, record_bytes)
@@ -171,7 +172,7 @@ fn _store_save (): void =
       val () = $A.write_byte(choice, 4, STORE_WEBDAV)
       val @(choice_frozen, choice_bytes) = $A.freeze<byte>(choice)
       val @(choice_key_frozen, choice_key_bytes) = $A.freeze<byte>(_choice_key())
-      val () = $P.discard<Int>($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
+      val () = save_checked($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
       val () = release_bytes(choice_key_frozen, choice_key_bytes)
       val () = release_bytes(choice_frozen, choice_bytes)
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
@@ -179,10 +180,12 @@ fn _store_save (): void =
 (* No store chosen, and the WebDAV credentials forgotten *)
 fn _store_forget (): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_choice_key())
-  val () = $P.discard<Int>($IDB.idb_delete(key_bytes, 4))
+  (* checked as a save: a delete that failed would bring the store
+     back next run, with the credentials the reader asked to forget *)
+  val () = save_checked($IDB.idb_delete(key_bytes, 4))
   val () = release_bytes(key_frozen, key_bytes)
   val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
-  val () = $P.discard<Int>($IDB.idb_delete(webdav_bytes, 11))
+  val () = save_checked($IDB.idb_delete(webdav_bytes, 11))
 in release_bytes(webdav_frozen, webdav_bytes) end
 
 (* "QS1\n", this device's number, the last sync's minute, result and
@@ -197,7 +200,7 @@ fn _state_save (): void = let
   val () = $A.write_i32(record, 16, !_last_status)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_state_key())
-  val () = $P.discard<Int>($IDB.idb_put(key_bytes, 10, record_bytes, 20))
+  val () = save_checked($IDB.idb_put(key_bytes, 10, record_bytes, 20))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -593,7 +596,7 @@ fn _webdav_read (answer: read_answer -<cloref1> void): void = let
   val pending = _send("GET", empty_bytes, 0, false)
   val () = release_bytes(empty_frozen, empty_bytes)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), lam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
     val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(ReadFailed(_unreached(), 0)) end
@@ -620,7 +623,7 @@ in
                 val () = $BD.blob_free(body)
               in answer(ReadFile(owner, file, size)) end)
         end)
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 (* WebDAV: PUT the file, If-Match the ETag read (unconditional when
@@ -629,7 +632,7 @@ fn _webdav_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size, answer: write_answer -<cloref1> void): void = let
   val pending = _send("PUT", body, body_size, true)
 in
-  $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+  $P.finish<Int>($P.vow(pending), lam(handle) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
     val () = (case+ $FE.fetch_claim_tagged(handle, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in answer(WriteFailed(_unreached(), 0)) end
@@ -641,7 +644,7 @@ in
           else if (if status >= 200 then status < 300 else false) then answer(Written())
           else answer(WriteFailed(_failure_kind(status), status))
         end)
-  in $P.ret<int>(0) end))
+  in () end)
 end
 
 (* Reads the file from the store *)
@@ -1213,7 +1216,7 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), lam(handle) => let
           (* a record that could not be read is left as it is *)
           val () = (if handle < 0 then ()
             else (case+ _held_swap(_written, NoHeld()) of
@@ -1227,8 +1230,7 @@ fun _annotations_take {left:nat} .<left>. (k: int, left: int left): void =
                     in annot_sync_store(take_content(handle), bytes, size, annotations_at, deleted_at, id_high, id_low) end
                     else _content_free(take_content(handle)))
                 in _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices))) end))
-          val () = _annotations_take(k + 1, left - 1)
-        in $P.ret<int>(0) end))
+        in _annotations_take(k + 1, left - 1) end)
       end
     end
 
@@ -1508,13 +1510,12 @@ fun _books {book_index,count:nat | book_index <= count} .<count - book_index>. (
         val pending = $IDB.idb_get(key_bytes, 15)
         val () = release_bytes(key_frozen, key_bytes)
       in
-        $P.discard<int>($P.and_then<Int><int>($P.vow(pending), lam(handle) => let
+        $P.finish<Int>($P.vow(pending), lam(handle) => let
           (* a record that could not be read is not taken for none: the
              file's annotations go back as they are *)
           val own = (if handle < 0 then NoContentBytes() else take_content(handle)): content_bytes
           val () = _push(_annotations_chunk(own, id_high, id_low))
-          val () = _books(book_index + 1, count)
-        in $P.ret<int>(0) end))
+        in _books(book_index + 1, count) end)
       end)
 
 (* The merge of the file read (held in _remote) and this device's,
@@ -1587,7 +1588,9 @@ implement sync_start () = let
         in $A.free<byte>(record) end)
   in $P.ret<int>(0) end)
 in
-  $P.discard<int>($P.and_then<int><int>(state_read, lam(_) => let
+  (* ignored: each read in the chain deals with its own value (none read
+     leaves sync off, as at its first run) *)
+  $P.finish<int>($P.and_then<int><int>(state_read, lam(_) => let
     val @(choice_frozen, choice_bytes) = $A.freeze<byte>(_choice_key())
     val choice_pending = $IDB.idb_get(choice_bytes, 4)
     val () = release_bytes(choice_frozen, choice_bytes)
@@ -1618,7 +1621,7 @@ in
         in $P.ret<int>(0) end)
       end
     end)
-  end))
+  end), lam(_) => ())
 end
 
 (* A book opened in the reader (its library key): sync, to bring its
