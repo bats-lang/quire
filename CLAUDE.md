@@ -23,6 +23,37 @@ a query length of the same name. A loop index (`i`, `j`) or a
 conventional pair (`l` and `n` for an array's location and size) may
 stay short within a few lines.
 
+## Priorities
+
+* **p0:** first, before anything else.
+* **p1:** next.
+* **p2:** known issues the Android release is held for. Work sessions
+  address them.
+* **p3:** not held for. A session may file p3 issues but does not work
+  on them.
+
+## CI is pinned
+
+Every input to CI is pinned in the source (#203), so a commit that
+passes keeps passing: the packages by the committed `bats.lock`, the
+compiler by its commit in `.github/bats-version`, and pwa's Android
+workflow by its commit (`android.yml@<sha>` in `check.yml`). CI never
+runs `bats lock`: `bats check` and `bats build` fetch exactly the locked
+versions, and fail when a locked one is missing or the lock does not
+match the project (a package used but not locked, or locked but not
+used).
+
+A quire PR that adopts new package versions runs `bats lock --repository
+<dir>` and commits `bats.lock` with the change that needs them. Package
+releases publish first; then the quire PR with the new lock. A publish
+never turns main red: until a lock names it, quire does not use it. The
+daily `relock.yml` (the generic `relock-pins.yml`) relocks against the
+newest, moves the compiler pin, pushes `relock/<date>`, opens a PR
+listing the old and new versions and dispatches `check.yml` on it, so a
+breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
+workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
+`android.yml` pin as not moved; move it in a PR of its own.
+
 ## To do: book memory in a rolling window of page arenas
 
 Partly done: the window exists (`src/pages.bats`), and the buffers a
