@@ -1,0 +1,1 @@
+fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
