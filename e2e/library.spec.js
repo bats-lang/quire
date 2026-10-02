@@ -779,3 +779,27 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await expect(menuItem(page, 'Your books are kept')).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+// A file shared with the installed web app (its manifest's
+// share_target): POSTed to share-target, kept by bridge's service
+// worker, and handed to the app as an external file once it opens at
+// ?shared=
+test('an EPUB shared with the installed web app is imported', async ({ page }) => {
+  const errors = await start(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await reload(page);
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, { timeout: 15000 });
+  const bytes = (await import('node:fs')).readFileSync(epubFile({ title: 'Shared To The App', author: 'Share Target' })).toString('base64');
+  const redirected = await page.evaluate(async b64 => {
+    const data = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const form = new FormData();
+    form.append('file', new File([data], 'shared.epub', { type: 'application/epub+zip' }));
+    const r = await fetch('share-target', { method: 'POST', body: form, redirect: 'manual' });
+    return r.type;
+  }, bytes);
+  expect(redirected).toBe('opaqueredirect');
+  await page.goto('/?shared=1');
+  await expect(card(page, 'Shared To The App')).toBeVisible({ timeout: 30000 });
+  expect(await page.evaluate(() => location.search)).toBe('');
+  expect(errors).toEqual([]);
+});
