@@ -6,7 +6,7 @@
 // label or visible text. No test depends on an element's id or class.
 
 import { expect } from '@playwright/test';
-import { createEpub } from './create-epub.js';
+import { createEpub, solidPng } from './create-epub.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -387,3 +387,64 @@ export async function illegible(root) {
     return bad;
   });
 }
+
+// ---- fixed layout ----
+
+/** A page of a fixed-layout book: an image of the page's size (600 by
+    800, drawn at twice that), with its viewport meta unless bare, and
+    its itemref's properties, if any */
+export const imagePage = (n, bare = false, itemref = undefined) => ({
+  head: bare ? '' : '<meta name="viewport" content="width=600, height=800"/>',
+  body: `<div><img src="images/page${n}.png" alt="Page ${n}"/></div>`,
+  itemref,
+});
+
+/** A fixed-layout book of count image pages: the pages listed in bare
+    have no viewport meta; spread is its rendition:spread (none, when
+    left out); itemrefs, each page's itemref properties; rtl, read
+    right to left */
+export const fixedLayoutBook = (title, count, { bare = [], spread, itemrefs = [], rtl = false } = {}) => ({
+  title, author: 'Fixed Tests', chapters: count, rtl,
+  metadata: '<meta property="rendition:layout">pre-paginated</meta>\n' +
+    (spread ? `<meta property="rendition:spread">${spread}</meta>\n` : ''),
+  rawChapters: Array.from({ length: count }, (_, k) => imagePage(k + 1, bare.includes(k + 1), itemrefs[k])),
+  extraImages: Array.from({ length: count }, (_, k) => ({ name: `images/page${k + 1}.png`, data: solidPng(1200, 1600) })),
+});
+
+/** The page indicator of a fixed page read back: the spine item shown
+    (the first of a spread's two, with last the second) and the book's
+    count */
+export async function fixedPlace(page) {
+  const text = (await indicator(page).textContent()).trim();
+  const spread = /· pages (\d+)–(\d+) of (\d+) in book$/.exec(text);
+  if (spread) return { p: +spread[1], last: +spread[2], t: +spread[3] };
+  const m = /· page (\d+) of (\d+) in book$/.exec(text);
+  expect(m, `page indicator "${text}"`).not.toBeNull();
+  return { p: +m[1], t: +m[2] };
+}
+
+/** Imports the book made from opts and opens it, waiting for its first
+    fixed page */
+export async function readFixed(page, opts) {
+  const n = await cards(page).count();
+  await importFiles(page, [epubFile(opts)], n + 1);
+  await card(page, opts.title).click();
+  await expect(bookPage(page)).toBeVisible();
+  await expect(indicator(page)).toContainText('in book');
+}
+
+/** The fixed pages shown: the page (the whole reader view) and each of
+    its boxes, left to right, with the image in it (its name, and
+    whether it is loaded) */
+export const fixedBoxes = page => bookPage(page).evaluate(doc => {
+  const rect = e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; };
+  const sides = [...doc.children].map(box => {
+    const image = box.querySelector('img');
+    return {
+      ...rect(box), laidOut: { w: box.offsetWidth, h: box.offsetHeight },
+      image: image ? { ...rect(image), name: image.alt, loaded: image.complete && image.naturalWidth > 0 } : null,
+    };
+  });
+  const shown = sides.find(side => side.image) || sides[0];
+  return { view: rect(doc), sides, page: shown, image: shown && shown.image, loaded: !!(shown && shown.image && shown.image.loaded) };
+});
