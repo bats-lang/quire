@@ -47,10 +47,14 @@ staload "library.sats"
 staload "jsonio.sats"
 staload "app.sats"
 staload "stardict.sats"
+staload "storage.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+
+(* A write's answer no consumer took: nothing to free *)
+implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The most dictionaries kept *)
 #define MOST_DICTIONARIES 64
@@ -344,7 +348,7 @@ fn _file_key {letter:nat | letter < 256} (letter: int letter, id: int): [l:agz] 
 fn _file_delete {letter:nat | letter < 256} (letter: int letter, id: int): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
   (* ignored: a delete that fails leaves bytes nothing reads *)
-  val () = $P.finish<Int>($IDB.idb_delete(key_bytes, 15), lam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 15), llam(_) => ())
 in release_bytes(key_frozen, key_bytes) end
 
 fn _files_delete (id: int): void = let
@@ -395,7 +399,8 @@ in
     val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
     val @(key, key_len) = _id_bytes("dicts")
     val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val () = save_checked($IDB.idb_put(key_bytes, key_len, used, stop))
+    (* never over a list that could not be read *)
+    val () = (if storage_savable(DictionariesRecord()) then save_checked($IDB.idb_put(key_bytes, key_len, used, stop)) else ())
     val () = release_bytes(key_frozen, key_bytes)
     val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
   in release_bytes(out_frozen, out_bytes) end
@@ -440,10 +445,11 @@ implement dict_load () = let
   val stored = $IDB.idb_get(key_bytes, key_len)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => $P.ret<int>(0)
-    | ~BlobBytes(data, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    | ~StoredUnreadable() => let val () = storage_unreadable(DictionariesRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, n) =>
       if n < 12 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 0) <> 81 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 1) <> 68 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
@@ -542,10 +548,13 @@ fn _fetch {letter:nat | letter < 256} (letter: int letter, id: int, cell: ref(fi
   val stored = $BF.file_idb_get(key_bytes, 15)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ $BF.file_claim(handle) of
-    | ~$R.none() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
-    | ~$R.some(file) =>
+  $P.and_then<$BF.file_lookup><int>(stored, llam(found) =>
+    case+ found of
+    | ~$BF.FileAbsent() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    (* not read: the dictionary stays unopened, and is read again at
+       the next lookup *)
+    | ~$BF.FileUnreadable() => let val () = _slot_put(cell, NoFile()) in $P.ret<int>(0) end
+    | ~$BF.FileFound(file) =>
       if !_reading <> reading then let val () = $BF.file_close(file) in $P.ret<int>(0) end
       else let
         val size = $BF.file_size(file)
@@ -584,8 +593,10 @@ fn _is_loaded (open_dictionary: !loaded): bool =
   | @Loaded(_, _, _, _, _, _, _, _) => let prval () = fold@(open_dictionary) in true end
   | _ => false
 
-fn _gather_finish (id: int, reading: int, again: () -<cloref1> void): void =
-  if !_reading <> reading then ()
+(* The files read for dictionary id (the reading-th read) put together:
+   true when the dictionary is open then *)
+fn _gather_finish (id: int, reading: int): bool =
+  if !_reading <> reading then false
   else let
   val table = _slot_take(_gather_table)
   val idx = _slot_take(_gather_idx)
@@ -601,25 +612,27 @@ in
       val assembled = _assemble(id, table, idx, dict, syn)
       val opened = _is_loaded(assembled)
       val () = _loaded_put(assembled)
-    in if opened then again() else () end
+    in opened end
     else let
       prval () = fold@(current)
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   | _ => let
       val () = _slot_close(table)
       val () = _slot_close(idx)
       val () = _slot_close(dict)
       val () = _slot_close(syn)
-    in _loaded_put(current) end
+      val () = _loaded_put(current)
+    in false end
   end
 
 (* Reads dictionary id's files (with its .syn when kind says it has
-   one); again runs once they are open *)
-fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
+   one); the promise resolves true once they are open *)
+fn _load (id: int, kind: int): $P.promise(bool, $P.Chained) = let
   val () = _loaded_put(Loading(id))
   val reading = !_reading + 1
   val () = !_reading := reading
@@ -628,15 +641,15 @@ fn _load (id: int, kind: int, again: () -<cloref1> void): void = let
   val () = _slot_put(_gather_dict, NoFile())
   val () = _slot_put(_gather_syn, NoFile())
   val with_syn = $AR.band_int_int(kind, 2) <> 0
-  val gathered = $P.and_then<int><int>(_fetch(88, id, _gather_table, reading), lam(_) =>
-    $P.and_then<int><int>(_fetch(73, id, _gather_idx, reading), lam(_) =>
-      $P.and_then<int><int>(_fetch(68, id, _gather_dict, reading), lam(_) =>
+  val gathered = $P.and_then<int><int>(_fetch(88, id, _gather_table, reading), llam(_) =>
+    $P.and_then<int><int>(_fetch(73, id, _gather_idx, reading), llam(_) =>
+      $P.and_then<int><int>(_fetch(68, id, _gather_dict, reading), llam(_) =>
         if with_syn then _fetch(83, id, _gather_syn, reading)
         else let val () = _slot_put(_gather_syn, NoFile()) in $P.ret<int>(0) end)))
 in
   (* each file's read keeps what it found in its slot, which
      _gather_finish checks *)
-  $P.finish<int>(gathered, lam(_) => _gather_finish(id, reading, again))
+  $P.and_then<int><bool>(gathered, llam(_) => $P.ret<bool>(_gather_finish(id, reading)))
 end
 
 (* The dictionary closed: the next lookup reads its files again *)
@@ -927,23 +940,22 @@ fun _trim_end {l:agz}{n:pos}{start:nat}{stop:nat | start <= stop; stop <= n} .<s
   else if _trimmed(_byte_at(word, stop - 1)) then _trim_end(word, start, stop - 1)
   else stop
 
+(* What a lookup found: the word, which dict_show then shows (DictFound);
+   not the word (DictMissing); or that the dictionary's files are being
+   read for it (DictReading): its promise resolves true once they are
+   open, when the lookup can be made again *)
+#pub datavtype dict_found =
+  | DictFound of ()
+  | DictMissing of ()
+  | DictReading of $P.promise(bool, $P.Chained)
+
 (* Looks word[0, word_len) up in the first dictionary of the language
-   code[0, code_len) names: true when it is found there, and then
-   dict_show shows it. When that dictionary's files are not read yet,
-   they are read, and what dict_when_read was given runs once they are *)
+   code[0, code_len) names. When that dictionary's files are not read
+   yet, they are read (DictReading) *)
 #pub fn dict_find {code_loc,word_loc:agz}{word_size:pos}{word_len:nat | word_len <= word_size}
-  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): bool
-
-typedef act = () -<cloref1> void
-val _nothing: act = lam () =<cloref1> ()
-val _when_read = ref<act>(_nothing)
-
-(* What runs once a dictionary's files are read (a lookup again) *)
-#pub fn dict_when_read (again: () -<cloref1> void): void
-implement dict_when_read (again) = !_when_read := again
+  (code: !$A.arr(byte, code_loc, 3), code_len: int, word: !$A.arr(byte, word_loc, word_size), word_len: int word_len): dict_found
 
 implement dict_find (code, code_len, word, word_len) = let
-  val again = !_when_read
   val () = _hit_put(NoHit())
   val code_len = g1ofg0(code_len)
   val language = (if code_len >= 0 then (if code_len <= 3 then _language_of_bytes(code, code_len) else ~1) else ~1): int
@@ -953,9 +965,9 @@ implement dict_find (code, code_len, word, word_len) = let
   val @(id, kind) = _dicts_for(list, language)
   val () = _dicts_put(DictCell(list, next_id))
 in
-  if id < 0 then false
-  else if stop - start <= 0 then false
-  else if stop - start > 64 then false
+  if id < 0 then DictMissing()
+  else if stop - start <= 0 then DictMissing()
+  else if stop - start > 64 then DictMissing()
   else let
     val current = _loaded_take()
   in
@@ -972,25 +984,24 @@ in
         case+ found of
         | ~RecordGot(headword, headword_len, offset, size) => let
             val () = _hit_put(Hit(id, headword, headword_len, offset, size))
-          in true end
-        | ~NoRecord() => false
+          in DictFound() end
+        | ~NoRecord() => DictMissing()
       end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
+    (* the files are being read already: that read's lookup is made
+       again once they are open *)
     | @Loading(loading_id) =>
-      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in false end
+      if loading_id = id then let prval () = fold@(current); val () = _loaded_put(current) in DictMissing() end
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
     | NotLoaded() => let
         val () = _loaded_put(current)
-        val () = _load(id, kind, again)
-      in false end
+      in DictReading(_load(id, kind)) end
   end
 end
 
@@ -1079,13 +1090,13 @@ in
               val inflate_len = piece_len - ((if finishing then 0 else 5): [cut:int | cut == 0 || cut == 5] int cut)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
               val @(used, rest) = $A.borrow_split<byte>(compressed_frozen, compressed_bytes, inflate_len)
-              val inflating = decompress(used, inflate_len, 8)
+              val inflating = decompress(used, inflate_len, $BD.DeflateRaw())
               val compressed_bytes = $A.borrow_join<byte>(compressed_frozen, used, rest)
               val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
               val () = piece_free(owner, $A.thaw<byte>(compressed_frozen))
               val relative = offset - first * chunk_length
             in
-              $P.finish<Int>($P.vow(inflating), lam(handle) =>
+              $P.finish<Int>($P.vow(inflating), llam(handle) =>
                 case+ take_content(handle) of
                 | ~NoContentBytes() => _article_unread()
                 | ~ContentBytes(content_owner, content, content_size) => let
@@ -1284,7 +1295,10 @@ in
   else let
     val () = _unload()
     val () = _render()
-  in undo_offer("Dictionary removed", lam () => _restore(id, index), lam () => _forget(id)) end
+  in $P.finish<settled>(undo_offer("Dictionary removed"), llam(how) =>
+    case+ how of
+    | Undone() => _restore(id, index)
+    | Final() => _forget(id)) end
 end
 
 (* ============================================================
@@ -1683,21 +1697,24 @@ in
       in true end)
 end
 
-(* The lesser of two stores' statuses: below 0 when either failed *)
-fn _least_status (first: Int, second: Int): Int = if first < second then first else second
+(* Two stores, both kept (Stored), or not *)
+fn _both_stored (first: $IDB.stored, second: $IDB.stored): $IDB.stored =
+  case+ first of
+  | $IDB.Stored() => second
+  | $IDB.NotStored() => $IDB.NotStored()
 
 (* The file cell holds, stored under letter for dictionary id from the
    JS side, and closed *)
-fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise(Int, $P.Chained) =
+fn _file_store {letter:nat | letter < 256} (cell: ref(file_slot), letter: int letter, id: int): $P.promise($IDB.stored, $P.Chained) =
   case+ _slot_take(cell) of
-  | ~NoFile() => $P.ret<Int>(0)
+  | ~NoFile() => $P.ret<$IDB.stored>($IDB.Stored())
   | ~FileSlot(file, _) => let
       val @(key_frozen, key_bytes) = $A.freeze<byte>(_file_key(letter, id))
       val stored = $BF.file_idb_put(key_bytes, 15, file)
       val () = release_bytes(key_frozen, key_bytes)
       (* the JS side took the file's bytes as the call was made *)
       val () = $BF.file_close(file)
-    in $P.vow(stored) end
+    in stored end
 
 fn _free_entry {name_loc,types_loc:agz} (name: $A.arr(byte, name_loc, 256), types: $A.arr(byte, types_loc, 16)): void = let
   val () = $A.free<byte>(name)
@@ -1749,23 +1766,24 @@ in
     else let
       val kind = ((if compressed then 1 else 0): int) + ((if has_syn then 2 else 0): int)
       val language = !_import_language
-      (* each file stored in turn; the least of their statuses, so one
+      (* each file stored in turn; NotStored when one was not, so one
          that failed is not lost *)
-      val stored = $P.and_then<Int><Int>(_file_store(_import_idx, 73, id), lam(idx_status) =>
-        $P.and_then<Int><Int>(_file_store(_import_dict, 68, id), lam(dict_status) =>
-          $P.and_then<Int><Int>(_file_store(_import_syn, 83, id), lam(syn_status) =>
-            $P.ret<Int>(_least_status(_least_status(idx_status, dict_status), syn_status)))))
+      val stored = $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_idx, 73, id), llam(idx_status) =>
+        $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_dict, 68, id), llam(dict_status) =>
+          $P.and_then<$IDB.stored><$IDB.stored>(_file_store(_import_syn, 83, id), llam(syn_status) =>
+            $P.ret<$IDB.stored>(_both_stored(_both_stored(idx_status, dict_status), syn_status)))))
       val () = _slot_put(_import_ifo, NoFile())
       val+ ~DictCell(list, next_id) = _dicts_take()
       val () = _dicts_put(DictCell(_dicts_join(list, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil())), next_id))
       val () = _unload()
       val () = _render()
     in
-      $P.finish<Int>(stored, lam(status) => let
+      $P.finish<$IDB.stored>(stored, llam(status) => let
         val () = _save()
       in
-        if status >= 0 then ui_text("dictionaries-status", "Dictionary added.")
-        else ui_text("dictionaries-status", "The dictionary's files could not be stored. The browser's storage may be full: free some space, remove it and import it again.")
+        case+ status of
+        | $IDB.Stored() => ui_text("dictionaries-status", "Dictionary added.")
+        | $IDB.NotStored() => ui_text("dictionaries-status", "The dictionary's files could not be stored. The browser's storage may be full: free some space, remove it and import it again.")
       end)
     end
   end
@@ -1852,7 +1870,7 @@ fun _open_files {file_index,file_count:nat | file_index <= file_count} .<file_co
     val opened = $BF.file_open_at(id_bytes, input_len, file_index)
     val () = release_bytes(id_frozen, id_bytes)
   in
-    $P.finish<Int>($P.vow(opened), lam(handle) => let
+    $P.finish<Int>($P.vow(opened), llam(handle) => let
       val () = _keep_file(handle)
     in _open_files(file_index + 1, file_count) end)
   end

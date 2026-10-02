@@ -15,8 +15,8 @@ of its members.
 Ids are named (for a text, a class, a listener, a comparison with an
 event's target) by the functions in NAMERS, and by helpers that pass a
 parameter on to one; each named literal must be a made id, one of a
-family's, or the page's own (bats-root, or pwa-*, which the pwa page
-script makes).
+family's, or the page's own (bats-root). No id of pwa's page scripts
+(pwa-*) is named: what they did is quire's own now (bats-lang/pwa#49).
 
 usage: tests/static/ids.py <src-dir>...   (exit 1 on any finding)
 """
@@ -36,7 +36,7 @@ NAMERS = {name: (0,) for name in (
     'ui_clear', 'ui_attr', 'ui_attr_buf', 'ui_place', 'ui_class', 'ui_show',
     'ui_text', 'ui_text_buf', 'ui_text_long', 'ui_tone', 'ui_role',
     'ui_named', 'ui_measure', 'ui_focus', 'ui_harm_item', 'OnEl', 'OnGestures',
-    'ui_option',
+    'ui_option', 'ui_src_empty',
 )}
 NAMERS['ui_labelled'] = (0, 2)
 NAMERS['_is'] = (1,)
@@ -50,7 +50,6 @@ NUMBERED = {'nid_make': [(0, None)], 'nid_make2': [(0, 2)], 'nid_pad3': [(0, Non
 # read after them)
 PREFIX_NAMERS = {'_row_of': 1}
 PAGE_IDS = {'bats-root'}
-PAGE_PREFIX = 'pwa-'
 
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 DEFN = re.compile(r'^(?:#pub\s+)?(?:fn|fun)\s+(\w+)\s*((?:\{[^}]*\}\s*)*)\(', re.M)
@@ -214,7 +213,7 @@ def main(dirs):
     for ident, where in sorted(made.items()):
         if len(where) > 1:
             problems.append(f'id "{ident}" is made at {len(where)} places: {", ".join(where)}')
-        if ident.startswith(PAGE_PREFIX) or ident in PAGE_IDS:
+        if ident in PAGE_IDS:
             problems.append(f'id "{ident}" is the page\'s own, made at {where[0]}')
         for (pre, suf), fwhere in families.items():
             if family_regex(pre, suf).match(ident):
@@ -233,7 +232,7 @@ def main(dirs):
                                     f'"{pb}"+n+"{sb}" ({families[fams[b]]}) can be the same')
 
     def known(ident):
-        return (ident in made or ident in PAGE_IDS or ident.startswith(PAGE_PREFIX)
+        return (ident in made or ident in PAGE_IDS
                 or any(family_regex(p, s).match(ident) for p, s in families))
 
     for path, text in sources:

@@ -334,7 +334,7 @@ in
     val fetching = _fetch(describing)
     val () = kept_free(describing)
   in
-    $P.finish<Int>(fetching, lam(handle) =>
+    $P.finish<Int>(fetching, llam(handle) =>
     _described(_claim(handle, FEED_MOST), request))
   end
 end
@@ -376,7 +376,7 @@ fn _load (): void = let
   val fetching = _fetch(address)
   val () = kept_free(address)
 in
-  $P.finish<Int>(fetching, lam(handle) =>
+  $P.finish<Int>(fetching, llam(handle) =>
   _arrived(_claim(handle, FEED_MOST), request))
 end
 
@@ -536,7 +536,7 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
       val importing = import_fetched(book_file, size, name, name_len)
       val () = $A.free<byte>(name)
     in
-      $P.finish<Int>(importing, lam(outcome) => let
+      $P.finish<Int>(importing, llam(outcome) => let
         val () = (if outcome > 0 then _say("Added to your library.")
           else if outcome < 0 then _say("This book could not be imported.")
           else _quiet())
@@ -567,7 +567,7 @@ in
     val fetching = _fetch(epub)
     val () = kept_free(epub)
   in
-    $P.finish<Int>(fetching, lam(handle) =>
+    $P.finish<Int>(fetching, llam(handle) =>
     _got(_claim(handle, BOOK_MOST), index, request))
   end
 end

@@ -27,6 +27,7 @@ staload "app.sats"
 staload "stardict.sats"
 staload "opds.sats"
 staload "url.sats"
+staload "storage.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -253,7 +254,8 @@ in
     val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
     val @(key, key_len) = _storage_key()
     val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val () = save_checked($IDB.idb_put(key_bytes, key_len, used, stop))
+    (* never over a list that could not be read *)
+    val () = (if storage_savable(CataloguesRecord()) then save_checked($IDB.idb_put(key_bytes, key_len, used, stop)) else ())
     val () = release_bytes(key_frozen, key_bytes)
     val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
   in release_bytes(out_frozen, out_bytes) end
@@ -315,10 +317,11 @@ implement catalogue_load () = let
   val stored = $IDB.idb_get(key_bytes, key_len)
   val () = release_bytes(key_frozen, key_bytes)
 in
-  $P.and_then<Int><int>($P.vow(stored), lam(handle) =>
-    case+ take_blob(handle) of
-    | ~NoBlobBytes() => let val () = _list_put(CatalogueCell(_preset(), 2)) in $P.ret<int>(0) end
-    | ~BlobBytes(data, n) =>
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => let val () = _list_put(CatalogueCell(_preset(), 2)) in $P.ret<int>(0) end
+    | ~StoredUnreadable() => let val () = storage_unreadable(CataloguesRecord()) in $P.ret<int>(0) end
+    | ~StoredBytes(data, n) =>
       if n < 12 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 0) <> 81 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
       else if _byte_at(data, 1) <> 67 then let val () = $A.free<byte>(data) in $P.ret<int>(0) end
@@ -504,7 +507,10 @@ in
   else let
     val () = _render()
     val () = _save()
-  in undo_offer("Catalogue removed", lam () => _restore(id, index), lam () => _forget(id)) end
+  in $P.finish<settled>(undo_offer("Catalogue removed"), llam(how) =>
+    case+ how of
+    | Undone() => _restore(id, index)
+    | Final() => _forget(id)) end
 end
 
 (* ============================================================

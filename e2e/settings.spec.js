@@ -224,8 +224,9 @@ test('reset puts the defaults back', async ({ page }) => {
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });
 
-// Auto by the clock: the page's script (pwa) marks the night by the
-// local time, which the theme follows at the next page turn
+// Auto by the clock: night by the local time (local_time.bats, from the
+// host's clock and time zone), which the theme follows at the next page
+// turn
 test.describe('auto at night', () => {
   test.use({ timezoneId: 'Europe/Paris', colorScheme: 'light' });
   test('auto turns to Night at 22:00 local time, at the next page turn, and back by morning', async ({ page }) => {
@@ -282,4 +283,120 @@ test('in a browser tab, the screen offers only what it can: no rotation lock or 
   await openSettings(page);
   await expect(sheet(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
   await expect(sheet(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
+});
+
+// The night's edges, exactly, in another zone: New York in June is
+// UTC-4, so 21:59 there is 01:59 UTC
+test.describe('auto at night, to the minute', () => {
+  test.use({ timezoneId: 'America/New_York', colorScheme: 'light' });
+  test('night starts at 22:00 and ends at 07:00 local time', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-06-02T01:59:00Z') });
+    await start(page);
+    await readBook(page, { title: 'Edges', author: 'Settings Tests', rawChapters: chapters(1, 80) });
+    const theme = () => page.evaluate(() => document.getElementById('bats-root').className);
+    const turn = () => page.keyboard.press('ArrowRight');
+    expect(await theme()).toContain('th-light');
+    // 21:59:30: still the day
+    await page.clock.runFor('00:30');
+    await turn();
+    await page.waitForTimeout(100);
+    expect(await theme()).toContain('th-light');
+    // 22:00
+    await page.clock.runFor('00:30');
+    await turn();
+    await expect.poll(theme).toContain('th-night');
+    // 06:59
+    await page.clock.runFor('08:59:00');
+    await turn();
+    await page.waitForTimeout(100);
+    expect(await theme()).toContain('th-night');
+    // 07:00
+    await page.clock.runFor('01:00');
+    await turn();
+    await expect.poll(theme).toContain('th-light');
+  });
+});
+
+test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  const full = sheet(page).getByRole('button', { name: 'Full screen', exact: true });
+  await expect(full).toHaveAttribute('aria-pressed', 'false');
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+  await expect(full).toHaveAttribute('aria-pressed', 'false');
+});
+
+// The Android app's plugins, each call kept; and a speech engine with
+// voices (none says anything here)
+async function deviceStubs(page) {
+  await page.addInitScript(() => {
+    window.calls = [];
+    const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      StatusBar: { hide: call('hide'), show: call('show') },
+      ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+      ScreenBrightness: { setBrightness: call('brightness') },
+    } };
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    const voices = [
+      { name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true },
+      { name: 'Narrator', lang: 'en-GB', voiceURI: 'narrator-en', default: false },
+    ];
+    Object.defineProperty(window, 'speechSynthesis', { value: {
+      getVoices: () => voices, speak() {}, cancel() {}, pause() {}, resume() {}, addEventListener() {},
+    } });
+  });
+}
+
+test('reset puts reading aloud\'s speed and voice, the brightness and the rotation lock back too, and Undo returns them', async ({ page }) => {
+  await deviceStubs(page);
+  await start(page);
+  await readBook(page, { title: 'Device Reset', author: 'Settings Tests', rawChapters: chapters(1, 5) });
+  await openSettings(page);
+  const speed = sheet(page).getByRole('combobox', { name: 'Reading speed' });
+  const voice = sheet(page).getByRole('combobox', { name: 'Voice' });
+  const brightness = sheet(page).getByRole('combobox', { name: 'Brightness' });
+  const lock = sheet(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  await speed.selectOption('1.5');
+  await voice.selectOption({ label: 'Narrator' });
+  await brightness.selectOption({ label: '25%' });
+  await lock.click();
+  await expect(lock).toHaveAttribute('aria-pressed', 'true');
+  await choose(page, 'Reset to defaults');
+  await expect(speed).toHaveValue('1');
+  await expect(voice.locator('option:checked')).toHaveText('Automatic');
+  await expect(brightness).toHaveValue('system');
+  await expect(lock).toHaveAttribute('aria-pressed', 'false');
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toEqual(['brightness {"brightness":-1}', 'unlock']);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect(speed).toHaveValue('1.5');
+  await expect(voice.locator('option:checked')).toHaveText('Narrator');
+  await expect(brightness).toHaveValue('25');
+  await expect(lock).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-2).map(c => c.split(' ')[0]))).toEqual(['brightness', 'lock']);
+  expect(await page.evaluate(() => window.calls.slice(-2)[0])).toBe('brightness {"brightness":0.25}');
+});
+
+// Auto by the clock, without a page turned: night is checked each
+// minute while a book is open
+test.describe('auto at night, while the page stays', () => {
+  test.use({ timezoneId: 'Europe/Paris', colorScheme: 'light' });
+  test('auto turns to Night at 22:00 and back at 07:00 with no page turned', async ({ page }) => {
+    // 21:58 in Paris (UTC+2 in June)
+    await page.clock.install({ time: new Date('2026-06-01T19:58:00Z') });
+    await start(page);
+    await readBook(page, { title: 'Still', author: 'Settings Tests', rawChapters: chapters(1, 5) });
+    const theme = () => page.evaluate(() => document.getElementById('bats-root').className);
+    expect(await theme()).toContain('th-light');
+    await page.clock.runFor('03:00');
+    await expect.poll(theme).toContain('th-night');
+    // 07:01
+    await page.clock.runFor('09:00:00');
+    await expect.poll(theme).toContain('th-light');
+  });
 });

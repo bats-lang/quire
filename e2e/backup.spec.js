@@ -232,3 +232,61 @@ test('a backup holds the collections, and restoring it puts each book back in it
   await expect(card(page, 'Grouped One')).toHaveCount(1);
   await expect(cards(page)).toHaveCount(1);
 });
+
+// The Android app's plugins, each call kept; and a speech engine with
+// voices (none says anything here)
+async function deviceStubs(page) {
+  await page.addInitScript(() => {
+    window.calls = [];
+    const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      StatusBar: { hide: call('hide'), show: call('show') },
+      ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+      ScreenBrightness: { setBrightness: call('brightness') },
+    } };
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    const voices = [
+      { name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true },
+      { name: 'Narrator', lang: 'en-GB', voiceURI: 'narrator-en', default: false },
+    ];
+    Object.defineProperty(window, 'speechSynthesis', { value: {
+      getVoices: () => voices, speak() {}, cancel() {}, pause() {}, resume() {}, addEventListener() {},
+    } });
+  });
+}
+
+test('a backup holds reading aloud\'s speed and voices, the brightness and the rotation lock, and a restore puts them back', async ({ page }) => {
+  await deviceStubs(page);
+  await start(page);
+  await readBook(page, { title: 'Device Backup', author: 'Keeper', rawChapters: chapters(1, 5) });
+  await openSettings(page);
+  const sheet = dialog(page, 'Typography and theme');
+  await sheet.getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
+  await sheet.getByRole('combobox', { name: 'Voice' }).selectOption({ label: 'Narrator' });
+  await sheet.getByRole('combobox', { name: 'Brightness' }).selectOption({ label: '25%' });
+  await sheet.getByRole('button', { name: 'Lock rotation', exact: true }).click();
+  await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  await toLibrary(page);
+  const json = await exportBackup(page);
+  const b = JSON.parse(json);
+  expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 25, rotationLocked: true, voices: { en: 'Narrator' } });
+  // reset, then restored
+  await librarySettings(page);
+  await settingsButton(page, 'Reset settings').click();
+  await settingsButton(page, 'Done').click();
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
+  const reset = JSON.parse(await exportBackup(page));
+  expect(reset.settings).toMatchObject({ readingSpeed: 100, brightness: 'system', rotationLocked: false, voices: {} });
+  const path = rawFile('device-backup.json', json);
+  await restoreBackup(page, path);
+  await expect(restored(page)).toBeVisible();
+  await restored(page).getByRole('button', { name: 'OK' }).click();
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toContain('brightness {"brightness":0.25}');
+  await openBook(page, 'Device Backup');
+  await openSettings(page);
+  await expect(sheet.getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
+  await expect(sheet.getByRole('combobox', { name: 'Voice' }).locator('option:checked')).toHaveText('Narrator');
+  await expect(sheet.getByRole('combobox', { name: 'Brightness' })).toHaveValue('25');
+  await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
