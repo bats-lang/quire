@@ -1042,3 +1042,244 @@ and _font_item
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
 
 implement find_font_href (data, nodes) = _font_item_nodes(data, nodes)
+
+(* ============================================================
+   Fixed layout (EPUB 3.3 §8.2): the OPF's rendition:layout, each
+   itemref's own, and a page's viewport meta
+   ============================================================ *)
+
+(* How a book, or one of its spine items, is laid out: reflowed (the
+   reader's pages and typography), or pre-paginated (fixed layout: each
+   spine item one page of its own size, scaled to fit) *)
+#pub datatype rendition_layout =
+  | Reflowable
+  | PrePaginated
+
+(* What a <meta property="rendition:layout"> says, or that none is met *)
+datatype layout_said =
+  | LayoutUnsaid
+  | LayoutSaysReflowable
+  | LayoutSaysPrePaginated
+
+(* What the meta's value says: pre-paginated, or (anything else, as
+   "reflowable", the default) reflowable *)
+fn _layout_of_value {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): layout_said = let
+  val @(value_offset, value_len) = _trim(data, offset, span_len)
+in if _span_is(data, value_offset, value_len, "pre-paginated") then LayoutSaysPrePaginated() else LayoutSaysReflowable() end
+
+fun _layout_meta_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): layout_said =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => (case+ _layout_meta(data, node) of
+    | LayoutUnsaid() => _layout_meta_nodes(data, rest)
+    | LayoutSaysReflowable() => LayoutSaysReflowable()
+    | LayoutSaysPrePaginated() => LayoutSaysPrePaginated())
+  | $X.xml_nodes_nil() => LayoutUnsaid()
+
+and _layout_meta
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): layout_said =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
+         if _span_is(data, property_offset, property_len, "rendition:layout") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) => _layout_of_value(data, value_offset, value_len)
+            | ~xspan_none() => LayoutUnsaid())
+         else LayoutUnsaid()
+       | ~xspan_none() => LayoutUnsaid())
+    else _layout_meta_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => LayoutUnsaid()
+
+(* The book's layout: its OPF's rendition:layout meta, reflowable when
+   it has none *)
+#pub fn opf_layout
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): rendition_layout
+
+implement opf_layout (data, nodes) =
+  case+ _layout_meta_nodes(data, nodes) of
+  | LayoutSaysPrePaginated() => PrePaginated()
+  | LayoutSaysReflowable() => Reflowable()
+  | LayoutUnsaid() => Reflowable()
+
+(* The search for an itemref: the properties of the one sought (none
+   when it has no properties attribute), or how many itemrefs are left
+   to skip after the nodes searched *)
+datavtype itemref_search(n:int) =
+  | ItemrefFound(n) of xspan(n)
+  | ItemrefAfter(n) of int
+
+fun _itemref_properties_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), skip: int): itemref_search(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => (case+ _itemref_properties_node(data, node, skip) of
+    | ~ItemrefAfter(left) => _itemref_properties_nodes(data, rest, left)
+    | found => found)
+  | $X.xml_nodes_nil() => ItemrefAfter(skip)
+
+and _itemref_properties_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), skip: int): itemref_search(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var itemref_chars = @[char][7]('i', 't', 'e', 'm', 'r', 'e', 'f')
+    var properties_chars = @[char][10]('p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, itemref_chars, 7) then
+      if skip <= 0 then ItemrefFound(_find_attr_value(data, attrs, properties_chars, 10))
+      else ItemrefAfter(skip - 1)
+    else _itemref_properties_nodes(data, children, skip)
+  end
+  | $X.xml_text(_, _) => ItemrefAfter(skip)
+
+(* The layout of spine item item_index: its itemref's
+   rendition:layout-pre-paginated or rendition:layout-reflowable
+   property, else the book's *)
+#pub fn itemref_layout_n
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), item_index: int, book_layout: rendition_layout): rendition_layout
+
+implement itemref_layout_n (data, nodes, item_index, book_layout) =
+  case+ _itemref_properties_nodes(data, nodes, item_index) of
+  | ~ItemrefAfter(_) => book_layout
+  | ~ItemrefFound(properties) => (case+ properties of
+    | ~xspan_none() => book_layout
+    | ~xspan_at(properties_offset, properties_len) => let
+        var pre_paginated_chars = @[char][30]('r', 'e', 'n', 'd', 'i', 't', 'i', 'o', 'n', ':', 'l', 'a', 'y', 'o', 'u', 't', '-', 'p', 'r', 'e', '-', 'p', 'a', 'g', 'i', 'n', 'a', 't', 'e', 'd')
+        var reflowable_chars = @[char][27]('r', 'e', 'n', 'd', 'i', 't', 'i', 'o', 'n', ':', 'l', 'a', 'y', 'o', 'u', 't', '-', 'r', 'e', 'f', 'l', 'o', 'w', 'a', 'b', 'l', 'e')
+      in
+        if _span_has(data, properties_offset, properties_len, pre_paginated_chars, 30, 0) then PrePaginated()
+        else if _span_has(data, properties_offset, properties_len, reflowable_chars, 27, 0) then Reflowable()
+        else book_layout
+      end)
+
+(* A fixed-layout page's size in CSS pixels, its initial containing
+   block (EPUB RS 3.3 §8.1.2): the width and height its viewport meta
+   gives, each 1 to 10000; or none, when it has no viewport meta or
+   either is missing, not a number, or out of that range *)
+#pub datavtype viewport =
+  | {width,height:pos | width <= 10000; height <= 10000} Viewport of (int width, int height)
+  | NoViewport of ()
+
+#pub fn viewport_free (size: viewport): void
+
+implement viewport_free (size) =
+  case+ size of
+  | ~Viewport(_, _) => ()
+  | ~NoViewport() => ()
+
+(* One of the viewport's sizes, or none *)
+datavtype dimension =
+  | {size:pos | size <= 10000} Dimension of int size
+  | NoDimension of ()
+
+(* The first position at or after position in data[offset, offset +
+   span_len) that is not white space *)
+fun _skip_spaces {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{position:nat | position <= span_len} .<span_len - position>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, position: int position): [after:nat | after <= span_len] int after =
+  if position >= span_len then position
+  else if byte2int0($A.read<byte>(data, offset + position)) <= 32 then _skip_spaces(data, offset, span_len, position + 1)
+  else position
+
+(* value, then the decimal digits from position on (a unit after them,
+   such as "px", is the number's end); past 100000 it stops growing *)
+fun _digits_value {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{position:nat | position <= span_len} .<span_len - position>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, position: int position, value: int): int =
+  if position >= span_len then value
+  else let
+    val digit = byte2int0($A.read<byte>(data, offset + position)) - 48
+  in
+    if digit < 0 then value
+    else if digit > 9 then value
+    else if value > 100000 then value
+    else _digits_value(data, offset, span_len, position + 1, value * 10 + digit)
+  end
+
+(* Whether the byte before position (when there is one) ends a
+   viewport key: the content's start, white space, ',' or ';' *)
+fn _key_starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{position:nat | position <= span_len}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, position: int position): bool =
+  if position <= 0 then true
+  else let
+    val before = byte2int0($A.read<byte>(data, offset + position - 1))
+  in before <= 32 || before = 44 || before = 59 end
+
+(* The number given to key ("width" or "height") in the viewport
+   meta's content data[offset, offset + span_len), from position on:
+   key, then '=' (white space around it allowed), then its digits *)
+fun _viewport_dimension {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{key_len:pos}{position:nat} .<max(span_len - position, 0)>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, key: string key_len, key_len: int key_len, position: int position): dimension =
+  if position + key_len > span_len then NoDimension()
+  else if (if _key_starts(data, offset, span_len, position) then _lowercase_from(data, offset + position, key, key_len, 0) else false) then let
+    val after_key = _skip_spaces(data, offset, span_len, position + key_len)
+  in
+    if after_key >= span_len then NoDimension()
+    else if byte2int0($A.read<byte>(data, offset + after_key)) <> 61 then
+      _viewport_dimension(data, offset, span_len, key, key_len, position + 1)
+    else let
+      val value = g1ofg0(_digits_value(data, offset, span_len, _skip_spaces(data, offset, span_len, after_key + 1), 0))
+    in if value <= 0 then NoDimension() else if value > 10000 then NoDimension() else Dimension(value) end
+  end
+  else _viewport_dimension(data, offset, span_len, key, key_len, position + 1)
+
+(* The viewport the content data[offset, offset + span_len) of a
+   viewport meta gives *)
+fn _viewport_of {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): viewport =
+  case+ _viewport_dimension(data, offset, span_len, "width", 5, 0) of
+  | ~NoDimension() => NoViewport()
+  | ~Dimension(width) => (case+ _viewport_dimension(data, offset, span_len, "height", 6, 0) of
+    | ~NoDimension() => NoViewport()
+    | ~Dimension(height) => Viewport(width, height))
+
+fun _viewport_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): viewport =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => (case+ _viewport_node(data, node) of
+    | ~NoViewport() => _viewport_nodes(data, rest)
+    | found => found)
+  | $X.xml_nodes_nil() => NoViewport()
+
+and _viewport_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): viewport =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var name_chars = @[char][4]('n', 'a', 'm', 'e')
+    var content_chars = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
+    var body_chars = @[char][4]('b', 'o', 'd', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, name_chars, 4) of
+       | ~xspan_at(meta_name_offset, meta_name_len) =>
+         if _span_is(data, meta_name_offset, meta_name_len, "viewport") then
+           (case+ _find_attr_value(data, attrs, content_chars, 7) of
+            | ~xspan_at(content_offset, content_len) => _viewport_of(data, content_offset, content_len)
+            | ~xspan_none() => NoViewport())
+         else NoViewport()
+       | ~xspan_none() => NoViewport())
+    (* the viewport meta is in the head: the body is not searched *)
+    else if xml_name_eq(data, tag_offset, tag_len, body_chars, 4) then NoViewport()
+    else _viewport_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => NoViewport()
+
+(* The viewport of a fixed-layout page: its XHTML's first viewport
+   meta, read as EPUB RS 3.3 §8.1.2 says *)
+#pub fn xhtml_viewport
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): viewport
+
+implement xhtml_viewport (data, nodes) = _viewport_nodes(data, nodes)

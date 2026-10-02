@@ -15,6 +15,7 @@
 staload "ui.sats"
 staload "notice.sats"
 staload "modal.sats"
+staload "version.sats"
 staload "book.sats"
 staload "library.sats"
 staload "settings.sats"
@@ -85,10 +86,13 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
    of each language, the brightness, the rotation lock among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 64 + 100 + 24866) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
-      val next = jw_lit(out, 0, "{\"quire\":1,\"settings\":{\"size\":")
+      (* the version of Quire that wrote it (#219) *)
+      val next = jw_lit(out, 0, "{\"quire\":1,\"appVersion\":\"")
+      val next = jw_lit(out, next, quire_version())
+      val next = jw_lit(out, next, "\",\"settings\":{\"size\":")
       val next = jw_int(out, next, set_size_get())
       val next = jw_lit(out, next, ",\"lineHeight\":")
       val next = jw_int(out, next, set_lh_get())

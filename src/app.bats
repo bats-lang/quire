@@ -8,6 +8,7 @@
 staload "ui.sats"
 staload "style.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload "version.sats"
 
 fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
@@ -362,6 +363,12 @@ fn _about_screen (): void = let
   val () = ui_text("about-title", "About Quire")
   val () = ui_el("about-box", "about-text", TDiv, "sabout")
   val () = ui_text_long("about-text", "Quire, an EPUB reader. Your books and reading data are kept on this device.")
+  (* the version, as a bug report should give it (#219) *)
+  val () = ui_el("about-box", "about-version-row", TDiv, "srow")
+  val () = ui_add("about-version-row", "about-version-label", TSpan)
+  val () = ui_text("about-version-label", "Version")
+  val () = ui_add("about-version-row", "about-version", TB)
+  val () = ui_text("about-version", quire_version())
   val () = ui_el("about-box", "about-links", TDiv, "sfields")
   val () = ui_named("about-links", NGroup, "Links")
   val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
