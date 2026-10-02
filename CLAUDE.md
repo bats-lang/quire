@@ -476,6 +476,17 @@ opens, back in the library; either way the banner says why. A copy is
 confirmed by the copy status (`copy-status`, `RStatus`), apart from the
 Undo toast.
 
+A read of storage that failed is never taken for an empty one (#174):
+`lookup_bytes` and `lookup_content` (`src/book.bats`) answer
+`StoredUnreadable` / `ContentUnreadable` apart from nothing stored, so
+every load must say what it does then. A record each save rewrites
+whole (the library, settings, statistics, reading speed, catalogues,
+dictionaries, sync's state, a book's annotations) that could not be
+read is not saved this session (`src/storage.bats`: its save checks
+`storage_savable`), books are not added to an unread library, and an
+unread book's annotations cannot be made; the banner says so. A backup
+that could not read a book's notes is not made.
+
 The overlays (the menus, book info, the reader's panels and the full
 screens: Settings, Sync) are a `layer` (`src/layer.bats`), whose
 element ids only that module knows: they are shown and hidden only by
