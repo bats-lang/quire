@@ -924,7 +924,7 @@ fn _page_waiter_swap (next: page_waiter): page_waiter = let
 in cell end
 
 (* The page shown is told to whoever waits for it *)
-fn _page_hook_run (): void =
+fn _page_waiter_resolve (): void =
   case+ _page_waiter_swap(NoPageWaiter()) of
   | ~PageWaiter(waiting) => $P.resolve<int>(waiting, 0)
   | ~NoPageWaiter() => ()
@@ -942,7 +942,7 @@ fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_c
   (* scrolled, the last screen offers the next chapter *)
   val () = ui_show("next-chapter", (if _scrolled() then (if page + 1 >= page_count then chapter < chapter_count else false) else false))
   val () = _record_position()
-in _page_hook_run() end
+in _page_waiter_resolve() end
 
 (* Shows a page of page_count, scrolled down by top when scrolled (the page's
    own step otherwise) *)

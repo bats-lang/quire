@@ -34,6 +34,7 @@ staload "overlay.sats"
 staload "reader.sats"
 staload "settings.sats"
 staload "mem.sats"
+staload "notice.sats"
 staload AU = "wasm.bats-packages.dev/bridge/src/audio.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -488,10 +489,11 @@ fn _stop (): void = let
   val () = ui_show("narration-leave", false)
 in _pressed(false) end
 
-(* Stops, saying the narration cannot be played *)
+(* Stops, saying in the error banner that the narration cannot be
+   played *)
 fn _failed (): void = let
   val () = _stop()
-in ui_show("narration-error", true) end
+in notice_error("This narration cannot be played") end
 
 (* Where clip generation ends: at a time in its audio, at the audio's
    end, or nowhere (it is not the clip playing) *)
@@ -575,7 +577,6 @@ and _play_at {rounds:nat} .<rounds>. (generation: int, from_ms: int, seek: bool,
     (* a new source starts at the element's default speed *)
     val () = _rate()
     val () = _pressed(true)
-    val () = ui_show("narration-error", false)
     val () = $P.finish<$AU.play_outcome>(_play_audio(), llam(outcome) =>
       case+ outcome of
       | $AU.Playing() => ()
@@ -1127,9 +1128,7 @@ implement narration_close () = let
   val () = _pause_audio()
   val () = $BDOM.clear_marks(MARK_KIND)
   val () = _pressed(false)
-  val () = ui_show("narration-leave", false)
-  val () = ui_show("narration-error", false)
-in _source_put(NoSource()) end
+in let val () = ui_show("narration-leave", false) in _source_put(NoSource()) end end
 
 (* Whether a click's target, event_bytes[10, n), is id *)
 fun _id_from {l:agz}{n:nat}{id_len:nat}{i:nat | i <= id_len} .<id_len - i>.
@@ -1157,9 +1156,9 @@ fun _watch_pages {pages:nat} .<pages>. (pages: int pages): void =
         else $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => _moved()))
     in _watch_pages(pages - 1) end)
 
-(* The narration's listeners: its controls, the audio's events and its
-   error's dismissal; and it watches the reader's pages shown *)
-#pub fn narration_listen {count:nat} (listeners: regs(count)): regs(count + 6)
+(* The narration's listeners: its controls and the audio's events; and
+   it watches the reader's pages shown *)
+#pub fn narration_listen {count:nat} (listeners: regs(count)): regs(count + 5)
 
 implement narration_listen (listeners) = let
   val () = _watch_pages(PAGES_WATCHED)
@@ -1178,13 +1177,6 @@ implement narration_listen (listeners) = let
   val listeners = RCons(listeners, OnEl("narration"), "timeupdate", llam(_) => let val () = _time_update() in 0 end)
   val listeners = RCons(listeners, OnEl("narration"), "ended", llam(_) => let val () = _ended() in 0 end)
   val listeners = RCons(listeners, OnEl("narration"), "pause", llam(_) => let val () = _paused() in 0 end)
-  val listeners = RCons(listeners, OnEl("narration"), "error", llam(_) => let val () = _media_error() in 0 end)
-in RCons(listeners, OnEl("narration-error"), "click", llam(h) =>
-  case+ take_blob(h) of
-  | ~NoBlobBytes() => 0
-  | ~BlobBytes(event_bytes, n) => let
-      val dismiss = _id_is(event_bytes, n, "narration-error-dismiss")
-      val () = $A.free<byte>(event_bytes)
-    in if dismiss then let val () = ui_show("narration-error", false) in 0 end else 0 end) end
+in RCons(listeners, OnEl("narration"), "error", llam(_) => let val () = _media_error() in 0 end) end
 
 end (* #target wasm *)

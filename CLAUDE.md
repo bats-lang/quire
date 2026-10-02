@@ -316,10 +316,11 @@ backstop, and `ended` covers an audio file shorter than its clip. A
 generation number drops the timers and answers of earlier clips. At a
 chapter's end the narration goes on into the next chapter with an
 overlay (`book_narrated_after`). A page the reader shows (a turn, a
-jump, a new chapter; the reader's `reader_on_page_shown`) moves it
+jump, a new chapter; the promise `reader_page_shown` resolves) moves it
 there: from the first clip on or after the page, or the chapter's
 first; so does a tap on text a clip reads. A play the browser refuses,
-or an `error`, stops it with "This narration cannot be played"; a
+or an `error`, stops it, and the error banner says "This narration
+cannot be played"; a
 `pause` it did not ask for (a headset, a call) leaves it paused. The
 screen stays awake while the reader is open, so while it plays.
 
