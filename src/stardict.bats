@@ -106,28 +106,31 @@ in _starts(ifo, n, head, g1u2i(string1_length(head)), 0) end
 
 fn _lower (code: int): int = if code >= 65 then (if code <= 90 then code + 32 else code) else code
 
+(* How a headword sorts against a query *)
+#pub datatype word_order = Before | Same | After
+
 fun _fold_compare {word_loc,query_loc:agz}{word_owner,query_owner:addr}{word_size,query_size:nat}
   {start,word_len:nat | start + word_len <= word_size}{query_len:nat | query_len <= query_size}{i:nat | i <= word_len} .<word_len - i>.
   (word: !$A.arrx(byte, word_loc, word_size, word_owner), start: int start, word_len: int word_len,
-   query: !$A.arrx(byte, query_loc, query_size, query_owner), query_len: int query_len, i: int i): int =
-  if i >= word_len then (if i >= query_len then 0 else ~1)
-  else if i >= query_len then 1
+   query: !$A.arrx(byte, query_loc, query_size, query_owner), query_len: int query_len, i: int i): word_order =
+  if i >= word_len then (if i >= query_len then Same() else Before())
+  else if i >= query_len then After()
   else let
     val word_code = _lower(_byte_of(word, start + i))
     val query_code = _lower(_byte_of(query, i))
   in
-    if word_code < query_code then ~1
-    else if word_code > query_code then 1
+    if word_code < query_code then Before()
+    else if word_code > query_code then After()
     else _fold_compare(word, start, word_len, query, query_len, i + 1)
   end
 
 (* How the headword word[start, start + word_len) sorts against
    query[0, query_len) with ASCII letters' case set aside (the first
-   key of stardict_strcmp): -1 before it, 0 alike, 1 after *)
+   key of stardict_strcmp) *)
 #pub fn word_fold_compare {word_loc,query_loc:agz}{word_owner,query_owner:addr}{word_size,query_size:nat}
   {start,word_len:nat | start + word_len <= word_size}{query_len:nat | query_len <= query_size}
   (word: !$A.arrx(byte, word_loc, word_size, word_owner), start: int start, word_len: int word_len,
-   query: !$A.arrx(byte, query_loc, query_size, query_owner), query_len: int query_len): int
+   query: !$A.arrx(byte, query_loc, query_size, query_owner), query_len: int query_len): word_order
 
 implement word_fold_compare (word, start, word_len, query, query_len) =
   _fold_compare(word, start, word_len, query, query_len, 0)
@@ -348,30 +351,33 @@ in
   in written + decoded_len end
 end
 
-(* What a part of type kind is: 1 plain text (m, l, t, y), 2 markup (h,
-   x, g), 0 one that cannot be shown *)
-fn _kind (kind: int): int =
-  if kind = 109 || kind = 108 || kind = 116 || kind = 121 then 1
-  else if kind = 104 || kind = 120 || kind = 103 then 2
-  else 0
+(* What an article's part is, by its type's letter: plain text (m, l,
+   t, y), markup (h, x, g), or one that cannot be shown *)
+datatype part_kind = PlainPart | MarkupPart | HiddenPart
+
+fn _kind (kind: int): part_kind =
+  if kind = 109 || kind = 108 || kind = 116 || kind = 121 then PlainPart()
+  else if kind = 104 || kind = 120 || kind = 103 then MarkupPart()
+  else HiddenPart()
+
+fn _shown (kind: int): bool =
+  case+ _kind(kind) of PlainPart() => true | MarkupPart() => true | HiddenPart() => false
+
+(* A blank line at out[written], when something is shown before it *)
+fn _blank_line {out_loc:agz}{written:nat | written <= ARTICLE_MAX}
+  (out: !$A.arr(byte, out_loc, ARTICLE_MAX), written: int written): [w:nat | written <= w; w <= ARTICLE_MAX] int w =
+  if written > 0 then _put(out, 65535, _put(out, 65535, written, 10), 10) else written
 
 (* The part of type kind at data[at, stop) at out[written, ...), after a
    blank line when something is shown before it *)
 fn _part {l,out_loc:agz}{o:addr}{n:nat}{stop:nat | stop <= n}{at:nat | at <= stop}{written:nat | written <= ARTICLE_MAX}
   (data: !$A.arrx(byte, l, n, o), at: int at, stop: int stop, kind: int,
    out: !$A.arr(byte, out_loc, ARTICLE_MAX), written: int written)
-  : [after:nat | written <= after; after <= ARTICLE_MAX] int after = let
-  val shown = _kind(kind)
-in
-  if shown = 0 then written
-  else let
-    val written = (if written > 0 then _put(out, 65535, _put(out, 65535, written, 10), 10) else written)
-      : [w:nat | written <= w; w <= ARTICLE_MAX] int w
-  in
-    if shown = 1 then _plain(data, at, stop, out, 65535, written)
-    else _markup(data, at, stop, out, written)
-  end
-end
+  : [after:nat | written <= after; after <= ARTICLE_MAX] int after =
+  case+ _kind(kind) of
+  | HiddenPart() => written
+  | PlainPart() => _plain(data, at, stop, out, 65535, _blank_line(out, written))
+  | MarkupPart() => _markup(data, at, stop, out, _blank_line(out, written))
 
 (* Where the part at data[at] ends, and where the next begins: a lower
    case type's at its 0 byte (or the end), an upper case one's after
@@ -405,7 +411,7 @@ fun _typed_parts {l,types_loc,out_loc:agz}{o:addr}{size:nat}{n:nat | n <= size}{
     val kind = _byte_of(types, type_index)
     val @(start, stop, next) = _part_span(data, n, at, kind, type_index + 1 >= types_len)
     val after = _part(data, start, stop, kind, out, written)
-  in _typed_parts(data, n, next, types, types_len, type_index + 1, out, after, shown || _kind(kind) > 0) end
+  in _typed_parts(data, n, next, types, types_len, type_index + 1, out, after, shown || _shown(kind)) end
 
 (* The parts of an article without a sametypesequence, from data[at]:
    each its type's byte, then its data *)
@@ -417,7 +423,7 @@ fun _tagged_parts {l,out_loc:agz}{o:addr}{size:nat}{n:nat | n <= size}{at:nat | 
     val kind = _byte_of(data, at)
     val @(start, stop, next) = _part_span(data, n, at + 1, kind, false)
     val after = _part(data, start, stop, kind, out, written)
-  in _tagged_parts(data, n, next, out, after, shown || _kind(kind) > 0) end
+  in _tagged_parts(data, n, next, out, after, shown || _shown(kind)) end
 
 (* The article data[start, stop) as text at out[0, text_len), its
    types types[0, types_len) (the .ifo's sametypesequence, or none): -1

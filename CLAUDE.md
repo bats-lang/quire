@@ -461,6 +461,11 @@ a `load_outcome` (`ChapterShown` or why not, `load_shown`).
 How a sync ended is a `sync_result`, stored as its code in
 "sync-state" (`_result_code`, `_result_of_code`); the store's kind a
 `store_kind`; and an HTTP status is read once into an `http_answer`.
+A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
+its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
+a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
+`CaseFolded`, `NotFound`) by stardict's `word_order` (`Before`, `Same`,
+`After`); an article's part is a `part_kind`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
