@@ -18,6 +18,7 @@ staload "local_time.sats"
 staload "jsonio.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
+staload "style.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
@@ -27,58 +28,143 @@ implement $P.dispose<settled>(_) = ()
    size               font size in px, 12 to 32
    line_height        line spacing in tenths, 12 to 24
    margin             page margins, 0 (narrow) to 4 (wide)
-   font               0 Literata, 1 Inter, 2 the book's own, 3 Atkinson
-                      Hyperlegible
-   theme              0 auto (the system's), 1 light, 2 sepia, 3 dark,
-                      4 night, 5 grey
-   align              0 ragged, 1 justified
-   hyphens            0 no hyphenation, 1 hyphenated
+   font               font
+   align              alignment
+   hyphens            hyphenation
    paragraph_spacing  space after a paragraph in tenths of an em, 0 to 20
    letter_spacing     letter spacing in hundredths of an em, 0 to 12
    word_spacing       word spacing in hundredths of an em, 0 to 16
-   dim_images         0 a book's images as they are, 1 dimmed in the
-                      dark themes
-   tap_zones          what a tap on the page does, where: 0 sides (the
-                      left quarter back, the right on, between them the
-                      bars), 1 forward (the top band the bars, the left
-                      quarter back, anywhere else on), 2 one hand (the
-                      top third back, the bottom third on, between them
-                      the bars)
-   volume_keys        0 the volume keys are the volume's, 1 they turn
-                      the page
-   scrolled           0 pages (turned across), 1 scrolled (down the
-                      chapter)
-   columns            paged, the columns a screen shows: 0 auto (two on
-                      a wide screen in landscape, else one), 1 one, 2 two
-                      (a spread)
-   readout            the footer's readout: 0 pages left in the chapter,
-                      1 the page of the chapter's pages, 2 the chapter of
-                      the book's, 3 the time left in the chapter, 4 in
-                      the book (where the browser gives them to the page)
-   ruby               a ruby's annotations (furigana over a word): 0
-                      hidden, 1 shown
+   dim_images         image_dimming
+   tap_zones          tap_zones
+   volume_keys        volume_keys
+   scrolled           page_flow
+   columns            column_count
+   readout            readout
+   ruby               ruby_display (kept apart, in _ruby)
+   Each is stored as a byte, decoded once as it is read (its _of_code)
+   and encoded once as it is written (its _code)
    (the spacings reach what WCAG 1.4.12 asks a page to take: 2em
    after a paragraph, .12em between letters, .16em between words) *)
 #pub typedef set_size = [v:int | 12 <= v; v <= 32] int v
 #pub typedef set_lh = [v:int | 12 <= v; v <= 24] int v
 #pub typedef set_margin = [v:nat | v <= 4] int v
-#pub typedef set_font = [v:nat | v <= 3] int v
-#pub typedef set_theme = [v:nat | v <= 5] int v
-#pub typedef set_align = [v:nat | v <= 1] int v
-#pub typedef set_hyph = [v:nat | v <= 1] int v
+(* The reader's font: Literata, Inter, the book's own, or Atkinson
+   Hyperlegible *)
+#pub datatype font = Literata | Inter | BookFont | Atkinson
+#pub typedef set_font = font
+
+(* The theme chosen: auto (Night at night, Dark when the system asks
+   for it, else Light), or one fixed *)
+#pub datavtype theme_choice = Auto | Fixed of theme
+
+(* A text's alignment: ragged (WCAG 1.4.8) or justified *)
+#pub datatype alignment = Ragged | Justified
+#pub typedef set_align = alignment
+
+#pub datatype hyphenation = NoHyphens | Hyphenated
+#pub typedef set_hyph = hyphenation
 #pub typedef set_ps = [v:nat | v <= 20] int v
 #pub typedef set_ls = [v:nat | v <= 12] int v
 #pub typedef set_ws = [v:nat | v <= 16] int v
-#pub typedef set_dim = [v:nat | v <= 1] int v
-#pub typedef set_taps = [v:nat | v <= 2] int v
-#pub typedef set_vol = [v:nat | v <= 1] int v
-#pub typedef set_rd = [v:nat | v <= 4] int v
-#pub typedef set_flow = [v:nat | v <= 1] int v
-#pub typedef set_cols = [v:nat | v <= 2] int v
-#pub typedef set_ruby = [v:nat | v <= 1] int v
+(* A book's images: as they are, or dimmed in the dark themes *)
+#pub datatype image_dimming = ImagesAsTheyAre | ImagesDimmed
+#pub typedef set_dim = image_dimming
+
+(* What a tap on the page does, where: sides (the left quarter back,
+   the right on, between them the bars), forward (the top band the
+   bars, the left quarter back, anywhere else on), or one hand (the top
+   third back, the bottom third on, between them the bars) *)
+#pub datatype tap_zones = SideZones | ForwardZones | OneHandZones
+#pub typedef set_taps = tap_zones
+
+(* The volume keys: the volume's, or they turn the page *)
+#pub datatype volume_keys = KeysForVolume | KeysTurnPages
+#pub typedef set_vol = volume_keys
+
+(* The footer's readout: pages left in the chapter, the page of the
+   chapter's pages, the chapter of the book's, the time left in the
+   chapter, or in the book (where the browser gives them to the page) *)
+#pub datatype readout = PagesLeft | PageOfPages | ChapterOfChapters | TimeLeftInChapter | TimeLeftInBook
+#pub typedef set_rd = readout
+
+(* A chapter turned across in pages, or scrolled down *)
+#pub datatype page_flow = Paged | Scrolled
+#pub typedef set_flow = page_flow
+
+(* Paged, the columns a screen shows: auto (two on a wide screen in
+   landscape, else one), one, or two (a spread) *)
+#pub datatype column_count = AutoColumns | OneColumn | TwoColumns
+#pub typedef set_cols = column_count
+
+(* A ruby's annotations (furigana over a word): shown or hidden *)
+#pub datatype ruby_display = RubyShown | RubyHidden
+#pub typedef set_ruby = ruby_display
+
+(* Each setting as the "S2" record and the backup store it, and back:
+   decoded once, as it is read (an unknown byte is the default) *)
+#pub fn font_code (v: font): [code:nat | code <= 3] int code
+implement font_code (v) = case+ v of Literata() => 0 | Inter() => 1 | BookFont() => 2 | Atkinson() => 3
+#pub fn font_of_code (code: int): font
+implement font_of_code (code) = if code = 1 then Inter() else if code = 2 then BookFont() else if code = 3 then Atkinson() else Literata()
+
+(* 0 auto, 1 light, 2 sepia, 3 dark, 4 night, 5 grey *)
+#pub fn theme_choice_code (v: !theme_choice): [code:nat | code <= 5] int code
+implement theme_choice_code (v) = case+ v of Auto() => 0 | Fixed(t) => 1 + theme_palette(t)
+#pub fn theme_choice_of_code (code: int): theme_choice
+implement theme_choice_of_code (code) =
+  if code = 1 then Fixed(Light()) else if code = 2 then Fixed(Sepia()) else if code = 3 then Fixed(Dark())
+  else if code = 4 then Fixed(Night()) else if code = 5 then Fixed(Grey()) else Auto()
+
+#pub fn align_code (v: alignment): [code:nat | code <= 1] int code
+implement align_code (v) = case+ v of Ragged() => 0 | Justified() => 1
+#pub fn align_of_code (code: int): alignment
+implement align_of_code (code) = if code = 1 then Justified() else Ragged()
+
+#pub fn hyph_code (v: hyphenation): [code:nat | code <= 1] int code
+implement hyph_code (v) = case+ v of NoHyphens() => 0 | Hyphenated() => 1
+#pub fn hyph_of_code (code: int): hyphenation
+implement hyph_of_code (code) = if code = 0 then NoHyphens() else Hyphenated()
+
+#pub fn dim_code (v: image_dimming): [code:nat | code <= 1] int code
+implement dim_code (v) = case+ v of ImagesAsTheyAre() => 0 | ImagesDimmed() => 1
+#pub fn dim_of_code (code: int): image_dimming
+implement dim_of_code (code) = if code = 0 then ImagesAsTheyAre() else ImagesDimmed()
+
+#pub fn taps_code (v: tap_zones): [code:nat | code <= 2] int code
+implement taps_code (v) = case+ v of SideZones() => 0 | ForwardZones() => 1 | OneHandZones() => 2
+#pub fn taps_of_code (code: int): tap_zones
+implement taps_of_code (code) = if code = 1 then ForwardZones() else if code = 2 then OneHandZones() else SideZones()
+
+#pub fn vol_code (v: volume_keys): [code:nat | code <= 1] int code
+implement vol_code (v) = case+ v of KeysForVolume() => 0 | KeysTurnPages() => 1
+#pub fn vol_of_code (code: int): volume_keys
+implement vol_of_code (code) = if code = 1 then KeysTurnPages() else KeysForVolume()
+
+#pub fn rd_code (v: readout): [code:nat | code <= 4] int code
+implement rd_code (v) =
+  case+ v of PagesLeft() => 0 | PageOfPages() => 1 | ChapterOfChapters() => 2 | TimeLeftInChapter() => 3 | TimeLeftInBook() => 4
+#pub fn rd_of_code (code: int): readout
+implement rd_of_code (code) =
+  if code = 1 then PageOfPages() else if code = 2 then ChapterOfChapters() else if code = 3 then TimeLeftInChapter()
+  else if code = 4 then TimeLeftInBook() else PagesLeft()
+
+#pub fn flow_code (v: page_flow): [code:nat | code <= 1] int code
+implement flow_code (v) = case+ v of Paged() => 0 | Scrolled() => 1
+#pub fn flow_of_code (code: int): page_flow
+implement flow_of_code (code) = if code = 1 then Scrolled() else Paged()
+
+#pub fn cols_code (v: column_count): [code:nat | code <= 2] int code
+implement cols_code (v) = case+ v of AutoColumns() => 0 | OneColumn() => 1 | TwoColumns() => 2
+#pub fn cols_of_code (code: int): column_count
+implement cols_of_code (code) = if code = 1 then OneColumn() else if code = 2 then TwoColumns() else AutoColumns()
+
+#pub fn ruby_code (v: ruby_display): [code:nat | code <= 1] int code
+implement ruby_code (v) = case+ v of RubyHidden() => 0 | RubyShown() => 1
+#pub fn ruby_of_code (code: int): ruby_display
+implement ruby_of_code (code) = if code = 0 then RubyHidden() else RubyShown()
 
 typedef settings = @{
-  size = set_size, line_height = set_lh, margin = set_margin, font = set_font, theme = set_theme,
+  size = set_size, line_height = set_lh, margin = set_margin, font = set_font,
   align = set_align, hyphens = set_hyph, paragraph_spacing = set_ps, letter_spacing = set_ls,
   word_spacing = set_ws, dim_images = set_dim, tap_zones = set_taps, volume_keys = set_vol,
   readout = set_rd, scrolled = set_flow, columns = set_cols
@@ -88,18 +174,35 @@ typedef settings = @{
    hyphenated, the paragraph spacing the page always had, and images
    dimmed in the dark theme *)
 fn _defaults (): settings =
-  @{ size = 18, line_height = 16, margin = 2, font = 0, theme = 0, align = 0, hyphens = 1,
-     paragraph_spacing = 8, letter_spacing = 0, word_spacing = 0, dim_images = 1, tap_zones = 0,
-     volume_keys = 0, readout = 0, scrolled = 0, columns = 0 }
+  @{ size = 18, line_height = 16, margin = 2, font = Literata(), align = Ragged(), hyphens = Hyphenated(),
+     paragraph_spacing = 8, letter_spacing = 0, word_spacing = 0, dim_images = ImagesDimmed(), tap_zones = SideZones(),
+     volume_keys = KeysForVolume(), readout = PagesLeft(), scrolled = Paged(), columns = AutoColumns() }
 
 val _set = ref<settings>(_defaults())
-(* Whether a ruby's annotations are shown (1, the default) or hidden.
+(* The theme chosen (auto, the default): kept apart from the record, as
+   _ruby is, and taken out and put back, since it is linear *)
+val _theme_choice = ref<theme_choice>(Auto())
+
+fn _choice_copy (choice: !theme_choice): theme_choice =
+  case+ choice of Auto() => Auto() | Fixed(t) => Fixed(t)
+
+#pub fn theme_choice_free (choice: theme_choice): void
+implement theme_choice_free (choice) =
+  case+ choice of ~Auto() => () | ~Fixed(_) => ()
+
+(* Whether the theme chosen, as its code, is the one wanted *)
+fn _is_chosen (code: int, wanted: theme_choice): bool = let
+  val wanted_code = theme_choice_code(wanted)
+  val () = theme_choice_free(wanted)
+in code = wanted_code end
+
+(* Whether a ruby's annotations are shown (the default) or hidden.
    Kept apart from the record in memory (it is byte 19 of the stored
    one): each of the record's setters writes the record out whole, so a
    field there costs a line in every one of them, and a cell of its own
    costs one setter. (Wasm builds now have memmove, bats-lang/bats#220,
    so the record's size is no longer a limit) *)
-val _ruby = ref<int>(1)
+val _ruby = ref<ruby_display>(RubyShown())
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)
 
@@ -420,8 +523,21 @@ implement set_lh_get () = (!_set).line_height
 implement set_margin_get () = (!_set).margin
 #pub fn set_font_get (): set_font
 implement set_font_get () = (!_set).font
-#pub fn set_theme_get (): set_theme
-implement set_theme_get () = (!_set).theme
+(* The theme chosen, as a value of its own *)
+#pub fn set_theme_get (): theme_choice
+implement set_theme_get () = let
+  var choice: theme_choice = Auto()
+  val () = ref_exch_elt<theme_choice>(_theme_choice, choice)
+  val copy = _choice_copy(choice)
+  val () = ref_exch_elt<theme_choice>(_theme_choice, choice)
+  val () = theme_choice_free(choice)
+in copy end
+
+#pub fn set_theme_set (value: theme_choice): void
+implement set_theme_set (value) = let
+  var choice: theme_choice = value
+  val () = ref_exch_elt<theme_choice>(_theme_choice, choice)
+in theme_choice_free(choice) end
 #pub fn set_align_get (): set_align
 implement set_align_get () = (!_set).align
 #pub fn set_hyph_get (): set_hyph
@@ -445,7 +561,7 @@ implement set_flow_get () = (!_set).scrolled
 #pub fn set_cols_get (): set_cols
 implement set_cols_get () = (!_set).columns
 #pub fn set_ruby_get (): set_ruby
-implement set_ruby_get () = if !_ruby = 0 then 0 else 1
+implement set_ruby_get () = !_ruby
 
 (* ============================================================
    Applying
@@ -472,10 +588,11 @@ fn _margin_px (margin: set_margin): [px:nat | px <= 64] int px =
 fn _put_font {l:agz}{position:nat | position + 34 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, font: set_font)
   : [stop:nat | stop <= position + 34] int stop =
-  if font = 0 then _put_text(buf, position, "Literata,Georgia,serif")
-  else if font = 1 then _put_text(buf, position, "Inter,system-ui,sans-serif")
-  else if font = 3 then _put_text(buf, position, "'Atkinson Hyperlegible',sans-serif")
-  else _put_text(buf, position, "var(--bookfont,Georgia),serif")
+  case+ font of
+  | Literata() => _put_text(buf, position, "Literata,Georgia,serif")
+  | Inter() => _put_text(buf, position, "Inter,system-ui,sans-serif")
+  | Atkinson() => _put_text(buf, position, "'Atkinson Hyperlegible',sans-serif")
+  | BookFont() => _put_text(buf, position, "var(--bookfont,Georgia),serif")
 
 (* tenths as a decimal at buf[position, stop): 16 -> "1.6" *)
 fn _put_tenths {l:agz}{n:pos}{position:nat | position + 23 <= n}{tenths:nat}
@@ -497,19 +614,20 @@ in $S.int_to_str(buf, next, n, hundredths) end
 fn _put_align {l:agz}{position:nat | position + 7 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, align: set_align)
   : [stop:nat | stop <= position + 7] int stop =
-  if align = 1 then _put_text(buf, position, "justify") else _put_text(buf, position, "start")
+  case+ align of Justified() => _put_text(buf, position, "justify") | Ragged() => _put_text(buf, position, "start")
 
 fn _put_hyphens {l:agz}{position:nat | position + 6 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, hyphens: set_hyph)
   : [stop:nat | stop <= position + 6] int stop =
-  if hyphens = 1 then _put_text(buf, position, "auto") else _put_text(buf, position, "manual")
+  case+ hyphens of Hyphenated() => _put_text(buf, position, "auto") | NoHyphens() => _put_text(buf, position, "manual")
 
 fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, dim_images: set_dim)
   : [stop:nat | stop <= position + 80] int stop =
-  if dim_images = 1 then
+  case+ dim_images of
+  | ImagesDimmed() =>
     _put_text(buf, position, ".th-dark .caf img,.th-night .caf img,.th-grey .caf img{filter:brightness(.8)}")
-  else position
+  | ImagesAsTheyAre() => position
 
 (* A spread: two columns a screen (each still at most 38rem wide, as
    .caf>* makes it), and the probe (spread-probe) shown, which is how
@@ -517,26 +635,29 @@ fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
 fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, columns: set_cols)
   : [stop:nat | stop <= position + 120] int stop =
-  if columns = 2 then _put_text(buf, position, ".caf{column-width:50vw}.sprobe{display:block}")
-  else if columns = 1 then position
+  case+ columns of
+  | TwoColumns() => _put_text(buf, position, ".caf{column-width:50vw}.sprobe{display:block}")
+  | OneColumn() => position
   (* auto: as Apple Books does on an iPad turned on its side, and with
      room for two lines of about 30em (Readium's auto column count) *)
-  else _put_text(buf, position,
+  | AutoColumns() => _put_text(buf, position,
     "@media (orientation:landscape) and (min-width:60em){.caf{column-width:50vw}.sprobe{display:block}}")
 
 fn _put_scrolled {l:agz}{position:nat | position + 72 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
   : [stop:nat | stop <= position + 72] int stop =
-  if scrolled = 1 then _put_text(buf, position, ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}")
-  else position
+  case+ scrolled of
+  | Scrolled() => _put_text(buf, position, ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}")
+  | Paged() => position
 
 (* A ruby's annotations hidden: its rt and rtc (an rp is not shown
    where ruby is, by the browser's own sheet). Layout, not colour *)
 fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, ruby: set_ruby)
   : [stop:nat | stop <= position + 30] int stop =
-  if ruby = 0 then _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
-  else position
+  case+ ruby of
+  | RubyHidden() => _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
+  | RubyShown() => position
 
 (* The reader's typography as CSS, in style element style-type *)
 fn _apply_type (): void = let
@@ -582,29 +703,32 @@ fn _night (): bool = local_night()
 (* The theme shown now: auto is Night at night (reading a bright screen
    at bedtime delays sleep: Chang et al., PNAS 2015), else Dark when the
    system asks for dark, else Light *)
-val _shown_theme = ref<int>(~1)
+val _shown_theme = ref<theme>(Light())
 
-(* Whether the theme shown is dark, light or sepia: the root's class *)
+(* The theme auto shows now *)
+fn _auto_theme (): theme = if _night() then Night() else if !_system_dark then Dark() else Light()
+
+(* The theme shown: the root's class *)
 fn _apply_theme (): void = let
-  val chosen = (!_set).theme
-  val shown = (if chosen = 0 then (if _night() then 4 else if !_system_dark then 3 else 1) else chosen): set_theme
+  val choice = set_theme_get()
+  val shown = (case+ choice of ~Auto() => _auto_theme() | ~Fixed(t) => t): theme
   val () = !_shown_theme := shown
 in
-  if shown = 5 then ui_attr("bats-root", AClass, "app th-grey")
-  else if shown = 4 then ui_attr("bats-root", AClass, "app th-night")
-  else if shown = 3 then ui_attr("bats-root", AClass, "app th-dark")
-  else if shown = 2 then ui_attr("bats-root", AClass, "app th-sepia")
-  else ui_attr("bats-root", AClass, "app th-light")
+  case+ shown of
+  | Grey() => ui_attr("bats-root", AClass, "app th-grey")
+  | Night() => ui_attr("bats-root", AClass, "app th-night")
+  | Dark() => ui_attr("bats-root", AClass, "app th-dark")
+  | Sepia() => ui_attr("bats-root", AClass, "app th-sepia")
+  | Light() => ui_attr("bats-root", AClass, "app th-light")
 end
 
 (* Auto, the theme again, when the clock has passed into the night or
    out of it (at a page turn) *)
 #pub fn set_theme_recheck (): void
 implement set_theme_recheck () =
-  if (!_set).theme <> 0 then ()
-  else let
-    val shown = (if _night() then 4 else if !_system_dark then 3 else 1): int
-  in if shown = !_shown_theme then () else _apply_theme() end
+  case+ set_theme_get() of
+  | ~Fixed(_) => ()
+  | ~Auto() => if theme_palette(_auto_theme()) = theme_palette(!_shown_theme) then () else _apply_theme()
 
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
@@ -624,34 +748,40 @@ fn _show_controls (): void = let
   val buf = $A.alloc<byte>(32)
   val next = $S.int_to_str(buf, 0, 32, current.margin + 1)
   val () = ui_text_buf("margins-value", buf, next)
-  val () = _pressed("font-literata", current.font = 0)
-  val () = _pressed("font-inter", current.font = 1)
-  val () = _pressed("font-book", current.font = 2)
-  val () = _pressed("font-atkinson", current.font = 3)
-  val () = _pressed("theme-auto", current.theme = 0)
-  val () = _pressed("theme-light", current.theme = 1)
-  val () = _pressed("theme-sepia", current.theme = 2)
-  val () = _pressed("theme-dark", current.theme = 3)
-  val () = _pressed("theme-night", current.theme = 4)
-  val () = _pressed("theme-grey", current.theme = 5)
-  val () = _pressed("layout-pages", current.scrolled = 0)
-  val () = _pressed("layout-scroll", current.scrolled = 1)
-  val () = _pressed("columns-auto", current.columns = 0)
-  val () = _pressed("columns-one", current.columns = 1)
-  val () = _pressed("columns-two", current.columns = 2)
-  val () = _pressed("align-ragged", current.align = 0)
-  val () = _pressed("align-justified", current.align = 1)
-  val () = _pressed("hyphens-on", current.hyphens = 1)
-  val () = _pressed("hyphens-off", current.hyphens = 0)
-  val () = _pressed("dim-on", current.dim_images = 1)
-  val () = _pressed("dim-off", current.dim_images = 0)
-  val () = _pressed("taps-sides", current.tap_zones = 0)
-  val () = _pressed("taps-forward", current.tap_zones = 1)
-  val () = _pressed("taps-one-hand", current.tap_zones = 2)
-  val () = _pressed("volume-keys-turn", current.volume_keys = 1)
-  val () = _pressed("volume-keys-off", current.volume_keys = 0)
-  val () = _pressed("ruby-show", set_ruby_get() = 1)
-  val () = _pressed("ruby-hide", set_ruby_get() = 0)
+  val font = font_code(current.font)
+  val () = _pressed("font-literata", font = font_code(Literata()))
+  val () = _pressed("font-inter", font = font_code(Inter()))
+  val () = _pressed("font-book", font = font_code(BookFont()))
+  val () = _pressed("font-atkinson", font = font_code(Atkinson()))
+  val choice = set_theme_get()
+  val theme = theme_choice_code(choice)
+  val () = theme_choice_free(choice)
+  val () = _pressed("theme-auto", _is_chosen(theme, Auto()))
+  val () = _pressed("theme-light", _is_chosen(theme, Fixed(Light())))
+  val () = _pressed("theme-sepia", _is_chosen(theme, Fixed(Sepia())))
+  val () = _pressed("theme-dark", _is_chosen(theme, Fixed(Dark())))
+  val () = _pressed("theme-night", _is_chosen(theme, Fixed(Night())))
+  val () = _pressed("theme-grey", _is_chosen(theme, Fixed(Grey())))
+  val () = _pressed("layout-pages", flow_code(current.scrolled) = flow_code(Paged()))
+  val () = _pressed("layout-scroll", flow_code(current.scrolled) = flow_code(Scrolled()))
+  val columns = cols_code(current.columns)
+  val () = _pressed("columns-auto", columns = cols_code(AutoColumns()))
+  val () = _pressed("columns-one", columns = cols_code(OneColumn()))
+  val () = _pressed("columns-two", columns = cols_code(TwoColumns()))
+  val () = _pressed("align-ragged", align_code(current.align) = align_code(Ragged()))
+  val () = _pressed("align-justified", align_code(current.align) = align_code(Justified()))
+  val () = _pressed("hyphens-on", hyph_code(current.hyphens) = hyph_code(Hyphenated()))
+  val () = _pressed("hyphens-off", hyph_code(current.hyphens) = hyph_code(NoHyphens()))
+  val () = _pressed("dim-on", dim_code(current.dim_images) = dim_code(ImagesDimmed()))
+  val () = _pressed("dim-off", dim_code(current.dim_images) = dim_code(ImagesAsTheyAre()))
+  val taps = taps_code(current.tap_zones)
+  val () = _pressed("taps-sides", taps = taps_code(SideZones()))
+  val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
+  val () = _pressed("taps-one-hand", taps = taps_code(OneHandZones()))
+  val () = _pressed("volume-keys-turn", vol_code(current.volume_keys) = vol_code(KeysTurnPages()))
+  val () = _pressed("volume-keys-off", vol_code(current.volume_keys) = vol_code(KeysForVolume()))
+  val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
+  val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
   val buf = $A.alloc<byte>(32)
   val next = _put_tenths(buf, 0, 32, current.paragraph_spacing)
   val () = ui_text_buf("paragraph-value", buf, next)
@@ -693,21 +823,23 @@ fn _save (sort: int): void = let
   val () = $A.write_byte(record, 2, current.size)
   val () = $A.write_byte(record, 3, current.line_height)
   val () = $A.write_byte(record, 4, current.margin)
-  val () = $A.write_byte(record, 5, current.font)
-  val () = $A.write_byte(record, 6, current.theme)
+  val () = $A.write_byte(record, 5, font_code(current.font))
+  val choice = set_theme_get()
+  val () = $A.write_byte(record, 6, theme_choice_code(choice))
+  val () = theme_choice_free(choice)
   val () = $A.write_byte(record, 7, $AR.low_byte(sort))
-  val () = $A.write_byte(record, 8, current.align)
-  val () = $A.write_byte(record, 9, current.hyphens)
+  val () = $A.write_byte(record, 8, align_code(current.align))
+  val () = $A.write_byte(record, 9, hyph_code(current.hyphens))
   val () = $A.write_byte(record, 10, current.paragraph_spacing)
   val () = $A.write_byte(record, 11, current.letter_spacing)
   val () = $A.write_byte(record, 12, current.word_spacing)
-  val () = $A.write_byte(record, 13, current.dim_images)
-  val () = $A.write_byte(record, 14, current.tap_zones)
-  val () = $A.write_byte(record, 15, current.volume_keys)
-  val () = $A.write_byte(record, 16, current.readout)
-  val () = $A.write_byte(record, 17, current.scrolled)
-  val () = $A.write_byte(record, 18, current.columns)
-  val () = $A.write_byte(record, 19, set_ruby_get())
+  val () = $A.write_byte(record, 13, dim_code(current.dim_images))
+  val () = $A.write_byte(record, 14, taps_code(current.tap_zones))
+  val () = $A.write_byte(record, 15, vol_code(current.volume_keys))
+  val () = $A.write_byte(record, 16, rd_code(current.readout))
+  val () = $A.write_byte(record, 17, flow_code(current.scrolled))
+  val () = $A.write_byte(record, 18, cols_code(current.columns))
+  val () = $A.write_byte(record, 19, ruby_code(set_ruby_get()))
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
@@ -775,7 +907,7 @@ in set_sliders() end
 implement set_size_set (value) = let
   val current = !_set
 in !_set := @{
-  size = value, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = value, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -784,7 +916,7 @@ in !_set := @{
 implement set_lh_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = value, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = value, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -793,7 +925,7 @@ in !_set := @{
 implement set_margin_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = value, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = value, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -802,16 +934,7 @@ in !_set := @{
 implement set_font_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = value, theme = current.theme,
-  align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
-  letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
-  dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
-  readout = current.readout, scrolled = current.scrolled, columns = current.columns } end
-#pub fn set_theme_set (value: set_theme): void
-implement set_theme_set (value) = let
-  val current = !_set
-in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = value,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = value,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -820,7 +943,7 @@ in !_set := @{
 implement set_align_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = value, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -829,7 +952,7 @@ in !_set := @{
 implement set_hyph_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = value, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -838,7 +961,7 @@ in !_set := @{
 implement set_ps_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = value,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -847,7 +970,7 @@ in !_set := @{
 implement set_ls_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = value, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -856,7 +979,7 @@ in !_set := @{
 implement set_ws_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = value,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -865,7 +988,7 @@ in !_set := @{
 implement set_dim_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = value, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -874,7 +997,7 @@ in !_set := @{
 implement set_taps_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = value, volume_keys = current.volume_keys,
@@ -883,7 +1006,7 @@ in !_set := @{
 implement set_vol_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = value,
@@ -892,7 +1015,7 @@ in !_set := @{
 implement set_rd_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -901,7 +1024,7 @@ in !_set := @{
 implement set_flow_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -912,7 +1035,7 @@ implement set_ruby_set (value) = !_ruby := value
 implement set_cols_set (value) = let
   val current = !_set
 in !_set := @{
-  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font, theme = current.theme,
+  size = current.size, line_height = current.line_height, margin = current.margin, font = current.font,
   align = current.align, hyphens = current.hyphens, paragraph_spacing = current.paragraph_spacing,
   letter_spacing = current.letter_spacing, word_spacing = current.word_spacing,
   dim_images = current.dim_images, tap_zones = current.tap_zones, volume_keys = current.volume_keys,
@@ -926,7 +1049,8 @@ val _voices_reset = ref<voices_cell>(VoicesCell(VoiceChoicesEnd(), 0))
    are put aside (_voices_reset), for its Undo *)
 fn _reset (): void = let
   val () = !_set := _defaults()
-  val () = !_ruby := 1
+  val () = !_ruby := RubyShown()
+  val () = set_theme_set(Auto())
   val () = !_speech_rate := RateNormal()
   val () = !_brightness := BrightnessSystem()
   val () = !_rotation := RotationFree()
@@ -943,6 +1067,7 @@ in _voice_choices_free(older) end
 implement set_reset_undoable (how) = let
   val before = !_set
   val ruby_before = !_ruby
+  val theme_before = set_theme_get()
   val rate_before = !_speech_rate
   val brightness_before = !_brightness
   val rotation_before = !_rotation
@@ -953,6 +1078,7 @@ in
     | Undone() => let
         val () = !_set := before
         val () = !_ruby := ruby_before
+        val () = set_theme_set(theme_before)
         val () = !_speech_rate := rate_before
         val () = !_brightness := brightness_before
         val () = !_rotation := rotation_before
@@ -965,6 +1091,7 @@ in
         val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
         val+ ~VoicesCell(older, _) = aside
         val () = _voice_choices_free(older)
+        val () = theme_choice_free(theme_before)
       in $P.ret<settled>(Final()) end)
 end
 
@@ -1027,16 +1154,16 @@ in
         val size = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 2))), 12, 32, 18)
         val line_height = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 3))), 12, 24, 16)
         val margin = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 4))), 0, 4, 2)
-        val font = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 5))), 0, 3, 0)
-        val theme = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 6))), 0, 5, 0)
+        val font = font_of_code(byte2int0($A.get<byte>(record, 5)))
+        val () = set_theme_set(theme_choice_of_code(byte2int0($A.get<byte>(record, 6))))
         (* the library's view: its sort order, grid and filter (lib_state_get) *)
         val sort = _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 7))), 0, 63, 0)
         (* "S2" has the rest; "S1" had none, and they are the defaults *)
         val second_version = (if n >= 13 then byte2int0($A.get<byte>(record, 1)) = 50 else false): bool
         val align = (if n >= 13 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 8))), 0, 1, 0) else 0) else 0): set_align
+          align_of_code(byte2int0($A.get<byte>(record, 8))) else Ragged()) else Ragged()): set_align
         val hyphens = (if n >= 13 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 9))), 0, 1, 1) else 1) else 1): set_hyph
+          hyph_of_code(byte2int0($A.get<byte>(record, 9))) else Hyphenated()) else Hyphenated()): set_hyph
         val paragraph_spacing = (if n >= 13 then (if second_version then
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 10))), 0, 20, 8) else 8) else 8): set_ps
         val letter_spacing = (if n >= 13 then (if second_version then
@@ -1044,19 +1171,19 @@ in
         val word_spacing = (if n >= 13 then (if second_version then
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 12))), 0, 16, 0) else 0) else 0): set_ws
         val dim_images = (if n >= 14 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 13))), 0, 1, 1) else 1) else 1): set_dim
+          dim_of_code(byte2int0($A.get<byte>(record, 13))) else ImagesDimmed()) else ImagesDimmed()): set_dim
         val tap_zones = (if n >= 15 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 14))), 0, 2, 0) else 0) else 0): set_taps
+          taps_of_code(byte2int0($A.get<byte>(record, 14))) else SideZones()) else SideZones()): set_taps
         val volume_keys = (if n >= 16 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 15))), 0, 1, 0) else 0) else 0): set_vol
+          vol_of_code(byte2int0($A.get<byte>(record, 15))) else KeysForVolume()) else KeysForVolume()): set_vol
         val readout = (if n >= 17 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 16))), 0, 4, 0) else 0) else 0): set_rd
+          rd_of_code(byte2int0($A.get<byte>(record, 16))) else PagesLeft()) else PagesLeft()): set_rd
         val scrolled = (if n >= 18 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 17))), 0, 1, 0) else 0) else 0): set_flow
+          flow_of_code(byte2int0($A.get<byte>(record, 17))) else Paged()) else Paged()): set_flow
         val columns = (if n >= 19 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 18))), 0, 2, 0) else 0) else 0): set_cols
+          cols_of_code(byte2int0($A.get<byte>(record, 18))) else AutoColumns()) else AutoColumns()): set_cols
         val ruby = (if n >= 20 then (if second_version then
-          _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 19))), 0, 1, 1) else 1) else 1): set_ruby
+          ruby_of_code(byte2int0($A.get<byte>(record, 19))) else RubyShown()) else RubyShown()): set_ruby
         (* the device's own, after the settings *)
         val () = !_speech_rate := (if n >= 21 then (if second_version then
           _rate_of_code(byte2int0($A.get<byte>(record, 20))) else RateNormal()) else RateNormal())
@@ -1068,7 +1195,7 @@ in
         val @(voices_read, voices_read_count) = _voices_read(record, n, 24, stored_voices, VoiceChoicesEnd(), 0)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
-        val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font, theme = theme,
+        val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,
           align = align, hyphens = hyphens, paragraph_spacing = paragraph_spacing, letter_spacing = letter_spacing,
           word_spacing = word_spacing, dim_images = dim_images, tap_zones = tap_zones, volume_keys = volume_keys,
           readout = readout, scrolled = scrolled, columns = columns }

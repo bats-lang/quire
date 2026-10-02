@@ -209,7 +209,8 @@ fn _is_vertical (): bool =
    down or up, and the reader's place, its anchor and the arenas' window
    count screenfuls as they count pages. A book set vertically is never
    scrolled *)
-fn _scrolled (): bool = if _is_vertical() then false else set_flow_get() = 1
+fn _scrolled (): bool =
+  if _is_vertical() then false else (case+ set_flow_get() of Scrolled() => true | Paged() => false)
 
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
@@ -226,9 +227,9 @@ datatype page_axis = Across | AcrossBack | Down
 
 fn _page_axis (): page_axis =
   if _is_vertical() then Down
-  else if set_flow_get() = 1 then Down
-  else if !_right_to_left then AcrossBack
-  else Across
+  else case+ set_flow_get() of
+  | Scrolled() => Down
+  | Paged() => if !_right_to_left then AcrossBack else Across
 
 (* How far a turn scrolls: scrolled, the page's height, less its
    paddings (84 px) and a line's overlap, so no line is lost between
@@ -296,28 +297,38 @@ in
   else (size_after / chapter_size) * page_count + (size_after - (size_after / chapter_size) * chapter_size) * page_count / chapter_size
 end
 
-(* The footer's readouts (the setting rd), each naming its scope: 0 the
-   pages left in the chapter, 1 the page of the chapter's pages, 2 the
-   chapter of the book's, 3 the time left in the chapter, 4 in the book.
-   The times are there only once the reading speed is known. *)
-fn _readout_ok (readout: int, page: Int, page_count: Int, chapter_index: Int): bool =
-  if readout = 3 then _speed_known()
-  else if readout = 4 then (if _speed_known() then _rest_pages(chapter_index, page_count) >= 0 else false)
-  else readout >= 0 && readout <= 2
+(* The footer's readouts (the setting rd), each naming its scope. The
+   times are there only once the reading speed is known. *)
+fn _readout_ok (readout: readout, page: Int, page_count: Int, chapter_index: Int): bool =
+  case+ readout of
+  | TimeLeftInChapter() => _speed_known()
+  | TimeLeftInBook() => (if _speed_known() then _rest_pages(chapter_index, page_count) >= 0 else false)
+  | PagesLeft() => true
+  | PageOfPages() => true
+  | ChapterOfChapters() => true
 
 (* The readout shown: the one chosen, or pages left when it cannot be *)
-fn _readout_shown (page: Int, page_count: Int, chapter_index: Int): [readout:nat | readout <= 4] int readout = let
+fn _readout_shown (page: Int, page_count: Int, chapter_index: Int): readout = let
   val readout = set_rd_get()
-in if _readout_ok(readout, page, page_count, chapter_index) then readout else 0 end
+in if _readout_ok(readout, page, page_count, chapter_index) then readout else PagesLeft() end
+
+(* The readout a tap turns to from the one given, in the footer's order *)
+fn _readout_next (readout: readout): readout =
+  case+ readout of
+  | PagesLeft() => PageOfPages()
+  | PageOfPages() => ChapterOfChapters()
+  | ChapterOfChapters() => TimeLeftInChapter()
+  | TimeLeftInChapter() => TimeLeftInBook()
+  | TimeLeftInBook() => PagesLeft()
 
 (* The readout after the one given: the next one that can be shown *)
-fn _readout_after {readout:nat | readout <= 4} (readout: int readout, page: Int, page_count: Int, chapter_index: Int): [next_readout:nat | next_readout <= 4] int next_readout = let
-  val next = (if readout < 4 then readout + 1 else 0): [next:nat | next <= 4] int next
+fn _readout_after (readout: readout, page: Int, page_count: Int, chapter_index: Int): readout = let
+  val next = _readout_next(readout)
 in
   if _readout_ok(next, page, page_count, chapter_index) then next
   else let
-    val after_next = (if next < 4 then next + 1 else 0): [after_next:nat | after_next <= 4] int after_next
-  in if _readout_ok(after_next, page, page_count, chapter_index) then after_next else 0 end
+    val after_next = _readout_next(next)
+  in if _readout_ok(after_next, page, page_count, chapter_index) then after_next else PagesLeft() end
 end
 
 (* " · " (5 bytes, from a no-break space, 0xC2 0xA0, since a space
@@ -377,8 +388,8 @@ in _put(buf, offset, "% of chapter") end
 
 (* The readout given, for a page of page_count in a chapter (from 1; 0 when none is
    known) of chapter_count, at buf[at, end_at) *)
-fn _put_readout {l:agz}{at:nat | at + 70 <= 96}{readout:nat | readout <= 4}
-  (buf: !$A.arr(byte, l, 96), at: int at, readout: int readout, page: Int, page_count: Int, chapter: Int, chapter_count: Int)
+fn _put_readout {l:agz}{at:nat | at + 70 <= 96}
+  (buf: !$A.arr(byte, l, 96), at: int at, readout: readout, page: Int, page_count: Int, chapter: Int, chapter_count: Int)
   : [end_at:nat | end_at <= at + 70] int end_at = let
   val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
   (* the screens after the one shown (the reading speed is by screens) *)
@@ -386,10 +397,12 @@ fn _put_readout {l:agz}{at:nat | at + 70 <= 96}{readout:nat | readout <= 4}
 in
   (* scrolled, the chapter's pages are its screenfuls: where the one
      shown is says more than how many there are *)
-  if (if readout <= 1 then _scrolled() else false) then _put_chapter_percent(buf, at, page, page_count)
-  else if readout = 1 then (if _spread() then _put_page_of(buf, _put(buf, at, "pages "), page, page_count)
-    else _put_page_of(buf, _put(buf, at, "page "), page, page_count))
-  else if readout = 2 then let
+  case+ readout of
+  | PageOfPages() =>
+    if _scrolled() then _put_chapter_percent(buf, at, page, page_count)
+    else if _spread() then _put_page_of(buf, _put(buf, at, "pages "), page, page_count)
+    else _put_page_of(buf, _put(buf, at, "page "), page, page_count)
+  | ChapterOfChapters() => let
     (* by the contents' top-level entries; by the spine's items when
        the contents have none *)
     val @(chapter_number, chapter_total) = toc_chapter_of(chapter_index)
@@ -406,14 +419,16 @@ in
       val offset = _put(buf, offset, " of ")
     in $S.int_to_str(buf, offset, 96, chapter_total) end
   end
-  else if readout = 3 then let
+  | TimeLeftInChapter() => let
     val offset = _put_duration(buf, at, 96, _minutes_for_pages(left))
   in _put(buf, offset, " left in chapter") end
-  else if readout = 4 then let
+  | TimeLeftInBook() => let
     val rest = _rest_pages(chapter_index, page_count)
     val more = (if rest > 0 then rest else 0): Int
     val offset = _put_duration(buf, at, 96, _minutes_for_pages(left + more))
   in _put(buf, offset, " left in book") end
+  | PagesLeft() =>
+  if _scrolled() then _put_chapter_percent(buf, at, page, page_count)
   else if left = 0 then _put(buf, at, "last page in chapter")
   else let
     (* a spread's screens are two pages each *)

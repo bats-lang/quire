@@ -1322,34 +1322,34 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
     in let val () = ui_focus("typography-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("typography-panel"), "click", llam(h) => let
       val clicked = _target(h)
-      val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(0) in true end
-        else if _is(clicked, "font-inter") then let val () = set_font_set(1) in true end
-        else if _is(clicked, "font-book") then let val () = set_font_set(2) in true end
-        else if _is(clicked, "font-atkinson") then let val () = set_font_set(3) in true end
-        else if _is(clicked, "theme-auto") then let val () = set_theme_set(0) in true end
-        else if _is(clicked, "theme-light") then let val () = set_theme_set(1) in true end
-        else if _is(clicked, "theme-sepia") then let val () = set_theme_set(2) in true end
-        else if _is(clicked, "theme-dark") then let val () = set_theme_set(3) in true end
-        else if _is(clicked, "theme-night") then let val () = set_theme_set(4) in true end
-        else if _is(clicked, "theme-grey") then let val () = set_theme_set(5) in true end
-        else if _is(clicked, "layout-pages") then let val () = set_flow_set(0) in true end
-        else if _is(clicked, "layout-scroll") then let val () = set_flow_set(1) in true end
-        else if _is(clicked, "columns-auto") then let val () = set_cols_set(0) in true end
-        else if _is(clicked, "columns-one") then let val () = set_cols_set(1) in true end
-        else if _is(clicked, "columns-two") then let val () = set_cols_set(2) in true end
-        else if _is(clicked, "align-ragged") then let val () = set_align_set(0) in true end
-        else if _is(clicked, "align-justified") then let val () = set_align_set(1) in true end
-        else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(0) in true end
-        else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(1) in true end
-        else if _is(clicked, "ruby-show") then let val () = set_ruby_set(1) in true end
-        else if _is(clicked, "ruby-hide") then let val () = set_ruby_set(0) in true end
-        else if _is(clicked, "dim-off") then let val () = set_dim_set(0) in true end
-        else if _is(clicked, "dim-on") then let val () = set_dim_set(1) in true end
-        else if _is(clicked, "taps-sides") then let val () = set_taps_set(0) in true end
-        else if _is(clicked, "taps-forward") then let val () = set_taps_set(1) in true end
-        else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(2) in true end
-        else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
-        else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
+      val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(Literata()) in true end
+        else if _is(clicked, "font-inter") then let val () = set_font_set(Inter()) in true end
+        else if _is(clicked, "font-book") then let val () = set_font_set(BookFont()) in true end
+        else if _is(clicked, "font-atkinson") then let val () = set_font_set(Atkinson()) in true end
+        else if _is(clicked, "theme-auto") then let val () = set_theme_set(Auto()) in true end
+        else if _is(clicked, "theme-light") then let val () = set_theme_set(Fixed(Light())) in true end
+        else if _is(clicked, "theme-sepia") then let val () = set_theme_set(Fixed(Sepia())) in true end
+        else if _is(clicked, "theme-dark") then let val () = set_theme_set(Fixed(Dark())) in true end
+        else if _is(clicked, "theme-night") then let val () = set_theme_set(Fixed(Night())) in true end
+        else if _is(clicked, "theme-grey") then let val () = set_theme_set(Fixed(Grey())) in true end
+        else if _is(clicked, "layout-pages") then let val () = set_flow_set(Paged()) in true end
+        else if _is(clicked, "layout-scroll") then let val () = set_flow_set(Scrolled()) in true end
+        else if _is(clicked, "columns-auto") then let val () = set_cols_set(AutoColumns()) in true end
+        else if _is(clicked, "columns-one") then let val () = set_cols_set(OneColumn()) in true end
+        else if _is(clicked, "columns-two") then let val () = set_cols_set(TwoColumns()) in true end
+        else if _is(clicked, "align-ragged") then let val () = set_align_set(Ragged()) in true end
+        else if _is(clicked, "align-justified") then let val () = set_align_set(Justified()) in true end
+        else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(NoHyphens()) in true end
+        else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(Hyphenated()) in true end
+        else if _is(clicked, "ruby-show") then let val () = set_ruby_set(RubyShown()) in true end
+        else if _is(clicked, "ruby-hide") then let val () = set_ruby_set(RubyHidden()) in true end
+        else if _is(clicked, "dim-off") then let val () = set_dim_set(ImagesAsTheyAre()) in true end
+        else if _is(clicked, "dim-on") then let val () = set_dim_set(ImagesDimmed()) in true end
+        else if _is(clicked, "taps-sides") then let val () = set_taps_set(SideZones()) in true end
+        else if _is(clicked, "taps-forward") then let val () = set_taps_set(ForwardZones()) in true end
+        else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(OneHandZones()) in true end
+        else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(KeysForVolume()) in true end
+        else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(KeysTurnPages()) in true end
         else if _is(clicked, "typography-reset") then let
             val () = _settings_reset()
           in false end
@@ -1511,21 +1511,22 @@ fn _zone_click (x: Int, y: Int): void = let
   val page_y = $DR.get_measure_y()
   val page_width = $DR.get_measure_w()
   val page_height = $DR.get_measure_h()
-  val taps = set_taps_get()
 in
   if page_width <= 0 then ()
-  else if taps = 1 then
+  else case+ set_taps_get() of
+  | ForwardZones() =>
     (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
      else if x < page_x + page_width / 4 then _left()
      else _right())
-  else if taps = 2 then
+  | OneHandZones() =>
     (if page_height <= 0 then _chrome_set(~(!_chrome))
      else if y < page_y + page_height / 3 then _previous()
      else if y > page_y + page_height - page_height / 3 then _next()
      else _chrome_set(~(!_chrome)))
-  else if x < page_x + page_width / 4 then _left()
-  else if x > page_x + page_width - page_width / 4 then _right()
-  else _chrome_set(~(!_chrome))
+  | SideZones() =>
+    (if x < page_x + page_width / 4 then _left()
+     else if x > page_x + page_width - page_width / 4 then _right()
+     else _chrome_set(~(!_chrome)))
 end
 
 (* A key's name at key_bytes[1, 1 + name_len), and its modifier flags after it *)
@@ -1536,6 +1537,12 @@ in
   else if byte2int0($A.get<byte>(key_bytes, 0)) <> name_len then false
   else _bytes_at(key_bytes, n, 1, name, name_len, 0)
 end
+
+(* Whether the volume keys turn the page *)
+fn _volume_turns (): bool = case+ set_vol_get() of KeysTurnPages() => true | KeysForVolume() => false
+
+(* Whether a tap on the page is read by the sides' zones *)
+fn _side_zones (): bool = case+ set_taps_get() of SideZones() => true | ForwardZones() => false | OneHandZones() => false
 
 fn _reader_key {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): void = let
   val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1))), 1) = 1 else false): bool
@@ -1551,10 +1558,10 @@ in
   else if _key_is(key_bytes, n, " ") then let val () = $EV.prevent_default() in (if shift then _previous() else _next()) end
   (* the volume keys, when they turn the page and the browser gives them
      to the page: down on, up back, and the volume left as it is *)
-  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeDown") else false) then let
+  else if (if _volume_turns() then _key_is(key_bytes, n, "AudioVolumeDown") else false) then let
     val () = $EV.prevent_default()
   in _next() end
-  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeUp") else false) then let
+  else if (if _volume_turns() then _key_is(key_bytes, n, "AudioVolumeUp") else false) then let
     val () = $EV.prevent_default()
   in _previous() end
   else if _key_is(key_bytes, n, "Home") then let val () = $EV.prevent_default() in reader_page(0) end
@@ -1995,7 +2002,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       else if (if node >= 0 then reader_link_at(node) else false) then 0
       (* with the sides' zones, a tap on an image between them shows it
          full screen, rather than the bars *)
-      else if (if node >= 0 then (if set_taps_get() = 0 then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
+      else if (if node >= 0 then (if _side_zones() then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
       else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown

@@ -87,13 +87,15 @@ fn _settings_chunk (): jchunk =
       val next = jw_lit(out, next, ",\"margins\":")
       val next = jw_int(out, next, set_margin_get())
       val next = jw_lit(out, next, ",\"font\":")
-      val next = jw_int(out, next, set_font_get())
+      val next = jw_int(out, next, font_code(set_font_get()))
       val next = jw_lit(out, next, ",\"theme\":")
-      val next = jw_int(out, next, set_theme_get())
+      val theme = set_theme_get()
+      val next = jw_int(out, next, theme_choice_code(theme))
+      val () = theme_choice_free(theme)
       val next = jw_lit(out, next, ",\"align\":")
-      val next = jw_int(out, next, set_align_get())
+      val next = jw_int(out, next, align_code(set_align_get()))
       val next = jw_lit(out, next, ",\"hyphens\":")
-      val next = jw_int(out, next, set_hyph_get())
+      val next = jw_int(out, next, hyph_code(set_hyph_get()))
       val next = jw_lit(out, next, ",\"paragraphSpacing\":")
       val next = jw_int(out, next, set_ps_get())
       val next = jw_lit(out, next, ",\"letterSpacing\":")
@@ -101,19 +103,19 @@ fn _settings_chunk (): jchunk =
       val next = jw_lit(out, next, ",\"wordSpacing\":")
       val next = jw_int(out, next, set_ws_get())
       val next = jw_lit(out, next, ",\"dimImages\":")
-      val next = jw_int(out, next, set_dim_get())
+      val next = jw_int(out, next, dim_code(set_dim_get()))
       val next = jw_lit(out, next, ",\"tapZones\":")
-      val next = jw_int(out, next, set_taps_get())
+      val next = jw_int(out, next, taps_code(set_taps_get()))
       val next = jw_lit(out, next, ",\"volumeKeys\":")
-      val next = jw_int(out, next, set_vol_get())
+      val next = jw_int(out, next, vol_code(set_vol_get()))
       val next = jw_lit(out, next, ",\"footerReadout\":")
-      val next = jw_int(out, next, set_rd_get())
+      val next = jw_int(out, next, rd_code(set_rd_get()))
       val next = jw_lit(out, next, ",\"scrolled\":")
-      val next = jw_int(out, next, set_flow_get())
+      val next = jw_int(out, next, flow_code(set_flow_get()))
       val next = jw_lit(out, next, ",\"columns\":")
-      val next = jw_int(out, next, set_cols_get())
+      val next = jw_int(out, next, cols_code(set_cols_get()))
       val next = jw_lit(out, next, ",\"ruby\":")
-      val next = jw_int(out, next, set_ruby_get())
+      val next = jw_int(out, next, ruby_code(set_ruby_get()))
       val next = jw_lit(out, next, ",\"readingSpeed\":")
       val next = jw_int(out, next, speech_rate_hundredths(set_speech_rate_get()))
       (* a level in percent, or the system's own *)
@@ -1060,16 +1062,16 @@ in
         val () = (if value >= 0 then (if value <= 4 then set_margin_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "font") then let
-        val () = (if value >= 0 then (if value <= 3 then set_font_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 3 then set_font_set(font_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "theme") then let
-        val () = (if value >= 0 then (if value <= 5 then set_theme_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 5 then set_theme_set(theme_choice_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "align") then let
-        val () = (if value >= 0 then (if value <= 1 then set_align_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_align_set(align_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "hyphens") then let
-        val () = (if value >= 0 then (if value <= 1 then set_hyph_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_hyph_set(hyph_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "paragraphSpacing") then let
         val () = (if value >= 0 then (if value <= 20 then set_ps_set(value) else ()) else ())
@@ -1089,25 +1091,25 @@ in
         val () = (if value >= 0 then (if value <= 600 then stats_goal_set(value) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
-        val () = (if value >= 0 then (if value <= 1 then set_ruby_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_ruby_set(ruby_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "columns") then let
-        val () = (if value >= 0 then (if value <= 2 then set_cols_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 2 then set_cols_set(cols_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "scrolled") then let
-        val () = (if value >= 0 then (if value <= 1 then set_flow_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_flow_set(flow_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "footerReadout") then let
-        val () = (if value >= 0 then (if value <= 4 then set_rd_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 4 then set_rd_set(rd_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "volumeKeys") then let
-        val () = (if value >= 0 then (if value <= 1 then set_vol_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_vol_set(vol_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "tapZones") then let
-        val () = (if value >= 0 then (if value <= 2 then set_taps_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 2 then set_taps_set(taps_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "dimImages") then let
-        val () = (if value >= 0 then (if value <= 1 then set_dim_set(value) else ()) else ())
+        val () = (if value >= 0 then (if value <= 1 then set_dim_set(dim_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "wordSpacing") then let
         val () = (if value >= 0 then (if value <= 16 then set_ws_set(value) else ()) else ())
