@@ -481,7 +481,9 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
   of the five themes. The proof is css's `CONTRAST` over the palette
-  (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
+  (`PAL(t, r, c)`, its theme a `palette` and its role a `colour_role`,
+  both datasorts, so a role is passed as a `role_value(r)`, never a
+  number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
   accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
@@ -501,8 +503,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
-* The sheet's size is in its type (`sheet(r, st)`: r bytes left), so it
-  always fits the 64 KiB text it is put in.
+* The sheet's size is in its type (`sheet(r, media, open)`: r bytes
+  left, and whether an @media block and a rule are open), so it always
+  fits the 64 KiB text it is put in, and a rule is opened only outside
+  another and closed only once.
 
 Elements are made through `src/ui.bats`:
 
