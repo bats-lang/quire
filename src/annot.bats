@@ -18,6 +18,7 @@
 
 staload "book.sats"
 staload "ui.sats"
+staload "sharing.sats"
 staload "notice.sats"
 staload "modal.sats"
 staload "undo.sats"
@@ -1428,24 +1429,20 @@ fn _markdown_download {used_loc:agz}{used_len:pos} (used: !$A.borrow(byte, used_
   val () = release_bytes(name_frozen, name_bytes)
 in release_bytes(mime_frozen, mime_bytes) end
 
-(* The Markdown file used[0, used_len) put where the page's script
-   shares it from (annotations-share-text), when it fits; else
-   downloaded *)
-fn _markdown_share {used_loc:agz}{used_len:pos} (used: !$A.borrow(byte, used_loc, used_len), used_len: int used_len): void =
-  if used_len >= 65536 then _markdown_download(used, used_len)
-  else let
-    val id = $A.alloc<byte>(22)
-    val () = $A.write_text(id, 0, $A.text_lit("annotations-share-text"), 22)
-  in ui_text_n_b(id, 22, used, 0, used_len) end
+(* Where the annotations' Markdown file goes: downloaded, or shared (as
+   a file, or as its text; as_text shares it as its text when the
+   platform refuses it as a file) *)
+#pub datatype export_to =
+  | ToDownload
+  | ToShare of (share_as, () -<cloref1> void)
 
 (* The highlights and notes as a Markdown file, headed by the book's
    title title[0, title_len) and author author[0, author_len):
-   downloaded, or, to be shared, put where the page's script shares it
-   from *)
+   downloaded, or shared *)
 #pub fn annot_export {title_loc,author_loc:agz}{title_size,author_size:pos}{title_len:nat | title_len < title_size; title_len < 256}{author_len:nat | author_len < author_size; author_len < 256}
-  (title: $A.arr(byte, title_loc, title_size), title_len: int title_len, author: $A.arr(byte, author_loc, author_size), author_len: int author_len, share: bool): void
+  (title: $A.arr(byte, title_loc, title_size), title_len: int title_len, author: $A.arr(byte, author_loc, author_size), author_len: int author_len, destination: export_to): void
 
-implement annot_export (title, title_len, author, author_len, share) = let
+implement annot_export (title, title_len, author, author_len, destination) = let
   val cell = _take()
   val+ @AnnotationsCell(annotations, count) = cell
   val piece_size = 1024 + 3600 * count
@@ -1470,7 +1467,9 @@ in
       val file_end = _literal(out, list_end, "---\n*Exported from Quire*\n")
       val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
       val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, file_end)
-      val () = (if share then _markdown_share(used, file_end) else _markdown_download(used, file_end))
+      val () = (case+ destination of
+        | ToDownload() => _markdown_download(used, file_end)
+        | ToShare(way, as_text) => share_markdown(used, file_end, way, as_text))
       val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
       val () = $A.drop<byte>(out_frozen, out_bytes)
     in piece_free(owner, $A.thaw<byte>(out_frozen)) end

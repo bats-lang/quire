@@ -1119,8 +1119,9 @@ test('two columns show a spread, turned as one and numbered as two pages; auto s
   await expect(indicator(page)).toHaveText(wide ? /· pages \d+–\d+ of \d+ in chapter$/ : /· page \d+ of \d+ in chapter$/);
 });
 
-// Reading aloud, by the page's script (pwa): here with a speech engine
-// that says each sentence only when the test says it has been spoken
+// Reading aloud (read_aloud.bats, on bridge's speech atoms): here with a
+// speech engine that says each sentence only when the test says it has
+// been spoken. The sentence said is the highlight bats-mark-5
 async function fakeSpeech(page) {
   await page.addInitScript(() => {
     window.spoken = [];
@@ -1154,7 +1155,7 @@ test('read aloud reads the page from its top, the sentence read marked, turning 
   await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(async () => (await spoken(page)).length).toBe(1);
   expect((await spoken(page))[0].text).toBe('Part 1');
-  expect(await page.evaluate(() => CSS.highlights.has('pwa-spoken'))).toBe(true);
+  expect(await page.evaluate(() => CSS.highlights.has('bats-mark-5'))).toBe(true);
   // sentence after sentence, the page turned when the next is not on it
   const first = await place(page);
   for (let k = 0; k < 40 && (await place(page)).p === first.p; k++) {
@@ -1175,7 +1176,7 @@ test('read aloud reads the page from its top, the sentence read marked, turning 
   await showChrome(page);
   await readAloud(page).click();
   await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
-  expect(await page.evaluate(() => CSS.highlights.has('pwa-spoken'))).toBe(false);
+  expect(await page.evaluate(() => CSS.highlights.has('bats-mark-5'))).toBe(false);
   const n = (await spoken(page)).length;
   await page.evaluate(() => window.sentenceSpoken());
   await page.waitForTimeout(200);
@@ -1222,4 +1223,47 @@ test('without speech in the browser, read aloud is not offered', async ({ page }
   await readBook(page, book('Silent', 1));
   await showChrome(page);
   await expect(readAloud(page)).toBeHidden();
+});
+
+// The sentence marked: the text of the spoken highlight's range
+const spokenMark = page => page.evaluate(() => {
+  const h = CSS.highlights.get('bats-mark-5');
+  return h ? [...h].map(r => r.toString()) : [];
+});
+
+test('read aloud says the sentences in order, each marked, without a ruby\'s reading, and pauses and goes on', async ({ page }) => {
+  await fakeSpeech(page);
+  await start(page);
+  await readBook(page, { title: 'Ruby Spoken', author: 'Reader Tests', rawChapters: [
+    { body: '<p>The <ruby>word<rp>(</rp><rt>reading</rt><rp>)</rp></ruby> is here. Next one! Last?</p><p>A second block.</p>' },
+  ] });
+  await showChrome(page);
+  await readAloud(page).click();
+  await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['The word is here.']);
+  await expect.poll(() => spokenMark(page)).toHaveLength(1);
+  const [first] = await spokenMark(page);
+  expect(first.startsWith('The')).toBe(true);
+  expect(first.endsWith('here.')).toBe(true);
+  await page.evaluate(() => window.sentenceSpoken());
+  await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['The word is here.', 'Next one!']);
+  expect(await spokenMark(page)).toEqual(['Next one!']);
+  // paused: the mark goes and nothing more is said
+  await showChrome(page);
+  await readAloud(page).click();
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
+  expect(await spokenMark(page)).toEqual([]);
+  await page.evaluate(() => window.sentenceSpoken());
+  await page.waitForTimeout(200);
+  expect((await spoken(page)).length).toBe(2);
+  // on again: the sentence it was saying, then the next block's
+  await readAloud(page).click();
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => (await spoken(page)).map(s => s.text)).toEqual(['The word is here.', 'Next one!', 'Next one!']);
+  await page.evaluate(() => window.sentenceSpoken());
+  await page.evaluate(() => window.sentenceSpoken());
+  await expect.poll(async () => (await spoken(page)).map(s => s.text).slice(3)).toEqual(['Last?', 'A second block.']);
+  // the book's end: nothing turns, and reading stops
+  await page.evaluate(() => window.sentenceSpoken());
+  await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
+  expect(await spokenMark(page)).toEqual([]);
 });

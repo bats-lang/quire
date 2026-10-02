@@ -396,8 +396,8 @@ test('a bookmark is deleted from the bookmarks tab', async ({ page }) => {
   await expect(star(page)).toHaveAttribute('aria-pressed', 'false');
 });
 
-// Sharing, by the page's script (pwa): here with a share sheet that
-// keeps what it is given
+// Sharing (sharing.bats, on bridge's share atoms): here with a share
+// sheet that keeps what it is given
 async function fakeShare(page) {
   await page.addInitScript(() => {
     window.shared = [];
@@ -437,4 +437,49 @@ test('where nothing can be shared, Share is not offered', async ({ page }) => {
   await expect(selection(page).getByRole('button', { name: 'Share', exact: true })).toBeHidden();
   await openPanel(page);
   await expect(panel(page).getByRole('button', { name: 'Share', exact: true })).toBeHidden();
+});
+
+// A share sheet that takes text, and files only as canShare says
+async function fakeShareOf(page, canShareFile) {
+  await page.addInitScript(source => {
+    window.shared = [];
+    const canShareFile = eval(source);
+    navigator.canShare = d => !!d.files && d.files.every(canShareFile);
+    navigator.share = async d => {
+      const files = await Promise.all((d.files || []).map(async f => ({ name: f.name, type: f.type, text: await f.text() })));
+      window.shared.push({ title: d.title, text: d.text, files });
+    };
+  }, canShareFile.toString());
+}
+
+test('where files cannot be shared, the annotations are shared as their text', async ({ page }) => {
+  await fakeShareOf(page, () => false);
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Share', exact: true }).click();
+  await expect.poll(async () => (await shared(page)).length).toBe(1);
+  const [one] = await shared(page);
+  expect(one.files).toEqual([]);
+  expect(one.title).toBe('quire-annotations.md');
+  expect(one.text).toMatch(/^# Marked Up\n## Annotations Tests\n/);
+  expect(one.text).toMatch(/> Para 1\.0/);
+});
+
+test('a Markdown file the platform will not take as a file is shared as its text', async ({ page }) => {
+  // files can be shared, but not this one (a text file can; Markdown cannot)
+  await fakeShareOf(page, f => f.type !== 'text/markdown');
+  await start(page);
+  await readBook(page, book);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Share', exact: true }).click();
+  await expect.poll(async () => (await shared(page)).length).toBe(1);
+  const [one] = await shared(page);
+  expect(one.files).toEqual([]);
+  expect(one.title).toBe('quire-annotations.md');
+  expect(one.text).toMatch(/^# Marked Up\n/);
 });

@@ -19,6 +19,7 @@ staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
 (* ============================================================
    Records
@@ -2042,10 +2043,10 @@ implement lib_filter_get () = !_filter
 
 (* On iOS Safari there is no install prompt, and what a page keeps is
    cleared after 7 days without a visit, but not for an app on the Home
-   Screen. The hint is offered once the library has a book (the
-   stylesheet shows it only under the page's pwa-ios-browser class,
-   which the page's script sets) until it is dismissed; dismissed until
-   the last run's answer is read, so it never shows twice *)
+   Screen. The hint is offered there (bridge's is_ios_browser: iOS
+   Safari, not the Home Screen) once the library has a book, until it is
+   dismissed; dismissed until the last run's answer is read, so it never
+   shows twice *)
 val _install_hint_dismissed = ref<bool>(true)
 
 fn _install_hint_key (): [l:agz] $A.arr(byte, l, 12) = let
@@ -2055,6 +2056,7 @@ in key end
 
 fn _install_hint_show (): void =
   if !_install_hint_dismissed then ui_attr("install-hint", AClass, "ihint")
+  else if ~($BAPP.is_ios_browser()) then ui_attr("install-hint", AClass, "ihint")
   else if lib_count() > 0 then ui_attr("install-hint", AClass, "ihint on")
   else ui_attr("install-hint", AClass, "ihint")
 

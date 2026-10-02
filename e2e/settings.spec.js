@@ -224,8 +224,9 @@ test('reset puts the defaults back', async ({ page }) => {
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });
 
-// Auto by the clock: the page's script (pwa) marks the night by the
-// local time, which the theme follows at the next page turn
+// Auto by the clock: night by the local time (local_time.bats, from the
+// host's clock and time zone), which the theme follows at the next page
+// turn
 test.describe('auto at night', () => {
   test.use({ timezoneId: 'Europe/Paris', colorScheme: 'light' });
   test('auto turns to Night at 22:00 local time, at the next page turn, and back by morning', async ({ page }) => {
@@ -282,4 +283,50 @@ test('in a browser tab, the screen offers only what it can: no rotation lock or 
   await openSettings(page);
   await expect(sheet(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
   await expect(sheet(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
+});
+
+// The night's edges, exactly, in another zone: New York in June is
+// UTC-4, so 21:59 there is 01:59 UTC
+test.describe('auto at night, to the minute', () => {
+  test.use({ timezoneId: 'America/New_York', colorScheme: 'light' });
+  test('night starts at 22:00 and ends at 07:00 local time', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-06-02T01:59:00Z') });
+    await start(page);
+    await readBook(page, { title: 'Edges', author: 'Settings Tests', rawChapters: chapters(1, 80) });
+    const theme = () => page.evaluate(() => document.getElementById('bats-root').className);
+    const turn = () => page.keyboard.press('ArrowRight');
+    expect(await theme()).toContain('th-light');
+    // 21:59:30: still the day
+    await page.clock.runFor('00:30');
+    await turn();
+    await page.waitForTimeout(100);
+    expect(await theme()).toContain('th-light');
+    // 22:00
+    await page.clock.runFor('00:30');
+    await turn();
+    await expect.poll(theme).toContain('th-night');
+    // 06:59
+    await page.clock.runFor('08:59:00');
+    await turn();
+    await page.waitForTimeout(100);
+    expect(await theme()).toContain('th-night');
+    // 07:00
+    await page.clock.runFor('01:00');
+    await turn();
+    await expect.poll(theme).toContain('th-light');
+  });
+});
+
+test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  const full = sheet(page).getByRole('button', { name: 'Full screen', exact: true });
+  await expect(full).toHaveAttribute('aria-pressed', 'false');
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+  await expect(full).toHaveAttribute('aria-pressed', 'false');
 });

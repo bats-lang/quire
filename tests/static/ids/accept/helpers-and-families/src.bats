@@ -6,5 +6,5 @@ fn _info (): void = let
   val () = _row("size-row", "size-value")
   val () = ui_text("size-value", "12 pt")
   val () = ui_text("toc-row3", "Chapter 3")
-in ui_show("pwa-anything", true) end
+in ui_show("bats-root", true) end
 fn _click (t: int): int = _row_of(t, "toc-row")

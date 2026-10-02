@@ -15,6 +15,9 @@
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload SCR = "wasm.bats-packages.dev/bridge/src/screen.sats"
+staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 #use result as R
 staload "mem.sats"
 
@@ -254,19 +257,6 @@ in end
    anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion | AHidden
-  | APwaInstall   (* a click on it asks the browser to install the app (the page's script) *)
-  (* reading aloud, by the page's script: a click on APwaSpeak reads the
-     element it names from its page, or pauses; on APwaSpeakSelection,
-     from the selection; APwaSpeechNext is clicked to turn the page, and
-     the page's script fills and keeps the speed and voice choices *)
-  | APwaSpeak | APwaSpeakSelection | APwaSpeechNext | APwaSpeechRate | APwaSpeechVoice
-  (* sharing, by the page's script: the selection, cited by the element
-     named; or the element named's text as a file, named *)
-  | APwaShareSelection | APwaShareFile | APwaShareName
-  (* the screen and the system, by the page's script: full screen, the
-     rotation locked, the brightness chosen; and where the files the
-     system opens with the app, or shares with it, are dropped *)
-  | APwaFullscreen | APwaOrientationLock | APwaBrightness | APwaFileDrop
 
 fn _attr_name (attribute: attr): [name_len:pos | name_len < 256] string name_len =
   case+ attribute of
@@ -274,14 +264,7 @@ fn _attr_name (attribute: attr): [name_len:pos | name_len < 256] string name_len
   | AValue() => "value" | AControls() => "aria-controls"
   | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
   | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
-  | AHidden() => "aria-hidden" | APwaInstall() => "data-pwa-install"
-  | APwaSpeak() => "data-pwa-speak" | APwaSpeakSelection() => "data-pwa-speak-selection"
-  | APwaSpeechNext() => "data-pwa-speech-next" | APwaSpeechRate() => "data-pwa-speech-rate"
-  | APwaSpeechVoice() => "data-pwa-speech-voice"
-  | APwaShareSelection() => "data-pwa-share-selection" | APwaShareFile() => "data-pwa-share-file"
-  | APwaShareName() => "data-pwa-share-name"
-  | APwaFullscreen() => "data-pwa-fullscreen" | APwaOrientationLock() => "data-pwa-orientation-lock"
-  | APwaBrightness() => "data-pwa-brightness" | APwaFileDrop() => "data-pwa-file-drop"
+  | AHidden() => "aria-hidden"
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
@@ -798,7 +781,7 @@ in release_bytes(id_frozen, id_bytes) end
    Search (type=search) or a multi-line text area. *)
 (* A search field, a text area, or one line of text (a name) *)
 #pub datatype field = FSearch | FText | FLine
-  | FChoice   (* a choice among options the page's script puts in it *)
+  | FChoice   (* a choice among options (ui_option) *)
   (* a web address, a user name and a password, as a sign-in form has
      them: the browser's password manager can fill them *)
   | FUrl | FUser | FPassword
@@ -959,11 +942,19 @@ in _set_attr(id, "aria-labelledby", by) end
    type carries, bounds the ids below MEDIA_LISTENER, the last of the
    bridge's 128 slots, which is the media query listener's (listen_media
    shares the slots). The table is registered at once by ui_listen_all;
-   there is no other way to register a listener. *)
+   there is no other way to register a listener. Besides the page's
+   events (RCons), the platform's, each decoded by bridge into its
+   datatype, take a slot of the table each: full screen entered or
+   left (RFullscreen), reading aloud's events (RSpeech) and the
+   browser's offer to install the app coming and going
+   (RInstallOffer). *)
 #pub datatype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
       (regs(count), on, string event_len, ($EV.event_payload) -<cloref1> int)
+  | {count:nat} RFullscreen(count + 1) of (regs(count), ($SCR.fullscreen_change) -<cloref1> void)
+  | {count:nat} RSpeech(count + 1) of (regs(count), ($SP.speech_event) -<cloref1> void)
+  | {count:nat} RInstallOffer(count + 1) of (regs(count), ($BAPP.install_offer) -<cloref1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<cloref1> int): void = let
@@ -993,6 +984,18 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | RCons(rest, target, event, callback) => let
       val position = _listen_all(rest)
       val () = _listen_one(target, event, position, callback)
+    in position + 1 end
+  | RFullscreen(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $SCR.listen_fullscreen(position, callback)
+    in position + 1 end
+  | RSpeech(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $SP.listen_speech(position, callback)
+    in position + 1 end
+  | RInstallOffer(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $BAPP.listen_install_prompt(position, callback)
     in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the

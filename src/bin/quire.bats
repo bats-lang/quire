@@ -30,6 +30,10 @@ staload "clock.sats"
 staload "sync.sats"
 staload "catalogue.sats"
 staload "catalogues.sats"
+staload "platform.sats"
+staload "screen_controls.sats"
+staload "sharing.sats"
+staload "read_aloud.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -247,6 +251,8 @@ fn _show_library (): void = let
   val () = layer_close(LNote())
   val () = layer_close(LImage())
   val () = layer_close(LDictionary())
+  (* nothing is read aloud from the library *)
+  val () = aloud_stop()
   val () = ui_show("library", true)
   (* a reload now comes back here *)
   val () = _view_save(~1)
@@ -352,9 +358,10 @@ fn _copy_into {source_loc,destination_loc:agz}{source_size,destination_size:nat}
   (source: !$A.arr(byte, source_loc, source_size), count: int count, destination: !$A.arr(byte, destination_loc, destination_size), at: int at): void =
   _copy_from_to(source, count, destination, at, 0)
 
-(* A shared selection's citation, the book's: "Author, Title" (as the
-   export's) *)
-fn _citation_set {book:int} (book: int book): void = let
+(* The selection shared, cited by the open book: "Author, Title" (as
+   the export's) *)
+fn _share_selection (): void = let
+  val book = lib_index_of_key(open_key_get())
   val @(title, title_len) = lib_text(book, 0)
   val @(author, author_len) = lib_text(book, 1)
   val citation = $A.alloc<byte>(520)
@@ -364,7 +371,7 @@ fn _citation_set {book:int} (book: int book): void = let
   val () = _copy_into(title, title_len, citation, author_len + 2)
   val () = $A.free<byte>(title)
   val () = $A.free<byte>(author)
-in ui_text_buf("share-citation", citation, author_len + 2 + title_len) end
+in share_selection(citation, author_len + 2 + title_len) end
 
 (* A book's saved place, gone to as it opens: when its chapter could not
    be shown there is no page to stay on, so the reader goes back to the
@@ -388,7 +395,8 @@ fn _open_book {book:int} (book: int book): void =
     else let
       val () = _show_reader()
       val () = _hint_offer()
-      val () = _citation_set(book)
+      (* what another book was reading aloud stops *)
+      val () = aloud_stop()
       val () = reader_stack_clear()
       (* the Ruby row waits for this book's first ruby *)
       val () = reader_ruby_forget()
@@ -828,13 +836,17 @@ fn _copy_selection (): void =
       in release_bytes(text_frozen, text_bytes) end
     end
 
-(* Exports the open book's annotations: downloaded, or to be shared
-   (the page's script shares them once this click's listener is done) *)
-fn _export (share: bool): void = let
+(* Exports the open book's annotations: downloaded, or shared *)
+fn _export (destination: export_to): void = let
   val book = lib_index_of_key(open_key_get())
   val @(title, title_len) = lib_text(book, 0)
   val @(author, author_len) = lib_text(book, 1)
-in annot_export(title, title_len, author, author_len, share) end
+in annot_export(title, title_len, author, author_len, destination) end
+
+(* The annotations shared: as a file where the platform shares files,
+   else (or when it refuses this one as a file) as its text *)
+fn _share_annotations (way: share_as): void =
+  _export(ToShare(way, lam () => _export(ToShare(AsText(), lam () => ()))))
 
 (* Goes to annotation, remembering where the reader was *)
 fn _annotation_go (annotation: int): void = let
@@ -1092,8 +1104,10 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         if _is(clicked, "menu-settings") then let
           val () = layer_close(LLibraryMenu())
         in _settings_open() end
-        (* the page's script asks the browser to install the app *)
-        else if _is(clicked, "menu-install") then layer_close(LLibraryMenu())
+        (* the browser's offer to install the app *)
+        else if _is(clicked, "menu-install") then let
+          val () = layer_close(LLibraryMenu())
+        in platform_install() end
         else if _is(clicked, "menu-storage-kept") then let
           val () = layer_close(LLibraryMenu())
           val () = modal_inform("Your books are kept")
@@ -1181,6 +1195,10 @@ in listeners end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", lam(_) => let
+      (* the screen's controls as the platform has them now, and the
+         speeds and the book's voices to read aloud *)
+      val () = screen_controls_show()
+      val () = aloud_choices_show()
       val () = layer_open(LTypography())
     in let val () = ui_focus("typography-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("typography-panel"), "click", lam(h) => let
@@ -1220,7 +1238,10 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
           in false end
         else false): bool
       val close = _is(clicked, "typography-close")
+      val full_screen = _is(clicked, "screen-fullscreen")
+      val lock = _is(clicked, "screen-lock")
       val () = _target_free(clicked)
+      val () = (if full_screen then screen_fullscreen_toggle() else if lock then screen_lock_toggle() else ())
       val () = (if close then layer_close(LTypography()) else ())
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
   val listeners = RCons(listeners, OnEl("size-row"), "input", lam(h) => let
@@ -1701,6 +1722,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val copy = _is(clicked, "selection-copy")
       val search = _is(clicked, "selection-search")
       val define = _is(clicked, "selection-define")
+      val read = _is(clicked, "selection-read")
+      val share = _is(clicked, "selection-share")
       val () = _target_free(clicked)
       val () = (if highlight then let val _ = annot_highlight(0) in () end
         else if orange then let val _ = annot_highlight(1) in () end
@@ -1709,6 +1732,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         else if copy then _copy_selection()
         else if search then _search_selection()
         else if define then dict_show()
+        else if read then aloud_from_selection()
+        else if share then _share_selection()
         else ())
     in let val () = ui_show("selection-toolbar", false) in 0 end end)
   (* a word's dictionary entry: closed, or looked up online instead *)
@@ -1735,8 +1760,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         else if _is(clicked, "filter-orange") then 1 else if _is(clicked, "filter-underlined") then 2 else ~2): int
       val () = _target_free(clicked)
       val () = (if close then layer_close(LAnnotations())
-        else if export_asked then _export(false)
-        else if share_asked then _export(true)
+        else if export_asked then _export(ToDownload())
+        else if share_asked then _share_annotations(share_as_now())
         else if filter >= ~1 then annot_filter_set(filter)
         else if go_row >= 0 then let val () = layer_close(LAnnotations()) in _annotation_go(go_row) end
         else if note_row >= 0 then annot_ask_note(note_row, false)
@@ -1896,6 +1921,31 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
     in 0 end)
 in listeners end
 
+(* The platform's: reading aloud (its button, its speed and voice,
+   speech's events, and the page going away, which stops it), the
+   screen's controls (the brightness, and full screen entered or left),
+   and the browser's offer to install the app *)
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 8) = let
+  val listeners = RCons(listeners, OnEl("read-aloud"), "click", lam(_) => let
+      val () = aloud_toggle()
+    in 0 end)
+  val listeners = RCons(listeners, OnWindow(), "pagehide", lam(_) => let
+      val () = aloud_stop()
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("speech-rate"), "change", lam(_) => let
+      val () = aloud_rate_chosen()
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("speech-voice"), "change", lam(_) => let
+      val () = aloud_voice_chosen()
+    in 0 end)
+  val listeners = RSpeech(listeners, lam(event) => aloud_event(event))
+  val listeners = RCons(listeners, OnEl("screen-brightness"), "change", lam(_) => let
+      val () = screen_brightness_chosen()
+    in 0 end)
+  val listeners = RFullscreen(listeners, lam(change) => screen_fullscreen_changed(change))
+  val listeners = RInstallOffer(listeners, lam(offer) => platform_install_show(offer))
+in listeners end
+
 (* ============================================================
    Startup
    ============================================================ *)
@@ -1906,13 +1956,18 @@ implement main0 () = let
   val () = sync_screen_make()
   val () = _gestures_start()
   (* every listener, in one table: each one's id is its place in it *)
-  val listeners = _wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil())))))))))))
+  val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
   (* files handed to the app from outside it (an Android intent) *)
   val listeners = RCons(listeners, OnExternalFiles(), "files", lam(h) => let
       val () = (if !_view = 1 then _show_library() else ())
       val () = import_external(h)
     in 0 end)
   val () = ui_listen_all(listeners)
+  (* what the platform offers: reading aloud, sharing, installing, and
+     whether the storage is kept *)
+  val () = aloud_offer()
+  val () = sharing_show()
+  val () = platform_start()
   (* ignored: each load deals with its own value (a speed, the
      dictionaries and the catalogues not read start as none) *)
   val () = $P.finish<int>(reader_speed_load(), lam(_) => ())
@@ -1931,6 +1986,8 @@ implement main0 () = let
     in
       $P.and_then<int><int>(lib_load(), lam(_) => let
         val () = lib_state_set(state)
+        (* the screen's controls, with the brightness and the lock kept *)
+        val () = screen_controls_start()
         val () = lib_render()
         (* sync, once the library is read *)
         val () = sync_start()

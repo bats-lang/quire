@@ -23,6 +23,7 @@ staload "backup.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload "app.sats"
+staload "platform.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -348,6 +349,8 @@ in
       val () = _book_store_checked(storing, key)
       (* the record a backup kept for it, if any *)
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
+      (* the storage holds a book of the reader's now: asked to be kept *)
+      val () = (if key > 0 then platform_keep_storage() else ())
     in key end
     else let
       val () = lib_update(library_index, lam(record) => @{

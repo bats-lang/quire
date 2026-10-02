@@ -15,6 +15,7 @@ staload "notice.sats"
 staload "book.sats"
 staload "mem.sats"
 staload "library.sats"
+staload "local_time.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
@@ -41,45 +42,8 @@ val _goal = ref<int>(0)
    The local day
    ============================================================ *)
 
-(* The digits at bytes[position, n) as a number, or -1 *)
-fun _digits_value {l:agz}{n:nat}{position:nat | position <= n} .<n - position>.
-  (bytes: !$A.arr(byte, l, n), n: int n, position: int position, value: int): int =
-  if position >= n then value
-  else let
-    val character = byte2int0($A.get<byte>(bytes, position))
-  in
-    if character < 48 || character > 57 then ~1
-    else _digits_value(bytes, n, position + 1, value * 10 + character - 48)
-  end
-
-(* The local time's offset from UTC in minutes east: the page's script
-   (pwa) keeps it in the id of an element, pwa-utc-offset- and the
-   minutes plus 1440; 0 (UTC) when it does not *)
-fn _utc_offset (): int = let
-  val selector = $A.alloc<byte>(22)
-  val () = $A.write_text(selector, 0, $A.text_lit("[id^=pwa-utc-offset-]"), 21)
-  val @(selector_frozen, selector_bytes) = $A.freeze<byte>(selector)
-  val @(selector_text, selector_rest) = $A.borrow_split<byte>(selector_frozen, selector_bytes, 21)
-  val found = $DR.query_selector(selector_text, 21)
-  val selector_bytes = $A.borrow_join<byte>(selector_frozen, selector_text, selector_rest)
-  val () = release_bytes(selector_frozen, selector_bytes)
-in
-  case+ found of
-  | ~$R.none() => 0
-  | ~$R.some(blob) => let
-      val id_len = $BD.blob_len(blob)
-    in
-      if id_len <= 15 then let val () = $BD.blob_free(blob) in 0 end
-      else if id_len > 24 then let val () = $BD.blob_free(blob) in 0 end
-      else let
-        val id_bytes = $A.alloc<byte>(id_len)
-        val () = $BD.blob_read(blob, 0, id_bytes, id_len)
-        val () = $BD.blob_free(blob)
-        val minutes = _digits_value(id_bytes, id_len, 15, 0)
-        val () = $A.free<byte>(id_bytes)
-      in if minutes < 0 then 0 else if minutes > 2880 then 0 else minutes - 1440 end
-    end
-end
+(* The local time's offset from UTC in minutes east (local_time) *)
+fn _utc_offset (): int = local_offset_minutes()
 
 #pub fn stats_offset (): int
 implement stats_offset () = _utc_offset()

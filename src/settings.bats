@@ -14,10 +14,9 @@ staload "notice.sats"
 staload "undo.sats"
 staload "book.sats"
 staload "mem.sats"
+staload "local_time.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
-staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
-staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The settings, each in its range:
    size               font size in px, 12 to 32
@@ -95,6 +94,261 @@ val _set = ref<settings>(_defaults())
 val _ruby = ref<int>(1)
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)
+
+(* ============================================================
+   The device's own choices: reading aloud's speed and voices, the
+   screen's brightness and its rotation lock. Kept with the settings
+   (bytes 20 on of their record), apart from the record in memory, as
+   _ruby is; not in a backup and not reset with the settings, since a
+   voice, a brightness and a lock are this device's
+   ============================================================ *)
+
+(* How fast a book is read aloud, three quarters of the normal speed to
+   twice it *)
+#pub datatype speech_rate =
+  | RateThreeQuarters | RateNormal | RateOneAndAQuarter
+  | RateOneAndAHalf | RateOneAndThreeQuarters | RateDouble
+
+(* The speed in hundredths of the normal one, as bridge's speech_speak
+   takes it *)
+#pub fn speech_rate_hundredths (rate: speech_rate): [hundredths:int | 75 <= hundredths; hundredths <= 200] int hundredths
+
+implement speech_rate_hundredths (rate) =
+  case+ rate of
+  | RateThreeQuarters() => 75 | RateNormal() => 100 | RateOneAndAQuarter() => 125
+  | RateOneAndAHalf() => 150 | RateOneAndThreeQuarters() => 175 | RateDouble() => 200
+
+fn _rate_code (rate: speech_rate): [code:nat | code <= 5] int code =
+  case+ rate of
+  | RateThreeQuarters() => 0 | RateNormal() => 1 | RateOneAndAQuarter() => 2
+  | RateOneAndAHalf() => 3 | RateOneAndThreeQuarters() => 4 | RateDouble() => 5
+
+(* A stored byte's speed: checked here, once; the normal speed when it
+   is not one *)
+fn _rate_of_code (code: int): speech_rate =
+  if code = 0 then RateThreeQuarters() else if code = 2 then RateOneAndAQuarter()
+  else if code = 3 then RateOneAndAHalf() else if code = 4 then RateOneAndThreeQuarters()
+  else if code = 5 then RateDouble() else RateNormal()
+
+(* The screen's brightness while the app is shown: the system's own, or
+   a level (the app only: a web page cannot set it) *)
+#pub datatype brightness_choice =
+  | BrightnessSystem | BrightnessTenth | BrightnessQuarter
+  | BrightnessHalf | BrightnessThreeQuarters | BrightnessFull
+
+fn _brightness_code (choice: brightness_choice): [code:nat | code <= 5] int code =
+  case+ choice of
+  | BrightnessSystem() => 0 | BrightnessTenth() => 1 | BrightnessQuarter() => 2
+  | BrightnessHalf() => 3 | BrightnessThreeQuarters() => 4 | BrightnessFull() => 5
+
+fn _brightness_of_code (code: int): brightness_choice =
+  if code = 1 then BrightnessTenth() else if code = 2 then BrightnessQuarter()
+  else if code = 3 then BrightnessHalf() else if code = 4 then BrightnessThreeQuarters()
+  else if code = 5 then BrightnessFull() else BrightnessSystem()
+
+(* Whether the screen's rotation is locked (to the one it had then) *)
+#pub datatype rotation = RotationFree | RotationLocked
+
+fn _rotation_code (turn: rotation): [code:nat | code <= 1] int code =
+  case+ turn of RotationFree() => 0 | RotationLocked() => 1
+
+fn _rotation_of_code (code: int): rotation =
+  if code = 1 then RotationLocked() else RotationFree()
+
+val _speech_rate = ref<speech_rate>(RateNormal())
+val _brightness = ref<brightness_choice>(BrightnessSystem())
+val _rotation = ref<rotation>(RotationFree())
+
+#pub fn set_speech_rate_get (): speech_rate
+implement set_speech_rate_get () = !_speech_rate
+#pub fn set_speech_rate_set (rate: speech_rate): void
+implement set_speech_rate_set (rate) = !_speech_rate := rate
+#pub fn set_brightness_get (): brightness_choice
+implement set_brightness_get () = !_brightness
+#pub fn set_brightness_set (choice: brightness_choice): void
+implement set_brightness_set (choice) = !_brightness := choice
+#pub fn set_rotation_get (): rotation
+implement set_rotation_get () = !_rotation
+#pub fn set_rotation_set (turn: rotation): void
+implement set_rotation_set (turn) = !_rotation := turn
+
+(* The voice chosen for each language a book was read aloud in: its
+   primary subtag ("en", lower case) and the voice's name; a language
+   with none is read in its automatic voice *)
+#define VOICES_MAX 16
+#define VOICE_NAME_MAX 255
+
+datavtype voice_choices(int) =
+  | VoiceChoicesEnd(0)
+  | {count:nat}{code_loc,name_loc:agz}{code_len:pos | code_len <= 3}{name_len:pos | name_len <= VOICE_NAME_MAX}
+    VoiceChoice(count + 1) of ($A.arr(byte, code_loc, 3), int code_len, $A.arr(byte, name_loc, name_len), int name_len, voice_choices(count))
+
+datavtype voices_cell = {count:nat | count <= VOICES_MAX} VoicesCell of (voice_choices(count), int count)
+
+val _voices = ref<voices_cell>(VoicesCell(VoiceChoicesEnd(), 0))
+
+fun _voice_choices_free {count:nat} .<count>. (choices: voice_choices(count)): void =
+  case+ choices of
+  | ~VoiceChoicesEnd() => ()
+  | ~VoiceChoice(code, _, name, _, rest) => let
+      val () = $A.free<byte>(code)
+      val () = $A.free<byte>(name)
+    in _voice_choices_free(rest) end
+
+fn _voices_take (): voices_cell = let
+  var cell: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
+  val () = ref_exch_elt<voices_cell>(_voices, cell)
+in cell end
+
+fn _voices_put (cell: voices_cell): void = let
+  var previous: voices_cell = cell
+  val () = ref_exch_elt<voices_cell>(_voices, previous)
+  val+ ~VoicesCell(old, _) = previous
+in _voice_choices_free(old) end
+
+(* Whether code[0, code_len) is wanted[0, wanted_len) *)
+fun _code_is {l,wanted_loc:agz}{wanted_size:pos}{code_len:nat | code_len <= 3}{wanted_len:nat | wanted_len <= wanted_size}{i:nat | i <= code_len} .<code_len - i>.
+  (code: !$A.arr(byte, l, 3), code_len: int code_len, wanted: !$A.arr(byte, wanted_loc, wanted_size), wanted_len: int wanted_len, i: int i): bool =
+  if code_len <> wanted_len then false
+  else if i >= code_len then true
+  else if i >= wanted_len then false
+  else if byte2int0($A.get<byte>(code, i)) <> byte2int0($A.get<byte>(wanted, i)) then false
+  else _code_is(code, code_len, wanted, wanted_len, i + 1)
+
+(* A voice kept for a language: its name, or none (the automatic one) *)
+#pub datavtype kept_voice =
+  | {l:agz}{name_len:pos | name_len <= 255} KeptVoice of ($A.arr(byte, l, name_len), int name_len)
+  | AutomaticVoice of ()
+
+(* name[0, name_len) in a new array *)
+fun _name_copy {source_loc,copy_loc:agz}{source_size,copy_size:pos}{name_len:nat | name_len <= source_size; name_len <= copy_size}{i:nat | i <= name_len} .<name_len - i>.
+  (source: !$A.arr(byte, source_loc, source_size), copy: !$A.arr(byte, copy_loc, copy_size), name_len: int name_len, i: int i): void =
+  if i >= name_len then ()
+  else let
+    val () = $A.set<byte>(copy, i, $A.get<byte>(source, i))
+  in _name_copy(source, copy, name_len, i + 1) end
+
+fun _voice_find {count:nat}{wanted_loc:agz}{wanted_size:pos}{wanted_len:nat | wanted_len <= wanted_size} .<count>.
+  (choices: !voice_choices(count), wanted: !$A.arr(byte, wanted_loc, wanted_size), wanted_len: int wanted_len): kept_voice =
+  case+ choices of
+  | VoiceChoicesEnd() => AutomaticVoice()
+  | VoiceChoice(code, code_len, name, name_len, rest) =>
+    if _code_is(code, code_len, wanted, wanted_len, 0) then let
+      val copy = $A.alloc<byte>(name_len)
+      val () = _name_copy(name, copy, name_len, 0)
+    in KeptVoice(copy, name_len) end
+    else _voice_find(rest, wanted, wanted_len)
+
+(* The voice kept for the language whose primary subtag is
+   code[0, code_len) *)
+#pub fn set_voice_get {l:agz}{code_len:pos | code_len <= 3} (code: !$A.arr(byte, l, 3), code_len: int code_len): kept_voice
+
+implement set_voice_get (code, code_len) = let
+  val cell = _voices_take()
+  val+ @VoicesCell(choices, _) = cell
+  val found = _voice_find(choices, code, code_len)
+  prval () = fold@(cell)
+  val () = _voices_put(cell)
+in found end
+
+(* The choices without the one for code[0, code_len), and how many are
+   left *)
+fun _voice_drop {count:nat}{wanted_loc:agz}{wanted_size:pos}{wanted_len:nat | wanted_len <= wanted_size} .<count>.
+  (choices: voice_choices(count), wanted: !$A.arr(byte, wanted_loc, wanted_size), wanted_len: int wanted_len)
+  : [left:nat | left <= count] @(voice_choices(left), int left) =
+  case+ choices of
+  | ~VoiceChoicesEnd() => @(VoiceChoicesEnd(), 0)
+  | ~VoiceChoice(code, code_len, name, name_len, rest) =>
+    if _code_is(code, code_len, wanted, wanted_len, 0) then let
+      val () = $A.free<byte>(code)
+      val () = $A.free<byte>(name)
+    in _voice_drop(rest, wanted, wanted_len) end
+    else let
+      val @(kept, left) = _voice_drop(rest, wanted, wanted_len)
+    in @(VoiceChoice(code, code_len, name, name_len, kept), left + 1) end
+
+(* The voice kept for the language of code[0, code_len): a name, or the
+   automatic one. A language past the 16th chosen is not kept *)
+#pub fn set_voice_set {l:agz}{code_len:pos | code_len <= 3} (code: !$A.arr(byte, l, 3), code_len: int code_len, chosen: kept_voice): void
+
+implement set_voice_set (code, code_len, chosen) = let
+  val+ ~VoicesCell(choices, _) = _voices_take()
+  val @(others, left) = _voice_drop(choices, code, code_len)
+in
+  case+ chosen of
+  | ~AutomaticVoice() => _voices_put(VoicesCell(others, left))
+  | ~KeptVoice(name, name_len) =>
+    if left >= VOICES_MAX then let
+      val () = $A.free<byte>(name)
+    in _voices_put(VoicesCell(others, left)) end
+    else let
+      val code_copy = $A.alloc<byte>(3)
+      val () = _name_copy(code, code_copy, code_len, 0)
+    in _voices_put(VoicesCell(VoiceChoice(code_copy, code_len, name, name_len, others), left + 1)) end
+end
+
+(* The bytes the voices take in the record: for each, its code's length
+   and code, its name's length and name *)
+fun _voices_size {count:nat} .<count>. (choices: !voice_choices(count)): [size:nat | size <= count * (2 + 3 + VOICE_NAME_MAX)] int size =
+  case+ choices of
+  | VoiceChoicesEnd() => 0
+  | VoiceChoice(_, code_len, _, name_len, rest) => 2 + code_len + name_len + _voices_size(rest)
+
+fun _bytes_put {source_loc,record_loc:agz}{source_size,record_size:pos}{count:nat | count <= source_size}{at:nat | at + count <= record_size}{i:nat | i <= count} .<count - i>.
+  (source: !$A.arr(byte, source_loc, source_size), count: int count, record: !$A.arr(byte, record_loc, record_size), at: int at, i: int i): void =
+  if i >= count then ()
+  else let
+    val () = $A.set<byte>(record, at + i, $A.get<byte>(source, i))
+  in _bytes_put(source, count, record, at, i + 1) end
+
+(* The voices at record[at, at + _voices_size(choices)) *)
+fun _voices_write {count:nat}{l:agz}{record_size:pos}{at:nat} .<count>.
+  (choices: !voice_choices(count), record: !$A.arr(byte, l, record_size), record_size: int record_size, at: int at): void =
+  case+ choices of
+  | VoiceChoicesEnd() => ()
+  | VoiceChoice(code, code_len, name, name_len, rest) =>
+    if at + 2 + code_len + name_len > record_size then ()
+    else let
+      val () = $A.write_byte(record, at, code_len)
+      val () = _bytes_put(code, code_len, record, at + 1, 0)
+      val () = $A.write_byte(record, at + 1 + code_len, name_len)
+      val () = _bytes_put(name, name_len, record, at + 2 + code_len, 0)
+    in _voices_write(rest, record, record_size, at + 2 + code_len + name_len) end
+
+(* The voices stored at record[at, n), each checked here, once: a code
+   of 1 to 3 bytes and a name of 1 to 255; the reading stops at the
+   first that is not *)
+fun _voices_read {l:agz}{n:nat}{at:nat}{count:nat | count <= VOICES_MAX} .<max(n - at, 0)>.
+  (record: !$A.arr(byte, l, n), n: int n, at: int at, left: int, choices: voice_choices(count), count: int count)
+  : [read_count:nat | read_count <= VOICES_MAX] @(voice_choices(read_count), int read_count) =
+  if left <= 0 then @(choices, count)
+  else if count >= VOICES_MAX then @(choices, count)
+  else if at + 1 > n then @(choices, count)
+  else let
+    val code_len = $AR.low_byte(byte2int0($A.get<byte>(record, at)))
+  in
+    if code_len < 1 then @(choices, count)
+    else if code_len > 3 then @(choices, count)
+    else if at + 1 + code_len + 1 > n then @(choices, count)
+    else let
+      val name_len = $AR.low_byte(byte2int0($A.get<byte>(record, at + 1 + code_len)))
+    in
+      if name_len < 1 then @(choices, count)
+      else if at + 2 + code_len + name_len > n then @(choices, count)
+      else let
+        val code = $A.alloc<byte>(3)
+        fun copy_out {code_loc:agz}{size:pos}{from:nat}{count:nat | from + count <= n; count <= size}{i:nat | i <= count} .<count - i>.
+          (record: !$A.arr(byte, l, n), from: int from, out: !$A.arr(byte, code_loc, size), count: int count, i: int i): void =
+          if i >= count then ()
+          else let
+            val () = $A.set<byte>(out, i, $A.get<byte>(record, from + i))
+          in copy_out(record, from, out, count, i + 1) end
+        val () = copy_out(record, at + 1, code, code_len, 0)
+        val name = $A.alloc<byte>(name_len)
+        val () = copy_out(record, at + 2 + code_len, name, name_len, 0)
+      in _voices_read(record, n, at + 2 + code_len + name_len, left - 1, VoiceChoice(code, code_len, name, name_len, choices), count + 1) end
+    end
+  end
 
 #pub fn set_size_get (): set_size
 implement set_size_get () = (!_set).size
@@ -259,22 +513,8 @@ fn _apply_type (): void = let
 in ui_text_buf("style-type", buf, next) end
 
 (* Whether it is night by the local clock (22:00 to 07:00, iOS Night
-   Shift's default schedule): the page's script (pwa) marks the page
-   pwa-night then, which wasm has no clock of its own to tell (its time
-   is UTC) *)
-fn _night (): bool = let
-  val selector = $A.alloc<byte>(21)
-  val () = $A.write_text(selector, 0, $A.text_lit(".pwa-night #bats-root"), 21)
-  val @(selector_frozen, selector_bytes) = $A.freeze<byte>(selector)
-  val @(selector_text, selector_rest) = $A.borrow_split<byte>(selector_frozen, selector_bytes, 21)
-  val found = $DR.query_selector(selector_text, 21)
-  val selector_bytes = $A.borrow_join<byte>(selector_frozen, selector_text, selector_rest)
-  val () = release_bytes(selector_frozen, selector_bytes)
-in
-  case+ found of
-  | ~$R.none() => false
-  | ~$R.some(blob) => let val () = $BD.blob_free(blob) in true end
-end
+   Shift's default schedule), from the host's clock and time zone *)
+fn _night (): bool = local_night()
 
 (* The theme shown now: auto is Night at night (reading a bright screen
    at bedtime delays sleep: Chang et al., PNAS 2015), else Dark when the
@@ -366,11 +606,25 @@ in ui_text_buf("word-value", buf, next) end
 (* "S2", then size, line height, margin, font, theme, the library's
    sort order, align, hyphens, paragraph, letter and word spacing, dim
    images, tap zones, volume keys, readout, scrolled, columns and ruby,
-   a byte each. ("S1" was the first 8; a record of "S2" without the
-   last bytes has their defaults.) *)
+   a byte each; then the device's own: reading aloud's speed, the
+   brightness and the rotation lock, a byte each, and the voices kept
+   (their count, then each one's code and name, each after its length).
+   ("S1" was the first 8; a record of "S2" without the last bytes has
+   their defaults.) *)
 fn _save (sort: int): void = let
   val current = !_set
-  val record = $A.alloc<byte>(20)
+  val voices = _voices_take()
+  val+ @VoicesCell(choices, voice_count) = voices
+  val voices_size = _voices_size(choices)
+  val record_size = 24 + voices_size
+  val record = $A.alloc<byte>(record_size)
+  val () = _voices_write(choices, record, record_size, 24)
+  val () = $A.write_byte(record, 23, voice_count)
+  prval () = fold@(voices)
+  val () = _voices_put(voices)
+  val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
+  val () = $A.write_byte(record, 21, _brightness_code(!_brightness))
+  val () = $A.write_byte(record, 22, _rotation_code(!_rotation))
   val () = $A.write_byte(record, 0, 83)
   val () = $A.write_byte(record, 1, 50)
   val () = $A.write_byte(record, 2, current.size)
@@ -395,7 +649,7 @@ fn _save (sort: int): void = let
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("set"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-  val () = save_checked($IDB.idb_put(key_bytes, 3, record_bytes, 20))
+  val () = save_checked($IDB.idb_put(key_bytes, 3, record_bytes, record_size))
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(record_frozen, record_bytes) end
 
@@ -699,6 +953,16 @@ in
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 18))), 0, 2, 0) else 0) else 0): set_cols
         val ruby = (if n >= 20 then (if second_version then
           _in_range($AR.low_byte(byte2int0($A.get<byte>(record, 19))), 0, 1, 1) else 1) else 1): set_ruby
+        (* the device's own, after the settings *)
+        val () = !_speech_rate := (if n >= 21 then (if second_version then
+          _rate_of_code(byte2int0($A.get<byte>(record, 20))) else RateNormal()) else RateNormal())
+        val () = !_brightness := (if n >= 22 then (if second_version then
+          _brightness_of_code(byte2int0($A.get<byte>(record, 21))) else BrightnessSystem()) else BrightnessSystem())
+        val () = !_rotation := (if n >= 23 then (if second_version then
+          _rotation_of_code(byte2int0($A.get<byte>(record, 22))) else RotationFree()) else RotationFree())
+        val stored_voices = (if n >= 24 then (if second_version then byte2int0($A.get<byte>(record, 23)) else 0) else 0): int
+        val @(voices_read, voices_read_count) = _voices_read(record, n, 24, stored_voices, VoiceChoicesEnd(), 0)
+        val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font, theme = theme,
           align = align, hyphens = hyphens, paragraph_spacing = paragraph_spacing, letter_spacing = letter_spacing,

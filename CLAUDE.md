@@ -113,11 +113,16 @@ page's arena, or the one piece of an arena sized to it, so it has no
   (`catalogue_backup_json` in `src/catalogues.bats`);
 * the sync file: as it is read from the store, each chunk of the merge
   and the merge joined as it is written (`_out`, `_remote`, `_written`
-  in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`).
+  in `src/sync.bats`), refused over 16 MiB (`SYNC_MAX_BYTES`);
+* a chapter's text read aloud (its `script`, `reader_script_load` in
+  `src/reader.bats`), held while the chapter is read aloud; each
+  block's copy while it is cut into sentences; and each sentence's copy
+  while it is said (`script_text`).
 
-Each piece lives only while it is parsed or written: nothing is kept
-between page turns yet, since pages are CSS columns of the chapter's
-DOM.
+Each piece lives only while it is parsed or written, except the
+script read aloud, which outlives page turns (the arena it was lent from
+is released when it is given back, if the window has moved on): pages
+are CSS columns of the chapter's DOM.
 
 With `alloc`:
 
@@ -261,6 +266,83 @@ again.
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
+
+## The platform, in Bats
+
+What the browser and the Android app offer beyond the page (reading
+aloud, full screen, the rotation lock, the brightness, sharing,
+installing, keeping the storage, the local time, files opened with the
+app) is quire's own logic, on bridge's typed atoms (each with its
+`*_available`, and each JS answer decoded into a datatype that is
+matched exhaustively), not pwa's page scripts (bats-lang/pwa#49): no
+element carries a `data-pwa-*` marker and no rule keys on a `pwa-*`
+class, so pwa's scripts act on nothing of quire's. A control is shown
+only where its platform has it, by its own `data-hide`.
+
+* **Reading aloud** (`src/read_aloud.bats`): Read aloud (the bottom
+  bar) reads the chapter shown from the first sentence on the page
+  (halving the sentences by where each starts against the page:
+  `placement`, `Before | OnPage | After`, across as the book reads, down
+  when scrolled), Read from here from the sentence the selection starts
+  in. A chapter's sentences are its `script` (`src/reader.bats`): the
+  text of each block holding no other block (a paragraph, a heading, a
+  list item, a quotation, a term, a description, a caption, a cell,
+  preformatted text), a ruby's `rt`, `rtc` and `rp` left out but their
+  content nodes counted as render makes them (search and render's walk,
+  a third time), cut by bridge's `segment_sentences` in the book's
+  language; each sentence knows its text and where it is on the page
+  (content node and UTF-16 offset at each end). Each is said by
+  `speech_speak`, marked with `mark_range` as mark 5
+  (`::highlight(bats-mark-5)`, the search hit's proven pair), and when
+  the next one starts past the page the page is turned by
+  `reader_turn_on` (the next page button's turn, as a promise of
+  `turned`: `TurnedPage | TurnedChapter | NotTurned`), into the next
+  chapter too, at most 3 turns for one sentence; reading stops where
+  nothing turns. The state is one `aloud`: `Silent`, `Loading` (a
+  script being made), `Saying` (a sentence, its utterance's number),
+  `Turning` (a turn awaited, for a sentence or the chapter's end:
+  `turn_for`) or `Paused`; each run is numbered, so what an earlier
+  run started is dropped. A pause cancels what is said and says that
+  sentence again on resume, when it is still on the page shown (else
+  from the page's first): `speechSynthesis.pause()` stops for good on
+  Android's Chrome and after some 15 s on desktop Chrome. Read aloud is
+  pressed (`aria-pressed`) while it reads, and the screen kept awake
+  (`keep_awake`; the reader keeps it awake anyway). The speed
+  (`speech_rate`, 0.75 to 2 times) and the voice of each language (by
+  the language's primary subtag, the voices whose language has it)
+  are kept with the settings, outside the settings record (bytes 20
+  and 23 on of "S2", as `ruby` is), neither in the backup nor reset with
+  the settings: they are the device's. Going to the library, opening
+  another book, or the page going away (`pagehide`) stops reading.
+* **The screen** (`src/screen_controls.bats`, the typography panel's
+  Screen row): Full screen (`fullscreen_*`, pressed as
+  `listen_fullscreen` says), Lock rotation (`orientation_*`, a
+  `rotation` kept with the settings and locked again as the app
+  starts), and Brightness (`brightness_*`, the app only: a
+  `brightness_choice`, the system's or 10 to 100%, kept with the
+  settings and set again as the app starts).
+* **Sharing** (`src/sharing.bats`): the selection, quoted and cited
+  ("“…”\n— Author, Title"), by `share_text`; the annotations' Markdown
+  file (`annot_export` to `ToShare`) by `share_file` where files can be
+  shared (`share_as`: `AsFile | AsText`), else, or when the platform
+  refuses it as a file (`FilesNotShareable`), as its text.
+* **Installing and keeping the storage** (`src/platform.bats`): Install
+  Quire is shown while the browser offers to install the app
+  (`install_prompt_available`, `listen_install_prompt`) and asks for it
+  (`install_prompt`); the Home Screen hint shows on iOS Safari only
+  (`is_ios_browser`, `src/library.bats`). The storage is asked to be
+  kept (`storage_persist`) once, after the first book is imported, and
+  the library menu says whether it is (`storage_persisted` at startup).
+* **The local time** (`src/local_time.bats`): its offset from UTC
+  (`timezone_offset_minutes`) and whether it is night (22:00 to 07:00,
+  from `epoch_millis`), for the auto theme (checked at each page turn)
+  and the reading statistics' local day.
+* **Files opened with the app** (`launchQueue`, the share target, the
+  Android app's files) arrive on bridge's external-file path, which the
+  library imports (`OnExternalFiles`). Until pwa's own JS is gone
+  (bats-lang/pwa#49, step 3), its service worker's share-target handler
+  answers first and keeps a file shared with the installed web app
+  where only its page script looked for it.
 
 ## What the types guarantee about the interface
 
@@ -421,3 +503,6 @@ each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot
 (of 128) is the media query listener's (`ui_media_listener`), which
 shares the bridge's table, so no listener of the table can take it.
+The platform's typed listeners take their slots in the same table:
+full screen's (`RFullscreen`), speech's (`RSpeech`) and the install
+offer's (`RInstallOffer`), each given its event as bridge decodes it.

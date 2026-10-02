@@ -38,6 +38,7 @@ staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
+staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 
 fn _apply_diff_list(diffs: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
@@ -3290,5 +3291,606 @@ implement update_page_indicator() = _update_page_indicator()
 #pub fun num_id {prefix_len:pos | prefix_len <= 3}{number:nat}{width:int | width == 2 || width == 3}
   (id_prefix: string prefix_len, number: int number, width: int width): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len)
 implement num_id(id_prefix, number, width) = _number_id(id_prefix, number, width)
+
+
+(* ============================================================
+   Reading aloud: the page turned on, and a chapter's sentences
+   (read_aloud.bats reads them)
+   ============================================================ *)
+
+(* What a turn on did: the next page of the chapter shown, the next
+   chapter's first page shown, or nothing (the book's last page, or a
+   chapter that could not be shown) *)
+#pub datatype turned = TurnedPage | TurnedChapter | NotTurned
+
+(* The page turned on, as the next page button turns it (into the next
+   chapter too); the promise resolves once the page is shown *)
+#pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
+
+implement reader_turn_on () = let
+  val () = reader_stack_clear()
+  val () = !_settle_anchor := ~1
+in
+  case+ reading_get() of
+  | @(page, page_count, chapter, chapter_count) =>
+    if page + 1 < page_count then let
+      val () = _speed_turn()
+      val () = _show_page(page + 1, page_count, chapter, chapter_count)
+    in $P.ret<turned>(TurnedPage()) end
+    else if chapter < chapter_count then let
+      val () = _speed_turn()
+    in
+      $P.and_then<int><turned>(_goto(chapter, 0, ~1), lam(result) =>
+        if result >= 0 then $P.ret<turned>(TurnedChapter())
+        else let
+          (* as _jump_checked: the page that was shown, and the banner
+             says why *)
+          val () = (case+ reading_get() of
+            | @(page_now, page_count_now, chapter_now, chapter_count_now) =>
+              if chapter_now > 0 then _show_page(page_now, page_count_now, chapter_now, chapter_count_now) else ())
+          val () = notice_part_unread()
+        in $P.ret<turned>(NotTurned()) end)
+    end
+    else $P.ret<turned>(NotTurned())
+end
+
+(* Whether the chapter is scrolled down rather than paged across *)
+#pub fun reader_scrolls (): bool
+implement reader_scrolls () = _scrolled()
+
+(* The book's language tag (its OPF's dc:language) in tag[0, tag_len);
+   tag_len is 0 when it has none *)
+#pub fun reader_lang_tag (): [l:agz][tag_len:nat | tag_len <= 35] @($A.arr(byte, l, 36), int tag_len)
+
+implement reader_lang_tag () = let
+  val tag = $A.alloc<byte>(36)
+in
+  case+ _book_lang_take() of
+  | ~NoBookLang() => let
+      val () = _book_lang_put(NoBookLang())
+    in @(tag, 0) end
+  | ~BookLang(lang, lang_len) => let
+      fun copy {lang_loc,tag_loc:agz}{lang_len:nat | lang_len <= 35}{i:nat | i <= lang_len} .<lang_len - i>.
+        (lang: !$A.arr(byte, lang_loc, 35), tag: !$A.arr(byte, tag_loc, 36), lang_len: int lang_len, i: int i): void =
+        if i >= lang_len then ()
+        else let
+          val () = $A.set<byte>(tag, i, $A.get<byte>(lang, i))
+        in copy(lang, tag, lang_len, i + 1) end
+      val () = copy(lang, tag, lang_len, 0)
+      val () = _book_lang_put(BookLang(lang, lang_len))
+    in @(tag, lang_len) end
+end
+
+(* The elements read aloud a block at a time: a paragraph, a heading, a
+   list item, a quotation, a definition's term and description, a
+   figure's caption, a table's cell and preformatted text *)
+fn _block_tag {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): bool = let
+  fn is {pattern_len:pos} (data: !$A.borrow(byte, l, n), pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
+    xml_name_eq(data, name_offset, name_len, pattern, pattern_len)
+  var paragraph = @[char][1]('p')
+  var heading1 = @[char][2]('h', '1')
+  var heading2 = @[char][2]('h', '2')
+  var heading3 = @[char][2]('h', '3')
+  var heading4 = @[char][2]('h', '4')
+  var heading5 = @[char][2]('h', '5')
+  var heading6 = @[char][2]('h', '6')
+  var list_item = @[char][2]('l', 'i')
+  var blockquote = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var term = @[char][2]('d', 't')
+  var description = @[char][2]('d', 'd')
+  var figcaption = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var cell = @[char][2]('t', 'd')
+  var header_cell = @[char][2]('t', 'h')
+  var preformatted = @[char][3]('p', 'r', 'e')
+in
+  if is(data, paragraph, 1) then true
+  else if is(data, heading1, 2) then true else if is(data, heading2, 2) then true
+  else if is(data, heading3, 2) then true else if is(data, heading4, 2) then true
+  else if is(data, heading5, 2) then true else if is(data, heading6, 2) then true
+  else if is(data, list_item, 2) then true else if is(data, blockquote, 10) then true
+  else if is(data, term, 2) then true else if is(data, description, 2) then true
+  else if is(data, figcaption, 10) then true else if is(data, cell, 2) then true
+  else if is(data, header_cell, 2) then true
+  else is(data, preformatted, 3)
+end
+
+(* Whether nodes hold a block element *)
+fun _blocks_within {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => if _block_within(data, node) then true else _blocks_within(data, rest)
+  | $X.xml_nodes_nil() => false
+
+and _block_within {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): bool =
+  case+ node of
+  | $X.xml_text(_, _) => false
+  | $X.xml_element(name_offset, name_len, _, children) =>
+    if _block_tag(data, name_offset, name_len) then true else _blocks_within(data, children)
+
+(* The text read aloud, as the chapter's XHTML of n bytes has it: each
+   text content node's text data[offset, offset + length) (not yet
+   decoded), with its block's number and its content node's *)
+datavtype text_runs(n:int, int) =
+  | TextRunsEnd(n, 0) of ()
+  | {count:nat}{offset,length:nat | offset + length <= n; length < 65536}
+    TextRun(n, count + 1) of (Nat, Nat, int offset, int length, text_runs(n, count))
+
+fun _text_runs_free {n:int}{count:nat} .<count>. (runs: text_runs(n, count)): void =
+  case+ runs of
+  | ~TextRunsEnd() => ()
+  | ~TextRun(_, _, _, _, rest) => _text_runs_free(rest)
+
+fun _text_runs_reverse {n:int}{count,reversed_count:nat} .<count>.
+  (runs: text_runs(n, count), reversed: text_runs(n, reversed_count)): text_runs(n, count + reversed_count) =
+  case+ runs of
+  | ~TextRunsEnd() => reversed
+  | ~TextRun(block, node, offset, length, rest) => _text_runs_reverse(rest, TextRun(block, node, offset, length, reversed))
+
+(* The pieces of text data[offset, offset + text_len), as _text_spans
+   makes them, from a content node on: as runs of block, and the next
+   node's number *)
+fun _runs_text {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{count:nat} .<text_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, block: Nat, node: Nat, found: text_runs(n, count))
+  : [new_count:nat] @(Nat, text_runs(n, new_count)) =
+  if text_len < 65536 then @(node + 1, TextRun(block, node, offset, text_len, found))
+  else let
+    val cut = _text_cut(data, offset, text_len)
+  in _runs_text(data, offset + cut, text_len - cut, block, node + 1, TextRun(block, node, offset, cut, found)) end
+
+(* A chapter's text read aloud: its nodes walked as _render_nodes shows
+   them, numbering the content nodes the same way (as search does: the
+   three must stay in step). A block element holding no other block
+   starts a block (its number is blocks); text outside such a block is
+   not read, nor a ruby's readings and parentheses (rt, rtc, rp), whose
+   nodes are counted all the same. The next content node's number, the
+   blocks' count, and the runs found (the latest first) *)
+fun _runs_nodes {l:agz}{n:pos}{tree_size:nat}{count:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), top: bool, readable: bool,
+   block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
+  : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(next_node, next_blocks, found_after) = _runs_node(data, node, top, readable, block, blocks, content_node, found)
+    in _runs_nodes(data, rest, top, readable, block, next_blocks, next_node, found_after) end
+  | $X.xml_nodes_nil() => @(content_node, blocks, found)
+
+and _runs_node {l:agz}{n:pos}{tree_size:pos}{count:nat} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), top: bool, readable: bool,
+   block: Int, blocks: Nat, content_node: Nat, found: text_runs(n, count))
+  : [new_count:nat] @(Nat, Nat, text_runs(n, new_count)) =
+  case+ node of
+  | $X.xml_text(offset, text_len) =>
+    if (if top then _blank(data, offset, text_len, 0) else false) then @(_skip_count(text_len, content_node), blocks, found)
+    else if (if readable then block >= 0 else false) then let
+      val @(next_node, found_after) = _runs_text(data, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
+    in @(next_node, blocks, found_after) end
+    else @(_text_count(data, offset, text_len, content_node), blocks, found)
+  | $X.xml_element(name_offset, name_len, _, children) => let
+    var _tag_head = @[char][4]('h', 'e', 'a', 'd')
+    var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
+    var _tag_meta = @[char][4]('m', 'e', 't', 'a')
+    var _tag_link = @[char][4]('l', 'i', 'n', 'k')
+    var _tag_style = @[char][5]('s', 't', 'y', 'l', 'e')
+    var _tag_script = @[char][6]('s', 'c', 'r', 'i', 'p', 't')
+    var _tag_html = @[char][4]('h', 't', 'm', 'l')
+    var _tag_body = @[char][4]('b', 'o', 'd', 'y')
+    var _tag_br = @[char][2]('b', 'r')
+    var _tag_hr = @[char][2]('h', 'r')
+    var _tag_img = @[char][3]('i', 'm', 'g')
+    var _tag_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+    var _tag_ruby_text = @[char][2]('r', 't')
+    var _tag_ruby_text_container = @[char][3]('r', 't', 'c')
+    var _tag_ruby_parenthesis = @[char][2]('r', 'p')
+    (* a ruby's readings and parentheses are not read (only its base
+       is), but their nodes are counted as render makes them *)
+    val annotation = (if xml_name_eq(data, name_offset, name_len, _tag_ruby_text, 2) then true
+      else if xml_name_eq(data, name_offset, name_len, _tag_ruby_text_container, 3) then true
+      else xml_name_eq(data, name_offset, name_len, _tag_ruby_parenthesis, 2)): bool
+  in
+    if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_title, 5) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_meta, 4) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_link, 4) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_style, 5) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_script, 6) then @(content_node, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_html, 4) then
+      _runs_nodes(data, children, top, readable, block, blocks, content_node, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
+      _runs_nodes(data, children, top, readable, block, blocks, content_node, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then @(content_node + 1, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then @(content_node + 1, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, blocks, found)
+    else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then @(content_node + 1, blocks, found)
+    else let
+      (* a block holding no other block starts one of its own *)
+      val starts = (if block >= 0 then false
+        else if _block_tag(data, name_offset, name_len) then ~_blocks_within(data, children)
+        else false): bool
+      val inner_block = (if starts then (blocks: Int) else block): Int
+      val inner_blocks = (if starts then blocks + 1 else blocks): Nat
+    in _runs_nodes(data, children, false, (if annotation then false else readable), inner_block, inner_blocks, content_node + 1, found) end
+  end
+
+(* The runs' text placed in the script's text of size bytes: each run's
+   block, content node, and where its decoded text is,
+   [start, start + length) *)
+datavtype placed_runs(size:int, int) =
+  | PlacedEnd(size, 0) of ()
+  | {count:nat}{start,length:nat | start + length <= size; length > 0}
+    PlacedRun(size, count + 1) of (Nat, Nat, int start, int length, placed_runs(size, count))
+
+fun _placed_free {size:int}{count:nat} .<count>. (runs: placed_runs(size, count)): void =
+  case+ runs of
+  | ~PlacedEnd() => ()
+  | ~PlacedRun(_, _, _, _, rest) => _placed_free(rest)
+
+fun _placed_reverse {size:int}{count,reversed_count:nat} .<count>.
+  (runs: placed_runs(size, count), reversed: placed_runs(size, reversed_count)): placed_runs(size, count + reversed_count) =
+  case+ runs of
+  | ~PlacedEnd() => reversed
+  | ~PlacedRun(block, node, start, length, rest) => _placed_reverse(rest, PlacedRun(block, node, start, length, reversed))
+
+(* The bytes of the runs' text, before it is decoded (at least what it
+   takes decoded) *)
+fun _runs_total {n:int}{count:nat} .<count>. (runs: !text_runs(n, count), total: Nat): Nat =
+  case+ runs of
+  | TextRunsEnd() => total
+  | TextRun(_, _, _, length, rest) => _runs_total(rest, total + length)
+
+(* source[0, count) at target[at, at + count) *)
+fun _bytes_into {source_loc,target_loc:agz}{owner:addr}{source_size,target_size:nat}{count:nat | count <= source_size}{at:nat | at + count <= target_size}{i:nat | i <= count} .<count - i>.
+  (source: !$A.arr(byte, source_loc, source_size), count: int count, target: !$A.arrx(byte, target_loc, target_size, owner), at: int at, i: int i): void =
+  if i >= count then ()
+  else let
+    val () = $A.set<byte>(target, at + i, $A.get<byte>(source, i))
+  in _bytes_into(source, count, target, at, i + 1) end
+
+(* Each run's text decoded into text[at, size), in order: where each
+   went (the latest first) *)
+fun _runs_write {l,text_loc:agz}{owner:addr}{n,size:pos}{count,placed_count:nat}{at:nat | at <= size} .<count>.
+  (data: !$A.borrow(byte, l, n), runs: text_runs(n, count), text: !$A.arrx(byte, text_loc, size, owner), size: int size, at: int at, placed: placed_runs(size, placed_count))
+  : [new_count:nat] placed_runs(size, new_count) =
+  case+ runs of
+  | ~TextRunsEnd() => placed
+  | ~TextRun(block, node, offset, length, rest) =>
+    if length <= 0 then _runs_write(data, rest, text, size, at, placed)
+    else let
+      val decoded = $A.alloc<byte>(length)
+      val decoded_len = decode_text(data, offset, length, decoded)
+    in
+      if decoded_len <= 0 then let
+        val () = $A.free<byte>(decoded)
+      in _runs_write(data, rest, text, size, at, placed) end
+      else if at + decoded_len > size then let
+        val () = $A.free<byte>(decoded)
+        val () = _text_runs_free(rest)
+      in placed end
+      else let
+        val () = _bytes_into(decoded, decoded_len, text, at, 0)
+        val () = $A.free<byte>(decoded)
+      in _runs_write(data, rest, text, size, at + decoded_len, PlacedRun(block, node, at, decoded_len, placed)) end
+    end
+
+(* The runs of block at the head of runs (in order), and those after *)
+fun _block_split {size:int}{count:nat} .<count>. (runs: placed_runs(size, count), block: Nat)
+  : [taken,left:nat | taken + left == count] @(placed_runs(size, taken), placed_runs(size, left)) =
+  case+ runs of
+  | ~PlacedEnd() => @(PlacedEnd(), PlacedEnd())
+  | ~PlacedRun(run_block, node, start, length, rest) =>
+    if run_block <> block then @(PlacedEnd(), PlacedRun(run_block, node, start, length, rest))
+    else let
+      val @(taken, left) = _block_split(rest, block)
+    in @(PlacedRun(run_block, node, start, length, taken), left) end
+
+(* Where the last of the runs ends, at least at *)
+fun _runs_end {size:int}{count:nat}{at:nat | at <= size} .<count>. (runs: !placed_runs(size, count), at: int at): [end_at:nat | at <= end_at; end_at <= size] int end_at =
+  case+ runs of
+  | PlacedEnd() => at
+  | PlacedRun(_, _, start, length, rest) =>
+    if start + length >= at then _runs_end(rest, start + length) else _runs_end(rest, at)
+
+(* The UTF-16 units of text[from, until), as the page counts a text
+   node's offsets: one for each character, two for one past U+FFFF (a
+   4-byte character) *)
+fun _utf16_units {l:agz}{owner:addr}{size:nat}{from,until:nat | from <= until; until <= size} .<until - from>.
+  (text: !$A.arrx(byte, l, size, owner), from: int from, until: int until, units: Nat): Nat =
+  if from >= until then units
+  else let
+    val code = byte2int0($A.get<byte>(text, from))
+    val more = (if code >= 240 then 2 else if $AR.band_int_int(code, 192) = 128 then 0 else 1): Nat
+  in _utf16_units(text, from + 1, until, units + more) end
+
+(* The content node and offset where text[at] is: in the run that holds
+   it; -1 when none does *)
+fun _point_from {l:agz}{owner:addr}{size:int}{count:nat} .<count>.
+  (runs: !placed_runs(size, count), text: !$A.arrx(byte, l, size, owner), at: Int): @(Int, Int) =
+  case+ runs of
+  | PlacedEnd() => @(~1, 0)
+  | PlacedRun(_, node, start, length, rest) =>
+    if at < start then _point_from(rest, text, at)
+    else if at >= start + length then _point_from(rest, text, at)
+    else @(node, _utf16_units(text, start, at, 0))
+
+(* The content node and offset where text[.., at) ends: in the run whose
+   text it ends in; -1 when none *)
+fun _point_until {l:agz}{owner:addr}{size:int}{count:nat} .<count>.
+  (runs: !placed_runs(size, count), text: !$A.arrx(byte, l, size, owner), at: Int): @(Int, Int) =
+  case+ runs of
+  | PlacedEnd() => @(~1, 0)
+  | PlacedRun(_, node, start, length, rest) =>
+    if at <= start then _point_until(rest, text, at)
+    else if at > start + length then _point_until(rest, text, at)
+    else @(node, _utf16_units(text, start, at, 0))
+
+(* A chapter's sentences, each its text in the script's text of size
+   bytes, [start, start + length), and where it is on the page: from
+   offset start_offset (UTF-16 units) of content node start_node to
+   end_offset of end_node *)
+#pub datavtype sentences_of(size:int, int) =
+  | SentencesNone(size, 0) of ()
+  | {count:nat}{start,length:nat | start + length <= size; length > 0}
+    SentenceOf(size, count + 1) of (int start, int length, Int, Int, Int, Int, sentences_of(size, count))
+
+fun _sentences_of_free {size:int}{count:nat} .<count>. (sentences: sentences_of(size, count)): void =
+  case+ sentences of
+  | ~SentencesNone() => ()
+  | ~SentenceOf(_, _, _, _, _, _, rest) => _sentences_of_free(rest)
+
+fun _sentences_of_reverse {size:int}{count,reversed_count:nat} .<count>.
+  (sentences: sentences_of(size, count), reversed: sentences_of(size, reversed_count)): sentences_of(size, count + reversed_count) =
+  case+ sentences of
+  | ~SentencesNone() => reversed
+  | ~SentenceOf(start, length, start_node, start_offset, end_node, end_offset, rest) =>
+    _sentences_of_reverse(rest, SentenceOf(start, length, start_node, start_offset, end_node, end_offset, reversed))
+
+(* Whether a byte is white space *)
+fn _white (code: int): bool = if code = 32 then true else if code = 9 then true else if code = 10 then true else code = 13
+
+fun _skip_white {l:agz}{owner:addr}{size:nat}{at,until:nat | at <= until; until <= size} .<until - at>.
+  (text: !$A.arrx(byte, l, size, owner), at: int at, until: int until): [first:nat | at <= first; first <= until] int first =
+  if at >= until then until
+  else if _white(byte2int0($A.get<byte>(text, at))) then _skip_white(text, at + 1, until)
+  else at
+
+fun _trim_white {l:agz}{owner:addr}{size:nat}{low,until:nat | low <= until; until <= size} .<until - low>.
+  (text: !$A.arrx(byte, l, size, owner), low: int low, until: int until): [last:nat | low <= last; last <= until] int last =
+  if until <= low then low
+  else if _white(byte2int0($A.get<byte>(text, until - 1))) then _trim_white(text, low, until - 1)
+  else until
+
+(* The sentence text[from, until) of a block whose runs are runs, its
+   white space at either end left out, added to found (when it says
+   anything) *)
+fn _sentence_add {l:agz}{owner:addr}{size:nat}{runs_count,count:nat}
+  (runs: !placed_runs(size, runs_count), text: !$A.arrx(byte, l, size, owner), size: int size, from: Int, until: Int,
+   found: sentences_of(size, count), count: int count)
+  : [new_count:nat] @(sentences_of(size, new_count), int new_count) =
+  if from < 0 then @(found, count)
+  else if until > size then @(found, count)
+  else if from >= until then @(found, count)
+  else let
+    val first = _skip_white(text, from, until)
+    val last = _trim_white(text, first, until)
+  in
+    if first >= last then @(found, count)
+    else let
+      val @(start_node, start_offset) = _point_from(runs, text, first)
+      val @(end_node, end_offset) = _point_until(runs, text, last)
+    in
+      if start_node < 0 then @(found, count)
+      else if end_node < 0 then @(found, count)
+      else @(SentenceOf(first, last - first, start_node, start_offset, end_node, end_offset, found), count + 1)
+    end
+  end
+
+(* The sentences segment_sentences found in a block's text, which is
+   text[block_start, block_start + block_len), added to found *)
+fun _starts_add {l:agz}{owner:addr}{size:nat}{runs_count,count:nat}{block_len:pos}{first:nat | first <= block_len}{block_start:nat} .<block_len - first>.
+  (starts: $SP.sentences(block_len, first), block_len: int block_len, block_start: int block_start,
+   runs: !placed_runs(size, runs_count), text: !$A.arrx(byte, l, size, owner), size: int size,
+   found: sentences_of(size, count), count: int count)
+  : [new_count:nat] @(sentences_of(size, new_count), int new_count) =
+  case+ starts of
+  | ~$SP.SentencesEnd() => @(found, count)
+  | ~$SP.Sentence(start, rest) => let
+      val next = (case+ rest of
+        | $SP.SentencesEnd() => block_len
+        | $SP.Sentence(next_start, _) => next_start): Int
+      val @(found_after, count_after) = _sentence_add(runs, text, size, block_start + start, block_start + next, found, count)
+    in _starts_add(rest, block_len, block_start, runs, text, size, found_after, count_after) end
+
+(* text[from, from + count) into copy *)
+fun _bytes_out {l,copy_loc:agz}{owner,copy_owner:addr}{size,copy_size:nat}{from,count:nat | from + count <= size; count <= copy_size}{i:nat | i <= count} .<count - i>.
+  (text: !$A.arrx(byte, l, size, owner), from: int from, count: int count, copy: !$A.arrx(byte, copy_loc, copy_size, copy_owner), i: int i): void =
+  if i >= count then ()
+  else let
+    val () = $A.set<byte>(copy, i, $A.get<byte>(text, from + i))
+  in _bytes_out(text, from, count, copy, i + 1) end
+
+(* A block's sentences (its runs are runs, in order), in the book's
+   language lang[0, lang_len), added to found: as segment_sentences
+   finds them, or the block whole when it cannot *)
+fn _block_sentences {l,lang_loc:agz}{owner:addr}{size:nat}{runs_count:pos}{count:nat}{lang_len:nat | lang_len <= 36}
+  (runs: !placed_runs(size, runs_count), text: !$A.arrx(byte, l, size, owner), size: int size,
+   lang: !$A.borrow(byte, lang_loc, 36), lang_len: int lang_len,
+   found: sentences_of(size, count), count: int count)
+  : [new_count:nat] @(sentences_of(size, new_count), int new_count) = let
+  val block_start = (case+ runs of PlacedRun(_, _, start, _, _) => start | PlacedEnd() => 0): [start:nat | start <= size] int start
+  val block_end = _runs_end(runs, block_start)
+  val block_len = block_end - block_start
+in
+  if block_len <= 0 then @(found, count)
+  else if block_len > 268435456 then @(found, count)
+  else case+ piece_new(block_len) of
+  | ~NoPiece() => @(found, count)
+  | ~Piece(copy_owner, copy) => let
+      val () = _bytes_out(text, block_start, block_len, copy, 0)
+      val @(copy_frozen, copy_bytes) = $A.freeze<byte>(copy)
+      val segmented = $SP.segment_sentences(copy_bytes, block_len, lang, lang_len)
+      val () = $A.drop<byte>(copy_frozen, copy_bytes)
+      val () = piece_free(copy_owner, $A.thaw<byte>(copy_frozen))
+    in
+      case+ segmented of
+      | ~$R.some(starts) => _starts_add(starts, block_len, block_start, runs, text, size, found, count)
+      | ~$R.none() => _sentence_add(runs, text, size, block_start, block_end, found, count)
+    end
+end
+
+(* Every block's sentences, the blocks' runs being runs (in order),
+   added to found *)
+fun _blocks_sentences {l,lang_loc:agz}{owner:addr}{size:nat}{runs_count,count:nat}{lang_len:nat | lang_len <= 36} .<runs_count>.
+  (runs: placed_runs(size, runs_count), text: !$A.arrx(byte, l, size, owner), size: int size,
+   lang: !$A.borrow(byte, lang_loc, 36), lang_len: int lang_len,
+   found: sentences_of(size, count), count: int count)
+  : [new_count:nat] @(sentences_of(size, new_count), int new_count) =
+  case+ runs of
+  | ~PlacedEnd() => @(found, count)
+  | ~PlacedRun(block, node, start, length, rest) => let
+      val @(same, others) = _block_split(rest, block)
+      val this_block = PlacedRun(block, node, start, length, same)
+      val @(found_after, count_after) = _block_sentences(this_block, text, size, lang, lang_len, found, count)
+      val () = _placed_free(this_block)
+    in _blocks_sentences(others, text, size, lang, lang_len, found_after, count_after) end
+
+(* A chapter's sentences, read aloud one after another: its text read
+   aloud (the text of its blocks, decoded, a piece of book content held
+   while it is read), its sentences, how many, and the chapter's index
+   (from 0); none when it has nothing to read *)
+#pub datavtype script =
+  | {arena_loc,piece_loc:agz}{size:pos}{count:pos}
+    Script of (piece_owner(size, arena_loc), $A.arrx(byte, piece_loc, size, arena_loc), sentences_of(size, count), int count, Nat)
+  | NoScript of ()
+
+#pub fun script_free (script: script): void
+implement script_free (script) =
+  case+ script of
+  | ~NoScript() => ()
+  | ~Script(owner, text, sentences, _, _) => let
+      val () = _sentences_of_free(sentences)
+    in piece_free(owner, text) end
+
+(* The script of the chapter data[0, n), whose nodes are nodes, of
+   index chapter *)
+fn _script_make {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
+  val @(_, _, found) = _runs_nodes(data, nodes, true, true, ~1, 0, 0, TextRunsEnd())
+  val runs = _text_runs_reverse(found, TextRunsEnd())
+  val total = _runs_total(runs, 0)
+in
+  if total <= 0 then let val () = _text_runs_free(runs) in NoScript() end
+  else if total > 268435456 then let val () = _text_runs_free(runs) in NoScript() end
+  else case+ piece_new(total) of
+  | ~NoPiece() => let val () = _text_runs_free(runs) in NoScript() end
+  | ~Piece(owner, text) => let
+      val placed = _placed_reverse(_runs_write(data, runs, text, total, 0, PlacedEnd()), PlacedEnd())
+      val @(lang, lang_len) = reader_lang_tag()
+      val @(lang_frozen, lang_bytes) = $A.freeze<byte>(lang)
+      val @(found_sentences, count) = _blocks_sentences(placed, text, total, lang_bytes, lang_len, SentencesNone(), 0)
+      val () = release_bytes(lang_frozen, lang_bytes)
+      val sentences = _sentences_of_reverse(found_sentences, SentencesNone())
+    in
+      if count <= 0 then let
+        val () = _sentences_of_free(sentences)
+        val () = piece_free(owner, text)
+      in NoScript() end
+      else Script(owner, text, sentences, count, chapter)
+    end
+end
+
+(* Reads chapter chapter (from 0) of the open book, and makes its
+   script; done is given it (none when the chapter cannot be read) *)
+#pub fun reader_script_load {chapter:nat} (chapter: int chapter, done: (script) -<cloref1> void): void
+
+implement reader_script_load (chapter, done) = let
+  val serial = book_serial()
+in
+  case+ book_chapter_get(serial, chapter) of
+  | ~ChaptersUnknown() => done(NoScript())
+  | ~ChapterNone(_) => done(NoScript())
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _) =>
+    (case+ piece_new(compressed_size) of
+     | ~NoPiece() => done(NoScript())
+     | ~Piece(compressed_owner, compressed) => let
+         val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+         val decompressing = decompress(compressed_bytes, compressed_size, method)
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+       in
+         $P.finish<Int>($P.vow(decompressing), lam(handle) =>
+           case+ take_content(handle) of
+           | ~NoContentBytes() => done(NoScript())
+           | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
+               val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+               val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+               val script = _script_make(xhtml_bytes, nodes, chapter)
+               val () = $X.free_nodes(nodes)
+               val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+               val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
+             in done(script) end)
+       end)
+end
+
+(* Sentence index of a script: where it is on the page, @(start node,
+   start offset, end node, end offset); a start node of -1 when there is
+   no such sentence *)
+fun _sentence_place {size:int}{count:nat} .<count>. (sentences: !sentences_of(size, count), index: int): @(Int, Int, Int, Int) =
+  case+ sentences of
+  | SentencesNone() => @(~1, 0, ~1, 0)
+  | SentenceOf(_, _, start_node, start_offset, end_node, end_offset, rest) =>
+    if index <= 0 then @(start_node, start_offset, end_node, end_offset)
+    else _sentence_place(rest, index - 1)
+
+#pub fun script_place (script: !script, index: int): @(Int, Int, Int, Int)
+implement script_place (script, index) =
+  case+ script of
+  | NoScript() => @(~1, 0, ~1, 0)
+  | Script(_, _, sentences, _, _) => _sentence_place(sentences, index)
+
+(* How many sentences a script has, and its chapter's index; -1 for none *)
+#pub fun script_count (script: !script): Nat
+implement script_count (script) =
+  case+ script of
+  | NoScript() => 0
+  | Script(_, _, _, count, _) => count
+
+#pub fun script_chapter (script: !script): Int
+implement script_chapter (script) =
+  case+ script of
+  | NoScript() => ~1
+  | Script(_, _, _, _, chapter) => chapter
+
+(* Where sentence index's text is in the script's text, and how long *)
+fun _sentence_span {size:nat}{count:nat} .<count>. (sentences: !sentences_of(size, count), index: int)
+  : [start,length:nat | start + length <= size] @(int start, int length) =
+  case+ sentences of
+  | SentencesNone() => @(0, 0)
+  | SentenceOf(start, length, _, _, _, _, rest) =>
+    if index <= 0 then @(start, length) else _sentence_span(rest, index - 1)
+
+(* Sentence index's text, in a piece of its own (book content), and its
+   length; none when there is no such sentence or no memory for it *)
+#pub datavtype sentence_text =
+  | {arena_loc,piece_loc:agz}{length:pos}
+    SentenceText of (piece_owner(length, arena_loc), $A.arrx(byte, piece_loc, length, arena_loc), int length)
+  | NoSentenceText of ()
+
+#pub fun script_text (script: !script, index: int): sentence_text
+implement script_text (script, index) =
+  case+ script of
+  | NoScript() => NoSentenceText()
+  | Script(_, text, sentences, _, _) => let
+      val @(start, length) = _sentence_span(sentences, index)
+    in
+      if length <= 0 then NoSentenceText()
+      else if length > 268435456 then NoSentenceText()
+      else case+ piece_new(length) of
+      | ~NoPiece() => NoSentenceText()
+      | ~Piece(copy_owner, copy) => let
+          val () = _bytes_out(text, start, length, copy, 0)
+        in SentenceText(copy_owner, copy, length) end
+    end
 
 end (* #target wasm *)
