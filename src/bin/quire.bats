@@ -612,7 +612,7 @@ fn _info_open {book:int} (book: int book): void =
         else ())
       val () = ui_show("info-speed-row", minutes_read > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", book_numbers.shelf)
-      val () = ui_attr("book-info-cover", ASrc, "data:,")
+      val () = ui_src_empty("book-info-cover")
       val () = (if book_numbers.cover > 0 then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
       (* a book without a cover shows none, not a broken image *)
       val () = ui_show("book-info-cover", book_numbers.cover > 0)

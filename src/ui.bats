@@ -129,8 +129,8 @@ end
    Elements
    ============================================================ *)
 
-fn _add_in_document {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{tag_len:pos | tag_len < 256}
-  (parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len, id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, tag: string tag_len): void = let
+fn _add_in_document {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len, id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, tag: $D.tag): void = let
   val document = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, tag)
 in $D.destroy(document) end
@@ -141,12 +141,13 @@ in $D.destroy(document) end
    name, so no control can be made without one *)
 #pub datatype tag = TDiv | TSpan | TH1 | TB | TStyle
 
-fn _tag_name (element_tag: tag): [name_len:pos | name_len < 256] string name_len =
+fn _tag_name (element_tag: tag): $D.tag =
   case+ element_tag of
-  | TDiv() => "div" | TSpan() => "span" | TH1() => "h1" | TB() => "b" | TStyle() => "style"
+  | TDiv() => $D.Div() | TSpan() => $D.Span() | TH1() => $D.H1() | TB() => $D.B()
+  | TStyle() => $D.Stylesheet($D.AppStylesheet())
 
-fn _add_element {parent_len,id_len:pos | parent_len < 256; id_len < 256}{tag_len:pos | tag_len < 256}
-  (parent: string parent_len, id: string id_len, tag: string tag_len): void = let
+fn _add_element {parent_len,id_len:pos | parent_len < 256; id_len < 256}
+  (parent: string parent_len, id: string id_len, tag: $D.tag): void = let
   val parent_len = _length(parent) and id_len = _length(id)
   val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
@@ -201,8 +202,8 @@ in release_bytes(id_frozen, id_bytes) end
    Attributes
    ============================================================ *)
 
-fn _set_attr_bytes {id_loc,value_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos}{offset,length:nat | offset + length <= value_len; length < 65536}
-  (id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len,
+fn _set_attr_bytes {id_loc,value_loc:agz}{id_len:pos | id_len < 256}{value_len:pos}{offset,length:nat | offset + length <= value_len; length < 65536}
+  (id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: $D.attribute,
    value_bytes: !$A.borrow(byte, value_loc, value_len), offset: int offset, length: int length): void = let
   val document = $D.open_document($A.text_lit("bats-root"), 9)
   val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, offset, length)
@@ -212,8 +213,8 @@ in $D.destroy(document) end
    name an element (aria-label, aria-labelledby, alt, placeholder) or
    give it a role are not among the ones ui_attr sets: only the
    constructors set them *)
-fn _set_attr {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
-  (id: string id_len, name: string name_len, value: string value_len): void = let
+fn _set_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
+  (id: string id_len, name: $D.attribute, value: string value_len): void = let
   val id_len = _length(id) and value_len = _length(value)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
@@ -221,8 +222,8 @@ fn _set_attr {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_le
   val () = release_bytes(value_frozen, value_bytes)
 in release_bytes(id_frozen, id_bytes) end
 
-fn _set_attr_n {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
-  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: string value_len): void = let
+fn _set_attr_n {id_loc:agz}{id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: $D.attribute, value: string value_len): void = let
   val value_len = _length(value)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
@@ -231,8 +232,8 @@ fn _set_attr_n {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len <
   val () = release_bytes(id_frozen, id_bytes)
 in end
 
-fn _set_attr_buf {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
-  (id: string id_len, name: string name_len, value: $A.arr(byte, l, n), value_len: int value_len): void = let
+fn _set_attr_buf {id_len:pos | id_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
+  (id: string id_len, name: $D.attribute, value: $A.arr(byte, l, n), value_len: int value_len): void = let
   val id_len = _length(id)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
@@ -240,8 +241,8 @@ fn _set_attr_buf {id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{l:ag
   val () = release_bytes(value_frozen, value_bytes)
 in release_bytes(id_frozen, id_bytes) end
 
-fn _set_attr_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_loc:agz}{value_size:pos}{value_len:pos | value_len <= value_size; value_len < 65536}
-  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: $A.arr(byte, value_loc, value_size), value_len: int value_len): void = let
+fn _set_attr_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{value_loc:agz}{value_size:pos}{value_len:pos | value_len <= value_size; value_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: $D.attribute, value: $A.arr(byte, value_loc, value_size), value_len: int value_len): void = let
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val () = _set_attr_bytes(id_bytes, id_len, name, value_bytes, 0, value_len)
@@ -249,11 +250,49 @@ fn _set_attr_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_l
   val () = release_bytes(id_frozen, id_bytes)
 in end
 
+(* URL attribute name of element id: value[0, value_len), which dom's
+   set_url sets only when it is a URL that runs no script (the callers
+   check for more: an https or http address) *)
+fn _set_url_bytes {id_loc,value_loc:agz}{id_len:pos | id_len < 256}{value_len:pos}{length:nat | length <= value_len; length < 65536}
+  (id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: $D.url_attribute,
+   value_bytes: !$A.borrow(byte, value_loc, value_len), length: int length): void = let
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val _ = $D.set_url(document, id_bytes, id_len, name, value_bytes, 0, length)
+in $D.destroy(document) end
+
+fn _set_url_buf {id_len:pos | id_len < 256}{l:agz}{n:pos}{value_len:pos | value_len <= n; value_len < 65536}
+  (id: string id_len, name: $D.url_attribute, value: $A.arr(byte, l, n), value_len: int value_len): void = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val () = _set_url_bytes(id_bytes, id_len, name, value_bytes, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+fn _set_url_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{value_loc:agz}{value_size:pos}{value_len:pos | value_len <= value_size; value_len < 65536}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, name: $D.url_attribute, value: $A.arr(byte, value_loc, value_size), value_len: int value_len): void = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
+  val () = _set_url_bytes(id_bytes, id_len, name, value_bytes, value_len)
+  val () = release_bytes(value_frozen, value_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* The source of image id emptied: "data:,", an empty text, so it shows
+   nothing until it is given one *)
+#pub fn ui_src_empty {id_len:pos | id_len < 256} (id: string id_len): void
+implement ui_src_empty (id) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.set_url_literal(document, id_bytes, id_len, $D.Src, $D.EmptyData)
+  val () = $D.destroy(document)
+in release_bytes(id_frozen, id_bytes) end
+
 (* The attributes other code may set. There is no style: the one inline
    style is a place (ui_place), so nothing can set a colour, a size or
    anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
-  | ATabindex | ASrc | AValueNow | ACurrent | AGestureRegion | AHidden
+  | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden
   | APwaInstall   (* a click on it asks the browser to install the app (the page's script) *)
   (* reading aloud, by the page's script: a click on APwaSpeak reads the
      element it names from its page, or pauses; on APwaSpeakSelection,
@@ -268,20 +307,20 @@ in end
      system opens with the app, or shares with it, are dropped *)
   | APwaFullscreen | APwaOrientationLock | APwaBrightness | APwaFileDrop
 
-fn _attr_name (attribute: attr): [name_len:pos | name_len < 256] string name_len =
+fn _attr_name (attribute: attr): $D.attribute =
   case+ attribute of
-  | AClass() => "class" | ASelected() => "aria-selected" | APressed() => "aria-pressed"
-  | AValue() => "value" | AControls() => "aria-controls"
-  | ATabindex() => "tabindex" | ASrc() => "src" | AValueNow() => "aria-valuenow"
-  | ACurrent() => "aria-current" | AGestureRegion() => "data-gesture-region"
-  | AHidden() => "aria-hidden" | APwaInstall() => "data-pwa-install"
-  | APwaSpeak() => "data-pwa-speak" | APwaSpeakSelection() => "data-pwa-speak-selection"
-  | APwaSpeechNext() => "data-pwa-speech-next" | APwaSpeechRate() => "data-pwa-speech-rate"
-  | APwaSpeechVoice() => "data-pwa-speech-voice"
-  | APwaShareSelection() => "data-pwa-share-selection" | APwaShareFile() => "data-pwa-share-file"
-  | APwaShareName() => "data-pwa-share-name"
-  | APwaFullscreen() => "data-pwa-fullscreen" | APwaOrientationLock() => "data-pwa-orientation-lock"
-  | APwaBrightness() => "data-pwa-brightness" | APwaFileDrop() => "data-pwa-file-drop"
+  | AClass() => $D.Class | ASelected() => $D.Aria("selected") | APressed() => $D.Aria("pressed")
+  | AValue() => $D.Value | AControls() => $D.Aria("controls")
+  | ATabindex() => $D.Tabindex | AValueNow() => $D.Aria("valuenow")
+  | ACurrent() => $D.Aria("current") | AGestureRegion() => $D.Data("gesture-region")
+  | AHidden() => $D.Aria("hidden") | APwaInstall() => $D.Data("pwa-install")
+  | APwaSpeak() => $D.Data("pwa-speak") | APwaSpeakSelection() => $D.Data("pwa-speak-selection")
+  | APwaSpeechNext() => $D.Data("pwa-speech-next") | APwaSpeechRate() => $D.Data("pwa-speech-rate")
+  | APwaSpeechVoice() => $D.Data("pwa-speech-voice")
+  | APwaShareSelection() => $D.Data("pwa-share-selection") | APwaShareFile() => $D.Data("pwa-share-file")
+  | APwaShareName() => $D.Data("pwa-share-name")
+  | APwaFullscreen() => $D.Data("pwa-fullscreen") | APwaOrientationLock() => $D.Data("pwa-orientation-lock")
+  | APwaBrightness() => $D.Data("pwa-brightness") | APwaFileDrop() => $D.Data("pwa-file-drop")
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
@@ -325,7 +364,7 @@ in _put_text(style, style_len, "%", 1, 0) end
 implement ui_place (id, placement, tenths) = let
   val style = $A.alloc<byte>(32)
   val style_len = _place_style(style, placement, tenths)
-in _set_attr_buf(id, "style", style, style_len) end
+in _set_attr_buf(id, $D.Style, style, style_len) end
 
 #pub fn ui_place_n {id_loc:agz}{id_len:pos | id_len < 256}{tenths:nat | tenths <= 1000}
   (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, placement: place, tenths: int tenths): void
@@ -333,24 +372,24 @@ in _set_attr_buf(id, "style", style, style_len) end
 implement ui_place_n (id, id_len, placement, tenths) = let
   val style = $A.alloc<byte>(32)
   val style_len = _place_style(style, placement, tenths)
-in _set_attr_n_buf(id, id_len, "style", style, style_len) end
+in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
 
 (* The class of element id *)
 #pub fn ui_class {id_len:pos | id_len < 256}{class_len:pos | class_len < 256} (id: string id_len, class_name: string class_len): void
 
-implement ui_class(id, class_name) = _set_attr(id, "class", class_name)
+implement ui_class(id, class_name) = _set_attr(id, $D.Class, class_name)
 
 (* Whether element id is shown (hidden ones have data-hide="1", which the
    stylesheet does not display) *)
 #pub fn ui_show {id_len:pos | id_len < 256} (id: string id_len, shown: bool): void
 
 implement ui_show(id, shown) =
-  if shown then _set_attr(id, "data-hide", "0") else _set_attr(id, "data-hide", "1")
+  if shown then _set_attr(id, $D.Data("hide"), "0") else _set_attr(id, $D.Data("hide"), "1")
 
 #pub fn ui_show_n {id_loc:agz}{id_len:pos | id_len < 256} (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, shown: bool): void
 
 implement ui_show_n(id, id_len, shown) =
-  if shown then _set_attr_n(id, id_len, "data-hide", "0") else _set_attr_n(id, id_len, "data-hide", "1")
+  if shown then _set_attr_n(id, id_len, $D.Data("hide"), "0") else _set_attr_n(id, id_len, $D.Data("hide"), "1")
 
 (* The file input id, made again (so a file chosen twice in a row is
    taken both times) as the one child of parent after its label: its
@@ -360,11 +399,11 @@ implement ui_show_n(id, id_len, shown) =
 
 implement ui_file_input(parent, id, label, accept, multiple) = let
   val () = ui_text(parent, label)
-  val () = _add_element(parent, id, "input")
-  val () = _set_attr(id, "type", "file")
-  val () = _set_attr(id, "accept", accept)
-  val () = (if multiple then _set_attr(id, "multiple", "multiple") else ())
-in _set_attr(id, "aria-label", label) end
+  val () = _add_element(parent, id, $D.Input)
+  val () = _set_attr(id, $D.Type, "file")
+  val () = _set_attr(id, $D.Accept, accept)
+  val () = (if multiple then _set_attr(id, $D.Multiple, "multiple") else ())
+in _set_attr(id, $D.Aria("label"), label) end
 
 (* The row of a range input input_id from low to high at the value value[0, value_len):
    made again (a range the user has moved no longer follows its value
@@ -376,17 +415,17 @@ in _set_attr(id, "aria-label", label) end
 
 implement ui_range(row, label_id, label, input_id, low, high, value_id, value, value_len) = let
   val () = ui_clear(row)
-  val () = _add_element(row, label_id, "span")
-  val () = _set_attr(label_id, "class", "slabel")
+  val () = _add_element(row, label_id, $D.Span)
+  val () = _set_attr(label_id, $D.Class, "slabel")
   val () = ui_text(label_id, label)
-  val () = _add_element(row, input_id, "input")
-  val () = _set_attr(input_id, "type", "range")
-  val () = _set_attr(input_id, "min", low)
-  val () = _set_attr(input_id, "max", high)
-  val () = _set_attr_buf(input_id, "value", value, value_len)
-  val () = _set_attr(input_id, "aria-label", label)
-  val () = _add_element(row, value_id, "span")
-in _set_attr(value_id, "class", "sval") end
+  val () = _add_element(row, input_id, $D.Input)
+  val () = _set_attr(input_id, $D.Type, "range")
+  val () = _set_attr(input_id, $D.Min, low)
+  val () = _set_attr(input_id, $D.Max, high)
+  val () = _set_attr_buf(input_id, $D.Value, value, value_len)
+  val () = _set_attr(input_id, $D.Aria("label"), label)
+  val () = _add_element(row, value_id, $D.Span)
+in _set_attr(value_id, $D.Class, "sval") end
 
 
 (* ============================================================
@@ -482,8 +521,8 @@ in release_bytes(id_frozen, id_bytes) end
    ============================================================ *)
 
 (* In document: attribute name of element id_bytes, the literal value; or its text *)
-fn _document_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}{value_len:pos | value_len < 256}
-  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len, value: string value_len): void = let
+fn _document_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: $D.attribute, value: string value_len): void = let
   val value_len = _length(value)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(_literal_bytes(value, value_len))
   val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, 0, value_len)
@@ -497,8 +536,8 @@ fn _document_text {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{text_len:
 in release_bytes(text_frozen, text_bytes) end
 
 (* An attribute with the empty value (alt="") *)
-fn _document_empty_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}{name_len:pos | name_len < 256}
-  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: string name_len): void = let
+fn _document_empty_attr {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
+  (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, name: $D.attribute): void = let
   val @(value_frozen, value_bytes) = $A.freeze<byte>($A.alloc<byte>(1))
   val () = $D.set_attr(document, id_bytes, id_len, name, value_bytes, 0, 0)
 in release_bytes(value_frozen, value_bytes) end
@@ -507,9 +546,9 @@ in release_bytes(value_frozen, value_bytes) end
 fn _document_button {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}
   (document: !$D.document(document_loc), parent_bytes: !$A.borrow(byte, parent_loc, parent_len), parent_len: int parent_len,
    id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, class_name: string class_len): void = let
-  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "button")
-  val () = _document_attr(document, id_bytes, id_len, "type", "button")
-in _document_attr(document, id_bytes, id_len, "class", class_name) end
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.Button)
+  val () = _document_attr(document, id_bytes, id_len, $D.Type, "button")
+in _document_attr(document, id_bytes, id_len, $D.Class, class_name) end
 
 #pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak
@@ -568,37 +607,37 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
     in _document_text(document, id_bytes, id_len, label) end
   | ~CIcon(class_name, the_icon, name) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
-      val () = _document_attr(document, id_bytes, id_len, "aria-label", name)
+      val () = _document_attr(document, id_bytes, id_len, $D.Aria("label"), name)
     in _document_text(document, id_bytes, id_len, _glyph(the_icon)) end
   | ~CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
   | ~CLinkOut(class_name, label) => let
-      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
-      val () = _document_attr(document, id_bytes, id_len, "class", class_name)
-      val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
-      val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
+      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.A)
+      val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
+      val () = _document_attr(document, id_bytes, id_len, $D.Target, "_blank")
+      val () = _document_attr(document, id_bytes, id_len, $D.Rel, "noopener noreferrer")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CDownload(class_name, label) => let
-      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "a")
-      val () = _document_attr(document, id_bytes, id_len, "class", class_name)
-      val () = _document_empty_attr(document, id_bytes, id_len, "download")
-      val () = _document_attr(document, id_bytes, id_len, "target", "_blank")
-      val () = _document_attr(document, id_bytes, id_len, "rel", "noopener noreferrer")
+      val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.A)
+      val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
+      val () = _document_empty_attr(document, id_bytes, id_len, $D.Download)
+      val () = _document_attr(document, id_bytes, id_len, $D.Target, "_blank")
+      val () = _document_attr(document, id_bytes, id_len, $D.Rel, "noopener noreferrer")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CMenuItem(label) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
-      val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CHarmItem(the_harm) => let
       val @(_, label) = _harm_item(the_harm)
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
-      val () = _document_attr(document, id_bytes, id_len, "role", "menuitem")
-      val () = _document_attr(document, id_bytes, id_len, "data-harm", "y")
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
+      val () = _document_attr(document, id_bytes, id_len, $D.Data("harm"), "y")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CTab(label, controls, selected) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "tab")
-      val () = _document_attr(document, id_bytes, id_len, "role", "tab")
-      val () = _document_attr(document, id_bytes, id_len, "aria-controls", controls)
-      val () = _document_attr(document, id_bytes, id_len, "aria-selected", (if selected then "true" else "false"): [value_len:pos | value_len < 256] string value_len)
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "tab")
+      val () = _document_attr(document, id_bytes, id_len, $D.Aria("controls"), controls)
+      val () = _document_attr(document, id_bytes, id_len, $D.Aria("selected"), (if selected then "true" else "false"): [value_len:pos | value_len < 256] string value_len)
     in _document_text(document, id_bytes, id_len, label) end
 
 fn _control_literal {parent_len,id_len:pos | parent_len < 256; id_len < 256} (parent: string parent_len, id: string id_len, the_control: control): void = let
@@ -638,7 +677,7 @@ in release_bytes(id_frozen, id_bytes) end
 
 implement ui_el(parent, id, element_tag, class_name) = let
   val () = ui_add(parent, id, element_tag)
-in _set_attr(id, "class", class_name) end
+in _set_attr(id, $D.Class, class_name) end
 
 (* A button named by the text it shows *)
 #pub fn ui_text_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
@@ -700,7 +739,7 @@ fn _is_https {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n
   (id: string id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
 
 implement ui_https_href (id, url, url_len) =
-  if _is_https(url, url_len) then _set_attr_buf(id, "href", url, url_len) else $A.free<byte>(url)
+  if _is_https(url, url_len) then _set_url_buf(id, $D.Href, url, url_len) else $A.free<byte>(url)
 
 (* A numbered download link (ui_download_nn), showing label (its name) *)
 #pub fn ui_download_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
@@ -720,7 +759,7 @@ fn _is_http {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n)
   (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
 
 implement ui_web_href_n (id, id_len, url, url_len) =
-  if _is_https(url, url_len) || _is_http(url, url_len) then _set_attr_n_buf(id, id_len, "href", url, url_len)
+  if _is_https(url, url_len) || _is_http(url, url_len) then _set_url_n_buf(id, id_len, $D.Href, url, url_len)
   else let
     val () = $A.free<byte>(id)
   in $A.free<byte>(url) end
@@ -731,7 +770,7 @@ implement ui_web_href_n (id, id_len, url, url_len) =
   (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
 
 implement ui_web_src_n (id, id_len, url, url_len) =
-  if _is_https(url, url_len) || _is_http(url, url_len) then _set_attr_n_buf(id, id_len, "src", url, url_len)
+  if _is_https(url, url_len) || _is_http(url, url_len) then _set_url_n_buf(id, id_len, $D.Src, url, url_len)
   else let
     val () = $A.free<byte>(id)
   in $A.free<byte>(url) end
@@ -755,8 +794,8 @@ in _control_literal(parent, id, CHarmItem(the_harm)) end
 
 implement ui_tone(id, button_tone) =
   case+ button_tone of
-  | ~Danger(_) => _set_attr(id, "data-harm", "y")
-  | ~Plain() => _set_attr(id, "data-harm", "n")
+  | ~Danger(_) => _set_attr(id, $D.Data("harm"), "y")
+  | ~Plain() => _set_attr(id, $D.Data("harm"), "n")
 
 (* A tab named by its label, controlling the panel controls *)
 #pub fn ui_tab {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}{controls_len:pos | controls_len < 256}
@@ -773,9 +812,9 @@ implement ui_img(parent, id, class_name) = let
   val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val document = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "img")
-  val () = _document_attr(document, id_bytes, id_len, "class", class_name)
-  val () = _document_empty_attr(document, id_bytes, id_len, "alt")
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.Img)
+  val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
+  val () = _document_empty_attr(document, id_bytes, id_len, $D.Alt)
   val () = $D.destroy(document)
   val () = release_bytes(parent_frozen, parent_bytes)
 in release_bytes(id_frozen, id_bytes) end
@@ -787,9 +826,9 @@ implement ui_img_nn(parent, parent_len, id, id_len, class_name) = let
   val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent)
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
   val document = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, "img")
-  val () = _document_attr(document, id_bytes, id_len, "class", class_name)
-  val () = _document_empty_attr(document, id_bytes, id_len, "alt")
+  val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.Img)
+  val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
+  val () = _document_empty_attr(document, id_bytes, id_len, $D.Alt)
   val () = $D.destroy(document)
   val () = release_bytes(parent_frozen, parent_bytes)
 in release_bytes(id_frozen, id_bytes) end
@@ -809,39 +848,39 @@ in release_bytes(id_frozen, id_bytes) end
 implement ui_field(parent, id, field_kind, class_name, name) = let
   val () = (case+ field_kind of
     | FSearch() => let
-        val () = _add_element(parent, id, "input")
-      in _set_attr(id, "type", "search") end
-    | FText() => _add_element(parent, id, "textarea")
-    | FChoice() => _add_element(parent, id, "select")
+        val () = _add_element(parent, id, $D.Input)
+      in _set_attr(id, $D.Type, "search") end
+    | FText() => _add_element(parent, id, $D.Textarea)
+    | FChoice() => _add_element(parent, id, $D.Select)
     | FLine() => let
-        val () = _add_element(parent, id, "input")
-        val () = _set_attr(id, "type", "text")
-        val () = _set_attr(id, "autocomplete", "off")
-      in _set_attr(id, "enterkeyhint", "done") end
+        val () = _add_element(parent, id, $D.Input)
+        val () = _set_attr(id, $D.Type, "text")
+        val () = _set_attr(id, $D.Autocomplete, "off")
+      in _set_attr(id, $D.Enterkeyhint, "done") end
     | FUrl() => let
-        val () = _add_element(parent, id, "input")
-        val () = _set_attr(id, "type", "url")
-        val () = _set_attr(id, "autocomplete", "url")
-        val () = _set_attr(id, "autocapitalize", "none")
-      in _set_attr(id, "spellcheck", "false") end
+        val () = _add_element(parent, id, $D.Input)
+        val () = _set_attr(id, $D.Type, "url")
+        val () = _set_attr(id, $D.Autocomplete, "url")
+        val () = _set_attr(id, $D.Autocapitalize, "none")
+      in _set_attr(id, $D.Spellcheck, "false") end
     | FUser() => let
-        val () = _add_element(parent, id, "input")
-        val () = _set_attr(id, "type", "text")
-        val () = _set_attr(id, "autocomplete", "username")
-        val () = _set_attr(id, "autocapitalize", "none")
-      in _set_attr(id, "spellcheck", "false") end
+        val () = _add_element(parent, id, $D.Input)
+        val () = _set_attr(id, $D.Type, "text")
+        val () = _set_attr(id, $D.Autocomplete, "username")
+        val () = _set_attr(id, $D.Autocapitalize, "none")
+      in _set_attr(id, $D.Spellcheck, "false") end
     | FPassword() => let
-        val () = _add_element(parent, id, "input")
-        val () = _set_attr(id, "type", "password")
-      in _set_attr(id, "autocomplete", "current-password") end)
-  val () = _set_attr(id, "class", class_name)
-  val () = _set_attr(id, "placeholder", name)
-in _set_attr(id, "aria-label", name) end
+        val () = _add_element(parent, id, $D.Input)
+        val () = _set_attr(id, $D.Type, "password")
+      in _set_attr(id, $D.Autocomplete, "current-password") end)
+  val () = _set_attr(id, $D.Class, class_name)
+  val () = _set_attr(id, $D.Placeholder, name)
+in _set_attr(id, $D.Aria("label"), name) end
 
 (* In document: option id_bytes chosen, when selected *)
 fn _document_selected {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
   (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, selected: bool): void =
-  if selected then _document_attr(document, id_bytes, id_len, "selected", "selected") else ()
+  if selected then _document_attr(document, id_bytes, id_len, $D.Selected, "selected") else ()
 
 (* An option of the choice (FChoice) select_id, as its last: its value
    value[0, value_len), named by the label it shows,
@@ -859,8 +898,8 @@ implement ui_option(select_id, id, id_len, value, value_len, label, label_len, s
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(label_frozen, label_bytes) = $A.freeze<byte>(label)
   val document = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = $D.add_element(document, select_bytes, select_len, id_bytes, id_len, "option")
-  val () = $D.set_attr(document, id_bytes, id_len, "value", value_bytes, 0, value_len)
+  val () = $D.add_element(document, select_bytes, select_len, id_bytes, id_len, $D.Option)
+  val () = $D.set_attr(document, id_bytes, id_len, $D.Value, value_bytes, 0, value_len)
   val () = $D.set_text(document, id_bytes, id_len, label_bytes, 0, label_len)
   val () = _document_selected(document, id_bytes, id_len, selected)
   val () = $D.destroy(document)
@@ -876,13 +915,13 @@ in release_bytes(select_frozen, select_bytes) end
 
 implement ui_role(id, the_role) =
   case+ the_role of
-  | RMain() => _set_attr(id, "role", "main")
-  | RStatus() => _set_attr(id, "role", "status")
-  | RAlert() => _set_attr(id, "role", "alert")
-  | RTooltip() => _set_attr(id, "role", "tooltip")
+  | RMain() => _set_attr(id, $D.Role, "main")
+  | RStatus() => _set_attr(id, $D.Role, "status")
+  | RAlert() => _set_attr(id, $D.Role, "alert")
+  | RTooltip() => _set_attr(id, $D.Role, "tooltip")
   | RHeading() => let
-      val () = _set_attr(id, "role", "heading")
-    in _set_attr(id, "aria-level", "1") end
+      val () = _set_attr(id, $D.Role, "heading")
+    in _set_attr(id, $D.Aria("level"), "1") end
 
 (* Roles that need a name: given here, with the role *)
 #pub datatype named = NRegion | NToolbar | NDialog | NModal | NNavigation | NDocument
@@ -897,22 +936,22 @@ fn _named_role (the_role: named): [role_len:pos | role_len < 256] string role_le
 
 fn _named_modal {id_len:pos | id_len < 256} (id: string id_len, the_role: named): void =
   case+ the_role of
-  | NModal() => _set_attr(id, "aria-modal", "true")
+  | NModal() => _set_attr(id, $D.Aria("modal"), "true")
   | _ => ()
 
 fn _document_modal {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
   (document: !$D.document(document_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, the_role: named): void =
   case+ the_role of
-  | NModal() => _document_attr(document, id_bytes, id_len, "aria-modal", "true")
+  | NModal() => _document_attr(document, id_bytes, id_len, $D.Aria("modal"), "true")
   | _ => ()
 
 (* Role the_role for element id, named name *)
 #pub fn ui_named {id_len:pos | id_len < 256}{name_len:pos | name_len < 256} (id: string id_len, the_role: named, name: string name_len): void
 
 implement ui_named(id, the_role, name) = let
-  val () = _set_attr(id, "role", _named_role(the_role))
+  val () = _set_attr(id, $D.Role, _named_role(the_role))
   val () = _named_modal(id, the_role)
-in _set_attr(id, "aria-label", name) end
+in _set_attr(id, $D.Aria("label"), name) end
 
 (* Role the_role for numbered element id, named by the text of numbered
    element by *)
@@ -923,9 +962,9 @@ implement ui_labelled_nn(id, id_len, the_role, by, by_len) = let
   val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
   val @(by_frozen, by_bytes) = $A.freeze<byte>(by)
   val document = $D.open_document($A.text_lit("bats-root"), 9)
-  val () = _document_attr(document, id_bytes, id_len, "role", _named_role(the_role))
+  val () = _document_attr(document, id_bytes, id_len, $D.Role, _named_role(the_role))
   val () = _document_modal(document, id_bytes, id_len, the_role)
-  val () = $D.set_attr(document, id_bytes, id_len, "aria-labelledby", by_bytes, 0, by_len)
+  val () = $D.set_attr(document, id_bytes, id_len, $D.Aria("labelledby"), by_bytes, 0, by_len)
   val () = $D.destroy(document)
   val () = release_bytes(by_frozen, by_bytes)
 in release_bytes(id_frozen, id_bytes) end
@@ -934,9 +973,9 @@ in release_bytes(id_frozen, id_bytes) end
 #pub fn ui_labelled {id_len:pos | id_len < 256}{by_len:pos | by_len < 256} (id: string id_len, the_role: named, by: string by_len): void
 
 implement ui_labelled(id, the_role, by) = let
-  val () = _set_attr(id, "role", _named_role(the_role))
+  val () = _set_attr(id, $D.Role, _named_role(the_role))
   val () = _named_modal(id, the_role)
-in _set_attr(id, "aria-labelledby", by) end
+in _set_attr(id, $D.Aria("labelledby"), by) end
 
 
 (* ============================================================
