@@ -2218,15 +2218,20 @@ fn _vertical_set (vertical: writing_mode): void = let
   val () = !_vertical := vertical
 in _rows_set() end
 
-(* Finds book s's chapters from its OPF and keeps them in the book: its
-   chapter count, or below 0 when the OPF cannot be read *)
-fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
+(* Whether a book's chapters were found from its OPF *)
+datatype spine_built = SpineBuilt | SpineNotBuilt
+
+implement $P.dispose<spine_built>(_) = ()
+
+(* Finds book s's chapters from its OPF and keeps them in the book;
+   SpineNotBuilt when the OPF cannot be read *)
+fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
   case+ book_meta_get() of
-  | ~$R.none() => $P.ret<int>(~1)
+  | ~$R.none() => $P.ret<spine_built>(SpineNotBuilt())
   | ~$R.some(@(file_size, opf_data_start, opf_compressed_size, opf_method, opf_name_offset, opf_name_len)) =>
     (* The OPF's compressed bytes, read at their span into a piece *)
     (case+ piece_new(opf_compressed_size) of
-     | ~NoPiece() => $P.ret<int>(~1)
+     | ~NoPiece() => $P.ret<spine_built>(SpineNotBuilt())
      | ~Piece(compressed_owner, opf_compressed) => let
          val _ = book_read(serial, file_size, opf_data_start, opf_compressed, opf_compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(opf_compressed)
@@ -2234,9 +2239,9 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+         $P.and_then<decompressed><spine_built>(decompressing, llam(inflated) =>
            case+ take_decompressed(inflated) of
-           | ~NoContentBytes() => $P.ret<int>(~2)
+           | ~NoContentBytes() => $P.ret<spine_built>(SpineNotBuilt())
            | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
                val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_buf)
                val opf_nodes = $X.parse_document(opf_bytes, opf_size)
@@ -2258,7 +2263,7 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_frozen, opf_bytes)
                val () = piece_free(opf_owner, $A.thaw<byte>(opf_frozen))
-             in $P.ret<int>(total) end)
+             in $P.ret<spine_built>(SpineBuilt()) end)
        end)
 
 (* Box which, a child of the page (styled as .caf.fixed>* is): a
@@ -2363,18 +2368,37 @@ fn _boxes_add {doc_location:agz} (doc: !$D.document(doc_location), layout: rendi
       if _on_left(shape) then let val () = _box_make(doc, PageBox()) in _box_make(doc, FacingBox()) end
       else let val () = _box_make(doc, FacingBox()) in _box_make(doc, PageBox()) end)
 
+(* How a chapter's load went: shown; or not, because the book's chapters
+   could not be found, it has no such chapter, there is no room to read
+   it, it could not be read, or (a spread's facing page) a later turn
+   took its place *)
+#pub datatype load_outcome = ChapterShown | SpineNotRead | NoSuchChapter | NoRoomForChapter | ChapterNotRead | ChapterSuperseded
+
+implement $P.dispose<load_outcome>(_) = ()
+
+(* Whether a chapter's load showed it *)
+#pub fn load_shown (outcome: load_outcome): bool
+implement load_shown (outcome) =
+  case+ outcome of
+  | ChapterShown() => true
+  | SpineNotRead() => false
+  | NoSuchChapter() => false
+  | NoRoomForChapter() => false
+  | ChapterNotRead() => false
+  | ChapterSuperseded() => false
+
 (* Shows chapter facing_index of book serial in the facing box of a
    spread, its content nodes going on from the page's, its size its
    viewport's (else the page's), its links and images its own. Shown
    only while load generation is the last: a later turn has cleared
    it. Its failure leaves the spread's side blank, the page shown *)
-fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index, generation: int): $P.promise(int, $P.Chained) =
+fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index, generation: int): $P.promise(load_outcome, $P.Chained) =
   case+ book_chapter_get(serial, facing_index) of
-  | ~ChaptersUnknown() => $P.ret<int>(~1)
-  | ~ChapterNone(_) => $P.ret<int>(~4)
+  | ~ChaptersUnknown() => $P.ret<load_outcome>(SpineNotRead())
+  | ~ChapterNone(_) => $P.ret<load_outcome>(NoSuchChapter())
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, _, _) =>
     (case+ piece_new(compressed_size) of
-     | ~NoPiece() => $P.ret<int>(~5)
+     | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
      | ~Piece(compressed_owner, compressed) => let
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
@@ -2382,13 +2406,13 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
-         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+         $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) =>
            case+ take_decompressed(inflated) of
-           | ~NoContentBytes() => $P.ret<int>(~6)
+           | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
                val () = piece_free(xhtml_owner, xhtml)
-             in $P.ret<int>(~7) end
+             in $P.ret<load_outcome>(ChapterSuperseded()) end
              else let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
                val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
@@ -2405,23 +2429,23 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
                val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
                val () = _fixed_fit()
-             in $P.ret<int>(0) end)
+             in $P.ret<load_outcome>(ChapterShown()) end)
        end)
 
 (* Shows chapter chapter_index of book serial, from its chapters *)
-fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(int, $P.Chained) =
+fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(load_outcome, $P.Chained) =
   case+ book_chapter_get(serial, chapter_index) of
-  | ~ChaptersUnknown() => $P.ret<int>(~1)
+  | ~ChaptersUnknown() => $P.ret<load_outcome>(SpineNotRead())
   | ~ChapterNone(chapter_count) => let
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
-    in $P.ret<int>(~4) end
+    in $P.ret<load_outcome>(NoSuchChapter()) end
   | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, layout, chapter_count) => let
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, _) => reading_set(@(page, page_count, chapter, chapter_count)))
     in
       case+ piece_new(compressed_size) of
-      | ~NoPiece() => $P.ret<int>(~5)
+      | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
       | ~Piece(compressed_owner, compressed) => let
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
@@ -2430,11 +2454,11 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
               val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
             in
               (* Stage 3: parse HTML and render *)
-              $P.and_then<decompressed><int>(decompressing, llam(inflated) => let
+              $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) => let
                 val content = take_decompressed(inflated)
               in
                 case+ content of
-                | ~NoContentBytes() => $P.ret<int>(~6)
+                | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
 
                   (* Parse XHTML with xml-tree *)
@@ -2501,13 +2525,13 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
                   (* the facing page, on the other side; the page is
                      shown whatever becomes of it *)
                   case+ shape of
-                  | WithNext() => $P.and_then<int><int>(_facing_open(serial, chapter_index + 1, generation), llam(_) => $P.ret<int>(0))
+                  | WithNext() => $P.and_then<load_outcome><load_outcome>(_facing_open(serial, chapter_index + 1, generation), llam(_) => $P.ret<load_outcome>(ChapterShown()))
                   | WithPrevious() =>
-                    if chapter_index > 0 then $P.and_then<int><int>(_facing_open(serial, chapter_index - 1, generation), llam(_) => $P.ret<int>(0))
-                    else $P.ret<int>(0)
-                  | Single() => $P.ret<int>(0)
-                  | AloneLeft() => $P.ret<int>(0)
-                  | AloneRight() => $P.ret<int>(0)
+                    if chapter_index > 0 then $P.and_then<load_outcome><load_outcome>(_facing_open(serial, chapter_index - 1, generation), llam(_) => $P.ret<load_outcome>(ChapterShown()))
+                    else $P.ret<load_outcome>(ChapterShown())
+                  | Single() => $P.ret<load_outcome>(ChapterShown())
+                  | AloneLeft() => $P.ret<load_outcome>(ChapterShown())
+                  | AloneRight() => $P.ret<load_outcome>(ChapterShown())
                 end
               end)
             end
@@ -2515,17 +2539,18 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
 
 (* Loads chapter chapter_index: first the book's chapters, from its OPF,
    when they are not found yet *)
-fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(int, $P.Chained) = let
+fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(load_outcome, $P.Chained) = let
   val serial = book_serial()
   val () = !_load_generation := !_load_generation + 1
   val generation = !_load_generation
 in
   case+ book_chapter_get(serial, chapter_index) of
   | ~ChaptersUnknown() =>
-    $P.and_then<int><int>(_spine_build(serial), llam(result) =>
-      if result < 0 then $P.ret<int>(result)
-      else $P.and_then<int><int>(toc_build(serial), llam(_) =>
-        $P.and_then<int><int>(_font_load(serial), llam(_) => _chapter_open(serial, chapter_index, generation))))
+    $P.and_then<spine_built><load_outcome>(_spine_build(serial), llam(built) =>
+      case+ built of
+      | SpineNotBuilt() => $P.ret<load_outcome>(SpineNotRead())
+      | SpineBuilt() => $P.and_then<int><load_outcome>(toc_build(serial), llam(_) =>
+        $P.and_then<int><load_outcome>(_font_load(serial), llam(_) => _chapter_open(serial, chapter_index, generation))))
   | ~ChapterNone(_) => _chapter_open(serial, chapter_index, generation)
   | ~ChapterGot(_, _, _, _, _, _, _, _, _) => _chapter_open(serial, chapter_index, generation)
 end
@@ -2610,22 +2635,22 @@ fn _settle_start (anchor: Int): void = let
 in _settle(!_settle_generation, 12) end
 
 (* Loads a chapter (from 0) and shows its page, or the page of
-   content node anchor (see _show_target); the promise resolves with 0,
-   or below 0 when the chapter cannot be shown *)
-fn _goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained) = let
+   content node anchor (see _show_target); the promise resolves with how
+   the load went *)
+fn _goto (chapter: Int, page: Int, anchor: Int): $P.promise(load_outcome, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
-    if result < 0 then $P.ret<int>(result)
+  $P.and_then<load_outcome><load_outcome>(_load_chapter(chapter), llam(result) =>
+    if ~load_shown(result) then $P.ret<load_outcome>(result)
     else let
       val () = _show_target(page, anchor)
       val () = _settle_start(anchor)
-    in $P.ret<int>(0) end)
+    in $P.ret<load_outcome>(result) end)
 end
 
 (* Loads a chapter and shows the page of its element whose id is
    fragment[0, fragment_len) (the first page when there is none); frees fragment *)
-fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: Int, fragment: $A.arr(byte, l, n), fragment_len: int fragment_len): $P.promise(int, $P.Chained) =
+fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: Int, fragment: $A.arr(byte, l, n), fragment_len: int fragment_len): $P.promise(load_outcome, $P.Chained) =
   if fragment_len <= 0 then let
     val () = $A.free<byte>(fragment)
   in _goto(chapter, 0, ~1) end
@@ -2634,25 +2659,24 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
     val () = !_fragment_node := ~1
     val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
   in
-    $P.and_then<int><int>(_load_chapter(chapter), llam(result) => let
+    $P.and_then<load_outcome><load_outcome>(_load_chapter(chapter), llam(result) => let
       val () = _fragment_put(FragmentNone())
     in
-      if result < 0 then $P.ret<int>(result)
+      if ~load_shown(result) then $P.ret<load_outcome>(result)
       else let
         val anchor = !_fragment_node
         val () = _show_target(0, anchor)
         val () = _settle_start(anchor)
-      in $P.ret<int>(0) end
+      in $P.ret<load_outcome>(result) end
     end)
   end
 
 (* Ends a jump (or a turn into another chapter): when the chapter could
-   not be shown (its result is below 0), the reader stays on the page it
-   was on, shown again (a drag may have moved it), never a blank one,
-   and the banner says why *)
-fn _jump_checked (jumping: $P.promise(int, $P.Chained)): void =
-  $P.finish<int>(jumping, llam(result) =>
-    if result >= 0 then ()
+   not be shown, the reader stays on the page it was on, shown again (a
+   drag may have moved it), never a blank one, and the banner says why *)
+fn _jump_checked (jumping: $P.promise(load_outcome, $P.Chained)): void =
+  $P.finish<load_outcome>(jumping, llam(result) =>
+    if load_shown(result) then ()
     else let
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, chapter_count) =>
@@ -2777,15 +2801,15 @@ in
 end
 
 (* Loads a chapter and shows its page at a thousandth of it *)
-fn _goto_part (chapter: Int, thousandth: Int): $P.promise(int, $P.Chained) = let
+fn _goto_part (chapter: Int, thousandth: Int): $P.promise(load_outcome, $P.Chained) = let
   val chapter = (if chapter >= 0 then chapter else 0): [chapter:nat] int chapter
 in
-  $P.and_then<int><int>(_load_chapter(chapter), llam(result) =>
-    if result < 0 then $P.ret<int>(result)
+  $P.and_then<load_outcome><load_outcome>(_load_chapter(chapter), llam(result) =>
+    if ~load_shown(result) then $P.ret<load_outcome>(result)
     else let
       val () = (case+ reading_get() of
         | @(_, page_count, _, _) => _show_target(thousandth * page_count / 1000, ~1))
-    in $P.ret<int>(0) end)
+    in $P.ret<load_outcome>(result) end)
 end
 
 (* The next page: in this chapter, else the next chapter's first *)
@@ -3266,7 +3290,7 @@ implement page_prev() = let
   val () = reader_stack_clear()
 in _page_previous() end
 
-#pub fun load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(int, $P.Chained)
+#pub fun load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(load_outcome, $P.Chained)
 implement load_chapter(chapter_index) = _load_chapter(chapter_index)
 
 
@@ -3278,7 +3302,7 @@ implement load_chapter(chapter_index) = _load_chapter(chapter_index)
 
 (* Loads a chapter and shows a page of it (the last for -1), or the
    page of content node anchor when anchor >= 0 *)
-#pub fun reader_goto (chapter: Int, page: Int, anchor: Int): $P.promise(int, $P.Chained)
+#pub fun reader_goto (chapter: Int, page: Int, anchor: Int): $P.promise(load_outcome, $P.Chained)
 implement reader_goto (chapter, page, anchor) = _goto(chapter, page, anchor)
 
 (* Jumps to a row of the contents list, remembering where the reader
@@ -3778,8 +3802,8 @@ in
   in
     (* the hit is marked only once its chapter is shown; a failure is
        told by _jump_checked *)
-    _jump_checked($P.and_then<int><int>(_goto(chapter, 0, node), llam(result) => let
-      val () = (if result >= 0 then (if node >= 0 then let
+    _jump_checked($P.and_then<load_outcome><load_outcome>(_goto(chapter, 0, node), llam(result) => let
+      val () = (if load_shown(result) then (if node >= 0 then let
           val () = $BDOM.clear_marks(2)
           val @(start_id, start_id_len) = nid_pad3("c", node)
           val @(end_id, end_id_len) = nid_pad3("c", node)
@@ -3788,7 +3812,7 @@ in
           val () = $BDOM.mark_range(2, start_bytes, start_id_len, offset, end_bytes, end_id_len, offset + query_len)
           val () = release_bytes(end_frozen, end_bytes)
         in release_bytes(start_frozen, start_bytes) end else ()) else ())
-    in $P.ret<int>(result) end))
+    in $P.ret<load_outcome>(result) end))
   end
 end
 
@@ -3872,8 +3896,8 @@ in
     else if chapter < chapter_count then let
       val () = _speed_turn()
     in
-      $P.and_then<int><turned>(_goto(chapter, 0, ~1), llam(result) =>
-        if result >= 0 then $P.ret<turned>(TurnedChapter())
+      $P.and_then<load_outcome><turned>(_goto(chapter, 0, ~1), llam(result) =>
+        if load_shown(result) then $P.ret<turned>(TurnedChapter())
         else let
           (* as _jump_checked: the page that was shown, and the banner
              says why *)

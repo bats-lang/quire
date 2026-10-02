@@ -176,10 +176,30 @@ in id end
    Opening the archive: container.xml, then the OPF
    ============================================================ *)
 
-(* What to do with the OPF once it is read *)
-#define MODE_OPEN 0     (* reopen a stored book: nothing *)
-#define MODE_NEW 1      (* add a new book to the library *)
-#define MODE_REPLACE 2  (* replace the stored file of library book library_index *)
+(* What to do with the OPF once it is read: nothing (a stored book
+   reopened), add a new book to the library, or replace the stored file
+   of library book library_index *)
+datatype import_mode = Reopen | AddNew | Replace
+
+fn _is_reopen (mode: import_mode): bool =
+  case+ mode of Reopen() => true | AddNew() => false | Replace() => false
+
+(* Why an archive could not be opened: no container.xml, or one that
+   could not be read; no package (OPF) path in it, no package there, or
+   one that could not be read; the book not finished, or not put in the
+   library *)
+datatype archive_failure =
+  | NoContainer | ContainerNotRead | NoPackagePath | NoPackage | PackageNotRead | NotFinished | NotInLibrary
+
+(* How opening an archive went: a book added or replaced (its key), a
+   stored book reopened, or a failure *)
+datavtype archive_outcome =
+  | BookAdded of Int
+  | BookReopened of ()
+  | ArchiveFailed of archive_failure
+
+implement $P.dispose<archive_outcome>(outcome) =
+  case+ outcome of ~BookAdded(_) => () | ~BookReopened() => () | ~ArchiveFailed(_) => ()
 
 (* target[6 + position, 6 + count) := source[position, count) *)
 fun _put_after_head {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat | count <= source_size; count + 6 <= target_size}{position:nat | position <= count} .<count - position>.
@@ -281,9 +301,9 @@ in
 end
 
 fn _cover_of {file_size:pos}{l:agz}{n:pos}{tree_size:nat}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
-  (mode: int, serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len, opf_bytes: !$A.borrow(byte, l, n), n: int n,
+  (mode: import_mode, serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len, opf_bytes: !$A.borrow(byte, l, n), n: int n,
    nodes: !$X.xml_node_list(n, tree_size), id_high: Int, id_low: Int): image_type =
-  if mode = MODE_OPEN then NotAnImage()
+  if _is_reopen(mode) then NotAnImage()
   else case+ find_cover_href(opf_bytes, n, nodes) of
   | ~xspan_at(href_offset, href_len) => _store_cover(serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, href_offset, href_len, id_high, id_low)
   | ~xspan_none() => NotAnImage()
@@ -314,14 +334,21 @@ fn _book_store_checked (storing: $P.promise($IDB.stored, $P.Chained), key: Int):
       val text_end = _put_string(message, name_end, " is open, but could not be stored, so it will not open next time. Free some space and import it again.")
     in notice_error_buf(message, text_end) end)
 
-(* After the OPF of book `serial` (file_size bytes) is read: in MODE_NEW
-   adds the book to the library, in MODE_REPLACE updates library book
-   library_index; stores the
-   file under 'b' in both. The book's key, or below 0. *)
+(* The book's file, stored from the JS side under 'b' *)
+fn _store_file (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained) = let
+  val key = lib_key(98, id_high, id_low)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  val storing = book_idb_put(key_bytes, 15)
+  val () = release_bytes(key_frozen, key_bytes)
+in storing end
+
+(* After the OPF of book `serial` (file_size bytes) is read: in AddNew
+   adds the book to the library, in Replace updates library book
+   library_index; stores the file under 'b' in both *)
 fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
   (serial: int, file_size: int file_size, opf_bytes: !$A.borrow(byte, l, n), n: int n,
    compressed_offset: int compressed_offset, compressed_size: int compressed_size, method: $Z.compression, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
-   mode: int, library_index: Int, id_high: Int, id_low: Int): Int = let
+   mode: import_mode, library_index: Int, id_high: Int, id_low: Int): archive_outcome = let
   val nodes = $X.parse_document(opf_bytes, n)
   val @(title, author) = walk_opf_metadata(opf_bytes, nodes)
   val cover = _cover_of(mode, serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, nodes, id_high, id_low)
@@ -330,7 +357,7 @@ fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_siz
   val series_number = g1ofg0(series_number_found)
   (* its accessibility metadata, for Book info *)
   val @(a11y_flags, summary) = opf_a11y(opf_bytes, nodes)
-  val () = (if mode <> MODE_OPEN then _store_a11y(opf_bytes, a11y_flags, summary, id_high, id_low) else xspan_free(summary))
+  val () = (if ~_is_reopen(mode) then _store_a11y(opf_bytes, a11y_flags, summary, id_high, id_low) else xspan_free(summary))
   val () = $X.free_nodes(nodes)
   val finished = book_finish(serial, file_size, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len)
   val @(series_offset, series_len) = (case+ series of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
@@ -338,29 +365,27 @@ in
   if ~finished then let
     val () = xspan_free(title)
     val () = xspan_free(author)
-  in ~20 end
-  else if mode = MODE_OPEN then let
-    val () = xspan_free(title)
-    val () = xspan_free(author)
-  in 0 end
-  else let
-    (* The file, stored from the JS side under 'b' *)
-    val key = lib_key(98, id_high, id_low)
-    val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-    val storing = book_idb_put(key_bytes, 15)
-    val () = release_bytes(key_frozen, key_bytes)
-    val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-    val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-  in
-    if mode = MODE_NEW then let
+  in ArchiveFailed(NotFinished()) end
+  else case+ mode of
+  | Reopen() => let
+      val () = xspan_free(title)
+      val () = xspan_free(author)
+    in BookReopened() end
+  | AddNew() => let
+      val storing = _store_file(id_high, id_low)
+      val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+      val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
       val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes())
       val () = _book_store_checked(storing, key)
       (* the record a backup kept for it, if any *)
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
       (* the storage holds a book of the reader's now: asked to be kept *)
       val () = (if key > 0 then platform_keep_storage() else ())
-    in key end
-    else let
+    in if key > 0 then BookAdded(key) else ArchiveFailed(NotInLibrary()) end
+  | Replace() => let
+      val storing = _store_file(id_high, id_low)
+      val () = xspan_free(title)
+      val () = xspan_free(author)
       val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(library_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = OnShelf(), added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
@@ -373,15 +398,14 @@ in
         | ~$R.some(record) => record.key
         | ~$R.none() => ~21): Int
       val () = _book_store_checked(storing, key)
-    in key end
-  end
+    in if key > 0 then BookAdded(key) else ArchiveFailed(NotInLibrary()) end
 end
 
 (* Reads the container.xml and OPF of book `serial` (the file_size-byte
-   file just put in the book cell), then _opf_done; the promise resolves with the
-   book's key, or below 0 when the file is not an EPUB it can read *)
-fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: int, library_index: Int, id_high: Int, id_low: Int)
-  : $P.promise(Int, $P.Chained) = let
+   file just put in the book cell), then _opf_done; the promise resolves with
+   how that went *)
+fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: import_mode, library_index: Int, id_high: Int, id_low: Int)
+  : $P.promise(archive_outcome, $P.Chained) = let
   var container_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
   val container_name = $S.from_char_array(container_chars, 22)
   val @(name_frozen, name_bytes) = $A.freeze<byte>(container_name)
@@ -389,16 +413,16 @@ fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: i
   val () = release_bytes(name_frozen, name_bytes)
 in
   case+ container of
-  | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~3) end
+  | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(NoContainer())) end
   | ~ZipGot(container_owner, container_data, container_size, container_method, _, _, _) => let
       val @(data_frozen, data_bytes) = $A.freeze<byte>(container_data)
       val decompressing = decompress(data_bytes, container_size, zip_compression(container_method))
       val () = $A.drop<byte>(data_frozen, data_bytes)
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
-      $P.and_then<decompressed><Int>(decompressing, llam(container_inflated) =>
+      $P.and_then<decompressed><archive_outcome>(decompressing, llam(container_inflated) =>
         case+ take_decompressed(container_inflated) of
-        | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~5) end
+        | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(ContainerNotRead())) end
         | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
             val @(xml_frozen, xml_bytes) = $A.freeze<byte>(xml_buffer)
             val nodes = $X.parse_document(xml_bytes, xml_size)
@@ -410,7 +434,7 @@ in
                 val () = $A.drop<byte>(xml_frozen, xml_bytes)
                 val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
                 val () = book_abandon(serial)
-              in $P.ret<Int>(~6) end
+              in $P.ret<archive_outcome>(ArchiveFailed(NoPackagePath())) end
             | ~xspan_at(opf_path_offset, opf_path_len) =>
               (* The OPF's path names a zip entry, so it is shorter than
                  65536 bytes (a zip name's limit): checked here *)
@@ -418,12 +442,12 @@ in
                 val () = $A.drop<byte>(xml_frozen, xml_bytes)
                 val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
                 val () = book_abandon(serial)
-              in $P.ret<Int>(~6) end
+              in $P.ret<archive_outcome>(ArchiveFailed(NoPackagePath())) end
               else if opf_path_len >= 65536 then let
                 val () = $A.drop<byte>(xml_frozen, xml_bytes)
                 val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
                 val () = book_abandon(serial)
-              in $P.ret<Int>(~6) end
+              in $P.ret<archive_outcome>(ArchiveFailed(NoPackagePath())) end
               else let
                 val path_buffer = $A.alloc<byte>(opf_path_len)
                 val () = $S.copy_from_borrow(xml_bytes, opf_path_offset, xml_size, path_buffer, 0, opf_path_len, opf_path_len)
@@ -432,25 +456,25 @@ in
                 val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buffer)
                 val opf_entry = book_zip_read(serial, file_size, path_bytes, opf_path_len)
                 val () = release_bytes(path_frozen, path_bytes)
-                val () = (if mode <> MODE_OPEN then _stage("Reading metadata", 60) else ())
+                val () = (if ~_is_reopen(mode) then _stage("Reading metadata", 60) else ())
               in
                 case+ opf_entry of
-                | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<Int>(~7) end
+                | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(NoPackage())) end
                 | ~ZipGot(opf_owner, opf_data, opf_compressed_size, opf_method, opf_offset, opf_name_offset, opf_name_len) => let
                     val @(opf_data_frozen, opf_data_bytes) = $A.freeze<byte>(opf_data)
                     val opf_decompressing = decompress(opf_data_bytes, opf_compressed_size, zip_compression(opf_method))
                     val () = $A.drop<byte>(opf_data_frozen, opf_data_bytes)
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
-                    $P.and_then<decompressed><Int>(opf_decompressing, llam(opf_inflated) =>
+                    $P.and_then<decompressed><archive_outcome>(opf_decompressing, llam(opf_inflated) =>
                       case+ take_decompressed(opf_inflated) of
-                      | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<Int>(~9) end
+                      | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(PackageNotRead())) end
                       | ~ContentBytes(opf_content_owner, opf_content, opf_size) => let
                           val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_content)
                           val outcome = _opf_done(serial, file_size, opf_bytes, opf_size, opf_offset, opf_compressed_size, opf_method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
                           val () = $A.drop<byte>(opf_frozen, opf_bytes)
                           val () = piece_free(opf_content_owner, $A.thaw<byte>(opf_frozen))
-                        in $P.ret<Int>(outcome) end)
+                        in $P.ret<archive_outcome>(outcome) end)
                   end
               end
           end)
@@ -467,8 +491,25 @@ end
    is answered (Answered). The resolver is linear: it is resolved once,
    by the answer, and there is no id that could name a resolver no
    longer there. *)
+(* The answer to "already in the library" *)
+datatype duplicate_answer = ReplaceIt | SkipIt
+
+implement $P.dispose<duplicate_answer>(_) = ()
+
+(* How an import went: the book added (or put back over its old file),
+   by its key; it was already in the library and kept as it was; or it
+   failed (why is already said) *)
+#pub datavtype import_outcome = Added of Int | Kept of () | Failed of ()
+
+(* An import's outcome let go: what it was is already reported *)
+#pub fn import_outcome_free (outcome: import_outcome): void
+implement import_outcome_free (outcome) =
+  case+ outcome of ~Added(_) => () | ~Kept() => () | ~Failed() => ()
+
+implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
+
 datavtype duplicate =
-  | {file_size:pos} Asked of ($BF.infile(file_size), int file_size, Int, Int, Int, $P.resolver(Int))
+  | {file_size:pos} Asked of ($BF.infile(file_size), int file_size, Int, Int, Int, $P.resolver(duplicate_answer))
   | {file_size:pos} Answered of ($BF.infile(file_size), int file_size, Int, Int, Int)
   | NoDuplicate of ()
 
@@ -488,7 +529,7 @@ in
   case+ previous of
   | ~Asked(book_file, _, _, _, _, resolver) => let
       val () = $BF.file_close(book_file)
-    in $P.resolve<Int>(resolver, 1) end
+    in $P.resolve<duplicate_answer>(resolver, SkipIt()) end
   | ~Answered(book_file, _, _, _, _) => $BF.file_close(book_file)
   | ~NoDuplicate() => ()
 end
@@ -501,7 +542,7 @@ in
   case+ _duplicate_take() of
   | ~Asked(book_file, file_size, id_high, id_low, library_index, resolver) => let
       val () = _duplicate_put(Answered(book_file, file_size, id_high, id_low, library_index))
-    in $P.resolve<Int>(resolver, (if replace then 2 else 1)) end
+    in $P.resolve<duplicate_answer>(resolver, (if replace then ReplaceIt() else SkipIt())) end
   | other => _duplicate_put(other)
 end
 
@@ -513,33 +554,38 @@ in lib_render() end
 
 (* Imports the file_size-byte book_file with id (id_high, id_low) as a
    new book (library_index < 0) or over library book library_index *)
-fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(Int, $P.Chained) = let
+fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(import_outcome, $P.Chained) = let
   val () = _stage("Opening archive", 30)
   val serial = book_begin(book_file, file_size)
-  val mode = (if library_index < 0 then MODE_NEW else MODE_REPLACE): int
+  val mode = (if library_index < 0 then AddNew() else Replace()): import_mode
 in
-  $P.and_then<Int><Int>(_open_archive(serial, file_size, mode, library_index, id_high, id_low), llam(outcome) =>
-    if outcome < 0 then let
-      val () = _error()
-    in $P.ret<Int>(outcome) end
-    else let
-      val () = _stage("Adding to library", 90)
-      val () = open_key_set(outcome)
-      val () = _library_changed()
-      val () = ui_show("import-progress", false)
-      val () = _kept_name_put(NoKeptName())
-    in $P.ret<Int>(outcome) end)
+  $P.and_then<archive_outcome><import_outcome>(_open_archive(serial, file_size, mode, library_index, id_high, id_low), llam(outcome) =>
+    case+ outcome of
+    | ~BookAdded(key) => let
+        val () = _stage("Adding to library", 90)
+        val () = open_key_set(key)
+        val () = _library_changed()
+        val () = ui_show("import-progress", false)
+        val () = _kept_name_put(NoKeptName())
+      in $P.ret<import_outcome>(Added(key)) end
+    (* an import neither reopens nor fails silently *)
+    | ~BookReopened() => let
+        val () = _error()
+      in $P.ret<import_outcome>(Failed()) end
+    | ~ArchiveFailed(_) => let
+        val () = _error()
+      in $P.ret<import_outcome>(Failed()) end)
 end
 
 (* Imports book_file, of file_size bytes, whose name is kept *)
-fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(Int, $P.Chained) =
+fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: int file_size): $P.promise(import_outcome, $P.Chained) =
   (* a book added to a library that could not be read could not be kept
      without saving that library over the one stored (#174) *)
   if ~storage_savable(LibraryRecord()) then let
     val () = $BF.file_close(book_file)
     val () = _kept_name_put(NoKeptName())
     val () = notice_error("Books cannot be added: Quire could not read your library. Reopen Quire to try again.")
-  in $P.ret<Int>(~1) end
+  in $P.ret<import_outcome>(Failed()) end
   else let
   val () = _stage_name()
   val () = _stage("Reading file", 10)
@@ -548,7 +594,7 @@ in
   if file_size <= 0 then let
     val () = $BF.file_close(book_file)
     val () = _error()
-  in $P.ret<Int>(~1) end
+  in $P.ret<import_outcome>(Failed()) end
   else let
     val @(id_high, id_low) = _file_id(book_file, file_size)
     val library_index = lib_find(id_high, id_low)
@@ -560,7 +606,7 @@ in
         (* An archived book is restored by importing it again *)
         if same_shelf(record.shelf, Archived()) then _import_go(book_file, file_size, id_high, id_low, library_index)
         else let
-          val @(answer_promise, resolver) = $P.create<Int>()
+          val @(answer_promise, resolver) = $P.create<duplicate_answer>()
           val () = _duplicate_put(Asked(book_file, file_size, id_high, id_low, library_index, resolver))
           val @(title, title_len) = lib_text(library_index, TitleText())
           val message = $A.alloc<byte>(320)
@@ -573,22 +619,23 @@ in
             | Declined() => _duplicate_answer(false))
           val () = modal_text(message, text_end)
         in
-          $P.and_then<Int><Int>($P.vow(answer_promise), llam(answer) =>
+          $P.and_then<duplicate_answer><import_outcome>($P.vow(answer_promise), llam(answer) =>
             case+ _duplicate_take() of
             | ~NoDuplicate() => let
                 val () = ui_show("import-progress", false)
-              in $P.ret<Int>(~1) end
+              in $P.ret<import_outcome>(Failed()) end
             | ~Asked(waiting_file, _, _, _, _, waiting_resolver) => let
                 val () = $BF.file_close(waiting_file)
-                val () = $P.resolve<Int>(waiting_resolver, 1)
+                val () = $P.resolve<duplicate_answer>(waiting_resolver, SkipIt())
                 val () = ui_show("import-progress", false)
-              in $P.ret<Int>(~1) end
+              in $P.ret<import_outcome>(Failed()) end
             | ~Answered(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index) =>
-              if answer = 2 then _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
-              else let
-                val () = $BF.file_close(waiting_file)
-                val () = ui_show("import-progress", false)
-              in $P.ret<Int>(0) end)
+              (case+ answer of
+              | ReplaceIt() => _import_go(waiting_file, waiting_size, waiting_high, waiting_low, waiting_index)
+              | SkipIt() => let
+                  val () = $BF.file_close(waiting_file)
+                  val () = ui_show("import-progress", false)
+                in $P.ret<import_outcome>(Kept()) end))
         end)
   end
 end
@@ -603,14 +650,14 @@ fn _unread (): void = let
 in ui_show("import-progress", false) end
 
 (* Imports the file an open promise resolved with *)
-fn _import_opened (opened: $BF.opened): $P.promise(Int, $P.Chained) =
+fn _import_opened (opened: $BF.opened): $P.promise(import_outcome, $P.Chained) =
   case+ opened of
   (* gone from the input before it was read: nothing to import *)
-  | ~$BF.NotOpened() => $P.ret<Int>(~1)
+  | ~$BF.NotOpened() => $P.ret<import_outcome>(Failed())
   | ~$BF.OpenFailed() => let
       val () = _kept_name_put(NoKeptName())
       val () = _unread()
-    in $P.ret<Int>(~1) end
+    in $P.ret<import_outcome>(Failed()) end
   | ~$BF.Opened(book_file) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name_of(book_file)
@@ -618,10 +665,9 @@ fn _import_opened (opened: $BF.opened): $P.promise(Int, $P.Chained) =
 
 (* Imports book_file, of file_size bytes, fetched from a catalogue: its
    name (for its progress and errors) is name[0, name_len), the book's
-   title there. The promise resolves as an import's does: the book's
-   key, 0 when it was already in the library and kept, or below 0 *)
+   title there. The promise resolves with how the import went *)
 #pub fn import_fetched {file_size:nat}{l:agz}{n:pos}{name_len:nat | name_len <= n}
-  (book_file: $BF.infile(file_size), file_size: int file_size, name: !$A.arr(byte, l, n), name_len: int name_len): $P.promise(Int, $P.Chained)
+  (book_file: $BF.infile(file_size), file_size: int file_size, name: !$A.arr(byte, l, n), name_len: int name_len): $P.promise(import_outcome, $P.Chained)
 
 implement import_fetched (book_file, file_size, name, name_len) = let
   val () = (if name_len <= 0 then _kept_name_put(NoKeptName())
@@ -632,28 +678,35 @@ implement import_fetched (book_file, file_size, name, name_len) = let
     in _kept_name_put(KeptName(name_bytes, kept_len)) end)
 in _import_file(book_file, file_size) end
 
-(* Imports files file_index to file_count - 1 of source (0 the file
-   input import-file, 1 the last drop), one after another *)
+(* Where picked files come from: the file input import-file, or the
+   last drop *)
+datatype import_source = FileInput | Dropped
+
+(* Imports files file_index to file_count - 1 of source, one after
+   another *)
 fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_count - file_index>.
-  (source: int, file_index: int file_index, file_count: int file_count): void =
+  (source: import_source, file_index: int file_index, file_count: int file_count): void =
   if file_index >= file_count then
     (* the input's files are all read: its choice is cleared *)
-    (if source = 0 then app_import_input() else ())
+    (case+ source of FileInput() => app_import_input() | Dropped() => ())
   else let
-    val opened = (if source = 0 then let
+    val opened = (case+ source of
+      | FileInput() => let
         val input_id = $A.alloc<byte>(11)
         val () = $A.write_text(input_id, 0, $A.text_lit("import-file"), 11)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
         val opened = $BF.file_open_at(id_bytes, 11, file_index)
         val () = release_bytes(id_frozen, id_bytes)
       in opened end
-      else $BF.dropped_open_at(file_index)): $P.promise($BF.opened, $P.Chained)
+      | Dropped() => $BF.dropped_open_at(file_index)): $P.promise($BF.opened, $P.Chained)
   in
     (* each import's result is already reported (_import_opened shows
        the error banner on a failure, and a duplicate is answered in its
        own dialog): the next file is imported whatever it was *)
-    $P.finish<Int>($P.and_then<$BF.opened><Int>(opened, llam(opened) => _import_opened(opened)), llam(_) =>
-      _import_seq(source, file_index + 1, file_count))
+    $P.finish<import_outcome>($P.and_then<$BF.opened><import_outcome>(opened, llam(opened) => _import_opened(opened)), llam(outcome) => let
+      val () = import_outcome_free(outcome)
+    in
+      _import_seq(source, file_index + 1, file_count) end)
   end
 
 (* Imports the files picked in the file input import-file *)
@@ -665,16 +718,16 @@ implement import_picked () = let
   val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
   val file_count = $BF.file_count(id_bytes, 11)
   val () = release_bytes(id_frozen, id_bytes)
-in _import_seq(0, 0, file_count) end
+in _import_seq(FileInput(), 0, file_count) end
 
 (* Imports the files of the last drop *)
 #pub fn import_dropped (): void
 
-implement import_dropped () = _import_seq(1, 0, $BF.dropped_count())
+implement import_dropped () = _import_seq(Dropped(), 0, $BF.dropped_count())
 
 (* Imports a file handed to the app from outside it; the promise
    resolves when its import is done, as an import's does *)
-#pub fn import_external (handed: $BE.external): $P.promise(Int, $P.Chained)
+#pub fn import_external (handed: $BE.external): $P.promise(import_outcome, $P.Chained)
 
 (* ignored: the import's result is already reported, as each one's of
    _import_seq *)
@@ -683,7 +736,7 @@ implement import_external (handed) =
   | ~$BE.ExternalUnreadable(name) => let
       val () = _keep_name(name)
       val () = _unread()
-    in $P.ret<Int>(~1) end
+    in $P.ret<import_outcome>(Failed()) end
   | ~$BE.External(book_file, name) => let
       val file_size = $BF.file_size(book_file)
       val () = _keep_name(name)
@@ -721,9 +774,11 @@ in
         else let
           val serial = book_begin(book_file, file_size)
         in
-          $P.and_then<Int><book_opening>(_open_archive(serial, file_size, MODE_OPEN, ~1, id_high, id_low), llam(outcome) =>
-            if outcome < 0 then $P.ret<book_opening>(BookFileMissing())
-            else let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end)
+          $P.and_then<archive_outcome><book_opening>(_open_archive(serial, file_size, Reopen(), ~1, id_high, id_low), llam(outcome) =>
+            case+ outcome of
+            | ~BookReopened() => let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end
+            | ~BookAdded(_) => $P.ret<book_opening>(BookFileMissing())
+            | ~ArchiveFailed(_) => $P.ret<book_opening>(BookFileMissing()))
         end
       end)
 end
