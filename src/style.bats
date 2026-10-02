@@ -778,7 +778,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance
+  | Appearance | ContainerType
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -808,7 +808,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | Outline() => "outline" | OutlineOffset() => "outline-offset"
   | ColumnFill() => "column-fill" | ColumnGap() => "column-gap"
   | ColumnWidth() => "column-width" | BreakAfter() => "break-after"
-  | BreakInside() => "break-inside" | Appearance() => "appearance"
+  | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
@@ -1520,7 +1520,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 7600} (sheet: sheet(left, 0)): [after:nat | after >= left - 7600] sheet(after, 0) = let
+fn _reader {left:nat | left >= 8300} (sheet: sheet(left, 0)): [after:nat | after >= left - 8300] sheet(after, 0) = let
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -1725,6 +1725,34 @@ fn _reader {left:nat | left >= 7600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, MaxWidth(), "none")
   val sheet = lay(sheet, PaddingLeft(), "0")
   val sheet = lay(sheet, PaddingRight(), "0")
+  val sheet = close(sheet)
+  (* a fixed-layout page: the page is the whole reader view (the bars
+     over it, as they are over a reflowed page), with no columns,
+     scroll or paddings, and its box (reader.bats's page-box) centred
+     in it, its own size scaled to fit (its inline style, ui_fixed_box_n,
+     from _fixed_fit). Not restyled: these outrank the typography's .caf
+     and .caf>* (style-type, settings.bats). What is outside the box is
+     cut off, as EPUB RS 3.3 says, and its images fit it (the book's
+     own CSS, which would size them, is not used) *)
+  val sheet = rule(sheet, ".caf.fixed")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, JustifyContent(), "center")
+  val sheet = lay(sheet, Padding(), "0")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, ColumnWidth(), "auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf.fixed>*")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = lay(sheet, MaxWidth(), "none")
+  val sheet = lay(sheet, Margin(), "0")
+  val sheet = lay(sheet, Padding(), "0")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, ContainerType(), "size")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf.fixed img")
+  val sheet = lay(sheet, MaxWidth(), "100cqw")
+  val sheet = lay(sheet, MaxHeight(), "100cqh")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf figure")
   val sheet = lay(sheet, Margin(), "1em auto")

@@ -291,9 +291,9 @@ implement ui_src_empty (id) = let
   val () = $D.destroy(document)
 in release_bytes(id_frozen, id_bytes) end
 
-(* The attributes other code may set. There is no style: the one inline
-   style is a place (ui_place), so nothing can set a colour, a size or
-   anything else the stylesheet proves *)
+(* The attributes other code may set. There is no style: the inline
+   styles are a place (ui_place) and a fixed page's box (ui_fixed_box_n),
+   so nothing can set a colour or anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden
 
@@ -355,6 +355,28 @@ in _set_attr_buf(id, $D.Style, style, style_len) end
 implement ui_place_n (id, id_len, placement, tenths) = let
   val style = $A.alloc<byte>(32)
   val style_len = _place_style(style, placement, tenths)
+in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
+
+(* A fixed-layout page's box (reader.bats, made for each fixed page in
+   the page): its width and height in CSS pixels and its zoom in
+   thousandths, "width:600px;height:800px;zoom:62.5%". The one inline
+   style besides a place, written from numbers alone, so it cannot set
+   a colour or anything else the stylesheet proves; a zoom of 0 (which
+   would hide the page) does not type-check *)
+#pub fn ui_fixed_box_n {id_loc:agz}{id_len:pos | id_len < 256}{width,height:pos | width <= 10000; height <= 10000}{zoom:pos | zoom <= 10000}
+  (id: $A.arr(byte, id_loc, id_len), id_len: int id_len, width: int width, height: int height, zoom: int zoom): void
+
+implement ui_fixed_box_n (id, id_len, width, height, zoom) = let
+  val style = $A.alloc<byte>(96)
+  val style_len = _put_text(style, 0, "width:", 6, 0)
+  val style_len = $S.int_to_str(style, style_len, 96, width)
+  val style_len = _put_text(style, style_len, "px;height:", 10, 0)
+  val style_len = $S.int_to_str(style, style_len, 96, height)
+  val style_len = _put_text(style, style_len, "px;zoom:", 8, 0)
+  val style_len = $S.int_to_str(style, style_len, 96, zoom / 10)
+  val style_len = _put_text(style, style_len, ".", 1, 0)
+  val style_len = $S.int_to_str(style, style_len, 96, zoom - (zoom / 10) * 10)
+  val style_len = _put_text(style, style_len, "%", 1, 0)
 in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
 
 (* The class of element id *)

@@ -10,6 +10,7 @@
 #use zip as Z
 #use str as S
 
+staload "epub_xml.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "mem.sats"
@@ -42,13 +43,14 @@ implement $P.dispose<$IDB.stored>(_) = ()
    (the first time a chapter is loaded, book_spine_set): a chapter's
    data [data_offset, data_offset + data_size) in the file of file_size
    bytes, its method, its name [name_offset, name_offset + name_len) in
-   the file and the length dir_len of that name's directory part;
+   the file, the length dir_len of that name's directory part and its
+   layout (its itemref's, else the book's: reflowed, or a fixed page);
    missing when its href is empty, over 1 MiB with the OPF's directory,
    or names no entry; count chapters *)
 #pub datavtype book_chapters(file_size:int, count:int) =
   | ChaptersNil(file_size, 0) of ()
   | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
-    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, book_chapters(file_size, count))
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, rendition_layout, book_chapters(file_size, count))
   | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
@@ -115,7 +117,7 @@ implement $P.dispose<$IDB.stored>(_) = ()
 (* Chapter chapter_index of the open book, book `serial` *)
 #pub datavtype chapter_got =
   | {file_size:pos}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}{chapter_count:nat}
-    ChapterGot of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, int chapter_count)
+    ChapterGot of (int file_size, int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, rendition_layout, int chapter_count)
   (* The book has chapter_count chapters, but not a chapter_index-th one
      that names an entry *)
   | {chapter_count:nat} ChapterNone of (int chapter_count)
@@ -378,7 +380,7 @@ end
 fun book_chapters_free {file_size:int}{count:nat} .<count>. (chapters: book_chapters(file_size, count)): void =
   case+ chapters of
   | ~ChaptersNil() => ()
-  | ~Chapter(_, _, _, _, _, _, rest) => book_chapters_free(rest)
+  | ~Chapter(_, _, _, _, _, _, _, rest) => book_chapters_free(rest)
   | ~ChapterMissing(rest) => book_chapters_free(rest)
 
 fn book_spine_free {file_size:int} (spine: book_spine(file_size)): void =
@@ -391,9 +393,9 @@ fun book_chapter_at {file_size:pos}{remaining:nat}{chapter_index:nat}{chapter_co
   (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index, chapter_count: int chapter_count): chapter_got =
   case+ chapters of
   | ChaptersNil() => ChapterNone(chapter_count)
-  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, rest) =>
+  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, layout, rest) =>
     if chapter_index = 0 then let
-      val got = ChapterGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len, chapter_count)
+      val got = ChapterGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len, layout, chapter_count)
       prval () = fold@(chapters)
     in got end
     else let
@@ -693,7 +695,7 @@ fun book_chapter_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remain
   (chapters: !book_chapters(file_size, remaining), name_offset: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
   case+ chapters of
   | ChaptersNil() => ~1
-  | @Chapter(_, _, _, chapter_name_offset, _, _, rest) =>
+  | @Chapter(_, _, _, chapter_name_offset, _, _, _, rest) =>
     if chapter_name_offset = name_offset then let prval () = fold@(chapters) in chapter_index end
     else let
       val found = book_chapter_find(rest, name_offset, chapter_index + 1)
@@ -730,7 +732,7 @@ fun book_weigh {file_size:pos}{remaining:nat} .<remaining>.
   (chapters: !book_chapters(file_size, remaining), chapter_index: int, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
   case+ chapters of
   | ChaptersNil() => @(before, own, total)
-  | @Chapter(_, data_size, _, _, _, _, rest) => let
+  | @Chapter(_, data_size, _, _, _, _, _, rest) => let
       val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, before + data_size, own, total + data_size)
         else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, before, data_size, total + data_size)
         else book_weigh(rest, chapter_index - 1, before, own, total + data_size)): @(Nat, Nat, Nat)
