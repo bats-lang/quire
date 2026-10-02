@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The relock workflow starts it on its relock/<date> branch: a pull
+  # request opened with GITHUB_TOKEN starts no workflow by itself
+  workflow_dispatch:
 
 jobs:
   check:
@@ -27,11 +30,16 @@ jobs:
       - name: Install WASM tools
         run: sudo apt-get install -y -q lld
 
+      # The compiler at the commit .github/bats-version pins (#203)
+      - name: Read the compiler pin
+        id: pins
+        run: echo "bats=$(tr -d '[:space:]' < .github/bats-version)" >> "$GITHUB_OUTPUT"
+
       - name: Checkout bats compiler
         uses: actions/checkout@v4
         with:
           repository: bats-lang/bats
-          ref: main
+          ref: ${{ steps.pins.outputs.bats }}
           path: bats-src
 
       - name: Build bats from checked-in bootstrap C
@@ -45,11 +53,15 @@ jobs:
       - name: Setup
         run: |
           sudo cp $HOME/bats-bin/bats /bin/bats
-          git clone https://github.com/bats-lang/repository-prototype.git $HOME/repository
+          git clone --depth 1 https://github.com/bats-lang/repository-prototype.git $HOME/repository
+          # The packages are the versions the committed bats.lock locks
+          # (#203); bats check and build fetch exactly those, and fail on
+          # a lock that does not match the project. Only a relock moves
+          # them: never this workflow.
+          test -f bats.lock || { echo "::error::bats.lock is missing: run 'bats lock --repository <dir>' and commit it"; exit 1; }
 
       - name: bats check
         run: |
-          bats lock --repository $HOME/repository
           bats check --repository $HOME/repository
 
       - name: Static tests
@@ -121,7 +133,8 @@ jobs:
   # main uploads them as downloadable artifacts.
   android:
     needs: check
-    uses: bats-lang/pwa/.github/workflows/android.yml@main
+    # Pinned by commit; the relock workflow moves it (#203)
+    uses: bats-lang/pwa/.github/workflows/android.yml@80d4a473699b6479bd2fbe5a0467c2918e8de9fc
     secrets: inherit
     with:
       artifact: quire-android
