@@ -754,11 +754,11 @@ in Sheet(builder) end
   | Display | FlexDirection | Flex | FlexWrap | FlexBasis | AlignItems
   | AlignSelf | JustifyContent | Gap | Order
   | Padding | PaddingTop | PaddingBottom | PaddingLeft | PaddingRight
-  | Margin | MarginTop | MarginBottom | MarginLeft | MarginRight
+  | Margin | MarginTop | MarginBottom | MarginLeft | MarginRight | MarginBlock | MarginInline
   | Width | MaxWidth | MinWidth | Height | MaxHeight | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
-  | WhiteSpace | Hyphens | Direction
+  | WhiteSpace | Hyphens | Direction | WritingMode
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
@@ -774,7 +774,8 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | PaddingBottom() => "padding-bottom" | PaddingLeft() => "padding-left"
   | PaddingRight() => "padding-right" | Margin() => "margin" | MarginTop() => "margin-top"
   | MarginBottom() => "margin-bottom" | MarginLeft() => "margin-left"
-  | MarginRight() => "margin-right" | Width() => "width" | MaxWidth() => "max-width"
+  | MarginRight() => "margin-right" | MarginBlock() => "margin-block"
+  | MarginInline() => "margin-inline" | Width() => "width" | MaxWidth() => "max-width"
   | MinWidth() => "min-width" | Height() => "height" | MaxHeight() => "max-height"
   | MinHeight() => "min-height" | BoxSizing() => "box-sizing" | FontFamily() => "font-family"
   | FontSize() => "font-size" | FontWeight() => "font-weight" | FontStyle() => "font-style"
@@ -782,6 +783,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | TextTransform() => "text-transform" | TextAlign() => "text-align"
   | TextOverflow() => "text-overflow" | TextDecoration() => "text-decoration"
   | WhiteSpace() => "white-space" | Hyphens() => "hyphens" | Direction() => "direction"
+  | WritingMode() => "writing-mode"
   | Overflow() => "overflow" | OverflowX() => "overflow-x" | Position() => "position"
   | Top() => "top" | Bottom() => "bottom" | Left() => "left" | Right() => "right"
   | Inset() => "inset" | ZIndex() => "z-index" | Cursor() => "cursor"
@@ -1503,7 +1505,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 7000} (sheet: sheet(left, 0)): [after:nat | after >= left - 7000] sheet(after, 0) = let
+fn _reader {left:nat | left >= 7600} (sheet: sheet(left, 0)): [after:nat | after >= left - 7600] sheet(after, 0) = let
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -1628,14 +1630,17 @@ fn _reader {left:nat | left >= 7000} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = close(sheet)
   (* a paragraph's alignment, hyphenation and the space after it are
-     the reader's settings (settings.bats, in style-type) *)
+     the reader's settings (settings.bats, in style-type). Its margins
+     are logical: the space after it is below it in horizontal text,
+     and beside it (between its columns of lines) in vertical text,
+     where a margin below would shorten its lines *)
   val sheet = rule(sheet, ".caf p")
-  val sheet = lay(sheet, Margin(), "0 auto .8em")
+  val sheet = lay(sheet, MarginBlock(), "0 .8em")
+  val sheet = lay(sheet, MarginInline(), "auto")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf h1,.caf h2,.caf h3")
   val sheet = lay(sheet, TextAlign(), "center")
-  val sheet = lay(sheet, MarginTop(), "1.5em")
-  val sheet = lay(sheet, MarginBottom(), ".5em")
+  val sheet = lay(sheet, MarginBlock(), "1.5em .5em")
   val sheet = lay(sheet, BreakAfter(), "avoid")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf hr")
@@ -1679,6 +1684,32 @@ fn _reader {left:nat | left >= 7000} (sheet: sheet(left, 0)): [after:nat | after
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
   val sheet = lay(sheet, Direction(), "rtl")
+  val sheet = close(sheet)
+  (* set vertically (a Chinese, Japanese or Korean book read right to
+     left; Mongolian in its script, its lines going on to the right):
+     the columns follow the inline axis, down the page, so a page is one
+     column and the gap between two, the page's top and bottom paddings
+     (.caf), and a turn is exactly the page's height. Always paged, one
+     column a screen: these outrank the typography's .caf (style-type,
+     settings.bats), whose columns and scroll they replace *)
+  val sheet = rule(sheet, ".caf.vertical,.caf.vertical-lr")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, ColumnWidth(), "100vh")
+  val sheet = lay(sheet, ColumnGap(), "calc(max(48px,env(safe-area-inset-top)) + max(36px,env(safe-area-inset-bottom)))")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf.vertical")
+  val sheet = lay(sheet, WritingMode(), "vertical-rl")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf.vertical-lr")
+  val sheet = lay(sheet, WritingMode(), "vertical-lr")
+  val sheet = close(sheet)
+  (* the lines are the column's height, and the margins' setting is not
+     offered (the typography's paddings on the page's children): a
+     block takes the page's width, and its lines its height *)
+  val sheet = rule(sheet, ".caf.vertical>*,.caf.vertical-lr>*")
+  val sheet = lay(sheet, MaxWidth(), "none")
+  val sheet = lay(sheet, PaddingLeft(), "0")
+  val sheet = lay(sheet, PaddingRight(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf figure")
   val sheet = lay(sheet, Margin(), "1em auto")
