@@ -101,6 +101,12 @@ jobs:
             dist/pwa
           retention-days: 1
 
+      # The home page beside the app, as deploy.yml publishes it, for the
+      # e2e test that the service worker leaves it to the network. Added
+      # after the Android project is uploaded, which never holds it
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
