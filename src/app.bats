@@ -275,6 +275,7 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
   val () = _hide("menu-storage-at-risk")
   val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
+  val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_harm_item("library-menu-box", HEmptyTrash())

@@ -1014,6 +1014,11 @@ in
   in lib_coll_name_show(collection) end
 end
 
+(* Opens the About screen, from Settings or the library menu *)
+fn _about_open (): void = let
+  val () = layer_open(LAbout())
+in ui_focus("about-done") end
+
 (* Opens the Settings screen, its Sync row and goal as they are now *)
 fn _settings_open (): void = let
   val () = stats_goal_show()
@@ -1059,9 +1064,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 4) =
           val () = layer_close(LSettings())
           val () = (if _in_reader() then _show_library() else ())
         in _factory_reset() end
-        else if about then let
-          val () = layer_open(LAbout())
-        in ui_focus("about-done") end
+        else if about then _about_open()
         else if done then layer_close(LSettings())
         else ())
     in 0 end)
@@ -1069,7 +1072,8 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 4) =
      goes back to Settings *)
   val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
       val () = layer_close(LAbout())
-      val () = ui_focus("settings-about")
+      (* back where it was opened: Settings' row, or the library menu's button *)
+      val () = (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button"))
     in 0 end)
   val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
       val () = layer_close(LSettings())
@@ -1226,6 +1230,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         if _is(clicked, "menu-settings") then let
           val () = layer_close(LLibraryMenu())
         in _settings_open() end
+        else if _is(clicked, "menu-about") then let
+          val () = layer_close(LLibraryMenu())
+        in _about_open() end
         (* the browser's offer to install the app *)
         else if _is(clicked, "menu-install") then let
           val () = layer_close(LLibraryMenu())
