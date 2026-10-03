@@ -819,7 +819,10 @@ again a moment (`COPY_SETTLE_MS`) after the page last changed (a
 chapter shown, laid out anew, an image come in), so a turn only
 scrolls the copy to the place and shows it: on a 300 KB chapter its
 first frame comes in 20 to 30 ms, where making the copy at the turn
-took 110 to 200 (`e2e/page-turn.spec.js` holds it to 50). The page
+took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
+instant turn's, in the same page). A turn shows only a `fresh_copy`,
+which only `_copy_ready` gives, making a stale copy again first, so no
+turn shows a chapter or a layout gone. The page
 itself goes to the incoming page at once, so the place, the indicator
 and the arenas' window move as before. The overlay is a strip of
 [copy | gap] scrolled each frame, so the copy slides off (mirrored
