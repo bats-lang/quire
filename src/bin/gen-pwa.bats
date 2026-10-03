@@ -96,8 +96,9 @@ implement main0 () = let
   val () = println! ("PWA generated in dist/pwa/")
   (* The Capacitor project around it; its id is the one Quire is
      published under on Google Play. It opens EPUBs, and is shared
-     them. *)
-  val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
+     them; and it is opened at quire:// addresses, as Dropbox's sign-in
+     in the system's browser comes back (quire://oauth/dropbox) *)
+  val () = $P.create_android_linked("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip", "quire")
   val () = _android_version()
   val () = println! ("Android project generated in dist/android/")
 in end

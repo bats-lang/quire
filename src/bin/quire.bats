@@ -2145,8 +2145,9 @@ in listeners end
 (* The platform's: reading aloud (its button, its speed and voice,
    speech's events, and the page going away, which stops it), the
    screen's controls (the brightness, and full screen entered or left),
-   and the browser's offer to install the app *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 8) = let
+   the browser's offer to install the app, and the addresses the app is
+   opened at (Dropbox's sign-in coming back) *)
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -2165,6 +2166,7 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 8) = let
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
+  val listeners = RAppLink(listeners, llam(link) => sync_app_link(link))
 in listeners end
 
 (* ============================================================
