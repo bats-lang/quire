@@ -14,6 +14,8 @@ const base64url = bytes => Buffer.from(bytes).toString('base64')
 export function dropbox() {
   const d = {
     file: null, rev: 0, requests: [], uploads: [], revoked: [],
+    // each code exchanged for tokens, in order
+    exchanged: [],
     // the sign-in page's answer: 'allow' or 'deny'
     answer: 'allow',
     // codes given, by code: { challenge, redirect }
@@ -73,6 +75,7 @@ export function dropbox() {
       const access = `access-${++d.counter}`;
       if (form.get('grant_type') === 'authorization_code') {
         const given = d.codes.get(form.get('code'));
+        d.exchanged.push(form.get('code'));
         d.codes.delete(form.get('code'));
         if (!given || given.redirect !== form.get('redirect_uri')) return json(route, { error: 'invalid_grant' }, 400);
         const challenge = base64url(createHash('sha256').update(form.get('code_verifier') || '').digest());

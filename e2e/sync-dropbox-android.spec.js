@@ -145,6 +145,8 @@ test('in the app, Dropbox signs in through the system browser and comes back at 
   });
   expect(asked.state).toMatch(/^[A-Za-z0-9_-]{22}$/);
   expect(a.page.url()).toBe(address);
+  // the code is exchanged once
+  expect(server.exchanged).toHaveLength(1);
   expect(server.uploads).toEqual(['add']);
   expect(server.json().books).toHaveLength(1);
   await librarySettings(a.page);
@@ -212,6 +214,14 @@ test('in the app, a return from Dropbox that starts the app again is taken once 
   await a.page.reload();
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   expect(server.uploads).toEqual(['add']);
+  expect(server.exchanged).toHaveLength(1);
+  // the same address handed over again (it is taken already) is not a
+  // sign-in: no exchange, nothing said
+  const said = await status(a.page).textContent();
+  await a.page.evaluate(url => window.__openApp(url), back);
+  await a.page.waitForTimeout(500);
+  expect(server.exchanged).toHaveLength(1);
+  await expect(status(a.page)).toHaveText(said);
   expect(unexpected(a)).toEqual([]);
   await a.context.close();
 });
