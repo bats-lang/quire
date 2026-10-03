@@ -15,39 +15,40 @@ import {
   librarySearch, librarySettings, settingsButton, settingsScreen,
 } from './helpers.js';
 
-/** The app's Capacitor, played: Browser (when browser is true) and App.
+/** The app's Capacitor, played: Browser (when browser is true) and App
+    (when app is true).
     window.__openApp(url) opens the app at url; an address kept under
     "launch-link" in sessionStorage started the app, and is passed once a
     listener is added */
-function capacitor({ browser }) {
+function capacitor({ browser, app }) {
   const launch = sessionStorage.getItem('launch-link');
   sessionStorage.removeItem('launch-link');
   const kept = launch ? [{ url: launch }] : [];
-  window.__links = { opened: [], closed: 0, listeners: [] };
+  window.__links = { opened: [], listeners: [] };
   window.__openApp = url => window.__links.listeners.forEach(f => f({ url }));
-  const plugins = {
-    App: {
-      addListener: (name, f) => {
-        if (name === 'appUrlOpen') {
-          window.__links.listeners.push(f);
-          setTimeout(() => kept.splice(0).forEach(e => f(e)), 0);
-        }
-        return Promise.resolve({ remove: () => Promise.resolve() });
-      },
+  const plugins = {};
+  if (app) plugins.App = {
+    addListener: (name, f) => {
+      if (name === 'appUrlOpen') {
+        window.__links.listeners.push(f);
+        setTimeout(() => kept.splice(0).forEach(e => f(e)), 0);
+      }
+      return Promise.resolve({ remove: () => Promise.resolve() });
     },
   };
+  // Browser has no close: the return brings the app's activity forward,
+  // which ends the tab (bats-lang/bridge#135)
   if (browser) plugins.Browser = {
     open: o => { window.__links.opened.push(o.url); return Promise.resolve(); },
-    close: () => { window.__links.closed++; return Promise.resolve(); },
   };
   window.Capacitor = { isNativePlatform: () => true, Plugins: plugins };
 }
 
 /** A device running the app, with Dropbox routed, and the build's key
     (none: key '') */
-async function device(browser, server, { key = KEY, tab = true } = {}) {
+async function device(browser, server, { key = KEY, tab = true, app = true } = {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await context.addInitScript(capacitor, { browser: tab });
+  await context.addInitScript(capacitor, { browser: tab, app });
   await context.route('https://api.dropboxapi.com/**', server.api);
   await context.route('https://content.dropboxapi.com/**', server.api);
   await context.route('**/sync-clients.json', route => route.fulfill({
@@ -70,7 +71,7 @@ const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 const dropboxButton = page => panel(page).getByRole('button', { name: 'Dropbox' });
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
-const links = page => page.evaluate(() => ({ opened: window.__links.opened, closed: window.__links.closed }));
+const links = page => page.evaluate(() => ({ opened: window.__links.opened }));
 
 async function openSync(page) {
   await librarySettings(page);
@@ -144,8 +145,6 @@ test('in the app, Dropbox signs in through the system browser and comes back at 
   });
   expect(asked.state).toMatch(/^[A-Za-z0-9_-]{22}$/);
   expect(a.page.url()).toBe(address);
-  // the tab over the app is closed once Dropbox has sent the reader back
-  expect((await links(a.page)).closed).toBe(1);
   expect(server.uploads).toEqual(['add']);
   expect(server.json().books).toHaveLength(1);
   await librarySettings(a.page);
@@ -182,12 +181,10 @@ test('in the app, a canceled sign-in changes nothing, and a code or an address i
   expect(server.requests).toEqual([]);
 
   // an address of another app's, or of quire's that is not Dropbox's
-  // return, is not sync's: nothing changes, and the tab is left alone
-  const closed = (await links(a.page)).closed;
+  // return, is not sync's: nothing changes
   await a.page.evaluate(() => window.__openApp('quire://oauth/dropboxes?code=x&state=AAAAAAAAAAAAAAAAAAAAAA'));
   await a.page.evaluate(() => window.__openApp('content://downloads/book.epub'));
   await expect(status(a.page)).toHaveText('Dropbox sign-in was canceled.');
-  expect((await links(a.page)).closed).toBe(closed);
 
   // a code with a state this app did not send is refused
   server.answer = 'allow';
@@ -215,18 +212,20 @@ test('in the app, a return from Dropbox that starts the app again is taken once 
   await a.page.reload();
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   expect(server.uploads).toEqual(['add']);
-  expect((await links(a.page)).closed).toBe(1);
   expect(unexpected(a)).toEqual([]);
   await a.context.close();
 });
 
-test('in the app, Dropbox is not listed without the system browser\'s tab, and says when the build has no key', async ({ browser }) => {
+test('in the app, Dropbox is not listed without the system browser\'s tab or the app\'s links, and says when the build has no key', async ({ browser }) => {
   const server = dropbox();
-  const a = await device(browser, server, { tab: false });
-  await openSync(a.page);
-  await expect(dropboxButton(a.page)).toBeHidden();
-  await expect(panel(a.page).getByText('Dropbox sync isn\'t set up')).toBeHidden();
-  await a.context.close();
+  // each plugin without the other: no round trip, so no Dropbox
+  for (const plugins of [{ tab: false }, { app: false }]) {
+    const a = await device(browser, server, plugins);
+    await openSync(a.page);
+    await expect(dropboxButton(a.page)).toBeHidden();
+    await expect(panel(a.page).getByText('Dropbox sync isn\'t set up')).toBeHidden();
+    await a.context.close();
+  }
 
   const b = await device(browser, server, { key: '' });
   await openSync(b.page);

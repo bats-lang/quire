@@ -44,7 +44,15 @@ staload "dropbox.sats"
 staload "web_request.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
+staload BT = "wasm.bats-packages.dev/bridge/src/browser_tab.sats"
 staload "nextcloud.sats"
+
+(* Whether this app can sign in to Dropbox through the system's browser:
+   it opens Dropbox's page in a tab over the app (bridge's Browser
+   plugin) and is told the address Dropbox sends the reader back to (its
+   App plugin). Both are needed: quire's own sequencing of the two *)
+fn _round_trip_available (): bool =
+  $BT.browser_tab_available() && $AL.app_link_available()
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -2397,7 +2405,7 @@ implement sync_screen_open () = let
   val key = $A.alloc<byte>(256)
   val key_len = sync_clients_dropbox(key)
   val () = $A.free<byte>(key)
-  val dropbox = (if app then $AL.browser_tab_available() else true): bool
+  val dropbox = (if app then _round_trip_available() else true): bool
   val () = ui_show("sync-dropbox-row", dropbox)
   val () = ui_show("sync-dropbox", key_len > 0)
   val () = (if ~dropbox then ()
@@ -3289,15 +3297,15 @@ fn _dropbox_page_open {l:agz}{url_len:pos | url_len <= REQUEST_URL_MAX} (url: $A
   val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
   val @(used, rest) = $A.borrow_split<byte>(url_frozen, url_bytes, url_len)
 in
-  if $AL.browser_tab_available() then let
-    val opening = $AL.browser_tab_open(used, url_len)
+  if _round_trip_available() then let
+    val opening = $BT.browser_tab_open(used, url_len)
     val url_bytes = $A.borrow_join<byte>(url_frozen, used, rest)
     val () = release_bytes(url_frozen, url_bytes)
   in
-    $P.finish<$AL.tab_opened>(opening, llam(opened) =>
+    $P.finish<$BT.tab_opened>(opening, llam(opened) =>
       case+ opened of
-      | $AL.TabOpened() => ()
-      | $AL.TabNotOpened() => _ask_failed(DropboxSignInRefused()))
+      | $BT.TabOpened() => ()
+      | $BT.TabNotOpened() => _ask_failed(DropboxSignInRefused()))
   end
   else let
     val left = $NAV.navigate_away(used, url_len)
@@ -3406,8 +3414,8 @@ in
   in
     if ~_dropbox_link(page, n) then $A.free<byte>(page)
     else let
-      (* the tab over the app, on Dropbox's page, is done with *)
-      val () = $AL.browser_tab_close()
+      (* the tab over the app went as the app came forward (its activity
+         is singleTask, bats-lang/bridge#135) *)
       val () = _returned_free(_returned_swap(_returned_of(page, n)))
       val () = $A.free<byte>(page)
     in _returned_pending() end
