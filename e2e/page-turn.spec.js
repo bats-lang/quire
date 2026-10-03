@@ -118,6 +118,38 @@ test.describe('a page turn', () => {
     await expect.poll(async () => (await place(page)).p).toBe(2);
   });
 
+  test('turning on again as soon as the next chapter is shown, the page being left is the new chapter\'s', async ({ page }) => {
+    await start(page);
+    await readBook(page, book('At Once'));
+    await page.keyboard.press('End');
+    await expect.poll(async () => { const p = await place(page); return p.p === p.t; }).toBe(true);
+    await expect.poll(() => copies(page)).toBe(1);
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await place(page)).ch, { intervals: [10] }).toBe(2);
+    // at once, well within the moment before the kept copy is made again
+    // (the turn into the chapter may still be sliding: the next key ends
+    // it): which chapter the page being left shows, in every frame from
+    // the key's on
+    await page.evaluate(() => {
+      window.turnSeen = new Set();
+      window.turnWatching = true;
+      const step = () => {
+        for (const p of document.querySelectorAll('[aria-hidden="true"] p')) {
+          if (p.checkVisibility({ visibilityProperty: true })) window.turnSeen.add(p.textContent.slice(0, 6));
+        }
+        if (window.turnWatching) requestAnimationFrame(step);
+      };
+      const onKey = () => { window.removeEventListener('keydown', onKey, true); requestAnimationFrame(step); };
+      window.addEventListener('keydown', onKey, true);
+    });
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await place(page)).p).toBe(2);
+    await expect.poll(() => copies(page, 'Para 2.0 ')).toBe(1);
+    const seenChapters = await page.evaluate(() => { window.turnWatching = false; return [...window.turnSeen]; });
+    expect(seenChapters).toContain('Para 2');
+    expect(seenChapters).not.toContain('Para 1');
+  });
+
   test('into the next chapter and back, the page being left lies over the chapter coming in', async ({ page }) => {
     await start(page);
     await readBook(page, book('Chapters'));
@@ -158,24 +190,40 @@ const firstFrame = (page) => page.evaluate(() => window.firstFrame);
 
 test.describe('a page turn on a long chapter', () => {
   // The copy is kept between turns, so a turn only scrolls it and shows
-  // it: its first frame comes as soon as a turn without the copy's. On a
-  // chapter of about 300 KB, making the copy at the turn took 110 to 200
-  // ms here, the kept copy 20 to 30, and a turn with no copy 11 to 24
-  test('starts within 50 ms of the key, half the turns or more', async ({ page }) => {
+  // it: its first frame comes about as soon as an instant turn's (with
+  // less motion: no copy at all). The two are measured in the same page,
+  // so a slower machine slows both: on a chapter of about 300 KB, here,
+  // making the copy at the turn took 110 to 200 ms, the kept copy 20 to
+  // 30, and an instant turn 11 to 24
+  test('starts within 30 ms of an instant turn\'s first frame', async ({ page }) => {
     await start(page);
     await readBook(page, { title: 'A Long Chapter', author: 'Turn Tests', rawChapters: chapters(2, 900) });
     // the copy, made a moment after the chapter is shown, kept hidden
     await expect.poll(() => page.locator('[aria-hidden="true"] p').count()).toBeGreaterThan(0);
-    const times = [];
-    for (let i = 0; i < 6; i++) {
-      await watchFirstFrame(page);
-      await page.keyboard.press(i % 2 ? 'ArrowLeft' : 'ArrowRight');
-      times.push(await firstFrame(page));
-      await expect.poll(async () => (await place(page)).p).toBe(i % 2 ? 1 : 2);
-      await expect.poll(() => copies(page)).toBe(1);
-    }
-    times.sort((a, b) => a - b);
-    expect(times[2], `first frames: ${times.map(Math.round).join(', ')} ms`).toBeLessThanOrEqual(50);
+    // six turns, on and back, each from the key to its first frame
+    const turns = async () => {
+      const times = [];
+      for (let i = 0; i < 6; i++) {
+        await watchFirstFrame(page);
+        await page.keyboard.press(i % 2 ? 'ArrowLeft' : 'ArrowRight');
+        times.push(await firstFrame(page));
+        await expect.poll(async () => (await place(page)).p).toBe(i % 2 ? 1 : 2);
+        await expect.poll(() => copies(page)).toBe(1);
+      }
+      times.sort((x, y) => x - y);
+      return times;
+    };
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    const instant = await turns();
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    const animated = await turns();
+    // the middle of each (the third of six): one slow frame (a collection,
+    // the machine busy) moves neither
+    const ms = (times) => times.map(Math.round).join(', ');
+    // printed, so each CI run shows the margin
+    console.log(`first frames: animated ${ms(animated)} ms, instant ${ms(instant)} ms`);
+    expect(animated[2], `first frames: animated ${ms(animated)} ms, instant ${ms(instant)} ms`)
+      .toBeLessThanOrEqual(instant[2] + 30);
   });
 });
 

@@ -1061,21 +1061,27 @@ fn _place_scroll (): scrolled =
     | AcrossBack() => ScrolledAcross(~(page * !_page_width))
     | Down() => ScrolledDown(page * _step()))
 
-(* The copy of the page kept in the sheet, hidden but laid out, so a
-   turn only scrolls it and shows it (making one, appending it and
-   laying out its columns takes a large chapter's whole frame and more):
-   none yet, one that no longer shows what the page does (the chapter
-   shown again, laid out again, an image come in), or one that does *)
-datatype copy_state = CopyMissing | CopyStale | CopyKept
-
-val _copy = ref<copy_state>(CopyMissing)
+(* Whether the sheet is over the page (a turn going on) *)
+val _sheet_laid = ref<bool>(false)
 
 (* The number of the last refresh asked for: only the last one, a
    moment after the changes stop, makes the copy again *)
 val _copy_asked = ref<int>(0)
 
-(* Whether the sheet is over the page (a turn going on) *)
-val _sheet_laid = ref<bool>(false)
+(* The copy of the page kept in the sheet, hidden but laid out, so a
+   turn only scrolls it and shows it (making one, appending it and
+   laying out its columns takes a large chapter's whole frame and more).
+   A turn shows it only with a fresh_copy, which only _copy_ready gives,
+   having made the copy again unless it is known to show the page: so
+   no turn shows a copy of a chapter or a layout gone (in the moment
+   before a stale copy is made again, a turn makes it then). Its state
+   and its constructors are local: none yet, one that no longer shows
+   what the page does (the chapter shown again, laid out again, an
+   image come in), or one that does *)
+local
+datatype copy_state = CopyMissing | CopyStale | CopyKept
+
+val _copy = ref<copy_state>(CopyMissing)
 
 (* The page as it is now, copied into the sheet (turn-copy, inert, at
    the place's scroll), in one flush, in place of any copy before it *)
@@ -1090,17 +1096,27 @@ fn _copy_place (): void =
   | ~ScrolledAcross(left) => _scroll_literal("turn-copy", ScrollAcross(), left)
   | ~ScrolledDown(top) => _scroll_literal("turn-copy", ScrollDown(), top)
 
-(* The page as it is now in the sheet: the kept copy scrolled to it, or
-   a copy made now when there is none that shows the page *)
-fn _copy_page (): void =
-  case+ !_copy of
-  | CopyKept() => _copy_place()
-  | CopyStale() => _copy_make()
-  | CopyMissing() => _copy_make()
+datavtype fresh_copy_ = FreshCopy of ()
+in
+vtypedef fresh_copy = fresh_copy_
+
+(* The copy showing the page as it is now: the kept copy scrolled to
+   the place's page when it shows the page, else one made now *)
+fn _copy_ready (): fresh_copy = let
+  val () = (case+ !_copy of
+    | CopyKept() => _copy_place()
+    | CopyStale() => _copy_make()
+    | CopyMissing() => _copy_make())
+in FreshCopy() end
+
+(* A fresh copy, shown (by _sheet_show) *)
+fn _copy_shown (copy: fresh_copy): void = let
+  val+ ~FreshCopy() = copy
+in end
 
 (* The page changed under the copy: it is made again a moment after the
    changes stop (images come in one by one), unless a turn is going on
-   then, which makes it again once it ends (_sheet_hide) *)
+   then, which makes it again once it ends (_copy_after_turn) *)
 fn _copy_stale (): void = let
   val () = !_copy := CopyStale()
   val number = !_copy_asked + 1
@@ -1115,11 +1131,26 @@ in
       | CopyMissing() => ()))
 end
 
-(* The page being left, laid over the page: the copy at the page as it
-   is now, at rest, then the shade at its strongest and page-turn shown *)
-fn _sheet_show (slide: slide, under: beneath): void = let
+(* A turn over: a copy that went stale under it made again a moment
+   later *)
+fn _copy_after_turn (): void =
+  case+ !_copy of
+  | CopyStale() => _copy_stale()
+  | CopyKept() => ()
+  | CopyMissing() => ()
+
+(* The book closed: no copy kept, and none to be made *)
+fn _copy_drop (): void = let
+  val () = !_copy_asked := !_copy_asked + 1
+  val () = ui_clear("turn-sheet")
+in !_copy := CopyMissing() end
+end
+
+(* The page being left, laid over the page: the fresh copy, at rest,
+   then the shade at its strongest and page-turn shown *)
+fn _sheet_show (copy: fresh_copy, slide: slide, under: beneath): void = let
   val () = !_sheet_laid := true
-  val () = _copy_page()
+  val () = _copy_shown(copy)
   val () = _strip_at(slide, 0)
   val () = _shade_level(SHADE_LEVELS)
   val () = ui_show("turn-shade", true)
@@ -1132,12 +1163,7 @@ fn _sheet_hide (): void = let
   val () = !_sheet_laid := false
   val () = ui_class("page-turn", "turn idle")
   val () = ui_show("turn-shade", false)
-in
-  case+ !_copy of
-  | CopyStale() => _copy_stale()
-  | CopyKept() => ()
-  | CopyMissing() => ()
-end
+in _copy_after_turn() end
 
 (* A sheet over the page: held by a drag (HELD), while the page beneath
    shows another page than the reader's place, or sliding off a turn
@@ -1161,14 +1187,14 @@ stadef turn_sheet = turn_sheet_
 (* A turn's sheet: the page being left, over the page, whose place is
    about to move to the incoming page *)
 fn _sheet_lay_slid (slide: slide): turn_sheet(SLID) = let
-  val () = _sheet_show(slide, BeneathPage())
+  val () = _sheet_show(_copy_ready(), slide, BeneathPage())
 in SheetSlid() end
 
 (* A drag's sheet: the page at its place, over the page, which then
    shows the incoming page (or a blank one), not its place, until the
    sheet is put back or the turn committed *)
 fn _sheet_lay_held (slide: slide, under: beneath, incoming: int): turn_sheet(HELD) = let
-  val () = _sheet_show(slide, under)
+  val () = _sheet_show(_copy_ready(), slide, under)
   val () = (case+ under of BeneathPage() => _page_scroll(incoming) | BeneathBlank() => ())
 in SheetHeld() end
 
@@ -4115,9 +4141,7 @@ implement reader_pan_back() = _turn_return()
 #pub fun reader_turn_settle(): void
 implement reader_turn_settle() = let
   val () = _turn_settle()
-  val () = !_copy_asked := !_copy_asked + 1
-  val () = ui_clear("turn-sheet")
-in !_copy := CopyMissing() end
+in _copy_drop() end
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)
