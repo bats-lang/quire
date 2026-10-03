@@ -233,6 +233,19 @@ goes through Undo). That row says sync's state in short
 "WebDAV · synced 2 min ago" ("Android · ..."), or how the last sync
 failed.
 
+Nextcloud is signed in to with its Login Flow v2 (`src/nextcloud.bats`,
+#184), which ends in the WebDAV store: the screen's Sign in with
+Nextcloud (`sync_nextcloud_sign_in`) takes an https address, starts the
+flow (`nextcloud_start`), offers the server's sign-in page as a link
+the reader taps (`nextcloud-page`: a tap is never blocked, a script's
+`window.open` after an answer is), and polls the flow's endpoint every
+3 s for its 20 minutes (`nextcloud_poll`, a form body `token=…`); a new
+sign-in or Turn off ends a poll (`_sign_in_generation`). Granted, the
+user's id (`nextcloud_user_id`, OCS `cloud/user`: a login name can be an
+email, the files folder is named by the id) makes the folder,
+`<server>/remote.php/dav/files/<id>` (`nextcloud_folder`), kept with the
+login name and the app password as `WebDav`, and a sync runs.
+
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
 or seen here (the browser gives the time only to the minute), written
