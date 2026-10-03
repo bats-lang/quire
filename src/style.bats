@@ -763,7 +763,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType
+  | Appearance | ContainerType | UserSelect
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -793,7 +793,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | Outline() => "outline" | OutlineOffset() => "outline-offset"
   | ColumnFill() => "column-fill" | ColumnGap() => "column-gap"
   | ColumnWidth() => "column-width" | BreakAfter() => "break-after"
-  | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type"
+  | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
@@ -1734,6 +1734,11 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Padding(), "0")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, ContainerType(), "size")
+  val sheet = close(sheet)
+  (* a spread's facing page is shown, not marked: what is selected,
+     highlighted or read aloud is the page's *)
+  val sheet = rule(sheet, ".caf .facing")
+  val sheet = lay(sheet, UserSelect(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.fixed img")
   val sheet = lay(sheet, MaxWidth(), "100cqw")

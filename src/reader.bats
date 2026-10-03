@@ -209,6 +209,37 @@ fn _is_fixed (): bool =
   | Reflowable() => false
   | PrePaginated() => true
 
+(* How a fixed page is shown (_shape_of): alone, the spread's other
+   side not shown (spreads not wanted, or a centred page, are Single; a
+   page whose side is left or right with no page beside it keeps its
+   side, the other blank); or beside the spine item after it or before
+   it, the facing page (_facing_open), a spread of two *)
+datatype spread_shape =
+  | Single
+  | AloneLeft
+  | AloneRight
+  | WithNext
+  | WithPrevious
+
+val _shape = ref<spread_shape>(Single())
+
+(* Whether the page shown is one of a spread of two *)
+fn _paired (): bool =
+  case+ !_shape of
+  | WithNext() => true
+  | WithPrevious() => true
+  | Single() => false
+  | AloneLeft() => false
+  | AloneRight() => false
+
+(* The book's rendition:spread: when its fixed pages are shown two at a
+   time, unless the Columns setting says *)
+val _book_spread = ref<rendition_spread>(SpreadAuto())
+
+(* Whether spreads were wanted when the page shown was laid out
+   (_spreads_wanted): a layout that wants otherwise shows it again *)
+val _spreads_shown = ref<bool>(false)
+
 (* How the chapter shown is set: as the book is, unless it is a fixed
    page, which is laid out as its own size, not in the reader's columns *)
 fn _writing (): writing_mode =
@@ -361,10 +392,10 @@ in release_bytes(id_frozen, id_bytes) end
 (* Whether a screen shows two columns, a spread: the probe the
    typography's style shows then (settings.bats, _put_cols) *)
 fn _spread (): bool =
-  (* set vertically, a screen is always one page, and so is a fixed
-     page's *)
+  (* set vertically, a screen is always one page; a fixed page's shows
+     two when it is one of a spread of two *)
   if _is_vertical() then false
-  else if _is_fixed() then false
+  else if _is_fixed() then _paired()
   else let
     val () = _measure_literal("spread-probe")
   in $DR.get_measure_w() > 0 end
@@ -377,7 +408,19 @@ fn _put_page_of {l:agz}{at:nat | at + 55 <= 96}
   (buf: !$A.arr(byte, l, 96), at: int at, page: Int, page_count: Int): [end_at:nat | end_at <= at + 55] int end_at =
   if _is_fixed() then (case+ reading_get() of
     | @(_, _, chapter, chapter_count) => let
-        val offset = $S.int_to_str(buf, at, 96, chapter)
+        (* a spread's two spine items, the first in the spine first *)
+        val first = (case+ !_shape of
+          | WithPrevious() => chapter - 1
+          | WithNext() => chapter
+          | Single() => chapter
+          | AloneLeft() => chapter
+          | AloneRight() => chapter): Int
+        val offset = $S.int_to_str(buf, at, 96, first)
+        val offset = (if _paired() then let
+            (* an en dash *)
+            val offset = _put(buf, offset, "\xE2\x80\x93")
+          in $S.int_to_str(buf, offset, 96, first + 1) end
+          else offset): [offset:nat | offset <= at + 25] int offset
         val offset = _put(buf, offset, " of ")
         val offset = $S.int_to_str(buf, offset, 96, chapter_count)
       in _put(buf, offset, " in book") end)
@@ -756,25 +799,41 @@ fn _count_pages (): [count:int] int count =
   | Across() => _count_across()
   | AcrossBack() => _count_across()
 
-(* The id of a fixed page's box *)
-fn _box_id (): [l:agz] @($A.arr(byte, l, 8), int 8) = let
-  val box_id = $A.alloc<byte>(8)
-  val () = $A.write_text(box_id, 0, $A.text_lit("page-box"), 8)
-in @(box_id, 8) end
+(* A fixed page's box, a child of the page: the page's own
+   (page-box), or the facing page's of a spread (facing-box), its other
+   side, blank when it has no page *)
+datatype box =
+  | PageBox
+  | FacingBox
+
+fn _box_id (which: box): [l:agz][id_len:pos | id_len <= 16] @($A.arr(byte, l, id_len), int id_len) =
+  case+ which of
+  | PageBox() => let
+      val box_id = $A.alloc<byte>(8)
+      val () = $A.write_text(box_id, 0, $A.text_lit("page-box"), 8)
+    in @(box_id, 8) end
+  | FacingBox() => let
+      val box_id = $A.alloc<byte>(10)
+      val () = $A.write_text(box_id, 0, $A.text_lit("facing-box"), 10)
+    in @(box_id, 10) end
 
 (* The size of the last fixed page shown that had one (its viewport
    meta): a fixed page without one is given it, as EPUB RS 3.3 §8.1.2
    allows. Forgotten when a book opens (_spine_build) *)
 val _page_size = ref<viewport>(NoViewport())
 
-fn _page_size_take (): viewport = let
+(* The facing page's own size, its viewport meta's (or none: it then
+   takes the page's) *)
+val _facing_size = ref<viewport>(NoViewport())
+
+fn _size_take (cell_ref: ref(viewport)): viewport = let
   var cell: viewport = NoViewport()
-  val () = ref_exch_elt<viewport>(_page_size, cell)
+  val () = ref_exch_elt<viewport>(cell_ref, cell)
 in cell end
 
-fn _page_size_put (size: viewport): void = let
+fn _size_put (cell_ref: ref(viewport), size: viewport): void = let
   var cell: viewport = size
-  val () = ref_exch_elt<viewport>(_page_size, cell)
+  val () = ref_exch_elt<viewport>(cell_ref, cell)
 in viewport_free(cell) end
 
 (* A fixed page's viewport, kept for it and the pages after it that
@@ -782,7 +841,7 @@ in viewport_free(cell) end
 fn _page_size_keep (size: viewport): void =
   case+ size of
   | ~NoViewport() => ()
-  | ~Viewport(width, height) => _page_size_put(Viewport(width, height))
+  | ~Viewport(width, height) => _size_put(_page_size, Viewport(width, height))
 
 (* A length measured on the screen, as a fixed page's size: 1 to 10000
    CSS pixels *)
@@ -800,28 +859,47 @@ fn _fit_zoom (slot_width: int, slot_height: int, width: int, height: int): [zoom
   val zoom = g1ofg0(smaller)
 in if zoom < 1 then 1 else if zoom > 10000 then 10000 else zoom end
 
+(* Box which, a page of size, fitted to a slot of slot_width by
+   slot_height: size (else the slot's own) scaled to fit *)
+fn _fit_box (which: box, size: !viewport, slot_width: int, slot_height: int): void = let
+  val @(box_id, box_id_len) = _box_id(which)
+in
+  case+ size of
+  | Viewport(width, height) => ui_fixed_box_n(box_id, box_id_len, width, height, _fit_zoom(slot_width, slot_height, width, height))
+  | NoViewport() => ui_fixed_box_n(box_id, box_id_len, _box_length(slot_width), _box_length(slot_height), 1000)
+end
+
 (* A fixed page is laid out as its own size, its viewport (else the
    last fixed page's; else the slot's), and scaled to fit the slot: the
    page, the whole reader view, the bars over it as they are over a
-   reflowed page. Its box is centred in the page (.caf.fixed); this
-   sizes and scales it, at each layout, so a resize fits it again *)
+   reflowed page; in a spread, its half of it, the facing page (or a
+   blank of the page's size) the other half, the two meeting in the
+   middle with no gap (EPUB RS 3.3). The boxes are centred in the page
+   (.caf.fixed); this sizes and scales them, at each layout, so a
+   resize fits them again *)
 fn _fixed_fit (): void =
   if ~_is_fixed() then ()
   else let
     val () = _measure_literal("page")
-    val slot_width = $DR.get_measure_w()
+    val view_width = $DR.get_measure_w()
     val slot_height = $DR.get_measure_h()
-    val size = _page_size_take()
-    val @(box_id, box_id_len) = _box_id()
-  in
-    case+ size of
-    | Viewport(width, height) => let
-        val () = ui_fixed_box_n(box_id, box_id_len, width, height, _fit_zoom(slot_width, slot_height, width, height))
-      in _page_size_put(size) end
-    | ~NoViewport() => let
-        val () = _page_size_put(NoViewport())
-      in ui_fixed_box_n(box_id, box_id_len, _box_length(slot_width), _box_length(slot_height), 1000) end
-  end
+    val spread = (case+ !_shape of
+      | Single() => false
+      | AloneLeft() => true
+      | AloneRight() => true
+      | WithNext() => true
+      | WithPrevious() => true): bool
+    val slot_width = (if spread then view_width / 2 else view_width): int
+    val size = _size_take(_page_size)
+    val () = _fit_box(PageBox(), size, slot_width, slot_height)
+    val () = (if spread then let
+        val facing = _size_take(_facing_size)
+        val () = (case+ facing of
+          | Viewport(_, _) => _fit_box(FacingBox(), facing, slot_width, slot_height)
+          | NoViewport() => _fit_box(FacingBox(), size, slot_width, slot_height))
+      in _size_put(_facing_size, facing) end
+      else ())
+  in _size_put(_page_size, size) end
 
 fn _measure_pagination(): void = let
   val () = _fixed_fit()
@@ -1151,11 +1229,14 @@ val _content_count = ref<[count:nat] int count>(0)
    id as a borrow *)
 (* The id of a content node (or of the content area page, for ~1) in a
    fresh array; with its length *)
-(* What a chapter is rendered into: the page, or a fixed page's box in
-   it (page-box, _box_add) *)
+(* What a chapter is rendered into: the page, a fixed page's box in it
+   (page-box, _boxes_add), or the facing page's box of a spread
+   (facing-box, _facing_open), whose content nodes go on from the
+   page's *)
 datatype render_into =
   | IntoPage
   | IntoPageBox
+  | IntoFacingBox
 
 val _render_into = ref<render_into>(IntoPage())
 
@@ -1165,7 +1246,8 @@ fn _node_id {node:int | node >= ~1} (node: int node): [l:agz][id_len:pos | id_le
         val page_id = $A.alloc<byte>(4)
         val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
       in @(page_id, 4) end
-    | IntoPageBox() => _box_id())
+    | IntoPageBox() => _box_id(PageBox())
+    | IntoFacingBox() => _box_id(FacingBox()))
   else _number_id("c", node, 3)
 
 (* A new element <tag> for a content node, the last child of the node parent *)
@@ -2138,7 +2220,7 @@ fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_na
           | ~EntryMiss() => ChapterMissing(found)
           | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
               Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
-                itemref_layout_n(opf_bytes, nodes, item, book_layout),
+                itemref_layout_n(opf_bytes, nodes, item, book_layout), itemref_spread_n(opf_bytes, nodes, item),
                 _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
         end): book_chapters(file_size, found_count + 1)
   in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout, item - 1, chapters) end
@@ -2317,7 +2399,9 @@ fn _rows_set (): void = let
      (margin-block-end), between their columns of lines *)
   val () = ui_show("paragraph-row", reflowed)
   val () = ui_show("layout-row", horizontal)
-  val () = ui_show("columns-row", horizontal)
+  (* a fixed page's Columns are its spreads: one page, two, or as the
+     book and the view's shape say *)
+  val () = ui_show("columns-row", (if reflowed then horizontal else true))
   val () = ui_show("margins-row", horizontal)
   val () = ui_show("letter-row", horizontal)
   val () = ui_show("word-row", horizontal)
@@ -2364,7 +2448,8 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
                val () = !_right_to_left := spine_rtl(opf_bytes, opf_nodes)
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
                (* a new book's fixed pages take no size from another's *)
-               val () = _page_size_put(NoViewport())
+               val () = _size_put(_page_size, NoViewport())
+               val () = !_book_spread := opf_spread(opf_bytes, opf_nodes)
                val () = _lang_locate(opf_bytes, opf_nodes)
                val () = _font_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = $X.free_nodes(opf_nodes)
@@ -2373,24 +2458,154 @@ fn _spine_build (serial: int): $P.promise(int, $P.Chained) =
              in $P.ret<int>(total) end)
        end)
 
-(* A fixed page's box, page-box, the page's one child (styled as .caf.fixed>* is):
-   its content is rendered into it, and it is sized and scaled by
-   _fixed_fit *)
-fn _box_make {doc_location:agz} (doc: !$D.document(doc_location)): void = let
+(* Box which, a child of the page (styled as .caf.fixed>* is): a
+   page's content is rendered into it, and it is sized and scaled by
+   _fixed_fit. The facing box is not selected (.facing): what the reader
+   marks, selects or reads aloud is the page's *)
+fn _box_make {doc_location:agz} (doc: !$D.document(doc_location), which: box): void = let
   val page_id = $A.alloc<byte>(4)
   val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
   val @(page_frozen, page_bytes) = $A.freeze<byte>(page_id)
-  val @(box_id, box_id_len) = _box_id()
+  val @(box_id, box_id_len) = _box_id(which)
   val @(box_frozen, box_bytes) = $A.freeze<byte>(box_id)
   val () = $D.add_element(doc, page_bytes, 4, box_bytes, box_id_len, $D.Div)
+  val () = (case+ which of
+    | PageBox() => ()
+    | FacingBox() => let
+        val class_name = $A.alloc<byte>(6)
+        val () = $A.write_text(class_name, 0, $A.text_lit("facing"), 6)
+        val @(class_frozen, class_bytes) = $A.freeze<byte>(class_name)
+        val () = $D.set_attr(doc, box_bytes, box_id_len, $D.Class, class_bytes, 0, 6)
+      in release_bytes(class_frozen, class_bytes) end)
   val () = release_bytes(box_frozen, box_bytes)
 in release_bytes(page_frozen, page_bytes) end
 
-(* The box, for a fixed page *)
-fn _box_add {doc_location:agz} (doc: !$D.document(doc_location), layout: rendition_layout): void =
+(* Whether a fixed page is shown in a spread: as the Columns setting
+   says (Two always, One never), and at Auto as the book's
+   rendition:spread says: never for none, always for both, and for
+   landscape or auto (Apple Books' and Thorium's choice) when the view
+   is wider than tall *)
+fn _spreads_wanted (): bool = let
+  val columns = set_cols_get()
+in
+  if columns = 2 then true
+  else if columns = 1 then false
+  else (case+ !_book_spread of
+    | SpreadNone() => false
+    | SpreadBoth() => true
+    | SpreadLandscape() => let
+        val () = _measure_literal("page")
+      in $DR.get_measure_w() > $DR.get_measure_h() end
+    | SpreadAuto() => let
+        val () = _measure_literal("page")
+      in $DR.get_measure_w() > $DR.get_measure_h() end)
+end
+
+fn _is_left (slot: page_slot): bool =
+  case+ slot of
+  | SlotLeft() => true
+  | SlotRight() => false
+  | SlotCentre() => false
+  | SlotNone() => false
+
+fn _is_right (slot: page_slot): bool =
+  case+ slot of
+  | SlotRight() => true
+  | SlotLeft() => false
+  | SlotCentre() => false
+  | SlotNone() => false
+
+(* How fixed chapter chapter_index is shown: alone when spreads are not
+   wanted, or it is centred; else beside the page before or after it
+   that makes a spread with it (the left page then the right, or the
+   right then the left read right to left), or alone on its side *)
+fn _shape_of (serial: int, chapter_index: int): spread_shape =
+  if ~_spreads_wanted() then Single()
+  else let
+    val right_to_left = !_right_to_left
+    val @(before, own, after) = book_chapter_slots(serial, chapter_index, right_to_left)
+  in
+    case+ own of
+    | SlotCentre() => Single()
+    | SlotNone() => Single()
+    | SlotLeft() =>
+      if right_to_left then (if _is_right(before) then WithPrevious() else AloneLeft())
+      else if _is_right(after) then WithNext() else AloneLeft()
+    | SlotRight() =>
+      if right_to_left then (if _is_left(after) then WithNext() else AloneRight())
+      else if _is_left(before) then WithPrevious() else AloneRight()
+  end
+
+(* Whether the page shown, of shape, is on the left of its spread *)
+fn _on_left (shape: spread_shape): bool =
+  case+ shape of
+  | AloneLeft() => true
+  | AloneRight() => false
+  | Single() => true
+  | WithNext() => ~(!_right_to_left)
+  | WithPrevious() => !_right_to_left
+
+(* The boxes of a page of layout and shape: none reflowed; a fixed
+   page's box, and in a spread the facing box on its other side, left
+   first *)
+fn _boxes_add {doc_location:agz} (doc: !$D.document(doc_location), layout: rendition_layout, shape: spread_shape): void =
   case+ layout of
   | Reflowable() => ()
-  | PrePaginated() => _box_make(doc)
+  | PrePaginated() => (case+ shape of
+    | Single() => _box_make(doc, PageBox())
+    | AloneLeft() => let val () = _box_make(doc, PageBox()) in _box_make(doc, FacingBox()) end
+    | AloneRight() => let val () = _box_make(doc, FacingBox()) in _box_make(doc, PageBox()) end
+    | WithNext() =>
+      if _on_left(shape) then let val () = _box_make(doc, PageBox()) in _box_make(doc, FacingBox()) end
+      else let val () = _box_make(doc, FacingBox()) in _box_make(doc, PageBox()) end
+    | WithPrevious() =>
+      if _on_left(shape) then let val () = _box_make(doc, PageBox()) in _box_make(doc, FacingBox()) end
+      else let val () = _box_make(doc, FacingBox()) in _box_make(doc, PageBox()) end)
+
+(* Shows chapter facing_index of book serial in the facing box of a
+   spread, its content nodes going on from the page's, its size its
+   viewport's (else the page's), its links and images its own. Shown
+   only while load generation is the last: a later turn has cleared
+   it. Its failure leaves the spread's side blank, the page shown *)
+fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index, generation: int): $P.promise(int, $P.Chained) =
+  case+ book_chapter_get(serial, facing_index) of
+  | ~ChaptersUnknown() => $P.ret<int>(~1)
+  | ~ChapterNone(_) => $P.ret<int>(~4)
+  | ~ChapterGot(file_size, chapter_start, compressed_size, method, chapter_name_offset, _, dir_len, _, _) =>
+    (case+ piece_new(compressed_size) of
+     | ~NoPiece() => $P.ret<int>(~5)
+     | ~Piece(compressed_owner, compressed) => let
+         val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
+         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+       in
+         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+           case+ take_decompressed(inflated) of
+           | ~NoContentBytes() => $P.ret<int>(~6)
+           | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
+             if generation <> !_load_generation then let
+               val () = piece_free(xhtml_owner, xhtml)
+             in $P.ret<int>(~7) end
+             else let
+               val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+               val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+               val () = _size_put(_facing_size, xhtml_viewport(xhtml_bytes, nodes))
+               val doc = $D.open_document($A.text_lit("bats-root"), 9)
+               val () = !_render_into := IntoFacingBox()
+               val no_fragment = FragmentNone()
+               val found = _render_nodes(doc, xhtml_bytes, xhtml_size, ~1, nodes, images_nil(), no_fragment)
+               val () = _fragment_free(no_fragment)
+               val () = !_render_into := IntoPage()
+               val () = $D.destroy(doc)
+               val () = $X.free_nodes(nodes)
+               val () = _load_images(serial, file_size, chapter_name_offset, dir_len, xhtml_bytes, xhtml_size, found, generation, facing_index)
+               val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+               val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
+               val () = _fixed_fit()
+             in $P.ret<int>(0) end)
+       end)
 
 (* Shows chapter chapter_index of book serial, from its chapters, its
    overlay's clips matched to its content nodes as they are made *)
@@ -2449,6 +2664,12 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                      rtl: direction:rtl would turn the inline axis, down
                      the page, upward *)
                   val () = !_layout := layout
+                  (* shown alone or in a spread; its facing page, if any,
+                     after it (_facing_open) *)
+                  val () = _size_put(_facing_size, NoViewport())
+                  val () = !_spreads_shown := (case+ layout of PrePaginated() => _spreads_wanted() | Reflowable() => false)
+                  val shape = (case+ layout of PrePaginated() => _shape_of(serial, chapter_index) | Reflowable() => Single()): spread_shape
+                  val () = !_shape := shape
                   val size = xhtml_viewport(xhtml_bytes, nodes)
                   val () = (case+ layout of
                     | PrePaginated() => let
@@ -2456,7 +2677,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                         val () = !_render_into := IntoPageBox()
                       in _page_size_keep(size) end
                     | Reflowable() => viewport_free(size))
-                  val () = _box_add(doc, layout)
+                  val () = _boxes_add(doc, layout, shape)
                   val () = (case+ _writing() of
                     | VerticalRightToLeft() => ui_attr("page", AClass, "caf vertical")
                     | VerticalLeftToRight() => ui_attr("page", AClass, "caf vertical-lr")
@@ -2485,7 +2706,18 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
                   val () = _measure_pagination()
                   val () = annot_marks()
-                in $P.ret<int>(0) end
+                in
+                  (* the facing page, on the other side; the page is
+                     shown whatever becomes of it *)
+                  case+ shape of
+                  | WithNext() => $P.and_then<int><int>(_facing_open(serial, chapter_index + 1, generation), llam(_) => $P.ret<int>(0))
+                  | WithPrevious() =>
+                    if chapter_index > 0 then $P.and_then<int><int>(_facing_open(serial, chapter_index - 1, generation), llam(_) => $P.ret<int>(0))
+                    else $P.ret<int>(0)
+                  | Single() => $P.ret<int>(0)
+                  | AloneLeft() => $P.ret<int>(0)
+                  | AloneRight() => $P.ret<int>(0)
+                end
               end)
             end
     end
@@ -2894,8 +3126,18 @@ in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
     if page + 1 < page_count then let val () = _speed_turn() in _show_page(page + 1, page_count, chapter, chapter_count) end
-    else if chapter < chapter_count then let val () = _speed_turn() in _jump_checked(_goto(chapter, 0, ~1)) end
-    else _show_page(page, page_count, chapter, chapter_count)
+    else let
+      (* past a spread's facing page, when it is the next *)
+      val next = (case+ !_shape of
+        | WithNext() => chapter + 1
+        | WithPrevious() => chapter
+        | Single() => chapter
+        | AloneLeft() => chapter
+        | AloneRight() => chapter): Int
+    in
+      if next < chapter_count then let val () = _speed_turn() in _jump_checked(_goto(next, 0, ~1)) end
+      else _show_page(page, page_count, chapter, chapter_count)
+    end
 end
 
 (* The previous page: in this chapter, else the previous chapter's last *)
@@ -2905,16 +3147,31 @@ in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
     if page > 0 then _show_page(page - 1, page_count, chapter, chapter_count)
-    else if chapter > 1 then _jump_checked(_goto(chapter - 2, ~1, ~1))
-    else _show_page(0, page_count, chapter, chapter_count)
+    else let
+      (* before a spread's facing page, when it is the previous *)
+      val previous = (case+ !_shape of
+        | WithPrevious() => chapter - 3
+        | WithNext() => chapter - 2
+        | Single() => chapter - 2
+        | AloneLeft() => chapter - 2
+        | AloneRight() => chapter - 2): Int
+    in
+      if previous >= 0 then _jump_checked(_goto(previous, ~1, ~1))
+      else _show_page(0, page_count, chapter, chapter_count)
+    end
 end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
-fn _relayout (): void = let
-  val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
-  val () = _measure_pagination()
-in _show_target(page, anchor) end
+fn _relayout (): void =
+  (* a fixed page whose spreads are now wanted, or no longer: shown
+     again, alone or in its spread *)
+  if (if _is_fixed() then (if _spreads_wanted() then ~(!_spreads_shown) else !_spreads_shown) else false) then
+    (case+ reading_get() of @(_, _, chapter, _) => _jump_checked(_goto(chapter - 1, 0, ~1)))
+  else let
+    val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
+    val () = _measure_pagination()
+  in _show_target(page, anchor) end
 
 (* ============================================================
    Search: every chapter's text, for the query

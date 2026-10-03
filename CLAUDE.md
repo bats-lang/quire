@@ -47,7 +47,8 @@ A quire PR that adopts new package versions runs `bats lock --repository
 <dir>` and commits `bats.lock` with the change that needs them. Package
 releases publish first; then the quire PR with the new lock. A publish
 never turns main red: until a lock names it, quire does not use it. The
-daily `relock.yml` (the generic `relock-pins.yml`) relocks against the
+daily `relock.yml` (the shared `relock-pins.yml` of
+bats-lang/repository-prototype, called by commit) relocks against the
 newest, moves the compiler pin, pushes `relock/<date>`, opens a PR
 listing the old and new versions and dispatches `check.yml` on it, so a
 breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
@@ -739,9 +740,30 @@ and drags beside a letter-boxed page turn it. It is one page, never
 scrolled or in columns, its images fit it (`100cqw`, `100cqh`), and it
 is set horizontally whatever the book's `_vertical` (`_writing`). The indicator counts spine items ("page 5 of
 24 in book"). It is not restyled: only the theme and what the reader
-does (taps, keys, reading aloud, the screen) are offered (`_rows_set`).
+does (taps, keys, reading aloud, the screen) are offered, with Columns,
+which say its spreads (`_rows_set`).
 The book's own CSS is dropped as for every book, so text a publisher
 placed over art shows in flow.
+
+Fixed pages are shown two at a time, a spread, as the Columns setting
+says (Two always, One never) and at Auto as the book's
+`rendition:spread` says (`rendition_spread`: `SpreadNone` never,
+`SpreadBoth` always, `SpreadLandscape` and `SpreadAuto` when the view
+is wider than tall, as Apple Books and Thorium do; `_spreads_wanted`).
+Each itemref's `page-spread-*` is kept with its chapter (`page_spread`),
+and `book_chapter_slots` places the pages as Apple Books does: a page
+takes the side it asks for, else the side after the page before it,
+and the first fixed page (or the first after a reflowed one) is alone
+on the right (on the left read right to left); a centred page is
+alone. `_shape_of` makes the page shown a `spread_shape`: `Single`,
+`AloneLeft` or `AloneRight` (the other side blank), or `WithNext` or
+`WithPrevious` (a spread of two). Its facing page is rendered into the
+other box (`facing-box`, `_facing_open`), its content nodes going on
+from the page's, after the page is shown; it cannot be selected
+(`.facing`), so what is marked or read aloud is the page's. The two
+boxes meet in the middle with no gap (EPUB RS 3.3), each fitted to its
+half. A turn moves a spread at a time, and a layout that wants spreads
+otherwise (a turned device, the Columns setting) shows the page again.
 
 The back button a jump leaves (to the place jumped from) never stays
 up: `ps_cell` in `src/reader.bats` holds the positions it offers, and

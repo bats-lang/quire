@@ -58,13 +58,14 @@ implement $P.dispose<$IDB.stored>(_) = ()
    data [data_offset, data_offset + data_size) in the file of file_size
    bytes, its method, its name [name_offset, name_offset + name_len) in
    the file, the length dir_len of that name's directory part, its
-   layout (its itemref's, else the book's: reflowed, or a fixed page) and
-   its Media Overlay; missing when its href is empty, over 1 MiB with the
-   OPF's directory, or names no entry; count chapters *)
+   layout (its itemref's, else the book's: reflowed, or a fixed page),
+   the side of a spread its itemref asks for and its Media Overlay;
+   missing when its href is empty, over 1 MiB with the OPF's directory,
+   or names no entry; count chapters *)
 #pub datavtype book_chapters(file_size:int, count:int) =
   | ChaptersNil(file_size, 0) of ()
   | {count:nat}{data_offset:nat}{data_size:pos | data_offset + data_size <= file_size; data_size <= 268435456}{name_offset:nat}{name_len:pos | name_offset + name_len <= file_size; name_len < 65536}{dir_len:nat | dir_len <= name_len}
-    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, rendition_layout, chapter_overlay(file_size), book_chapters(file_size, count))
+    Chapter(file_size, count + 1) of (int data_offset, int data_size, $Z.compression, int name_offset, int name_len, int dir_len, rendition_layout, page_spread, chapter_overlay(file_size), book_chapters(file_size, count))
   | {count:nat} ChapterMissing(file_size, count + 1) of (book_chapters(file_size, count))
 
 (* The book's chapters once found, with their count *)
@@ -170,6 +171,26 @@ implement $P.dispose<$IDB.stored>(_) = ()
    from the bytes it holds (they never pass through wasm memory); none
    when another book is open or the bytes are not inside its file *)
 #pub fn book_blob_url {mime_len:pos | mime_len <= 24} (serial: int, data_offset: int, data_size: int, mime: string mime_len): blob_url
+
+(* Where a spine item sits in a spread: a fixed page on the left, on the
+   right, or across both (alone); or no fixed page (reflowed, missing,
+   or past either end of the spine) *)
+#pub datatype page_slot =
+  | SlotLeft
+  | SlotRight
+  | SlotCentre
+  | SlotNone
+
+(* The slots of chapters chapter_index - 1, chapter_index and
+   chapter_index + 1 of the open book, book `serial`, read right to
+   left or not. A fixed page takes the side its itemref asks for; one
+   that asks for none takes the side after the page before it: a left
+   page's right, a right page's left, the first side of a spread (the
+   left, or the right read right to left) after a centred one; and the
+   first fixed page, or the first after a reflowed one, is alone on the
+   right (on the left read right to left), as Apple Books shows a
+   cover *)
+#pub fn book_chapter_slots (serial: int, chapter_index: int, right_to_left: bool): @(page_slot, page_slot, page_slot)
 
 (* The index of the chapter of the open book, book `serial`, whose
    entry's name is at name_offset in the file; -1 when none is (or book
@@ -429,7 +450,7 @@ fn chapter_overlay_free {file_size:int} (overlay: chapter_overlay(file_size)): v
 fun book_chapters_free {file_size:int}{count:nat} .<count>. (chapters: book_chapters(file_size, count)): void =
   case+ chapters of
   | ~ChaptersNil() => ()
-  | ~Chapter(_, _, _, _, _, _, _, overlay, rest) => let
+  | ~Chapter(_, _, _, _, _, _, _, _, overlay, rest) => let
       val () = chapter_overlay_free(overlay)
     in book_chapters_free(rest) end
   | ~ChapterMissing(rest) => book_chapters_free(rest)
@@ -444,7 +465,7 @@ fun book_chapter_at {file_size:pos}{remaining:nat}{chapter_index:nat}{chapter_co
   (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index, chapter_count: int chapter_count): chapter_got =
   case+ chapters of
   | ChaptersNil() => ChapterNone(chapter_count)
-  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, layout, _, rest) =>
+  | @Chapter(data_offset, data_size, method, name_offset, name_len, dir_len, layout, _, _, rest) =>
     if chapter_index = 0 then let
       val got = ChapterGot(file_size, data_offset, data_size, method, name_offset, name_len, dir_len, layout, chapter_count)
       prval () = fold@(chapters)
@@ -746,7 +767,7 @@ fun book_chapter_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remain
   (chapters: !book_chapters(file_size, remaining), name_offset: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
   case+ chapters of
   | ChaptersNil() => ~1
-  | @Chapter(_, _, _, chapter_name_offset, _, _, _, _, rest) =>
+  | @Chapter(_, _, _, chapter_name_offset, _, _, _, _, _, rest) =>
     if chapter_name_offset = name_offset then let prval () = fold@(chapters) in chapter_index end
     else let
       val found = book_chapter_find(rest, name_offset, chapter_index + 1)
@@ -776,6 +797,72 @@ in
   | _ => let val () = book_put(book) in ~1 end
 end
 
+(* The slot of a fixed page that asks for asked, after a page in
+   previous *)
+fn _slot_after (asked: page_spread, previous: page_slot, right_to_left: bool): page_slot =
+  case+ asked of
+  | SpreadSlotLeft() => SlotLeft()
+  | SpreadSlotRight() => SlotRight()
+  | SpreadSlotCenter() => SlotCentre()
+  | SpreadSlotAny() => (case+ previous of
+    | SlotLeft() => SlotRight()
+    | SlotRight() => SlotLeft()
+    | SlotCentre() => if right_to_left then SlotRight() else SlotLeft()
+    | SlotNone() => if right_to_left then SlotLeft() else SlotRight())
+
+(* The slot of the first of chapters, after a page in previous *)
+fn book_slot_first {file_size:pos}{remaining:nat}
+  (chapters: !book_chapters(file_size, remaining), previous: page_slot, right_to_left: bool): page_slot =
+  case+ chapters of
+  | ChaptersNil() => SlotNone()
+  | @Chapter(_, _, _, _, _, _, layout, asked, _, _) => let
+      val slot = (case+ layout of
+        | PrePaginated() => _slot_after(asked, previous, right_to_left)
+        | Reflowable() => SlotNone()): page_slot
+      prval () = fold@(chapters)
+    in slot end
+  | ChapterMissing(_) => SlotNone()
+
+(* The slots of the chapters before, at and after chapter_index of
+   chapters (which follow a page in previous, before them) *)
+fun book_slots_walk {file_size:pos}{remaining:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), chapter_index: int, previous: page_slot, right_to_left: bool): @(page_slot, page_slot, page_slot) =
+  case+ chapters of
+  | ChaptersNil() => @(SlotNone(), SlotNone(), SlotNone())
+  | @Chapter(_, _, _, _, _, _, layout, asked, _, rest) => let
+      val slot = (case+ layout of
+        | PrePaginated() => _slot_after(asked, previous, right_to_left)
+        | Reflowable() => SlotNone()): page_slot
+      val slots = (if chapter_index = 0 then @(previous, slot, book_slot_first(rest, slot, right_to_left))
+        else book_slots_walk(rest, chapter_index - 1, slot, right_to_left)): @(page_slot, page_slot, page_slot)
+      prval () = fold@(chapters)
+    in slots end
+  | @ChapterMissing(rest) => let
+      val slots = (if chapter_index = 0 then @(previous, SlotNone(), book_slot_first(rest, SlotNone(), right_to_left))
+        else book_slots_walk(rest, chapter_index - 1, SlotNone(), right_to_left)): @(page_slot, page_slot, page_slot)
+      prval () = fold@(chapters)
+    in slots end
+
+implement book_chapter_slots (serial, chapter_index, right_to_left) = let
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(_, _, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val slots = (case+ spine of
+        | @Spine(chapters, _) => let
+            val slots = (if chapter_index < 0 then @(SlotNone(), SlotNone(), SlotNone())
+              else book_slots_walk(chapters, chapter_index, SlotNone(), right_to_left)): @(page_slot, page_slot, page_slot)
+            prval () = fold@(spine)
+          in slots end
+        | NoSpine() => @(SlotNone(), SlotNone(), SlotNone())): @(page_slot, page_slot, page_slot)
+      prval () = fold@(book)
+      val () = book_put(book)
+    in slots end
+    else let prval () = fold@(book); val () = book_put(book) in @(SlotNone(), SlotNone(), SlotNone()) end
+  | _ => let val () = book_put(book) in @(SlotNone(), SlotNone(), SlotNone()) end
+end
+
 (* The sizes of chapters: of the chapters before chapter chapter_index,
    of that chapter, and of all of them, added to before, own and
    total *)
@@ -783,7 +870,7 @@ fun book_weigh {file_size:pos}{remaining:nat} .<remaining>.
   (chapters: !book_chapters(file_size, remaining), chapter_index: int, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
   case+ chapters of
   | ChaptersNil() => @(before, own, total)
-  | @Chapter(_, data_size, _, _, _, _, _, _, rest) => let
+  | @Chapter(_, data_size, _, _, _, _, _, _, _, rest) => let
       val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, before + data_size, own, total + data_size)
         else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, before, data_size, total + data_size)
         else book_weigh(rest, chapter_index - 1, before, own, total + data_size)): @(Nat, Nat, Nat)
@@ -885,7 +972,7 @@ fun book_overlay_at {file_size:pos}{remaining:nat}{chapter_index:nat} .<remainin
   (chapters: !book_chapters(file_size, remaining), file_size: int file_size, chapter_index: int chapter_index): overlay_got =
   case+ chapters of
   | ChaptersNil() => OverlayNone()
-  | @Chapter(_, _, _, _, _, _, _, overlay, rest) =>
+  | @Chapter(_, _, _, _, _, _, _, _, overlay, rest) =>
     if chapter_index = 0 then let
       val got = (case+ overlay of
         | Overlay(data_offset, data_size, method, name_offset, name_len, dir_len) =>
@@ -931,7 +1018,7 @@ fun book_narrated_find {file_size:pos}{remaining:nat}{chapter_index:nat} .<remai
   (chapters: !book_chapters(file_size, remaining), after: int, chapter_index: int chapter_index): [found:int | found >= ~1] int found =
   case+ chapters of
   | ChaptersNil() => ~1
-  | @Chapter(_, _, _, _, _, _, _, overlay, rest) => let
+  | @Chapter(_, _, _, _, _, _, _, _, overlay, rest) => let
       val narrated = (case+ overlay of Overlay(_, _, _, _, _, _) => true | NoOverlay() => false): bool
     in
       if (if narrated then chapter_index > after else false) then let prval () = fold@(chapters) in chapter_index end
