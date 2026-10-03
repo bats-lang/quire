@@ -2,7 +2,7 @@
 // made: the error banner (an alert) in both views, a failed save said
 // once a session, a chapter that cannot be read, and the copy status.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
   librarySearch, selectText, selectionButton, bookPage, chapters,

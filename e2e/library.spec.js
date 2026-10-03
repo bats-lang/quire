@@ -1,7 +1,7 @@
 // The library: importing, the cards, sorting, shelves, the book menu,
 // search, and what survives a reload.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,

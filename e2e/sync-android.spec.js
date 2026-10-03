@@ -6,7 +6,7 @@
 // token for the device's account, Filesystem keeps files in a map), and
 // Google Drive's API is a mock routed in each (no real network).
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,

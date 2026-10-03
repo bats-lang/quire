@@ -2,7 +2,7 @@
  * Smoke test: quick sanity check that WASM loads and import works.
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createEpub } from './create-epub.js';
 import { importInput, cards, bookPage, librarySearch, reload,
 } from './helpers.js';

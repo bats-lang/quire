@@ -1,7 +1,7 @@
 // Backup and restore: the library's state in one JSON file, put back
 // into the library, and kept for a book that comes back later.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
