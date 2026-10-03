@@ -454,6 +454,11 @@ An annotation's kind (`Bookmark`, or a highlight in its
 filter a `style_filter`. A kind is one flat datatype, not `Highlight of
 highlight_style`: a constructor that carries data would make it linear,
 and an annotation's numbers are copied freely.
+Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
+`Replace`) and ends in an `archive_outcome`; an import's promise
+resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
+duplicate question with a `duplicate_answer`, and a chapter's load with
+a `load_outcome` (`ChapterShown` or why not, `load_shown`).
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
