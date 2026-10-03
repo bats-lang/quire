@@ -16,6 +16,7 @@ staload "epub_xml.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "mem.sats"
+staload "notice.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
@@ -250,22 +251,26 @@ implement $P.dispose<$IDB.stored>(_) = ()
 
 (* The arena a piece of piece_size bytes at arena_loc came from: the
    current page's (lent out of the reader's window, see pages.bats), or
-   an arena of its own when the page has no room for it *)
+   an arena of its own, of the smallest of array's size classes that
+   holds it (ARENA_CLASS), when the page has no room for it *)
 #pub datavtype piece_owner(piece_size:int, arena_loc:addr) =
   | {used:nat | used <= PAGE_BYTES}{page,pages:int | 0 <= page; page < pages}
     OwnerPage(piece_size, arena_loc) of ($A.arena(byte, arena_loc, PAGE_BYTES, used, 1), int page, int pages, int used)
-  | OwnerOwn(piece_size, arena_loc) of ($A.arena(byte, arena_loc, piece_size, piece_size, 1))
+  | {class_size:int | piece_size <= class_size}
+    OwnerOwn(piece_size, arena_loc) of ($A.arena(byte, arena_loc, class_size, piece_size, 1))
 
 (* piece_size bytes of the book's content (an entry's data, a
    decompressed OPF or chapter, an image), which can be larger than
-   alloc's 1 MiB, held only while it is parsed: a piece of the current page's arena when it fits
-   there, else the one piece of an arena of its own; freed with
-   piece_free *)
+   alloc's 1 MiB, held only while it is parsed: a piece of the current
+   page's arena when it fits there, else the one piece of an arena of
+   its own, of the smallest class that holds it; freed with piece_free *)
 #pub datavtype piece(piece_size:int) =
   | {arena_loc,piece_loc:agz} Piece(piece_size) of (piece_owner(piece_size, arena_loc), $A.arrx(byte, piece_loc, piece_size, arena_loc))
   | NoPiece(piece_size) of ()
 
-(* A piece of piece_size bytes, or none when the memory cannot be had *)
+(* A piece of piece_size bytes, or none when the memory cannot be had.
+   A piece larger than the largest class (array's ARENA_MOST, 16 MiB)
+   is refused, and the error banner says so *)
 #pub fn piece_new {piece_size:pos | piece_size <= 268435456} (piece_size: int piece_size): piece(piece_size)
 
 #pub fn piece_free {arena_loc,piece_loc:agz}{piece_size:pos}
@@ -591,11 +596,16 @@ implement piece_new (piece_size) =
   case+ page_lend(piece_size) of
   | ~PageLent(arena, piece, page, pages, used) => Piece(OwnerPage(arena, page, pages, used), piece)
   | ~NoLend() =>
-    (case+ $A.arena_create<byte>(piece_size) of
-     | ~$A.arena_none() => NoPiece()
-     | ~$A.arena_some(arena) => let
-         val piece = $A.arena_alloc<byte>(arena, piece_size)
-       in Piece(OwnerOwn(arena), piece) end)
+    (case+ $A.arena_class_of(piece_size) of
+     | ~$A.arena_too_large() => let
+         val () = notice_error("This is too large for Quire to read: it is over 16 MB.")
+       in NoPiece() end
+     | ~$A.arena_fits(class | class_size) =>
+       (case+ $A.arena_create<byte>(class | class_size) of
+        | ~$A.arena_none() => NoPiece()
+        | ~$A.arena_some(arena) => let
+            val piece = $A.arena_alloc<byte>(arena, piece_size)
+          in Piece(OwnerOwn(arena), piece) end))
 
 implement piece_free (owner, piece) =
   case+ owner of

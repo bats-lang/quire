@@ -5,7 +5,9 @@
 
 #use array as A
 
-(* The bytes of a page's arena: generous for a page's text and images *)
+(* The bytes of a page's arena, array's 4 MiB class: generous for a
+   page's text and images (the largest chapter of 67 EPUBs measured
+   for #251 is 646 KB, the largest image 1.3 MB) *)
 #pub stadef PAGE_BYTES = 4194304
 
 (* The arena of page `page` of a chapter of `pages` pages, with no piece
@@ -84,7 +86,7 @@
 implement page_arena_new {page,pages} (page, pages) =
   if page < 0 then NoPageArena()
   else if page >= pages then NoPageArena()
-  else (case+ $A.arena_create<byte>(4194304) of
+  else (case+ $A.arena_create<byte>($A.Arena4MiB() | 4194304) of
     | ~$A.arena_none() => NoPageArena()
     | ~$A.arena_some(arena) => PageArena(arena, 0))
 

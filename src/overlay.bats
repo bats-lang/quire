@@ -12,7 +12,8 @@
    read.
 
    The clips are kept in a table of CLIP_BYTES bytes a clip, at most
-   CLIP_MAX of them (1 MiB), the one piece of an arena of its own:
+   CLIP_MAX of them (1 MiB), the one piece of an arena of its own, of
+   the 1 MiB class (array's ARENA_CLASS), which holds CLIP_MAX clips:
      0  begin, in ms
      4  end, in ms; -1 for the end of the audio
      8  while parsed, where the audio's src is in the SMIL; then where its
@@ -58,11 +59,15 @@ staload "paths.sats"
 #define FLAG_MATCHED 2
 #define FLAG_DEFLATED 4
 
+(* The bytes of a table's arena: CLIP_MAX clips of 32 bytes, array's
+   1 MiB class *)
+#pub stadef CLIP_TABLE_BYTES = 1048576
+
 (* count clips, CLIP_BYTES (32) bytes each: the one piece of an arena of
    their own *)
 #pub datavtype clip_table(count:int) =
   | {arena_loc,table_loc:agz}
-    ClipTable(count) of ($A.arena(byte, arena_loc, 32 * count, 32 * count, 1), $A.arrx(byte, table_loc, 32 * count, arena_loc))
+    ClipTable(count) of ($A.arena(byte, arena_loc, CLIP_TABLE_BYTES, 32 * count, 1), $A.arrx(byte, table_loc, 32 * count, arena_loc))
 
 #pub datavtype clip_table_made(count:int) =
   | ClipTableMade(count) of (clip_table(count))
@@ -73,7 +78,7 @@ staload "paths.sats"
 #pub fn clip_table_new {count:pos | count <= CLIP_MAX} (count: int count): clip_table_made(count)
 
 implement clip_table_new (count) =
-  case+ $A.arena_create<byte>(32 * count) of
+  case+ $A.arena_create<byte>($A.Arena1MiB() | 1048576) of
   | ~$A.arena_none() => ClipTableNone()
   | ~$A.arena_some(arena) => let
       val bytes = $A.arena_alloc<byte>(arena, 32 * count)

@@ -6,10 +6,11 @@
    is refused), read (opds.bats) and let go: what is shown is kept as
    the page's feed, and the pages browsed through are a trail of
    addresses, so Back fetches the page before again. A book's EPUB is
-   fetched the same way, put on the JS side as a file (file_store),
-   and imported as a picked file is; where a browser may not read it
-   (the fetch fails: CORS), Get gives way to a link that downloads it,
-   to import it then. *)
+   fetched straight into a file on the JS side (bridge's fetch_file):
+   wasm gets its status and the file, never its bytes, and imports it
+   as a picked file is, reading it by ranges; where a browser may not
+   read it (the fetch fails: CORS), Get gives way to a link that
+   downloads it, to import it then. *)
 
 #target wasm begin
 
@@ -34,8 +35,6 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 
 (* The most bytes a page of a catalogue is read in *)
 #define FEED_MOST 4194304
-(* The most bytes of a book got *)
-#define BOOK_MOST 268435456
 (* The most pages Back goes back through *)
 #define TRAIL_MOST 64
 
@@ -211,6 +210,27 @@ in
     val borrowed = $A.borrow_join<byte>(frozen, used, rest)
     val () = release_bytes(frozen, borrowed)
   in $P.and_then<$FE.fetched><fetched>(fetching, llam(got) => $P.ret<fetched>(_claim(got, most))) end
+end
+
+(* A request for a book's file nobody took: its file closed *)
+implement $P.dispose<$FE.fetched_file>(got) =
+  case+ got of
+  | ~$FE.RespondedFile(_, book_file) => $BF.file_close(book_file)
+  | ~$FE.NoFileResponse() => ()
+
+(* Fetches the book at address straight into a file held by JS: its
+   bytes never pass through wasm memory *)
+fn _fetch_book (address: !kept): $P.promise($FE.fetched_file, $P.Chained) = let
+  val @(bytes, address_len) = kept_copy(address)
+in
+  if address_len <= 0 then let val () = $A.free<byte>(bytes) in $P.ret<$FE.fetched_file>($FE.NoFileResponse()) end
+  else let
+    val @(frozen, borrowed) = $A.freeze<byte>(bytes)
+    val @(used, rest) = $A.borrow_split<byte>(frozen, borrowed, address_len)
+    val fetching = $FE.fetch_file(used, address_len)
+    val borrowed = $A.borrow_join<byte>(frozen, used, rest)
+    val () = release_bytes(frozen, borrowed)
+  in fetching end
 end
 
 (* ============================================================
@@ -539,39 +559,50 @@ fn _blocked {index:nat} (index: int index): void = let
   val @(then_text, then_len) = nid_make("book-then", index)
 in ui_show_n(then_text, then_len, true) end
 
-(* The book at index of request's page, fetched (got): imported *)
-fn _got {index:nat} (got: fetched, index: int index, request: int): void =
+(* What a refusal of a book's download is said as *)
+fn _refused (refused: refusal): void =
+  case+ refused of
+  | NotThere() => _say("The book was not found.")
+  | NeedsSignIn() => _say("The book could not be downloaded.")
+  | OtherRefusal() => _say("The book could not be downloaded.")
+
+(* The book at index of request's page, fetched into a file held by
+   JS (got): imported, by ranges, as a picked file is *)
+fn _got {index:nat} (got: $FE.fetched_file, index: int index, request: int): void =
   case+ got of
-  | ~Fetched(owner, piece, size) => let
-      val @(frozen, borrowed) = $A.freeze<byte>(piece)
-      val book_file = $BF.file_store(borrowed, size)
-      val () = $A.drop<byte>(frozen, borrowed)
-      val () = piece_free(owner, $A.thaw<byte>(frozen))
-      val title = (if request = !_request then _shown_entry(index, EntryTitle()) else kept_none()): kept
-      val @(name, name_len) = kept_copy(title)
-      val () = kept_free(title)
-      val () = _say("Importing the book\xE2\x80\xA6")
-      val importing = import_fetched(book_file, size, name, name_len)
-      val () = $A.free<byte>(name)
+  | ~$FE.RespondedFile(status, book_file) =>
+    if status < 200 then let
+      val () = $BF.file_close(book_file)
+    in _refused(_refusal(status)) end
+    else if status > 299 then let
+      val () = $BF.file_close(book_file)
+    in _refused(_refusal(status)) end
+    else let
+      val size = $BF.file_size(book_file)
     in
-      $P.finish<import_outcome>(importing, llam(outcome) =>
-        case+ outcome of
-        | ~Added(_) => _say("Added to your library.")
-        | ~Failed() => _say("This book could not be imported.")
-        | ~Kept() => _quiet())
+      if size <= 0 then let
+        val () = $BF.file_close(book_file)
+      in _say("The book could not be downloaded.") end
+      else let
+        val title = (if request = !_request then _shown_entry(index, EntryTitle()) else kept_none()): kept
+        val @(name, name_len) = kept_copy(title)
+        val () = kept_free(title)
+        val () = _say("Importing the book\xE2\x80\xA6")
+        val importing = import_fetched(book_file, size, name, name_len)
+        val () = $A.free<byte>(name)
+      in
+        $P.finish<import_outcome>(importing, llam(outcome) =>
+          case+ outcome of
+          | ~Added(_) => _say("Added to your library.")
+          | ~Failed() => _say("This book could not be imported.")
+          | ~Kept() => _quiet())
+      end
     end
-  | ~Blocked() =>
+  | ~$FE.NoFileResponse() =>
     if request = !_request then let
       val () = _quiet()
     in _blocked(index) end
     else ()
-  | ~Refused(refused) =>
-    (case+ refused of
-     | NotThere() => _say("The book was not found.")
-     | NeedsSignIn() => _say("The book could not be downloaded.")
-     | OtherRefusal() => _say("The book could not be downloaded."))
-  | ~TooLarge() => _say("The book is too large.")
-  | ~Empty() => _say("The book could not be downloaded.")
 
 (* Gets the book at index of the page shown: its EPUB fetched and
    imported *)
@@ -584,10 +615,10 @@ in
   if kept_len(epub) <= 0 then kept_free(epub)
   else let
     val () = _say("Downloading the book\xE2\x80\xA6")
-    val fetching = _fetch(epub, BOOK_MOST)
+    val fetching = _fetch_book(epub)
     val () = kept_free(epub)
   in
-    $P.finish<fetched>(fetching, llam(got) => _got(got, index, request))
+    $P.finish<$FE.fetched_file>(fetching, llam(got) => _got(got, index, request))
   end
 end
 
