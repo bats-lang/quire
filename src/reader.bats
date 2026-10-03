@@ -1049,17 +1049,16 @@ in
   else _shade_level(0)
 end
 
-(* The page as it is now, copied into the sheet *)
-fn _copy_page (): void = let
-  val source = $A.alloc<byte>(4)
-  val () = $A.write_text(source, 0, $A.text_lit("page"), 4)
-  val holder = $A.alloc<byte>(10)
-  val () = $A.write_text(holder, 0, $A.text_lit("turn-sheet"), 10)
-  val @(source_frozen, source_bytes) = $A.freeze<byte>(source)
-  val @(holder_frozen, holder_bytes) = $A.freeze<byte>(holder)
-  val () = $BDOM.copy_node(source_bytes, 4, holder_bytes, 10)
-  val () = release_bytes(source_frozen, source_bytes)
-in release_bytes(holder_frozen, holder_bytes) end
+(* The page as it is now, copied into the sheet (turn-copy, inert, at
+   the page's own scroll: the place's page), in one flush *)
+fn _copy_page (): void =
+  case+ reading_get() of
+  | @(page, _, _, _) => let
+      val scroll = (case+ _page_axis() of
+        | Across() => ScrolledAcross(page * !_page_width)
+        | AcrossBack() => ScrolledAcross(~(page * !_page_width))
+        | Down() => ScrolledDown(page * _step())): scrolled
+    in ui_copy_inert("page", "turn-sheet", "turn-copy", scroll) end
 
 (* The page being left, laid over the page: the shade shown at its
    strongest, then page-turn (so the copy is laid out as the page is),
