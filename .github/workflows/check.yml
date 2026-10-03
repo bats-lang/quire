@@ -147,8 +147,22 @@ jobs:
       - name: Install Playwright
         run: npx playwright install chromium
 
-      - name: Run e2e tests
-        run: npx playwright test
+      # #244 reproduction: the full suite 3 times under an artificial CPU
+      # load of about 2 to 2.5 times the core count, with the stall capture
+      - name: Run e2e tests 3 times under load
+        run: |
+          sudo apt-get install -y -q stress-ng
+          cores=$(nproc)
+          stress-ng --cpu $(( cores * 2 - 1 )) --cpu-load 100 --timeout 5h > /dev/null 2>&1 &
+          ( while true; do echo "load $(date -u +%T) $(cut -d' ' -f1-3 /proc/loadavg)"; sleep 60; done ) &
+          status=0
+          for run in 1 2 3; do
+            echo "=== run $run of 3, $cores cores"
+            npx playwright test --output "test-results/run$run" || status=1
+          done
+          echo "=== captures outside the capture's own spec:"
+          find test-results -name 'stall-capture-*.json' | grep -v -E '/stall-capture-(a|every)-' || echo none
+          exit $status
 
       # What a page that stopped answering was doing (e2e/stall-capture.js,
       # #244): also in e2e-screenshots, apart here so it is found at once
