@@ -216,10 +216,10 @@ dictionaries' names and languages, not their files.
 reading time the same on the reader's devices, through one file,
 `quire-sync.json`, in the backup's JSON format plus each record's
 stamps, a `deleted` list per book and a `devices` list. Where the file
-is kept is a `store` (only `WebDav(url, user, password)` now): its
-credentials are stored on this device only, by the store's kind
-("sync" names the kind, "sync-webdav" holds the WebDAV ones), never in
-the backup. The merge and its tries call only `store_read` (the file,
+is kept is a `store` (`WebDav(url, user, password)`, or `Android`,
+below): its credentials are stored on this device only, by the store's
+kind ("sync" names the kind, "sync-webdav" holds the WebDAV ones,
+"sync-android" the account's address), never in the backup. The merge and its tries call only `store_read` (the file,
 none yet, or a failure) and `store_write` (written, a conflict, or a
 failure); WebDAV's read is a GET whose ETag is the version, its write
 a PUT with If-Match (a 412 is the conflict). A sync reads, merges and
@@ -230,7 +230,8 @@ the page is hidden, and from the screen's Sync now (`LSync`,
 `sync-screen`, opened from the Settings screen's Sync row; Turn off
 goes through Undo). That row says sync's state in short
 (`sync_summary_show`, refreshed with the screen's status line): "Off",
-"WebDAV · synced 2 min ago", or how the last sync failed.
+"WebDAV · synced 2 min ago" ("Android · ..."), or how the last sync
+failed.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -245,6 +246,36 @@ start, end, minute made), so it is never stored and two devices that
 restored one backup give it the same id; the latest change wins, and a
 deletion (`deleted`, kept 180 days, `QA3`) wins over a change made
 before it. A book only another device has is kept as an orphan ("o").
+
+**Use Android** (#184), in the app only (bridge's
+`google_token_available`): the store `Android(account)`, the file in
+the app data folder of the device's Google account's Drive
+(`src/drive.bats`: a listing for its id and version, then its bytes; a
+write checks the version is still the one read, else it is a
+conflict, and replaces the bytes, or makes the file in
+`appDataFolder`). The access token for `drive.appdata` comes from
+bridge's `google_token_get` (Capawesome's Google Sign-In, which shows
+Google's sheet each time it is asked), so it is asked for only when
+the reader acts (Use Android, Sync now) and kept in memory while the
+app runs (`_token`); a sync the app makes by itself without one, or
+one Drive refuses (401), says "Tap Sync now to sign in to Google
+again". No account, a cancel, and a build with no client each say so;
+Turn off signs out. The client ID is public and not compiled in:
+`scripts/sync-clients.sh` writes the repository variable
+`GOOGLE_WEB_CLIENT_ID` (checked) into `sync-clients.json` beside the
+app, read by `src/sync_clients.bats`; with none, Use Android says it is
+not set up. With no store chosen, the app keeps the file for Android's
+Auto Backup (`STORE_BACKUP`, bridge's `backup_file` in `backup/` of
+the app's files, the only thing pwa's backup rules keep): each sync
+point merges it and writes it there, and the file a reinstall
+restores is merged at the first launch like any sync file; a store's
+write writes it too. `e2e/sync-android.spec.js` plays both plugins
+and Drive's API. In a browser the same store is **Google Drive**
+(bridge's `google_token_get` there goes through Google Identity
+Services' token model: a token for about an hour, no refresh token),
+listed only in a build with a client, so Google's script is loaded
+only then; the summary says "Google Drive · ...", and Turn off revokes
+the token.
 
 ### Catalogues
 
@@ -459,6 +490,11 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
+its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
+a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
+`CaseFolded`, `NotFound`) by stardict's `word_order` (`Before`, `Same`,
+`After`); an article's part is a `part_kind`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
