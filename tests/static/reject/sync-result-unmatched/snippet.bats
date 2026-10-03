@@ -6,3 +6,5 @@ fn _static_failed (result: sync_result): bool =
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true
   | KeptChanging() => true | ServerError() => true | TooLarge() => true
   | Damaged() => true | NoMemory() => true | NoAddress() => true
+  | SignInAgain() => true | NoGoogleAccount() => true | NotSetUp() => true
+  | GoogleRefused() => true | SignInCanceled() => true

@@ -415,9 +415,22 @@ in share_selection(citation, author_len + 2 + title_len) end
 (* A book's saved place, gone to as it opens: when its chapter could not
    be shown there is no page to stay on, so the reader goes back to the
    library and the banner says why *)
-fn _opened_checked (result: int): void =
-  if result >= 0 then ()
-  else let
+(* How a book's opening ended: its chapter shown, the library shown
+   instead (it said why), or the chapter not shown *)
+datatype opened = OpenedShown | OpenedInLibrary | OpenedNotShown
+
+implement $P.dispose<opened>(_) = ()
+
+implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
+
+fn _opened_of (outcome: load_outcome): opened =
+  if load_shown(outcome) then OpenedShown() else OpenedNotShown()
+
+fn _opened_checked (result: opened): void =
+  case+ result of
+  | OpenedShown() => ()
+  | OpenedInLibrary() => ()
+  | OpenedNotShown() => let
     val () = (if _in_reader() then _show_library() else ())
   in notice_part_unread() end
 
@@ -459,21 +472,23 @@ fn _open_book {book:int} (book: int book): void =
     in
       (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
-        $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor)), llam(result) =>
+        $P.finish<opened>($P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
+          $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
           _opened_checked(result))
       else
-        $P.finish<int>($P.and_then<book_opening><int>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
+        $P.finish<opened>($P.and_then<book_opening><opened>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
           case+ opening of
           | BookFileMissing() => let
               val () = _show_library()
               val () = notice_error("This book's file could not be read. Import it again.")
-            in $P.ret<int>(0) end
+            in $P.ret<opened>(OpenedInLibrary()) end
           (* a passing failure of storage: importing again is not the fix *)
           | BookFileUnreadable() => let
               val () = _show_library()
               val () = notice_error("This book could not be read from storage. Try again, or reopen Quire if it keeps happening.")
-            in $P.ret<int>(0) end
-          | BookOpened() => $P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor))), llam(result) =>
+            in $P.ret<opened>(OpenedInLibrary()) end
+          | BookOpened() => $P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
+            $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
           _opened_checked(result))
     end
 
@@ -1297,8 +1312,10 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val now = _is(clicked, "sync-now")
       val off = _is(clicked, "sync-off")
       val done = _is(clicked, "sync-done")
+      val android = _is(clicked, "sync-android")
       val () = _target_free(clicked)
       val () = (if now then sync_now()
+        else if android then sync_android()
         else if off then sync_off()
         else if done then layer_close(LSync())
         else ())
@@ -1902,10 +1919,10 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val read = _is(clicked, "selection-read")
       val share = _is(clicked, "selection-share")
       val () = _target_free(clicked)
-      val () = (if highlight then let val _ = annot_highlight(0) in () end
-        else if orange then let val _ = annot_highlight(1) in () end
-        else if underline then let val _ = annot_highlight(2) in () end
-        else if note then annot_ask_note(annot_highlight(0), true)
+      val () = (if highlight then let val _ = annot_highlight(Yellow()) in () end
+        else if orange then let val _ = annot_highlight(Orange()) in () end
+        else if underline then let val _ = annot_highlight(Underlined()) in () end
+        else if note then annot_ask_note(annot_highlight(Yellow()), true)
         else if copy then _copy_selection()
         else if search then _search_selection()
         else if define then dict_show()
@@ -1933,13 +1950,18 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val close = _is(clicked, "annotations-close")
       val export_asked = _is(clicked, "annotations-export")
       val share_asked = _is(clicked, "annotations-share")
-      val filter = (if _is(clicked, "filter-all") then ~1 else if _is(clicked, "filter-yellow") then 0
-        else if _is(clicked, "filter-orange") then 1 else if _is(clicked, "filter-underlined") then 2 else ~2): int
+      val filter = (if _is(clicked, "filter-all") then $R.some(EveryStyle())
+        else if _is(clicked, "filter-yellow") then $R.some(OnlyYellow())
+        else if _is(clicked, "filter-orange") then $R.some(OnlyOrange())
+        else if _is(clicked, "filter-underlined") then $R.some(OnlyUnderlined())
+        else $R.none()): $R.option(style_filter)
       val () = _target_free(clicked)
-      val () = (if close then layer_close(LAnnotations())
+      val () = (case+ filter of
+        | ~$R.some(chosen) => annot_filter_set(chosen)
+        | ~$R.none() =>
+        if close then layer_close(LAnnotations())
         else if export_asked then $P.finish<share_end>(_export(ToDownload()), llam(_) => ())
         else if share_asked then _share_annotations(share_as_now())
-        else if filter >= ~1 then annot_filter_set(filter)
         else if go_row >= 0 then let val () = layer_close(LAnnotations()) in _annotation_go(go_row) end
         else if note_row >= 0 then annot_ask_note(note_row, false)
         else if delete_row >= 0 then annot_delete_highlight(delete_row)
@@ -2168,9 +2190,12 @@ fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
    done. The library is shown first, where the import is seen *)
 fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
   if rounds <= 0 then ()
-  else $P.finish<Int>($P.and_then<$BE.external><Int>($BE.external_next(), llam(handed) => let
+  else $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
       val () = (if _in_reader() then _show_library() else ())
-    in import_external(handed) end), llam(_) => _external_wait(rounds - 1))
+    in import_external(handed) end), llam(outcome) => let
+      (* its outcome is already reported *)
+      val () = import_outcome_free(outcome)
+    in _external_wait(rounds - 1) end)
 
 implement main0 () = let
   val () = app_build()
