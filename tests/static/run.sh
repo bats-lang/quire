@@ -11,13 +11,12 @@
 # `expect` file (so it is rejected for the right reason).
 #
 # With members named, it runs only those (CI's static groups, in
-# tests/groups.json, each run by a job of its own): `checkers` (ids.py and
-# case_plus.py, with their fixtures), and fixtures, `accept/<name>` or
-# `reject/<name>`. With none, it runs the checkers and every fixture.
-# Before any fixture, the app itself must pass bats check: that also
-# fills the build cache each fixture's copy starts from, which halves a
-# fixture's time (a reject fixture 1.6 min instead of 3, an accept one 6
-# instead of 11, on CI's runners).
+# tests/groups.json, each run by a job of its own): `check` (bats check of
+# the app itself), `checkers` (ids.py and case_plus.py, with their
+# fixtures), and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# it runs the checkers and every fixture. Each fixture starts from no
+# build (its copy leaves out dist/), so a check run before it does not
+# make it faster.
 #
 # usage: tests/static/run.sh <repository-dir> [<member> ...]
 #        (bats must be on PATH)
@@ -30,14 +29,14 @@ shift
 all=yes
 [ $# -eq 0 ] || all=no
 named() { # member -> 0 when it is to run
-  [ $all = yes ] && return 0
+  [ $all = yes ] && [ "$1" != check ] && return 0
   for member in $selected; do [ "$member" = "$1" ] && return 0; done
   return 1
 }
 selected="$*"
 for member in $selected; do
   case $member in
-    checkers) ;;
+    check|checkers) ;;
     accept/*|reject/*) [ -d "$ROOT/tests/static/$member" ] || { echo "no fixture $member"; exit 2; } ;;
     *) echo "not a member: $member"; exit 2 ;;
   esac
@@ -45,12 +44,10 @@ done
 
 fail=0
 
-# The app itself, before any fixture (it fills the build cache)
-fixtures=$all
-for member in $selected; do case $member in accept/*|reject/*) fixtures=yes ;; esac; done
-if [ $fixtures = yes ]; then
-  if (cd "$ROOT" && bats check --repository "$repository") > "$TMP/app.log" 2>&1; then echo "ok   bats check of the app"
-  else echo "FAIL bats check of the app:"; cat "$TMP/app.log"; exit 1; fi
+# The app itself
+if named check; then
+  if (cd "$ROOT" && bats check --repository "$repository") > "$TMP/app.log" 2>&1; then echo "ok   check"
+  else echo "FAIL check:"; cat "$TMP/app.log"; fail=1; fi
 fi
 
 check() { # fixture dir -> 0 when bats check passes; log in $TMP/<name>.log
