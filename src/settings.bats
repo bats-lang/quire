@@ -41,6 +41,9 @@ implement $P.dispose<settled>(_) = ()
    columns            column_count
    readout            readout
    ruby               ruby_display (kept apart, in _ruby)
+   narration speed    a book's narration (its Media Overlays), in
+                      quarters of its own speed: 2 (half) to 8 (double),
+                      the range EPUB 3.3's reading systems offer
    Each is stored as a byte, decoded once as it is read (its _of_code)
    and encoded once as it is written (its _code)
    (the spacings reach what WCAG 1.4.12 asks a page to take: 2em
@@ -163,6 +166,11 @@ implement ruby_code (v) = case+ v of RubyHidden() => 0 | RubyShown() => 1
 #pub fn ruby_of_code (code: int): ruby_display
 implement ruby_of_code (code) = if code = 0 then RubyHidden() else RubyShown()
 
+#pub typedef set_narration_speed = [v:int | 2 <= v; v <= 8] int v
+(* Whether a book's narration reads its page numbers and notes (EPUB's
+   skippable structures) or passes over them *)
+#pub datatype narration_notes = NotesSkipped | NotesRead
+
 typedef settings = @{
   size = set_size, line_height = set_lh, margin = set_margin, font = set_font,
   align = set_align, hyphens = set_hyph, paragraph_spacing = set_ps, letter_spacing = set_ls,
@@ -203,6 +211,12 @@ in code = wanted_code end
    costs one setter. (Wasm builds now have memmove, bats-lang/bats#220,
    so the record's size is no longer a limit) *)
 val _ruby = ref<ruby_display>(RubyShown())
+(* A book narration's speed, in quarters of its own (2, half, to 8,
+   double: the range EPUB 3.3's reading systems offer), and whether it
+   reads page numbers and notes: the device's own, kept apart from the
+   record as they are *)
+val _narration_speed = ref<int>(4)
+val _narration_notes = ref<narration_notes>(NotesSkipped())
 (* Whether the system asks for a dark theme (for auto) *)
 val _system_dark = ref<bool>(false)
 
@@ -562,6 +576,42 @@ implement set_flow_get () = (!_set).scrolled
 implement set_cols_get () = (!_set).columns
 #pub fn set_ruby_get (): set_ruby
 implement set_ruby_get () = !_ruby
+#pub fn set_narration_speed_get (): set_narration_speed
+implement set_narration_speed_get () = let
+  val speed = g1ofg0(!_narration_speed)
+in if speed < 2 then 4 else if speed > 8 then 4 else speed end
+#pub fn set_narration_notes_get (): narration_notes
+implement set_narration_notes_get () = !_narration_notes
+
+fn _notes_code (notes: narration_notes): [code:nat | code <= 1] int code =
+  case+ notes of NotesSkipped() => 1 | NotesRead() => 0
+
+(* A stored byte's choice: checked here, once; skipped when it is not
+   one *)
+fn _notes_of_code (code: int): narration_notes =
+  if code = 0 then NotesRead() else NotesSkipped()
+
+(* "N" and the narration's two bytes at record[at, at + 3) *)
+fn _narration_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 3 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 78)
+    val () = $A.write_byte(record, at + 1, set_narration_speed_get())
+  in $A.write_byte(record, at + 2, _notes_code(!_narration_notes)) end
+
+(* The narration's bytes after "N" at record[at]: checked here, once; the
+   defaults when there are none (a record written before them) *)
+fn _narration_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 3 > n then let
+    val () = !_narration_speed := 4
+  in !_narration_notes := NotesSkipped() end
+  else if byte2int0($A.get<byte>(record, at)) <> 78 then let
+    val () = !_narration_speed := 4
+  in !_narration_notes := NotesSkipped() end
+  else let
+    val speed = byte2int0($A.get<byte>(record, at + 1))
+    val () = !_narration_speed := (if speed < 2 then 4 else if speed > 8 then 4 else speed)
+  in !_narration_notes := _notes_of_code(byte2int0($A.get<byte>(record, at + 2))) end
 
 (* ============================================================
    Applying
@@ -733,6 +783,20 @@ implement set_theme_recheck () =
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
+(* The narration's speed, as its slider shows it: 0.5 to 2, each with a
+   multiplication sign *)
+fn _narration_speed_text (): void = let
+  val speed = set_narration_speed_get()
+in
+  if speed <= 2 then ui_text("narration-speed-value", "0.5\xC3\x97")
+  else if speed = 3 then ui_text("narration-speed-value", "0.75\xC3\x97")
+  else if speed = 4 then ui_text("narration-speed-value", "1\xC3\x97")
+  else if speed = 5 then ui_text("narration-speed-value", "1.25\xC3\x97")
+  else if speed = 6 then ui_text("narration-speed-value", "1.5\xC3\x97")
+  else if speed = 7 then ui_text("narration-speed-value", "1.75\xC3\x97")
+  else ui_text("narration-speed-value", "2\xC3\x97")
+end
+
 (* The settings panel's controls, showing the settings *)
 fn _show_controls (): void = let
   val current = !_set
@@ -782,6 +846,10 @@ fn _show_controls (): void = let
   val () = _pressed("volume-keys-off", vol_code(current.volume_keys) = vol_code(KeysForVolume()))
   val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
   val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
+  val () = (case+ set_narration_notes_get() of
+    | NotesSkipped() => let val () = _pressed("narration-skip", true) in _pressed("narration-read", false) end
+    | NotesRead() => let val () = _pressed("narration-skip", false) in _pressed("narration-read", true) end)
+  val () = _narration_speed_text()
   val buf = $A.alloc<byte>(32)
   val next = _put_tenths(buf, 0, 32, current.paragraph_spacing)
   val () = ui_text_buf("paragraph-value", buf, next)
@@ -801,7 +869,8 @@ in ui_text_buf("word-value", buf, next) end
    images, tap zones, volume keys, readout, scrolled, columns and ruby,
    a byte each; then the device's own: reading aloud's speed, the
    brightness and the rotation lock, a byte each, and the voices kept
-   (their count, then each one's code and name, each after its length).
+   (their count, then each one's code and name, each after its length),
+   then "N" (78) and a book narration's speed and skipping, a byte each.
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -809,10 +878,11 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size
+  val record_size = 24 + voices_size + 3
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
+  val () = _narration_write(record, record_size, 24 + voices_size)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -878,6 +948,11 @@ implement set_sliders () = let
   val value_len = $S.int_to_str(value_text, 0, 16, current.word_spacing)
   val () = ui_range("word-row", "word-label", "Word spacing", "word-range", "0", "16", "word-value",
     value_text, value_len)
+  (* the narration's speed, in quarters *)
+  val value_text = $A.alloc<byte>(16)
+  val value_len = $S.int_to_str(value_text, 0, 16, set_narration_speed_get())
+  val () = ui_range("narration-speed-row", "narration-speed-label", "Narration speed", "narration-speed-range", "2", "8",
+    "narration-speed-value", value_text, value_len)
 in _show_controls() end
 
 (* Applies the settings (and shows them in the panel), then saves them
@@ -1031,6 +1106,10 @@ in !_set := @{
   readout = current.readout, scrolled = value, columns = current.columns } end
 #pub fn set_ruby_set (value: set_ruby): void
 implement set_ruby_set (value) = !_ruby := value
+#pub fn set_narration_speed_set (value: set_narration_speed): void
+implement set_narration_speed_set (value) = !_narration_speed := value
+#pub fn set_narration_notes_set (notes: narration_notes): void
+implement set_narration_notes_set (notes) = !_narration_notes := notes
 #pub fn set_cols_set (value: set_cols): void
 implement set_cols_set (value) = let
   val current = !_set
@@ -1054,6 +1133,8 @@ fn _reset (): void = let
   val () = !_speech_rate := RateNormal()
   val () = !_brightness := BrightnessSystem()
   val () = !_rotation := RotationFree()
+  val () = !_narration_speed := 4
+  val () = !_narration_notes := NotesSkipped()
   var aside: voices_cell = _voices_take()
   val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
   val+ ~VoicesCell(older, _) = aside
@@ -1071,6 +1152,8 @@ implement set_reset_undoable (how) = let
   val rate_before = !_speech_rate
   val brightness_before = !_brightness
   val rotation_before = !_rotation
+  val speed_before = !_narration_speed
+  val notes_before = !_narration_notes
   val () = _reset()
 in
   $P.and_then<settled><settled>(how, llam(settling) =>
@@ -1082,6 +1165,8 @@ in
         val () = !_speech_rate := rate_before
         val () = !_brightness := brightness_before
         val () = !_rotation := rotation_before
+        val () = !_narration_speed := speed_before
+        val () = !_narration_notes := notes_before
         var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
         val () = ref_exch_elt<voices_cell>(_voices_reset, aside)
         val () = _voices_put(aside)
@@ -1193,6 +1278,8 @@ in
           _rotation_of_code(byte2int0($A.get<byte>(record, 22))) else RotationFree()) else RotationFree())
         val stored_voices = (if n >= 24 then (if second_version then byte2int0($A.get<byte>(record, 23)) else 0) else 0): int
         val @(voices_read, voices_read_count) = _voices_read(record, n, 24, stored_voices, VoiceChoicesEnd(), 0)
+        val voices_end = 24 + _voices_size(voices_read)
+        val () = _narration_read(record, n, voices_end)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,

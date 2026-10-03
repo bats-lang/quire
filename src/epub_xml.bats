@@ -678,6 +678,63 @@ in
   | ~xspan_none() => xspan_none()
 end
 
+(* The attribute attr of the manifest item whose id is
+   data[idref_offset, idref_offset + idref_len) *)
+fun _manifest_attr_nodes
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}{attr_len:pos} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len, attr: &(@[char][attr_len]), attr_len: int attr_len): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _manifest_attr_node(data, data_len, node, idref_offset, idref_len, attr, attr_len) of
+     | ~xspan_none() => _manifest_attr_nodes(data, data_len, rest, idref_offset, idref_len, attr, attr_len)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _manifest_attr_node
+  {l:agz}{n:pos}{tree_size:pos}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}{attr_len:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, node: !$X.xml_node(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len, attr: &(@[char][attr_len]), attr_len: int attr_len): xspan(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var item_chars = @[char][4]('i', 't', 'e', 'm')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, item_chars, 4) then let
+      var id_chars = @[char][2]('i', 'd')
+    in
+      case+ _find_attr_value(data, attrs, id_chars, 2) of
+      | ~xspan_at(id_offset, id_len) =>
+        if id_len <> idref_len then xspan_none()
+        else if $S.borrow_region_eq(data, data_len, id_offset, idref_offset, idref_len) then _find_attr_value(data, attrs, attr, attr_len)
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _manifest_attr_nodes(data, data_len, children, idref_offset, idref_len, attr, attr_len)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the Media Overlay (a SMIL document) of the
+   chapter_index-th spine itemref: its manifest item's media-overlay
+   names another item, whose href this is *)
+#pub fn find_chapter_overlay_href_n
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   nodes: !$X.xml_node_list(n, tree_size), chapter_index: int): xspan(n)
+
+implement find_chapter_overlay_href_n(data, data_len, nodes, chapter_index) = let
+  val @(idref, _) = _nth_idref_nodes(data, nodes, chapter_index)
+in
+  case+ idref of
+  | ~xspan_at(idref_offset, idref_len) => let
+      var media_overlay_chars = @[char][13]('m', 'e', 'd', 'i', 'a', '-', 'o', 'v', 'e', 'r', 'l', 'a', 'y')
+    in
+      case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, media_overlay_chars, 13) of
+      | ~xspan_at(overlay_offset, overlay_len) => _manifest_href_nodes(data, data_len, nodes, overlay_offset, overlay_len)
+      | ~xspan_none() => xspan_none()
+    end
+  | ~xspan_none() => xspan_none()
+end
+
 (* ============================================================
    Manifest: items by property, meta by name
    ============================================================ *)
