@@ -112,7 +112,7 @@ jobs:
           grep -q 'android:mimeType="application/epub+zip"' dist/android/intent-filters.xml
           echo "PWA verification passed"
 
-      # A book for the Android smoke test to share with the app
+      # A book for the Android smoke test to open the app with
       - name: Make the book to share
         run: >-
           node -e "import('./e2e/create-epub.js').then(m => require('fs').writeFileSync('dist/android/smoke-share.epub',
@@ -166,7 +166,7 @@ jobs:
   android:
     needs: check
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@8827ba2a28e0ea8292c868097fd7e3654b620f21
+    uses: bats-lang/pwa/.github/workflows/android.yml@e02e1e23bc8da42c917b5d5f25ec2bbdf1bc829f
     secrets: inherit
     with:
       artifact: quire-android
@@ -178,8 +178,10 @@ jobs:
       # Run it on an emulator until the library's button, which the wasm
       # renders (the static page shows only a spinner), is on the screen
       smoke-test-text: Import EPUB
-      # then share a book with it, as another app would, until its title
-      # is in the library
+      # then start it anew with a book (VIEW), as a file manager opens
+      # it, until its title is in the library; turn and recreate it, and
+      # open and share the book while it is open (VIEW, SEND): each
+      # intent's book handed to the page once (#247)
       smoke-share-file: android/smoke-share.epub
       smoke-share-type: application/epub+zip
       smoke-share-text: Shared With Quire
