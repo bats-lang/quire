@@ -809,6 +809,28 @@ pointer only once it has moved more than 4 px: capture at pointerdown
 would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
 
+Every page turn is animated (#246): a tap, a key, a button, reading
+aloud and a drag. At a turn's start the page as it is is copied into
+an overlay (`page-turn`, bridge's `copy_node`: no ids, `inert`,
+`aria-hidden`), and the page itself goes to the incoming page at once,
+so the place, the indicator and the arenas' window move as before. The
+overlay is a strip of [copy | gap] scrolled each frame, so the copy
+slides off (mirrored right to left, along the axis for `Down`) with
+the stylesheet's edge shadow, over a shade (`turn-shade`) on the page
+beneath. 280 ms, eased out; a drag's commit takes what is left. Under
+`prefers-reduced-motion: reduce` a turn is instant and nothing is laid
+over the page. The turn is a `turn_cell` in `src/reader.bats`
+(`TurnStill`, `TurnHeld`, `TurnReturning`, `TurnWaiting`,
+`TurnSliding`), each holding a linear `turn_sheet(HELD | SLID)` whose
+constructors are local: a sliding sheet ends only by `_sheet_lift`, a
+held one only by `_sheet_put_back` (the page back at its place) or
+`_sheet_commit`, so no turn, interrupted or late, leaves the copy over
+the page or the page between two places (`tests/static`'s
+`page-turn-*`). The shade's levels are proven in each theme
+(`VEILED`, written by `scripts/gen-harmony.py`): under it the text
+keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
+none.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for

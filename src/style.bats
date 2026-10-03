@@ -293,6 +293,41 @@ dataprop HARMONY(int) =
 (* dark text on a light ground in the first two themes, light on dark
    in the others *)
 
+(* The shade over the incoming page as a page turns (reader.bats) is
+   black at some strength over the whole page, text and all. Browsers
+   blend it in sRGB, channel by channel: SHADE(c, strength, s) says the
+   colour c under black at strength percent is s, each channel rounded
+   (the LIN witnesses pin the six channels). SHADED(t, text, ground,
+   strength, k): in theme t, text on ground under that shade still
+   reaches k / 10. VEILED(t, strength): every pair the page shows does,
+   its text at 7:1 (HARMONY's at rest) and the rest at 4.5:1 (SURF's):
+   links, the two highlights and the marks (search, reading aloud). So
+   a shade is written only at a strength that leaves the page legible
+   (_shade_rule) *)
+dataprop SHADE(int, int, int) =
+  | {r,g,b,shaded_r,shaded_g,shaded_b:nat | r < 256; g < 256; b < 256}{strength:nat | strength <= 100}
+    {rl,rh,gl,gh,bl,bh,srl,srh,sgl,sgh,sbl,sbh:int |
+     100 * shaded_r <= r * (100 - strength) + 50; r * (100 - strength) + 50 < 100 * shaded_r + 100;
+     100 * shaded_g <= g * (100 - strength) + 50; g * (100 - strength) + 50 < 100 * shaded_g + 100;
+     100 * shaded_b <= b * (100 - strength) + 50; b * (100 - strength) + 50 < 100 * shaded_b + 100}
+    SHADEc(r * 65536 + g * 256 + b, strength, shaded_r * 65536 + shaded_g * 256 + shaded_b) of
+      ($CT.LIN(r, rl, rh), $CT.LIN(g, gl, gh), $CT.LIN(b, bl, bh),
+       $CT.LIN(shaded_r, srl, srh), $CT.LIN(shaded_g, sgl, sgh), $CT.LIN(shaded_b, sbl, sbh))
+
+dataprop SHADED(int, int, int, int, int) =
+  | {t,text,ground,strength,k:int}{text_colour,ground_colour,text_shaded,ground_shaded:int}
+    SHADEDc(t, text, ground, strength, k) of (
+      PAL(t, text, text_colour), PAL(t, ground, ground_colour),
+      SHADE(text_colour, strength, text_shaded), SHADE(ground_colour, strength, ground_shaded),
+      $CT.CONTRAST(text_shaded, ground_shaded, k))
+
+dataprop VEILED(int, int) =
+  | {t,strength:int}
+    VEILEDc(t, strength) of (
+      SHADED(t, FG, BG, strength, 70), SHADED(t, ACCENT, BG, strength, 45),
+      SHADED(t, FG, HL, strength, 45), SHADED(t, FG, HL2, strength, 45),
+      SHADED(t, MARKFG, MARK, strength, 45))
+
 (* BEGIN proofs: written by scripts/gen-harmony.py *)
 prval S_fg_bg = SURFc(
   PAL0_fg(), PAL0_bg(), $CT.CONTRAST_lighter_second(L_2a2a2a, L_faf8f5),
@@ -649,6 +684,363 @@ prval H_grey: HARMONY(4) = HARMONYc(
   MODE_dark($H.LIGHTERc(L_e2e2e2, L_3a3a3a), $H.PEAKc($H.MXMN_rgb($H.RGBc{0x3a,0x3a,0x3a}())),
     $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())), $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())),
     $H.CALMc($H.MXMN_gbr($H.RGBc{0x8f,0xd0,0xa8}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0xff,0xb4,0xab}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0x99,0x99,0x99}()))))
+prval V_light_6: VEILED(0, 6) = VEILEDc(
+  SHADEDc(PAL0_fg(), PAL0_bg(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_eb(), $CT.LIN_e9(), $CT.LIN_e6()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_e9(), $CT.LIN_e6()))),
+  SHADEDc(PAL0_accent(), PAL0_bg(),
+    SHADEc($CT.LIN_2f(), $CT.LIN_6f(), $CT.LIN_4f(), $CT.LIN_2c(), $CT.LIN_68(), $CT.LIN_4a()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_eb(), $CT.LIN_e9(), $CT.LIN_e6()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_2c(), $CT.LIN_68(), $CT.LIN_4a()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_e9(), $CT.LIN_e6()))),
+  SHADEDc(PAL0_fg(), PAL0_hl(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()),
+    SHADEc($CT.LIN_fd(), $CT.LIN_e5(), $CT.LIN_9a(), $CT.LIN_ee(), $CT.LIN_d7(), $CT.LIN_91()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()), $CT.LUMc($CT.LIN_ee(), $CT.LIN_d7(), $CT.LIN_91()))),
+  SHADEDc(PAL0_fg(), PAL0_hl2(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()),
+    SHADEc($CT.LIN_fb(), $CT.LIN_c5(), $CT.LIN_8a(), $CT.LIN_ec(), $CT.LIN_b9(), $CT.LIN_82()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()), $CT.LUMc($CT.LIN_ec(), $CT.LIN_b9(), $CT.LIN_82()))),
+  SHADEDc(PAL0_markfg(), PAL0_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
+prval V_light_12: VEILED(0, 12) = VEILEDc(
+  SHADEDc(PAL0_fg(), PAL0_bg(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_dc(), $CT.LIN_da(), $CT.LIN_d8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()), $CT.LUMc($CT.LIN_dc(), $CT.LIN_da(), $CT.LIN_d8()))),
+  SHADEDc(PAL0_accent(), PAL0_bg(),
+    SHADEc($CT.LIN_2f(), $CT.LIN_6f(), $CT.LIN_4f(), $CT.LIN_29(), $CT.LIN_62(), $CT.LIN_46()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_dc(), $CT.LIN_da(), $CT.LIN_d8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_29(), $CT.LIN_62(), $CT.LIN_46()), $CT.LUMc($CT.LIN_dc(), $CT.LIN_da(), $CT.LIN_d8()))),
+  SHADEDc(PAL0_fg(), PAL0_hl(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()),
+    SHADEc($CT.LIN_fd(), $CT.LIN_e5(), $CT.LIN_9a(), $CT.LIN_df(), $CT.LIN_ca(), $CT.LIN_88()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()), $CT.LUMc($CT.LIN_df(), $CT.LIN_ca(), $CT.LIN_88()))),
+  SHADEDc(PAL0_fg(), PAL0_hl2(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()),
+    SHADEc($CT.LIN_fb(), $CT.LIN_c5(), $CT.LIN_8a(), $CT.LIN_dd(), $CT.LIN_ad(), $CT.LIN_79()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()), $CT.LUMc($CT.LIN_dd(), $CT.LIN_ad(), $CT.LIN_79()))),
+  SHADEDc(PAL0_markfg(), PAL0_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_e0(), $CT.LIN_9e(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_e0(), $CT.LIN_9e(), $CT.LIN_00()))))
+prval V_light_18: VEILED(0, 18) = VEILEDc(
+  SHADEDc(PAL0_fg(), PAL0_bg(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_cd(), $CT.LIN_cb(), $CT.LIN_c9()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()), $CT.LUMc($CT.LIN_cd(), $CT.LIN_cb(), $CT.LIN_c9()))),
+  SHADEDc(PAL0_accent(), PAL0_bg(),
+    SHADEc($CT.LIN_2f(), $CT.LIN_6f(), $CT.LIN_4f(), $CT.LIN_27(), $CT.LIN_5b(), $CT.LIN_41()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_cd(), $CT.LIN_cb(), $CT.LIN_c9()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_27(), $CT.LIN_5b(), $CT.LIN_41()), $CT.LUMc($CT.LIN_cd(), $CT.LIN_cb(), $CT.LIN_c9()))),
+  SHADEDc(PAL0_fg(), PAL0_hl(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()),
+    SHADEc($CT.LIN_fd(), $CT.LIN_e5(), $CT.LIN_9a(), $CT.LIN_cf(), $CT.LIN_bc(), $CT.LIN_7e()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()), $CT.LUMc($CT.LIN_cf(), $CT.LIN_bc(), $CT.LIN_7e()))),
+  SHADEDc(PAL0_fg(), PAL0_hl2(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()),
+    SHADEc($CT.LIN_fb(), $CT.LIN_c5(), $CT.LIN_8a(), $CT.LIN_ce(), $CT.LIN_a2(), $CT.LIN_71()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()), $CT.LUMc($CT.LIN_ce(), $CT.LIN_a2(), $CT.LIN_71()))),
+  SHADEDc(PAL0_markfg(), PAL0_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_d1(), $CT.LIN_93(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_d1(), $CT.LIN_93(), $CT.LIN_00()))))
+prval V_light_24: VEILED(0, 24) = VEILEDc(
+  SHADEDc(PAL0_fg(), PAL0_bg(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_be(), $CT.LIN_bc(), $CT.LIN_ba()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()), $CT.LUMc($CT.LIN_be(), $CT.LIN_bc(), $CT.LIN_ba()))),
+  SHADEDc(PAL0_accent(), PAL0_bg(),
+    SHADEc($CT.LIN_2f(), $CT.LIN_6f(), $CT.LIN_4f(), $CT.LIN_24(), $CT.LIN_54(), $CT.LIN_3c()),
+    SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_be(), $CT.LIN_bc(), $CT.LIN_ba()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_24(), $CT.LIN_54(), $CT.LIN_3c()), $CT.LUMc($CT.LIN_be(), $CT.LIN_bc(), $CT.LIN_ba()))),
+  SHADEDc(PAL0_fg(), PAL0_hl(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()),
+    SHADEc($CT.LIN_fd(), $CT.LIN_e5(), $CT.LIN_9a(), $CT.LIN_c0(), $CT.LIN_ae(), $CT.LIN_75()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()), $CT.LUMc($CT.LIN_c0(), $CT.LIN_ae(), $CT.LIN_75()))),
+  SHADEDc(PAL0_fg(), PAL0_hl2(),
+    SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()),
+    SHADEc($CT.LIN_fb(), $CT.LIN_c5(), $CT.LIN_8a(), $CT.LIN_bf(), $CT.LIN_96(), $CT.LIN_69()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()), $CT.LUMc($CT.LIN_bf(), $CT.LIN_96(), $CT.LIN_69()))),
+  SHADEDc(PAL0_markfg(), PAL0_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_c2(), $CT.LIN_88(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_c2(), $CT.LIN_88(), $CT.LIN_00()))))
+prval V_sepia_5: VEILED(1, 5) = VEILEDc(
+  SHADEDc(PAL1_fg(), PAL1_bg(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_e4(), $CT.LIN_db(), $CT.LIN_c8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()), $CT.LUMc($CT.LIN_e4(), $CT.LIN_db(), $CT.LIN_c8()))),
+  SHADEDc(PAL1_accent(), PAL1_bg(),
+    SHADEc($CT.LIN_7a(), $CT.LIN_4f(), $CT.LIN_1d(), $CT.LIN_74(), $CT.LIN_4b(), $CT.LIN_1c()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_e4(), $CT.LIN_db(), $CT.LIN_c8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_74(), $CT.LIN_4b(), $CT.LIN_1c()), $CT.LUMc($CT.LIN_e4(), $CT.LIN_db(), $CT.LIN_c8()))),
+  SHADEDc(PAL1_fg(), PAL1_hl(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()),
+    SHADEc($CT.LIN_e6(), $CT.LIN_cf(), $CT.LIN_8a(), $CT.LIN_db(), $CT.LIN_c5(), $CT.LIN_83()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()), $CT.LUMc($CT.LIN_db(), $CT.LIN_c5(), $CT.LIN_83()))),
+  SHADEDc(PAL1_fg(), PAL1_hl2(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()),
+    SHADEc($CT.LIN_e8(), $CT.LIN_b8(), $CT.LIN_80(), $CT.LIN_dc(), $CT.LIN_af(), $CT.LIN_7a()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()), $CT.LUMc($CT.LIN_dc(), $CT.LIN_af(), $CT.LIN_7a()))),
+  SHADEDc(PAL1_markfg(), PAL1_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f2(), $CT.LIN_aa(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f2(), $CT.LIN_aa(), $CT.LIN_00()))))
+prval V_sepia_10: VEILED(1, 10) = VEILEDc(
+  SHADEDc(PAL1_fg(), PAL1_bg(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_d8(), $CT.LIN_cf(), $CT.LIN_bd()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()), $CT.LUMc($CT.LIN_d8(), $CT.LIN_cf(), $CT.LIN_bd()))),
+  SHADEDc(PAL1_accent(), PAL1_bg(),
+    SHADEc($CT.LIN_7a(), $CT.LIN_4f(), $CT.LIN_1d(), $CT.LIN_6e(), $CT.LIN_47(), $CT.LIN_1a()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_d8(), $CT.LIN_cf(), $CT.LIN_bd()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_6e(), $CT.LIN_47(), $CT.LIN_1a()), $CT.LUMc($CT.LIN_d8(), $CT.LIN_cf(), $CT.LIN_bd()))),
+  SHADEDc(PAL1_fg(), PAL1_hl(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()),
+    SHADEc($CT.LIN_e6(), $CT.LIN_cf(), $CT.LIN_8a(), $CT.LIN_cf(), $CT.LIN_ba(), $CT.LIN_7c()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()), $CT.LUMc($CT.LIN_cf(), $CT.LIN_ba(), $CT.LIN_7c()))),
+  SHADEDc(PAL1_fg(), PAL1_hl2(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()),
+    SHADEc($CT.LIN_e8(), $CT.LIN_b8(), $CT.LIN_80(), $CT.LIN_d1(), $CT.LIN_a6(), $CT.LIN_73()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()), $CT.LUMc($CT.LIN_d1(), $CT.LIN_a6(), $CT.LIN_73()))),
+  SHADEDc(PAL1_markfg(), PAL1_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_e6(), $CT.LIN_a1(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_e6(), $CT.LIN_a1(), $CT.LIN_00()))))
+prval V_sepia_15: VEILED(1, 15) = VEILEDc(
+  SHADEDc(PAL1_fg(), PAL1_bg(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_cc(), $CT.LIN_c4(), $CT.LIN_b3()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()), $CT.LUMc($CT.LIN_cc(), $CT.LIN_c4(), $CT.LIN_b3()))),
+  SHADEDc(PAL1_accent(), PAL1_bg(),
+    SHADEc($CT.LIN_7a(), $CT.LIN_4f(), $CT.LIN_1d(), $CT.LIN_68(), $CT.LIN_43(), $CT.LIN_19()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_cc(), $CT.LIN_c4(), $CT.LIN_b3()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_68(), $CT.LIN_43(), $CT.LIN_19()), $CT.LUMc($CT.LIN_cc(), $CT.LIN_c4(), $CT.LIN_b3()))),
+  SHADEDc(PAL1_fg(), PAL1_hl(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()),
+    SHADEc($CT.LIN_e6(), $CT.LIN_cf(), $CT.LIN_8a(), $CT.LIN_c4(), $CT.LIN_b0(), $CT.LIN_75()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()), $CT.LUMc($CT.LIN_c4(), $CT.LIN_b0(), $CT.LIN_75()))),
+  SHADEDc(PAL1_fg(), PAL1_hl2(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()),
+    SHADEc($CT.LIN_e8(), $CT.LIN_b8(), $CT.LIN_80(), $CT.LIN_c5(), $CT.LIN_9c(), $CT.LIN_6d()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()), $CT.LUMc($CT.LIN_c5(), $CT.LIN_9c(), $CT.LIN_6d()))),
+  SHADEDc(PAL1_markfg(), PAL1_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_d9(), $CT.LIN_98(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_d9(), $CT.LIN_98(), $CT.LIN_00()))))
+prval V_sepia_20: VEILED(1, 20) = VEILEDc(
+  SHADEDc(PAL1_fg(), PAL1_bg(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_c0(), $CT.LIN_b8(), $CT.LIN_a8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()), $CT.LUMc($CT.LIN_c0(), $CT.LIN_b8(), $CT.LIN_a8()))),
+  SHADEDc(PAL1_accent(), PAL1_bg(),
+    SHADEc($CT.LIN_7a(), $CT.LIN_4f(), $CT.LIN_1d(), $CT.LIN_62(), $CT.LIN_3f(), $CT.LIN_17()),
+    SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_c0(), $CT.LIN_b8(), $CT.LIN_a8()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_62(), $CT.LIN_3f(), $CT.LIN_17()), $CT.LUMc($CT.LIN_c0(), $CT.LIN_b8(), $CT.LIN_a8()))),
+  SHADEDc(PAL1_fg(), PAL1_hl(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()),
+    SHADEc($CT.LIN_e6(), $CT.LIN_cf(), $CT.LIN_8a(), $CT.LIN_b8(), $CT.LIN_a6(), $CT.LIN_6e()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()), $CT.LUMc($CT.LIN_b8(), $CT.LIN_a6(), $CT.LIN_6e()))),
+  SHADEDc(PAL1_fg(), PAL1_hl2(),
+    SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()),
+    SHADEc($CT.LIN_e8(), $CT.LIN_b8(), $CT.LIN_80(), $CT.LIN_ba(), $CT.LIN_93(), $CT.LIN_66()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()), $CT.LUMc($CT.LIN_ba(), $CT.LIN_93(), $CT.LIN_66()))),
+  SHADEDc(PAL1_markfg(), PAL1_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_cc(), $CT.LIN_8f(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_cc(), $CT.LIN_8f(), $CT.LIN_00()))))
+prval V_dark_2: VEILED(2, 2) = VEILEDc(
+  SHADEDc(PAL2_fg(), PAL2_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()))),
+  SHADEDc(PAL2_accent(), PAL2_bg(),
+    SHADEc($CT.LIN_7f(), $CT.LIN_c4(), $CT.LIN_9b(), $CT.LIN_7c(), $CT.LIN_c0(), $CT.LIN_98()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_7c(), $CT.LIN_c0(), $CT.LIN_98()), $CT.LUMc($CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()))),
+  SHADEDc(PAL2_fg(), PAL2_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_6b(), $CT.LIN_5c(), $CT.LIN_2e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_6b(), $CT.LIN_5c(), $CT.LIN_2e()))),
+  SHADEDc(PAL2_fg(), PAL2_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_79(), $CT.LIN_56(), $CT.LIN_30()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_79(), $CT.LIN_56(), $CT.LIN_30()))),
+  SHADEDc(PAL2_markfg(), PAL2_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()))))
+prval V_dark_4: VEILED(2, 4) = VEILEDc(
+  SHADEDc(PAL2_fg(), PAL2_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()))),
+  SHADEDc(PAL2_accent(), PAL2_bg(),
+    SHADEc($CT.LIN_7f(), $CT.LIN_c4(), $CT.LIN_9b(), $CT.LIN_7a(), $CT.LIN_bc(), $CT.LIN_95()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_7a(), $CT.LIN_bc(), $CT.LIN_95()), $CT.LUMc($CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()))),
+  SHADEDc(PAL2_fg(), PAL2_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_69(), $CT.LIN_5a(), $CT.LIN_2d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_69(), $CT.LIN_5a(), $CT.LIN_2d()))),
+  SHADEDc(PAL2_fg(), PAL2_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_76(), $CT.LIN_54(), $CT.LIN_2f()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_76(), $CT.LIN_54(), $CT.LIN_2f()))),
+  SHADEDc(PAL2_markfg(), PAL2_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()))))
+prval V_dark_6: VEILED(2, 6) = VEILEDc(
+  SHADEDc(PAL2_fg(), PAL2_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()))),
+  SHADEDc(PAL2_accent(), PAL2_bg(),
+    SHADEc($CT.LIN_7f(), $CT.LIN_c4(), $CT.LIN_9b(), $CT.LIN_77(), $CT.LIN_b8(), $CT.LIN_92()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_77(), $CT.LIN_b8(), $CT.LIN_92()), $CT.LUMc($CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()))),
+  SHADEDc(PAL2_fg(), PAL2_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_66(), $CT.LIN_58(), $CT.LIN_2c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_66(), $CT.LIN_58(), $CT.LIN_2c()))),
+  SHADEDc(PAL2_fg(), PAL2_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_74(), $CT.LIN_53(), $CT.LIN_2e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_74(), $CT.LIN_53(), $CT.LIN_2e()))),
+  SHADEDc(PAL2_markfg(), PAL2_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
+prval V_dark_8: VEILED(2, 8) = VEILEDc(
+  SHADEDc(PAL2_fg(), PAL2_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()))),
+  SHADEDc(PAL2_accent(), PAL2_bg(),
+    SHADEc($CT.LIN_7f(), $CT.LIN_c4(), $CT.LIN_9b(), $CT.LIN_75(), $CT.LIN_b4(), $CT.LIN_8f()),
+    SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_75(), $CT.LIN_b4(), $CT.LIN_8f()), $CT.LUMc($CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()))),
+  SHADEDc(PAL2_fg(), PAL2_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_64(), $CT.LIN_56(), $CT.LIN_2b()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_64(), $CT.LIN_56(), $CT.LIN_2b()))),
+  SHADEDc(PAL2_fg(), PAL2_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_71(), $CT.LIN_51(), $CT.LIN_2d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_71(), $CT.LIN_51(), $CT.LIN_2d()))),
+  SHADEDc(PAL2_markfg(), PAL2_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()))))
+prval V_night_0: VEILED(3, 0) = VEILEDc(
+  SHADEDc(PAL3_fg(), PAL3_bg(),
+    SHADEc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()),
+    SHADEc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()), $CT.LUMc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()))),
+  SHADEDc(PAL3_accent(), PAL3_bg(),
+    SHADEc($CT.LIN_c9(), $CT.LIN_a3(), $CT.LIN_6b(), $CT.LIN_c9(), $CT.LIN_a3(), $CT.LIN_6b()),
+    SHADEc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_c9(), $CT.LIN_a3(), $CT.LIN_6b()), $CT.LUMc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()))),
+  SHADEDc(PAL3_fg(), PAL3_hl(),
+    SHADEc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()),
+    SHADEc($CT.LIN_4f(), $CT.LIN_43(), $CT.LIN_18(), $CT.LIN_4f(), $CT.LIN_43(), $CT.LIN_18()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()), $CT.LUMc($CT.LIN_4f(), $CT.LIN_43(), $CT.LIN_18()))),
+  SHADEDc(PAL3_fg(), PAL3_hl2(),
+    SHADEc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()),
+    SHADEc($CT.LIN_5c(), $CT.LIN_3f(), $CT.LIN_1f(), $CT.LIN_5c(), $CT.LIN_3f(), $CT.LIN_1f()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()), $CT.LUMc($CT.LIN_5c(), $CT.LIN_3f(), $CT.LIN_1f()))),
+  SHADEDc(PAL3_markfg(), PAL3_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00()))))
+prval V_grey_2: VEILED(4, 2) = VEILEDc(
+  SHADEDc(PAL4_fg(), PAL4_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_39(), $CT.LIN_39(), $CT.LIN_39()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_39(), $CT.LIN_39(), $CT.LIN_39()))),
+  SHADEDc(PAL4_accent(), PAL4_bg(),
+    SHADEc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8(), $CT.LIN_8c(), $CT.LIN_cc(), $CT.LIN_a5()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_39(), $CT.LIN_39(), $CT.LIN_39()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_8c(), $CT.LIN_cc(), $CT.LIN_a5()), $CT.LUMc($CT.LIN_39(), $CT.LIN_39(), $CT.LIN_39()))),
+  SHADEDc(PAL4_fg(), PAL4_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_6b(), $CT.LIN_5c(), $CT.LIN_2e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_6b(), $CT.LIN_5c(), $CT.LIN_2e()))),
+  SHADEDc(PAL4_fg(), PAL4_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_79(), $CT.LIN_56(), $CT.LIN_30()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()), $CT.LUMc($CT.LIN_79(), $CT.LIN_56(), $CT.LIN_30()))),
+  SHADEDc(PAL4_markfg(), PAL4_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()))))
+prval V_grey_4: VEILED(4, 4) = VEILEDc(
+  SHADEDc(PAL4_fg(), PAL4_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_38(), $CT.LIN_38(), $CT.LIN_38()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_38(), $CT.LIN_38(), $CT.LIN_38()))),
+  SHADEDc(PAL4_accent(), PAL4_bg(),
+    SHADEc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8(), $CT.LIN_89(), $CT.LIN_c8(), $CT.LIN_a1()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_38(), $CT.LIN_38(), $CT.LIN_38()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_89(), $CT.LIN_c8(), $CT.LIN_a1()), $CT.LUMc($CT.LIN_38(), $CT.LIN_38(), $CT.LIN_38()))),
+  SHADEDc(PAL4_fg(), PAL4_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_69(), $CT.LIN_5a(), $CT.LIN_2d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_69(), $CT.LIN_5a(), $CT.LIN_2d()))),
+  SHADEDc(PAL4_fg(), PAL4_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_76(), $CT.LIN_54(), $CT.LIN_2f()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()), $CT.LUMc($CT.LIN_76(), $CT.LIN_54(), $CT.LIN_2f()))),
+  SHADEDc(PAL4_markfg(), PAL4_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()))))
+prval V_grey_6: VEILED(4, 6) = VEILEDc(
+  SHADEDc(PAL4_fg(), PAL4_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_37(), $CT.LIN_37(), $CT.LIN_37()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_37(), $CT.LIN_37(), $CT.LIN_37()))),
+  SHADEDc(PAL4_accent(), PAL4_bg(),
+    SHADEc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8(), $CT.LIN_86(), $CT.LIN_c4(), $CT.LIN_9e()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_37(), $CT.LIN_37(), $CT.LIN_37()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_86(), $CT.LIN_c4(), $CT.LIN_9e()), $CT.LUMc($CT.LIN_37(), $CT.LIN_37(), $CT.LIN_37()))),
+  SHADEDc(PAL4_fg(), PAL4_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_66(), $CT.LIN_58(), $CT.LIN_2c()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_66(), $CT.LIN_58(), $CT.LIN_2c()))),
+  SHADEDc(PAL4_fg(), PAL4_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_74(), $CT.LIN_53(), $CT.LIN_2e()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()), $CT.LUMc($CT.LIN_74(), $CT.LIN_53(), $CT.LIN_2e()))),
+  SHADEDc(PAL4_markfg(), PAL4_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
+prval V_grey_8: VEILED(4, 8) = VEILEDc(
+  SHADEDc(PAL4_fg(), PAL4_bg(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_35(), $CT.LIN_35(), $CT.LIN_35()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_35(), $CT.LIN_35(), $CT.LIN_35()))),
+  SHADEDc(PAL4_accent(), PAL4_bg(),
+    SHADEc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8(), $CT.LIN_84(), $CT.LIN_bf(), $CT.LIN_9b()),
+    SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_35(), $CT.LIN_35(), $CT.LIN_35()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_84(), $CT.LIN_bf(), $CT.LIN_9b()), $CT.LUMc($CT.LIN_35(), $CT.LIN_35(), $CT.LIN_35()))),
+  SHADEDc(PAL4_fg(), PAL4_hl(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_6d(), $CT.LIN_5e(), $CT.LIN_2f(), $CT.LIN_64(), $CT.LIN_56(), $CT.LIN_2b()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_64(), $CT.LIN_56(), $CT.LIN_2b()))),
+  SHADEDc(PAL4_fg(), PAL4_hl2(),
+    SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
+    SHADEc($CT.LIN_7b(), $CT.LIN_58(), $CT.LIN_31(), $CT.LIN_71(), $CT.LIN_51(), $CT.LIN_2d()),
+    $CT.CONTRAST_lighter_first($CT.LUMc($CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()), $CT.LUMc($CT.LIN_71(), $CT.LIN_51(), $CT.LIN_2d()))),
+  SHADEDc(PAL4_markfg(), PAL4_mark(),
+    SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
+    SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()),
+    $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()))))
 (* END proofs *)
 
 (* ============================================================
@@ -778,7 +1170,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect
+  | Appearance | ContainerType | UserSelect | Transition
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -809,6 +1201,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | ColumnFill() => "column-fill" | ColumnGap() => "column-gap"
   | ColumnWidth() => "column-width" | BreakAfter() => "break-after"
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
+  | Transition() => "transition"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
@@ -2255,6 +2648,105 @@ fn _under_600px {left:nat | left >= 57} (sheet: sheet(left, 0)): [after:nat | af
   val sheet = media_end(sheet)
 in sheet end
 
+(* The selector of a page turn's shade at a level in a theme (the
+   light theme's is also the default) *)
+fn _shade_selector {number:int}{level:pos | level <= 4} (which: palette_theme(number), level: int level): [length:pos | length <= 40] string length =
+  case+ which of
+  | Light() => (case+ level of 1 => ".shade.s1,.th-light .shade.s1" | 2 => ".shade.s2,.th-light .shade.s2"
+    | 3 => ".shade.s3,.th-light .shade.s3" | _ => ".shade.s4,.th-light .shade.s4")
+  | Sepia() => (case+ level of 1 => ".th-sepia .shade.s1" | 2 => ".th-sepia .shade.s2"
+    | 3 => ".th-sepia .shade.s3" | _ => ".th-sepia .shade.s4")
+  | Dark() => (case+ level of 1 => ".th-dark .shade.s1" | 2 => ".th-dark .shade.s2"
+    | 3 => ".th-dark .shade.s3" | _ => ".th-dark .shade.s4")
+  | Night() => (case+ level of 1 => ".th-night .shade.s1" | 2 => ".th-night .shade.s2"
+    | 3 => ".th-night .shade.s3" | _ => ".th-night .shade.s4")
+  | Grey() => (case+ level of 1 => ".th-grey .shade.s1" | 2 => ".th-grey .shade.s2"
+    | 3 => ".th-grey .shade.s3" | _ => ".th-grey .shade.s4")
+
+(* The shade at a level (1 to 4, the strongest last) in a theme: black
+   at strength percent, a ground with no text, at a strength proven to
+   leave every pair the page shows legible under it (VEILED) *)
+fn _shade_rule {number:int}{strength:nat | strength <= 100}{level:pos | level <= 4}{left:nat | left >= 120}
+  (veiled: VEILED(number, strength) | sheet: sheet(left, 0), which: palette_theme(number), level: int level, strength: int strength)
+  : [after:nat | after >= left - 120] sheet(after, 0) = let
+  val sheet = rule(sheet, _shade_selector(which, level))
+  val () = raw(sheet, "background-color:rgba(0,0,0,")
+  val sheet = _number(sheet, strength)
+  val () = raw(sheet, "%);font-size:0;")
+in close(sheet) end
+
+(* A page turn (reader.bats): the shade over the incoming page, and
+   over it page-turn, where the page being left (a copy, in .sheet, on
+   the page's own ground, proven) slides off, the gap it leaves showing
+   the page beneath (blank, a ground with no text, while a drag holds a
+   chapter's first or last page). Its edge casts a shadow on the page
+   beneath. Neither takes a tap, which goes through to the page. The
+   shade is strongest in the light themes, where a shadow shows; in the
+   dark ones it is weaker (Night's highlight is 4.70:1 at rest, so
+   there no shade at all leaves it at 4.5:1), and the shadow and the
+   slide carry the turn *)
+fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | after >= left - 3600] sheet(after, 0) = let
+  val sheet = rule(sheet, ".shade")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Inset(), "0")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = lay(sheet, FontSize(), "0")
+  val sheet = lay(sheet, Transition(), "background-color 80ms linear")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".turn")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Inset(), "0")
+  val sheet = lay(sheet, ZIndex(), "2")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".turn.to-up,.turn.to-down")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sheet")
+  val sheet = lay(sheet, Flex(), "0 0 100%")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = lay(sheet, MinHeight(), "0")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = lay(sheet, BoxShadow(), "0 0 24px rgba(0,0,0,.4)")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tgap")
+  val sheet = lay(sheet, Flex(), "0 0 100%")
+  val sheet = close(sheet)
+  (* sliding right or down, the gap is first: the sheet rests at the
+     strip's end *)
+  val sheet = rule(sheet, ".turn.to-right .tgap,.turn.to-down .tgap")
+  val sheet = lay(sheet, Order(), "-1")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".turn.blank .tgap")
+  val sheet = fill(sheet, 0)
+  val sheet = close(sheet)
+  val sheet = _shade_rule(V_light_6 | sheet, Light(), 1, 6)
+  val sheet = _shade_rule(V_light_12 | sheet, Light(), 2, 12)
+  val sheet = _shade_rule(V_light_18 | sheet, Light(), 3, 18)
+  val sheet = _shade_rule(V_light_24 | sheet, Light(), 4, 24)
+  val sheet = _shade_rule(V_sepia_5 | sheet, Sepia(), 1, 5)
+  val sheet = _shade_rule(V_sepia_10 | sheet, Sepia(), 2, 10)
+  val sheet = _shade_rule(V_sepia_15 | sheet, Sepia(), 3, 15)
+  val sheet = _shade_rule(V_sepia_20 | sheet, Sepia(), 4, 20)
+  val sheet = _shade_rule(V_dark_2 | sheet, Dark(), 1, 2)
+  val sheet = _shade_rule(V_dark_4 | sheet, Dark(), 2, 4)
+  val sheet = _shade_rule(V_dark_6 | sheet, Dark(), 3, 6)
+  val sheet = _shade_rule(V_dark_8 | sheet, Dark(), 4, 8)
+  val sheet = _shade_rule(V_night_0 | sheet, Night(), 1, 0)
+  val sheet = _shade_rule(V_night_0 | sheet, Night(), 2, 0)
+  val sheet = _shade_rule(V_night_0 | sheet, Night(), 3, 0)
+  val sheet = _shade_rule(V_night_0 | sheet, Night(), 4, 0)
+  val sheet = _shade_rule(V_grey_2 | sheet, Grey(), 1, 2)
+  val sheet = _shade_rule(V_grey_4 | sheet, Grey(), 2, 4)
+  val sheet = _shade_rule(V_grey_6 | sheet, Grey(), 3, 6)
+  val sheet = _shade_rule(V_grey_8 | sheet, Grey(), 4, 8)
+in sheet end
+
 (* The axes the page turn (gestures region 1, on .caf) owns: the
    stylesheet's touch-action for .caf comes from them, so the browser
    leaves exactly that axis to the recognizer *)
@@ -2304,6 +2796,7 @@ implement app_style () = let
   val sheet = _shell(sheet)
   val sheet = _overlays(sheet)
   val sheet = _reader(sheet)
+  val sheet = _page_turn(sheet)
   val sheet = _panels(sheet)
   val sheet = _under_480px(sheet)
   val sheet = _under_600px(sheet)

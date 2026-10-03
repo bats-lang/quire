@@ -42,6 +42,7 @@ staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
+staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
 fn _apply_diff_list(diffs: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
@@ -916,6 +917,414 @@ fn _fixed_fit (): void =
       in _size_put(_facing_size, facing) end
       else ())
   in _size_put(_page_size, size) end
+
+(* ============================================================
+   The page turn, animated (#246). Pages are CSS columns of one
+   element, so the page being left is a copy of it (bridge's
+   copy_node, in turn-sheet) laid over it in page-turn, which slides
+   off the way the turn goes, its edge casting the stylesheet's shadow
+   (.sheet); the page itself already shows the incoming page, under a
+   shade (turn-shade, style.bats's .shade) that lightens as the turn
+   completes. Where the system asks for less motion, a turn is instant
+   ============================================================ *)
+
+(* Which way the page being left slides off *)
+datatype slide = SlideLeft | SlideRight | SlideUp | SlideDown
+
+fn _slide_same (first: slide, second: slide): bool =
+  case+ first of
+  | SlideLeft() => (case+ second of SlideLeft() => true | SlideRight() => false | SlideUp() => false | SlideDown() => false)
+  | SlideRight() => (case+ second of SlideLeft() => false | SlideRight() => true | SlideUp() => false | SlideDown() => false)
+  | SlideUp() => (case+ second of SlideLeft() => false | SlideRight() => false | SlideUp() => true | SlideDown() => false)
+  | SlideDown() => (case+ second of SlideLeft() => false | SlideRight() => false | SlideUp() => false | SlideDown() => true)
+
+(* A turn on (to the next page) or back *)
+datatype turn_way = TurnOn | TurnBack
+
+(* The page being left slides off toward where the reading started:
+   to the left as a book is read left to right, to the right right to
+   left, and up when its pages go down; back, the other way *)
+fn _slide_of (way: turn_way): slide =
+  case+ _page_axis() of
+  | Across() => (case+ way of TurnOn() => SlideLeft() | TurnBack() => SlideRight())
+  | AcrossBack() => (case+ way of TurnOn() => SlideRight() | TurnBack() => SlideLeft())
+  | Down() => (case+ way of TurnOn() => SlideUp() | TurnBack() => SlideDown())
+
+(* What lies beneath the page being left: the incoming page, or, while
+   a drag holds the chapter's first or last page, a blank one (the
+   next chapter is not loaded until the turn is committed) *)
+datatype beneath = BeneathPage | BeneathBlank
+
+(* A whole turn's time, in milliseconds, eased out: Material's for a
+   transition across the whole screen *)
+#define TURN_MS 280
+
+(* About one frame, in milliseconds: a turn's first frame shows it a
+   frame on *)
+#define FRAME_MS 16
+
+(* The most frames one turn asks for (a metric's bound): past them, the
+   turn ends where it is going *)
+#define TURN_FRAMES 600
+
+(* The shade's levels, its strongest last (style.bats's .shade.s1 to
+   .s4, each proven) *)
+#define SHADE_LEVELS 4
+
+(* Which way a scroll goes *)
+datatype scroll_axis = ScrollAcross | ScrollDown
+
+(* Element id scrolled across (or down) to value *)
+fn _scroll_literal {id_len:pos | id_len < 256} (id: string id_len, axis: scroll_axis, value: int): void = let
+  val id_len = g1u2i(string1_length(id))
+  val id_buf = $A.alloc<byte>(id_len)
+  val () = $A.write_text(id_buf, 0, $A.text_lit(id), id_len)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id_buf)
+  val () = (case+ axis of
+    | ScrollAcross() => $SC.set_scroll_left(id_bytes, id_len, value)
+    | ScrollDown() => $SC.set_scroll_top(id_bytes, id_len, value))
+in release_bytes(id_frozen, id_bytes) end
+
+(* The page scrolled to page of the chapter, as _show_page_down puts
+   it: across, its pages going on to the right (or, right to left, to
+   the left: a scroll below 0); down, a step each *)
+fn _page_scroll (page: int): void =
+  case+ _page_axis() of
+  | Across() => _scroll_literal("page", ScrollAcross(), page * !_page_width)
+  | AcrossBack() => _scroll_literal("page", ScrollAcross(), ~(page * !_page_width))
+  | Down() => _scroll_literal("page", ScrollDown(), page * _step())
+
+(* Whether the system asks for less motion (prefers-reduced-motion,
+   which Android's Remove animations sets too): then a turn is instant,
+   as WCAG 2.3.3 asks *)
+fn _motion_reduced (): bool = let
+  val query = $A.alloc<byte>(32)
+  val () = $A.write_text(query, 0, $A.text_lit("(prefers-reduced-motion: reduce)"), 32)
+  val @(query_frozen, query_bytes) = $A.freeze<byte>(query)
+  val answer = $MEDIA.match_media(query_bytes, 32)
+  val () = release_bytes(query_frozen, query_bytes)
+in case+ answer of $MEDIA.Matches() => true | $MEDIA.NoMatch() => false end
+
+(* page-turn's classes: the way its sheet slides (its gap, beneath the
+   sheet's edge, before it when it slides right or down), and a blank
+   gap *)
+fn _turn_class (slide: slide, under: beneath): void =
+  case+ under of
+  | BeneathPage() => (case+ slide of
+    | SlideLeft() => ui_class("page-turn", "turn to-left")
+    | SlideRight() => ui_class("page-turn", "turn to-right")
+    | SlideUp() => ui_class("page-turn", "turn to-up")
+    | SlideDown() => ui_class("page-turn", "turn to-down"))
+  | BeneathBlank() => (case+ slide of
+    | SlideLeft() => ui_class("page-turn", "turn to-left blank")
+    | SlideRight() => ui_class("page-turn", "turn to-right blank")
+    | SlideUp() => ui_class("page-turn", "turn to-up blank")
+    | SlideDown() => ui_class("page-turn", "turn to-down blank"))
+
+(* The shade over the incoming page at a level (0 none) *)
+fn _shade_level {level:nat | level <= SHADE_LEVELS} (level: int level): void =
+  case+ level of
+  | 0 => ui_class("turn-shade", "shade")
+  | 1 => ui_class("turn-shade", "shade s1")
+  | 2 => ui_class("turn-shade", "shade s2")
+  | 3 => ui_class("turn-shade", "shade s3")
+  | _ => ui_class("turn-shade", "shade s4")
+
+(* The sheet slid off by progress thousandths of the page, and the shade
+   as light as that leaves it: at its strongest as the turn starts, and
+   gone as it ends *)
+fn _strip_at (slide: slide, progress: int): void = let
+  val width = !_page_width
+  val height = !_page_height
+  val () = (case+ slide of
+    | SlideLeft() => _scroll_literal("page-turn", ScrollAcross(), progress * width / 1000)
+    | SlideRight() => _scroll_literal("page-turn", ScrollAcross(), width - progress * width / 1000)
+    | SlideUp() => _scroll_literal("page-turn", ScrollDown(), progress * height / 1000)
+    | SlideDown() => _scroll_literal("page-turn", ScrollDown(), height - progress * height / 1000))
+in
+  if progress < 250 then _shade_level(4)
+  else if progress < 500 then _shade_level(3)
+  else if progress < 750 then _shade_level(2)
+  else if progress < 1000 then _shade_level(1)
+  else _shade_level(0)
+end
+
+(* The page as it is now, copied into the sheet *)
+fn _copy_page (): void = let
+  val source = $A.alloc<byte>(4)
+  val () = $A.write_text(source, 0, $A.text_lit("page"), 4)
+  val holder = $A.alloc<byte>(10)
+  val () = $A.write_text(holder, 0, $A.text_lit("turn-sheet"), 10)
+  val @(source_frozen, source_bytes) = $A.freeze<byte>(source)
+  val @(holder_frozen, holder_bytes) = $A.freeze<byte>(holder)
+  val () = $BDOM.copy_node(source_bytes, 4, holder_bytes, 10)
+  val () = release_bytes(source_frozen, source_bytes)
+in release_bytes(holder_frozen, holder_bytes) end
+
+(* The page being left, laid over the page: the shade shown at its
+   strongest, then page-turn (so the copy is laid out as the page is),
+   then the copy, at rest *)
+fn _sheet_show (slide: slide, under: beneath): void = let
+  val () = _turn_class(slide, under)
+  val () = _shade_level(SHADE_LEVELS)
+  val () = ui_show("turn-shade", true)
+  val () = ui_show("page-turn", true)
+  val () = _copy_page()
+in _strip_at(slide, 0) end
+
+(* Nothing over the page *)
+fn _sheet_hide (): void = let
+  val () = ui_show("page-turn", false)
+  val () = ui_show("turn-shade", false)
+in ui_clear("turn-sheet") end
+
+(* A sheet over the page: held by a drag (HELD), while the page beneath
+   shows another page than the reader's place, or sliding off a turn
+   (SLID), the page beneath being the place. Its constructors are local,
+   so a sheet is laid only by _sheet_lay_held or _sheet_lay_slid, and,
+   being linear, ends only where it is taken away: a sliding one by
+   _sheet_lift, a held one by _sheet_put_back, which puts the page back
+   at its place, or by _sheet_commit, once the place has moved to the
+   page beneath. So no turn, however it ends, leaves a copy over the
+   page or the page between two places *)
+stadef HELD = 0
+stadef SLID = 1
+
+local
+datavtype turn_sheet_(int) =
+  | SheetHeld(HELD) of ()
+  | SheetSlid(SLID) of ()
+in
+stadef turn_sheet = turn_sheet_
+
+(* A turn's sheet: the page being left, over the page, whose place is
+   about to move to the incoming page *)
+fn _sheet_lay_slid (slide: slide): turn_sheet(SLID) = let
+  val () = _sheet_show(slide, BeneathPage())
+in SheetSlid() end
+
+(* A drag's sheet: the page at its place, over the page, which then
+   shows the incoming page (or a blank one), not its place, until the
+   sheet is put back or the turn committed *)
+fn _sheet_lay_held (slide: slide, under: beneath, incoming: int): turn_sheet(HELD) = let
+  val () = _sheet_show(slide, under)
+  val () = (case+ under of BeneathPage() => _page_scroll(incoming) | BeneathBlank() => ())
+in SheetHeld() end
+
+(* A turn's sheet taken away: the page shows the place *)
+fn _sheet_lift (sheet: turn_sheet(SLID)): void = let
+  val+ ~SheetSlid() = sheet
+in _sheet_hide() end
+
+(* A drag's sheet taken away, and the page back at its place *)
+fn _sheet_put_back (sheet: turn_sheet(HELD)): void = let
+  val+ ~SheetHeld() = sheet
+  val () = _sheet_hide()
+in case+ reading_get() of @(page, _, _, _) => _page_scroll(page) end
+
+(* A drag committed, the place moved to the page beneath: the sheet
+   goes on sliding as a turn's *)
+fn _sheet_commit (sheet: turn_sheet(HELD)): turn_sheet(SLID) = let
+  val+ ~SheetHeld() = sheet
+in SheetSlid() end
+end
+
+(* The turn: none; a drag holding the page (its number, the way the
+   sheet slides, and how far, in thousandths of the page); a drag let go
+   going back (how far it was, and when it started, once a frame says,
+   else -1); a turn whose incoming page is not shown yet (a chapter
+   loading); a turn sliding on (from how far, since when) *)
+datavtype turn_cell =
+  | TurnStill of ()
+  | TurnHeld of (turn_sheet(HELD), int, slide, int)
+  | TurnReturning of (turn_sheet(HELD), int, slide, int, int)
+  | TurnWaiting of (turn_sheet(SLID), int, slide, int)
+  | TurnSliding of (turn_sheet(SLID), int, slide, int, int)
+
+val _turn = ref<turn_cell>(TurnStill())
+
+(* The number of the last turn *)
+val _turn_number = ref<int>(0)
+
+fn _turn_take (): turn_cell = let
+  var cell: turn_cell = TurnStill()
+  val () = ref_exch_elt<turn_cell>(_turn, cell)
+in cell end
+
+(* A turn ended at once: a sheet lifted, a drag's put back *)
+fn _turn_end (cell: turn_cell): void =
+  case+ cell of
+  | ~TurnStill() => ()
+  | ~TurnHeld(sheet, _, _, _) => _sheet_put_back(sheet)
+  | ~TurnReturning(sheet, _, _, _, _) => _sheet_put_back(sheet)
+  | ~TurnWaiting(sheet, _, _, _) => _sheet_lift(sheet)
+  | ~TurnSliding(sheet, _, _, _, _) => _sheet_lift(sheet)
+
+(* Keeps the turn; whatever was kept (nothing, after a take) ends *)
+fn _turn_put (cell: turn_cell): void = let
+  var old: turn_cell = cell
+  val () = ref_exch_elt<turn_cell>(_turn, old)
+in _turn_end(old) end
+
+(* Ends any turn at once, the page showing its place with nothing over
+   it: a resize, a jump, the book closed *)
+fn _turn_settle (): void = _turn_end(_turn_take())
+
+(* Eased out (a cubic): how far a turn is, in thousandths, when its
+   time is so many thousandths gone *)
+fn _eased (time: int): int =
+  if time >= 1000 then 1000
+  else if time <= 0 then 0
+  else let val left = 1000 - time in 1000 - left * left / 1000 * left / 1000 end
+
+(* A frame of turn number at time: a sliding sheet slid on, a returning
+   one back; each ends when its time is up. A frame of a turn that is
+   no longer the one kept does nothing *)
+fun _turn_frame {rounds:nat} .<rounds>. (number: int, time: int, rounds: int rounds): void =
+  case+ _turn_take() of
+  | ~TurnSliding(sheet, kept, slide, from, start) =>
+    if kept <> number then _turn_put(TurnSliding(sheet, kept, slide, from, start))
+    else let
+      val start = (if start >= 0 then start else time - FRAME_MS): int
+      val length = TURN_MS * (1000 - from) / 1000
+      val elapsed = time - start
+    in
+      if rounds <= 0 then _sheet_lift(sheet)
+      else if length <= 0 then _sheet_lift(sheet)
+      else if elapsed >= length then _sheet_lift(sheet)
+      else let
+        val () = _strip_at(slide, from + (1000 - from) * _eased(elapsed * 1000 / length) / 1000)
+        val () = _turn_put(TurnSliding(sheet, kept, slide, from, start))
+      in $P.finish<Int>($TM.animation_frame(), llam(next) => _turn_frame(number, next, rounds - 1)) end
+    end
+  | ~TurnReturning(sheet, kept, slide, from, start) =>
+    if kept <> number then _turn_put(TurnReturning(sheet, kept, slide, from, start))
+    else let
+      val start = (if start >= 0 then start else time - FRAME_MS): int
+      val length = TURN_MS * from / 1000
+      val elapsed = time - start
+    in
+      if rounds <= 0 then _sheet_put_back(sheet)
+      else if length <= 0 then _sheet_put_back(sheet)
+      else if elapsed >= length then _sheet_put_back(sheet)
+      else let
+        val () = _strip_at(slide, from - from * _eased(elapsed * 1000 / length) / 1000)
+        val () = _turn_put(TurnReturning(sheet, kept, slide, from, start))
+      in $P.finish<Int>($TM.animation_frame(), llam(next) => _turn_frame(number, next, rounds - 1)) end
+    end
+  | other => _turn_put(other)
+
+(* Turn number's frames, from the next *)
+fn _turn_frames (number: int): void =
+  $P.finish<Int>($TM.animation_frame(), llam(time) => _turn_frame(number, time, TURN_FRAMES))
+
+(* A turn laid: the page being left over the page, waiting for the
+   incoming page; its number (0, with nothing laid, where the system
+   asks for less motion) *)
+fn _turn_lay (slide: slide): int =
+  if _motion_reduced() then 0
+  else if !_page_width <= 0 then 0
+  else let
+    val number = !_turn_number + 1
+    val () = !_turn_number := number
+    val () = _turn_put(TurnWaiting(_sheet_lay_slid(slide), number, slide, 0))
+  in number end
+
+(* A turn starts, from the page shown: any turn before it ends at once,
+   except a drag held the same way, which this turn commits, going on
+   from where the finger let go. Its number, for _turn_go *)
+fn _turn_begin (way: turn_way): int = let
+  val slide = _slide_of(way)
+in
+  case+ _turn_take() of
+  | ~TurnHeld(sheet, number, held_slide, progress) =>
+    if _slide_same(held_slide, slide) then let
+      val () = _turn_put(TurnWaiting(_sheet_commit(sheet), number, slide, progress))
+    in number end
+    else let val () = _sheet_put_back(sheet) in _turn_lay(slide) end
+  | other => let val () = _turn_end(other) in _turn_lay(slide) end
+end
+
+(* Turn number's incoming page is shown: its sheet slides off (at once,
+   where the system asks for less motion) *)
+fn _turn_go (number: int): void =
+  case+ _turn_take() of
+  | ~TurnWaiting(sheet, kept, slide, progress) =>
+    if kept <> number then _turn_put(TurnWaiting(sheet, kept, slide, progress))
+    else if _motion_reduced() then _sheet_lift(sheet)
+    else let
+      val () = _turn_class(slide, BeneathPage())
+      val () = _turn_put(TurnSliding(sheet, number, slide, progress, ~1))
+    in _turn_frames(number) end
+  | other => _turn_put(other)
+
+(* Turn number's incoming page could not be shown: its sheet is taken
+   away, the page staying where it was *)
+fn _turn_lift (number: int): void =
+  case+ _turn_take() of
+  | ~TurnWaiting(sheet, kept, slide, progress) =>
+    if kept <> number then _turn_put(TurnWaiting(sheet, kept, slide, progress))
+    else _sheet_lift(sheet)
+  | other => _turn_put(other)
+
+(* A drag let go without a turn: the page being left goes back over
+   the page *)
+fn _turn_return (): void =
+  case+ _turn_take() of
+  | ~TurnHeld(sheet, number, slide, progress) =>
+    if _motion_reduced() then _sheet_put_back(sheet)
+    else let
+      val () = _turn_put(TurnReturning(sheet, number, slide, progress, ~1))
+    in _turn_frames(number) end
+  | other => _turn_put(other)
+
+(* A drag across starts holding the page, the sheet slid progress
+   thousandths of the page: beneath it the page it would turn to, else a
+   blank one *)
+fn _turn_hold_new (slide: slide, progress: int): void =
+  case+ reading_get() of
+  | @(page, page_count, _, _) => let
+      val on = (case+ _page_axis() of
+        | Across() => _slide_same(slide, SlideLeft())
+        | AcrossBack() => _slide_same(slide, SlideRight())
+        | Down() => _slide_same(slide, SlideUp())): bool
+      val incoming = (if on then page + 1 else page - 1): int
+      val under = (if incoming < 0 then BeneathBlank() else if incoming >= page_count then BeneathBlank() else BeneathPage()): beneath
+      val number = !_turn_number + 1
+      val () = !_turn_number := number
+      val sheet = _sheet_lay_held(slide, under, incoming)
+      val () = _strip_at(slide, progress)
+    in _turn_put(TurnHeld(sheet, number, slide, progress)) end
+
+(* A drag across, shift px to the right of where it started: the page
+   being left follows the finger, the way it went, over the page it
+   would turn to *)
+fn _turn_hold (shift: int): void = let
+  val width = !_page_width
+in
+  if width <= 0 then ()
+  else let
+    val slide = (if shift < 0 then SlideLeft() else SlideRight()): slide
+    val distance = (if shift < 0 then ~shift else shift): int
+    val progress = (if distance * 1000 / width < 1000 then distance * 1000 / width else 999): int
+  in
+    case+ _turn_take() of
+    | ~TurnHeld(sheet, number, held_slide, _) =>
+      if shift = 0 then let
+        val () = _strip_at(held_slide, 0)
+      in _turn_put(TurnHeld(sheet, number, held_slide, 0)) end
+      else if _slide_same(held_slide, slide) then let
+        val () = _strip_at(slide, progress)
+      in _turn_put(TurnHeld(sheet, number, slide, progress)) end
+      else let
+        (* turned the other way: the other page beneath *)
+        val () = _sheet_put_back(sheet)
+      in _turn_hold_new(slide, progress) end
+    | other =>
+      if shift = 0 then _turn_put(other)
+      else let val () = _turn_end(other) in _turn_hold_new(slide, progress) end
+  end
+end
 
 fn _measure_pagination(): void = let
   val () = _fixed_fit()
@@ -3019,10 +3428,28 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
 (* Ends a jump (or a turn into another chapter): when the chapter could
    not be shown, the reader stays on the page it was on, shown again (a
    drag may have moved it), never a blank one, and the banner says why *)
-fn _jump_checked (jumping: $P.promise(load_outcome, $P.Chained)): void =
+fn _jump_checked (jumping: $P.promise(load_outcome, $P.Chained)): void = let
+  (* a jump is no turn: one under way ends where it was going *)
+  val () = _turn_settle()
+in
   $P.finish<load_outcome>(jumping, llam(result) =>
     if load_shown(result) then ()
     else let
+      val () = (case+ reading_get() of
+        | @(page, page_count, chapter, chapter_count) =>
+          if chapter > 0 then _show_page(page, page_count, chapter, chapter_count) else ())
+    in notice_part_unread() end)
+end
+
+(* A turn (number) into another chapter, as _jump_checked ends a jump:
+   once the chapter's page is shown, the page being left slides off it;
+   when it cannot be shown, the sheet goes, the reader staying on the
+   page it was on *)
+fn _turn_jump (number: int, jumping: $P.promise(load_outcome, $P.Chained)): void =
+  $P.finish<load_outcome>(jumping, llam(result) =>
+    if load_shown(result) then _turn_go(number)
+    else let
+      val () = _turn_lift(number)
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, chapter_count) =>
           if chapter > 0 then _show_page(page, page_count, chapter, chapter_count) else ())
@@ -3163,7 +3590,11 @@ fn _page_next(): void = let
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
-    if page + 1 < page_count then let val () = _speed_turn() in _show_page(page + 1, page_count, chapter, chapter_count) end
+    if page + 1 < page_count then let
+      val () = _speed_turn()
+      val turn = _turn_begin(TurnOn())
+      val () = _show_page(page + 1, page_count, chapter, chapter_count)
+    in _turn_go(turn) end
     else let
       (* past a spread's facing page, when it is the next *)
       val next = (case+ !_shape of
@@ -3173,8 +3604,12 @@ in
         | AloneLeft() => chapter
         | AloneRight() => chapter): Int
     in
-      if next < chapter_count then let val () = _speed_turn() in _jump_checked(_goto(next, 0, ~1)) end
-      else _show_page(page, page_count, chapter, chapter_count)
+      if next < chapter_count then let
+        val () = _speed_turn()
+        val turn = _turn_begin(TurnOn())
+      in _turn_jump(turn, _goto(next, 0, ~1)) end
+      (* the book's last page: a drag holding it goes back *)
+      else let val () = _turn_return() in _show_page(page, page_count, chapter, chapter_count) end
     end
 end
 
@@ -3184,7 +3619,10 @@ fn _page_previous(): void = let
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
-    if page > 0 then _show_page(page - 1, page_count, chapter, chapter_count)
+    if page > 0 then let
+      val turn = _turn_begin(TurnBack())
+      val () = _show_page(page - 1, page_count, chapter, chapter_count)
+    in _turn_go(turn) end
     else let
       (* before a spread's facing page, when it is the previous *)
       val previous = (case+ !_shape of
@@ -3194,14 +3632,20 @@ in
         | AloneLeft() => chapter - 2
         | AloneRight() => chapter - 2): Int
     in
-      if previous >= 0 then _jump_checked(_goto(previous, ~1, ~1))
-      else _show_page(0, page_count, chapter, chapter_count)
+      if previous >= 0 then let
+        val turn = _turn_begin(TurnBack())
+      in _turn_jump(turn, _goto(previous, ~1, ~1)) end
+      (* the book's first page: a drag holding it goes back *)
+      else let val () = _turn_return() in _show_page(0, page_count, chapter, chapter_count) end
     end
 end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
-fn _relayout (): void =
+fn _relayout (): void = let
+  (* a turn under way ends where it was going, the page laid out anew *)
+  val () = _turn_settle()
+in
   (* a fixed page whose spreads are now wanted, or no longer: shown
      again, alone or in its spread *)
   if (if _is_fixed() then (if _spreads_wanted() then ~(!_spreads_shown) else !_spreads_shown) else false) then
@@ -3210,6 +3654,7 @@ fn _relayout (): void =
     val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
     val () = _measure_pagination()
   in _show_target(page, anchor) end
+end
 
 (* ============================================================
    Search: every chapter's text, for the query
@@ -3580,29 +4025,28 @@ implement apply_diff(diff) = _apply_diff(diff)
 #pub fun measure_pagination(): void
 implement measure_pagination() = _measure_pagination()
 
-(* The page shown, shift px to the right of where it rests (a drag's
-   preview; 0 puts it back) *)
+(* A drag across the page, shift px to the right of where it started:
+   the page being left follows the finger, over the page it would turn
+   to (a committed drag turns the page, page_next or page_prev, going
+   on from there; reader_pan_back puts it back) *)
 #pub fun reader_pan(shift: int): void
-
-(* The page shown, scrolled across by the finger's shift; its pages go
-   on the way sign says (1 to the right, ~1 to the left) *)
-fn _pan_across (sign: int, shift: int): void =
-  case+ reading_get() of
-  | @(page, _, _, _) => let
-      val page_id = $A.alloc<byte>(4)
-      val () = $A.write_text(page_id, 0, $A.text_lit("page"), 4)
-      val @(page_id_frozen, page_id_bytes) = $A.freeze<byte>(page_id)
-      val () = $SC.set_scroll_left(page_id_bytes, 4, sign * page * !_page_width - shift)
-    in release_bytes(page_id_frozen, page_id_bytes) end
 
 implement reader_pan(shift) =
   (* down the page (scrolled, or set vertically), a drag across moves
      nothing: a committed drag turns the page *)
   case+ _page_axis() of
   | Down() => ()
-  (* right to left, the pages go on to the left: a scroll below 0 *)
-  | AcrossBack() => _pan_across(~1, shift)
-  | Across() => _pan_across(1, shift)
+  | AcrossBack() => _turn_hold(shift)
+  | Across() => _turn_hold(shift)
+
+(* A drag let go without a turn (cancelled, or not across): the page
+   being left goes back over the page *)
+#pub fun reader_pan_back(): void
+implement reader_pan_back() = _turn_return()
+
+(* Any turn ends at once, the page showing its place (the book closed) *)
+#pub fun reader_turn_settle(): void
+implement reader_turn_settle() = _turn_settle()
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)
@@ -4211,6 +4655,8 @@ implement reader_relayout () = _relayout()
 implement reader_page (page) = let
   (* the reader moved: a restored place no longer holds them *)
   val () = !_settle_anchor := ~1
+  (* a jump within the chapter, not a turn: one under way ends *)
+  val () = _turn_settle()
 in case+ reading_get() of
   | @(_, page_count, chapter, chapter_count) => if page < 0 then _show_page(0, page_count, chapter, chapter_count) else if page >= page_count then _show_page(page_count - 1, page_count, chapter, chapter_count) else _show_page(page, page_count, chapter, chapter_count)
 end
@@ -4247,14 +4693,18 @@ in
   | @(page, page_count, chapter, chapter_count) =>
     if page + 1 < page_count then let
       val () = _speed_turn()
+      val turn = _turn_begin(TurnOn())
       val () = _show_page(page + 1, page_count, chapter, chapter_count)
+      val () = _turn_go(turn)
     in $P.ret<turned>(TurnedPage()) end
     else if chapter < chapter_count then let
       val () = _speed_turn()
+      val turn = _turn_begin(TurnOn())
     in
       $P.and_then<load_outcome><turned>(_goto(chapter, 0, ~1), llam(result) =>
-        if load_shown(result) then $P.ret<turned>(TurnedChapter())
+        if load_shown(result) then let val () = _turn_go(turn) in $P.ret<turned>(TurnedChapter()) end
         else let
+          val () = _turn_lift(turn)
           (* as _jump_checked: the page that was shown, and the banner
              says why *)
           val () = (case+ reading_get() of

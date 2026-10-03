@@ -295,6 +295,8 @@ fn _show_library (): void = let
   val () = _view_save(~1)
   val () = reader_search_stop()
   val () = reader_stack_clear()
+  (* a page turn under way ends with the book *)
+  val () = reader_turn_settle()
   val () = reader_timer_stop()
   (* the narration stops with the book *)
   val () = narration_close()
@@ -1704,9 +1706,9 @@ fn _drag_ended (): void = let
   val () = !_dragged := true
 in $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => !_dragged := false) end
 
-(* The page turn's events: a pan moves the page with the finger, a
-   commit turns it (a drag to the left shows the page to the right),
-   a cancel puts it back *)
+(* The page turn's events: a pan moves the page being left with the
+   finger, a commit turns it (a drag to the left shows the page to the
+   right), from where the finger let go, a cancel puts it back *)
 fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): void =
   case+ events of
   | ~list_vt_nil() => ()
@@ -1720,11 +1722,11 @@ fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): voi
           in case+ direction of
             | $GP.DLeft() => _right()
             | $GP.DRight() => _left()
-            | _ => reader_pan(0)
+            | _ => reader_pan_back()
           end
         | ~$GT.GCancel(region, _) =>
           if region <> PAGE_REGION then ()
-          else let val () = _drag_ended() in reader_pan(0) end
+          else let val () = _drag_ended() in reader_pan_back() end
         | ~$GT.GLongPress(_, _, _) => ()
         | ~$GT.GPinch(_, _, _, _) => ()
         | ~$GT.GPinchEnd(_) => ()
