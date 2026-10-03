@@ -68,6 +68,14 @@ fn _brightness_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 11 <= n
   | level => jw_int(out, position, brightness_percent(level))
 
 (* Whether the rotation is locked: true or false *)
+(* Whether a narration reads page numbers and notes, as JSON's true or
+   false *)
+fn _narration_notes_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
+  case+ set_narration_notes_get() of
+  | NotesRead() => jw_lit(out, position, "true")
+  | NotesSkipped() => jw_lit(out, position, "false")
+
 fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
   case+ set_rotation_get() of
@@ -78,7 +86,7 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
    of each language, the brightness, the rotation lock among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 100 + 24866 + 96) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       (* the version of Quire that wrote it (#219) *)
@@ -129,6 +137,11 @@ fn _settings_chunk (): jchunk =
       val next = _rotation_json(out, next)
       val next = jw_lit(out, next, ",\"voices\":")
       val next = set_voices_json(out, next)
+      (* the narration's speed, in hundredths (50 to 200) *)
+      val next = jw_lit(out, next, ",\"narrationSpeed\":")
+      val next = jw_int(out, next, 25 * set_narration_speed_get())
+      val next = jw_lit(out, next, ",\"narrationReadsNotes\":")
+      val next = _narration_notes_json(out, next)
       val next = jw_lit(out, next, ",\"sort\":")
       val next = jw_int(out, next, sort_code(lib_sort_get()))
       val next = jw_lit(out, next, ",\"libraryGrid\":")
@@ -1037,6 +1050,11 @@ in
         (if jr_key_is(key, key_len, "brightness") then let
            val () = set_brightness_set(BrightnessSystem())
          in _settings_members(buf, n, jr_skip(buf, n, value_start), key, sort) end
+         else if jr_key_is(key, key_len, "narrationReadsNotes") then let
+           val @(is_bool, reads, after) = jr_bool(buf, n, value_start)
+           val () = (if is_bool then set_narration_notes_set(if reads then NotesRead() else NotesSkipped()) else ())
+           val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
+         in _settings_members(buf, n, next, key, sort) end
          else if jr_key_is(key, key_len, "rotationLocked") then let
            val @(is_bool, locked, after) = jr_bool(buf, n, value_start)
            val () = (if is_bool then set_rotation_set(if locked then RotationLocked() else RotationFree()) else ())
@@ -1093,6 +1111,10 @@ in
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "dailyGoal") then let
         val () = (if value >= 0 then (if value <= 600 then stats_goal_set(value) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "narrationSpeed") then let
+        val quarters = value / 25
+        val () = (if quarters * 25 = value then (if quarters >= 2 then (if quarters <= 8 then set_narration_speed_set(quarters) else ()) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
         val () = (if value >= 0 then (if value <= 1 then set_ruby_set(ruby_of_code(value)) else ()) else ())
