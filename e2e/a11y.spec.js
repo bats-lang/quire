@@ -1,7 +1,7 @@
 // Accessibility: an automated audit (axe) of every view finds nothing,
 // and the reader works from the keyboard alone.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import AxeBuilder from '@axe-core/playwright';
 import {
   start, epubFile, importFiles, readBook, place, showChrome, chapters, cards, bookPage, control, dialog,

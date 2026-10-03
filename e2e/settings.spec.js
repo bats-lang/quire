@@ -1,7 +1,7 @@
 // Typography and theme: each control changes the page as it moves, and
 // every setting is kept without being saved by hand.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
 } from './helpers.js';
 import { TINY_PNG } from './create-epub.js';

@@ -2,7 +2,7 @@
 // bars, keeping the place, and what a chapter's XHTML becomes on the
 // page.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {

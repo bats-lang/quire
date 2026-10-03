@@ -4,7 +4,7 @@
 // Each complex area is a screen of its own, opened from its row, and
 // Escape closes the screen on top, then Settings.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, cards, card, openBook, readBook, toLibrary, chapters, dialog, menuItem, libraryMenu,

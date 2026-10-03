@@ -150,6 +150,17 @@ jobs:
       - name: Run e2e tests
         run: npx playwright test
 
+      # What a page that stopped answering was doing (e2e/stall-capture.js,
+      # #244): also in e2e-screenshots, apart here so it is found at once
+      - name: Upload stall captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-stall-captures
+          path: test-results/**/stall-capture-*.json
+          if-no-files-found: ignore
+          retention-days: 30
+
       - name: Upload test screenshots
         if: always()
         uses: actions/upload-artifact@v4

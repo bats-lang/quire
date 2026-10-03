@@ -3,7 +3,7 @@
 // the file and its ETag, PUT honours If-Match (412 when the file
 // changed) and keeps what it is sent.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,

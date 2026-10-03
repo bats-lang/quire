@@ -1,7 +1,7 @@
 // Finding one's way in a book: its table of contents (EPUB 3 nav or
 // EPUB 2 NCX), the scrubber, and the back button that follows jumps.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, visibleText, showChrome, chapterTitle, control, dialog, jumpBack, bookPage,
 } from './helpers.js';
