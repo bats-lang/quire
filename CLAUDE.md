@@ -447,6 +447,13 @@ a `theme` (style's `palette_theme(n)`) is indexed by its number in the
 palette, `theme_palette` the one function that gives it, and the theme
 rules are written from it (their selectors too), so a theme's colours
 and its proofs cannot be another's.
+An annotation's kind (`Bookmark`, or a highlight in its
+`highlight_style`) is stored as its code in the "QA" record
+(`_kind_code`, `_kind_of_code`), the record's version is a
+`record_version`, a highlight's mark set a `mark_set`, and the list's
+filter a `style_filter`. A kind is one flat datatype, not `Highlight of
+highlight_style`: a constructor that carries data would make it linear,
+and an annotation's numbers are copied freely.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 

@@ -45,8 +45,36 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
    page-list) *)
 #define LABEL_MAX 16
 
-(* Each annotation: its kind (0 a bookmark; a highlight: 1 yellow, 2
-   orange, 3 underlined), chapter, the
+(* A highlight's style *)
+#pub datatype highlight_style = Yellow | Orange | Underlined
+
+(* What an annotation is: a bookmark, or a highlight in its style *)
+datatype annotation_kind = Bookmark | YellowHighlight | OrangeHighlight | UnderlinedHighlight
+
+fn _highlight_of (style: highlight_style): annotation_kind =
+  case+ style of Yellow() => YellowHighlight() | Orange() => OrangeHighlight() | Underlined() => UnderlinedHighlight()
+
+(* A kind as the "QA" record stores it, and back: 0 a bookmark; a
+   highlight, 1 yellow, 2 orange, 3 underlined (a highlight's kind this
+   version does not know is shown yellow) *)
+fn _kind_code (kind: annotation_kind): [code:nat | code <= 3] int code =
+  case+ kind of Bookmark() => 0 | YellowHighlight() => 1 | OrangeHighlight() => 2 | UnderlinedHighlight() => 3
+
+(* Whether an annotation of kind kind is a highlight *)
+fn _is_highlight (kind: annotation_kind): bool =
+  case+ kind of Bookmark() => false | YellowHighlight() => true | OrangeHighlight() => true | UnderlinedHighlight() => true
+
+fn _is_bookmark (kind: annotation_kind): bool = ~_is_highlight(kind)
+
+(* Whether two kinds are both highlights or both bookmarks *)
+fn _same_mark (kind: annotation_kind, other: annotation_kind): bool =
+  if _is_highlight(kind) then _is_highlight(other) else _is_bookmark(other)
+
+fn _kind_of_code (code: int): annotation_kind =
+  if code <= 0 then Bookmark() else if code = 2 then OrangeHighlight() else if code = 3 then UnderlinedHighlight()
+  else YellowHighlight()
+
+(* Each annotation: its kind, chapter, the
    node and offset it starts at and those it ends at, the page it was
    made on, when (epoch minutes), when it last changed (a stamp,
    clock.bats: it was made, or its note set), its text text[0, text_len) (a
@@ -57,7 +85,7 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 datavtype annotations(int) =
   | annotations_nil(0) of ()
   | {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX}
-    annotations_cons(count + 1) of (Int, Int, Int, Int, Int, Int, Int, Int, Int,
+    annotations_cons(count + 1) of (annotation_kind, Int, Int, Int, Int, Int, Int, Int, Int,
       $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len,
       $A.arr(byte, label_loc, label_len + 1), int label_len, annotations(count))
 
@@ -92,9 +120,9 @@ val _book_open = ref<bool>(false)
    28 bits, as a book's id is. It is not stored: two devices that hold
    the same annotation (made on one and synced, or restored from the
    same backup, or made by a version before ids) give it the same id *)
-fn _id_of (kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, made_at: Int): @(Int, Int) = let
+fn _id_of (kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, made_at: Int): @(Int, Int) = let
   val text = $A.alloc<byte>(96)
-  val () = $A.write_byte(text, 0, (if kind >= 1 then 104 else 98): [mark:nat | mark < 256] int mark)
+  val () = $A.write_byte(text, 0, (if _is_highlight(kind) then 104 else 98): [mark:nat | mark < 256] int mark)
   val at = $S.int_to_str(text, 1, 96, chapter)
   val () = $A.write_byte(text, at, 58)
   val at = $S.int_to_str(text, at + 1, 96, start_node)
@@ -219,18 +247,20 @@ fn _put (cell: annotations_cell): void = let
   val+ ~AnnotationsCell(annotations, _) = previous
 in annotations_free(annotations) end
 
-(* Whether an annotation of kind kind is a highlight *)
-fn _is_highlight (kind: int): bool = kind >= 1
+(* The mark sets highlights are shown in, one a style *)
+datatype mark_set = YellowMarks | OrangeMarks | UnderlineMarks
 
-(* A highlight's style: 0 yellow, 1 orange, 2 underlined (a kind this
-   version does not know is shown yellow) *)
-fn _style_of (kind: int): [style:nat | style <= 2] int style =
-  if kind = 2 then 1 else if kind = 3 then 2 else 0
+(* A mark set's number: the stylesheet's ::highlight(bats-mark-1), 3 or
+   4 (2 is the search's, 5 reading aloud's) *)
+fn _mark_number (marks: mark_set): [number:nat | number <= 5] int number =
+  case+ marks of YellowMarks() => 1 | OrangeMarks() => 3 | UnderlineMarks() => 4
 
-(* The mark set a highlight of kind kind is shown in: the stylesheet's
-   ::highlight(bats-mark-1), 3 or 4 (2 is the search's) *)
-fn _mark_set (kind: int): int =
-  if kind = 2 then 3 else if kind = 3 then 4 else 1
+(* The mark set a highlight of kind kind is shown in (a bookmark is
+   never marked) *)
+fn _mark_set (kind: annotation_kind): mark_set =
+  case+ kind of
+  | OrangeHighlight() => OrangeMarks() | UnderlinedHighlight() => UnderlineMarks()
+  | YellowHighlight() => YellowMarks() | Bookmark() => YellowMarks()
 
 (* destination[j, count) := source[j, count) *)
 fun _copy_bytes {source_loc,destination_loc:agz}{source_size,destination_size:pos}{count:nat | count <= source_size; count <= destination_size}{j:nat | j <= count} .<count - j>.
@@ -274,7 +304,7 @@ fn _before (chapter_a: int, node_a: int, offset_a: int, chapter_b: int, node_b: 
 
 (* annotations with the annotation added in its place *)
 fun _insert {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX} .<count>.
-  (kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int, made_at: Int, modified: Int,
+  (kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int, made_at: Int, modified: Int,
    text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len, note: $A.arr(byte, note_loc, note_len + 1), note_len: int note_len,
    label: $A.arr(byte, label_loc, label_len + 1), label_len: int label_len,
    annotations: annotations(count)): annotations(count + 1) =
@@ -313,7 +343,7 @@ fun _serialize {l:agz}{arena:addr}{n:int}{count:nat}{position:nat | position + S
   case+ annotations of
   | annotations_nil() => position
   | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, modified, text, text_len, note, note_len, label, label_len, rest) => let
-      val () = $A.write_i32(out, position, kind)
+      val () = $A.write_i32(out, position, _kind_code(kind))
       val () = $A.write_i32(out, position + 4, chapter)
       val () = $A.write_i32(out, position + 8, start_node)
       val () = $A.write_i32(out, position + 12, start_offset)
@@ -413,26 +443,28 @@ fun _bytes_of {stored_loc:agz}{arena:addr}{stored_size:nat}{position,count:nat |
     val () = $A.set<byte>(out, j, $A.get<byte>(stored, position + j))
   in _bytes_of(stored, position, count, out, j + 1) end
 
-(* The version of the record stored[0, n): 3 ("QA3", dated, with
-   deletions), 2 ("QA2", with print pages), 1 ("QA1", without), or 0
-   when it is none of them *)
-fn _version {l:agz}{arena:addr}{n:nat} (stored: !$A.arrx(byte, l, n, arena), n: int n): [version:nat | version <= 3; version == 0 || n >= 4] int version =
-  if n < 4 then 0
-  else if byte2int0($A.get<byte>(stored, 0)) <> 81 then 0
-  else if byte2int0($A.get<byte>(stored, 1)) <> 65 then 0
+(* A record's version: "QA3" (dated, with deletions), "QA2" (with print
+   pages), "QA1" (without), or none of them *)
+datatype record_version = QA1 | QA2 | QA3 | NotARecord
+
+(* The version of the record stored[0, n), read once *)
+fn _version {l:agz}{arena:addr}{n:nat} (stored: !$A.arrx(byte, l, n, arena), n: int n): record_version =
+  if n < 4 then NotARecord()
+  else if byte2int0($A.get<byte>(stored, 0)) <> 81 then NotARecord()
+  else if byte2int0($A.get<byte>(stored, 1)) <> 65 then NotARecord()
   else let
     val digit = byte2int0($A.get<byte>(stored, 2))
-  in if digit = 51 then 3 else if digit = 50 then 2 else if digit = 49 then 1 else 0 end
+  in if digit = 51 then QA3() else if digit = 50 then QA2() else if digit = 49 then QA1() else NotARecord() end
 
-(* The print page's label of the annotation whose label is stored at
-   stored[position] in a record of version version (none in a "QA1"
-   record): whether it is there whole, where its bytes start and its
-   length *)
-fn _stored_label {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}
-  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, version: int)
+fn _is_record (version: record_version): bool =
+  case+ version of NotARecord() => false | QA1() => true | QA2() => true | QA3() => true
+
+(* The print page's label stored at stored[position]: whether it is
+   there whole, where its bytes start and its length *)
+fn _label_at {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position)
   : [bytes_at:nat | position <= bytes_at][label_len:nat | label_len <= LABEL_MAX; bytes_at + label_len <= n] @(bool, int bytes_at, int label_len) =
-  if version < 2 then @(true, position, 0)
-  else if position + 1 > n then @(false, position, 0)
+  if position + 1 > n then @(false, position, 0)
   else let
     val label_len = $AR.low_byte(byte2int0($A.get<byte>(stored, position)))
   in
@@ -441,12 +473,25 @@ fn _stored_label {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}
     else @(true, position + 1, label_len)
   end
 
+(* The print page's label of the annotation whose label is stored at
+   stored[position] in a record of version version (none in a "QA1"
+   record): whether it is there whole, where its bytes start and its
+   length *)
+fn _stored_label {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, version: record_version)
+  : [bytes_at:nat | position <= bytes_at][label_len:nat | label_len <= LABEL_MAX; bytes_at + label_len <= n] @(bool, int bytes_at, int label_len) =
+  case+ version of
+  | QA1() => @(true, position, 0)
+  | NotARecord() => @(true, position, 0)
+  | QA2() => _label_at(stored, n, position)
+  | QA3() => _label_at(stored, n, position)
+
 (* The annotations stored in stored[position, n), a record of version
    version whose annotations' numbers take head bytes (32, or 36 when
    they are dated), onto annotations: read as they were stored (the
    book's data, checked here once) *)
 fun _parse {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}{head:int | head == 32 || head == 36}{count:nat | count <= ANNOTATIONS_MAX} .<n - position>.
-  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, head: int head, version: int, annotations: annotations(count), count: int count)
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, position: int position, head: int head, version: record_version, annotations: annotations(count), count: int count)
   : [total:nat | total <= ANNOTATIONS_MAX] @(annotations(total), int total) =
   if count >= ANNOTATIONS_MAX then @(annotations, count)
   else if position + head + 4 > n then @(annotations, count)
@@ -476,7 +521,7 @@ fun _parse {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}{head:int | h
           (* an annotation stored before they were dated changed when
              it was made *)
           val modified = (if head = 36 then _read_i32(stored, position + 32) else stamp_of_minutes(made_at)): Int
-          val added = _insert(_read_i32(stored, position), _read_i32(stored, position + 4), _read_i32(stored, position + 8), _read_i32(stored, position + 12),
+          val added = _insert(_kind_of_code(_read_i32(stored, position)), _read_i32(stored, position + 4), _read_i32(stored, position + 8), _read_i32(stored, position + 12),
                         _read_i32(stored, position + 16), _read_i32(stored, position + 20), _read_i32(stored, position + 24), made_at, modified,
                         text, text_len, note, note_len, label, label_len, annotations)
         in _parse(stored, n, label_bytes_at + label_len, head, version, added, count + 1) end
@@ -494,21 +539,32 @@ fun _parse_tombs {l:agz}{arena:addr}{n:nat}{position:nat | position <= n}{count:
   else _parse_tombs(stored, n, position + 12, left - 1,
     TombsCons(_read_i32(stored, position), _read_i32(stored, position + 4), _read_i32(stored, position + 8), tombs))
 
+(* The annotations of an undated record ("QA1", "QA2"), which has no
+   deletions *)
+fn _parse_undated {l:agz}{arena:addr}{n:nat}
+  (stored: !$A.arrx(byte, l, n, arena), n: int n, version: record_version)
+  : [count:nat | count <= ANNOTATIONS_MAX][tomb_count:nat] @(annotations(count), int count, tombs(tomb_count)) =
+  if n < 4 then @(annotations_nil(), 0, TombsNil())
+  else let
+    val @(annotations, count) = _parse(stored, n, 4, 32, version, annotations_nil(), 0)
+  in @(annotations, count, TombsNil()) end
+
 (* The annotations and deletions of a stored record stored[0, n) *)
 fn _parse_record {l:agz}{arena:addr}{n:nat}
   (stored: !$A.arrx(byte, l, n, arena), n: int n)
   : [count:nat | count <= ANNOTATIONS_MAX][tomb_count:nat] @(annotations(count), int count, tombs(tomb_count)) = let
   val version = _version(stored, n)
 in
-  if version = 0 then @(annotations_nil(), 0, TombsNil())
-  else if version < 3 then let
-    val @(annotations, count) = _parse(stored, n, 4, 32, version, annotations_nil(), 0)
-  in @(annotations, count, TombsNil()) end
-  else if n < 8 then @(annotations_nil(), 0, TombsNil())
-  else let
-    val @(annotations_at, tombs) = _parse_tombs(stored, n, 8, _read_i32(stored, 4), TombsNil())
-    val @(annotations, count) = _parse(stored, n, annotations_at, 36, version, annotations_nil(), 0)
-  in @(annotations, count, tombs) end
+  case+ version of
+  | NotARecord() => @(annotations_nil(), 0, TombsNil())
+  | QA3() =>
+    if n < 8 then @(annotations_nil(), 0, TombsNil())
+    else let
+      val @(annotations_at, tombs) = _parse_tombs(stored, n, 8, _read_i32(stored, 4), TombsNil())
+      val @(annotations, count) = _parse(stored, n, annotations_at, 36, version, annotations_nil(), 0)
+    in @(annotations, count, tombs) end
+  | QA2() => _parse_undated(stored, n, version)
+  | QA1() => _parse_undated(stored, n, version)
 end
 
 (* Reads the annotations of the book whose id is id_high, id_low *)
@@ -569,7 +625,7 @@ fun _marks {count:nat} .<count>. (annotations: !annotations(count), shown_chapte
            val @(end_id, end_id_len) = nid_pad3("c", end_node)
            val @(start_frozen, start_bytes) = $A.freeze<byte>(start_id)
            val @(end_frozen, end_bytes) = $A.freeze<byte>(end_id)
-           val () = $BDOM.mark_range(_mark_set(kind), start_bytes, start_id_len, start_offset, end_bytes, end_id_len, end_offset)
+           val () = $BDOM.mark_range(_mark_number(_mark_set(kind)), start_bytes, start_id_len, start_offset, end_bytes, end_id_len, end_offset)
            val () = release_bytes(end_frozen, end_bytes)
          in release_bytes(start_frozen, start_bytes) end else ()) else ()) else ()) else ())
       val () = _marks(rest, shown_chapter)
@@ -584,9 +640,9 @@ fn _chapter (): [chapter:nat] int chapter =
 #pub fn annot_marks (): void
 
 implement annot_marks () = let
-  val () = $BDOM.clear_marks(1)
-  val () = $BDOM.clear_marks(3)
-  val () = $BDOM.clear_marks(4)
+  val () = $BDOM.clear_marks(_mark_number(YellowMarks()))
+  val () = $BDOM.clear_marks(_mark_number(OrangeMarks()))
+  val () = $BDOM.clear_marks(_mark_number(UnderlineMarks()))
   val cell = _take()
   val+ @AnnotationsCell(annotations, _) = cell
   val () = _marks(annotations, _chapter())
@@ -622,7 +678,7 @@ fun _bookmark_here {count:nat} .<count>. (annotations: !annotations(count), show
   case+ annotations of
   | annotations_nil() => ~1
   | @annotations_cons(kind, chapter, start_node, _, _, _, page, _, _, _, _, _, _, _, _, rest) =>
-    if (if kind = 0 then (if chapter = shown_chapter then (if start_node >= 0 then _on_page(start_node) else page = _page()) else false) else false) then let
+    if (if _is_bookmark(kind) then (if chapter = shown_chapter then (if start_node >= 0 then _on_page(start_node) else page = _page()) else false) else false) then let
       prval () = fold@(annotations)
     in i end
     else let
@@ -743,7 +799,7 @@ fn _node_words (node: Int): [l:agz][words_len:nat | words_len <= 120] @($A.arr(b
   end
 
 fn _add {text_loc,note_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}
-  (kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int,
+  (kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int,
    text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len, note: $A.arr(byte, note_loc, note_len + 1), note_len: int note_len): void = let
   val+ ~AnnotationsCell(annotations, count) = _take()
 in
@@ -774,7 +830,7 @@ in
     val @(words, words_len) = _node_words(anchor)
     val words_copy = _copy_prefix(words, words_len)
     val () = $A.free<byte>(words)
-    val () = _add(0, _chapter(), anchor, 0, anchor, 0, page, words_copy, words_len, $A.alloc<byte>(1), 0)
+    val () = _add(Bookmark(), _chapter(), anchor, 0, anchor, 0, page, words_copy, words_len, $A.alloc<byte>(1), 0)
   in annot_star() end
 end
 
@@ -821,10 +877,9 @@ fn _index_of (chapter: Int, start_node: Int, start_offset: Int): int = let
   val () = _put(cell)
 in found end
 
-(* The selection, as a highlight of the chapter shown in style (0
-   yellow, 1 orange, 2 underlined): its index, or -1 when nothing is
+(* The selection, as a highlight of the chapter shown in style: its index, or -1 when nothing is
    selected in the chapter's text *)
-#pub fn annot_highlight {style:nat | style <= 2} (style: int style): int
+#pub fn annot_highlight (style: highlight_style): int
 
 implement annot_highlight (style) = let
   val @(start_blob, end_blob) = $DR.get_selection_range()
@@ -845,7 +900,7 @@ in
         val () = $A.free<byte>(selected)
         val chapter = _chapter()
         val page = (case+ reading_get() of @(shown_page, _, _, _) => shown_page): Int
-        val () = _add(1 + style, chapter, start_node, start_offset, end_node, end_offset, page, text, text_len, $A.alloc<byte>(1), 0)
+        val () = _add(_highlight_of(style), chapter, start_node, start_offset, end_node, end_offset, page, text, text_len, $A.alloc<byte>(1), 0)
         val () = annot_marks()
       in _index_of(chapter, start_node, start_offset) end)
 end
@@ -935,7 +990,7 @@ in annot_star() end
 datavtype removed =
   | NoRemoved of ()
   | {text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX}
-    Removed of (int, Int, Int, Int, Int, Int, Int, Int, Int, Int,
+    Removed of (int, annotation_kind, Int, Int, Int, Int, Int, Int, Int, Int,
       $A.arr(byte, text_loc, text_len + 1), int text_len, $A.arr(byte, note_loc, note_len + 1), int note_len,
       $A.arr(byte, label_loc, label_len + 1), int label_len)
 
@@ -1176,8 +1231,8 @@ fn _heading {list_id_len:pos | list_id_len < 256}{chapter:nat} (list_id: string 
 in ui_text_n_buf(group_id, group_id_len, label_bytes, label_len) end
 
 (* One row of the annotations list: highlight i *)
-fn _highlight_row {i:nat}{style:nat | style <= 2}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_len:nat | text_len < text_size; text_len < 65536}{note_len:nat | note_len < note_size; note_len < 65536}
-  (i: int i, style: int style, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
+fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_len:nat | text_len < text_size; text_len < 65536}{note_len:nat | note_len < note_size; note_len < 65536}
+  (i: int i, style: highlight_style, text: !$A.arr(byte, text_loc, text_size), text_len: int text_len, note: !$A.arr(byte, note_loc, note_size), note_len: int note_len): void = let
   val @(row_id, row_id_len) = nid_make("highlight-row", i)
   val () = ui_add_n("annotations-list", row_id, row_id_len, TDiv)
   val @(row_id, row_id_len) = nid_make("highlight-row", i)
@@ -1187,12 +1242,14 @@ fn _highlight_row {i:nat}{style:nat | style <= 2}{text_loc,note_loc:agz}{text_si
      is marked on the page *)
   val () = _child("highlight-go", "highlight-style", i, TSpan, "hstyle")
   val @(style_id, style_id_len) = nid_make("highlight-style", i)
-  val () = (if style = 1 then ui_text_n(style_id, style_id_len, "Orange")
-    else if style = 2 then ui_text_n(style_id, style_id_len, "Underlined")
-    else ui_text_n(style_id, style_id_len, "Yellow"))
-  val () = (if style = 1 then _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-orange")
-    else if style = 2 then _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-under")
-    else _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-yellow"))
+  val () = (case+ style of
+    | Orange() => ui_text_n(style_id, style_id_len, "Orange")
+    | Underlined() => ui_text_n(style_id, style_id_len, "Underlined")
+    | Yellow() => ui_text_n(style_id, style_id_len, "Yellow"))
+  val () = (case+ style of
+    | Orange() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-orange")
+    | Underlined() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-under")
+    | Yellow() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-yellow"))
   val () = _text_of("highlight-quote", i, text, text_len)
   val () = (if note_len > 0 then let
       val () = _child("highlight-go", "highlight-note", i, TSpan, "hn")
@@ -1202,15 +1259,27 @@ fn _highlight_row {i:nat}{style:nat | style <= 2}{text_loc,note_loc:agz}{text_si
     else _child_text_button("highlight-tools", "highlight-edit", i, "hbtn", "Add note"))
 in _child_text_button("highlight-tools", "highlight-delete", i, "hbtn", "Delete") end
 
-(* The style the annotations list shows: -1 every one, else 0 yellow,
-   1 orange, 2 underlined *)
-val _filter = ref<int>(~1)
+(* The highlights the annotations list shows: every one, or one style's *)
+#pub datatype style_filter = EveryStyle | OnlyYellow | OnlyOrange | OnlyUnderlined
+val _filter = ref<style_filter>(EveryStyle())
+
+(* Whether the filter is the one given *)
+fn _same_filter (filter: style_filter, other: style_filter): bool = let
+  fn code (filter: style_filter): int =
+    case+ filter of EveryStyle() => 0 | OnlyYellow() => 1 | OnlyOrange() => 2 | OnlyUnderlined() => 3
+in code(filter) = code(other) end
 
 (* Whether a highlight of kind kind is listed *)
-fn _listed (kind: int): bool =
-  if ~_is_highlight(kind) then false
-  else if !_filter < 0 then true
-  else _style_of(kind) = !_filter
+fn _listed (kind: annotation_kind): bool =
+  case+ kind of
+  | Bookmark() => false
+  | YellowHighlight() => (case+ !_filter of EveryStyle() => true | OnlyYellow() => true | OnlyOrange() => false | OnlyUnderlined() => false)
+  | OrangeHighlight() => (case+ !_filter of EveryStyle() => true | OnlyYellow() => false | OnlyOrange() => true | OnlyUnderlined() => false)
+  | UnderlinedHighlight() => (case+ !_filter of EveryStyle() => true | OnlyYellow() => false | OnlyOrange() => false | OnlyUnderlined() => true)
+
+(* A highlight's style (a bookmark has none, and is never asked) *)
+fn _style_of (kind: annotation_kind): highlight_style =
+  case+ kind of OrangeHighlight() => Orange() | UnderlinedHighlight() => Underlined() | YellowHighlight() => Yellow() | Bookmark() => Yellow()
 
 fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i, last_chapter: Int): int =
   case+ annotations of
@@ -1229,11 +1298,11 @@ fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(coun
    filter lists, or the bookmarks *)
 datatype counted = CountHighlights | CountListed | CountBookmarks
 
-fn _counts (which: counted, kind: int): bool =
+fn _counts (which: counted, kind: annotation_kind): bool =
   case+ which of
   | CountHighlights() => _is_highlight(kind)
   | CountListed() => _listed(kind)
-  | CountBookmarks() => kind = 0
+  | CountBookmarks() => _is_bookmark(kind)
 
 (* How many of annotations are of which *)
 fun _count_where {count:nat} .<count>. (annotations: !annotations(count), which: counted): int =
@@ -1250,11 +1319,11 @@ fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
 fn _filter_show (): void = let
-  val shown_style = !_filter
-  val () = _pressed("filter-all", shown_style < 0)
-  val () = _pressed("filter-yellow", shown_style = 0)
-  val () = _pressed("filter-orange", shown_style = 1)
-in _pressed("filter-underlined", shown_style = 2) end
+  val shown = !_filter
+  val () = _pressed("filter-all", _same_filter(shown, EveryStyle()))
+  val () = _pressed("filter-yellow", _same_filter(shown, OnlyYellow()))
+  val () = _pressed("filter-orange", _same_filter(shown, OnlyOrange()))
+in _pressed("filter-underlined", _same_filter(shown, OnlyUnderlined())) end
 
 (* The list's message when it shows no highlight *)
 fn _annotations_empty {n:pos | n < 256} (message: string n): void = let
@@ -1282,12 +1351,11 @@ in
   else ()
 end
 
-(* Lists only the highlights of style style (0 yellow, 1 orange, 2
-   underlined), or every one (-1) *)
-#pub fn annot_filter_set (style: int): void
+(* Lists only the highlights the filter lets through *)
+#pub fn annot_filter_set (filter: style_filter): void
 
-implement annot_filter_set (style) = let
-  val () = !_filter := (if style >= 0 then (if style <= 2 then style else ~1) else ~1)
+implement annot_filter_set (filter) = let
+  val () = !_filter := filter
 in annot_render() end
 
 (* One row of the bookmarks list: bookmark i *)
@@ -1317,7 +1385,7 @@ fun _bookmark_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count
   case+ annotations of
   | annotations_nil() => ()
   | @annotations_cons(kind, chapter, _, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
-      val () = (if kind = 0 then (if chapter >= 0 then _bookmark_row(i, chapter, text, text_len, note, note_len) else ()) else ())
+      val () = (if _is_bookmark(kind) then (if chapter >= 0 then _bookmark_row(i, chapter, text, text_len, note, note_len) else ()) else ())
       val () = _bookmark_rows(rest, i + 1)
       prval () = fold@(annotations)
     in end
@@ -1392,11 +1460,12 @@ fn _markdown_heading_if_new {l:agz}{arena:addr}{n:int}{position:nat | position +
   if chapter <> last_chapter then _markdown_heading(out, position, chapter) else position
 
 (* A highlight's style after its quote, unless yellow, the usual one *)
-fn _markdown_style {l:agz}{arena:addr}{n:int}{position:nat | position + 22 <= n}{style:nat | style <= 2}
-  (out: !$A.arrx(byte, l, n, arena), position: int position, style: int style): [next:nat | position <= next; next <= position + 22] int next =
-  if style = 1 then _literal(out, position, "*Orange highlight*\n\n")
-  else if style = 2 then _literal(out, position, "*Underlined*\n\n")
-  else position
+fn _markdown_style {l:agz}{arena:addr}{n:int}{position:nat | position + 22 <= n}
+  (out: !$A.arrx(byte, l, n, arena), position: int position, style: highlight_style): [next:nat | position <= next; next <= position + 22] int next =
+  case+ style of
+  | Orange() => _literal(out, position, "*Orange highlight*\n\n")
+  | Underlined() => _literal(out, position, "*Underlined*\n\n")
+  | Yellow() => position
 
 (* The highlights as Markdown at out[position]: each after its chapter's
    heading when it is the chapter's first *)
@@ -1446,7 +1515,7 @@ fun _markdown {out_loc,title_loc,author_loc:agz}{arena:addr}{out_size:int}{count
   | annotations_nil() => position
   | @annotations_cons(kind, chapter, _, _, _, _, _, _, _, text, text_len, note, note_len, label, label_len, rest) =>
     (* a bookmark is exported when it has a note *)
-    if kind = 0 then (if note_len > 0 then let
+    if _is_bookmark(kind) then (if note_len > 0 then let
       val after_heading = _markdown_heading_if_new(out, position, chapter, last_chapter)
       val text_at = _literal(out, after_heading, "**Bookmark:** ")
       val () = _flat_at(text, text_len, out, text_at, 0)
@@ -1552,15 +1621,12 @@ end
 #define TOMB_JSON_MAX 56
 
 fn _kind_json {l:agz}{arena:addr}{n:nat}{position:nat | position + 44 <= n}
-  (out: !$A.arrx(byte, l, n, arena), position: int position, kind: int): [next:int | position < next; next <= position + 44] int next =
-  if ~_is_highlight(kind) then jw_lit(out, position, "{\"kind\":\"bookmark\"")
-  else let
-    val style = _style_of(kind)
-  in
-    if style = 1 then jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"orange\"")
-    else if style = 2 then jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"underline\"")
-    else jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"yellow\"")
-  end
+  (out: !$A.arrx(byte, l, n, arena), position: int position, kind: annotation_kind): [next:int | position < next; next <= position + 44] int next =
+  case+ kind of
+  | Bookmark() => jw_lit(out, position, "{\"kind\":\"bookmark\"")
+  | OrangeHighlight() => jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"orange\"")
+  | UnderlinedHighlight() => jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"underline\"")
+  | YellowHighlight() => jw_lit(out, position, "{\"kind\":\"highlight\",\"style\":\"yellow\"")
 
 (* An annotation's print page, ',"printPage":"214"', when it has one *)
 fn _print_page_json {l,label_loc:agz}{arena:addr}{n:int}{label_size:pos}{label_len:nat | label_len < label_size; label_len <= LABEL_MAX}{position:nat | position + 15 + 6 * LABEL_MAX <= n}
@@ -1631,7 +1697,7 @@ fun _json_tombs {l:agz}{arena:addr}{n:int}{count:nat}{left:nat}{position:nat | p
 #pub fn annot_json {l:agz}{arena:addr}{n:nat} (stored: !$A.arrx(byte, l, n, arena), n: int n): jchunk
 
 implement annot_json (stored, n) =
-  if _version(stored, n) = 0 then JNone()
+  if ~_is_record(_version(stored, n)) then JNone()
   else let
     val @(annotations, count, _) = _parse_record(stored, n)
   in
@@ -1651,17 +1717,25 @@ fn _copy_prefix_or_whole {l:agz}{n:pos}{source_len:nat | source_len <= n; source
   val () = _copy_bytes(source, prefix_copy, source_len, 0)
 in prefix_copy end
 
-(* The number a member's key names: 1 chapter, 2 node, 3 offset, 4
-   endNode, 5 endOffset, 6 page, 7 time; -1 for any other *)
-fn _number_member {key_loc:agz}{key_len:nat | key_len <= 16} (key: !$A.arr(byte, key_loc, 16), key_len: int key_len): [member:int | ~1 <= member; member < 8] int member =
-  if jr_key_is(key, key_len, "chapter") then 1
-  else if jr_key_is(key, key_len, "node") then 2
-  else if jr_key_is(key, key_len, "offset") then 3
-  else if jr_key_is(key, key_len, "endNode") then 4
-  else if jr_key_is(key, key_len, "endOffset") then 5
-  else if jr_key_is(key, key_len, "page") then 6
-  else if jr_key_is(key, key_len, "time") then 7
-  else ~1
+(* An annotation's number members *)
+datatype number_member = ChapterMember | NodeMember | OffsetMember | EndNodeMember | EndOffsetMember | PageMember | TimeMember
+
+(* Where a number member is kept in values (_members) *)
+fn _member_slot (member: number_member): [slot:pos | slot < 8] int slot =
+  case+ member of
+  | ChapterMember() => 1 | NodeMember() => 2 | OffsetMember() => 3 | EndNodeMember() => 4
+  | EndOffsetMember() => 5 | PageMember() => 6 | TimeMember() => 7
+
+(* The number member a key names, if it names one *)
+fn _number_member {key_loc:agz}{key_len:nat | key_len <= 16} (key: !$A.arr(byte, key_loc, 16), key_len: int key_len): $R.option(number_member) =
+  if jr_key_is(key, key_len, "chapter") then $R.some(ChapterMember())
+  else if jr_key_is(key, key_len, "node") then $R.some(NodeMember())
+  else if jr_key_is(key, key_len, "offset") then $R.some(OffsetMember())
+  else if jr_key_is(key, key_len, "endNode") then $R.some(EndNodeMember())
+  else if jr_key_is(key, key_len, "endOffset") then $R.some(EndOffsetMember())
+  else if jr_key_is(key, key_len, "page") then $R.some(PageMember())
+  else if jr_key_is(key, key_len, "time") then $R.some(TimeMember())
+  else $R.none()
 
 (* An annotation's numbers as they are read: values[0] its kind,
    values[1, 8) the numbers _number_member names, values[8] a
@@ -1747,12 +1821,10 @@ in
     else if jr_key_is(key, key_len, "kind") then _members(json, json_size, _kind_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
     else if jr_key_is(key, key_len, "style") then _members(json, json_size, _style_member_at(json, json_size, value_at, key, values), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
     else if jr_key_is(key, key_len, "modified") then _members(json, json_size, _modified_member_at(json, json_size, value_at, values), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
-    else let
-      val member = _number_member(key, key_len)
-    in
-      if member >= 0 then _members(json, json_size, _number_member_at(json, json_size, value_at, values, member), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
-      else _members(json, json_size, jr_skip(json, json_size, value_at), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
-    end
+    else (case+ _number_member(key, key_len) of
+      | ~$R.some(member) => _members(json, json_size, _number_member_at(json, json_size, value_at, values, _member_slot(member)), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
+      | ~$R.none() => _members(json, json_size, jr_skip(json, json_size, value_at), key, text_buffer, note_buffer, label_buffer, values, text_len, note_len, label_len)
+      )
   end
 end
 
@@ -1781,8 +1853,7 @@ in
       val note = _copy_prefix_or_whole(note_buffer, note_len)
       val label = _copy_prefix_or_whole(label_buffer, label_len)
       (* a highlight's kind is its style's *)
-      val kind = $A.get<Int>(values, 0)
-      val kind = (if kind = 1 then 1 + $A.get<Int>(values, 8) else kind): Int
+      val kind = (if $A.get<Int>(values, 0) = 1 then _kind_of_code(1 + $A.get<Int>(values, 8)) else Bookmark()): annotation_kind
       val made_at = $A.get<Int>(values, 7)
       val modified = $A.get<Int>(values, 9)
       val modified = (if modified > 0 then modified else stamp_of_minutes(made_at)): Int
@@ -1914,16 +1985,13 @@ fn _note_after {first_loc,second_loc:agz}{first_len,second_len:nat}
   if first_len <> second_len then first_len > second_len
   else _after(first, second, first_len, 0)
 
-(* 1 for a highlight, 0 for a bookmark *)
-fn _mark_of (kind: Int): int = if kind >= 1 then 1 else 0
-
 (* Whether annotations has one that is (kind, chapter, start, end,
    made_at): the same one, as its id says *)
-fun _has {count:nat} .<count>. (annotations: !annotations(count), kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, made_at: Int): bool =
+fun _has {count:nat} .<count>. (annotations: !annotations(count), kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, made_at: Int): bool =
   case+ annotations of
   | annotations_nil() => false
   | @annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, _, other_made_at, _, _, _, _, _, _, _, rest) => let
-      val same = (if _mark_of(other_kind) = _mark_of(kind) then
+      val same = (if _same_mark(other_kind, kind) then
         (if other_chapter = chapter then (if other_start_node = start_node then (if other_start_offset = start_offset then
           (if other_end_node = end_node then (if other_end_offset = end_offset then other_made_at = made_at else false) else false)
           else false) else false) else false) else false): bool
@@ -1934,7 +2002,7 @@ fun _has {count:nat} .<count>. (annotations: !annotations(count), kind: Int, cha
 (* annotations with the other device's version of one of them: the
    later change of the two kept *)
 fun _take_later {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text_len <= TEXT_MAX}{note_len:nat | note_len <= NOTE_MAX}{label_len:nat | label_len <= LABEL_MAX} .<count>.
-  (annotations: annotations(count), kind: Int, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int, made_at: Int, modified: Int,
+  (annotations: annotations(count), kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int, made_at: Int, modified: Int,
    text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len, note: $A.arr(byte, note_loc, note_len + 1), note_len: int note_len,
    label: $A.arr(byte, label_loc, label_len + 1), label_len: int label_len): annotations(count) =
   case+ annotations of
@@ -1944,7 +2012,7 @@ fun _take_later {count:nat}{text_loc,note_loc,label_loc:agz}{text_len:nat | text
       val () = $A.free<byte>(label)
     in annotations_nil() end
   | ~annotations_cons(other_kind, other_chapter, other_start_node, other_start_offset, other_end_node, other_end_offset, other_page, other_made_at, other_modified, other_text, other_text_len, other_note, other_note_len, other_label, other_label_len, rest) => let
-      val same = (if _mark_of(other_kind) = _mark_of(kind) then
+      val same = (if _same_mark(other_kind, kind) then
         (if other_chapter = chapter then (if other_start_node = start_node then (if other_start_offset = start_offset then
           (if other_end_node = end_node then (if other_end_offset = end_offset then other_made_at = made_at else false) else false)
           else false) else false) else false) else false): bool
