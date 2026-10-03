@@ -247,9 +247,11 @@ test('page numbers are passed over, unless the reader asks for them; a table can
   await expect.poll(() => marked(page), FAST).toBe('Cell one');
   // inside the table, it can be left
   await press(page, 'Skip table');
-  await expect.poll(() => marked(page), FAST).toBe('After the table.');
-  // nothing between: the page number passed over, the table left
-  expect(await seen(page)).toEqual(['First words.', 'Second words.', 'Cell one', 'After the table.']);
+  // nothing between: the page number passed over, the table left. Polled
+  // on what the page recorded, not on the mark itself: the recorder samples
+  // every 20 ms, so it can lag a mark the test has already seen, and the
+  // last phrase's mark goes when the chapter ends
+  await expect.poll(() => seen(page), FAST).toEqual(['First words.', 'Second words.', 'Cell one', 'After the table.']);
   // the chapter's end, with no chapter after it, stops the narration
   await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
   await expect(control(page, 'Skip table')).toBeHidden();
@@ -263,8 +265,7 @@ test('page numbers are passed over, unless the reader asks for them; a table can
   await page.keyboard.press('Home');
   await watchMarks(page);
   await press(page, 'Read aloud');
-  await expect.poll(() => marked(page), FAST).toBe('Cell one');
-  expect(await seen(page)).toEqual(['First words.', 'Page 2', 'Second words.', 'Cell one']);
+  await expect.poll(() => seen(page), FAST).toEqual(['First words.', 'Page 2', 'Second words.', 'Cell one']);
   expect(errors).toEqual([]);
 });
 
