@@ -11,6 +11,7 @@
 #use array as A
 #use arith as AR
 #use str as S
+#use result as R
 #use wasm.bats-packages.dev/dom as D
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
@@ -1145,5 +1146,1115 @@ implement ui_pointer_capture(id, pointer_id) = let
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val () = $EV.pointer_capture(id_bytes, id_len, pointer_id)
 in release_bytes(id_frozen, id_bytes) end
+
+(* ============================================================
+   Controls: what a click's target is, decoded once
+   ============================================================ *)
+
+(* Whether bytes[at, n) is text, whole *)
+fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_len - i>.
+  (bytes: !$A.arr(byte, l, n), n: int n, at: int at, text: string text_len, text_len: int text_len, i: int i): bool =
+  if i >= text_len then at + text_len = n
+  else if at + i >= n then false
+  else if byte2int0($A.get<byte>(bytes, at + i)) <> char2int0(string_get_at(text, i)) then false
+  else _id_is(bytes, n, at, text, text_len, i + 1)
+
+(* The Settings screen's controls, each by its element's id (settings_control_id) *)
+#pub datatype settings_control =
+  | SettingsGoalOff
+  | SettingsGoalTen
+  | SettingsGoalTwenty
+  | SettingsGoalThirty
+  | SettingsGoalSixty
+  | SettingsSync
+  | SettingsDictionaries
+  | SettingsExportBackup
+  | SettingsResetSettings
+  | SettingsFactoryReset
+  | SettingsAbout
+  | SettingsDone
+
+#pub fn settings_control_id (control: settings_control): [id_len:pos | id_len < 256] string id_len
+implement settings_control_id (control) =
+  case+ control of
+  | SettingsGoalOff() => "settings-goal-off"
+  | SettingsGoalTen() => "settings-goal-10"
+  | SettingsGoalTwenty() => "settings-goal-20"
+  | SettingsGoalThirty() => "settings-goal-30"
+  | SettingsGoalSixty() => "settings-goal-60"
+  | SettingsSync() => "settings-sync"
+  | SettingsDictionaries() => "settings-dictionaries"
+  | SettingsExportBackup() => "settings-export-backup"
+  | SettingsResetSettings() => "settings-reset-settings"
+  | SettingsFactoryReset() => "settings-factory-reset"
+  | SettingsAbout() => "settings-about"
+  | SettingsDone() => "settings-done"
+
+(* The control after control, in the order the decoder tries them *)
+fn _settings_control_after (control: settings_control): $R.option(settings_control) =
+  case+ control of
+  | SettingsGoalOff() => $R.some(SettingsGoalTen())
+  | SettingsGoalTen() => $R.some(SettingsGoalTwenty())
+  | SettingsGoalTwenty() => $R.some(SettingsGoalThirty())
+  | SettingsGoalThirty() => $R.some(SettingsGoalSixty())
+  | SettingsGoalSixty() => $R.some(SettingsSync())
+  | SettingsSync() => $R.some(SettingsDictionaries())
+  | SettingsDictionaries() => $R.some(SettingsExportBackup())
+  | SettingsExportBackup() => $R.some(SettingsResetSettings())
+  | SettingsResetSettings() => $R.some(SettingsFactoryReset())
+  | SettingsFactoryReset() => $R.some(SettingsAbout())
+  | SettingsAbout() => $R.some(SettingsDone())
+  | SettingsDone() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _settings_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: settings_control, fuel: int fuel): $R.option(settings_control) = let
+  val id = settings_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _settings_control_after(control) of
+    | ~$R.some(next) => _settings_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_settings_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(settings_control)
+implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 12)
+
+(* The library view's filters, layouts and collections' buttons, each by its element's id (library_view_control_id) *)
+#pub datatype library_view_control =
+  | FilterBooksAll
+  | FilterUnread
+  | FilterReading
+  | FilterFinished
+  | ViewList
+  | ViewGrid
+  | CollectionAll
+  | CollectionRename
+  | CollectionDelete
+
+#pub fn library_view_control_id (control: library_view_control): [id_len:pos | id_len < 256] string id_len
+implement library_view_control_id (control) =
+  case+ control of
+  | FilterBooksAll() => "filter-books-all"
+  | FilterUnread() => "filter-unread"
+  | FilterReading() => "filter-reading"
+  | FilterFinished() => "filter-finished"
+  | ViewList() => "view-list"
+  | ViewGrid() => "view-grid"
+  | CollectionAll() => "collection-all"
+  | CollectionRename() => "collection-rename"
+  | CollectionDelete() => "collection-delete"
+
+(* The control after control, in the order the decoder tries them *)
+fn _library_view_control_after (control: library_view_control): $R.option(library_view_control) =
+  case+ control of
+  | FilterBooksAll() => $R.some(FilterUnread())
+  | FilterUnread() => $R.some(FilterReading())
+  | FilterReading() => $R.some(FilterFinished())
+  | FilterFinished() => $R.some(ViewList())
+  | ViewList() => $R.some(ViewGrid())
+  | ViewGrid() => $R.some(CollectionAll())
+  | CollectionAll() => $R.some(CollectionRename())
+  | CollectionRename() => $R.some(CollectionDelete())
+  | CollectionDelete() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _library_view_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: library_view_control, fuel: int fuel): $R.option(library_view_control) = let
+  val id = library_view_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _library_view_control_after(control) of
+    | ~$R.some(next) => _library_view_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_library_view_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_view_control)
+implement ui_library_view_control (bytes, n, at) = _library_view_control_from(bytes, n, at, FilterBooksAll(), 9)
+
+(* A book's menu's items, each by its element's id (card_menu_control_id) *)
+#pub datatype card_menu_control =
+  | CardMenuInfo
+  | CardMenuCollections
+  | CardMenuHide
+  | CardMenuArchive
+  | CardMenuTrash
+
+#pub fn card_menu_control_id (control: card_menu_control): [id_len:pos | id_len < 256] string id_len
+implement card_menu_control_id (control) =
+  case+ control of
+  | CardMenuInfo() => "card-menu-info"
+  | CardMenuCollections() => "card-menu-collections"
+  | CardMenuHide() => "card-menu-hide"
+  | CardMenuArchive() => "card-menu-archive"
+  | CardMenuTrash() => "card-menu-trash"
+
+(* The control after control, in the order the decoder tries them *)
+fn _card_menu_control_after (control: card_menu_control): $R.option(card_menu_control) =
+  case+ control of
+  | CardMenuInfo() => $R.some(CardMenuCollections())
+  | CardMenuCollections() => $R.some(CardMenuHide())
+  | CardMenuHide() => $R.some(CardMenuArchive())
+  | CardMenuArchive() => $R.some(CardMenuTrash())
+  | CardMenuTrash() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _card_menu_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: card_menu_control, fuel: int fuel): $R.option(card_menu_control) = let
+  val id = card_menu_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _card_menu_control_after(control) of
+    | ~$R.some(next) => _card_menu_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_card_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(card_menu_control)
+implement ui_card_menu_control (bytes, n, at) = _card_menu_control_from(bytes, n, at, CardMenuInfo(), 5)
+
+(* A book's collections' menu: a new one, done, or its backdrop, each by its element's id (collections_control_id) *)
+#pub datatype collections_control =
+  | CollectionsNew
+  | CollectionsDone
+  | CollectionsMenu
+
+#pub fn collections_control_id (control: collections_control): [id_len:pos | id_len < 256] string id_len
+implement collections_control_id (control) =
+  case+ control of
+  | CollectionsNew() => "collections-new"
+  | CollectionsDone() => "collections-done"
+  | CollectionsMenu() => "collections-menu"
+
+(* The control after control, in the order the decoder tries them *)
+fn _collections_control_after (control: collections_control): $R.option(collections_control) =
+  case+ control of
+  | CollectionsNew() => $R.some(CollectionsDone())
+  | CollectionsDone() => $R.some(CollectionsMenu())
+  | CollectionsMenu() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _collections_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: collections_control, fuel: int fuel): $R.option(collections_control) = let
+  val id = collections_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _collections_control_after(control) of
+    | ~$R.some(next) => _collections_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_collections_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(collections_control)
+implement ui_collections_control (bytes, n, at) = _collections_control_from(bytes, n, at, CollectionsNew(), 3)
+
+(* Book info's buttons, each by its element's id (book_info_control_id) *)
+#pub datatype book_info_control =
+  | BookInfoBack
+  | BookInfoHide
+  | BookInfoArchive
+  | BookInfoTrash
+
+#pub fn book_info_control_id (control: book_info_control): [id_len:pos | id_len < 256] string id_len
+implement book_info_control_id (control) =
+  case+ control of
+  | BookInfoBack() => "book-info-back"
+  | BookInfoHide() => "book-info-hide"
+  | BookInfoArchive() => "book-info-archive"
+  | BookInfoTrash() => "book-info-trash"
+
+(* The control after control, in the order the decoder tries them *)
+fn _book_info_control_after (control: book_info_control): $R.option(book_info_control) =
+  case+ control of
+  | BookInfoBack() => $R.some(BookInfoHide())
+  | BookInfoHide() => $R.some(BookInfoArchive())
+  | BookInfoArchive() => $R.some(BookInfoTrash())
+  | BookInfoTrash() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _book_info_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: book_info_control, fuel: int fuel): $R.option(book_info_control) = let
+  val id = book_info_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _book_info_control_after(control) of
+    | ~$R.some(next) => _book_info_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_book_info_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(book_info_control)
+implement ui_book_info_control (bytes, n, at) = _book_info_control_from(bytes, n, at, BookInfoBack(), 4)
+
+(* The library search's clear button, each by its element's id (library_search_control_id) *)
+#pub datatype library_search_control =
+  | LibrarySearchClear
+
+#pub fn library_search_control_id (control: library_search_control): [id_len:pos | id_len < 256] string id_len
+implement library_search_control_id (control) =
+  case+ control of
+  | LibrarySearchClear() => "library-search-clear"
+
+(* The control after control, in the order the decoder tries them *)
+fn _library_search_control_after (control: library_search_control): $R.option(library_search_control) =
+  case+ control of
+  | LibrarySearchClear() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _library_search_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: library_search_control, fuel: int fuel): $R.option(library_search_control) = let
+  val id = library_search_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _library_search_control_after(control) of
+    | ~$R.some(next) => _library_search_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_library_search_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_search_control)
+implement ui_library_search_control (bytes, n, at) = _library_search_control_from(bytes, n, at, LibrarySearchClear(), 1)
+
+(* The library menu's items, and its backdrop, each by its element's id (library_menu_control_id) *)
+#pub datatype library_menu_control =
+  | MenuSettings
+  | MenuAbout
+  | MenuInstall
+  | MenuStorageKept
+  | MenuStorageAtRisk
+  | MenuStats
+  | MenuCatalogues
+  | MenuClose
+  | LibraryMenu
+
+#pub fn library_menu_control_id (control: library_menu_control): [id_len:pos | id_len < 256] string id_len
+implement library_menu_control_id (control) =
+  case+ control of
+  | MenuSettings() => "menu-settings"
+  | MenuAbout() => "menu-about"
+  | MenuInstall() => "menu-install"
+  | MenuStorageKept() => "menu-storage-kept"
+  | MenuStorageAtRisk() => "menu-storage-at-risk"
+  | MenuStats() => "menu-stats"
+  | MenuCatalogues() => "menu-catalogues"
+  | MenuClose() => "menu-close"
+  | LibraryMenu() => "library-menu"
+
+(* The control after control, in the order the decoder tries them *)
+fn _library_menu_control_after (control: library_menu_control): $R.option(library_menu_control) =
+  case+ control of
+  | MenuSettings() => $R.some(MenuAbout())
+  | MenuAbout() => $R.some(MenuInstall())
+  | MenuInstall() => $R.some(MenuStorageKept())
+  | MenuStorageKept() => $R.some(MenuStorageAtRisk())
+  | MenuStorageAtRisk() => $R.some(MenuStats())
+  | MenuStats() => $R.some(MenuCatalogues())
+  | MenuCatalogues() => $R.some(MenuClose())
+  | MenuClose() => $R.some(LibraryMenu())
+  | LibraryMenu() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _library_menu_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: library_menu_control, fuel: int fuel): $R.option(library_menu_control) = let
+  val id = library_menu_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _library_menu_control_after(control) of
+    | ~$R.some(next) => _library_menu_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 9)
+
+(* The reading statistics' goals, done, and its backdrop, each by its element's id (stats_control_id) *)
+#pub datatype stats_control =
+  | StatsGoalOff
+  | StatsGoalTen
+  | StatsGoalTwenty
+  | StatsGoalThirty
+  | StatsGoalSixty
+  | StatsDone
+  | StatsPanel
+
+#pub fn stats_control_id (control: stats_control): [id_len:pos | id_len < 256] string id_len
+implement stats_control_id (control) =
+  case+ control of
+  | StatsGoalOff() => "stats-goal-off"
+  | StatsGoalTen() => "stats-goal-10"
+  | StatsGoalTwenty() => "stats-goal-20"
+  | StatsGoalThirty() => "stats-goal-30"
+  | StatsGoalSixty() => "stats-goal-60"
+  | StatsDone() => "stats-done"
+  | StatsPanel() => "stats-panel"
+
+(* The control after control, in the order the decoder tries them *)
+fn _stats_control_after (control: stats_control): $R.option(stats_control) =
+  case+ control of
+  | StatsGoalOff() => $R.some(StatsGoalTen())
+  | StatsGoalTen() => $R.some(StatsGoalTwenty())
+  | StatsGoalTwenty() => $R.some(StatsGoalThirty())
+  | StatsGoalThirty() => $R.some(StatsGoalSixty())
+  | StatsGoalSixty() => $R.some(StatsDone())
+  | StatsDone() => $R.some(StatsPanel())
+  | StatsPanel() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _stats_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: stats_control, fuel: int fuel): $R.option(stats_control) = let
+  val id = stats_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _stats_control_after(control) of
+    | ~$R.some(next) => _stats_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_stats_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(stats_control)
+implement ui_stats_control (bytes, n, at) = _stats_control_from(bytes, n, at, StatsGoalOff(), 7)
+
+(* The dictionaries' done, and its backdrop, each by its element's id (dictionaries_control_id) *)
+#pub datatype dictionaries_control =
+  | DictionariesDone
+  | DictionariesPanel
+
+#pub fn dictionaries_control_id (control: dictionaries_control): [id_len:pos | id_len < 256] string id_len
+implement dictionaries_control_id (control) =
+  case+ control of
+  | DictionariesDone() => "dictionaries-done"
+  | DictionariesPanel() => "dictionaries-panel"
+
+(* The control after control, in the order the decoder tries them *)
+fn _dictionaries_control_after (control: dictionaries_control): $R.option(dictionaries_control) =
+  case+ control of
+  | DictionariesDone() => $R.some(DictionariesPanel())
+  | DictionariesPanel() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _dictionaries_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: dictionaries_control, fuel: int fuel): $R.option(dictionaries_control) = let
+  val id = dictionaries_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _dictionaries_control_after(control) of
+    | ~$R.some(next) => _dictionaries_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_dictionaries_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(dictionaries_control)
+implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(bytes, n, at, DictionariesDone(), 2)
+
+(* The sync screen's buttons, each by its element's id (sync_screen_control_id) *)
+#pub datatype sync_screen_control =
+  | SyncNow
+  | SyncAndroid
+  | SyncGoogle
+  | NextcloudSignIn
+  | SyncDropbox
+  | SyncOff
+  | SyncDone
+
+#pub fn sync_screen_control_id (control: sync_screen_control): [id_len:pos | id_len < 256] string id_len
+implement sync_screen_control_id (control) =
+  case+ control of
+  | SyncNow() => "sync-now"
+  | SyncAndroid() => "sync-android"
+  | SyncGoogle() => "sync-google"
+  | NextcloudSignIn() => "nextcloud-sign-in"
+  | SyncDropbox() => "sync-dropbox"
+  | SyncOff() => "sync-off"
+  | SyncDone() => "sync-done"
+
+(* The control after control, in the order the decoder tries them *)
+fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_screen_control) =
+  case+ control of
+  | SyncNow() => $R.some(SyncAndroid())
+  | SyncAndroid() => $R.some(SyncGoogle())
+  | SyncGoogle() => $R.some(NextcloudSignIn())
+  | NextcloudSignIn() => $R.some(SyncDropbox())
+  | SyncDropbox() => $R.some(SyncOff())
+  | SyncOff() => $R.some(SyncDone())
+  | SyncDone() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _sync_screen_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: sync_screen_control, fuel: int fuel): $R.option(sync_screen_control) = let
+  val id = sync_screen_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _sync_screen_control_after(control) of
+    | ~$R.some(next) => _sync_screen_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_sync_screen_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_screen_control)
+implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 7)
+
+(* The sync toast's buttons, each by its element's id (sync_toast_control_id) *)
+#pub datatype sync_toast_control =
+  | SyncGo
+  | SyncToastClose
+
+#pub fn sync_toast_control_id (control: sync_toast_control): [id_len:pos | id_len < 256] string id_len
+implement sync_toast_control_id (control) =
+  case+ control of
+  | SyncGo() => "sync-go"
+  | SyncToastClose() => "sync-toast-close"
+
+(* The control after control, in the order the decoder tries them *)
+fn _sync_toast_control_after (control: sync_toast_control): $R.option(sync_toast_control) =
+  case+ control of
+  | SyncGo() => $R.some(SyncToastClose())
+  | SyncToastClose() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _sync_toast_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: sync_toast_control, fuel: int fuel): $R.option(sync_toast_control) = let
+  val id = sync_toast_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _sync_toast_control_after(control) of
+    | ~$R.some(next) => _sync_toast_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_sync_toast_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_toast_control)
+implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes, n, at, SyncGo(), 2)
+
+(* The typography panel's choices and buttons, each by its element's id (typography_control_id) *)
+#pub datatype typography_control =
+  | FontLiterata
+  | FontInter
+  | FontBook
+  | FontAtkinson
+  | ThemeAuto
+  | ThemeLight
+  | ThemeSepia
+  | ThemeDark
+  | ThemeNight
+  | ThemeGrey
+  | LayoutPages
+  | LayoutScroll
+  | ColumnsAuto
+  | ColumnsOne
+  | ColumnsTwo
+  | AlignRagged
+  | AlignJustified
+  | HyphensOff
+  | HyphensOn
+  | RubyShow
+  | RubyHide
+  | DimOff
+  | DimOn
+  | TapsSides
+  | TapsForward
+  | TapsOneHand
+  | VolumeKeysOff
+  | VolumeKeysTurn
+  | NarrationSkip
+  | NarrationRead
+  | TypographyReset
+  | TypographyClose
+  | ScreenFullscreen
+  | ScreenLock
+
+#pub fn typography_control_id (control: typography_control): [id_len:pos | id_len < 256] string id_len
+implement typography_control_id (control) =
+  case+ control of
+  | FontLiterata() => "font-literata"
+  | FontInter() => "font-inter"
+  | FontBook() => "font-book"
+  | FontAtkinson() => "font-atkinson"
+  | ThemeAuto() => "theme-auto"
+  | ThemeLight() => "theme-light"
+  | ThemeSepia() => "theme-sepia"
+  | ThemeDark() => "theme-dark"
+  | ThemeNight() => "theme-night"
+  | ThemeGrey() => "theme-grey"
+  | LayoutPages() => "layout-pages"
+  | LayoutScroll() => "layout-scroll"
+  | ColumnsAuto() => "columns-auto"
+  | ColumnsOne() => "columns-one"
+  | ColumnsTwo() => "columns-two"
+  | AlignRagged() => "align-ragged"
+  | AlignJustified() => "align-justified"
+  | HyphensOff() => "hyphens-off"
+  | HyphensOn() => "hyphens-on"
+  | RubyShow() => "ruby-show"
+  | RubyHide() => "ruby-hide"
+  | DimOff() => "dim-off"
+  | DimOn() => "dim-on"
+  | TapsSides() => "taps-sides"
+  | TapsForward() => "taps-forward"
+  | TapsOneHand() => "taps-one-hand"
+  | VolumeKeysOff() => "volume-keys-off"
+  | VolumeKeysTurn() => "volume-keys-turn"
+  | NarrationSkip() => "narration-skip"
+  | NarrationRead() => "narration-read"
+  | TypographyReset() => "typography-reset"
+  | TypographyClose() => "typography-close"
+  | ScreenFullscreen() => "screen-fullscreen"
+  | ScreenLock() => "screen-lock"
+
+(* The control after control, in the order the decoder tries them *)
+fn _typography_control_after (control: typography_control): $R.option(typography_control) =
+  case+ control of
+  | FontLiterata() => $R.some(FontInter())
+  | FontInter() => $R.some(FontBook())
+  | FontBook() => $R.some(FontAtkinson())
+  | FontAtkinson() => $R.some(ThemeAuto())
+  | ThemeAuto() => $R.some(ThemeLight())
+  | ThemeLight() => $R.some(ThemeSepia())
+  | ThemeSepia() => $R.some(ThemeDark())
+  | ThemeDark() => $R.some(ThemeNight())
+  | ThemeNight() => $R.some(ThemeGrey())
+  | ThemeGrey() => $R.some(LayoutPages())
+  | LayoutPages() => $R.some(LayoutScroll())
+  | LayoutScroll() => $R.some(ColumnsAuto())
+  | ColumnsAuto() => $R.some(ColumnsOne())
+  | ColumnsOne() => $R.some(ColumnsTwo())
+  | ColumnsTwo() => $R.some(AlignRagged())
+  | AlignRagged() => $R.some(AlignJustified())
+  | AlignJustified() => $R.some(HyphensOff())
+  | HyphensOff() => $R.some(HyphensOn())
+  | HyphensOn() => $R.some(RubyShow())
+  | RubyShow() => $R.some(RubyHide())
+  | RubyHide() => $R.some(DimOff())
+  | DimOff() => $R.some(DimOn())
+  | DimOn() => $R.some(TapsSides())
+  | TapsSides() => $R.some(TapsForward())
+  | TapsForward() => $R.some(TapsOneHand())
+  | TapsOneHand() => $R.some(VolumeKeysOff())
+  | VolumeKeysOff() => $R.some(VolumeKeysTurn())
+  | VolumeKeysTurn() => $R.some(NarrationSkip())
+  | NarrationSkip() => $R.some(NarrationRead())
+  | NarrationRead() => $R.some(TypographyReset())
+  | TypographyReset() => $R.some(TypographyClose())
+  | TypographyClose() => $R.some(ScreenFullscreen())
+  | ScreenFullscreen() => $R.some(ScreenLock())
+  | ScreenLock() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _typography_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: typography_control, fuel: int fuel): $R.option(typography_control) = let
+  val id = typography_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _typography_control_after(control) of
+    | ~$R.some(next) => _typography_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 34)
+
+(* The catalogues' add and done, and its backdrop, each by its element's id (catalogues_control_id) *)
+#pub datatype catalogues_control =
+  | CatalogueAdd
+  | CataloguesDone
+  | CataloguesPanel
+
+#pub fn catalogues_control_id (control: catalogues_control): [id_len:pos | id_len < 256] string id_len
+implement catalogues_control_id (control) =
+  case+ control of
+  | CatalogueAdd() => "catalogue-add"
+  | CataloguesDone() => "catalogues-done"
+  | CataloguesPanel() => "catalogues-panel"
+
+(* The control after control, in the order the decoder tries them *)
+fn _catalogues_control_after (control: catalogues_control): $R.option(catalogues_control) =
+  case+ control of
+  | CatalogueAdd() => $R.some(CataloguesDone())
+  | CataloguesDone() => $R.some(CataloguesPanel())
+  | CataloguesPanel() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _catalogues_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: catalogues_control, fuel: int fuel): $R.option(catalogues_control) = let
+  val id = catalogues_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _catalogues_control_after(control) of
+    | ~$R.some(next) => _catalogues_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_catalogues_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(catalogues_control)
+implement ui_catalogues_control (bytes, n, at) = _catalogues_control_from(bytes, n, at, CatalogueAdd(), 3)
+
+(* A catalogue's buttons, each by its element's id (catalogue_control_id) *)
+#pub datatype catalogue_control =
+  | CatalogueBack
+  | CatalogueClose
+  | CatalogueNext
+  | CataloguePrevious
+  | CatalogueSearchGo
+
+#pub fn catalogue_control_id (control: catalogue_control): [id_len:pos | id_len < 256] string id_len
+implement catalogue_control_id (control) =
+  case+ control of
+  | CatalogueBack() => "catalogue-back"
+  | CatalogueClose() => "catalogue-close"
+  | CatalogueNext() => "catalogue-next"
+  | CataloguePrevious() => "catalogue-previous"
+  | CatalogueSearchGo() => "catalogue-search-go"
+
+(* The control after control, in the order the decoder tries them *)
+fn _catalogue_control_after (control: catalogue_control): $R.option(catalogue_control) =
+  case+ control of
+  | CatalogueBack() => $R.some(CatalogueClose())
+  | CatalogueClose() => $R.some(CatalogueNext())
+  | CatalogueNext() => $R.some(CataloguePrevious())
+  | CataloguePrevious() => $R.some(CatalogueSearchGo())
+  | CatalogueSearchGo() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _catalogue_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: catalogue_control, fuel: int fuel): $R.option(catalogue_control) = let
+  val id = catalogue_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _catalogue_control_after(control) of
+    | ~$R.some(next) => _catalogue_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_catalogue_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(catalogue_control)
+implement ui_catalogue_control (bytes, n, at) = _catalogue_control_from(bytes, n, at, CatalogueBack(), 5)
+
+(* The contents panel's close and tabs, each by its element's id (contents_control_id) *)
+#pub datatype contents_control =
+  | ContentsClose
+  | ContentsTab
+  | BookmarksTab
+  | PagesTab
+
+#pub fn contents_control_id (control: contents_control): [id_len:pos | id_len < 256] string id_len
+implement contents_control_id (control) =
+  case+ control of
+  | ContentsClose() => "contents-close"
+  | ContentsTab() => "contents-tab"
+  | BookmarksTab() => "bookmarks-tab"
+  | PagesTab() => "pages-tab"
+
+(* The control after control, in the order the decoder tries them *)
+fn _contents_control_after (control: contents_control): $R.option(contents_control) =
+  case+ control of
+  | ContentsClose() => $R.some(ContentsTab())
+  | ContentsTab() => $R.some(BookmarksTab())
+  | BookmarksTab() => $R.some(PagesTab())
+  | PagesTab() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _contents_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: contents_control, fuel: int fuel): $R.option(contents_control) = let
+  val id = contents_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _contents_control_after(control) of
+    | ~$R.some(next) => _contents_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_contents_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(contents_control)
+implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 4)
+
+(* The selection toolbar's buttons, each by its element's id (selection_control_id) *)
+#pub datatype selection_control =
+  | SelectionHighlight
+  | SelectionOrange
+  | SelectionUnderline
+  | SelectionNote
+  | SelectionCopy
+  | SelectionSearch
+  | SelectionDefine
+  | SelectionRead
+  | SelectionShare
+
+#pub fn selection_control_id (control: selection_control): [id_len:pos | id_len < 256] string id_len
+implement selection_control_id (control) =
+  case+ control of
+  | SelectionHighlight() => "selection-highlight"
+  | SelectionOrange() => "selection-orange"
+  | SelectionUnderline() => "selection-underline"
+  | SelectionNote() => "selection-note"
+  | SelectionCopy() => "selection-copy"
+  | SelectionSearch() => "selection-search"
+  | SelectionDefine() => "selection-define"
+  | SelectionRead() => "selection-read"
+  | SelectionShare() => "selection-share"
+
+(* The control after control, in the order the decoder tries them *)
+fn _selection_control_after (control: selection_control): $R.option(selection_control) =
+  case+ control of
+  | SelectionHighlight() => $R.some(SelectionOrange())
+  | SelectionOrange() => $R.some(SelectionUnderline())
+  | SelectionUnderline() => $R.some(SelectionNote())
+  | SelectionNote() => $R.some(SelectionCopy())
+  | SelectionCopy() => $R.some(SelectionSearch())
+  | SelectionSearch() => $R.some(SelectionDefine())
+  | SelectionDefine() => $R.some(SelectionRead())
+  | SelectionRead() => $R.some(SelectionShare())
+  | SelectionShare() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _selection_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: selection_control, fuel: int fuel): $R.option(selection_control) = let
+  val id = selection_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _selection_control_after(control) of
+    | ~$R.some(next) => _selection_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_selection_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(selection_control)
+implement ui_selection_control (bytes, n, at) = _selection_control_from(bytes, n, at, SelectionHighlight(), 9)
+
+(* A word's dictionary entry's buttons, each by its element's id (dictionary_control_id) *)
+#pub datatype dictionary_control =
+  | DictionaryClose
+  | DictionaryOnline
+
+#pub fn dictionary_control_id (control: dictionary_control): [id_len:pos | id_len < 256] string id_len
+implement dictionary_control_id (control) =
+  case+ control of
+  | DictionaryClose() => "dictionary-close"
+  | DictionaryOnline() => "dictionary-online"
+
+(* The control after control, in the order the decoder tries them *)
+fn _dictionary_control_after (control: dictionary_control): $R.option(dictionary_control) =
+  case+ control of
+  | DictionaryClose() => $R.some(DictionaryOnline())
+  | DictionaryOnline() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _dictionary_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: dictionary_control, fuel: int fuel): $R.option(dictionary_control) = let
+  val id = dictionary_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _dictionary_control_after(control) of
+    | ~$R.some(next) => _dictionary_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_dictionary_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(dictionary_control)
+implement ui_dictionary_control (bytes, n, at) = _dictionary_control_from(bytes, n, at, DictionaryClose(), 2)
+
+(* The annotations panel's buttons and filters, each by its element's id (annotations_control_id) *)
+#pub datatype annotations_control =
+  | AnnotationsClose
+  | AnnotationsExport
+  | AnnotationsShare
+  | FilterAll
+  | FilterYellow
+  | FilterOrange
+  | FilterUnderlined
+
+#pub fn annotations_control_id (control: annotations_control): [id_len:pos | id_len < 256] string id_len
+implement annotations_control_id (control) =
+  case+ control of
+  | AnnotationsClose() => "annotations-close"
+  | AnnotationsExport() => "annotations-export"
+  | AnnotationsShare() => "annotations-share"
+  | FilterAll() => "filter-all"
+  | FilterYellow() => "filter-yellow"
+  | FilterOrange() => "filter-orange"
+  | FilterUnderlined() => "filter-underlined"
+
+(* The control after control, in the order the decoder tries them *)
+fn _annotations_control_after (control: annotations_control): $R.option(annotations_control) =
+  case+ control of
+  | AnnotationsClose() => $R.some(AnnotationsExport())
+  | AnnotationsExport() => $R.some(AnnotationsShare())
+  | AnnotationsShare() => $R.some(FilterAll())
+  | FilterAll() => $R.some(FilterYellow())
+  | FilterYellow() => $R.some(FilterOrange())
+  | FilterOrange() => $R.some(FilterUnderlined())
+  | FilterUnderlined() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _annotations_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: annotations_control, fuel: int fuel): $R.option(annotations_control) = let
+  val id = annotations_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _annotations_control_after(control) of
+    | ~$R.some(next) => _annotations_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_annotations_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(annotations_control)
+implement ui_annotations_control (bytes, n, at) = _annotations_control_from(bytes, n, at, AnnotationsClose(), 7)
+
+(* A note over the page's buttons, each by its element's id (footnote_control_id) *)
+#pub datatype footnote_control =
+  | FootnoteGo
+  | FootnoteClose
+
+#pub fn footnote_control_id (control: footnote_control): [id_len:pos | id_len < 256] string id_len
+implement footnote_control_id (control) =
+  case+ control of
+  | FootnoteGo() => "footnote-go"
+  | FootnoteClose() => "footnote-close"
+
+(* The control after control, in the order the decoder tries them *)
+fn _footnote_control_after (control: footnote_control): $R.option(footnote_control) =
+  case+ control of
+  | FootnoteGo() => $R.some(FootnoteClose())
+  | FootnoteClose() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _footnote_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: footnote_control, fuel: int fuel): $R.option(footnote_control) = let
+  val id = footnote_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _footnote_control_after(control) of
+    | ~$R.some(next) => _footnote_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_footnote_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(footnote_control)
+implement ui_footnote_control (bytes, n, at) = _footnote_control_from(bytes, n, at, FootnoteGo(), 2)
+
+(* The search panel's close, each by its element's id (search_panel_control_id) *)
+#pub datatype search_panel_control =
+  | SearchClose
+
+#pub fn search_panel_control_id (control: search_panel_control): [id_len:pos | id_len < 256] string id_len
+implement search_panel_control_id (control) =
+  case+ control of
+  | SearchClose() => "search-close"
+
+(* The control after control, in the order the decoder tries them *)
+fn _search_panel_control_after (control: search_panel_control): $R.option(search_panel_control) =
+  case+ control of
+  | SearchClose() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _search_panel_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: search_panel_control, fuel: int fuel): $R.option(search_panel_control) = let
+  val id = search_panel_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _search_panel_control_after(control) of
+    | ~$R.some(next) => _search_panel_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_search_panel_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(search_panel_control)
+implement ui_search_panel_control (bytes, n, at) = _search_panel_control_from(bytes, n, at, SearchClose(), 1)
+
+(* The search bar's buttons, each by its element's id (search_nav_control_id) *)
+#pub datatype search_nav_control =
+  | SearchPrevious
+  | SearchNext
+  | SearchNavClose
+
+#pub fn search_nav_control_id (control: search_nav_control): [id_len:pos | id_len < 256] string id_len
+implement search_nav_control_id (control) =
+  case+ control of
+  | SearchPrevious() => "search-previous"
+  | SearchNext() => "search-next"
+  | SearchNavClose() => "search-nav-close"
+
+(* The control after control, in the order the decoder tries them *)
+fn _search_nav_control_after (control: search_nav_control): $R.option(search_nav_control) =
+  case+ control of
+  | SearchPrevious() => $R.some(SearchNext())
+  | SearchNext() => $R.some(SearchNavClose())
+  | SearchNavClose() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _search_nav_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: search_nav_control, fuel: int fuel): $R.option(search_nav_control) = let
+  val id = search_nav_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _search_nav_control_after(control) of
+    | ~$R.some(next) => _search_nav_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_search_nav_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(search_nav_control)
+implement ui_search_nav_control (bytes, n, at) = _search_nav_control_from(bytes, n, at, SearchPrevious(), 3)
+
+(* The image viewer's close, each by its element's id (image_viewer_control_id) *)
+#pub datatype image_viewer_control =
+  | ImageClose
+
+#pub fn image_viewer_control_id (control: image_viewer_control): [id_len:pos | id_len < 256] string id_len
+implement image_viewer_control_id (control) =
+  case+ control of
+  | ImageClose() => "image-close"
+
+(* The control after control, in the order the decoder tries them *)
+fn _image_viewer_control_after (control: image_viewer_control): $R.option(image_viewer_control) =
+  case+ control of
+  | ImageClose() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _image_viewer_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: image_viewer_control, fuel: int fuel): $R.option(image_viewer_control) = let
+  val id = image_viewer_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _image_viewer_control_after(control) of
+    | ~$R.some(next) => _image_viewer_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_image_viewer_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(image_viewer_control)
+implement ui_image_viewer_control (bytes, n, at) = _image_viewer_control_from(bytes, n, at, ImageClose(), 1)
+
+(* The update toast's buttons, each by its element's id (update_control_id) *)
+#pub datatype update_control =
+  | UpdateReload
+  | UpdateDismiss
+
+#pub fn update_control_id (control: update_control): [id_len:pos | id_len < 256] string id_len
+implement update_control_id (control) =
+  case+ control of
+  | UpdateReload() => "update-reload"
+  | UpdateDismiss() => "update-dismiss"
+
+(* The control after control, in the order the decoder tries them *)
+fn _update_control_after (control: update_control): $R.option(update_control) =
+  case+ control of
+  | UpdateReload() => $R.some(UpdateDismiss())
+  | UpdateDismiss() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _update_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: update_control, fuel: int fuel): $R.option(update_control) = let
+  val id = update_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _update_control_after(control) of
+    | ~$R.some(next) => _update_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_update_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(update_control)
+implement ui_update_control (bytes, n, at) = _update_control_from(bytes, n, at, UpdateReload(), 2)
+
+(* ============================================================
+   Keys: a key event's name and modifiers, decoded once
+   ============================================================ *)
+
+(* The keys quire answers (a letter in either case), and any other *)
+#pub datatype key =
+  | ArrowRight
+  | ArrowLeft
+  | PageDown
+  | PageUp
+  | SpaceBar
+  | VolumeDown
+  | VolumeUp
+  | HomeKey
+  | EndKey
+  | LetterB
+  | LetterT
+  | LetterF
+  | Slash
+  | EnterKey
+  | EscapeKey
+  | OtherKey
+
+(* The modifiers held with a key: Shift, and Ctrl or Cmd *)
+#pub typedef modifiers = @{ shift = bool, command = bool }
+
+(* Whether key_bytes[1, 1 + name_len) is name, from i *)
+fun _name_at {l:agz}{n:nat}{name_len:nat}{i:nat | i <= name_len} .<name_len - i>.
+  (key_bytes: !$A.arr(byte, l, n), n: int n, name: string name_len, name_len: int name_len, i: int i): bool =
+  if i >= name_len then true
+  else if 1 + i >= n then false
+  else if byte2int0($A.get<byte>(key_bytes, 1 + i)) <> char2int0(string_get_at(name, i)) then false
+  else _name_at(key_bytes, n, name, name_len, i + 1)
+
+(* Whether a key event's bytes (its name's length, its name, its
+   modifiers' byte) name the key name *)
+fn _key_named {l:agz}{n:nat}{name_len:pos} (key_bytes: !$A.arr(byte, l, n), n: int n, name: string name_len): bool = let
+  val name_len = g1u2i(string1_length(name))
+in
+  if n <> name_len + 2 then false
+  else if byte2int0($A.get<byte>(key_bytes, 0)) <> name_len then false
+  else _name_at(key_bytes, n, name, name_len, 0)
+end
+
+(* The key a key event's bytes name *)
+#pub fn ui_key {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): key
+implement ui_key (key_bytes, n) =
+  if _key_named(key_bytes, n, "ArrowRight") then ArrowRight()
+  else if _key_named(key_bytes, n, "ArrowLeft") then ArrowLeft()
+  else if _key_named(key_bytes, n, "PageDown") then PageDown()
+  else if _key_named(key_bytes, n, "PageUp") then PageUp()
+  else if _key_named(key_bytes, n, " ") then SpaceBar()
+  else if _key_named(key_bytes, n, "AudioVolumeDown") then VolumeDown()
+  else if _key_named(key_bytes, n, "AudioVolumeUp") then VolumeUp()
+  else if _key_named(key_bytes, n, "Home") then HomeKey()
+  else if _key_named(key_bytes, n, "End") then EndKey()
+  else if _key_named(key_bytes, n, "b") then LetterB()
+  else if _key_named(key_bytes, n, "B") then LetterB()
+  else if _key_named(key_bytes, n, "t") then LetterT()
+  else if _key_named(key_bytes, n, "T") then LetterT()
+  else if _key_named(key_bytes, n, "f") then LetterF()
+  else if _key_named(key_bytes, n, "/") then Slash()
+  else if _key_named(key_bytes, n, "Enter") then EnterKey()
+  else if _key_named(key_bytes, n, "Escape") then EscapeKey()
+  else OtherKey()
+
+(* The modifiers of a key event's bytes: its last byte's bits, 1 Shift,
+   2 Ctrl and 8 Cmd *)
+#pub fn ui_modifiers {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): modifiers
+implement ui_modifiers (key_bytes, n) =
+  if n < 2 then @{ shift = false, command = false }
+  else let
+    val bits = $AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1)))
+  in @{ shift = $AR.band_g1(bits, 1) = 1, command = $AR.band_g1(bits, 10) >= 2 } end
 
 end (* #target wasm *)
