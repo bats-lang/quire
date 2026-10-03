@@ -270,7 +270,12 @@ the app's files, the only thing pwa's backup rules keep): each sync
 point merges it and writes it there, and the file a reinstall
 restores is merged at the first launch like any sync file; a store's
 write writes it too. `e2e/sync-android.spec.js` plays both plugins
-and Drive's API.
+and Drive's API. In a browser the same store is **Google Drive**
+(bridge's `google_token_get` there goes through Google Identity
+Services' token model: a token for about an hour, no refresh token),
+listed only in a build with a client, so Google's script is loaded
+only then; the summary says "Google Drive · ...", and Turn off revokes
+the token.
 
 ### Catalogues
 
