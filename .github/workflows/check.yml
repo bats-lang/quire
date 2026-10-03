@@ -10,73 +10,34 @@ on:
   workflow_dispatch:
 
 jobs:
-  check:
+  # The groups the tests run in, side by side (tests/groups.json): every
+  # e2e spec and every static test in exactly one, or this fails
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      e2e: ${{ steps.groups.outputs.e2e }}
+      static: ${{ steps.groups.outputs.static }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Every test in exactly one group
+        id: groups
+        run: scripts/ci-groups.py matrix
+
+  # The app and the PWA, built once: the Android project and the e2e
+  # groups take them from here (the quire-android artifact)
+  build:
     runs-on: ubuntu-latest
     steps:
       # Two commits deep: a pull request's checkout is the merge, and its
       # own head (its second parent) is what the version names (#219)
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 2
 
-      - name: Install ATS2
-        run: |
-          curl -sL "https://raw.githubusercontent.com/ats-lang/ats-lang.github.io/master/FROZEN000/ATS-Postiats/ATS2-Postiats-int-0.4.2.tgz" -o /tmp/ats2.tgz
-          mkdir -p ~/.ats2
-          tar -xzf /tmp/ats2.tgz -C ~/.ats2
-          cd ~/.ats2/ATS2-Postiats-int-0.4.2
-          make -j$(nproc) -C src/CBOOT patsopt
-          mkdir -p bin
-          cp src/CBOOT/patsopt bin/patsopt
-          mkdir -p ~/.bats
-          ln -sf ~/.ats2/ATS2-Postiats-int-0.4.2 ~/.bats/ats2
-
-      - name: Install WASM tools
-        run: sudo apt-get install -y -q lld
-
-      # The compiler at the commit .github/bats-version pins (#203)
-      - name: Read the compiler pin
-        id: pins
-        run: echo "bats=$(tr -d '[:space:]' < .github/bats-version)" >> "$GITHUB_OUTPUT"
-
-      - name: Checkout bats compiler
-        uses: actions/checkout@v4
+      - name: Set up bats
+        uses: ./.github/actions/setup-bats
         with:
-          repository: bats-lang/bats
-          ref: ${{ steps.pins.outputs.bats }}
-          path: bats-src
-
-      - name: Build bats from checked-in bootstrap C
-        run: |
-          cp -R bats-src/bootstrap/c ~/bats-c
-          make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2 debug/bats
-          mkdir -p ~/bats-bin
-          cp ~/bats-c/debug/bats ~/bats-bin/bats
-          rm -rf bats-src
-
-      - name: Setup
-        run: |
-          sudo cp $HOME/bats-bin/bats /bin/bats
-          git clone --depth 1 https://github.com/bats-lang/repository-prototype.git $HOME/repository
-          # The packages are the versions the committed bats.lock locks
-          # (#203); bats check and build fetch exactly those, and fail on
-          # a lock that does not match the project. Only a relock moves
-          # them: never this workflow.
-          test -f bats.lock || { echo "::error::bats.lock is missing: run 'bats lock --repository <dir>' and commit it"; exit 1; }
-
-      # The version the app and gen-pwa are built with: the date and short
-      # SHA of the commit built from, a pull request's own head (#219)
-      - name: Write the version
-        env:
-          QUIRE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: scripts/version.sh
-
-      - name: bats check
-        run: |
-          bats check --repository $HOME/repository
-
-      - name: Static tests
-        run: tests/static/run.sh $HOME/repository
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Build the app and the PWA generator
         run: bats build --repository $HOME/repository
@@ -118,8 +79,11 @@ jobs:
           node -e "import('./e2e/create-epub.js').then(m => require('fs').writeFileSync('dist/android/smoke-share.epub',
           m.createEpub({ title: 'Shared With Quire', author: 'Smoke Test', chapters: 2, storeChapters: true })))"
 
+      # The PWA and the Android project, for the Android jobs and the e2e
+      # groups (which add the home page themselves: the Android project
+      # never holds it)
       - name: Upload Android project
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quire-android
           path: |
@@ -127,14 +91,8 @@ jobs:
             dist/pwa
           retention-days: 1
 
-      # The home page beside the app, as deploy.yml publishes it, for the
-      # e2e test that the service worker leaves it to the network. Added
-      # after the Android project is uploaded, which never holds it
-      - name: Add the home page
-        run: cp -R homepage dist/pwa/homepage
-
       - name: Install Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -144,19 +102,119 @@ jobs:
       - name: Run WASM smoke tests
         run: npx vitest run
 
+  # The static tests (tests/static/run.sh): bats check of the app, the
+  # checkers, and each fixture a full bats check of its own, so they run
+  # in groups side by side
+  static:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.plan.outputs.static) }}
+    name: static (${{ matrix.group }})
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up bats
+        uses: ./.github/actions/setup-bats
+        with:
+          commit: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Static tests
+        run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
+
+  # The e2e suite, in groups by area side by side, each on the PWA built
+  # once (quire-android)
+  e2e:
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        group: ${{ fromJSON(needs.plan.outputs.e2e) }}
+    name: e2e (${{ matrix.group }})
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download the PWA
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: quire-android
+          path: dist
+
+      # The home page beside the app, as deploy.yml publishes it, for the
+      # e2e test that the service worker leaves it to the network
+      - name: Add the home page
+        run: cp -R homepage dist/pwa/homepage
+
+      - name: Install Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
       - name: Install Playwright
         run: npx playwright install chromium
 
+      # Each spec of the group, and only those: the filters must name
+      # exactly as many files as the group lists
       - name: Run e2e tests
-        run: npx playwright test
+        run: |
+          specs=$(scripts/ci-groups.py members e2e ${{ matrix.group }})
+          listed=$(npx playwright test --list $specs | tail -1)
+          echo "$listed"
+          echo "$listed" | grep -q " in $(echo "$specs" | wc -l) files$" || { echo "::error::the group's filters do not name exactly its $(echo "$specs" | wc -l) specs"; exit 1; }
+          npx playwright test --reporter=list,html $specs
+        env:
+          PLAYWRIGHT_HTML_OPEN: never
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-report-${{ matrix.group }}
+          path: playwright-report/
+          retention-days: 14
+
+      # What a page that stopped answering was doing (#244, #254): also
+      # in the screenshots, apart here so it is found at once
+      - name: Upload stall captures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-stall-captures-${{ matrix.group }}
+          path: test-results/**/stall-capture-*.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload test screenshots
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: e2e-screenshots
+          name: e2e-screenshots-${{ matrix.group }}
           path: test-results/
           retention-days: 14
+
+  # The one check main's branch protection requires: every group passed
+  # (a group skipped or cancelled is not a pass)
+  check:
+    if: always()
+    needs: [plan, build, static, e2e]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every group passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "plan, build, static, e2e: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = success ] || { echo "::error::a job this check needs ended $result"; exit 1; }
+          done
 
   # The Android app (AAB and APK), built by the pwa package's workflow and
   # signed with this repository's secrets; see ANDROID.md. Every run, a
@@ -164,7 +222,7 @@ jobs:
   # and checks that both are signed with the release key; only a push to
   # main uploads them as downloadable artifacts.
   android:
-    needs: check
+    needs: build
     # Pinned by commit; the relock workflow moves it (#203)
     uses: bats-lang/pwa/.github/workflows/android.yml@e02e1e23bc8da42c917b5d5f25ec2bbdf1bc829f
     secrets: inherit
