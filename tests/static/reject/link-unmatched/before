@@ -1,0 +1,1 @@
+fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_found =

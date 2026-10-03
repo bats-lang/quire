@@ -280,7 +280,12 @@ the app's files, the only thing pwa's backup rules keep): each sync
 point merges it and writes it there, and the file a reinstall
 restores is merged at the first launch like any sync file; a store's
 write writes it too. `e2e/sync-android.spec.js` plays both plugins
-and Drive's API.
+and Drive's API. In a browser the same store is **Google Drive**
+(bridge's `google_token_get` there goes through Google Identity
+Services' token model: a token for about an hour, no refresh token),
+listed only in a build with a client, so Google's script is loaded
+only then; the summary says "Google Drive · ...", and Turn off revokes
+the token.
 
 ### Catalogues
 
@@ -555,6 +560,10 @@ a `theme` (style's `palette_theme(n)`) is indexed by its number in the
 palette, `theme_palette` the one function that gives it, and the theme
 rules are written from it (their selectors too), so a theme's colours
 and its proofs cannot be another's.
+How a sync ended is a `sync_result`, stored as its code in
+"sync-state" (`_result_code`, `_result_of_code`); the store's kind a
+`store_kind` (`WebDavKind`, `AndroidKind`, `BackupKind`, `NoStoreKind`);
+and an HTTP status is read once into an `http_answer`.
 An annotation's kind (`Bookmark`, or a highlight in its
 `highlight_style`) is stored as its code in the "QA" record
 (`_kind_code`, `_kind_of_code`), the record's version is a
@@ -567,6 +576,17 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+A link found on the page is a `link_found` (`NoLink`, `InBook`,
+`OutOfBook`); a spine's direction a `spine_progression`; a book's
+accessibility metadata an `a11y_feature` each (its bit in the stored
+flags made by `a11y_bit` alone, asked by `a11y_has`) and a
+`wcag_level`; an OPDS list of links a `link_list`; the catalogue's
+fields `entry_field` and `page_field`, and a refused fetch a `refusal`.
+A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
+its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
+a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
+`CaseFolded`, `NotFound`) by stardict's `word_order` (`Before`, `Same`,
+`After`); an article's part is a `part_kind`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
