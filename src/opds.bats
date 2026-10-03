@@ -264,20 +264,20 @@ fn _picks_free (found: picks): void = let
   val () = kept_free(fourth)
 in kept_free(fifth) end
 
-#define PAGE_LINKS 0
-#define ENTRY_LINKS 1
-#define IMAGE_LINKS 2
+(* Which list of links is read: a page's, an entry's, or an OPDS 2
+   entry's images *)
+datatype link_list = PageLinks | EntryLinks | ImageLinks
 
 fn _is_acquisition (rel: !kept): bool = _kept_starts(rel, "http://opds-spec.org/acquisition")
 
-(* found, with what the link given gives in a list of links of kind
-   (PAGE_LINKS, ENTRY_LINKS, IMAGE_LINKS) *)
-fn _pick (kind: int, found: picks, given: link): picks = let
+(* found, with what the link given gives in a list of links of kind *)
+fn _pick (kind: link_list, found: picks, given: link): picks = let
   val+ ~Picks(first, second, third, fourth, fifth, acquired) = found
   val+ ~Link(rel, address, kind_of, link_title) = given
   val () = kept_free(link_title)
 in
-  if kind = PAGE_LINKS then let
+  case+ kind of
+  | PageLinks() => let
     val is_next = _kept_is(rel, "next")
     val is_previous = (if _kept_is(rel, "previous") then true else _kept_is(rel, "prev")): bool
     val is_search = _kept_is(rel, "search")
@@ -292,11 +292,11 @@ in
     else if is_description then Picks(first, second, third, _first(fourth, address), fifth, acquired)
     else let val () = kept_free(address) in Picks(first, second, third, fourth, fifth, acquired) end
   end
-  else if kind = IMAGE_LINKS then let
+  | ImageLinks() => let
     val () = kept_free(rel)
     val () = kept_free(kind_of)
   in Picks(first, second, _first(third, address), fourth, fifth, acquired) end
-  else let
+  | EntryLinks() => let
     val acquisition = _is_acquisition(rel)
     val epub = (if acquisition then _kept_starts(kind_of, "application/epub+zip") else false): bool
     val epub3 = (if epub then (if _kept_has(address, "epub3") then true else _kept_has(kind_of, "version=3")) else false): bool
@@ -471,7 +471,7 @@ fn _atom_link {l:agz}{n:pos}{count:nat} (data: !$A.borrow(byte, l, n), attribute
 
 (* found, with the links among nodes, of kind *)
 fun _atom_links {l:agz}{n:pos}{size:nat} .<size>.
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), kind: int, found: picks): picks =
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, size), kind: link_list, found: picks): picks =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
     (case+ node of
@@ -485,7 +485,7 @@ fun _atom_links {l:agz}{n:pos}{size:nat} .<size>.
 fn _atom_entry {l:agz}{n:pos}{size:nat} (data: !$A.borrow(byte, l, n), children: !$X.xml_node_list(n, size), base: !kept): one_entry = let
   val title = _span_text(data, _child_text(data, children, "title"), 512)
   val author = _span_text(data, _author_name(data, children), 256)
-  val found = _atom_links(data, children, ENTRY_LINKS, _picks_empty())
+  val found = _atom_links(data, children, EntryLinks(), _picks_empty())
 in _entry_of(base, title, author, found) end
 
 (* A feed's children: its title, links and entries *)
@@ -498,7 +498,7 @@ fun _atom_children {l:agz}{n:pos}{size:nat} .<size>.
        if _local_is(data, name_offset, name_len, "entry") then
          _atom_children(data, rest, base, _feed_add(page, _atom_entry(data, children, base)), found)
        else if _local_is(data, name_offset, name_len, "link") then
-         _atom_children(data, rest, base, page, _pick(PAGE_LINKS, found, _atom_link(data, attributes)))
+         _atom_children(data, rest, base, page, _pick(PageLinks(), found, _atom_link(data, attributes)))
        else if _local_is(data, name_offset, name_len, "title") then
          _atom_children(data, rest, base, _feed_title(page, _span_text(data, _first_text(children), 512)), found)
        else _atom_children(data, rest, base, page, found)
@@ -588,7 +588,7 @@ end
 (* found, with the link objects of the array's items from position on,
    to its closing bracket, of kind *)
 fun _json_links {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n} .<n - position>.
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 32), kind: int, found: picks): picks = let
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 32), kind: link_list, found: picks): picks = let
   val next = jr_ws(buf, n, position)
 in
   if next >= n then found
@@ -602,7 +602,7 @@ end
 
 (* found, with the links of the array at at (-1: none) *)
 fn _json_links_at {l,key_loc:agz}{owner:addr}{n:nat}{at:int | ~1 <= at; at < n}
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, at: int at, key: !$A.arr(byte, key_loc, 32), kind: int, found: picks): picks =
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, at: int at, key: !$A.arr(byte, key_loc, 32), kind: link_list, found: picks): picks =
   if at < 0 then found
   else if jr_is(buf, n, at, 91) then _json_links(buf, n, at + 1, key, kind, found)
   else found
@@ -629,8 +629,8 @@ fn _json_publication {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position 
   val author_at = (if metadata >= 0 then (if jr_is(buf, n, metadata, 123) then _member(buf, n, metadata + 1, key, "author") else ~1) else ~1)
     : [author_at:int | ~1 <= author_at; author_at < n] int author_at
   val author = (if author_at >= 0 then _name_at(buf, n, author_at, key, 256) else kept_none()): kept
-  val found = _json_links_at(buf, n, _member(buf, n, position + 1, key, "links"), key, ENTRY_LINKS, _picks_empty())
-  val found = _json_links_at(buf, n, _member(buf, n, position + 1, key, "images"), key, IMAGE_LINKS, found)
+  val found = _json_links_at(buf, n, _member(buf, n, position + 1, key, "links"), key, EntryLinks(), _picks_empty())
+  val found = _json_links_at(buf, n, _member(buf, n, position + 1, key, "images"), key, ImageLinks(), found)
 in _entry_of(base, title, author, found) end
 
 (* page, with the entries of the array's items from position on, to its
@@ -688,7 +688,7 @@ fn _json_feed {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position < n}
   val page = _feed_title(_feed_empty(), title)
   val page = _json_collections(buf, n, position, key, base, page)
   val page = (if groups >= 0 then (if jr_is(buf, n, groups, 91) then _json_groups(buf, n, groups + 1, key, base, page) else page) else page): feed
-  val found = _json_links_at(buf, n, links, key, PAGE_LINKS, _picks_empty())
+  val found = _json_links_at(buf, n, links, key, PageLinks(), _picks_empty())
 in @(_feed_links(base, page, found), is_feed) end
 
 (* ============================================================

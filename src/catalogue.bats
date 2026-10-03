@@ -145,11 +145,15 @@ in ui_show("catalogue-status", true) end
 
 fn _quiet (): void = ui_show("catalogue-status", false)
 
+(* Why a server refused a fetch: not found, a sign-in needed, or
+   another status *)
+datatype refusal = NotThere | NeedsSignIn | OtherRefusal
+
 (* What a fetch gave: its status and bytes in a piece, or why not *)
 datavtype fetched =
   | {arena_loc,piece_loc:agz}{size:pos} Fetched of (piece_owner(size, arena_loc), $A.arrx(byte, piece_loc, size, arena_loc), int size)
   | Blocked of ()         (* the request failed: a network error, or CORS *)
-  | Refused of int        (* an HTTP status other than 2xx *)
+  | Refused of refusal    (* an HTTP status other than 2xx *)
   | TooLarge of ()
   | Empty of ()
 
@@ -161,6 +165,12 @@ fn _fetched_free (got: fetched): void =
   | ~TooLarge() => ()
   | ~Empty() => ()
 
+(* A status the server refused with, read once: not found (404), a
+   sign-in needed (401, 403), or another *)
+fn _refusal (status: int): refusal =
+  if status = 404 then NotThere() else if status = 401 then NeedsSignIn() else if status = 403 then NeedsSignIn()
+  else OtherRefusal()
+
 (* What a fetch came to, read into a piece of at most most bytes *)
 fn _claim {most:pos | most <= 268435456} (got: $FE.fetched, most: int most): fetched =
   case+ got of
@@ -169,8 +179,8 @@ fn _claim {most:pos | most <= 268435456} (got: $FE.fetched, most: int most): fet
       val status = $FE.fetch_status(response)
       val blob = $FE.fetch_body(response)
     in
-      if status < 200 then let val () = $BD.blob_free(blob) in Refused(status) end
-      else if status > 299 then let val () = $BD.blob_free(blob) in Refused(status) end
+      if status < 200 then let val () = $BD.blob_free(blob) in Refused(_refusal(status)) end
+      else if status > 299 then let val () = $BD.blob_free(blob) in Refused(_refusal(status)) end
       else let
         val size = $BD.blob_len(blob)
       in
@@ -358,11 +368,11 @@ fn _arrived (got: fetched, request: int): void =
       in _say("This isn't a catalogue.") end
     end
   | ~Blocked() => _say("This catalogue doesn't let a browser read it.")
-  | ~Refused(status) =>
-    if status = 404 then _say("Not found.")
-    else if status = 401 then _say("Needs a sign-in.")
-    else if status = 403 then _say("Needs a sign-in.")
-    else _say("This catalogue could not be read.")
+  | ~Refused(refused) =>
+    (case+ refused of
+     | NotThere() => _say("Not found.")
+     | NeedsSignIn() => _say("Needs a sign-in.")
+     | OtherRefusal() => _say("This catalogue could not be read."))
   | ~TooLarge() => _say("This page of the catalogue is too large to read.")
   | ~Empty() => _say("This isn't a catalogue.")
 
@@ -424,14 +434,21 @@ implement catalogue_back () =
     val () = catalogue_close()
   in catalogue_panel_open() end
 
-(* What the page shown has: an entry's address (a link's, which = 0),
-   EPUB (1) or title (2) *)
-fun _entry_text {count:nat} .<count>. (list: !entries(count), index: int, which: int): kept =
+(* What of an entry is asked for: a link's address, a book's EPUB, or
+   either's title *)
+datatype entry_field = LinkAddress | BookEpub | EntryTitle
+
+(* What of the page shown is asked for: its next page, previous page or
+   search template *)
+datatype page_field = NextPage | PreviousPage | SearchTemplate
+
+(* What the page shown has: an entry's field *)
+fun _entry_text {count:nat} .<count>. (list: !entries(count), index: int, which: entry_field): kept =
   case+ list of
   | EntriesNil() => kept_none()
   | @EntryLink(title, address, rest) =>
     if index = 0 then let
-      val found = (if which = 0 then kept_dup(address) else if which = 2 then kept_dup(title) else kept_none()): kept
+      val found = (case+ which of LinkAddress() => kept_dup(address) | EntryTitle() => kept_dup(title) | BookEpub() => kept_none()): kept
       prval () = fold@(list)
     in found end
     else let
@@ -440,7 +457,7 @@ fun _entry_text {count:nat} .<count>. (list: !entries(count), index: int, which:
     in found end
   | @EntryBook(title, _, _, epub, rest) =>
     if index = 0 then let
-      val found = (if which = 1 then kept_dup(epub) else if which = 2 then kept_dup(title) else kept_none()): kept
+      val found = (case+ which of BookEpub() => kept_dup(epub) | EntryTitle() => kept_dup(title) | LinkAddress() => kept_none()): kept
       prval () = fold@(list)
     in found end
     else let
@@ -448,7 +465,7 @@ fun _entry_text {count:nat} .<count>. (list: !entries(count), index: int, which:
       prval () = fold@(list)
     in found end
 
-fn _shown_entry (index: int, which: int): kept =
+fn _shown_entry (index: int, which: entry_field): kept =
   case+ _shown_take() of
   | ~NothingShown() => let val () = _shown_put(NothingShown()) in kept_none() end
   | ~Shown(read) => let
@@ -457,34 +474,33 @@ fn _shown_entry (index: int, which: int): kept =
       val () = _shown_put(Shown(Feed(title, list, count, next, previous, template, description)))
     in found end
 
-(* The page shown's next page (which = 0), previous page (1) or search
-   template (2) *)
-fn _shown_link (which: int): kept =
+(* A link of the page shown *)
+fn _shown_link (which: page_field): kept =
   case+ _shown_take() of
   | ~NothingShown() => let val () = _shown_put(NothingShown()) in kept_none() end
   | ~Shown(read) => let
       val+ ~Feed(title, list, count, next, previous, template, description) = read
-      val found = (if which = 0 then kept_dup(next) else if which = 1 then kept_dup(previous) else kept_dup(template)): kept
+      val found = (case+ which of NextPage() => kept_dup(next) | PreviousPage() => kept_dup(previous) | SearchTemplate() => kept_dup(template)): kept
       val () = _shown_put(Shown(Feed(title, list, count, next, previous, template, description)))
     in found end
 
 (* Follows the link at index of the page shown *)
 #pub fn catalogue_follow (index: int): void
-implement catalogue_follow (index) = _go(_shown_entry(index, 0))
+implement catalogue_follow (index) = _go(_shown_entry(index, LinkAddress()))
 
 (* The page shown's next or previous page *)
 #pub fn catalogue_next (): void
-implement catalogue_next () = _go(_shown_link(0))
+implement catalogue_next () = _go(_shown_link(NextPage()))
 
 #pub fn catalogue_previous (): void
-implement catalogue_previous () = _go(_shown_link(1))
+implement catalogue_previous () = _go(_shown_link(PreviousPage()))
 
 (* Searches the catalogue for what the search field holds *)
 #pub fn catalogue_search (): void
 
 implement catalogue_search () = let
   val query = field_kept("catalogue-search", 256)
-  val template = _shown_link(2)
+  val template = _shown_link(SearchTemplate())
   val query_len = kept_len(query)
   val template_len = kept_len(template)
 in
@@ -531,7 +547,7 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
       val book_file = $BF.file_store(borrowed, size)
       val () = $A.drop<byte>(frozen, borrowed)
       val () = piece_free(owner, $A.thaw<byte>(frozen))
-      val title = (if request = !_request then _shown_entry(index, 2) else kept_none()): kept
+      val title = (if request = !_request then _shown_entry(index, EntryTitle()) else kept_none()): kept
       val @(name, name_len) = kept_copy(title)
       val () = kept_free(title)
       val () = _say("Importing the book\xE2\x80\xA6")
@@ -549,9 +565,11 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
       val () = _quiet()
     in _blocked(index) end
     else ()
-  | ~Refused(status) =>
-    if status = 404 then _say("The book was not found.")
-    else _say("The book could not be downloaded.")
+  | ~Refused(refused) =>
+    (case+ refused of
+     | NotThere() => _say("The book was not found.")
+     | NeedsSignIn() => _say("The book could not be downloaded.")
+     | OtherRefusal() => _say("The book could not be downloaded."))
   | ~TooLarge() => _say("The book is too large.")
   | ~Empty() => _say("The book could not be downloaded.")
 
@@ -560,7 +578,7 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
 #pub fn catalogue_get {index:nat} (index: int index): void
 
 implement catalogue_get (index) = let
-  val epub = _shown_entry(index, 1)
+  val epub = _shown_entry(index, BookEpub())
   val request = !_request
 in
   if kept_len(epub) <= 0 then kept_free(epub)
