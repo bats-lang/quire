@@ -1434,6 +1434,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
            shown only where it signs in *)
         | ~$R.some(SyncAndroid()) => sync_android()
         | ~$R.some(SyncGoogle()) => sync_android()
+        | ~$R.some(NextcloudSignIn()) => sync_nextcloud_sign_in()
         | ~$R.some(SyncOff()) => sync_off()
         | ~$R.some(SyncDone()) => layer_close(LSync()))
     in 0 end)
