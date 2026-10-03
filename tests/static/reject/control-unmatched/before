@@ -1,1 +1,1 @@
-fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
+fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
