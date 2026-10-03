@@ -36,7 +36,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 #define TOKEN_MAX 4096
 (* A URL's and the headers' most bytes *)
 #define URL_MAX 1024
-#define HEADERS_MAX 4400
+#define HEADERS_MAX 4600
 
 (* ============================================================
    What a read and a write come to

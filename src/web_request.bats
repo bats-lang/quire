@@ -17,7 +17,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* A request's URL's and its headers' most bytes *)
 #pub stadef REQUEST_URL_MAX = 1024
-#pub stadef REQUEST_HEADERS_MAX = 4400
+#pub stadef REQUEST_HEADERS_MAX = 4600
 
 (* literal at out[position] *)
 #pub fn request_text {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len <= n}
@@ -94,7 +94,7 @@ implement request_answered (got) =
   (got: $FE.fetched, name: !$A.borrow(byte, name_loc, name_len), name_len: int name_len,
    out: !$A.arr(byte, out_loc, out_size), out_size: int out_size): @(answered, [k:nat | k <= out_size] int k)
 
-implement request_answered_with (got, name, name_len, out, out_size) =
+implement request_answered_with {name_loc,out_loc}{name_len}{out_size} (got, name, name_len, out, out_size) =
   case+ got of
   | ~$FE.NoResponse() => @(Unanswered(), 0)
   | ~$FE.Responded(response) => let

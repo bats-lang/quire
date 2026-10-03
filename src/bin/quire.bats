@@ -1313,9 +1313,11 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val off = _is(clicked, "sync-off")
       val done = _is(clicked, "sync-done")
       val android = (if _is(clicked, "sync-android") then true else _is(clicked, "sync-google")): bool
+      val dropbox = _is(clicked, "sync-dropbox")
       val () = _target_free(clicked)
       val () = (if now then sync_now()
         else if android then sync_android()
+        else if dropbox then sync_dropbox()
         else if off then sync_off()
         else if done then layer_close(LSync())
         else ())
@@ -2237,7 +2239,13 @@ implement main0 () = let
         val () = lib_render()
         (* sync, once the library is read *)
         val () = sync_start()
-      in _view_restore() end)
+      in
+        $P.and_then<int><int>(_view_restore(), llam(view) => let
+          (* back from Dropbox's sign-in: Settings, where it was asked
+             for, and the sync screen comes over it as the sign-in ends *)
+          val () = (if sync_returning() then _settings_open() else ())
+        in $P.ret<int>(view) end)
+      end)
     end)
 (* ignored: each step deals with its own value (but see bats-lang/bridge#87:
    a library that could not be read is taken for none) *)

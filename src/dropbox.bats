@@ -45,7 +45,20 @@ staload RANDOM = "wasm.bats-packages.dev/bridge/src/random.sats"
 #define ANSWER_MAX 65536
 #define FORM_MAX 2048
 #define URL_MAX 1024
-#define HEADERS_MAX 4400
+#define HEADERS_MAX 4600
+
+(* Answers nobody took, freed: before their first use here *)
+implement $P.dispose<drive_got>(got) =
+  case+ got of
+  | ~DriveGot(owner, file, _) => piece_free(owner, file)
+  | ~DriveNothing() => ()
+  | ~DriveFailed(_) => ()
+
+implement $P.dispose<drive_put>(put) =
+  case+ put of
+  | ~DrivePut() => ()
+  | ~DriveChanged() => ()
+  | ~DrivePutFailed(_) => ()
 
 (* ============================================================
    PKCE: the verifier, its challenge, and the state
@@ -458,7 +471,7 @@ in
         val () = $A.free<byte>(result)
         (* no file yet: added, not updated, at the write *)
         val missing = _error_is(blob, "not_found")
-      in $P.ret<drive_got>(if missing then DriveNothing() else DriveFailed(409)) end
+      in if missing then $P.ret<drive_got>(DriveNothing()) else $P.ret<drive_got>(DriveFailed(409)) end
       else if (if status < 200 then true else status >= 300) then let
         val () = $A.free<byte>(result)
         val () = $BD.blob_free(blob)

@@ -28,27 +28,35 @@ datavtype client_cell =
   | {l:agz}{client_len:nat | client_len <= CLIENT_MAX} ClientCell of ($A.arr(byte, l, CLIENT_MAX), int client_len)
 
 val _google = ref<client_cell>(ClientCell($A.alloc<byte>(CLIENT_MAX), 0))
+val _dropbox = ref<client_cell>(ClientCell($A.alloc<byte>(CLIENT_MAX), 0))
+
+fn _client_swap (cell: ref(client_cell), client: client_cell): client_cell = let
+  var previous: client_cell = client
+  val () = ref_exch_elt<client_cell>(cell, previous)
+in previous end
 
 fn _google_swap (cell: client_cell): client_cell = let
   var previous: client_cell = cell
   val () = ref_exch_elt<client_cell>(_google, previous)
 in previous end
 
-fn _google_set {l:agz}{client_len:nat | client_len <= CLIENT_MAX} (client: $A.arr(byte, l, CLIENT_MAX), client_len: int client_len): void = let
-  val+ ~ClientCell(previous, _) = _google_swap(ClientCell(client, client_len))
-in $A.free<byte>(previous) end
 
-(* The Google web client's ID in the file buf[0, n) *)
-fn _google_of {l,key_loc:agz}{owner:addr}{n:nat}
-  (buf: !$A.arrx(byte, l, n, owner), n: int n, key: !$A.arr(byte, key_loc, 16)): void = let
+(* The client ID the file buf[0, n) names name, kept in cell *)
+fn _client_of {l,key_loc:agz}{owner:addr}{n:nat}{name_len:pos}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, key: !$A.arr(byte, key_loc, 16), name: string name_len, cell: ref(client_cell)): void = let
   val members = (if n > 0 then jr_object(buf, n, 0) else ~1): [inside:int | ~1 <= inside; inside <= n] int inside
-  val at = (if members >= 0 then jr_member(buf, n, members, key, "googleWebClient") else ~1): [at:int | ~1 <= at; at < n] int at
+  val at = (if members >= 0 then jr_member(buf, n, members, key, name) else ~1): [at:int | ~1 <= at; at < n] int at
   val client = $A.alloc<byte>(CLIENT_MAX)
 in
   if at < 0 then $A.free<byte>(client)
   else let
     val @(found, client_len, _) = jr_str(buf, n, at, client, CLIENT_MAX)
-  in if found then _google_set(client, client_len) else $A.free<byte>(client) end
+  in
+    if found then let
+      val+ ~ClientCell(previous, _) = _client_swap(cell, ClientCell(client, client_len))
+    in $A.free<byte>(previous) end
+    else $A.free<byte>(client)
+  end
 end
 
 (* Reads sync-clients.json, once, as the app starts; resolves when it is
@@ -79,7 +87,8 @@ in
               val () = $BD.blob_read(body, 0, file, size)
               val () = $BD.blob_free(body)
               val key = $A.alloc<byte>(16)
-              val () = _google_of(file, size, key)
+              val () = _client_of(file, size, key, "googleWebClient", _google)
+              val () = _client_of(file, size, key, "dropboxClient", _dropbox)
               val () = $A.free<byte>(key)
               val () = piece_free(owner, file)
             in $P.ret<int>(0) end)
@@ -96,6 +105,17 @@ fun _copy {source_loc,out_loc:agz}{count:nat | count <= 256}{j:nat | j <= count}
   else let
     val () = $A.set<byte>(out, j, $A.get<byte>(source, j))
   in _copy(source, count, out, j + 1) end
+
+(* Dropbox's app key (empty when this build has none), as
+   sync_clients_google *)
+#pub fn sync_clients_dropbox {l:agz} (out: !$A.arr(byte, l, 256)): [client_len:nat | client_len <= 256] int client_len
+
+implement sync_clients_dropbox (out) = let
+  val+ ~ClientCell(client, client_len) = _client_swap(_dropbox, ClientCell($A.alloc<byte>(CLIENT_MAX), 0))
+  val () = _copy(client, client_len, out, 0)
+  val+ ~ClientCell(empty, _) = _client_swap(_dropbox, ClientCell(client, client_len))
+  val () = $A.free<byte>(empty)
+in client_len end
 
 implement sync_clients_google (out) = let
   val+ ~ClientCell(client, client_len) = _google_swap(ClientCell($A.alloc<byte>(CLIENT_MAX), 0))
