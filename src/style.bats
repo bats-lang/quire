@@ -1803,7 +1803,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   (* the text a book's narration reads (narration.bats): the same proven
      pair as the sentence read aloud *)
   val sheet = rule(sheet, "::highlight(bats-mark-5)")
-  val sheet = surf(S_markfg_mark | sheet, 15, 14)
+  val sheet = surf(S_markfg_mark | sheet, RoleMarkText(), RoleMark())
   val sheet = close(sheet)
   (* the narration's controls, in the bottom bar's row *)
   val sheet = rule(sheet, ".ngrp")
