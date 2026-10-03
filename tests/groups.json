@@ -4,7 +4,9 @@
       "library.spec.js",
       "storage.spec.js",
       "notices.spec.js",
-      "smoke.spec.js"
+      "smoke.spec.js",
+      "catalogue.spec.js",
+      "stats.spec.js"
     ],
     "reader": [
       "reader.spec.js",
@@ -26,10 +28,8 @@
       "sync-dropbox.spec.js",
       "sync-nextcloud.spec.js",
       "backup.spec.js",
-      "catalogue.spec.js",
       "settings.spec.js",
       "settings-screen.spec.js",
-      "stats.spec.js",
       "a11y.spec.js",
       "about.spec.js",
       "layout.spec.js"
