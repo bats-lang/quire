@@ -47,7 +47,8 @@ A quire PR that adopts new package versions runs `bats lock --repository
 <dir>` and commits `bats.lock` with the change that needs them. Package
 releases publish first; then the quire PR with the new lock. A publish
 never turns main red: until a lock names it, quire does not use it. The
-daily `relock.yml` (the generic `relock-pins.yml`) relocks against the
+daily `relock.yml` (the shared `relock-pins.yml` of
+bats-lang/repository-prototype, called by commit) relocks against the
 newest, moves the compiler pin, pushes `relock/<date>`, opens a PR
 listing the old and new versions and dispatches `check.yml` on it, so a
 breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
@@ -467,7 +468,16 @@ stay as they are, decoded once as they are read and encoded once as
 they are written: a book's `shelf` (`shelf_of_code`, `shelf_code`) and
 cover (`image_of_code`, `image_code`), and the library view's
 `sort_order`, `layout` and `book_filter` (`lib_state_set`,
-`lib_state_get`, which packs them only to be saved with the settings).
+`lib_state_get`, which packs them only to be saved with the settings),
+and each setting of the "S2" record and the backup (`font`, `alignment`,
+`hyphenation`, `image_dimming`, `tap_zones`, `volume_keys`, `readout`,
+`page_flow`, `column_count`, `ruby_display`, each with its `_code` and
+`_of_code`). The theme chosen is a `theme_choice`, `Auto` or
+`Fixed(theme)`, kept apart from the settings record since it is linear;
+a `theme` (style's `palette_theme(n)`) is indexed by its number in the
+palette, `theme_palette` the one function that gives it, and the theme
+rules are written from it (their selectors too), so a theme's colours
+and its proofs cannot be another's.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
