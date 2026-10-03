@@ -2676,7 +2676,7 @@ fn _shade_rule {number:int}{strength:nat | strength <= 100}{level:pos | level <=
 in close(sheet) end
 
 (* A page turn (reader.bats): the shade over the incoming page, and
-   over it page-turn, where the page being left (a copy, in .sheet, on
+   over it page-turn, where the page being left (a copy, in .leaf, on
    the page's own ground, proven) slides off, the gap it leaves showing
    the page beneath (blank, a ground with no text, while a drag holds a
    chapter's first or last page). Its edge casts a shadow on the page
@@ -2705,7 +2705,7 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | af
   val sheet = rule(sheet, ".turn.to-up,.turn.to-down")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".sheet")
+  val sheet = rule(sheet, ".leaf")
   val sheet = lay(sheet, Flex(), "0 0 100%")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, MinWidth(), "0")

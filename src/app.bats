@@ -498,7 +498,7 @@ fn _reader (): void = let
   val () = _hide("turn-shade")
   val () = ui_el("reader", "page-turn", TDiv, "turn")
   val () = ui_attr("page-turn", AHidden, "true")
-  val () = ui_el("page-turn", "turn-sheet", TDiv, "sheet")
+  val () = ui_el("page-turn", "turn-sheet", TDiv, "leaf")
   val () = ui_el("page-turn", "turn-gap", TDiv, "tgap")
   val () = _hide("page-turn")
   (* the running footer, shown while the bars are hidden; what it says

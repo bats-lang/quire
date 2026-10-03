@@ -52,12 +52,26 @@ const drag = (page, x0, x1, y, { cancel = false, id = 31 } = {}) =>
   }, [x0, x1, y, cancel, id]);
 
 // What a turn looked like: the page shown at its end, and whether the
-// page being left was laid over it on the way
+// page being left was laid over it on the way (a copy of the page, the
+// first paragraph's text in it, added to the document at any time
+// during the turn, however short the turn)
 async function turn(page, act) {
   await expect.poll(() => copies(page)).toBe(1);
+  await page.evaluate(() => {
+    window.turnLaid = false;
+    window.turnWatch = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node.nodeType === 1 && node.getAttribute('aria-hidden') === 'true'
+            && node.textContent.includes('Para 1.0 ')) window.turnLaid = true;
+        }
+      }
+    });
+    window.turnWatch.observe(document.body, { childList: true, subtree: true });
+  });
   await act();
-  const laid = (await copies(page)) === 2;
   await expect.poll(() => copies(page)).toBe(1);
+  const laid = await page.evaluate(() => { window.turnWatch.disconnect(); return window.turnLaid; });
   return { laid, at: (await place(page)).p };
 }
 
@@ -118,8 +132,12 @@ test.describe('a page turn', () => {
   });
 });
 
+// Less motion, as the system asks for it (Playwright's reducedMotion
+// option is the context's; emulated here on the page itself)
+const lessMotion = ({ page }) => page.emulateMedia({ reducedMotion: 'reduce' });
+
 test.describe('with less motion', () => {
-  test.use({ reducedMotion: 'reduce' });
+  test.beforeEach(lessMotion);
 
   test('a turn by a key, a tap or a button is instant: no page is laid over the page', async ({ page }) => {
     await start(page);
@@ -177,7 +195,7 @@ test.describe('on a touch screen', () => {
   });
 
   test.describe('with less motion', () => {
-    test.use({ reducedMotion: 'reduce' });
+    test.beforeEach(lessMotion);
 
     test('a drag still turns on and back, and its page goes at once when let go', async ({ page }) => {
       await start(page);
