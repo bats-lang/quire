@@ -430,6 +430,53 @@ test('a file handed over by the host is imported', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+// As the Android app is started with a file (#247): its activity hands
+// the file over once, as soon as the page has bridge's batsNative, and
+// nothing when it is recreated (here, the page loaded again). The book
+// is imported once, nothing asks whether to replace it, and a file
+// handed over while the app is open is imported once too
+test('a file the app is started with is imported once, and one handed over while it is open once', async ({ page }) => {
+  const started = epubFile({ title: 'Started With It', author: 'Intent Test', chapters: 1 });
+  const opened = epubFile({ title: 'Opened While Open', author: 'Intent Test', chapters: 1 });
+  const fetched = { started: 0, opened: 0 };
+  await page.route('**/_capacitor_file_/started', r => {
+    fetched.started++;
+    return r.fulfill({ path: started, contentType: 'application/octet-stream' });
+  });
+  await page.route('**/_capacitor_file_/opened', r => {
+    fetched.opened++;
+    return r.fulfill({ path: opened, contentType: 'application/octet-stream' });
+  });
+  // the activity's one hand-over as the app starts, retried until the
+  // page has batsNative; none once it is recreated
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('launch-handed-over')) return;
+    sessionStorage.setItem('launch-handed-over', 'yes');
+    const handOver = () => {
+      if (globalThis.batsNative) globalThis.batsNative.deliverFile('/_capacitor_file_/started', 'started.epub');
+      else setTimeout(handOver, 20);
+    };
+    handOver();
+  });
+  const errors = await start(page);
+  await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
+  await page.waitForTimeout(500);
+  await expect(cards(page)).toHaveCount(1);
+  await expect(dialog(page, 'Already in library')).toBeHidden();
+  await page.reload();
+  await expect(card(page, 'Started With It')).toBeVisible({ timeout: 30000 });
+  await page.waitForTimeout(500);
+  await expect(cards(page)).toHaveCount(1);
+  await expect(dialog(page, 'Already in library')).toBeHidden();
+  await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/opened', 'opened.epub'));
+  await expect(card(page, 'Opened While Open')).toBeVisible({ timeout: 30000 });
+  await page.waitForTimeout(500);
+  await expect(cards(page)).toHaveCount(2);
+  await expect(dialog(page, 'Already in library')).toBeHidden();
+  expect(fetched).toEqual({ started: 1, opened: 1 });
+  expect(errors).toEqual([]);
+});
+
 // A handed-over file whose URL cannot be fetched is named in the error
 // banner, and the files handed over after it are still imported
 test('a file handed over by the host that cannot be read is said, and the next is imported', async ({ page }) => {
