@@ -724,5 +724,10 @@ table's length, in its type, is at most 127: the bridge's last slot
 (of 128) is the media query listener's (`ui_media_listener`), which
 shares the bridge's table, so no listener of the table can take it.
 The platform's typed listeners take their slots in the same table:
-full screen's (`RFullscreen`), speech's (`RSpeech`) and the install
-offer's (`RInstallOffer`), each given its event as bridge decodes it.
+full screen's (`RFullscreen`), speech's (`RSpeech`), the install
+offer's (`RInstallOffer`) and the page's fonts' (`RFonts`), each given
+its event as bridge decodes it. A chapter's pages are counted again as
+it is shown, for 3 s (`_settle`), and whenever a load of the page's
+fonts ends (`RFonts`, bridge's `listen_fonts_loaded`): the reading face
+can arrive after those 3 s, and the count made with its fallback would
+stay.

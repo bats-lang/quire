@@ -367,6 +367,35 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   await expect(note).toBeHidden();
 });
 
+test('a reading face that arrives late has the chapter\'s pages counted again', async ({ page }) => {
+  // Literata, the reading face, held back past the reader's own
+  // re-checks of a chapter just shown (3 s): it was laid out with a
+  // fallback, and only the face's arrival can say the count is stale
+  let release;
+  const held = new Promise(r => { release = r; });
+  await page.route('**/literata-latin.woff2', async route => { await held; await route.continue(); });
+  await start(page);
+  const filler = Array.from({ length: 60 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
+  await readBook(page, { title: 'Late face', author: 'Bot', rawChapters: [{ body: filler }] });
+  await page.waitForTimeout(3500);
+  const fallback = await place(page);
+  release();
+  await expect.poll(() => page.evaluate(() => document.fonts.check('16px Literata'))).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.fonts.status)).toBe('loaded');
+  // the count the chapter has in its face: a resize counts it afresh
+  const size = page.viewportSize();
+  const counted = async () => {
+    await page.setViewportSize({ width: size.width + 40, height: size.height });
+    await expect.poll(async () => (await place(page)).t).not.toBe(0);
+    await page.setViewportSize(size);
+    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(size.width);
+  };
+  await expect.poll(async () => (await place(page)).t).not.toBe(fallback.t);
+  const arrived = await place(page);
+  await counted();
+  await expect.poll(async () => (await place(page)).t).toBe(arrived.t);
+});
+
 /** A w by h PNG of one grey */
 function png(w, h) {
   const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
