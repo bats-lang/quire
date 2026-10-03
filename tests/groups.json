@@ -71,7 +71,8 @@
     "controls": [
       "reject/control-unmatched",
       "reject/brightness-not-a-choice",
-      "reject/theme-unmatched"
+      "reject/theme-unmatched",
+      "reject/role-unmatched"
     ]
   }
 }
