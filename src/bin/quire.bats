@@ -415,9 +415,22 @@ in share_selection(citation, author_len + 2 + title_len) end
 (* A book's saved place, gone to as it opens: when its chapter could not
    be shown there is no page to stay on, so the reader goes back to the
    library and the banner says why *)
-fn _opened_checked (result: int): void =
-  if result >= 0 then ()
-  else let
+(* How a book's opening ended: its chapter shown, the library shown
+   instead (it said why), or the chapter not shown *)
+datatype opened = OpenedShown | OpenedInLibrary | OpenedNotShown
+
+implement $P.dispose<opened>(_) = ()
+
+implement $P.dispose<import_outcome>(outcome) = import_outcome_free(outcome)
+
+fn _opened_of (outcome: load_outcome): opened =
+  if load_shown(outcome) then OpenedShown() else OpenedNotShown()
+
+fn _opened_checked (result: opened): void =
+  case+ result of
+  | OpenedShown() => ()
+  | OpenedInLibrary() => ()
+  | OpenedNotShown() => let
     val () = (if _in_reader() then _show_library() else ())
   in notice_part_unread() end
 
@@ -459,21 +472,23 @@ fn _open_book {book:int} (book: int book): void =
     in
       (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
-        $P.finish<int>($P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor)), llam(result) =>
+        $P.finish<opened>($P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
+          $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
           _opened_checked(result))
       else
-        $P.finish<int>($P.and_then<book_opening><int>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
+        $P.finish<opened>($P.and_then<book_opening><opened>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
           case+ opening of
           | BookFileMissing() => let
               val () = _show_library()
               val () = notice_error("This book's file could not be read. Import it again.")
-            in $P.ret<int>(0) end
+            in $P.ret<opened>(OpenedInLibrary()) end
           (* a passing failure of storage: importing again is not the fix *)
           | BookFileUnreadable() => let
               val () = _show_library()
               val () = notice_error("This book could not be read from storage. Try again, or reopen Quire if it keeps happening.")
-            in $P.ret<int>(0) end
-          | BookOpened() => $P.and_then<int><int>(annot_load(id_high, id_low), llam(_) => reader_goto(chapter, page, anchor))), llam(result) =>
+            in $P.ret<opened>(OpenedInLibrary()) end
+          | BookOpened() => $P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
+            $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
           _opened_checked(result))
     end
 
@@ -1298,9 +1313,11 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val off = _is(clicked, "sync-off")
       val done = _is(clicked, "sync-done")
       val nextcloud = _is(clicked, "nextcloud-sign-in")
+      val android = (if _is(clicked, "sync-android") then true else _is(clicked, "sync-google")): bool
       val () = _target_free(clicked)
       val () = (if now then sync_now()
         else if nextcloud then sync_nextcloud_sign_in()
+        else if android then sync_android()
         else if off then sync_off()
         else if done then layer_close(LSync())
         else ())
@@ -1331,34 +1348,34 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 8) = let
     in let val () = ui_focus("typography-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("typography-panel"), "click", llam(h) => let
       val clicked = _target(h)
-      val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(0) in true end
-        else if _is(clicked, "font-inter") then let val () = set_font_set(1) in true end
-        else if _is(clicked, "font-book") then let val () = set_font_set(2) in true end
-        else if _is(clicked, "font-atkinson") then let val () = set_font_set(3) in true end
-        else if _is(clicked, "theme-auto") then let val () = set_theme_set(0) in true end
-        else if _is(clicked, "theme-light") then let val () = set_theme_set(1) in true end
-        else if _is(clicked, "theme-sepia") then let val () = set_theme_set(2) in true end
-        else if _is(clicked, "theme-dark") then let val () = set_theme_set(3) in true end
-        else if _is(clicked, "theme-night") then let val () = set_theme_set(4) in true end
-        else if _is(clicked, "theme-grey") then let val () = set_theme_set(5) in true end
-        else if _is(clicked, "layout-pages") then let val () = set_flow_set(0) in true end
-        else if _is(clicked, "layout-scroll") then let val () = set_flow_set(1) in true end
-        else if _is(clicked, "columns-auto") then let val () = set_cols_set(0) in true end
-        else if _is(clicked, "columns-one") then let val () = set_cols_set(1) in true end
-        else if _is(clicked, "columns-two") then let val () = set_cols_set(2) in true end
-        else if _is(clicked, "align-ragged") then let val () = set_align_set(0) in true end
-        else if _is(clicked, "align-justified") then let val () = set_align_set(1) in true end
-        else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(0) in true end
-        else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(1) in true end
-        else if _is(clicked, "ruby-show") then let val () = set_ruby_set(1) in true end
-        else if _is(clicked, "ruby-hide") then let val () = set_ruby_set(0) in true end
-        else if _is(clicked, "dim-off") then let val () = set_dim_set(0) in true end
-        else if _is(clicked, "dim-on") then let val () = set_dim_set(1) in true end
-        else if _is(clicked, "taps-sides") then let val () = set_taps_set(0) in true end
-        else if _is(clicked, "taps-forward") then let val () = set_taps_set(1) in true end
-        else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(2) in true end
-        else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(0) in true end
-        else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(1) in true end
+      val changed = (if _is(clicked, "font-literata") then let val () = set_font_set(Literata()) in true end
+        else if _is(clicked, "font-inter") then let val () = set_font_set(Inter()) in true end
+        else if _is(clicked, "font-book") then let val () = set_font_set(BookFont()) in true end
+        else if _is(clicked, "font-atkinson") then let val () = set_font_set(Atkinson()) in true end
+        else if _is(clicked, "theme-auto") then let val () = set_theme_set(Auto()) in true end
+        else if _is(clicked, "theme-light") then let val () = set_theme_set(Fixed(Light())) in true end
+        else if _is(clicked, "theme-sepia") then let val () = set_theme_set(Fixed(Sepia())) in true end
+        else if _is(clicked, "theme-dark") then let val () = set_theme_set(Fixed(Dark())) in true end
+        else if _is(clicked, "theme-night") then let val () = set_theme_set(Fixed(Night())) in true end
+        else if _is(clicked, "theme-grey") then let val () = set_theme_set(Fixed(Grey())) in true end
+        else if _is(clicked, "layout-pages") then let val () = set_flow_set(Paged()) in true end
+        else if _is(clicked, "layout-scroll") then let val () = set_flow_set(Scrolled()) in true end
+        else if _is(clicked, "columns-auto") then let val () = set_cols_set(AutoColumns()) in true end
+        else if _is(clicked, "columns-one") then let val () = set_cols_set(OneColumn()) in true end
+        else if _is(clicked, "columns-two") then let val () = set_cols_set(TwoColumns()) in true end
+        else if _is(clicked, "align-ragged") then let val () = set_align_set(Ragged()) in true end
+        else if _is(clicked, "align-justified") then let val () = set_align_set(Justified()) in true end
+        else if _is(clicked, "hyphens-off") then let val () = set_hyph_set(NoHyphens()) in true end
+        else if _is(clicked, "hyphens-on") then let val () = set_hyph_set(Hyphenated()) in true end
+        else if _is(clicked, "ruby-show") then let val () = set_ruby_set(RubyShown()) in true end
+        else if _is(clicked, "ruby-hide") then let val () = set_ruby_set(RubyHidden()) in true end
+        else if _is(clicked, "dim-off") then let val () = set_dim_set(ImagesAsTheyAre()) in true end
+        else if _is(clicked, "dim-on") then let val () = set_dim_set(ImagesDimmed()) in true end
+        else if _is(clicked, "taps-sides") then let val () = set_taps_set(SideZones()) in true end
+        else if _is(clicked, "taps-forward") then let val () = set_taps_set(ForwardZones()) in true end
+        else if _is(clicked, "taps-one-hand") then let val () = set_taps_set(OneHandZones()) in true end
+        else if _is(clicked, "volume-keys-off") then let val () = set_vol_set(KeysForVolume()) in true end
+        else if _is(clicked, "volume-keys-turn") then let val () = set_vol_set(KeysTurnPages()) in true end
         else if _is(clicked, "typography-reset") then let
             val () = _settings_reset()
           in false end
@@ -1520,21 +1537,22 @@ fn _zone_click (x: Int, y: Int): void = let
   val page_y = $DR.get_measure_y()
   val page_width = $DR.get_measure_w()
   val page_height = $DR.get_measure_h()
-  val taps = set_taps_get()
 in
   if page_width <= 0 then ()
-  else if taps = 1 then
+  else case+ set_taps_get() of
+  | ForwardZones() =>
     (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
      else if x < page_x + page_width / 4 then _left()
      else _right())
-  else if taps = 2 then
+  | OneHandZones() =>
     (if page_height <= 0 then _chrome_set(~(!_chrome))
      else if y < page_y + page_height / 3 then _previous()
      else if y > page_y + page_height - page_height / 3 then _next()
      else _chrome_set(~(!_chrome)))
-  else if x < page_x + page_width / 4 then _left()
-  else if x > page_x + page_width - page_width / 4 then _right()
-  else _chrome_set(~(!_chrome))
+  | SideZones() =>
+    (if x < page_x + page_width / 4 then _left()
+     else if x > page_x + page_width - page_width / 4 then _right()
+     else _chrome_set(~(!_chrome)))
 end
 
 (* A key's name at key_bytes[1, 1 + name_len), and its modifier flags after it *)
@@ -1545,6 +1563,12 @@ in
   else if byte2int0($A.get<byte>(key_bytes, 0)) <> name_len then false
   else _bytes_at(key_bytes, n, 1, name, name_len, 0)
 end
+
+(* Whether the volume keys turn the page *)
+fn _volume_turns (): bool = case+ set_vol_get() of KeysTurnPages() => true | KeysForVolume() => false
+
+(* Whether a tap on the page is read by the sides' zones *)
+fn _side_zones (): bool = case+ set_taps_get() of SideZones() => true | ForwardZones() => false | OneHandZones() => false
 
 fn _reader_key {l:agz}{n:nat} (key_bytes: !$A.arr(byte, l, n), n: int n): void = let
   val shift = (if n >= 2 then $AR.band_g1($AR.low_byte(byte2int0($A.get<byte>(key_bytes, n - 1))), 1) = 1 else false): bool
@@ -1560,10 +1584,10 @@ in
   else if _key_is(key_bytes, n, " ") then let val () = $EV.prevent_default() in (if shift then _previous() else _next()) end
   (* the volume keys, when they turn the page and the browser gives them
      to the page: down on, up back, and the volume left as it is *)
-  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeDown") else false) then let
+  else if (if _volume_turns() then _key_is(key_bytes, n, "AudioVolumeDown") else false) then let
     val () = $EV.prevent_default()
   in _next() end
-  else if (if set_vol_get() = 1 then _key_is(key_bytes, n, "AudioVolumeUp") else false) then let
+  else if (if _volume_turns() then _key_is(key_bytes, n, "AudioVolumeUp") else false) then let
     val () = $EV.prevent_default()
   in _previous() end
   else if _key_is(key_bytes, n, "Home") then let val () = $EV.prevent_default() in reader_page(0) end
@@ -1897,10 +1921,10 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val read = _is(clicked, "selection-read")
       val share = _is(clicked, "selection-share")
       val () = _target_free(clicked)
-      val () = (if highlight then let val _ = annot_highlight(0) in () end
-        else if orange then let val _ = annot_highlight(1) in () end
-        else if underline then let val _ = annot_highlight(2) in () end
-        else if note then annot_ask_note(annot_highlight(0), true)
+      val () = (if highlight then let val _ = annot_highlight(Yellow()) in () end
+        else if orange then let val _ = annot_highlight(Orange()) in () end
+        else if underline then let val _ = annot_highlight(Underlined()) in () end
+        else if note then annot_ask_note(annot_highlight(Yellow()), true)
         else if copy then _copy_selection()
         else if search then _search_selection()
         else if define then dict_show()
@@ -1928,13 +1952,18 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val close = _is(clicked, "annotations-close")
       val export_asked = _is(clicked, "annotations-export")
       val share_asked = _is(clicked, "annotations-share")
-      val filter = (if _is(clicked, "filter-all") then ~1 else if _is(clicked, "filter-yellow") then 0
-        else if _is(clicked, "filter-orange") then 1 else if _is(clicked, "filter-underlined") then 2 else ~2): int
+      val filter = (if _is(clicked, "filter-all") then $R.some(EveryStyle())
+        else if _is(clicked, "filter-yellow") then $R.some(OnlyYellow())
+        else if _is(clicked, "filter-orange") then $R.some(OnlyOrange())
+        else if _is(clicked, "filter-underlined") then $R.some(OnlyUnderlined())
+        else $R.none()): $R.option(style_filter)
       val () = _target_free(clicked)
-      val () = (if close then layer_close(LAnnotations())
+      val () = (case+ filter of
+        | ~$R.some(chosen) => annot_filter_set(chosen)
+        | ~$R.none() =>
+        if close then layer_close(LAnnotations())
         else if export_asked then $P.finish<share_end>(_export(ToDownload()), llam(_) => ())
         else if share_asked then _share_annotations(share_as_now())
-        else if filter >= ~1 then annot_filter_set(filter)
         else if go_row >= 0 then let val () = layer_close(LAnnotations()) in _annotation_go(go_row) end
         else if note_row >= 0 then annot_ask_note(note_row, false)
         else if delete_row >= 0 then annot_delete_highlight(delete_row)
@@ -2004,7 +2033,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       else if (if node >= 0 then reader_link_at(node) else false) then 0
       (* with the sides' zones, a tap on an image between them shows it
          full screen, rather than the bars *)
-      else if (if node >= 0 then (if set_taps_get() = 0 then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
+      else if (if node >= 0 then (if _side_zones() then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
       else if x >= 0 then let val () = _zone_click(x, y) in 0 end else 0
     end)
   (* an image of the book, long-pressed (or right-clicked), is shown
@@ -2163,9 +2192,12 @@ fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
    done. The library is shown first, where the import is seen *)
 fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
   if rounds <= 0 then ()
-  else $P.finish<Int>($P.and_then<$BE.external><Int>($BE.external_next(), llam(handed) => let
+  else $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
       val () = (if _in_reader() then _show_library() else ())
-    in import_external(handed) end), llam(_) => _external_wait(rounds - 1))
+    in import_external(handed) end), llam(outcome) => let
+      (* its outcome is already reported *)
+      val () = import_outcome_free(outcome)
+    in _external_wait(rounds - 1) end)
 
 implement main0 () = let
   val () = app_build()

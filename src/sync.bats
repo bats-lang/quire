@@ -36,6 +36,11 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload GOOGLE = "wasm.bats-packages.dev/bridge/src/google_account.sats"
+staload BACKUP = "wasm.bats-packages.dev/bridge/src/backup_file.sats"
+staload "drive.sats"
+staload "sync_clients.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "nextcloud.sats"
 
 (* The sync file's most bytes: a larger one is refused *)
@@ -48,6 +53,9 @@ staload "nextcloud.sats"
 #define ETAG_MAX 256
 (* The tries of a sync whose write another device's beat (412) *)
 #define TRIES 3
+(* The Google account's address's and an access token's most bytes *)
+#define ACCOUNT_MAX 256
+#define TOKEN_MAX 4096
 
 (* ============================================================
    The store the file is kept in, and its credentials: on this device
@@ -57,12 +65,17 @@ staload "nextcloud.sats"
 (* Where the sync file is kept. Each kind is a constructor, with its own
    credentials and its own read and write (store_read, store_write):
    the merge and its tries call only those. WebDAV: the folder's URL,
-   the user name and the password *)
+   the user name and the password. Android (the app): the Google account
+   on the device, its address kept for the screen; the file is in its
+   Drive's app data folder (drive.bats), read and written with an
+   access token kept only while the app runs (_token) *)
 datavtype store =
   | NoStore of ()
   | {url_loc,user_loc,password_loc:agz}{url_len:pos | url_len <= URL_MAX}{user_len:nat | user_len <= USER_MAX}{password_len:nat | password_len <= PASSWORD_MAX}
     WebDav of ($A.arr(byte, url_loc, URL_MAX), int url_len, $A.arr(byte, user_loc, USER_MAX), int user_len,
                $A.arr(byte, password_loc, PASSWORD_MAX), int password_len)
+  | {account_loc:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
+    Android of ($A.arr(byte, account_loc, ACCOUNT_MAX), int account_len)
 
 fn _store_free (held: store): void =
   case+ held of
@@ -71,6 +84,7 @@ fn _store_free (held: store): void =
       val () = $A.free<byte>(url)
       val () = $A.free<byte>(user)
     in $A.free<byte>(password) end
+  | ~Android(account, _) => $A.free<byte>(account)
 
 val _store = ref<store>(NoStore())
 (* The store turned off, while its Undo is offered *)
@@ -83,7 +97,7 @@ in previous end
 
 fn _store_on (): bool = let
   val held = _store_swap(_store, NoStore())
-  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | NoStore() => false): bool
+  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | Android(_, _) => true | NoStore() => false): bool
   val () = _store_free(_store_swap(_store, held))
 in configured end
 
@@ -109,10 +123,23 @@ val _last_status = ref<Int>(0)
 #define RESULT_BLOCKED 10
 #define RESULT_RUNNING 11
 #define RESULT_ADDRESS 12
+(* Android: no token (one is asked for when the reader acts), no Google
+   account on the device, no client ID in this build, Google refused
+   (the build's clients not registered for this app), the reader said no *)
+#define RESULT_SIGN_IN 13
+#define RESULT_NO_ACCOUNT 14
+#define RESULT_NOT_SET_UP 15
+#define RESULT_REFUSED 16
+#define RESULT_CANCELED 17
 
-(* The store chosen, under "sync": "QS2\n" and its kind (STORE_WEBDAV);
-   each kind's credentials under a key of its own, "sync-webdav" *)
+(* The store chosen, under "sync": "QS2\n" and its kind (STORE_WEBDAV,
+   STORE_ANDROID); each kind's credentials under a key of its own,
+   "sync-webdav", "sync-android". With none chosen, the app keeps the
+   file for Android's Auto Backup (STORE_BACKUP): the merge is written
+   to a backed-up file, and the file a reinstall restored is merged *)
 #define STORE_WEBDAV 1
+#define STORE_ANDROID 2
+#define STORE_BACKUP 3
 
 fn _choice_key (): [l:agz] $A.arr(byte, l, 4) = let
   val key = $A.alloc<byte>(4)
@@ -124,12 +151,21 @@ fn _webdav_key (): [l:agz] $A.arr(byte, l, 11) = let
   val () = $A.write_text(key, 0, $A.text_lit("sync-webdav"), 11)
 in key end
 
-(* The store's kind, 0 none *)
+fn _android_key (): [l:agz] $A.arr(byte, l, 12) = let
+  val key = $A.alloc<byte>(12)
+  val () = $A.write_text(key, 0, $A.text_lit("sync-android"), 12)
+in key end
+
+(* The store's kind: the one chosen, else the backed-up file where the
+   app has one (STORE_BACKUP), else 0 *)
 fn _store_kind (): int = let
   val held = _store_swap(_store, NoStore())
-  val kind = (case+ held of WebDav(_, _, _, _, _, _) => STORE_WEBDAV | NoStore() => 0): int
+  val kind = (case+ held of WebDav(_, _, _, _, _, _) => STORE_WEBDAV | Android(_, _) => STORE_ANDROID | NoStore() => 0): int
   val () = _store_free(_store_swap(_store, held))
-in kind end
+in if kind > 0 then kind else if $BACKUP.backup_file_available() then STORE_BACKUP else 0 end
+
+(* Whether a sync runs: to a store chosen, or to the backed-up file *)
+fn _syncing (): bool = _store_kind() > 0
 
 fn _state_key (): [l:agz] $A.arr(byte, l, 10) = let
   val key = $A.alloc<byte>(10)
@@ -144,12 +180,42 @@ fun _put_bytes {source_loc,out_loc:agz}{owner:addr}{source_size:nat}{count:nat |
     val () = $A.write_byte(out, position + j, $AR.low_byte(byte2int0($A.get<byte>(source, j))))
   in _put_bytes(source, count, out, position, j + 1) end
 
+(* The choice of the store of kind, under "sync" *)
+fn _choice_save (kind: int): void = let
+  val choice = $A.alloc<byte>(5)
+  val () = $A.write_text(choice, 0, $A.text_lit("QS2"), 3)
+  val () = $A.write_byte(choice, 3, 10)
+  val stored = (if kind = STORE_ANDROID then STORE_ANDROID else STORE_WEBDAV): [stored:nat | stored < 256] int stored
+  val () = $A.write_byte(choice, 4, stored)
+  val @(choice_frozen, choice_bytes) = $A.freeze<byte>(choice)
+  val @(choice_key_frozen, choice_key_bytes) = $A.freeze<byte>(_choice_key())
+  val () = save_checked($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
+  val () = release_bytes(choice_key_frozen, choice_key_bytes)
+in release_bytes(choice_frozen, choice_bytes) end
+
 (* The WebDAV store's credentials: "QS1\n", then the folder's URL, the
    user name and the password (each a u16 length and its bytes), under
-   "sync-webdav"; and the choice of it, under "sync" *)
+   "sync-webdav"; the Android store's: "QS1\n", then the account's
+   address (a u16 length and its bytes), under "sync-android"; and the
+   choice of it, under "sync" *)
 fn _store_save (): void =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  | ~Android(account, account_len) => let
+      val record = $A.alloc<byte>(6 + ACCOUNT_MAX)
+      val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
+      val () = $A.write_byte(record, 3, 10)
+      val () = $A.write_u16le(record, 4, account_len)
+      val () = _put_bytes(account, account_len, record, 6, 0)
+      val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+      val @(used, rest) = $A.borrow_split<byte>(record_frozen, record_bytes, 6 + account_len)
+      val @(key_frozen, key_bytes) = $A.freeze<byte>(_android_key())
+      val () = save_checked($IDB.idb_put(key_bytes, 12, used, 6 + account_len))
+      val () = release_bytes(key_frozen, key_bytes)
+      val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
+      val () = release_bytes(record_frozen, record_bytes)
+      val () = _choice_save(STORE_ANDROID)
+    in _store_free(_store_swap(_store, Android(account, account_len))) end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val record_len = 10 + url_len + user_len + password_len
       val record = $A.alloc<byte>(10 + URL_MAX + USER_MAX + PASSWORD_MAX)
@@ -168,18 +234,11 @@ fn _store_save (): void =
       val () = release_bytes(key_frozen, key_bytes)
       val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
       val () = release_bytes(record_frozen, record_bytes)
-      val choice = $A.alloc<byte>(5)
-      val () = $A.write_text(choice, 0, $A.text_lit("QS2"), 3)
-      val () = $A.write_byte(choice, 3, 10)
-      val () = $A.write_byte(choice, 4, STORE_WEBDAV)
-      val @(choice_frozen, choice_bytes) = $A.freeze<byte>(choice)
-      val @(choice_key_frozen, choice_key_bytes) = $A.freeze<byte>(_choice_key())
-      val () = save_checked($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
-      val () = release_bytes(choice_key_frozen, choice_key_bytes)
-      val () = release_bytes(choice_frozen, choice_bytes)
+      val () = _choice_save(STORE_WEBDAV)
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
 
-(* No store chosen, and the WebDAV credentials forgotten *)
+(* No store chosen, and the WebDAV credentials and the Android account
+   forgotten *)
 fn _store_forget (): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_choice_key())
   (* checked as a save: a delete that failed would bring the store
@@ -188,7 +247,10 @@ fn _store_forget (): void = let
   val () = release_bytes(key_frozen, key_bytes)
   val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
   val () = save_checked($IDB.idb_delete(webdav_bytes, 11))
-in release_bytes(webdav_frozen, webdav_bytes) end
+  val () = release_bytes(webdav_frozen, webdav_bytes)
+  val @(android_frozen, android_bytes) = $A.freeze<byte>(_android_key())
+  val () = save_checked($IDB.idb_delete(android_bytes, 12))
+in release_bytes(android_frozen, android_bytes) end
 
 (* "QS1\n", this device's number, the last sync's minute, result and
    status (4 x i32), under "sync-state" *)
@@ -262,6 +324,21 @@ fn _store_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): stor
     end
   end
 
+(* The Android store kept in record[0, n) (checked here, once) *)
+fn _android_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): store =
+  if n < 6 then NoStore()
+  else if byte2int0($A.get<byte>(record, 1)) <> 83 then NoStore()
+  else let
+    val account_len = _u16_at(record, 4)
+  in
+    if account_len > ACCOUNT_MAX then NoStore()
+    else if 6 + account_len > n then NoStore()
+    else let
+      val account = $A.alloc<byte>(ACCOUNT_MAX)
+      val () = _bytes_from(record, 6, account_len, account, 0)
+    in Android(account, account_len) end
+  end
+
 (* ============================================================
    The screen's words
    ============================================================ *)
@@ -286,6 +363,13 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file isn't one Quire can read.")
   else if result = RESULT_MEMORY then _put_literal(out, position, "There isn't enough memory to sync.")
   else if result = RESULT_ADDRESS then _put_literal(out, position, "Enter the folder's address, starting with https://.")
+  else if result = RESULT_SIGN_IN then _put_literal(out, position, "Tap Sync now to sign in to Google again.")
+  else if result = RESULT_NO_ACCOUNT then _put_literal(out, position, "Android sync needs a Google account on this device.")
+  else if result = RESULT_NOT_SET_UP then
+    (if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
+     else _put_literal(out, position, "Google Drive sync isn't set up in this build of Quire."))
+  else if result = RESULT_REFUSED then _put_literal(out, position, "Google refused: this build of Quire isn't registered with it.")
+  else if result = RESULT_CANCELED then _put_literal(out, position, "Google sign-in was canceled.")
   else let
     val after = _put_literal(out, position, "The server answered with an error (")
     val after = $S.int_to_str(out, after, 512, status)
@@ -321,7 +405,8 @@ in after + 5 end
 fn _status_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] int stop = let
   val result = !_last_result
 in
-  if ~_store_on() then _put_literal(out, 0, "Sync is off.")
+  if ~_store_on() then
+    (if result >= RESULT_NO_ACCOUNT then _result_text(out, 0, result, 0) else _put_literal(out, 0, "Sync is off."))
     else if result = RESULT_RUNNING then _put_literal(out, 0, "Syncing...")
     else if result = RESULT_NONE then _put_literal(out, 0, "Not synced yet.")
     else if result = RESULT_ADDRESS then _result_text(out, 0, result, 0)
@@ -349,6 +434,8 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file can't be read")
   else if result = RESULT_MEMORY then _put_literal(out, position, "Not enough memory")
   else if result = RESULT_ADDRESS then _put_literal(out, position, "No folder address")
+  else if result = RESULT_SIGN_IN then _put_literal(out, position, "tap Sync now to sign in")
+  else if result = RESULT_REFUSED then _put_literal(out, position, "Google refused")
   else let
     val after = _put_literal(out, position, "Server error (")
     val after = $S.int_to_str(out, after, 512, status)
@@ -362,7 +449,9 @@ fn _summary_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] 
 in
   if ~_store_on() then _put_literal(out, 0, "Off")
   else let
-    val after = _put_literal(out, 0, "WebDAV \xC2\xB7 ")
+    val after = (if _store_kind() <> STORE_ANDROID then _put_literal(out, 0, "WebDAV \xC2\xB7 ")
+      else if $BAPP.is_native_platform() then _put_literal(out, 0, "Android \xC2\xB7 ")
+      else _put_literal(out, 0, "Google Drive \xC2\xB7 ")): [after:nat | after <= 20] int after
   in
     if result = RESULT_RUNNING then _put_literal(out, after, "syncing...")
     else if result = RESULT_NONE then _put_literal(out, after, "not synced yet")
@@ -473,6 +562,10 @@ fn _request_parts {url_loc,authorization_loc:agz}
   : [url_len:pos | url_len <= 1041][authorization_len:nat | authorization_len <= 700] @(int url_len, int authorization_len) =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => let val _ = _put_literal(url, 0, "/") in @(1, 0) end
+  | ~Android(account, account_len) => let
+      val _ = _put_literal(url, 0, "/")
+      val () = _store_free(_store_swap(_store, Android(account, account_len)))
+    in @(1, 0) end
   | ~WebDav(folder, folder_len, user, user_len, password, password_len) => let
       val url_len = _file_url(folder, folder_len, url)
       val authorization_len = _authorization(user, user_len, password, password_len, authorization)
@@ -483,6 +576,9 @@ fn _request_parts {url_loc,authorization_loc:agz}
 fn _store_url {l:agz} (out: !$A.arr(byte, l, 1041)): [length:nat | length <= 1041] int length =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => 0
+  | ~Android(account, account_len) => let
+      val () = _store_free(_store_swap(_store, Android(account, account_len)))
+    in 0 end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val length = _file_url(url, url_len, out)
       val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
@@ -679,17 +775,143 @@ in
   in $P.ret<write_answer>(answer) end)
 end
 
+(* The access token for the Android store's account: asked for when the
+   reader acts (Use Android, Sync now), kept only while the app runs,
+   and forgotten when Drive refuses it (it lasts about an hour). A sync
+   the app starts by itself never asks for one: asking shows Google's
+   sheet *)
+datavtype token_cell =
+  | NoToken of ()
+  | {l:agz}{token_len:pos | token_len <= TOKEN_MAX} Token of ($A.arr(byte, l, TOKEN_MAX), int token_len)
+
+fn _token_free (cell: token_cell): void =
+  case+ cell of
+  | ~NoToken() => ()
+  | ~Token(token, _) => $A.free<byte>(token)
+
+val _token = ref<token_cell>(NoToken())
+
+fn _token_swap (cell: token_cell): token_cell = let
+  var previous: token_cell = cell
+  val () = ref_exch_elt<token_cell>(_token, previous)
+in previous end
+
+(* What a Drive status says: 401 is a token Drive no longer takes (it is
+   forgotten), -1 to -3 drive.bats' own *)
+fn _drive_failure (status: Int): int =
+  if status = 401 then let
+    val () = _token_free(_token_swap(NoToken()))
+  in RESULT_SIGN_IN end
+  else if status = 0 then RESULT_UNREACHABLE
+  else if status = ~1 then RESULT_TOO_LARGE
+  else if status = ~2 then RESULT_MEMORY
+  else if status = ~3 then RESULT_DAMAGED
+  else if status = 403 then RESULT_REFUSED
+  else RESULT_SERVER
+
+(* The Android store: the file in the account's Drive *)
+fn _android_read (): $P.promise(read_answer, $P.Chained) =
+  case+ _token_swap(NoToken()) of
+  | ~NoToken() => $P.ret<read_answer>(ReadFailed(RESULT_SIGN_IN, 0))
+  | ~Token(token, token_len) => let
+      val pending = drive_read(token, token_len, SYNC_MAX_BYTES)
+      val () = _token_free(_token_swap(Token(token, token_len)))
+    in
+      $P.and_then<drive_got><read_answer>(pending, llam(got) =>
+        case+ got of
+        | ~DriveGot(owner, file, n) => $P.ret<read_answer>(ReadFile(owner, file, n))
+        | ~DriveNothing() => $P.ret<read_answer>(ReadNothing())
+        | ~DriveFailed(status) => $P.ret<read_answer>(ReadFailed(_drive_failure(status), status)))
+    end
+
+fn _android_write {body_loc:agz}{body_size:pos | body_size <= 16777216}
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
+  case+ _token_swap(NoToken()) of
+  | ~NoToken() => $P.ret<write_answer>(WriteFailed(RESULT_SIGN_IN, 0))
+  | ~Token(token, token_len) => let
+      val pending = drive_write(token, token_len, body, body_size)
+      val () = _token_free(_token_swap(Token(token, token_len)))
+    in
+      $P.and_then<drive_put><write_answer>(pending, llam(put) =>
+        case+ put of
+        | ~DrivePut() => $P.ret<write_answer>(Written())
+        | ~DriveChanged() => $P.ret<write_answer>(WriteConflict())
+        | ~DrivePutFailed(status) => $P.ret<write_answer>(WriteFailed(_drive_failure(status), status)))
+    end
+
+(* The backed-up file's name: in bridge's backup directory, which
+   Android's Auto Backup keeps *)
+fn _backup_name (): [l:agz] $A.arr(byte, l, 15) = let
+  val name = $A.alloc<byte>(15)
+  val () = $A.write_text(name, 0, $A.text_lit("quire-sync.json"), 15)
+in name end
+
+(* The backed-up file: the merge as it was last written here, or, after
+   a reinstall, as Auto Backup restored it *)
+fn _backup_read (): $P.promise(read_answer, $P.Chained) = let
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
+  val pending = $BACKUP.backup_file_read(name_bytes, 15)
+  val () = release_bytes(name_frozen, name_bytes)
+in
+  $P.and_then<$BACKUP.backup_found><read_answer>(pending, llam(found) =>
+    case+ found of
+    | ~$BACKUP.BackupNone() => $P.ret<read_answer>(ReadNothing())
+    | ~$BACKUP.BackupUnreadable() => $P.ret<read_answer>(ReadFailed(RESULT_DAMAGED, 0))
+    | ~$BACKUP.BackupFound(blob) => let
+        val size = $BD.blob_len(blob)
+      in
+        if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(RESULT_TOO_LARGE, 0)) end
+        else (case+ piece_new(size) of
+          | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(RESULT_MEMORY, 0)) end
+          | ~Piece(owner, file) => let
+              val () = $BD.blob_read(blob, 0, file, size)
+              val () = $BD.blob_free(blob)
+            in $P.ret<read_answer>(ReadFile(owner, file, size)) end)
+      end)
+end
+
+(* body[0, body_size) as the backed-up file *)
+fn _backup_write {body_loc:agz}{body_size:pos}
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(_backup_name())
+  val pending = $BACKUP.backup_file_write(name_bytes, 15, body, body_size)
+  val () = release_bytes(name_frozen, name_bytes)
+in
+  $P.and_then<$BACKUP.backup_written><write_answer>(pending, llam(written) =>
+    case+ written of
+    | $BACKUP.BackupWritten() => $P.ret<write_answer>(Written())
+    | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(RESULT_MEMORY, 0)))
+end
+
 (* Reads the file from the store *)
-fn store_read (): $P.promise(read_answer, $P.Chained) =
-  if _store_kind() = STORE_WEBDAV then _webdav_read()
+fn store_read (): $P.promise(read_answer, $P.Chained) = let
+  val kind = _store_kind()
+in
+  if kind = STORE_WEBDAV then _webdav_read()
+  else if kind = STORE_ANDROID then _android_read()
+  else if kind = STORE_BACKUP then _backup_read()
   else $P.ret<read_answer>(ReadFailed(RESULT_NONE, 0))
+end
 
 (* Writes body[0, body_size) to the store, as a change of the version
-   read *)
+   read; once a store's write is done, the app's backed-up file is
+   written too, for Auto Backup *)
 fn store_write {body_loc:agz}{body_size:pos}
-  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
-  if _store_kind() = STORE_WEBDAV then _webdav_write(body, body_size)
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
+  val kind = _store_kind()
+  val backed_up = (if kind = STORE_WEBDAV then true else kind = STORE_ANDROID): bool
+  val () = (if ~backed_up then ()
+    else if ~$BACKUP.backup_file_available() then ()
+    (* ignored: the backed-up file is a safety net; one not written
+       now is written at the next sync *)
+    else $P.finish<write_answer>(_backup_write(body, body_size), llam(_) => ()))
+in
+  if kind = STORE_WEBDAV then _webdav_write(body, body_size)
+  else if kind = STORE_ANDROID then
+    (if body_size > 16777216 then $P.ret<write_answer>(WriteFailed(RESULT_TOO_LARGE, 0)) else _android_write(body, body_size))
+  else if kind = STORE_BACKUP then _backup_write(body, body_size)
   else $P.ret<write_answer>(WriteFailed(RESULT_NONE, 0))
+end
 
 (* ============================================================
    A sync file, read: where its books and devices are
@@ -1675,7 +1897,7 @@ in
         else let
           val () = !_again := false
         in
-          if ~_store_on() then ()
+          if ~_syncing() then ()
           else let val () = _run_begin() in _rounds(left - 1) end
         end))
 end
@@ -1683,7 +1905,7 @@ end
 (* Syncs, when sync is on: at once, or once the sync under way ends *)
 #pub fn sync_run (): void
 implement sync_run () =
-  if ~_store_on() then ()
+  if ~_syncing() then ()
   else if !_busy then !_again := true
   else let
     val () = _run_begin()
@@ -1693,6 +1915,9 @@ implement sync_run () =
    once the library is read *)
 #pub fn sync_start (): void
 implement sync_start () = let
+  (* ignored: the clients are read for Use Android, which says it is not
+     set up while there are none *)
+  val () = $P.finish<int>(sync_clients_load(), llam(_) => ())
   val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
   val state_pending = $IDB.idb_get(state_bytes, 10)
   val () = release_bytes(state_frozen, state_bytes)
@@ -1735,7 +1960,27 @@ in
             val () = $A.free<byte>(record)
           in kind end): int
     in
-      if kind <> STORE_WEBDAV then $P.ret<int>(0)
+      if kind = STORE_ANDROID then let
+        val @(android_frozen, android_bytes) = $A.freeze<byte>(_android_key())
+        val android_pending = $IDB.idb_get(android_bytes, 12)
+        val () = release_bytes(android_frozen, android_bytes)
+      in
+        $P.and_then<$IDB.lookup><int>(android_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
+                val read = _android_of_record(record, n)
+                val () = $A.free<byte>(record)
+              in _store_free(_store_swap(_store, read)) end)
+          val () = sync_run()
+        in $P.ret<int>(0) end)
+      end
+      else if kind <> STORE_WEBDAV then let
+        (* no store chosen: the app's backed-up file, where it has one *)
+        val () = sync_run()
+      in $P.ret<int>(0) end
       else let
         val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
         val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
@@ -1807,6 +2052,11 @@ implement sync_screen_make () = let
   val () = ui_text("sync-title", "Sync")
   val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
   val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
+  val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
+  val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
+  val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
+  val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
+  val () = ui_show("sync-android-row", false)
   (* Nextcloud: its address, then its own sign-in page (Login Flow v2),
      which gives an app password *)
   val () = ui_el("sync-box", "nextcloud-box", TDiv, "sfields")
@@ -1837,6 +2087,7 @@ fn _fields_show (): void = let
 in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  | ~Android(account, account_len) => _store_free(_store_swap(_store, Android(account, account_len)))
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       fn copy {source_loc:agz}{size:pos}{count:pos | count <= size; count <= 1024} (source: !$A.arr(byte, source_loc, size), count: int count): [l:agz] $A.arr(byte, l, count) = let
         val out = $A.alloc<byte>(count)
@@ -1853,6 +2104,23 @@ end
 (* Opens the sync screen *)
 #pub fn sync_screen_open (): void
 implement sync_screen_open () = let
+  (* Use Android in the app, Google Drive in a browser: what it does, or
+     (in the app) that this build has no client to sign in with *)
+  val app = $BAPP.is_native_platform()
+  val client = $A.alloc<byte>(256)
+  val client_len = sync_clients_google(client)
+  val () = $A.free<byte>(client)
+  (* in a browser, a build with no client lists no Google Drive, and
+     Google's script is loaded only when there is one *)
+  val android = (if app then $GOOGLE.google_token_available()
+    else if client_len > 0 then $GOOGLE.google_token_available() else false): bool
+  val () = ui_show("sync-android-row", android)
+  val () = ui_show("sync-android", app)
+  val () = ui_show("sync-google", ~app)
+  val () = (if ~android then ()
+    else if client_len <= 0 then ui_text_long("sync-android-about", "Android sync isn't set up in this build of Quire.")
+    else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
+    else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
   val () = _fields_show()
   val () = _status_show()
   val () = ui_show("sync-off", _store_on())
@@ -1892,6 +2160,122 @@ fun _starts {l:agz}{n:nat}{text_len:nat | text_len <= n}{beginning_len:nat}{j:na
   else if byte2int0($A.get<byte>(text, j)) <> char2int0(string_get_at(beginning, j)) then false
   else _starts(text, text_len, beginning, beginning_len, j + 1)
 
+(* What asking for a token came to: the account's address (the token is
+   kept, in _token), or how it failed (RESULT_) *)
+datavtype asked =
+  | {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} Asked of ($A.arr(byte, l, ACCOUNT_MAX), int account_len)
+  | AskFailed of (int)
+
+implement $P.dispose<asked>(answer) =
+  case+ answer of
+  | ~Asked(account, _) => $A.free<byte>(account)
+  | ~AskFailed(_) => ()
+
+(* A blob's bytes, at most most of them, in an array of most *)
+fn _blob_bytes {n:nat}{most:pos | most <= 4096} (blob: $BD.dblob(n), most: int most): [l:agz][kept:nat | kept <= most] @($A.arr(byte, l, most), int kept) = let
+  val out = $A.alloc<byte>(most)
+  val size = $BD.blob_len(blob)
+  val kept = _within(size, most)
+  val () = $BD.blob_read(blob, 0, out, kept)
+  val () = $BD.blob_free(blob)
+in @(out, kept) end
+
+(* The account's address Google gave (empty when it gave none) *)
+fn _address_of (account: $R.option([k:pos] $BD.dblob(k))): [l:agz][kept:nat | kept <= ACCOUNT_MAX] @($A.arr(byte, l, ACCOUNT_MAX), int kept) =
+  case+ account of
+  | ~$R.some(blob) => _blob_bytes(blob, ACCOUNT_MAX)
+  | ~$R.none() => let
+      val empty = $A.alloc<byte>(ACCOUNT_MAX)
+    in @(empty, 0) end
+
+(* The token Google gave, kept *)
+fn _token_keep {n:pos} (blob: $BD.dblob(n)): bool = let
+  val @(token, token_len) = _blob_bytes(blob, TOKEN_MAX)
+in
+  if token_len <= 0 then let val () = $A.free<byte>(token) in false end
+  else let val () = _token_free(_token_swap(Token(token, token_len))) in true end
+end
+
+(* Asks Google for a token for drive.appdata, for the account on the
+   device: its sheet the first time, its consent the first time ever.
+   Only when the reader acts (Use Android, Sync now) *)
+fn _token_ask (): $P.promise(asked, $P.Chained) = let
+  val client = $A.alloc<byte>(256)
+  val client_len = sync_clients_google(client)
+in
+  if client_len <= 0 then let
+    val () = $A.free<byte>(client)
+  in $P.ret<asked>(AskFailed(RESULT_NOT_SET_UP)) end
+  else let
+    val scope = $A.alloc<byte>(45)
+    val () = $A.write_text(scope, 0, $A.text_lit("https://www.googleapis.com/auth/drive.appdata"), 45)
+    val @(scope_frozen, scope_bytes) = $A.freeze<byte>(scope)
+    val @(client_frozen, client_bytes) = $A.freeze<byte>(client)
+    val @(client_used, client_rest) = $A.borrow_split<byte>(client_frozen, client_bytes, client_len)
+    val pending = $GOOGLE.google_token_get(client_used, client_len, scope_bytes, 45)
+    val client_bytes = $A.borrow_join<byte>(client_frozen, client_used, client_rest)
+    val () = release_bytes(client_frozen, client_bytes)
+    val () = release_bytes(scope_frozen, scope_bytes)
+  in
+    $P.and_then<$GOOGLE.google_token><asked>(pending, llam(answer) =>
+      case+ answer of
+      | ~$GOOGLE.GoogleToken(token, account) => let
+          val kept = _token_keep(token)
+          val @(address, address_len) = _address_of(account)
+        in
+          if kept then $P.ret<asked>(Asked(address, address_len))
+          else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(RESULT_REFUSED)) end
+        end
+      | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(RESULT_NO_ACCOUNT))
+      | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(RESULT_CANCELED))
+      | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(RESULT_REFUSED))
+      | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(RESULT_NOT_SET_UP)))
+  end
+end
+
+(* A sign-in that failed, said on the screen *)
+fn _ask_failed (result: int): void = let
+  val () = !_last_result := result
+  val () = !_last_status := 0
+  val () = !_last_minutes := $TM.epoch_minutes()
+in _status_show() end
+
+(* The Android store with the account signed in, chosen and kept, then
+   a sync *)
+fn _android_chosen {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} (account: $A.arr(byte, l, ACCOUNT_MAX), account_len: int account_len): void = let
+  val () = _store_free(_store_swap(_store, Android(account, account_len)))
+  val () = _store_save()
+  (* not synced to it yet: a sync of the backed-up file's does not count *)
+  val () = !_last_result := RESULT_NONE
+  val () = (if layer_is_open(LSync()) then let
+      val () = _fields_show()
+    in ui_show("sync-off", true) end else ())
+in sync_run() end
+
+(* Use Android (the screen's button, in the app): Google's sheet for the
+   account on the device, then sync through its Drive *)
+#pub fn sync_android (): void
+implement sync_android () =
+  if ~$GOOGLE.google_token_available() then ()
+  else $P.finish<asked>(_token_ask(), llam(answer) =>
+    case+ answer of
+    | ~Asked(account, account_len) => _android_chosen(account, account_len)
+    | ~AskFailed(result) => _ask_failed(result))
+
+(* Sync now with the Android store: with the token kept, or one asked
+   for (Google's sheet) *)
+fn _android_now (): void = let
+  val held = _token_swap(NoToken())
+  val have = (case+ held of Token(_, _) => true | NoToken() => false): bool
+  val () = _token_free(_token_swap(held))
+in
+  if have then sync_run()
+  else $P.finish<asked>(_token_ask(), llam(answer) =>
+    case+ answer of
+    | ~Asked(account, account_len) => _android_chosen(account, account_len)
+    | ~AskFailed(result) => _ask_failed(result))
+end
+
 (* Sync now (the screen's button): the fields kept, then a sync *)
 #pub fn sync_now (): void
 implement sync_now () = let
@@ -1904,8 +2288,13 @@ in
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-    val () = !_last_result := RESULT_ADDRESS
-  in _status_show() end
+  in
+    (* no folder given: the Android store's sync, when it is the one *)
+    if _store_kind() = STORE_ANDROID then _android_now()
+    else let
+      val () = !_last_result := RESULT_ADDRESS
+    in _status_show() end
+  end
   else if ~web then let
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
@@ -1916,6 +2305,8 @@ in
     val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
     val () = _store_save()
     val () = ui_show("sync-off", true)
+    (* not synced to it yet, while a sync of the backed-up file's ends *)
+    val () = (if !_busy then !_last_result := RESULT_NONE else ())
   in sync_run() end
 end
 
@@ -2099,6 +2490,30 @@ implement sync_off () = let
 in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  | ~Android(account, account_len) => let
+      val () = _store_free(_store_swap(_store_off, Android(account, account_len)))
+      val () = _store_forget()
+      val () = _token_free(_token_swap(NoToken()))
+      (* ignored: signed out or not, the token is forgotten here, and
+         the next Use Android asks again *)
+      val () = $P.finish<$GOOGLE.google_signed_out>($GOOGLE.google_sign_out(), llam(_) => ())
+      val () = _fields_show()
+      val () = _status_show()
+      val () = ui_show("sync-off", false)
+    in
+      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
+            val () = _store_save()
+          in
+            if layer_is_open(LSync()) then let
+              val () = _fields_show()
+              val () = ui_show("sync-off", true)
+            in _status_show() end else ()
+          end
+        | Final() => _store_free(_store_swap(_store_off, NoStore())))
+    end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val () = _store_free(_store_swap(_store_off, WebDav(url, url_len, user, user_len, password, password_len)))
       val () = _store_forget()

@@ -77,8 +77,23 @@ stadef HL2 = 17
 #pub typedef role(r:int) = int(r)
 #pub typedef role = [r:nat | r < NROLE] int r
 
-(* Themes: 0 light, 1 sepia, 2 dark, 3 night (warm, low in blue, for
-   reading in the dark), 4 grey *)
+(* Themes: light, sepia, dark, night (warm, low in blue, for reading in
+   the dark) and grey, each indexed by its number in the palette (PAL's
+   first index): the one place a theme becomes that number *)
+#pub datatype palette_theme(int) =
+  | Light(0) of () | Sepia(1) of () | Dark(2) of () | Night(3) of () | Grey(4) of ()
+#pub typedef theme = [number:nat | number < 5] palette_theme(number)
+
+(* A theme's number in the palette, as its type says *)
+#pub fn theme_palette {number:int} (which: palette_theme(number)): int number
+implement theme_palette (which) =
+  case+ which of Light() => 0 | Sepia() => 1 | Dark() => 2 | Night() => 3 | Grey() => 4
+
+(* The rule's selector of a theme (the light theme's is also the root's) *)
+fn _theme_selector {number:int} (which: palette_theme(number)): [length:nat | length <= 20] string length =
+  case+ which of
+  | Light() => ":root,.th-light" | Sepia() => ".th-sepia" | Dark() => ".th-dark" | Night() => ".th-night"
+  | Grey() => ".th-grey"
 
 (* PAL(t, r, c): in theme t, role r is the colour 0xc *)
 dataprop PAL(int, int, int) =
@@ -890,7 +905,7 @@ in sheet end
 
 (* .th-<name>{--role:#rrggbb;...} for a theme: each colour is the one
    PAL gives, so the proofs above are about these *)
-fn theme {theme_number:int}{left:nat | left >= 740}{length:nat | length <= 20}
+fn theme {theme_number:int}{left:nat | left >= 740}
   {bg_colour,fg_colour,muted_colour,card_colour,line_colour,
    edge_colour,bar_colour,barfg_colour,accent_colour,accentfg_colour,
    hl_colour,barhi_colour,banner_colour,bannerfg_colour,mark_colour,
@@ -911,14 +926,14 @@ fn theme {theme_number:int}{left:nat | left >= 740}{length:nat | length <= 20}
    mark_from_pal: PAL(theme_number, MARK, mark_colour), markfg_from_pal: PAL(theme_number, MARKFG, markfg_colour),
    danger_from_pal: PAL(theme_number, DANGER, danger_colour), hl2_from_pal: PAL(theme_number, HL2, hl2_colour),
    harmony: HARMONY(theme_number) |
-   sheet: sheet(left, 0), selector: string length,
+   sheet: sheet(left, 0), which: palette_theme(theme_number),
    bg_colour: int bg_colour, fg_colour: int fg_colour, muted_colour: int muted_colour,
    card_colour: int card_colour, line_colour: int line_colour, edge_colour: int edge_colour,
    bar_colour: int bar_colour, barfg_colour: int barfg_colour, accent_colour: int accent_colour,
    accentfg_colour: int accentfg_colour, hl_colour: int hl_colour, barhi_colour: int barhi_colour,
    banner_colour: int banner_colour, bannerfg_colour: int bannerfg_colour, mark_colour: int mark_colour,
    markfg_colour: int markfg_colour, danger_colour: int danger_colour, hl2_colour: int hl2_colour): [after:nat | after >= left - 740] sheet(after, 0) = let
-  val sheet = rule(sheet, selector)
+  val sheet = rule(sheet, _theme_selector(which))
   val sheet = _declare_role(sheet, 0, bg_colour)
   val sheet = _declare_role(sheet, 1, fg_colour)
   val sheet = _declare_role(sheet, 2, muted_colour)
@@ -2243,31 +2258,31 @@ implement app_style () = let
   val sheet = theme(PAL0_bg(), PAL0_fg(), PAL0_muted(), PAL0_card(), PAL0_line(), PAL0_edge(),
     PAL0_bar(), PAL0_barfg(), PAL0_accent(), PAL0_accentfg(), PAL0_hl(), PAL0_barhi(),
     PAL0_banner(), PAL0_bannerfg(), PAL0_mark(), PAL0_markfg(), PAL0_danger(), PAL0_hl2(), H_light |
-    sheet, ":root,.th-light", 0xfaf8f5, 0x2a2a2a, 0x6b6b6b, 0xffffff, 0xdddddd, 0x8a8a8a,
+    sheet, Light(), 0xfaf8f5, 0x2a2a2a, 0x6b6b6b, 0xffffff, 0xdddddd, 0x8a8a8a,
     0x333333, 0xffffff, 0x2f6f4f, 0xffffff, 0xfde59a, 0x4a4a4a, 0xfbe3e1, 0x6b1d16,
     0xffb300, 0x000000, 0xb3261e, 0xfbc58a)
   val sheet = theme(PAL1_bg(), PAL1_fg(), PAL1_muted(), PAL1_card(), PAL1_line(), PAL1_edge(),
     PAL1_bar(), PAL1_barfg(), PAL1_accent(), PAL1_accentfg(), PAL1_hl(), PAL1_barhi(),
     PAL1_banner(), PAL1_bannerfg(), PAL1_mark(), PAL1_markfg(), PAL1_danger(), PAL1_hl2(), H_sepia |
-    sheet, ".th-sepia", 0xf0e6d2, 0x3b2f22, 0x6e5e4a, 0xf7efdf, 0xd6c7a8, 0x8f7d62,
+    sheet, Sepia(), 0xf0e6d2, 0x3b2f22, 0x6e5e4a, 0xf7efdf, 0xd6c7a8, 0x8f7d62,
     0x4a3b2a, 0xf7efdf, 0x7a4f1d, 0xffffff, 0xe6cf8a, 0x5e4c38, 0xfbe3e1, 0x6b1d16,
     0xffb300, 0x000000, 0x9c2a1c, 0xe8b880)
   val sheet = theme(PAL2_bg(), PAL2_fg(), PAL2_muted(), PAL2_card(), PAL2_line(), PAL2_edge(),
     PAL2_bar(), PAL2_barfg(), PAL2_accent(), PAL2_accentfg(), PAL2_hl(), PAL2_barhi(),
     PAL2_banner(), PAL2_bannerfg(), PAL2_mark(), PAL2_markfg(), PAL2_danger(), PAL2_hl2(), H_dark |
-    sheet, ".th-dark", 0x1e1e1e, 0xe2e2e2, 0xa0a0a0, 0x2a2a2a, 0x3d3d3d, 0x7a7a7a,
+    sheet, Dark(), 0x1e1e1e, 0xe2e2e2, 0xa0a0a0, 0x2a2a2a, 0x3d3d3d, 0x7a7a7a,
     0x111111, 0xe2e2e2, 0x7fc49b, 0x10231a, 0x6d5e2f, 0x2e2e2e, 0xfbe3e1, 0x6b1d16,
     0xffb300, 0x000000, 0xffb4ab, 0x7b5831)
   val sheet = theme(PAL3_bg(), PAL3_fg(), PAL3_muted(), PAL3_card(), PAL3_line(), PAL3_edge(),
     PAL3_bar(), PAL3_barfg(), PAL3_accent(), PAL3_accentfg(), PAL3_hl(), PAL3_barhi(),
     PAL3_banner(), PAL3_bannerfg(), PAL3_mark(), PAL3_markfg(), PAL3_danger(), PAL3_hl2(), H_night |
-    sheet, ".th-night", 0x1f1a14, 0xc2b296, 0x9a8a70, 0x2a231b, 0x3d342a, 0x857560,
+    sheet, Night(), 0x1f1a14, 0xc2b296, 0x9a8a70, 0x2a231b, 0x3d342a, 0x857560,
     0x15110c, 0xc2b296, 0xc9a36b, 0x1f1a14, 0x4f4318, 0x342b21, 0xfbe3e1, 0x6b1d16,
     0xffb300, 0x000000, 0xe8a598, 0x5c3f1f)
   val sheet = theme(PAL4_bg(), PAL4_fg(), PAL4_muted(), PAL4_card(), PAL4_line(), PAL4_edge(),
     PAL4_bar(), PAL4_barfg(), PAL4_accent(), PAL4_accentfg(), PAL4_hl(), PAL4_barhi(),
     PAL4_banner(), PAL4_bannerfg(), PAL4_mark(), PAL4_markfg(), PAL4_danger(), PAL4_hl2(), H_grey |
-    sheet, ".th-grey", 0x3a3a3a, 0xe2e2e2, 0xb8b8b8, 0x444444, 0x4f4f4f, 0x999999,
+    sheet, Grey(), 0x3a3a3a, 0xe2e2e2, 0xb8b8b8, 0x444444, 0x4f4f4f, 0x999999,
     0x2a2a2a, 0xe2e2e2, 0x8fd0a8, 0x10231a, 0x6d5e2f, 0x3d3d3d, 0xfbe3e1, 0x6b1d16,
     0xffb300, 0x000000, 0xffb4ab, 0x7b5831)
   val sheet = _base(sheet)
