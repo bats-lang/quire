@@ -896,6 +896,13 @@ closed (`reader_stack_clear`).
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
 
+CI runs the static tests and the e2e suite in groups side by side
+(`tests/groups.json`), the e2e groups on the app built once (the `build`
+job). Every spec and every static fixture is in exactly one group, or
+`scripts/ci-groups.py` fails the run: a new one is put in a group, by
+area and balanced by time. The `check` job, which main's branch
+protection requires, passes only when every group did.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot

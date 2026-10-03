@@ -10,13 +10,44 @@
 # each under tests/static/reject/ must fail it, with the message in its
 # `expect` file (so it is rejected for the right reason).
 #
-# usage: tests/static/run.sh <repository-dir>   (bats must be on PATH)
+# With members named, it runs only those (CI's static groups, in
+# tests/groups.json, each run by a job of its own): `check` (bats check of
+# the app itself), `checkers` (ids.py and case_plus.py, with their
+# fixtures), and fixtures, `accept/<name>` or `reject/<name>`. With none,
+# it runs the checkers and every fixture.
+#
+# usage: tests/static/run.sh <repository-dir> [<member> ...]
+#        (bats must be on PATH)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
+repository=$1
+shift
+all=yes
+[ $# -eq 0 ] || all=no
+named() { # member -> 0 when it is to run
+  [ $all = yes ] && [ "$1" != check ] && return 0
+  for member in $selected; do [ "$member" = "$1" ] && return 0; done
+  return 1
+}
+selected="$*"
+for member in $selected; do
+  case $member in
+    check|checkers) ;;
+    accept/*|reject/*) [ -d "$ROOT/tests/static/$member" ] || { echo "no fixture $member"; exit 2; } ;;
+    *) echo "not a member: $member"; exit 2 ;;
+  esac
+done
 
 fail=0
+
+# The app itself
+if named check; then
+  if (cd "$ROOT" && bats check --repository "$repository"); then echo "ok   check"
+  else echo "FAIL check"; fail=1; fi
+fi
+
 check() { # fixture dir -> 0 when bats check passes; log in $TMP/<name>.log
   n=$(basename "$1")
   w="$TMP/w-$n"
@@ -39,6 +70,7 @@ check() { # fixture dir -> 0 when bats check passes; log in $TMP/<name>.log
 
 # Element ids (ids.py): the app's own, and the checker's fixtures, each
 # a src.bats that must pass it or (reject/) fail it with its `expect`
+if named checkers; then
 if python3 "$ROOT/tests/static/ids.py" "$ROOT/src" > "$TMP/ids.log" 2>&1; then echo "ok   ids: $(tail -1 "$TMP/ids.log")"
 else echo "FAIL ids:"; cat "$TMP/ids.log"; fail=1; fi
 for d in "$ROOT"/tests/static/ids/accept/*/; do
@@ -66,18 +98,21 @@ for d in "$ROOT"/tests/static/case/reject/*/; do
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/case-$n.log"; then echo "ok   case/reject/$n"
   else echo "FAIL case/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/case-$n.log"; fail=1; fi
 done
+fi
 
 for d in "$ROOT"/tests/static/accept/*/; do
   [ -d "$d" ] || continue
   n=$(basename "$d")
-  if check "$d" "$1"; then echo "ok   accept/$n"
+  named "accept/$n" || continue
+  if check "$d" "$repository"; then echo "ok   accept/$n"
   else echo "FAIL accept/$n: should type-check"; grep -E 'error|no line' "$TMP/$n.log" | head -5; fail=1; fi
 done
 
 for d in "$ROOT"/tests/static/reject/*/; do
   [ -d "$d" ] || continue
   n=$(basename "$d")
-  if check "$d" "$1"; then echo "FAIL reject/$n: should be rejected"; fail=1
+  named "reject/$n" || continue
+  if check "$d" "$repository"; then echo "FAIL reject/$n: should be rejected"; fail=1
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/$n.log"; then echo "ok   reject/$n"
   else echo "FAIL reject/$n: rejected, but not with: $(cat "$d/expect")"; grep -E 'error|no line' "$TMP/$n.log" | head -5; fail=1; fi
 done

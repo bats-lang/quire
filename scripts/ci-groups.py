@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""The groups CI runs the tests in, side by side (tests/groups.json).
+
+Two kinds of group:
+
+* e2e: each a list of the specs under e2e/ one job runs, by area
+  (library and import; the reader and its page turns; the reading tools;
+  sync, backup, catalogues, settings and the rest);
+* static: each a list of what one job of the static tests runs: `check`
+  (bats check of the app itself), `checkers` (ids.py and case_plus.py,
+  with their fixtures), and the fixtures, `accept/<name>` and
+  `reject/<name>` under tests/static/ (each a full bats check of its
+  own, so they are the long part).
+
+Every spec and every static member is in exactly one group of its kind,
+and every name a group lists exists: anything else fails, so a spec or a
+fixture added and not put in a group fails CI instead of never running.
+
+usage:
+  scripts/ci-groups.py matrix          check, then write e2e=[...] and
+                                       static=[...] (the matrices' group
+                                       names, as JSON) to $GITHUB_OUTPUT,
+                                       or to standard output
+  scripts/ci-groups.py members <kind> <group>
+                                       check, then print that group's
+                                       members, one per line (e2e specs
+                                       as paths from the checkout's root)
+"""
+import json
+import os
+import sys
+
+ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
+
+
+def specs():
+    """Every spec of the e2e suite, by file name."""
+    return sorted(name for name in os.listdir(os.path.join(ROOT, 'e2e'))
+                  if name.endswith('.spec.js'))
+
+
+def static_members():
+    """Everything the static tests run: the app's check, the checkers,
+    and each fixture."""
+    found = ['check', 'checkers']
+    for verdict in ('accept', 'reject'):
+        directory = os.path.join(ROOT, 'tests', 'static', verdict)
+        found += sorted(f'{verdict}/{name}' for name in os.listdir(directory)
+                        if os.path.isdir(os.path.join(directory, name)))
+    return found
+
+
+def problems(groups):
+    """What is wrong with the groups: each name not in exactly one group
+    of its kind, or not one that exists."""
+    found = []
+    for kind, expected in (('e2e', specs()), ('static', static_members())):
+        listed = {}
+        for group, members in groups[kind].items():
+            if not members:
+                found.append(f'{kind} group {group} is empty')
+            for member in members:
+                listed.setdefault(member, []).append(group)
+        for member in expected:
+            where = listed.pop(member, [])
+            if not where:
+                found.append(f'{kind}: {member} is in no group (add it to one in tests/groups.json)')
+            elif len(where) > 1:
+                found.append(f'{kind}: {member} is in more than one group: {", ".join(where)}')
+        for member, where in sorted(listed.items()):
+            found.append(f'{kind}: {member} (in {", ".join(where)}) does not exist')
+    return found
+
+
+def main(arguments):
+    with open(os.path.join(ROOT, 'tests', 'groups.json')) as groups_file:
+        groups = json.load(groups_file)
+    found = problems(groups)
+    if found:
+        for problem in found:
+            print(f'::error file=tests/groups.json::{problem}')
+        return 1
+    if arguments == ['matrix']:
+        lines = [f'{kind}={json.dumps(sorted(groups[kind]))}' for kind in ('e2e', 'static')]
+        output = os.environ.get('GITHUB_OUTPUT')
+        if output:
+            with open(output, 'a') as output_file:
+                output_file.write(''.join(line + '\n' for line in lines))
+        print('\n'.join(lines))
+        total = len(specs()), len(static_members())
+        print(f'{total[0]} specs and {total[1]} static members, each in exactly one group',
+              file=sys.stderr)
+        return 0
+    if len(arguments) == 3 and arguments[0] == 'members' and arguments[1] in groups \
+            and arguments[2] in groups[arguments[1]]:
+        kind, group = arguments[1], arguments[2]
+        prefix = 'e2e/' if kind == 'e2e' else ''
+        print('\n'.join(prefix + member for member in groups[kind][group]))
+        return 0
+    print(__doc__.split('usage:')[1], file=sys.stderr)
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
