@@ -625,6 +625,12 @@ accessibility metadata an `a11y_feature` each (its bit in the stored
 flags made by `a11y_bit` alone, asked by `a11y_has`) and a
 `wcag_level`; an OPDS list of links a `link_list`; the catalogue's
 fields `entry_field` and `page_field`, and a refused fetch a `refusal`.
+A click's target is decoded once, in `src/ui.bats`, into its listener's
+own control datatype (`typography_control`, `selection_control`, ...),
+each control's id given by its `*_control_id` (which
+`tests/static/ids.py` reads: each must be made, none twice), and each
+listener matches it with `case+`; a key event is decoded once into a
+`key` and its `modifiers` (`ui_key`, `ui_modifiers`).
 A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
 its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
 a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
@@ -675,8 +681,8 @@ Elements are made through `src/ui.bats`:
 * Each element id is made at one place in the code, no numbered id
   (`nid_make`, a prefix and a number) can spell another, and every id
   the code names is one it makes: `tests/static/ids.py` checks the
-  source (the constructors, `ui_harm_id`, and helpers that pass an id
-  on), in CI through `tests/static/run.sh`. An element made again to
+  source (the constructors, `ui_harm_id`, the controls' `*_control_id`,
+  and helpers that pass an id on), in CI through `tests/static/run.sh`. An element made again to
   reset it (a search field, a file input) is made by one function,
   called at startup and at the reset.
 * `ui_attr` takes a typed attribute that cannot be a name, a role or a
