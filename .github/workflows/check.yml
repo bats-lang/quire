@@ -174,14 +174,19 @@ jobs:
           sudo apt-get install -y -q stress-ng
           cores=$(nproc)
           stress-ng --cpu $(( cores * 2 - 1 )) --cpu-load 100 --timeout 5h > /dev/null 2>&1 &
-          ( while true; do echo "load $(date -u +%T) $(cut -d' ' -f1-3 /proc/loadavg)"; sleep 60; done ) &
+          ( while true; do cut -d' ' -f1 /proc/loadavg >> /tmp/loads; sleep 30; done ) &
           status=0
+          results=""
           for run in 1 2 3; do
             echo "=== run $run of 3, $cores cores"
-            npx playwright test --reporter=list,html --output "test-results/run$run" $specs || status=1
+            npx playwright test --reporter=list,html --output "test-results/run$run" $specs > /tmp/run.log 2>&1 && results="$results pass" || { status=1; results="$results FAIL"; }
+            cat /tmp/run.log
+            results="$results($(grep -E '^ +[0-9]+ (passed|failed|flaky)' /tmp/run.log | tr -s ' ' | tr '\n' ','))"
           done
-          echo "=== captures outside the capture's own spec:"
-          find test-results -name 'stall-capture-*.json' | grep -v -E '/stall-capture-(a|every)-' || echo none
+          echo "::notice::${{ matrix.group }}: $cores cores, load 1-min min/mean/max $(sort -n /tmp/loads | awk '{a[NR]=$1; s+=$1} END {printf "%s/%.1f/%s", a[1], s/NR, a[NR]}'), runs:$results"
+          for capture in $(find test-results -name 'stall-capture-*.json' | grep -v -E '/stall-capture-(a|every)-'); do
+            echo "::warning::${{ matrix.group }} capture $capture: $(node -e "const c=require('./'+process.argv[1]); console.log(c.reason + ' | ' + c.verdict + ' | ' + (c.paused ? c.paused.frames.slice(0,6).map(f => f.functionName + '@' + f.url.split('/').pop() + ':' + (f.byteOffset ?? f.line)).join(' < ') : ''))" "$capture")"
+          done
           exit $status
         env:
           PLAYWRIGHT_HTML_OPEN: never
