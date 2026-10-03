@@ -1430,6 +1430,10 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val () = (case+ control of
         | ~$R.none() => ()
         | ~$R.some(SyncNow()) => sync_now()
+        (* the app's Use Android and the browser's Google Drive: each
+           shown only where it signs in *)
+        | ~$R.some(SyncAndroid()) => sync_android()
+        | ~$R.some(SyncGoogle()) => sync_android()
         | ~$R.some(SyncOff()) => sync_off()
         | ~$R.some(SyncDone()) => layer_close(LSync()))
     in 0 end)
