@@ -538,11 +538,11 @@ fn _got {index:nat} (got: fetched, index: int index, request: int): void =
       val importing = import_fetched(book_file, size, name, name_len)
       val () = $A.free<byte>(name)
     in
-      $P.finish<Int>(importing, llam(outcome) => let
-        val () = (if outcome > 0 then _say("Added to your library.")
-          else if outcome < 0 then _say("This book could not be imported.")
-          else _quiet())
-      in () end)
+      $P.finish<import_outcome>(importing, llam(outcome) =>
+        case+ outcome of
+        | ~Added(_) => _say("Added to your library.")
+        | ~Failed() => _say("This book could not be imported.")
+        | ~Kept() => _quiet())
     end
   | ~Blocked() =>
     if request = !_request then let

@@ -754,11 +754,11 @@ and _continue_after {rounds:nat} .<rounds>. (chapter: int, passes: int, rounds: 
         val () = !_continuing := true
         val () = _pause_audio()
       in
-        $P.finish<int>(reader_goto(next, 0, ~1), llam(result) => let
+        $P.finish<load_outcome>(reader_goto(next, 0, ~1), llam(result) => let
           val () = !_continuing := false
         in
           if generation <> !_generation then ()
-          else if result < 0 then _stop()
+          else if ~load_shown(result) then _stop()
           else let
             val _ = _sync()
           in
