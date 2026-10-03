@@ -216,10 +216,11 @@ dictionaries' names and languages, not their files.
 reading time the same on the reader's devices, through one file,
 `quire-sync.json`, in the backup's JSON format plus each record's
 stamps, a `deleted` list per book and a `devices` list. Where the file
-is kept is a `store` (`WebDav(url, user, password)`, or `Android`,
-below): its credentials are stored on this device only, by the store's
-kind ("sync" names the kind, "sync-webdav" holds the WebDAV ones,
-"sync-android" the account's address), never in the backup. The merge and its tries call only `store_read` (the file,
+is kept is a `store` (`WebDav(url, user, password)`, or `Android` or
+`Dropbox`, below): its credentials are stored on this device only, by
+the store's kind ("sync" names the kind, "sync-webdav" holds the WebDAV
+ones, "sync-android" the account's address, "sync-dropbox" the refresh
+token), never in the backup. The merge and its tries call only `store_read` (the file,
 none yet, or a failure) and `store_write` (written, a conflict, or a
 failure); WebDAV's read is a GET whose ETag is the version, its write
 a PUT with If-Match (a 412 is the conflict). A sync reads, merges and
@@ -230,8 +231,21 @@ the page is hidden, and from the screen's Sync now (`LSync`,
 `sync-screen`, opened from the Settings screen's Sync row; Turn off
 goes through Undo). That row says sync's state in short
 (`sync_summary_show`, refreshed with the screen's status line): "Off",
-"WebDAV · synced 2 min ago" ("Android · ..."), or how the last sync
+"WebDAV · synced 2 min ago" ("Android · ...", "Dropbox · ..."), or how the last sync
 failed.
+
+Nextcloud is signed in to with its Login Flow v2 (`src/nextcloud.bats`,
+#184), which ends in the WebDAV store: the screen's Sign in with
+Nextcloud (`sync_nextcloud_sign_in`) takes an https address, starts the
+flow (`nextcloud_start`), offers the server's sign-in page as a link
+the reader taps (`nextcloud-page`: a tap is never blocked, a script's
+`window.open` after an answer is), and polls the flow's endpoint every
+3 s for its 20 minutes (`nextcloud_poll`, a form body `token=…`); a new
+sign-in or Turn off ends a poll (`_sign_in_generation`). Granted, the
+user's id (`nextcloud_user_id`, OCS `cloud/user`: a login name can be an
+email, the files folder is named by the id) makes the folder,
+`<server>/remote.php/dav/files/<id>` (`nextcloud_folder`), kept with the
+login name and the app password as `WebDav`, and a sync runs.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -276,6 +290,34 @@ Services' token model: a token for about an hour, no refresh token),
 listed only in a build with a client, so Google's script is loaded
 only then; the summary says "Google Drive · ...", and Turn off revokes
 the token.
+
+**Dropbox** (#184), in a browser only for now (the app's sign-in
+through the system's browser, `quire://oauth/dropbox`, is still to
+come): the store `Dropbox(refresh)`, the same `quire-sync.json` in the
+app's own folder (Apps › Quire; scopes `files.content.read` and
+`files.content.write`). `src/dropbox.bats` reads it with
+`files/download` (its rev from the `Dropbox-API-Result` header; a 409
+`not_found` is no file yet) and writes it with `files/upload`, mode
+`add`, or `update` with the rev read: a 409 `conflict` is the
+conflict. `src/web_request.bats` holds the requests it shares with
+`src/drive.bats`. The sign-in is OAuth's code flow with PKCE (S256, no
+secret: the app key is public, from the repository variable
+`DROPBOX_CLIENT_ID` into `sync-clients.json` as `dropboxClient`;
+without it the row says Dropbox sync is not set up). `sync_dropbox`
+keeps the verifier and state ("sync-dropbox-sign-in") and leaves the
+page for Dropbox's (bridge's `navigate_away`), which sends the reader
+back to the page's own address with `?oauth=dropbox` (the registered
+redirects are in `sync-identity.yml`). As the page opens,
+`sync_start` takes the code and state from the address and puts the
+address back (`replace_state`), Settings opens (`sync_returning`), and
+the code is exchanged once the state matches (another's is refused);
+the refresh token is kept and the access token held in memory
+(`_token`), got again from the refresh token when Dropbox refuses it
+(401), with no sign-in. Turn off, once made final, revokes the grant.
+Dynamic client registration was tried and Dropbox refuses it (only its
+trusted partners may), so the app is registered by hand (quire#239).
+`e2e/sync-dropbox.spec.js` plays Dropbox's sign-in page, token
+endpoint and files API.
 
 ### Catalogues
 
@@ -478,6 +520,11 @@ a `theme` (style's `palette_theme(n)`) is indexed by its number in the
 palette, `theme_palette` the one function that gives it, and the theme
 rules are written from it (their selectors too), so a theme's colours
 and its proofs cannot be another's.
+How a sync ended is a `sync_result`, stored as its code in
+"sync-state" (`_result_code`, `_result_of_code`); the store's kind a
+`store_kind` (`WebDavKind`, `AndroidKind`, `BackupKind`, `DropboxKind`,
+`NoStoreKind`);
+and an HTTP status is read once into an `http_answer`.
 An annotation's kind (`Bookmark`, or a highlight in its
 `highlight_style`) is stored as its code in the "QA" record
 (`_kind_code`, `_kind_of_code`), the record's version is a

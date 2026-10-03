@@ -1434,6 +1434,8 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
            shown only where it signs in *)
         | ~$R.some(SyncAndroid()) => sync_android()
         | ~$R.some(SyncGoogle()) => sync_android()
+        | ~$R.some(NextcloudSignIn()) => sync_nextcloud_sign_in()
+        | ~$R.some(SyncDropbox()) => sync_dropbox()
         | ~$R.some(SyncOff()) => sync_off()
         | ~$R.some(SyncDone()) => layer_close(LSync()))
     in 0 end)
@@ -2332,7 +2334,13 @@ implement main0 () = let
         val () = lib_render()
         (* sync, once the library is read *)
         val () = sync_start()
-      in _view_restore() end)
+      in
+        $P.and_then<int><int>(_view_restore(), llam(view) => let
+          (* back from Dropbox's sign-in: Settings, where it was asked
+             for, and the sync screen comes over it as the sign-in ends *)
+          val () = (if sync_returning() then _settings_open() else ())
+        in $P.ret<int>(view) end)
+      end)
     end)
 (* ignored: each step deals with its own value (but see bats-lang/bridge#87:
    a library that could not be read is taken for none) *)

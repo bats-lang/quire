@@ -40,7 +40,9 @@ staload GOOGLE = "wasm.bats-packages.dev/bridge/src/google_account.sats"
 staload BACKUP = "wasm.bats-packages.dev/bridge/src/backup_file.sats"
 staload "drive.sats"
 staload "sync_clients.sats"
+staload "dropbox.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload "nextcloud.sats"
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -55,6 +57,8 @@ staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 (* The Google account's address's and an access token's most bytes *)
 #define ACCOUNT_MAX 256
 #define TOKEN_MAX 4096
+(* A Dropbox refresh token's most bytes *)
+#define REFRESH_MAX 512
 
 (* ============================================================
    The store the file is kept in, and its credentials: on this device
@@ -75,6 +79,8 @@ datavtype store =
                $A.arr(byte, password_loc, PASSWORD_MAX), int password_len)
   | {account_loc:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
     Android of ($A.arr(byte, account_loc, ACCOUNT_MAX), int account_len)
+  | {refresh_loc:agz}{refresh_len:pos | refresh_len <= REFRESH_MAX}
+    Dropbox of ($A.arr(byte, refresh_loc, REFRESH_MAX), int refresh_len)
 
 fn _store_free (held: store): void =
   case+ held of
@@ -84,6 +90,7 @@ fn _store_free (held: store): void =
       val () = $A.free<byte>(user)
     in $A.free<byte>(password) end
   | ~Android(account, _) => $A.free<byte>(account)
+  | ~Dropbox(refresh, _) => $A.free<byte>(refresh)
 
 val _store = ref<store>(NoStore())
 (* The store turned off, while its Undo is offered *)
@@ -96,49 +103,100 @@ in previous end
 
 fn _store_on (): bool = let
   val held = _store_swap(_store, NoStore())
-  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | Android(_, _) => true | NoStore() => false): bool
+  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | Android(_, _) => true | Dropbox(_, _) => true | NoStore() => false): bool
   val () = _store_free(_store_swap(_store, held))
 in configured end
 
 (* This device's number in the sync file (0 until it has one), the
-   minute of the last sync and how it ended (SyncResult's number), and,
+   minute of the last sync, and,
    when the server answered with an error, its status *)
 val _device = ref<Int>(0)
 val _last_minutes = ref<Int>(0)
-val _last_result = ref<int>(0)
 val _last_status = ref<Int>(0)
 
-(* How a sync ended *)
-#define RESULT_NONE 0
-#define RESULT_DONE 1
-#define RESULT_UNREACHABLE 2
-#define RESULT_CREDENTIALS 3
-#define RESULT_FOLDER 4
-#define RESULT_CONFLICT 5
-#define RESULT_SERVER 6
-#define RESULT_TOO_LARGE 7
-#define RESULT_DAMAGED 8
-#define RESULT_MEMORY 9
-#define RESULT_BLOCKED 10
-#define RESULT_RUNNING 11
-#define RESULT_ADDRESS 12
-(* Android: no token (one is asked for when the reader acts), no Google
-   account on the device, no client ID in this build, Google refused
-   (the build's clients not registered for this app), the reader said no *)
-#define RESULT_SIGN_IN 13
-#define RESULT_NO_ACCOUNT 14
-#define RESULT_NOT_SET_UP 15
-#define RESULT_REFUSED 16
-#define RESULT_CANCELED 17
+(* How a sync ended: not yet; synced; the server not reached, or (from
+   another origin) refused by the browser; the credentials refused; the
+   folder not found; the file kept changing; another error from the
+   server; the file too large, or not one Quire can read; no memory for
+   it; under way; or no folder's address. Android: no token (one is
+   asked for when the reader acts), no Google account on the device, no
+   client ID in this build, Google refused (the build's clients not
+   registered for this app), the reader said no. Dropbox: its sign-in no
+   longer good (the reader took the app's access away), no app key in
+   this build, a sign-in Dropbox or the page refused (a state that is
+   not the one sent), the reader said no *)
+datatype sync_result =
+  | NotSyncedYet | Synced | Unreachable | WrongCredentials | FolderNotFound | KeptChanging | ServerError
+  | TooLarge | Damaged | NoMemory | Blocked | Syncing | NoAddress
+  | SignInAgain | NoGoogleAccount | NotSetUp | GoogleRefused | SignInCanceled
+  | DropboxSignInAgain | DropboxNotSetUp | DropboxSignInRefused | DropboxSignInCanceled
 
-(* The store chosen, under "sync": "QS2\n" and its kind (STORE_WEBDAV,
-   STORE_ANDROID); each kind's credentials under a key of its own,
-   "sync-webdav", "sync-android". With none chosen, the app keeps the
-   file for Android's Auto Backup (STORE_BACKUP): the merge is written
+(* A result as "sync-state" stores it, and back: decoded once, as it is
+   read (an unknown number is not synced yet) *)
+fn _result_code (result: sync_result): [code:nat | code <= 21] int code =
+  case+ result of
+  | NotSyncedYet() => 0
+  | Synced() => 1
+  | Unreachable() => 2
+  | WrongCredentials() => 3
+  | FolderNotFound() => 4
+  | KeptChanging() => 5
+  | ServerError() => 6
+  | TooLarge() => 7
+  | Damaged() => 8
+  | NoMemory() => 9
+  | Blocked() => 10
+  | Syncing() => 11
+  | NoAddress() => 12
+  | SignInAgain() => 13
+  | NoGoogleAccount() => 14
+  | NotSetUp() => 15
+  | GoogleRefused() => 16
+  | SignInCanceled() => 17
+  | DropboxSignInAgain() => 18
+  | DropboxNotSetUp() => 19
+  | DropboxSignInRefused() => 20
+  | DropboxSignInCanceled() => 21
+
+fn _result_of_code (code: int): sync_result =
+  if code = 1 then Synced()
+  else if code = 2 then Unreachable()
+  else if code = 3 then WrongCredentials()
+  else if code = 4 then FolderNotFound()
+  else if code = 5 then KeptChanging()
+  else if code = 6 then ServerError()
+  else if code = 7 then TooLarge()
+  else if code = 8 then Damaged()
+  else if code = 9 then NoMemory()
+  else if code = 10 then Blocked()
+  else if code = 11 then Syncing()
+  else if code = 12 then NoAddress()
+  else if code = 13 then SignInAgain()
+  else if code = 14 then NoGoogleAccount()
+  else if code = 15 then NotSetUp()
+  else if code = 16 then GoogleRefused()
+  else if code = 17 then SignInCanceled()
+  else if code = 18 then DropboxSignInAgain()
+  else if code = 19 then DropboxNotSetUp()
+  else if code = 20 then DropboxSignInRefused()
+  else if code = 21 then DropboxSignInCanceled()
+  else NotSyncedYet()
+
+(* How the last sync ended *)
+val _last_result = ref<sync_result>(NotSyncedYet())
+
+(* The store chosen, under "sync": "QS2\n" and its kind's byte
+   (_kind_code); each kind's credentials under a key of its own,
+   "sync-webdav", "sync-android", "sync-dropbox". With none chosen, the app keeps the
+   file for Android's Auto Backup (BackupKind): the merge is written
    to a backed-up file, and the file a reinstall restored is merged *)
-#define STORE_WEBDAV 1
-#define STORE_ANDROID 2
-#define STORE_BACKUP 3
+datatype store_kind = WebDavKind | AndroidKind | BackupKind | DropboxKind | NoStoreKind
+
+fn _kind_code (kind: store_kind): [code:nat | code <= 4] int code =
+  case+ kind of WebDavKind() => 1 | AndroidKind() => 2 | BackupKind() => 3 | DropboxKind() => 4 | NoStoreKind() => 0
+
+fn _kind_of_code (code: int): store_kind =
+  if code = 1 then WebDavKind() else if code = 2 then AndroidKind() else if code = 3 then BackupKind() else if code = 4 then DropboxKind() else NoStoreKind()
 
 fn _choice_key (): [l:agz] $A.arr(byte, l, 4) = let
   val key = $A.alloc<byte>(4)
@@ -155,16 +213,41 @@ fn _android_key (): [l:agz] $A.arr(byte, l, 12) = let
   val () = $A.write_text(key, 0, $A.text_lit("sync-android"), 12)
 in key end
 
+(* Dropbox's refresh token, and a sign-in under way (its verifier and
+   state, kept while the page is away at Dropbox) *)
+fn _dropbox_key (): [l:agz] $A.arr(byte, l, 12) = let
+  val key = $A.alloc<byte>(12)
+  val () = $A.write_text(key, 0, $A.text_lit("sync-dropbox"), 12)
+in key end
+
+fn _dropbox_sign_in_key (): [l:agz] $A.arr(byte, l, 20) = let
+  val key = $A.alloc<byte>(20)
+  val () = $A.write_text(key, 0, $A.text_lit("sync-dropbox-sign-in"), 20)
+in key end
+
 (* The store's kind: the one chosen, else the backed-up file where the
-   app has one (STORE_BACKUP), else 0 *)
-fn _store_kind (): int = let
+   app has one (BackupKind), else none *)
+fn _store_kind (): store_kind = let
   val held = _store_swap(_store, NoStore())
-  val kind = (case+ held of WebDav(_, _, _, _, _, _) => STORE_WEBDAV | Android(_, _) => STORE_ANDROID | NoStore() => 0): int
+  val kind = (case+ held of WebDav(_, _, _, _, _, _) => WebDavKind() | Android(_, _) => AndroidKind() | Dropbox(_, _) => DropboxKind() | NoStore() => NoStoreKind()): store_kind
   val () = _store_free(_store_swap(_store, held))
-in if kind > 0 then kind else if $BACKUP.backup_file_available() then STORE_BACKUP else 0 end
+in
+  case+ kind of
+  | NoStoreKind() => if $BACKUP.backup_file_available() then BackupKind() else NoStoreKind()
+  | WebDavKind() => kind
+  | AndroidKind() => kind
+  | DropboxKind() => kind
+  | BackupKind() => kind
+end
 
 (* Whether a sync runs: to a store chosen, or to the backed-up file *)
-fn _syncing (): bool = _store_kind() > 0
+fn _syncing (): bool = case+ _store_kind() of NoStoreKind() => false | WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | BackupKind() => true
+
+(* Whether the store is the Android one *)
+fn _is_android (): bool = case+ _store_kind() of AndroidKind() => true | WebDavKind() => false | DropboxKind() => false | BackupKind() => false | NoStoreKind() => false
+
+(* Whether the store is the Dropbox one *)
+fn _store_kind_is_dropbox (): bool = case+ _store_kind() of DropboxKind() => true | AndroidKind() => false | WebDavKind() => false | BackupKind() => false | NoStoreKind() => false
 
 fn _state_key (): [l:agz] $A.arr(byte, l, 10) = let
   val key = $A.alloc<byte>(10)
@@ -180,12 +263,11 @@ fun _put_bytes {source_loc,out_loc:agz}{owner:addr}{source_size:nat}{count:nat |
   in _put_bytes(source, count, out, position, j + 1) end
 
 (* The choice of the store of kind, under "sync" *)
-fn _choice_save (kind: int): void = let
+fn _choice_save (kind: store_kind): void = let
   val choice = $A.alloc<byte>(5)
   val () = $A.write_text(choice, 0, $A.text_lit("QS2"), 3)
   val () = $A.write_byte(choice, 3, 10)
-  val stored = (if kind = STORE_ANDROID then STORE_ANDROID else STORE_WEBDAV): [stored:nat | stored < 256] int stored
-  val () = $A.write_byte(choice, 4, stored)
+  val () = $A.write_byte(choice, 4, _kind_code(kind))
   val @(choice_frozen, choice_bytes) = $A.freeze<byte>(choice)
   val @(choice_key_frozen, choice_key_bytes) = $A.freeze<byte>(_choice_key())
   val () = save_checked($IDB.idb_put(choice_key_bytes, 4, choice_bytes, 5))
@@ -200,6 +282,21 @@ in release_bytes(choice_frozen, choice_bytes) end
 fn _store_save (): void =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  | ~Dropbox(refresh, refresh_len) => let
+      val record = $A.alloc<byte>(6 + REFRESH_MAX)
+      val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
+      val () = $A.write_byte(record, 3, 10)
+      val () = $A.write_u16le(record, 4, refresh_len)
+      val () = _put_bytes(refresh, refresh_len, record, 6, 0)
+      val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+      val @(used, rest) = $A.borrow_split<byte>(record_frozen, record_bytes, 6 + refresh_len)
+      val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_key())
+      val () = save_checked($IDB.idb_put(key_bytes, 12, used, 6 + refresh_len))
+      val () = release_bytes(key_frozen, key_bytes)
+      val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
+      val () = release_bytes(record_frozen, record_bytes)
+      val () = _choice_save(DropboxKind())
+    in _store_free(_store_swap(_store, Dropbox(refresh, refresh_len))) end
   | ~Android(account, account_len) => let
       val record = $A.alloc<byte>(6 + ACCOUNT_MAX)
       val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
@@ -213,7 +310,7 @@ fn _store_save (): void =
       val () = release_bytes(key_frozen, key_bytes)
       val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
       val () = release_bytes(record_frozen, record_bytes)
-      val () = _choice_save(STORE_ANDROID)
+      val () = _choice_save(AndroidKind())
     in _store_free(_store_swap(_store, Android(account, account_len))) end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val record_len = 10 + url_len + user_len + password_len
@@ -233,7 +330,7 @@ fn _store_save (): void =
       val () = release_bytes(key_frozen, key_bytes)
       val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
       val () = release_bytes(record_frozen, record_bytes)
-      val () = _choice_save(STORE_WEBDAV)
+      val () = _choice_save(WebDavKind())
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
 
 (* No store chosen, and the WebDAV credentials and the Android account
@@ -249,7 +346,10 @@ fn _store_forget (): void = let
   val () = release_bytes(webdav_frozen, webdav_bytes)
   val @(android_frozen, android_bytes) = $A.freeze<byte>(_android_key())
   val () = save_checked($IDB.idb_delete(android_bytes, 12))
-in release_bytes(android_frozen, android_bytes) end
+  val () = release_bytes(android_frozen, android_bytes)
+  val @(dropbox_frozen, dropbox_bytes) = $A.freeze<byte>(_dropbox_key())
+  val () = save_checked($IDB.idb_delete(dropbox_bytes, 12))
+in release_bytes(dropbox_frozen, dropbox_bytes) end
 
 (* "QS1\n", this device's number, the last sync's minute, result and
    status (4 x i32), under "sync-state" *)
@@ -259,7 +359,7 @@ fn _state_save (): void = let
   val () = $A.write_byte(record, 3, 10)
   val () = $A.write_i32(record, 4, !_device)
   val () = $A.write_i32(record, 8, !_last_minutes)
-  val () = $A.write_i32(record, 12, !_last_result)
+  val () = $A.write_i32(record, 12, _result_code(!_last_result))
   val () = $A.write_i32(record, 16, !_last_status)
   val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_state_key())
@@ -342,6 +442,22 @@ fn _android_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): st
    The screen's words
    ============================================================ *)
 
+(* The Dropbox store kept in record[0, n) (checked here, once) *)
+fn _dropbox_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): store =
+  if n < 6 then NoStore()
+  else if byte2int0($A.get<byte>(record, 1)) <> 83 then NoStore()
+  else let
+    val refresh_len = _u16_at(record, 4)
+  in
+    if refresh_len <= 0 then NoStore()
+    else if refresh_len > REFRESH_MAX then NoStore()
+    else if 6 + refresh_len > n then NoStore()
+    else let
+      val refresh = $A.alloc<byte>(REFRESH_MAX)
+      val () = _bytes_from(record, 6, refresh_len, refresh, 0)
+    in Dropbox(refresh, refresh_len) end
+  end
+
 (* literal at out[position] *)
 fn _put_literal {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len <= n}
   (out: !$A.arr(byte, l, n), position: int position, text: string text_len): int(position + text_len) = let
@@ -349,30 +465,43 @@ fn _put_literal {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len 
   val () = $A.write_text(out, position, $A.text_lit(text), text_len)
 in position + text_len end
 
+(* "The server answered with an error (status).", at out[position] *)
+fn _server_error {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, status: Int)
+  : [stop:nat | stop <= position + 200] int stop = let
+  val after = _put_literal(out, position, "The server answered with an error (")
+  val after = $S.int_to_str(out, after, 512, status)
+in _put_literal(out, after, ").") end
+
 (* What a sync's end says (at most 200 bytes), at out[position] *)
-fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: int, status: Int)
+fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: sync_result, status: Int)
   : [stop:nat | stop <= position + 200] int stop =
-  if result = RESULT_UNREACHABLE then _put_literal(out, position, "Can't reach the server.")
-  else if result = RESULT_BLOCKED then
+  case+ result of
+  | Unreachable() => _put_literal(out, position, "Can't reach the server.")
+  | Blocked() =>
     _put_literal(out, position, "Can't reach the server, or it doesn't let a browser in (CORS): Quire works on without it; to sync, allow this app's origin on the server.")
-  else if result = RESULT_CREDENTIALS then _put_literal(out, position, "The user name or password is wrong.")
-  else if result = RESULT_FOLDER then _put_literal(out, position, "The folder wasn't found.")
-  else if result = RESULT_CONFLICT then _put_literal(out, position, "The file kept changing on the server. Try again.")
-  else if result = RESULT_TOO_LARGE then _put_literal(out, position, "The sync file is over 16 MB.")
-  else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file isn't one Quire can read.")
-  else if result = RESULT_MEMORY then _put_literal(out, position, "There isn't enough memory to sync.")
-  else if result = RESULT_ADDRESS then _put_literal(out, position, "Enter the folder's address, starting with https://.")
-  else if result = RESULT_SIGN_IN then _put_literal(out, position, "Tap Sync now to sign in to Google again.")
-  else if result = RESULT_NO_ACCOUNT then _put_literal(out, position, "Android sync needs a Google account on this device.")
-  else if result = RESULT_NOT_SET_UP then
-    (if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
-     else _put_literal(out, position, "Google Drive sync isn't set up in this build of Quire."))
-  else if result = RESULT_REFUSED then _put_literal(out, position, "Google refused: this build of Quire isn't registered with it.")
-  else if result = RESULT_CANCELED then _put_literal(out, position, "Google sign-in was canceled.")
-  else let
-    val after = _put_literal(out, position, "The server answered with an error (")
-    val after = $S.int_to_str(out, after, 512, status)
-  in _put_literal(out, after, ").") end
+  | WrongCredentials() => _put_literal(out, position, "The user name or password is wrong.")
+  | FolderNotFound() => _put_literal(out, position, "The folder wasn't found.")
+  | KeptChanging() => _put_literal(out, position, "The file kept changing on the server. Try again.")
+  | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB.")
+  | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
+  | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
+  | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
+  | SignInAgain() => _put_literal(out, position, "Tap Sync now to sign in to Google again.")
+  | NoGoogleAccount() => _put_literal(out, position, "Android sync needs a Google account on this device.")
+  | NotSetUp() =>
+    if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
+    else _put_literal(out, position, "Google Drive sync isn't set up in this build of Quire.")
+  | GoogleRefused() => _put_literal(out, position, "Google refused: this build of Quire isn't registered with it.")
+  | SignInCanceled() => _put_literal(out, position, "Google sign-in was canceled.")
+  | DropboxSignInAgain() => _put_literal(out, position, "Dropbox no longer lets Quire in. Tap Dropbox to sign in again.")
+  | DropboxNotSetUp() => _put_literal(out, position, "Dropbox sync isn't set up in this build of Quire.")
+  | DropboxSignInRefused() => _put_literal(out, position, "Dropbox didn't sign Quire in. Try again.")
+  | DropboxSignInCanceled() => _put_literal(out, position, "Dropbox sign-in was canceled.")
+  | ServerError() => _server_error(out, position, status)
+  (* not failures: their own lines are _status_text's *)
+  | NotSyncedYet() => _put_literal(out, position, "Not synced yet.")
+  | Synced() => _put_literal(out, position, "Synced.")
+  | Syncing() => _put_literal(out, position, "Syncing...")
 
 (* minutes (since the epoch) as the local date and time, "2026-10-01 at
    14:05", at out[position] *)
@@ -399,46 +528,96 @@ fn _when_text {l:agz}{position:nat | position + 48 <= 512} (out: !$A.arr(byte, l
   val () = $A.write_byte(out, after + 4, $AR.low_byte(48 + minute - (minute / 10) * 10))
 in after + 5 end
 
+(* How a sync failed, and when it was tried *)
+fn _tried {l:agz} (out: !$A.arr(byte, l, 512), result: sync_result): [stop:nat | stop <= 512] int stop = let
+  val after = _result_text(out, 0, result, !_last_status)
+  val after = _put_literal(out, after, " (Sync tried on ")
+  val after = _when_text(out, after, !_last_minutes)
+in _put_literal(out, after, ".)") end
+
+(* Whether a result is said even with sync off: why Use Android could
+   not turn it on *)
+fn _said_when_off (result: sync_result): bool =
+  case+ result of
+  | NoGoogleAccount() => true
+  | NotSetUp() => true
+  | GoogleRefused() => true
+  | SignInCanceled() => true
+  | DropboxNotSetUp() => true
+  | DropboxSignInRefused() => true
+  | DropboxSignInCanceled() => true
+  | DropboxSignInAgain() => false
+  | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
+  | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
+  | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
+  | SignInAgain() => false
+
 (* The screen's status line: syncing, or how the last sync ended and
    when *)
 fn _status_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] int stop = let
   val result = !_last_result
 in
   if ~_store_on() then
-    (if result >= RESULT_NO_ACCOUNT then _result_text(out, 0, result, 0) else _put_literal(out, 0, "Sync is off."))
-    else if result = RESULT_RUNNING then _put_literal(out, 0, "Syncing...")
-    else if result = RESULT_NONE then _put_literal(out, 0, "Not synced yet.")
-    else if result = RESULT_ADDRESS then _result_text(out, 0, result, 0)
-    else if result = RESULT_DONE then let
+    (if _said_when_off(result) then _result_text(out, 0, result, 0) else _put_literal(out, 0, "Sync is off."))
+  else case+ result of
+    | Syncing() => _put_literal(out, 0, "Syncing...")
+    | NotSyncedYet() => _put_literal(out, 0, "Not synced yet.")
+    | NoAddress() => _result_text(out, 0, result, 0)
+    | Synced() => let
       val after = _put_literal(out, 0, "Last synced on ")
       val after = _when_text(out, after, !_last_minutes)
     in _put_literal(out, after, ".") end
-    else let
-      val after = _result_text(out, 0, result, !_last_status)
-      val after = _put_literal(out, after, " (Sync tried on ")
-      val after = _when_text(out, after, !_last_minutes)
-    in _put_literal(out, after, ".)") end
+    | Unreachable() => _tried(out, result)
+    | Blocked() => _tried(out, result)
+    | WrongCredentials() => _tried(out, result)
+    | FolderNotFound() => _tried(out, result)
+    | KeptChanging() => _tried(out, result)
+    | ServerError() => _tried(out, result)
+    | TooLarge() => _tried(out, result)
+    | Damaged() => _tried(out, result)
+    | NoMemory() => _tried(out, result)
+    | SignInAgain() => _tried(out, result)
+    | NoGoogleAccount() => _tried(out, result)
+    | NotSetUp() => _tried(out, result)
+    | GoogleRefused() => _tried(out, result)
+    | SignInCanceled() => _tried(out, result)
+    | DropboxSignInAgain() => _tried(out, result)
+    | DropboxNotSetUp() => _tried(out, result)
+    | DropboxSignInRefused() => _tried(out, result)
+    | DropboxSignInCanceled() => _tried(out, result)
 end
 
 (* How the last sync failed, in a few words (at most 40 bytes), at
    out[position] *)
-fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: int, status: Int)
+fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte, l, 512), position: int position, result: sync_result, status: Int)
   : [stop:nat | stop <= position + 64] int stop =
-  if result = RESULT_UNREACHABLE then _put_literal(out, position, "Can't reach the server")
-  else if result = RESULT_BLOCKED then _put_literal(out, position, "Can't reach the server")
-  else if result = RESULT_CREDENTIALS then _put_literal(out, position, "Wrong user name or password")
-  else if result = RESULT_FOLDER then _put_literal(out, position, "Folder not found")
-  else if result = RESULT_CONFLICT then _put_literal(out, position, "The file kept changing")
-  else if result = RESULT_TOO_LARGE then _put_literal(out, position, "The sync file is over 16 MB")
-  else if result = RESULT_DAMAGED then _put_literal(out, position, "The sync file can't be read")
-  else if result = RESULT_MEMORY then _put_literal(out, position, "Not enough memory")
-  else if result = RESULT_ADDRESS then _put_literal(out, position, "No folder address")
-  else if result = RESULT_SIGN_IN then _put_literal(out, position, "tap Sync now to sign in")
-  else if result = RESULT_REFUSED then _put_literal(out, position, "Google refused")
-  else let
-    val after = _put_literal(out, position, "Server error (")
-    val after = $S.int_to_str(out, after, 512, status)
-  in _put_literal(out, after, ")") end
+  case+ result of
+  | Unreachable() => _put_literal(out, position, "Can't reach the server")
+  | Blocked() => _put_literal(out, position, "Can't reach the server")
+  | WrongCredentials() => _put_literal(out, position, "Wrong user name or password")
+  | FolderNotFound() => _put_literal(out, position, "Folder not found")
+  | KeptChanging() => _put_literal(out, position, "The file kept changing")
+  | TooLarge() => _put_literal(out, position, "The sync file is over 16 MB")
+  | Damaged() => _put_literal(out, position, "The sync file can't be read")
+  | NoMemory() => _put_literal(out, position, "Not enough memory")
+  | NoAddress() => _put_literal(out, position, "No folder address")
+  | SignInAgain() => _put_literal(out, position, "tap Sync now to sign in")
+  | GoogleRefused() => _put_literal(out, position, "Google refused")
+  | NoGoogleAccount() => _put_literal(out, position, "No Google account")
+  | NotSetUp() => _put_literal(out, position, "Not set up in this build")
+  | SignInCanceled() => _put_literal(out, position, "Sign-in canceled")
+  | DropboxSignInAgain() => _put_literal(out, position, "sign in to Dropbox again")
+  | DropboxNotSetUp() => _put_literal(out, position, "Not set up in this build")
+  | DropboxSignInRefused() => _put_literal(out, position, "Dropbox refused")
+  | DropboxSignInCanceled() => _put_literal(out, position, "Sign-in canceled")
+  | ServerError() => let
+      val after = _put_literal(out, position, "Server error (")
+      val after = $S.int_to_str(out, after, 512, status)
+    in _put_literal(out, after, ")") end
+  (* not failures: _summary_text says them *)
+  | NotSyncedYet() => _put_literal(out, position, "not synced yet")
+  | Synced() => _put_literal(out, position, "synced")
+  | Syncing() => _put_literal(out, position, "syncing...")
 
 (* The Settings screen's Sync row's state: "Off", the store and how long
    ago it last synced ("WebDAV \xC2\xB7 synced 2 min ago"), or how the
@@ -448,13 +627,15 @@ fn _summary_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] 
 in
   if ~_store_on() then _put_literal(out, 0, "Off")
   else let
-    val after = (if _store_kind() <> STORE_ANDROID then _put_literal(out, 0, "WebDAV \xC2\xB7 ")
+    val after = (if _store_kind_is_dropbox() then _put_literal(out, 0, "Dropbox \xC2\xB7 ")
+      else if ~_is_android() then _put_literal(out, 0, "WebDAV \xC2\xB7 ")
       else if $BAPP.is_native_platform() then _put_literal(out, 0, "Android \xC2\xB7 ")
       else _put_literal(out, 0, "Google Drive \xC2\xB7 ")): [after:nat | after <= 20] int after
   in
-    if result = RESULT_RUNNING then _put_literal(out, after, "syncing...")
-    else if result = RESULT_NONE then _put_literal(out, after, "not synced yet")
-    else if result = RESULT_DONE then let
+    case+ result of
+    | Syncing() => _put_literal(out, after, "syncing...")
+    | NotSyncedYet() => _put_literal(out, after, "not synced yet")
+    | Synced() => let
       val elapsed = $TM.epoch_minutes() - !_last_minutes
     in
       if elapsed < 1 then _put_literal(out, after, "synced just now")
@@ -470,7 +651,25 @@ in
         val after = _put_literal(out, after, "synced on ")
       in _when_text(out, after, !_last_minutes) end
     end
-    else _result_short(out, 0, result, !_last_status)
+    | Unreachable() => _result_short(out, 0, result, !_last_status)
+    | Blocked() => _result_short(out, 0, result, !_last_status)
+    | WrongCredentials() => _result_short(out, 0, result, !_last_status)
+    | FolderNotFound() => _result_short(out, 0, result, !_last_status)
+    | KeptChanging() => _result_short(out, 0, result, !_last_status)
+    | ServerError() => _result_short(out, 0, result, !_last_status)
+    | TooLarge() => _result_short(out, 0, result, !_last_status)
+    | Damaged() => _result_short(out, 0, result, !_last_status)
+    | NoMemory() => _result_short(out, 0, result, !_last_status)
+    | NoAddress() => _result_short(out, 0, result, !_last_status)
+    | SignInAgain() => _result_short(out, 0, result, !_last_status)
+    | NoGoogleAccount() => _result_short(out, 0, result, !_last_status)
+    | NotSetUp() => _result_short(out, 0, result, !_last_status)
+    | GoogleRefused() => _result_short(out, 0, result, !_last_status)
+    | SignInCanceled() => _result_short(out, 0, result, !_last_status)
+    | DropboxSignInAgain() => _result_short(out, 0, result, !_last_status)
+    | DropboxNotSetUp() => _result_short(out, 0, result, !_last_status)
+    | DropboxSignInRefused() => _result_short(out, 0, result, !_last_status)
+    | DropboxSignInCanceled() => _result_short(out, 0, result, !_last_status)
   end
 end
 
@@ -565,6 +764,10 @@ fn _request_parts {url_loc,authorization_loc:agz}
       val _ = _put_literal(url, 0, "/")
       val () = _store_free(_store_swap(_store, Android(account, account_len)))
     in @(1, 0) end
+  | ~Dropbox(refresh, refresh_len) => let
+      val _ = _put_literal(url, 0, "/")
+      val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
+    in @(1, 0) end
   | ~WebDav(folder, folder_len, user, user_len, password, password_len) => let
       val url_len = _file_url(folder, folder_len, url)
       val authorization_len = _authorization(user, user_len, password, password_len, authorization)
@@ -577,6 +780,9 @@ fn _store_url {l:agz} (out: !$A.arr(byte, l, 1041)): [length:nat | length <= 104
   | ~NoStore() => 0
   | ~Android(account, account_len) => let
       val () = _store_free(_store_swap(_store, Android(account, account_len)))
+    in 0 end
+  | ~Dropbox(refresh, refresh_len) => let
+      val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
     in 0 end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val length = _file_url(url, url_len, out)
@@ -661,16 +867,15 @@ in cross end
    ============================================================ *)
 
 (* What a read gives: the file (its bytes in a piece, its version kept
-   for the write), none yet, or how it failed (a RESULT_ kind, and the
-   server's status) *)
+   for the write), none yet, or how it failed (and the server's status) *)
 datavtype read_answer =
   | {owner,l:agz}{n:pos | n <= 268435456} ReadFile of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
   | ReadNothing of ()
-  | ReadFailed of (int, Int)
+  | ReadFailed of (sync_result, Int)
 
 (* What a write gives: written, a conflict (another device wrote the
    file since its version was read), or how it failed *)
-datavtype write_answer = Written of () | WriteConflict of () | WriteFailed of (int, Int)
+datavtype write_answer = Written of () | WriteConflict of () | WriteFailed of (sync_result, Int)
 
 (* An answer nobody took (its promise let go), freed *)
 implement $P.dispose<read_answer>(answer) =
@@ -679,20 +884,41 @@ implement $P.dispose<read_answer>(answer) =
   | ~ReadNothing() => ()
   | ~ReadFailed(_, _) => ()
 
+(* a Dropbox read, made in this module when no token is held *)
+implement $P.dispose<drive_got>(got) =
+  case+ got of
+  | ~DriveGot(owner, file, _) => piece_free(owner, file)
+  | ~DriveNothing() => ()
+  | ~DriveFailed(_) => ()
+
 implement $P.dispose<write_answer>(answer) =
   case+ answer of
   | ~Written() => ()
   | ~WriteConflict() => ()
   | ~WriteFailed(_, _) => ()
 
+(* An HTTP status, read once: success (2xx); 401 or 403, the credentials
+   refused; 404, not found; 409, the folder missing (a PUT into one that
+   is not there); 412, the version changed; or another *)
+datatype http_answer = HttpSuccess | HttpRefused | HttpNotFound | HttpNoFolder | HttpChanged | HttpOther
+
+fn _http_answer (status: Int): http_answer =
+  if status >= 200 then (if status < 300 then HttpSuccess()
+    else if status = 401 then HttpRefused() else if status = 403 then HttpRefused()
+    else if status = 404 then HttpNotFound() else if status = 409 then HttpNoFolder()
+    else if status = 412 then HttpChanged() else HttpOther())
+  else HttpOther()
+
 (* What a status a store refused with says: the credentials, the place
    the file is kept, or the server *)
-fn _failure_kind (status: Int): int =
-  if status = 401 then RESULT_CREDENTIALS
-  else if status = 403 then RESULT_CREDENTIALS
-  else if status = 404 then RESULT_FOLDER
-  else if status = 409 then RESULT_FOLDER
-  else RESULT_SERVER
+fn _failure_kind (answer: http_answer): sync_result =
+  case+ answer of
+  | HttpRefused() => WrongCredentials()
+  | HttpNotFound() => FolderNotFound()
+  | HttpNoFolder() => FolderNotFound()
+  | HttpSuccess() => ServerError()
+  | HttpChanged() => ServerError()
+  | HttpOther() => ServerError()
 
 (* What a request came to, with the response's ETag written to etag:
    its status, the tag's length (0 when it has none) and its body; none
@@ -714,7 +940,13 @@ fn _tagged {l:agz}{etag_size:pos}
 
 (* A request that never reached the store: offline, or (another origin)
    refused by the browser *)
-fn _unreached (): int = if _cross_origin() then RESULT_BLOCKED else RESULT_UNREACHABLE
+fn _unreached (): sync_result = if _cross_origin() then Blocked() else Unreachable()
+
+(* A read the server refused with status *)
+fn _read_failed {n:nat}{l:agz} (body: $BD.dblob(n), etag: $A.arr(byte, l, ETAG_MAX), status: Int): read_answer = let
+  val () = $BD.blob_free(body)
+  val () = $A.free<byte>(etag)
+in ReadFailed(_failure_kind(_http_answer(status)), status) end
 
 (* WebDAV: GET the file; its ETag is its version, and 404 is no file yet *)
 fn _webdav_read (): $P.promise(read_answer, $P.Chained) = let
@@ -728,28 +960,29 @@ in
     val answer = (case+ _tagged(got, etag, ETAG_MAX) of
       | ~$R.none() => let val () = $A.free<byte>(etag) in ReadFailed(_unreached(), 0) end
       | ~$R.some(@(status, etag_len, body)) =>
-        if status = 404 then let
+        (case+ _http_answer(status) of
+        | HttpNotFound() => let
           val () = $BD.blob_free(body)
           (* no file yet: it is written without a version to match *)
           val () = _etag_set(etag, 0)
         in ReadNothing() end
-        else if (if status < 200 then true else status >= 300) then let
-          val () = $BD.blob_free(body)
-          val () = $A.free<byte>(etag)
-        in ReadFailed(_failure_kind(status), status) end
-        else let
+        | HttpSuccess() => let
           val size = $BD.blob_len(body)
           val () = _etag_set(etag, etag_len)
         in
-          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in ReadFailed(RESULT_TOO_LARGE, 0) end
+          if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(body) in ReadFailed(TooLarge(), 0) end
           else if size <= 0 then let val () = $BD.blob_free(body) in ReadNothing() end
           else (case+ piece_new(size) of
-            | ~NoPiece() => let val () = $BD.blob_free(body) in ReadFailed(RESULT_MEMORY, 0) end
+            | ~NoPiece() => let val () = $BD.blob_free(body) in ReadFailed(NoMemory(), 0) end
             | ~Piece(owner, file) => let
                 val () = $BD.blob_read(body, 0, file, size)
                 val () = $BD.blob_free(body)
               in ReadFile(owner, file, size) end)
-        end): read_answer
+        end
+        | HttpRefused() => _read_failed(body, etag, status)
+        | HttpNoFolder() => _read_failed(body, etag, status)
+        | HttpChanged() => _read_failed(body, etag, status)
+        | HttpOther() => _read_failed(body, etag, status))): read_answer
   in $P.ret<read_answer>(answer) end)
 end
 
@@ -767,9 +1000,13 @@ in
           val () = $A.free<byte>(etag)
           val () = $BD.blob_free(reply)
         in
-          if status = 412 then WriteConflict()
-          else if (if status >= 200 then status < 300 else false) then Written()
-          else WriteFailed(_failure_kind(status), status)
+          case+ _http_answer(status) of
+          | HttpChanged() => WriteConflict()
+          | HttpSuccess() => Written()
+          | HttpRefused() => WriteFailed(WrongCredentials(), status)
+          | HttpNotFound() => WriteFailed(FolderNotFound(), status)
+          | HttpNoFolder() => WriteFailed(FolderNotFound(), status)
+          | HttpOther() => WriteFailed(ServerError(), status)
         end): write_answer
   in $P.ret<write_answer>(answer) end)
 end
@@ -797,21 +1034,21 @@ in previous end
 
 (* What a Drive status says: 401 is a token Drive no longer takes (it is
    forgotten), -1 to -3 drive.bats' own *)
-fn _drive_failure (status: Int): int =
+fn _drive_failure (status: Int): sync_result =
   if status = 401 then let
     val () = _token_free(_token_swap(NoToken()))
-  in RESULT_SIGN_IN end
-  else if status = 0 then RESULT_UNREACHABLE
-  else if status = ~1 then RESULT_TOO_LARGE
-  else if status = ~2 then RESULT_MEMORY
-  else if status = ~3 then RESULT_DAMAGED
-  else if status = 403 then RESULT_REFUSED
-  else RESULT_SERVER
+  in SignInAgain() end
+  else if status = 0 then Unreachable()
+  else if status = ~1 then TooLarge()
+  else if status = ~2 then NoMemory()
+  else if status = ~3 then Damaged()
+  else if status = 403 then GoogleRefused()
+  else ServerError()
 
 (* The Android store: the file in the account's Drive *)
 fn _android_read (): $P.promise(read_answer, $P.Chained) =
   case+ _token_swap(NoToken()) of
-  | ~NoToken() => $P.ret<read_answer>(ReadFailed(RESULT_SIGN_IN, 0))
+  | ~NoToken() => $P.ret<read_answer>(ReadFailed(SignInAgain(), 0))
   | ~Token(token, token_len) => let
       val pending = drive_read(token, token_len, SYNC_MAX_BYTES)
       val () = _token_free(_token_swap(Token(token, token_len)))
@@ -826,7 +1063,7 @@ fn _android_read (): $P.promise(read_answer, $P.Chained) =
 fn _android_write {body_loc:agz}{body_size:pos | body_size <= 16777216}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
   case+ _token_swap(NoToken()) of
-  | ~NoToken() => $P.ret<write_answer>(WriteFailed(RESULT_SIGN_IN, 0))
+  | ~NoToken() => $P.ret<write_answer>(WriteFailed(SignInAgain(), 0))
   | ~Token(token, token_len) => let
       val pending = drive_write(token, token_len, body, body_size)
       val () = _token_free(_token_swap(Token(token, token_len)))
@@ -855,13 +1092,13 @@ in
   $P.and_then<$BACKUP.backup_found><read_answer>(pending, llam(found) =>
     case+ found of
     | ~$BACKUP.BackupNone() => $P.ret<read_answer>(ReadNothing())
-    | ~$BACKUP.BackupUnreadable() => $P.ret<read_answer>(ReadFailed(RESULT_DAMAGED, 0))
+    | ~$BACKUP.BackupUnreadable() => $P.ret<read_answer>(ReadFailed(Damaged(), 0))
     | ~$BACKUP.BackupFound(blob) => let
         val size = $BD.blob_len(blob)
       in
-        if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(RESULT_TOO_LARGE, 0)) end
+        if size > SYNC_MAX_BYTES then let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(TooLarge(), 0)) end
         else (case+ piece_new(size) of
-          | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(RESULT_MEMORY, 0)) end
+          | ~NoPiece() => let val () = $BD.blob_free(blob) in $P.ret<read_answer>(ReadFailed(NoMemory(), 0)) end
           | ~Piece(owner, file) => let
               val () = $BD.blob_read(blob, 0, file, size)
               val () = $BD.blob_free(blob)
@@ -879,18 +1116,130 @@ in
   $P.and_then<$BACKUP.backup_written><write_answer>(pending, llam(written) =>
     case+ written of
     | $BACKUP.BackupWritten() => $P.ret<write_answer>(Written())
-    | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(RESULT_MEMORY, 0)))
+    | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(NoMemory(), 0)))
 end
 
-(* Reads the file from the store *)
-fn store_read (): $P.promise(read_answer, $P.Chained) = let
-  val kind = _store_kind()
+(* Whether an access token is held for the Dropbox store, or why none
+   could be got *)
+datavtype dropbox_access = AccessHeld of () | AccessFailed of (sync_result)
+
+implement $P.dispose<dropbox_access>(access) =
+  case+ access of
+  | ~AccessHeld() => ()
+  | ~AccessFailed(_) => ()
+
+(* The Dropbox store: an access token, kept, or got anew with the
+   refresh token kept (no sheet, no page: Dropbox's token endpoint) *)
+fn _dropbox_access (): $P.promise(dropbox_access, $P.Chained) = let
+  val held = _token_swap(NoToken())
+  val have = (case+ held of Token(_, _) => true | NoToken() => false): bool
+  val () = _token_free(_token_swap(held))
 in
-  if kind = STORE_WEBDAV then _webdav_read()
-  else if kind = STORE_ANDROID then _android_read()
-  else if kind = STORE_BACKUP then _backup_read()
-  else $P.ret<read_answer>(ReadFailed(RESULT_NONE, 0))
+  if have then $P.ret<dropbox_access>(AccessHeld())
+  else let
+    val key = $A.alloc<byte>(256)
+    val key_len = sync_clients_dropbox(key)
+  in
+    if key_len <= 0 then let
+      val () = $A.free<byte>(key)
+    in $P.ret<dropbox_access>(AccessFailed(DropboxNotSetUp())) end
+    else (case+ _store_swap(_store, NoStore()) of
+      | ~Dropbox(refresh, refresh_len) => let
+          val pending = dropbox_refresh(key, key_len, refresh, refresh_len)
+          val () = $A.free<byte>(key)
+          val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
+        in
+          $P.and_then<dropbox_tokens><dropbox_access>(pending, llam(tokens) =>
+            case+ tokens of
+            | ~DropboxTokens(access, access_len, refresh, _) => let
+                val () = $A.free<byte>(refresh)
+                val () = _token_free(_token_swap(Token(access, access_len)))
+              in $P.ret<dropbox_access>(AccessHeld()) end
+            | ~DropboxRefused(status) =>
+              $P.ret<dropbox_access>(AccessFailed(if status = 0 then Unreachable()
+                else if status = 400 then DropboxSignInAgain()
+                else if status = 401 then DropboxSignInAgain()
+                else ServerError())))
+        end
+      | other => let
+          val () = $A.free<byte>(key)
+          val () = _store_free(_store_swap(_store, other))
+        in $P.ret<dropbox_access>(AccessFailed(NotSyncedYet())) end)
+  end
 end
+
+(* What a Dropbox status says: 401 is an access token Dropbox no longer
+   takes (it is forgotten; the next sync gets another) *)
+fn _dropbox_failure (status: Int): sync_result =
+  if status = 401 then let
+    val () = _token_free(_token_swap(NoToken()))
+  in DropboxSignInAgain() end
+  else if status = 0 then Unreachable()
+  else if status = ~1 then TooLarge()
+  else if status = ~2 then NoMemory()
+  else if status = ~3 then Damaged()
+  else ServerError()
+
+(* The file read with the access token kept *)
+fn _dropbox_read_kept (): $P.promise(drive_got, $P.Chained) =
+  case+ _token_swap(NoToken()) of
+  | ~NoToken() => $P.ret<drive_got>(DriveFailed(401))
+  | ~Token(token, token_len) => let
+      val pending = dropbox_read(token, token_len, SYNC_MAX_BYTES)
+      val () = _token_free(_token_swap(Token(token, token_len)))
+    in pending end
+
+fn _dropbox_answer (got: drive_got): read_answer =
+  case+ got of
+  | ~DriveGot(owner, file, n) => ReadFile(owner, file, n)
+  | ~DriveNothing() => ReadNothing()
+  | ~DriveFailed(status) => ReadFailed(_dropbox_failure(status), status)
+
+(* The file read: with the access token, or one got anew; an access
+   token Dropbox no longer takes (it expires after hours) is replaced
+   once, with no sign-in *)
+fn _dropbox_read (): $P.promise(read_answer, $P.Chained) =
+  $P.and_then<dropbox_access><read_answer>(_dropbox_access(), llam(access) =>
+    case+ access of
+    | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 0))
+    | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_dropbox_read_kept(), llam(got) =>
+      case+ got of
+      | ~DriveFailed(status) =>
+        if status = 401 then let
+          val () = _token_free(_token_swap(NoToken()))
+        in
+          $P.and_then<dropbox_access><read_answer>(_dropbox_access(), llam(again) =>
+            case+ again of
+            | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 0))
+            | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_dropbox_read_kept(), llam(got) =>
+              $P.ret<read_answer>(_dropbox_answer(got))))
+        end
+        else $P.ret<read_answer>(ReadFailed(_dropbox_failure(status), status))
+      | other => $P.ret<read_answer>(_dropbox_answer(other))))
+
+fn _dropbox_write {body_loc:agz}{body_size:pos}
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
+  case+ _token_swap(NoToken()) of
+  | ~NoToken() => $P.ret<write_answer>(WriteFailed(DropboxSignInAgain(), 0))
+  | ~Token(token, token_len) => let
+      val pending = dropbox_write(token, token_len, body, body_size)
+      val () = _token_free(_token_swap(Token(token, token_len)))
+    in
+      $P.and_then<drive_put><write_answer>(pending, llam(put) =>
+        case+ put of
+        | ~DrivePut() => $P.ret<write_answer>(Written())
+        | ~DriveChanged() => $P.ret<write_answer>(WriteConflict())
+        | ~DrivePutFailed(status) => $P.ret<write_answer>(WriteFailed(_dropbox_failure(status), status)))
+    end
+
+(* Reads the file from the store *)
+fn store_read (): $P.promise(read_answer, $P.Chained) =
+  case+ _store_kind() of
+  | WebDavKind() => _webdav_read()
+  | AndroidKind() => _android_read()
+  | DropboxKind() => _dropbox_read()
+  | BackupKind() => _backup_read()
+  | NoStoreKind() => $P.ret<read_answer>(ReadFailed(NotSyncedYet(), 0))
 
 (* Writes body[0, body_size) to the store, as a change of the version
    read; once a store's write is done, the app's backed-up file is
@@ -898,18 +1247,20 @@ end
 fn store_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val kind = _store_kind()
-  val backed_up = (if kind = STORE_WEBDAV then true else kind = STORE_ANDROID): bool
+  val backed_up = (case+ kind of WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | BackupKind() => false | NoStoreKind() => false): bool
   val () = (if ~backed_up then ()
     else if ~$BACKUP.backup_file_available() then ()
     (* ignored: the backed-up file is a safety net; one not written
        now is written at the next sync *)
     else $P.finish<write_answer>(_backup_write(body, body_size), llam(_) => ()))
 in
-  if kind = STORE_WEBDAV then _webdav_write(body, body_size)
-  else if kind = STORE_ANDROID then
-    (if body_size > 16777216 then $P.ret<write_answer>(WriteFailed(RESULT_TOO_LARGE, 0)) else _android_write(body, body_size))
-  else if kind = STORE_BACKUP then _backup_write(body, body_size)
-  else $P.ret<write_answer>(WriteFailed(RESULT_NONE, 0))
+  case+ kind of
+  | WebDavKind() => _webdav_write(body, body_size)
+  | AndroidKind() =>
+    if body_size > 16777216 then $P.ret<write_answer>(WriteFailed(TooLarge(), 0)) else _android_write(body, body_size)
+  | DropboxKind() => _dropbox_write(body, body_size)
+  | BackupKind() => _backup_write(body, body_size)
+  | NoStoreKind() => $P.ret<write_answer>(WriteFailed(NotSyncedYet(), 0))
 end
 
 (* ============================================================
@@ -1286,7 +1637,7 @@ fn _round_settle (how: round_end): void =
 
 (* The end of a sync: how it ended, kept and shown; its round ended
    (another starts when one was asked for meanwhile) *)
-fn _end (result: int, status: Int): void = let
+fn _end (result: sync_result, status: Int): void = let
   val () = _held_free(_held_swap(_remote, NoHeld()))
   val () = _held_free(_held_swap(_written, NoHeld()))
   val () = _out_put(jfile_new{SYNC_MAX_BYTES}())
@@ -1298,12 +1649,12 @@ fn _end (result: int, status: Int): void = let
   val () = !_busy := false
 in _round_settle(RoundEnded()) end
 
-fn _fail (result: int, status: Int): void = _end(result, status)
+fn _fail (result: sync_result, status: Int): void = _end(result, status)
 
 fn _done (): void = let
   (* this device's number is its own once the file has it *)
   val () = (if !_device <= 0 then !_device := !_device_now else ())
-in _end(RESULT_DONE, 0) end
+in _end(Synced(), 0) end
 
 (* ============================================================
    The merge, taken: once the file is written
@@ -1585,7 +1936,7 @@ fn _take (): void =
    was read), read and merged again, up to TRIES times *)
 fn _write (): void =
   case+ _held_swap(_written, NoHeld()) of
-  | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+  | ~NoHeld() => _fail(NoMemory(), 0)
   | ~Held(owner, file, n, names_at, books, devices) => let
       val @(file_frozen, file_bytes) = $A.freeze<byte>(file)
       val () = $P.finish<write_answer>(store_write(file_bytes, n), llam(answer) =>
@@ -1594,7 +1945,7 @@ fn _write (): void =
         | ~WriteConflict() => let
             val () = _held_free(_held_swap(_written, NoHeld()))
             val () = !_tries := !_tries + 1
-          in if !_tries >= TRIES then _fail(RESULT_CONFLICT, 412) else _round_settle(RoundConflict()) end
+          in if !_tries >= TRIES then _fail(KeptChanging(), 412) else _round_settle(RoundConflict()) end
         | ~WriteFailed(kind, status) => _fail(kind, status))
       val () = $A.drop<byte>(file_frozen, file_bytes)
       val file = $A.thaw<byte>(file_frozen)
@@ -1791,10 +2142,10 @@ fn _tail (): void = let
   val () = _push(_text_chunk("]}"))
 in
   case+ jfile_join(_out_take()) of
-  | ~JNoWhole() => _fail(RESULT_MEMORY, 0)
+  | ~JNoWhole() => _fail(NoMemory(), 0)
   | ~JWhole(owner, file, n) =>
     (case+ _hold(owner, file, n) of
-     | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+     | ~NoHeld() => _fail(NoMemory(), 0)
      | ~Held(file_owner, bytes, size, names_at, books, devices) => let
          val () = _held_free(_held_swap(_written, Held(file_owner, bytes, size, names_at, books, devices)))
        in _write() end)
@@ -1847,7 +2198,7 @@ in _books(0, lib_count()) end
 (* The file read in a piece, held as _remote, merged *)
 fn _merge_held (file: held): void =
   case+ file of
-  | ~NoHeld() => _fail(RESULT_MEMORY, 0)
+  | ~NoHeld() => _fail(NoMemory(), 0)
   | ~Held(owner, bytes, n, names_at, books, devices) => let
       val () = _held_free(_held_swap(_remote, Held(owner, bytes, n, names_at, books, devices)))
     in _merge() end
@@ -1859,14 +2210,14 @@ fn _read (): void = $P.finish<read_answer>(store_read(), llam(answer) =>
   | ~ReadFailed(kind, status) => _fail(kind, status)
   | ~ReadFile(owner, file, size) =>
     (case+ _hold(owner, file, size) of
-     | ~NoHeld() => _fail(RESULT_DAMAGED, 0)
+     | ~NoHeld() => _fail(Damaged(), 0)
      | ~Held(file_owner, bytes, n, names_at, books, devices) => _merge_held(Held(file_owner, bytes, n, names_at, books, devices))))
 
 (* A sync begun: under way, with no try made yet *)
 fn _run_begin (): void = let
   val () = !_busy := true
   val () = !_tries := 0
-  val () = !_last_result := RESULT_RUNNING
+  val () = !_last_result := Syncing()
 in _status_show() end
 
 (* The most rounds one sync_run makes: each sync's tries, for each of
@@ -1887,7 +2238,7 @@ fun _rounds {left:nat} .<left>. (left: int left): void = let
 in
   $P.finish<round_end>(ended, llam(how) =>
     if left <= 0 then (case+ how of
-      | RoundConflict() => _fail(RESULT_CONFLICT, 412)
+      | RoundConflict() => _fail(KeptChanging(), 412)
       | RoundEnded() => ())
     else (case+ how of
       | RoundConflict() => _rounds(left - 1)
@@ -1913,94 +2264,6 @@ implement sync_run () =
 (* Reads the state and the store kept, then syncs (when sync is on):
    once the library is read *)
 #pub fn sync_start (): void
-implement sync_start () = let
-  (* ignored: the clients are read for Use Android, which says it is not
-     set up while there are none *)
-  val () = $P.finish<int>(sync_clients_load(), llam(_) => ())
-  val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
-  val state_pending = $IDB.idb_get(state_bytes, 10)
-  val () = release_bytes(state_frozen, state_bytes)
-  val state_read = $P.and_then<$IDB.lookup><bool>(state_pending, llam(found) => let
-    val readable = (case+ lookup_bytes(found) of
-      | ~NothingStored() => true
-      | ~StoredUnreadable() => let val () = storage_unreadable(SyncStateRecord()) in false end
-      | ~StoredBytes(record, n) =>
-        if n < 20 then let val () = $A.free<byte>(record) in true end
-        else let
-          val () = !_device := _i32_at(record, 4)
-          val () = !_last_minutes := _i32_at(record, 8)
-          val result = g0ofg1(_i32_at(record, 12))
-          (* a sync the last run left under way did not end *)
-          val () = !_last_result := (if result = RESULT_RUNNING then RESULT_NONE else result)
-          val () = !_last_status := _i32_at(record, 16)
-          val () = $A.free<byte>(record)
-        in true end): bool
-  in $P.ret<bool>(readable) end)
-in
-  (* ignored: each read in the chain deals with its own value (none read
-     leaves sync off, as at its first run) *)
-  $P.finish<int>($P.and_then<bool><int>(state_read, llam(readable) =>
-    (* a state that could not be read leaves sync off this session: a
-       sync would save this device's state over it (its number, #174) *)
-    if ~readable then $P.ret<int>(0)
-    else let
-    val @(choice_frozen, choice_bytes) = $A.freeze<byte>(_choice_key())
-    val choice_pending = $IDB.idb_get(choice_bytes, 4)
-    val () = release_bytes(choice_frozen, choice_bytes)
-  in
-    $P.and_then<$IDB.lookup><int>(choice_pending, llam(found) => let
-      (* the store chosen: its kind (none, and sync off, when it could
-         not be read) *)
-      val kind = (case+ lookup_bytes(found) of
-        | ~NothingStored() => 0
-        | ~StoredUnreadable() => 0
-        | ~StoredBytes(record, n) => let
-            val kind = (if n >= 5 then (if byte2int0($A.get<byte>(record, 1)) = 83 then byte2int0($A.get<byte>(record, 4)) else 0) else 0): int
-            val () = $A.free<byte>(record)
-          in kind end): int
-    in
-      if kind = STORE_ANDROID then let
-        val @(android_frozen, android_bytes) = $A.freeze<byte>(_android_key())
-        val android_pending = $IDB.idb_get(android_bytes, 12)
-        val () = release_bytes(android_frozen, android_bytes)
-      in
-        $P.and_then<$IDB.lookup><int>(android_pending, llam(found) => let
-          val () = (case+ lookup_bytes(found) of
-            | ~NothingStored() => ()
-            (* no store: sync stays off this session *)
-            | ~StoredUnreadable() => ()
-            | ~StoredBytes(record, n) => let
-                val read = _android_of_record(record, n)
-                val () = $A.free<byte>(record)
-              in _store_free(_store_swap(_store, read)) end)
-          val () = sync_run()
-        in $P.ret<int>(0) end)
-      end
-      else if kind <> STORE_WEBDAV then let
-        (* no store chosen: the app's backed-up file, where it has one *)
-        val () = sync_run()
-      in $P.ret<int>(0) end
-      else let
-        val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
-        val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
-        val () = release_bytes(webdav_frozen, webdav_bytes)
-      in
-        $P.and_then<$IDB.lookup><int>(webdav_pending, llam(found) => let
-          val () = (case+ lookup_bytes(found) of
-            | ~NothingStored() => ()
-            (* no store: sync stays off this session *)
-            | ~StoredUnreadable() => ()
-            | ~StoredBytes(record, n) => let
-                val read = _store_of_record(record, n)
-                val () = $A.free<byte>(record)
-              in _store_free(_store_swap(_store, read)) end)
-          val () = sync_run()
-        in $P.ret<int>(0) end)
-      end
-    end)
-  end), llam(_) => ())
-end
-
 (* A book opened in the reader (its library key): sync, to bring its
    place and annotations from the other devices *)
 #pub fn sync_book_opened (key: Int): void
@@ -2050,12 +2313,25 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
   val () = ui_text("sync-title", "Sync")
   val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
-  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file in a WebDAV folder (Nextcloud, ownCloud, a NAS). Use an app password if your server offers one: it is kept on this device only, never in a backup. Your books' files are not synced.")
+  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
   val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
   val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
   val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
   val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
   val () = ui_show("sync-android-row", false)
+  val () = ui_el("sync-box", "sync-dropbox-row", TDiv, "sfields")
+  val () = ui_text_btn("sync-dropbox-row", "sync-dropbox", "btn", "Dropbox")
+  val () = ui_el("sync-dropbox-row", "sync-dropbox-about", TDiv, "sabout")
+  val () = ui_show("sync-dropbox-row", false)
+  (* Nextcloud: its address, then its own sign-in page (Login Flow v2),
+     which gives an app password *)
+  val () = ui_el("sync-box", "nextcloud-box", TDiv, "sfields")
+  val () = ui_field("nextcloud-box", "nextcloud-server", FUrl, "mname", "Nextcloud server")
+  val () = ui_text_btn("nextcloud-box", "nextcloud-sign-in", "btn", "Sign in with Nextcloud")
+  val () = ui_link_out("nextcloud-box", "nextcloud-page", "btn linkout", "Open Nextcloud's sign-in page")
+  val () = ui_show("nextcloud-page", false)
+  val () = ui_el("sync-box", "sync-webdav-title", TDiv, "sabout")
+  val () = ui_text("sync-webdav-title", "Or any WebDAV folder (ownCloud, a NAS): its address, user name and an app password.")
   val () = ui_el("sync-box", "sync-fields", TDiv, "sfields")
   val () = _fields_make()
   val () = ui_el("sync-box", "sync-status", TDiv, "cnone")
@@ -2078,6 +2354,7 @@ in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
   | ~Android(account, account_len) => _store_free(_store_swap(_store, Android(account, account_len)))
+  | ~Dropbox(refresh, refresh_len) => _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       fn copy {source_loc:agz}{size:pos}{count:pos | count <= size; count <= 1024} (source: !$A.arr(byte, source_loc, size), count: int count): [l:agz] $A.arr(byte, l, count) = let
         val out = $A.alloc<byte>(count)
@@ -2111,6 +2388,17 @@ implement sync_screen_open () = let
     else if client_len <= 0 then ui_text_long("sync-android-about", "Android sync isn't set up in this build of Quire.")
     else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
     else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
+  (* Dropbox in a browser (the app's sign-in through the system's
+     browser is still to come): what it does, or that this build has no
+     key to sign in with *)
+  val key = $A.alloc<byte>(256)
+  val key_len = sync_clients_dropbox(key)
+  val () = $A.free<byte>(key)
+  val () = ui_show("sync-dropbox-row", ~app)
+  val () = ui_show("sync-dropbox", key_len > 0)
+  val () = (if app then ()
+    else if key_len <= 0 then ui_text_long("sync-dropbox-about", "Dropbox sync isn't set up in this build of Quire.")
+    else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
   val () = _fields_show()
   val () = _status_show()
   val () = ui_show("sync-off", _store_on())
@@ -2151,10 +2439,10 @@ fun _starts {l:agz}{n:nat}{text_len:nat | text_len <= n}{beginning_len:nat}{j:na
   else _starts(text, text_len, beginning, beginning_len, j + 1)
 
 (* What asking for a token came to: the account's address (the token is
-   kept, in _token), or how it failed (RESULT_) *)
+   kept, in _token), or how it failed (a sync_result) *)
 datavtype asked =
   | {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} Asked of ($A.arr(byte, l, ACCOUNT_MAX), int account_len)
-  | AskFailed of (int)
+  | AskFailed of (sync_result)
 
 implement $P.dispose<asked>(answer) =
   case+ answer of
@@ -2195,7 +2483,7 @@ fn _token_ask (): $P.promise(asked, $P.Chained) = let
 in
   if client_len <= 0 then let
     val () = $A.free<byte>(client)
-  in $P.ret<asked>(AskFailed(RESULT_NOT_SET_UP)) end
+  in $P.ret<asked>(AskFailed(NotSetUp())) end
   else let
     val scope = $A.alloc<byte>(45)
     val () = $A.write_text(scope, 0, $A.text_lit("https://www.googleapis.com/auth/drive.appdata"), 45)
@@ -2214,17 +2502,17 @@ in
           val @(address, address_len) = _address_of(account)
         in
           if kept then $P.ret<asked>(Asked(address, address_len))
-          else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(RESULT_REFUSED)) end
+          else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
         end
-      | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(RESULT_NO_ACCOUNT))
-      | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(RESULT_CANCELED))
-      | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(RESULT_REFUSED))
-      | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(RESULT_NOT_SET_UP)))
+      | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(NoGoogleAccount()))
+      | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
+      | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(GoogleRefused()))
+      | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(NotSetUp())))
   end
 end
 
 (* A sign-in that failed, said on the screen *)
-fn _ask_failed (result: int): void = let
+fn _ask_failed (result: sync_result): void = let
   val () = !_last_result := result
   val () = !_last_status := 0
   val () = !_last_minutes := $TM.epoch_minutes()
@@ -2236,7 +2524,7 @@ fn _android_chosen {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} (accoun
   val () = _store_free(_store_swap(_store, Android(account, account_len)))
   val () = _store_save()
   (* not synced to it yet: a sync of the backed-up file's does not count *)
-  val () = !_last_result := RESULT_NONE
+  val () = !_last_result := NotSyncedYet()
   val () = (if layer_is_open(LSync()) then let
       val () = _fields_show()
     in ui_show("sync-off", true) end else ())
@@ -2280,30 +2568,230 @@ in
     val () = $A.free<byte>(password)
   in
     (* no folder given: the Android store's sync, when it is the one *)
-    if _store_kind() = STORE_ANDROID then _android_now()
+    if _is_android() then _android_now()
+    else if _store_kind_is_dropbox() then sync_run()
     else let
-      val () = !_last_result := RESULT_ADDRESS
+      val () = !_last_result := NoAddress()
     in _status_show() end
   end
   else if ~web then let
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-    val () = !_last_result := RESULT_ADDRESS
+    val () = !_last_result := NoAddress()
   in _status_show() end
   else let
     val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
     val () = _store_save()
     val () = ui_show("sync-off", true)
     (* not synced to it yet, while a sync of the backed-up file's ends *)
-    val () = (if !_busy then !_last_result := RESULT_NONE else ())
+    val () = (if !_busy then !_last_result := NotSyncedYet() else ())
   in sync_run() end
+end
+
+(* Turned off: Dropbox's grant to Quire given back (its refresh token
+   gets an access token, which revokes them both), so the app's access
+   is not left on the reader's account *)
+fn _dropbox_revoke {refresh_loc:agz}{refresh_len:pos | refresh_len <= REFRESH_MAX}
+  (refresh: $A.arr(byte, refresh_loc, REFRESH_MAX), refresh_len: int refresh_len): void = let
+  val key = $A.alloc<byte>(256)
+  val key_len = sync_clients_dropbox(key)
+  val pending = dropbox_refresh(key, key_len, refresh, refresh_len)
+  val () = $A.free<byte>(key)
+  val () = $A.free<byte>(refresh)
+in
+  $P.finish<dropbox_tokens>(pending, llam(tokens) =>
+    case+ tokens of
+    | ~DropboxTokens(access, access_len, refresh, _) => let
+        val () = $A.free<byte>(refresh)
+        val revoking = dropbox_revoke(access, access_len)
+        val () = $A.free<byte>(access)
+        (* ignored: sync is off here whatever Dropbox says; the grant is
+           listed in the account's connected apps to remove by hand *)
+      in $P.finish<int>(revoking, llam(_) => ()) end
+    (* none got: the grant is already gone, or Dropbox is not reached;
+       either way sync is off here *)
+    | ~DropboxRefused(_) => ())
+end
+
+(* ============================================================
+   Nextcloud: signing in with its Login Flow v2 (nextcloud.bats),
+   which ends in a WebDAV store of the user's files folder, the login
+   name and an app password
+   ============================================================ *)
+
+(* Counts sign-ins: a poll an earlier one started (or one Turn off
+   ended) stops *)
+val _sign_in_generation = ref<int>(0)
+
+(* The polls a sign-in makes, a few seconds apart: the flow's token
+   lasts 20 minutes *)
+#define POLLS 400
+#define POLL_MILLISECONDS 3000
+
+(* A sign-in's progress, in the screen's status line *)
+fn _sign_in_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-status", text)
+
+(* What a failed step says *)
+fn _sign_in_failed (failure: nextcloud_failure): void = let
+  val () = ui_show("nextcloud-page", false)
+in
+  case+ failure of
+  | NextcloudUnreachable() => _sign_in_says("Can't reach the server, or it doesn't let a browser in (CORS). The Quire app can sign in; in a browser, the server must allow this app's origin.")
+  | NextcloudNotNextcloud() => _sign_in_says("That address isn't a Nextcloud server, or it didn't answer as one.")
+  | NextcloudRefused() => _sign_in_says("Nextcloud refused the app password it gave. Sign in again.")
+  | NextcloudMemory() => _sign_in_says("There isn't enough memory to sign in.")
+end
+
+(* A user's id nobody took (its promise let go), freed *)
+implement $P.dispose<user_found>(found) = user_found_free(found)
+
+(* The user's id asked for, signed in with the authorization made *)
+fn _user_id_asked {server_loc,authorization_loc:agz}{server_len:pos | server_len <= 1024}{authorization_len:nat | authorization_len <= 700}
+  (server: !$A.arr(byte, server_loc, 1024), server_len: int server_len,
+   authorization: !$A.arr(byte, authorization_loc, 700), authorization_len: int authorization_len): $P.promise(user_found, $P.Chained) =
+  if authorization_len > 0 then nextcloud_user_id(server, server_len, authorization, authorization_len)
+  else $P.ret<user_found>(UserNotFound(NextcloudNotNextcloud()))
+
+(* Signed in: the folder of the user's files found by their id, and
+   kept as the WebDAV store, then a sync *)
+fn _sign_in_granted {server_loc,name_loc,password_loc:agz}{server_len,name_len,password_len:pos | server_len <= 1024; name_len <= 1024; password_len <= 1024}
+  (generation: int, server: $A.arr(byte, server_loc, 1024), server_len: int server_len,
+   name: $A.arr(byte, name_loc, 1024), name_len: int name_len,
+   password: $A.arr(byte, password_loc, 1024), password_len: int password_len): void =
+  if name_len > USER_MAX then let
+    val () = $A.free<byte>(server)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+  in _sign_in_failed(NextcloudNotNextcloud()) end
+  else if password_len > PASSWORD_MAX then let
+    val () = $A.free<byte>(server)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+  in _sign_in_failed(NextcloudNotNextcloud()) end
+  else let
+    val user = $A.alloc<byte>(USER_MAX)
+    val () = _bytes_from(name, 0, name_len, user, 0)
+    val secret = $A.alloc<byte>(PASSWORD_MAX)
+    val () = _bytes_from(password, 0, password_len, secret, 0)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+    val authorization = $A.alloc<byte>(700)
+    val authorization_len = _authorization(user, name_len, secret, password_len, authorization)
+    val pending = _user_id_asked(server, server_len, authorization, authorization_len)
+    val () = $A.free<byte>(authorization)
+  in
+    $P.finish<user_found>(pending, llam(found) =>
+      if generation <> !_sign_in_generation then let
+        val () = user_found_free(found)
+        val () = $A.free<byte>(server)
+        val () = $A.free<byte>(user)
+      in $A.free<byte>(secret) end
+      else case+ found of
+      | ~UserNotFound(failure) => let
+          val () = $A.free<byte>(server)
+          val () = $A.free<byte>(user)
+          val () = $A.free<byte>(secret)
+        in _sign_in_failed(failure) end
+      | ~UserFound(id, id_len) => let
+          val folder = $A.alloc<byte>(4 * 1024 + 32)
+          val folder_len = nextcloud_folder(server, server_len, id, id_len, folder)
+          val () = $A.free<byte>(server)
+          val () = $A.free<byte>(id)
+        in
+          if folder_len > URL_MAX then let
+            val () = $A.free<byte>(folder)
+            val () = $A.free<byte>(user)
+            val () = $A.free<byte>(secret)
+          in _sign_in_failed(NextcloudNotNextcloud()) end
+          else let
+            val url = $A.alloc<byte>(URL_MAX)
+            val () = _bytes_from(folder, 0, folder_len, url, 0)
+            val () = $A.free<byte>(folder)
+            val () = _store_free(_store_swap(_store, WebDav(url, folder_len, user, name_len, secret, password_len)))
+            val () = _store_save()
+            val () = ui_show("nextcloud-page", false)
+            val () = _sign_in_says("Signed in to Nextcloud. Its app password is kept on this device only.")
+            val () = _fields_show()
+            val () = ui_show("sync-off", true)
+          in sync_run() end
+        end)
+  end
+
+(* Waits, then asks the flow's endpoint whether the reader has signed
+   in, polls left more times *)
+fun _sign_in_wait {endpoint_loc,token_loc:agz}{endpoint_len,token_len:pos | endpoint_len <= 1024; token_len <= 1024}{polls:nat} .<polls>.
+  (generation: int, endpoint: $A.arr(byte, endpoint_loc, 1024), endpoint_len: int endpoint_len,
+   token: $A.arr(byte, token_loc, 1024), token_len: int token_len, polls: int polls): void =
+  if polls <= 0 then let
+    val () = $A.free<byte>(endpoint)
+    val () = $A.free<byte>(token)
+    val () = ui_show("nextcloud-page", false)
+  in _sign_in_says("The sign-in timed out. Sign in with Nextcloud again.") end
+  else $P.finish<Int>($P.vow($TM.timer_set(POLL_MILLISECONDS)), llam(_) =>
+    if generation <> !_sign_in_generation then let
+      val () = $A.free<byte>(endpoint)
+    in $A.free<byte>(token) end
+    else $P.finish<login_polled>(nextcloud_poll(endpoint, endpoint_len, token, token_len), llam(polled) =>
+      if generation <> !_sign_in_generation then let
+        val () = login_polled_free(polled)
+        val () = $A.free<byte>(endpoint)
+      in $A.free<byte>(token) end
+      else case+ polled of
+      | ~LoginNotYet() => _sign_in_wait(generation, endpoint, endpoint_len, token, token_len, polls - 1)
+      | ~LoginPollFailed(failure) => let
+          val () = $A.free<byte>(endpoint)
+          val () = $A.free<byte>(token)
+        in _sign_in_failed(failure) end
+      | ~LoginGranted(server, server_len, name, name_len, password, password_len) => let
+          val () = $A.free<byte>(endpoint)
+          val () = $A.free<byte>(token)
+          val () = _sign_in_says("Signed in. Finding your files...")
+        in _sign_in_granted(generation, server, server_len, name, name_len, password, password_len) end))
+
+(* Sign in with Nextcloud (the screen's button): the flow started on the
+   server named, its sign-in page offered as a link (opened by the
+   reader's own tap, so no browser blocks it), and polled *)
+#pub fn sync_nextcloud_sign_in (): void
+implement sync_nextcloud_sign_in () = let
+  val @(address, address_len) = _field_value("nextcloud-server", 1024)
+  val () = !_sign_in_generation := !_sign_in_generation + 1
+  val generation = !_sign_in_generation
+  val () = ui_show("nextcloud-page", false)
+  (* https only: an app password is sent over it *)
+  val secure = _starts(address, address_len, "https://", 8, 0)
+in
+  if address_len <= 0 then let
+    val () = $A.free<byte>(address)
+  in _sign_in_says("Enter your Nextcloud's address, starting with https://.") end
+  else if ~secure then let
+    val () = $A.free<byte>(address)
+  in _sign_in_says("Enter your Nextcloud's address, starting with https://.") end
+  else let
+    val () = _sign_in_says("Asking the server...")
+    val pending = nextcloud_start(address, address_len)
+    val () = $A.free<byte>(address)
+  in
+    $P.finish<login_started>(pending, llam(started) =>
+      if generation <> !_sign_in_generation then login_started_free(started)
+      else case+ started of
+      | ~LoginNotStarted(failure) => _sign_in_failed(failure)
+      | ~LoginStarted(login, login_len, endpoint, endpoint_len, token, token_len) => let
+          val () = ui_https_href("nextcloud-page", login, login_len)
+          val () = ui_show("nextcloud-page", true)
+          val () = _sign_in_says("Open Nextcloud's sign-in page, sign in and grant access; Quire waits here for it.")
+        in _sign_in_wait(generation, endpoint, endpoint_len, token, token_len, POLLS) end)
+  end
 end
 
 (* Turn off (the screen's button): the folder, user name and password
    forgotten at once (they are kept only for the Undo offered) *)
 #pub fn sync_off (): void
-implement sync_off () =
+implement sync_off () = let
+  (* a sign-in under way stops *)
+  val () = !_sign_in_generation := !_sign_in_generation + 1
+  val () = ui_show("nextcloud-page", false)
+in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
   | ~Android(account, account_len) => let
@@ -2330,6 +2818,30 @@ implement sync_off () =
           end
         | Final() => _store_free(_store_swap(_store_off, NoStore())))
     end
+  | ~Dropbox(refresh, refresh_len) => let
+      val () = _store_free(_store_swap(_store_off, Dropbox(refresh, refresh_len)))
+      val () = _store_forget()
+      val () = _token_free(_token_swap(NoToken()))
+      val () = _fields_show()
+      val () = _status_show()
+      val () = ui_show("sync-off", false)
+    in
+      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
+            val () = _store_save()
+          in
+            if layer_is_open(LSync()) then let
+              val () = _fields_show()
+              val () = ui_show("sync-off", true)
+            in _status_show() end else ()
+          end
+        (* made final: Dropbox's grant given back *)
+        | Final() => (case+ _store_swap(_store_off, NoStore()) of
+          | ~Dropbox(refresh, refresh_len) => _dropbox_revoke(refresh, refresh_len)
+          | other => _store_free(other)))
+    end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val () = _store_free(_store_swap(_store_off, WebDav(url, url_len, user, user_len, password, password_len)))
       val () = _store_forget()
@@ -2350,5 +2862,500 @@ implement sync_off () =
           end
         | Final() => _store_free(_store_swap(_store_off, NoStore())))
     end
+end
+
+(* The store chosen, read with its credentials, then a sync *)
+fn _stores_load (): $P.promise(int, $P.Chained) = let
+    val @(choice_frozen, choice_bytes) = $A.freeze<byte>(_choice_key())
+    val choice_pending = $IDB.idb_get(choice_bytes, 4)
+    val () = release_bytes(choice_frozen, choice_bytes)
+  in
+    $P.and_then<$IDB.lookup><int>(choice_pending, llam(found) => let
+      (* the store chosen: its kind (none, and sync off, when it could
+         not be read) *)
+      val kind = (case+ lookup_bytes(found) of
+        | ~NothingStored() => NoStoreKind()
+        | ~StoredUnreadable() => NoStoreKind()
+        | ~StoredBytes(record, n) => let
+            val kind = (if n >= 5 then (if byte2int0($A.get<byte>(record, 1)) = 83 then _kind_of_code(byte2int0($A.get<byte>(record, 4))) else NoStoreKind()) else NoStoreKind()): store_kind
+            val () = $A.free<byte>(record)
+          in kind end): store_kind
+    in
+      case+ kind of
+      | AndroidKind() => let
+        val @(android_frozen, android_bytes) = $A.freeze<byte>(_android_key())
+        val android_pending = $IDB.idb_get(android_bytes, 12)
+        val () = release_bytes(android_frozen, android_bytes)
+      in
+        $P.and_then<$IDB.lookup><int>(android_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
+                val read = _android_of_record(record, n)
+                val () = $A.free<byte>(record)
+              in _store_free(_store_swap(_store, read)) end)
+          val () = sync_run()
+        in $P.ret<int>(0) end)
+      end
+      | DropboxKind() => let
+        val @(dropbox_frozen, dropbox_bytes) = $A.freeze<byte>(_dropbox_key())
+        val dropbox_pending = $IDB.idb_get(dropbox_bytes, 12)
+        val () = release_bytes(dropbox_frozen, dropbox_bytes)
+      in
+        $P.and_then<$IDB.lookup><int>(dropbox_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
+                val read = _dropbox_of_record(record, n)
+                val () = $A.free<byte>(record)
+              in _store_free(_store_swap(_store, read)) end)
+          val () = sync_run()
+        in $P.ret<int>(0) end)
+      end
+      (* no store chosen: the app's backed-up file, where it has one *)
+      | NoStoreKind() => let
+        val () = sync_run()
+      in $P.ret<int>(0) end
+      | BackupKind() => let
+        val () = sync_run()
+      in $P.ret<int>(0) end
+      | WebDavKind() => let
+        val @(webdav_frozen, webdav_bytes) = $A.freeze<byte>(_webdav_key())
+        val webdav_pending = $IDB.idb_get(webdav_bytes, 11)
+        val () = release_bytes(webdav_frozen, webdav_bytes)
+      in
+        $P.and_then<$IDB.lookup><int>(webdav_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
+                val read = _store_of_record(record, n)
+                val () = $A.free<byte>(record)
+              in _store_free(_store_swap(_store, read)) end)
+          val () = sync_run()
+        in $P.ret<int>(0) end)
+      end
+    end)
+end
+
+(* ============================================================
+   Dropbox: its sign-in, a page away and back
+   ============================================================ *)
+
+(* Where a URL's query or fragment starts in url[0, n): n for neither *)
+fn _query_start {l:agz}{size,n:nat | n <= size} (url: !$A.arr(byte, l, size), n: int n): [stop:nat | stop <= n] int stop = let
+  fun find {i:nat | i <= n} .<n - i>. (url: !$A.arr(byte, l, size), n: int n, i: int i): [stop:nat | stop <= n] int stop =
+    if i >= n then n
+    else let
+      val b = byte2int0($A.get<byte>(url, i))
+    in if b = 63 then i else if b = 35 then i else find(url, n, i + 1) end
+in find(url, n, 0) end
+
+(* Whether url[stop - 10, stop) is "index.html" *)
+fn _ends_index {l:agz}{size,stop:nat | stop <= size} (url: !$A.arr(byte, l, size), stop: int stop): bool =
+  if stop < 10 then false
+  else let
+    fun same {end_at:int | end_at >= 10; end_at <= size}{j:nat | j <= 10} .<10 - j>. (url: !$A.arr(byte, l, size), stop: int end_at, j: int j): bool =
+      if j >= 10 then true
+      else if byte2int0($A.get<byte>(url, stop - 10 + j)) <> char2int0(string_get_at("index.html", j)) then false
+      else same(url, stop, j + 1)
+  in same(url, stop, 0) end
+
+(* Where url[0, n)'s query or fragment starts, before an "index.html" *)
+fn _redirect_base {l:agz}{size,n:nat | n <= size} (url: !$A.arr(byte, l, size), n: int n): [base:nat | base <= n] int base = let
+  val base = _query_start(url, n)
+in
+  if base < 10 then base
+  else if _ends_index(url, base) then base - 10
+  else base
+end
+
+(* The address Dropbox sends the reader back to: the page's own, without
+   its query, fragment or "index.html", and "?oauth=dropbox" (the
+   addresses registered for the app's key are of this form) *)
+fn _redirect {l:agz} (out: !$A.arr(byte, l, 2100)): [length:nat | length <= 2100] int length = let
+  val page = $A.alloc<byte>(2048)
+  val page_len = $NAV.get_url(page, 2048)
+  val base = _redirect_base(page, page_len)
+  val () = _bytes_from(page, 0, base, out, 0)
+  val () = $A.free<byte>(page)
+in _put_literal(out, base, "?oauth=dropbox") end
+
+(* Whether url[position, n) starts with name *)
+fun _name_at {l:agz}{size,n:nat | n <= size}{position:int}{name_len:nat}{j:nat | j <= name_len} .<name_len - j>.
+  (url: !$A.arr(byte, l, size), n: int n, position: int position, name: string name_len, name_len: int name_len, j: int j): bool =
+  if j >= name_len then true
+  else let
+    val at = position + j
+  in
+    if at < 0 then false
+    else if at >= n then false
+    else if byte2int0($A.get<byte>(url, at)) <> char2int0(string_get_at(name, j)) then false
+    else _name_at(url, n, position, name, name_len, j + 1)
+  end
+
+(* Whether b is unreserved in a URL (RFC 3986): all a code, a state or
+   an error name from Dropbox holds *)
+fn _unreserved (b: int): bool =
+  if b >= 97 then b <= 122 || b = 126
+  else if b >= 65 then b <= 90 || b = 95
+  else if b >= 48 then b <= 57
+  else b = 45 || b = 46
+
+(* out[k, ...) := url[i, ...) up to "&", "#" or the end: its length, 0
+   when it is too long or holds what a value of Dropbox's does not *)
+fun _value_copy {l,out_loc:agz}{size,n:nat | n <= size}{i:nat | i <= n}{k:nat | k <= 512} .<n - i>.
+  (url: !$A.arr(byte, l, size), n: int n, i: int i, out: !$A.arr(byte, out_loc, 512), k: int k): [kept:nat | kept <= 512] int kept =
+  if i >= n then k
+  else let
+    val b = byte2int0($A.get<byte>(url, i))
+  in
+    if b = 38 then k
+    else if b = 35 then k
+    else if ~_unreserved(b) then 0
+    else if k >= 512 then 0
+    else let
+      val () = $A.set<byte>(out, k, $A.get<byte>(url, i))
+    in _value_copy(url, n, i + 1, out, k + 1) end
+  end
+
+(* The query parameter name's value in out: its length, 0 for none *)
+fn _parameter {l,out_loc:agz}{size,n:nat | n <= size}{name_len:pos}
+  (url: !$A.arr(byte, l, size), n: int n, name: string name_len, name_len: int name_len, out: !$A.arr(byte, out_loc, 512)): [kept:nat | kept <= 512] int kept = let
+  fun find {i:nat | i <= n} .<n - i>. (url: !$A.arr(byte, l, size), n: int n, i: int i, out: !$A.arr(byte, out_loc, 512)): [kept:nat | kept <= 512] int kept =
+    if i >= n then 0
+    else let
+      val b = byte2int0($A.get<byte>(url, i))
+    in
+      if b = 35 then 0
+      else if (b = 63 || b = 38) && _name_at(url, n, i + 1, name, name_len, 0) && _name_at(url, n, i + 1 + name_len, "=", 1, 0) then let
+        val from = i + 2 + name_len
+      in if from <= n then _value_copy(url, n, from, out, 0) else 0 end
+      else find(url, n, i + 1, out)
+    end
+in find(url, n, 0, out) end
+
+(* Whether text[0, text_len) is word *)
+fn _is_word {l:agz}{n:nat}{text_len:nat | text_len <= n}{word_len:nat}
+  (text: !$A.arr(byte, l, n), text_len: int text_len, word: string word_len, word_len: int word_len): bool =
+  if text_len <> word_len then false
+  else _starts(text, text_len, word, word_len, 0)
+
+(* What the address said as the page opened: nothing of Dropbox's, its
+   code and the state sent with the reader, or that it signed no one in
+   (the reader said no, or it refused) *)
+datavtype dropbox_return =
+  | NotReturned of ()
+  | {code_loc,state_loc:agz}{code_len,state_len:pos | code_len <= 512; state_len <= 512}
+    ReturnedCode of ($A.arr(byte, code_loc, 512), int code_len, $A.arr(byte, state_loc, 512), int state_len)
+  | ReturnedRefused of (bool)
+
+val _returned = ref<dropbox_return>(NotReturned())
+val _returning = ref<bool>(false)
+
+fn _returned_swap (cell: dropbox_return): dropbox_return = let
+  var previous: dropbox_return = cell
+  val () = ref_exch_elt<dropbox_return>(_returned, previous)
+in previous end
+
+fn _returned_free (cell: dropbox_return): void =
+  case+ cell of
+  | ~NotReturned() => ()
+  | ~ReturnedCode(code, _, state, _) => let
+      val () = $A.free<byte>(code)
+    in $A.free<byte>(state) end
+  | ~ReturnedRefused(_) => ()
+
+fn _returned_of {l:agz}{size,n:nat | n <= size} (page: !$A.arr(byte, l, size), n: int n): dropbox_return = let
+  val code = $A.alloc<byte>(512)
+  val code_len = _parameter(page, n, "code", 4, code)
+  val state = $A.alloc<byte>(512)
+  val state_len = _parameter(page, n, "state", 5, state)
+  val error = $A.alloc<byte>(512)
+  val error_len = _parameter(page, n, "error", 5, error)
+  val canceled = _is_word(error, error_len, "access_denied", 13)
+  val () = $A.free<byte>(error)
+in
+  if code_len > 0 then
+    (if state_len > 0 then ReturnedCode(code, code_len, state, state_len)
+     else let
+       val () = $A.free<byte>(code)
+       val () = $A.free<byte>(state)
+     in ReturnedRefused(false) end)
+  else let
+    val () = $A.free<byte>(code)
+    val () = $A.free<byte>(state)
+  in ReturnedRefused(canceled) end
+end
+
+(* The page's address as it opened: a return from Dropbox's sign-in
+   ("?oauth=dropbox&code=...&state=..." or "&error=...") is kept, and
+   the address is put back to the page's own, so the code is neither
+   bookmarked, nor kept in the history, nor taken again on a reload *)
+fn _dropbox_return_take (): void = let
+  val page = $A.alloc<byte>(2048)
+  val page_len = $NAV.get_url(page, 2048)
+  val oauth = $A.alloc<byte>(512)
+  val oauth_len = _parameter(page, page_len, "oauth", 5, oauth)
+  val dropbox = _is_word(oauth, oauth_len, "dropbox", 7)
+  val () = $A.free<byte>(oauth)
+in
+  if ~dropbox then $A.free<byte>(page)
+  else let
+    val () = _returned_free(_returned_swap(_returned_of(page, page_len)))
+    val () = !_returning := true
+    val base = _query_start(page, page_len)
+    val @(page_frozen, page_bytes) = $A.freeze<byte>(page)
+    val @(used, rest) = $A.borrow_split<byte>(page_frozen, page_bytes, base)
+    val () = $NAV.replace_state(used, base)
+    val page_bytes = $A.borrow_join<byte>(page_frozen, used, rest)
+  in release_bytes(page_frozen, page_bytes) end
+end
+
+(* Whether the page opened on a return from Dropbox's sign-in: the app
+   opens Settings then, and the sync screen comes over it *)
+#pub fn sync_returning (): bool
+implement sync_returning () = !_returning
+
+(* A Dropbox sign-in that failed, said on the sync screen *)
+fn _dropbox_failed (result: sync_result): void = let
+  val () = (if layer_is_open(LSync()) then () else sync_screen_open())
+in _ask_failed(result) end
+
+(* The Dropbox store, signed in: kept and chosen, then a sync *)
+fn _dropbox_chosen {refresh_loc,access_loc:agz}{refresh_len:pos | refresh_len <= REFRESH_MAX}{access_len:pos | access_len <= TOKEN_MAX}
+  (refresh: $A.arr(byte, refresh_loc, REFRESH_MAX), refresh_len: int refresh_len, access: $A.arr(byte, access_loc, TOKEN_MAX), access_len: int access_len): void = let
+  val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
+  val () = _token_free(_token_swap(Token(access, access_len)))
+  val () = _store_save()
+  (* not synced to it yet *)
+  val () = !_last_result := NotSyncedYet()
+  val () = !_last_status := 0
+  val () = (if layer_is_open(LSync()) then () else sync_screen_open())
+  val () = ui_show("sync-off", true)
+in sync_run() end
+
+(* Whether a[0, n) and b[0, n) hold the same bytes *)
+fun _same_bytes {a_loc,b_loc:agz}{a_size,b_size:nat}{n:nat | n <= a_size; n <= b_size}{j:nat | j <= n} .<n - j>.
+  (a: !$A.arr(byte, a_loc, a_size), b: !$A.arr(byte, b_loc, b_size), n: int n, j: int j): bool =
+  if j >= n then true
+  else if byte2int0($A.get<byte>(a, j)) <> byte2int0($A.get<byte>(b, j)) then false
+  else _same_bytes(a, b, n, j + 1)
+
+(* Whether the state that came back, given[0, given_len), is the one
+   sent, sent[0, SIGN_IN_STATE) *)
+fn _same_state {sent_loc,given_loc:agz}{given_len:nat | given_len <= 512}
+  (sent: !$A.arr(byte, sent_loc, 22), given: !$A.arr(byte, given_loc, 512), given_len: int given_len): bool =
+  if given_len <> 22 then false
+  else _same_bytes(sent, given, 22, 0)
+
+(* The sign-in under way kept as the page left: its verifier, record[0,
+   SIGN_IN_VERIFIER), and state, record[SIGN_IN_VERIFIER, SIGN_IN_VERIFIER +
+   SIGN_IN_STATE) *)
+#define SIGN_IN_VERIFIER 43
+#define SIGN_IN_STATE 22
+#define SIGN_IN_LEN 65
+
+(* Dropbox's code taken back: the state checked against the one sent
+   (another's is refused), then the code exchanged for tokens, with the
+   verifier kept as the page left *)
+fn _dropbox_exchanged {code_loc,state_loc:agz}{code_len,state_len:pos | code_len <= 512; state_len <= 512}
+  (code: $A.arr(byte, code_loc, 512), code_len: int code_len, state: $A.arr(byte, state_loc, 512), state_len: int state_len): $P.promise(int, $P.Chained) = let
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
+  val pending = $IDB.idb_get(key_bytes, 20)
+  (* the sign-in is taken once: a reload does not take it again *)
+  val () = save_checked($IDB.idb_delete(key_bytes, 20))
+  val () = release_bytes(key_frozen, key_bytes)
+in
+  $P.and_then<$IDB.lookup><int>(pending, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~StoredBytes(record, n) =>
+      if n <> SIGN_IN_LEN then let
+        val () = $A.free<byte>(record)
+        val () = $A.free<byte>(code)
+        val () = $A.free<byte>(state)
+      in $P.and_then<int><int>(_stores_load(), llam(_) => let
+          val () = _dropbox_failed(DropboxSignInRefused())
+        in $P.ret<int>(0) end) end
+      else let
+        val sent = $A.alloc<byte>(SIGN_IN_STATE)
+        val () = _bytes_from(record, SIGN_IN_VERIFIER, SIGN_IN_STATE, sent, 0)
+        val same = _same_state(sent, state, state_len)
+        val () = $A.free<byte>(sent)
+        val () = $A.free<byte>(state)
+        val key = $A.alloc<byte>(256)
+        val key_len = sync_clients_dropbox(key)
+      in
+        if ~same then let
+          val () = $A.free<byte>(record)
+          val () = $A.free<byte>(code)
+          val () = $A.free<byte>(key)
+        in $P.and_then<int><int>(_stores_load(), llam(_) => let
+            val () = _dropbox_failed(DropboxSignInRefused())
+          in $P.ret<int>(0) end) end
+        else if key_len <= 0 then let
+          val () = $A.free<byte>(record)
+          val () = $A.free<byte>(code)
+          val () = $A.free<byte>(key)
+        in $P.and_then<int><int>(_stores_load(), llam(_) => let
+            val () = _dropbox_failed(DropboxNotSetUp())
+          in $P.ret<int>(0) end) end
+        else let
+          val redirect = $A.alloc<byte>(2100)
+          val redirect_len = _redirect(redirect)
+          val exchanging = dropbox_exchange(key, key_len, redirect, redirect_len, code, code_len, record, SIGN_IN_VERIFIER)
+          val () = $A.free<byte>(redirect)
+          val () = $A.free<byte>(key)
+          val () = $A.free<byte>(record)
+          val () = $A.free<byte>(code)
+        in
+          $P.and_then<dropbox_tokens><int>(exchanging, llam(tokens) =>
+            case+ tokens of
+            | ~DropboxTokens(access, access_len, refresh, refresh_len) =>
+              if refresh_len > 0 then let
+                val () = _dropbox_chosen(refresh, refresh_len, access, access_len)
+              in $P.ret<int>(0) end
+              else let
+                val () = $A.free<byte>(access)
+                val () = $A.free<byte>(refresh)
+              in $P.and_then<int><int>(_stores_load(), llam(_) => let
+                  val () = _dropbox_failed(DropboxSignInRefused())
+                in $P.ret<int>(0) end) end
+            | ~DropboxRefused(status) =>
+              $P.and_then<int><int>(_stores_load(), llam(_) => let
+                val () = _dropbox_failed(if status = 0 then Unreachable() else DropboxSignInRefused())
+              in $P.ret<int>(0) end))
+        end
+      end
+    | ~NothingStored() => let
+        val () = $A.free<byte>(code)
+        val () = $A.free<byte>(state)
+      in $P.and_then<int><int>(_stores_load(), llam(_) => let
+          val () = _dropbox_failed(DropboxSignInRefused())
+        in $P.ret<int>(0) end) end
+    | ~StoredUnreadable() => let
+        val () = $A.free<byte>(code)
+        val () = $A.free<byte>(state)
+      in $P.and_then<int><int>(_stores_load(), llam(_) => let
+          val () = _dropbox_failed(DropboxSignInRefused())
+        in $P.ret<int>(0) end) end)
+end
+
+(* Dropbox (the screen's button, in a browser): the sign-in under way
+   kept, then the page left for Dropbox's, which sends the reader back
+   to this page with a code (PKCE: no secret in the app) *)
+#pub fn sync_dropbox (): void
+implement sync_dropbox () = let
+  val key = $A.alloc<byte>(256)
+  val key_len = sync_clients_dropbox(key)
+in
+  if key_len <= 0 then let
+    val () = $A.free<byte>(key)
+  in _ask_failed(DropboxNotSetUp()) end
+  else let
+    val secrets = dropbox_pkce()
+    val redirect = $A.alloc<byte>(2100)
+    val redirect_len = _redirect(redirect)
+    val @(url, url_len) = dropbox_authorize_url(key, key_len, redirect, redirect_len, secrets)
+    val () = $A.free<byte>(redirect)
+    val () = $A.free<byte>(key)
+    val record = $A.alloc<byte>(SIGN_IN_LEN)
+    val+ @Pkce(verifier, _, state) = secrets
+    val () = _bytes_from(verifier, 0, SIGN_IN_VERIFIER, record, 0)
+    fun put {state_loc,record_loc:agz}{j:nat | j <= SIGN_IN_STATE} .<SIGN_IN_STATE - j>.
+      (state: !$A.arr(byte, state_loc, 64), record: !$A.arr(byte, record_loc, SIGN_IN_LEN), j: int j): void =
+      if j >= SIGN_IN_STATE then ()
+      else let
+        val () = $A.set<byte>(record, SIGN_IN_VERIFIER + j, $A.get<byte>(state, j))
+      in put(state, record, j + 1) end
+    val () = put(state, record, 0)
+    prval () = fold@(secrets)
+    val () = pkce_free(secrets)
+    val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+    val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
+    val saving = $IDB.idb_put(key_bytes, 20, record_bytes, SIGN_IN_LEN)
+    val () = release_bytes(key_frozen, key_bytes)
+    val () = release_bytes(record_frozen, record_bytes)
+  in
+    if url_len <= 0 then let
+      val () = $A.free<byte>(url)
+      (* ignored: nothing was sent, and the next sign-in writes it again *)
+      val () = $P.finish<$IDB.stored>(saving, llam(_) => ())
+    in _ask_failed(DropboxSignInRefused()) end
+    else $P.finish<$IDB.stored>(saving, llam(status) =>
+      case+ status of
+      | $IDB.Stored() => let
+          val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
+          val @(used, rest) = $A.borrow_split<byte>(url_frozen, url_bytes, url_len)
+          val left = $NAV.navigate_away(used, url_len)
+          val url_bytes = $A.borrow_join<byte>(url_frozen, used, rest)
+          val () = release_bytes(url_frozen, url_bytes)
+        in if left then () else _ask_failed(DropboxSignInRefused()) end
+      | $IDB.NotStored() => let
+          val () = $A.free<byte>(url)
+        in _ask_failed(NoMemory()) end)
+  end
+end
+
+implement sync_start () = let
+  (* a return from Dropbox's sign-in page, taken from the address *)
+  val () = _dropbox_return_take()
+  val @(state_frozen, state_bytes) = $A.freeze<byte>(_state_key())
+  val state_pending = $IDB.idb_get(state_bytes, 10)
+  val () = release_bytes(state_frozen, state_bytes)
+  val state_read = $P.and_then<$IDB.lookup><bool>(state_pending, llam(found) => let
+    val readable = (case+ lookup_bytes(found) of
+      | ~NothingStored() => true
+      | ~StoredUnreadable() => let val () = storage_unreadable(SyncStateRecord()) in false end
+      | ~StoredBytes(record, n) =>
+        if n < 20 then let val () = $A.free<byte>(record) in true end
+        else let
+          val () = !_device := _i32_at(record, 4)
+          val () = !_last_minutes := _i32_at(record, 8)
+          (* a sync the last run left under way did not end *)
+          val () = !_last_result := (case+ _result_of_code(g0ofg1(_i32_at(record, 12))) of
+            | Syncing() => NotSyncedYet()
+            | result => result)
+          val () = !_last_status := _i32_at(record, 16)
+          val () = $A.free<byte>(record)
+        in true end): bool
+  in $P.ret<bool>(readable) end)
+  (* ignored: each read in the chain deals with its own value (none read
+     leaves sync off, as at its first run) *)
+  (* the clients are read first: Dropbox's key is needed to finish its
+     sign-in, and Use Android says it is not set up while there are none *)
+  val clients_read = $P.and_then<bool><bool>(state_read, llam(readable) =>
+    $P.and_then<int><bool>(sync_clients_load(), llam(_) => $P.ret<bool>(readable)))
+in
+  (* ignored: each read in the chain deals with its own value (none read
+     leaves sync off, as at its first run) *)
+  $P.finish<int>($P.and_then<bool><int>(clients_read, llam(readable) =>
+    (* a state that could not be read leaves sync off this session: a
+       sync would save this device's state over it (its number, #174) *)
+    case+ _returned_swap(NotReturned()) of
+    | ~NotReturned() => if readable then _stores_load() else $P.ret<int>(0)
+    | ~ReturnedCode(code, code_len, state, state_len) =>
+      if readable then _dropbox_exchanged(code, code_len, state, state_len)
+      else let
+        val () = $A.free<byte>(code)
+        val () = $A.free<byte>(state)
+      in $P.ret<int>(0) end
+    | ~ReturnedRefused(canceled) => let
+      (* the sign-in under way is over *)
+      val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
+      val () = save_checked($IDB.idb_delete(key_bytes, 20))
+      val () = release_bytes(key_frozen, key_bytes)
+    in
+      if readable then $P.and_then<int><int>(_stores_load(), llam(_) => let
+          val () = _dropbox_failed(if canceled then DropboxSignInCanceled() else DropboxSignInRefused())
+        in $P.ret<int>(0) end)
+      else $P.ret<int>(0)
+    end), llam(_) => ())
+end
 
 end (* #target wasm *)

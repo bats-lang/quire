@@ -1540,6 +1540,8 @@ implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(by
   | SyncNow
   | SyncAndroid
   | SyncGoogle
+  | NextcloudSignIn
+  | SyncDropbox
   | SyncOff
   | SyncDone
 
@@ -1549,6 +1551,8 @@ implement sync_screen_control_id (control) =
   | SyncNow() => "sync-now"
   | SyncAndroid() => "sync-android"
   | SyncGoogle() => "sync-google"
+  | NextcloudSignIn() => "nextcloud-sign-in"
+  | SyncDropbox() => "sync-dropbox"
   | SyncOff() => "sync-off"
   | SyncDone() => "sync-done"
 
@@ -1557,7 +1561,9 @@ fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_scr
   case+ control of
   | SyncNow() => $R.some(SyncAndroid())
   | SyncAndroid() => $R.some(SyncGoogle())
-  | SyncGoogle() => $R.some(SyncOff())
+  | SyncGoogle() => $R.some(NextcloudSignIn())
+  | NextcloudSignIn() => $R.some(SyncDropbox())
+  | SyncDropbox() => $R.some(SyncOff())
   | SyncOff() => $R.some(SyncDone())
   | SyncDone() => $R.none()
 
@@ -1575,7 +1581,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_sync_screen_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_screen_control)
-implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 5)
+implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 7)
 
 (* The sync toast's buttons, each by its element's id (sync_toast_control_id) *)
 #pub datatype sync_toast_control =

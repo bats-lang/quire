@@ -23,6 +23,7 @@
 staload "book.sats"
 staload "mem.sats"
 staload "jsonio.sats"
+staload "web_request.sats"
 staload FE = "wasm.bats-packages.dev/bridge/src/fetch.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
@@ -34,8 +35,8 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 (* An access token's most bytes *)
 #define TOKEN_MAX 4096
 (* A URL's and the headers' most bytes *)
-#define URL_MAX 512
-#define HEADERS_MAX 4300
+#define URL_MAX 1024
+#define HEADERS_MAX 4600
 
 (* ============================================================
    What a read and a write come to
@@ -99,101 +100,22 @@ fn _file_swap (file: drive_file): drive_file = let
   val () = ref_exch_elt<drive_file>(_file, previous)
 in previous end
 
-(* ============================================================
-   Requests
-   ============================================================ *)
-
-(* literal at out[position] *)
-fn _put {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len <= n}
-  (out: !$A.arr(byte, l, n), position: int position, text: string text_len): int(position + text_len) = let
-  val text_len = g1u2i(string1_length(text))
-  val () = $A.write_text(out, position, $A.text_lit(text), text_len)
-in position + text_len end
-
-(* source[0, count) at out[position] *)
-fun _copy {source_loc,out_loc:agz}{source_size,out_size:nat}{count:nat | count <= source_size}{position:nat | position + count <= out_size}{j:nat | j <= count} .<count - j>.
-  (source: !$A.arr(byte, source_loc, source_size), count: int count, out: !$A.arr(byte, out_loc, out_size), position: int position, j: int j): void =
-  if j >= count then ()
-  else let
-    val () = $A.set<byte>(out, position + j, $A.get<byte>(source, j))
-  in _copy(source, count, out, position, j + 1) end
-
 (* The headers: the token as Authorization, and content_type (none when
    empty) as Content-Type *)
 fn _headers {token_loc:agz}{token_size:nat}{token_len:nat | token_len <= token_size; token_len <= TOKEN_MAX}{type_len:nat | type_len <= 100}
   (token: !$A.arr(byte, token_loc, token_size), token_len: int token_len, content_type: string type_len)
   : [l:agz][headers_len:nat | headers_len <= HEADERS_MAX] @($A.arr(byte, l, HEADERS_MAX), int headers_len) = let
   val headers = $A.alloc<byte>(HEADERS_MAX)
-  val after = _put(headers, 0, "Authorization: Bearer ")
-  val () = _copy(token, token_len, headers, after, 0)
+  val after = request_text(headers, 0, "Authorization: Bearer ")
+  val () = request_copy(token, token_len, headers, after, 0)
   val after = after + token_len
   val type_len = g1u2i(string1_length(content_type))
 in
   if type_len <= 0 then @(headers, after)
   else let
-    val after = _put(headers, after, "\nContent-Type: ")
+    val after = request_text(headers, after, "\nContent-Type: ")
     val () = $A.write_text(headers, after, $A.text_lit(content_type), type_len)
   in @(headers, after + type_len) end
-end
-
-(* method for url[0, url_len), with the headers and body[0, body_len) *)
-fn _send {method_len:pos | method_len <= 8}{url_loc:agz}{url_len:pos | url_len <= URL_MAX}{headers_loc:agz}{headers_len:nat | headers_len <= HEADERS_MAX}{body_loc:agz}{body_size:nat}{body_len:nat | body_len <= body_size}
-  (method: string method_len, url: $A.arr(byte, url_loc, URL_MAX), url_len: int url_len,
-   headers: $A.arr(byte, headers_loc, HEADERS_MAX), headers_len: int headers_len,
-   body: !$A.borrow(byte, body_loc, body_size), body_len: int body_len): $P.promise($FE.fetched, $P.Chained) = let
-  val method_len = g1u2i(string1_length(method))
-  val method_bytes = $A.alloc<byte>(method_len)
-  val () = $A.write_text(method_bytes, 0, $A.text_lit(method), method_len)
-  val @(method_frozen, method_borrow) = $A.freeze<byte>(method_bytes)
-  val @(url_frozen, url_borrow) = $A.freeze<byte>(url)
-  val @(url_used, url_rest) = $A.borrow_split<byte>(url_frozen, url_borrow, url_len)
-  val @(headers_frozen, headers_borrow) = $A.freeze<byte>(headers)
-  val pending = $FE.fetch_request(method_borrow, method_len, url_used, url_len, headers_borrow, headers_len, body, body_len)
-  val () = release_bytes(headers_frozen, headers_borrow)
-  val url_borrow = $A.borrow_join<byte>(url_frozen, url_used, url_rest)
-  val () = release_bytes(url_frozen, url_borrow)
-  val () = release_bytes(method_frozen, method_borrow)
-in pending end
-
-(* method for url[0, url_len) with no body *)
-fn _send_empty {method_len:pos | method_len <= 8}{url_loc:agz}{url_len:pos | url_len <= URL_MAX}{headers_loc:agz}{headers_len:nat | headers_len <= HEADERS_MAX}
-  (method: string method_len, url: $A.arr(byte, url_loc, URL_MAX), url_len: int url_len,
-   headers: $A.arr(byte, headers_loc, HEADERS_MAX), headers_len: int headers_len): $P.promise($FE.fetched, $P.Chained) = let
-  val empty = $A.alloc<byte>(1)
-  val @(empty_frozen, empty_borrow) = $A.freeze<byte>(empty)
-  val pending = _send(method, url, url_len, headers, headers_len, empty_borrow, 0)
-  val () = release_bytes(empty_frozen, empty_borrow)
-in pending end
-
-(* A response's status and body; status 0 and no body when none came *)
-datavtype answered =
-  | {n:nat} Answered of ([s:int] int s, $BD.dblob(n))
-  | Unanswered of ()
-
-fn _answered (got: $FE.fetched): answered =
-  case+ got of
-  | ~$FE.NoResponse() => Unanswered()
-  | ~$FE.Responded(response) => let
-      val status = $FE.fetch_status(response)
-    in Answered(status, $FE.fetch_body(response)) end
-
-(* A body of at most most bytes, in a piece *)
-datavtype body_read =
-  | {owner,l:agz}{n:pos | n <= 268435456} BodyRead of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
-  | BodyEmpty of ()
-  | BodyFailed of (Int)
-
-fn _body {n:nat}{most:pos | most <= 268435456} (blob: $BD.dblob(n), most: int most): body_read = let
-  val size = $BD.blob_len(blob)
-in
-  if size <= 0 then let val () = $BD.blob_free(blob) in BodyEmpty() end
-  else if size > most then let val () = $BD.blob_free(blob) in BodyFailed(TOO_LARGE) end
-  else (case+ piece_new(size) of
-    | ~NoPiece() => let val () = $BD.blob_free(blob) in BodyFailed(MEMORY) end
-    | ~Piece(owner, bytes) => let
-        val () = $BD.blob_read(blob, 0, bytes, size)
-        val () = $BD.blob_free(blob)
-      in BodyRead(owner, bytes, size) end)
 end
 
 (* ============================================================
@@ -288,7 +210,7 @@ in if found then same else false end
 (* The listing of the app data folder for the file *)
 fn _listing_url (): [l:agz] @($A.arr(byte, l, URL_MAX), [n:pos | n <= URL_MAX] int n) = let
   val url = $A.alloc<byte>(URL_MAX)
-  val after = _put(url, 0, "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27quire-sync.json%27%20and%20trashed%3Dfalse&fields=files(id%2Cversion)&orderBy=createdTime")
+  val after = request_text(url, 0, "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name%3D%27quire-sync.json%27%20and%20trashed%3Dfalse&fields=files(id%2Cversion)&orderBy=createdTime")
 in @(url, after) end
 
 (* <before><id><after> *)
@@ -296,9 +218,9 @@ fn _id_url {id_loc:agz}{id_len:pos | id_len <= ID_MAX}{before_len,after_len:nat 
   (before: string before_len, id: !$A.arr(byte, id_loc, ID_MAX), id_len: int id_len, after: string after_len)
   : [l:agz] @($A.arr(byte, l, URL_MAX), [n:pos | n <= URL_MAX] int n) = let
   val url = $A.alloc<byte>(URL_MAX)
-  val position = _put(url, 0, before)
-  val () = _copy(id, id_len, url, position, 0)
-  val stop = _put(url, position + id_len, after)
+  val position = request_text(url, 0, before)
+  val () = request_copy(id, id_len, url, position, 0)
+  val stop = request_text(url, position + id_len, after)
 in @(url, stop) end
 
 (* ============================================================
@@ -314,16 +236,16 @@ fn _media {token_loc:agz}{token_size:nat}{token_len:pos | token_len <= token_siz
       val @(url, url_len) = _id_url("https://www.googleapis.com/drive/v3/files/", id, id_len, "?alt=media")
       val () = _file_free(_file_swap(DriveFile(id, id_len, version, version_len)))
       val @(headers, headers_len) = _headers(token, token_len, "")
-      val pending = _send_empty("GET", url, url_len, headers, headers_len)
+      val pending = request_send_empty("GET", url, url_len, headers, headers_len)
     in
       $P.and_then<$FE.fetched><drive_got>(pending, llam(got) =>
-        case+ _answered(got) of
+        case+ request_answered(got) of
         | ~Unanswered() => $P.ret<drive_got>(DriveFailed(0))
         | ~Answered(status, blob) =>
           if (if status < 200 then true else status >= 300) then let
             val () = $BD.blob_free(blob)
           in $P.ret<drive_got>(DriveFailed(status)) end
-          else (case+ _body(blob, most) of
+          else (case+ request_body(blob, most) of
             | ~BodyRead(owner, bytes, n) => $P.ret<drive_got>(DriveGot(owner, bytes, n))
             | ~BodyEmpty() => $P.ret<drive_got>(DriveNothing())
             | ~BodyFailed(why) => $P.ret<drive_got>(DriveFailed(why))))
@@ -333,20 +255,20 @@ implement drive_read (token, token_len, most) = let
   val () = _file_free(_file_swap(NoDriveFile()))
   val @(url, url_len) = _listing_url()
   val @(headers, headers_len) = _headers(token, token_len, "")
-  val pending = _send_empty("GET", url, url_len, headers, headers_len)
+  val pending = request_send_empty("GET", url, url_len, headers, headers_len)
   (* the token again, for the second request: the first's copy is in
      its headers, sent *)
   val again = $A.alloc<byte>(TOKEN_MAX)
-  val () = _copy(token, token_len, again, 0, 0)
+  val () = request_copy(token, token_len, again, 0, 0)
   val listed = $P.and_then<$FE.fetched><drive_got>(pending, llam(got) =>
-    case+ _answered(got) of
+    case+ request_answered(got) of
     | ~Unanswered() => let val () = $A.free<byte>(again) in $P.ret<drive_got>(DriveFailed(0)) end
     | ~Answered(status, blob) =>
       if (if status < 200 then true else status >= 300) then let
         val () = $BD.blob_free(blob)
         val () = $A.free<byte>(again)
       in $P.ret<drive_got>(DriveFailed(status)) end
-      else (case+ _body(blob, LISTING_MAX) of
+      else (case+ request_body(blob, LISTING_MAX) of
         | ~BodyFailed(why) => let val () = $A.free<byte>(again) in $P.ret<drive_got>(DriveFailed(why)) end
         | ~BodyEmpty() => let val () = $A.free<byte>(again) in $P.ret<drive_got>(DriveFailed(NOT_UNDERSTOOD)) end
         | ~BodyRead(owner, bytes, n) => let
@@ -406,7 +328,7 @@ fn _copied {body_loc:agz}{body_size:pos | body_size <= 16777216}
 (* The upload that makes the file *)
 fn _created_url (): [l:agz] @($A.arr(byte, l, URL_MAX), [n:pos | n <= URL_MAX] int n) = let
   val url = $A.alloc<byte>(URL_MAX)
-  val after = _put(url, 0, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cversion")
+  val after = request_text(url, 0, "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id%2Cversion")
 in @(url, after) end
 
 fn _made_free (made: piece_made): void =
@@ -416,7 +338,7 @@ fn _made_free (made: piece_made): void =
 
 (* What a write's response came to *)
 fn _put_answer (got: $FE.fetched): drive_put =
-  case+ _answered(got) of
+  case+ request_answered(got) of
   | ~Unanswered() => DrivePutFailed(0)
   | ~Answered(status, blob) => let
       val () = $BD.blob_free(blob)
@@ -433,7 +355,7 @@ fn _send_made {method_len:pos | method_len <= 8}{url_loc:agz}{url_len:pos | url_
   | ~PieceMade(owner, bytes, size) => let
       val @(headers, headers_len) = _headers(token, token_len, content_type)
       val @(frozen, borrowed) = $A.freeze<byte>(bytes)
-      val pending = _send(method, url, url_len, headers, headers_len, borrowed, size)
+      val pending = request_send(method, url, url_len, headers, headers_len, borrowed, size)
       val () = $A.drop<byte>(frozen, borrowed)
       val () = piece_free(owner, $A.thaw<byte>(frozen))
     in $P.and_then<$FE.fetched><drive_put>(pending, llam(got) => $P.ret<drive_put>(_put_answer(got))) end
@@ -447,13 +369,13 @@ implement drive_write (token, token_len, body, body_size) =
       (* the version now: another device's write since the read changed it *)
       val @(url, url_len) = _id_url("https://www.googleapis.com/drive/v3/files/", id, id_len, "?fields=version")
       val @(headers, headers_len) = _headers(token, token_len, "")
-      val pending = _send_empty("GET", url, url_len, headers, headers_len)
+      val pending = request_send_empty("GET", url, url_len, headers, headers_len)
       val made = _copied(body, body_size)
       val again = $A.alloc<byte>(TOKEN_MAX)
-      val () = _copy(token, token_len, again, 0, 0)
+      val () = request_copy(token, token_len, again, 0, 0)
     in
       $P.and_then<$FE.fetched><drive_put>(pending, llam(got) =>
-        case+ _answered(got) of
+        case+ request_answered(got) of
         | ~Unanswered() => let
             val () = _made_free(made)
             val () = $A.free<byte>(again)
@@ -466,7 +388,7 @@ implement drive_write (token, token_len, body, body_size) =
             val () = $A.free<byte>(again)
             val () = _file_free(DriveFile(id, id_len, version, version_len))
           in $P.ret<drive_put>(DrivePutFailed(status)) end
-          else (case+ _body(blob, LISTING_MAX) of
+          else (case+ request_body(blob, LISTING_MAX) of
             | ~BodyRead(owner, bytes, n) => let
                 val unchanged = _unchanged(bytes, n, version, version_len)
                 val () = piece_free(owner, bytes)
