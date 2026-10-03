@@ -26,6 +26,7 @@
       "sync.spec.js",
       "sync-android.spec.js",
       "sync-dropbox.spec.js",
+      "sync-dropbox-android.spec.js",
       "sync-nextcloud.spec.js",
       "backup.spec.js",
       "settings.spec.js",
