@@ -40,6 +40,7 @@ staload GOOGLE = "wasm.bats-packages.dev/bridge/src/google_account.sats"
 staload BACKUP = "wasm.bats-packages.dev/bridge/src/backup_file.sats"
 staload "drive.sats"
 staload "sync_clients.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -363,7 +364,9 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   else if result = RESULT_ADDRESS then _put_literal(out, position, "Enter the folder's address, starting with https://.")
   else if result = RESULT_SIGN_IN then _put_literal(out, position, "Tap Sync now to sign in to Google again.")
   else if result = RESULT_NO_ACCOUNT then _put_literal(out, position, "Android sync needs a Google account on this device.")
-  else if result = RESULT_NOT_SET_UP then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
+  else if result = RESULT_NOT_SET_UP then
+    (if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
+     else _put_literal(out, position, "Google Drive sync isn't set up in this build of Quire."))
   else if result = RESULT_REFUSED then _put_literal(out, position, "Google refused: this build of Quire isn't registered with it.")
   else if result = RESULT_CANCELED then _put_literal(out, position, "Google sign-in was canceled.")
   else let
@@ -445,8 +448,9 @@ fn _summary_text {l:agz} (out: !$A.arr(byte, l, 512)): [stop:nat | stop <= 512] 
 in
   if ~_store_on() then _put_literal(out, 0, "Off")
   else let
-    val after = (if _store_kind() = STORE_ANDROID then _put_literal(out, 0, "Android \xC2\xB7 ")
-      else _put_literal(out, 0, "WebDAV \xC2\xB7 ")): [after:nat | after <= 16] int after
+    val after = (if _store_kind() <> STORE_ANDROID then _put_literal(out, 0, "WebDAV \xC2\xB7 ")
+      else if $BAPP.is_native_platform() then _put_literal(out, 0, "Android \xC2\xB7 ")
+      else _put_literal(out, 0, "Google Drive \xC2\xB7 ")): [after:nat | after <= 20] int after
   in
     if result = RESULT_RUNNING then _put_literal(out, after, "syncing...")
     else if result = RESULT_NONE then _put_literal(out, after, "not synced yet")
@@ -2049,6 +2053,7 @@ implement sync_screen_make () = let
   val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file in a WebDAV folder (Nextcloud, ownCloud, a NAS). Use an app password if your server offers one: it is kept on this device only, never in a backup. Your books' files are not synced.")
   val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
   val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
+  val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
   val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
   val () = ui_show("sync-android-row", false)
   val () = ui_el("sync-box", "sync-fields", TDiv, "sfields")
@@ -2089,16 +2094,23 @@ end
 (* Opens the sync screen *)
 #pub fn sync_screen_open (): void
 implement sync_screen_open () = let
-  (* Use Android, in the app: what it does, or that this build has no
-     client to sign in with *)
-  val android = $GOOGLE.google_token_available()
-  val () = ui_show("sync-android-row", android)
+  (* Use Android in the app, Google Drive in a browser: what it does, or
+     (in the app) that this build has no client to sign in with *)
+  val app = $BAPP.is_native_platform()
   val client = $A.alloc<byte>(256)
   val client_len = sync_clients_google(client)
   val () = $A.free<byte>(client)
+  (* in a browser, a build with no client lists no Google Drive, and
+     Google's script is loaded only when there is one *)
+  val android = (if app then $GOOGLE.google_token_available()
+    else if client_len > 0 then $GOOGLE.google_token_available() else false): bool
+  val () = ui_show("sync-android-row", android)
+  val () = ui_show("sync-android", app)
+  val () = ui_show("sync-google", ~app)
   val () = (if ~android then ()
     else if client_len <= 0 then ui_text_long("sync-android-about", "Android sync isn't set up in this build of Quire.")
-    else ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way."))
+    else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
+    else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
   val () = _fields_show()
   val () = _status_show()
   val () = ui_show("sync-off", _store_on())
