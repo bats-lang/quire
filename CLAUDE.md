@@ -644,6 +644,12 @@ accessibility metadata an `a11y_feature` each (its bit in the stored
 flags made by `a11y_bit` alone, asked by `a11y_has`) and a
 `wcag_level`; an OPDS list of links a `link_list`; the catalogue's
 fields `entry_field` and `page_field`, and a refused fetch a `refusal`.
+A click's target is decoded once, in `src/ui.bats`, into its listener's
+own control datatype (`typography_control`, `selection_control`, ...),
+each control's id given by its `*_control_id` (which
+`tests/static/ids.py` reads: each must be made, none twice), and each
+listener matches it with `case+`; a key event is decoded once into a
+`key` and its `modifiers` (`ui_key`, `ui_modifiers`).
 A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
 its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
 a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
@@ -659,7 +665,9 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
   of the five themes. The proof is css's `CONTRAST` over the palette
-  (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
+  (`PAL(t, r, c)`, its theme a `palette` and its role a `colour_role`,
+  both datasorts, so a role is passed as a `role_value(r)`, never a
+  number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
   accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
@@ -679,8 +687,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
-* The sheet's size is in its type (`sheet(r, st)`: r bytes left), so it
-  always fits the 64 KiB text it is put in.
+* The sheet's size is in its type (`sheet(r, media, open)`: r bytes
+  left, and whether an @media block and a rule are open), so it always
+  fits the 64 KiB text it is put in, and a rule is opened only outside
+  another and closed only once.
 
 Elements are made through `src/ui.bats`:
 
@@ -694,8 +704,8 @@ Elements are made through `src/ui.bats`:
 * Each element id is made at one place in the code, no numbered id
   (`nid_make`, a prefix and a number) can spell another, and every id
   the code names is one it makes: `tests/static/ids.py` checks the
-  source (the constructors, `ui_harm_id`, and helpers that pass an id
-  on), in CI through `tests/static/run.sh`. An element made again to
+  source (the constructors, `ui_harm_id`, the controls' `*_control_id`,
+  and helpers that pass an id on), in CI through `tests/static/run.sh`. An element made again to
   reset it (a search field, a file input) is made by one function,
   called at startup and at the reset.
 * `ui_attr` takes a typed attribute that cannot be a name, a role or a
