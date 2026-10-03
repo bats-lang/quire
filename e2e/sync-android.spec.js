@@ -90,6 +90,15 @@ function capacitor({ mode, token, files }) {
       },
       Filesystem: {
         writeFile: o => { window.__files.set(o.path, o.data); return Promise.resolve({ uri: 'file:///' + o.path }); },
+        // as Capacitor's: a directory's listing, and a call for a file not
+        // there rejects (the app's console logs it, so the app makes none)
+        readdir: o => {
+          const prefix = o.path ? o.path + '/' : '';
+          const names = [...new Set([...window.__files.keys()].filter(k => k.startsWith(prefix))
+            .map(k => k.slice(prefix.length).split('/')[0]))];
+          if (o.path && !names.length) return Promise.reject(new Error('Folder does not exist'));
+          return Promise.resolve({ files: names.map(name => ({ name, type: 'file' })) });
+        },
         stat: o => window.__files.has(o.path) ? Promise.resolve({ type: 'file' }) : Promise.reject(new Error('File does not exist')),
         readFile: o => Promise.resolve({ data: window.__files.get(o.path) }),
       },
