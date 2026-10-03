@@ -2288,12 +2288,11 @@ in release_bytes(page_frozen, page_bytes) end
    rendition:spread says: never for none, always for both, and for
    landscape or auto (Apple Books' and Thorium's choice) when the view
    is wider than tall *)
-fn _spreads_wanted (): bool = let
-  val columns = set_cols_get()
-in
-  if columns = 2 then true
-  else if columns = 1 then false
-  else (case+ !_book_spread of
+fn _spreads_wanted (): bool =
+  case+ set_cols_get() of
+  | TwoColumns() => true
+  | OneColumn() => false
+  | AutoColumns() => (case+ !_book_spread of
     | SpreadNone() => false
     | SpreadBoth() => true
     | SpreadLandscape() => let
@@ -2302,7 +2301,6 @@ in
     | SpreadAuto() => let
         val () = _measure_literal("page")
       in $DR.get_measure_w() > $DR.get_measure_h() end)
-end
 
 fn _is_left (slot: page_slot): bool =
   case+ slot of
