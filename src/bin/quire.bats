@@ -1297,7 +1297,7 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
       val now = _is(clicked, "sync-now")
       val off = _is(clicked, "sync-off")
       val done = _is(clicked, "sync-done")
-      val android = _is(clicked, "sync-android")
+      val android = (if _is(clicked, "sync-android") then true else _is(clicked, "sync-google")): bool
       val () = _target_free(clicked)
       val () = (if now then sync_now()
         else if android then sync_android()
