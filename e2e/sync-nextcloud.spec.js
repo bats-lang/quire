@@ -3,7 +3,7 @@
 // https://cloud.example.com (no real network), answering CORS as a
 // server that lets the app's origin in would.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { start, dialog, librarySettings, settingsButton } from './helpers.js';
 
 const SERVER = 'https://cloud.example.com';

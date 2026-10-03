@@ -4,7 +4,7 @@
 // comes back with a code. Dropbox (its sign-in page, token endpoint and
 // files API) is a mock routed in each browser context: no real network.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { createHash } from 'node:crypto';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,

@@ -2,7 +2,7 @@
 // and hidden or shown from the settings, which offer it only for a book
 // that has some.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, readBook, importFiles, epubFile, openBook, toLibrary, reload, bookPage, dialog, openSettings,
   selectionButton, marks, chapters, chapterBody, cards,

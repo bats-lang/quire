@@ -6,7 +6,8 @@
       "notices.spec.js",
       "smoke.spec.js",
       "catalogue.spec.js",
-      "stats.spec.js"
+      "stats.spec.js",
+      "stall-capture.spec.js"
     ],
     "reader": [
       "reader.spec.js",

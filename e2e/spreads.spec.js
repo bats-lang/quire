@@ -5,7 +5,7 @@
 // one on the side after the one before it unless its itemref asks for
 // one, a centred page alone; the two meet in the middle with no gap.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, bookPage, dialog, openSettings, fixedLayoutBook, fixedPlace, readFixed, fixedBoxes,
 } from './helpers.js';
