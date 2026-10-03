@@ -646,7 +646,9 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
   of the five themes. The proof is css's `CONTRAST` over the palette
-  (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
+  (`PAL(t, r, c)`, its theme a `palette` and its role a `colour_role`,
+  both datasorts, so a role is passed as a `role_value(r)`, never a
+  number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
   accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
@@ -666,8 +668,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
-* The sheet's size is in its type (`sheet(r, st)`: r bytes left), so it
-  always fits the 64 KiB text it is put in.
+* The sheet's size is in its type (`sheet(r, media, open)`: r bytes
+  left, and whether an @media block and a rule are open), so it always
+  fits the 64 KiB text it is put in, and a rule is opened only outside
+  another and closed only once.
 
 Elements are made through `src/ui.bats`:
 
@@ -896,6 +900,13 @@ closed (`reader_stack_clear`).
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
 
+CI runs the static tests and the e2e suite in groups side by side
+(`tests/groups.json`), the e2e groups on the app built once (the `build`
+job). Every spec and every static fixture is in exactly one group, or
+`scripts/ci-groups.py` fails the run: a new one is put in a group, by
+area and balanced by time. The `check` job, which main's branch
+protection requires, passes only when every group did.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot
@@ -919,6 +930,6 @@ before its timeout, is captured: the frames `Debugger.pause` stops in
 (wasm ones by function and byte offset), a CPU profile when nothing
 pauses, which commands the renderer still answers, and the renderers'
 CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
-output (CI's `e2e-stall-captures` artifact), attached to the test, and
+output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
 summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
 loop forever in script and in wasm.

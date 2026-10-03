@@ -1,0 +1,81 @@
+{
+  "e2e": {
+    "library": [
+      "library.spec.js",
+      "storage.spec.js",
+      "notices.spec.js",
+      "smoke.spec.js",
+      "catalogue.spec.js",
+      "stats.spec.js",
+      "stall-capture.spec.js"
+    ],
+    "reader": [
+      "reader.spec.js",
+      "navigation.spec.js",
+      "spreads.spec.js"
+    ],
+    "reading-tools": [
+      "annotations.spec.js",
+      "search.spec.js",
+      "narration.spec.js",
+      "dictionary.spec.js",
+      "vertical.spec.js",
+      "fixed.spec.js",
+      "ruby.spec.js"
+    ],
+    "sync-and-settings": [
+      "sync.spec.js",
+      "sync-android.spec.js",
+      "sync-dropbox.spec.js",
+      "sync-nextcloud.spec.js",
+      "backup.spec.js",
+      "settings.spec.js",
+      "settings-screen.spec.js",
+      "a11y.spec.js",
+      "about.spec.js",
+      "layout.spec.js"
+    ]
+  },
+  "static": {
+    "app": [
+      "check",
+      "checkers",
+      "reject/import-unmatched",
+      "reject/shelf-unmatched"
+    ],
+    "aloud": [
+      "accept/aloud-placement-matched",
+      "reject/aloud-placement-unmatched",
+      "reject/turn-unmatched"
+    ],
+    "back": [
+      "accept/back-offer",
+      "reject/back-forged-proof",
+      "reject/back-nothing-to-offer"
+    ],
+    "narration": [
+      "accept/clip-last",
+      "reject/clip-past-end",
+      "reject/highlight-unmatched"
+    ],
+    "fixed-layout": [
+      "accept/fixed-box-fits",
+      "reject/fixed-box-zoom-zero",
+      "reject/link-unmatched"
+    ],
+    "sync": [
+      "reject/sync-result-unmatched",
+      "reject/unreadable-unhandled",
+      "reject/dictionary-file-unmatched"
+    ],
+    "controls": [
+      "reject/control-unmatched",
+      "reject/brightness-not-a-choice",
+      "reject/back-other-timeout"
+    ],
+    "style": [
+      "reject/role-unmatched",
+      "reject/theme-unmatched"
+    ]
+  }
+}
