@@ -496,11 +496,12 @@ fn _reader (): void = let
   val () = ui_el("reader", "turn-shade", TDiv, "shade")
   val () = ui_attr("turn-shade", AHidden, "true")
   val () = _hide("turn-shade")
-  val () = ui_el("reader", "page-turn", TDiv, "turn")
+  (* page-turn is laid out even while no page turns (idle: hidden), so
+     the copy kept in it is ready for a turn (reader.bats) *)
+  val () = ui_el("reader", "page-turn", TDiv, "turn idle")
   val () = ui_attr("page-turn", AHidden, "true")
   val () = ui_el("page-turn", "turn-sheet", TDiv, "leaf")
   val () = ui_el("page-turn", "turn-gap", TDiv, "tgap")
-  val () = _hide("page-turn")
   (* the running footer, shown while the bars are hidden; what it says
      the page indicator (a status) says too, so it is not read out *)
   val () = ui_el("reader", "footer", TDiv, "foot")

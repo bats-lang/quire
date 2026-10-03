@@ -959,6 +959,10 @@ datatype beneath = BeneathPage | BeneathBlank
    transition across the whole screen *)
 #define TURN_MS 280
 
+(* How long after the page last changed its kept copy is made again, in
+   milliseconds: a chapter's images come in over a moment *)
+#define COPY_SETTLE_MS 300
+
 (* About one frame, in milliseconds: a turn's first frame shows it a
    frame on *)
 #define FRAME_MS 16
@@ -1049,33 +1053,91 @@ in
   else _shade_level(0)
 end
 
-(* The page as it is now, copied into the sheet (turn-copy, inert, at
-   the page's own scroll: the place's page), in one flush *)
-fn _copy_page (): void =
+(* The page's own scroll at the place's page, as _page_scroll puts it *)
+fn _place_scroll (): scrolled =
   case+ reading_get() of
-  | @(page, _, _, _) => let
-      val scroll = (case+ _page_axis() of
-        | Across() => ScrolledAcross(page * !_page_width)
-        | AcrossBack() => ScrolledAcross(~(page * !_page_width))
-        | Down() => ScrolledDown(page * _step())): scrolled
-    in ui_copy_inert("page", "turn-sheet", "turn-copy", scroll) end
+  | @(page, _, _, _) => (case+ _page_axis() of
+    | Across() => ScrolledAcross(page * !_page_width)
+    | AcrossBack() => ScrolledAcross(~(page * !_page_width))
+    | Down() => ScrolledDown(page * _step()))
 
-(* The page being left, laid over the page: the shade shown at its
-   strongest, then page-turn (so the copy is laid out as the page is),
-   then the copy, at rest *)
+(* The copy of the page kept in the sheet, hidden but laid out, so a
+   turn only scrolls it and shows it (making one, appending it and
+   laying out its columns takes a large chapter's whole frame and more):
+   none yet, one that no longer shows what the page does (the chapter
+   shown again, laid out again, an image come in), or one that does *)
+datatype copy_state = CopyMissing | CopyStale | CopyKept
+
+val _copy = ref<copy_state>(CopyMissing)
+
+(* The number of the last refresh asked for: only the last one, a
+   moment after the changes stop, makes the copy again *)
+val _copy_asked = ref<int>(0)
+
+(* Whether the sheet is over the page (a turn going on) *)
+val _sheet_laid = ref<bool>(false)
+
+(* The page as it is now, copied into the sheet (turn-copy, inert, at
+   the place's scroll), in one flush, in place of any copy before it *)
+fn _copy_make (): void = let
+  val () = ui_clear("turn-sheet")
+  val () = ui_copy_inert("page", "turn-sheet", "turn-copy", _place_scroll())
+in !_copy := CopyKept() end
+
+(* The kept copy at the place's page *)
+fn _copy_place (): void =
+  case+ _place_scroll() of
+  | ~ScrolledAcross(left) => _scroll_literal("turn-copy", ScrollAcross(), left)
+  | ~ScrolledDown(top) => _scroll_literal("turn-copy", ScrollDown(), top)
+
+(* The page as it is now in the sheet: the kept copy scrolled to it, or
+   a copy made now when there is none that shows the page *)
+fn _copy_page (): void =
+  case+ !_copy of
+  | CopyKept() => _copy_place()
+  | CopyStale() => _copy_make()
+  | CopyMissing() => _copy_make()
+
+(* The page changed under the copy: it is made again a moment after the
+   changes stop (images come in one by one), unless a turn is going on
+   then, which makes it again once it ends (_sheet_hide) *)
+fn _copy_stale (): void = let
+  val () = !_copy := CopyStale()
+  val number = !_copy_asked + 1
+  val () = !_copy_asked := number
+in
+  $P.finish<Int>($P.vow($TM.timer_set(COPY_SETTLE_MS)), llam(_) =>
+    if !_copy_asked <> number then ()
+    else if !_sheet_laid then ()
+    else (case+ !_copy of
+      | CopyStale() => _copy_make()
+      | CopyKept() => ()
+      | CopyMissing() => ()))
+end
+
+(* The page being left, laid over the page: the copy at the page as it
+   is now, at rest, then the shade at its strongest and page-turn shown *)
 fn _sheet_show (slide: slide, under: beneath): void = let
-  val () = _turn_class(slide, under)
+  val () = !_sheet_laid := true
+  val () = _copy_page()
+  val () = _strip_at(slide, 0)
   val () = _shade_level(SHADE_LEVELS)
   val () = ui_show("turn-shade", true)
-  val () = ui_show("page-turn", true)
-  val () = _copy_page()
-in _strip_at(slide, 0) end
+in _turn_class(slide, under) end
 
-(* Nothing over the page *)
+(* Nothing over the page: page-turn hidden again (laid out still, its
+   copy kept), and a copy that no longer shows the page made again a
+   moment later *)
 fn _sheet_hide (): void = let
-  val () = ui_show("page-turn", false)
+  val () = !_sheet_laid := false
+  val () = ui_class("page-turn", "turn idle")
   val () = ui_show("turn-shade", false)
-in ui_clear("turn-sheet") end
+in
+  case+ !_copy of
+  | CopyStale() => _copy_stale()
+  | CopyKept() => ()
+  | CopyMissing() => ()
+end
 
 (* A sheet over the page: held by a drag (HELD), while the page beneath
    shows another page than the reader's place, or sliding off a turn
@@ -1348,6 +1410,9 @@ fn _measure_pagination(): void = let
   val () = (case+ reading_get() of
     | @(_, _, chapter, chapter_count) => reading_set(@(0, page_count, chapter, chapter_count)))
   val () = window_show(0, page_count)
+  (* laid out anew (a chapter shown, a resize, the typography): the
+     copy kept for turns is made again *)
+  val () = _copy_stale()
 in _update_page_indicator() end
 
 
@@ -2499,6 +2564,7 @@ in
     | $Z.Stored() => let
       val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
       val () = _set_src(node, in_viewer, compressed_bytes, compressed_size, mime)
+      val () = (if in_viewer then () else _copy_stale())
       val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
     in piece_free(owner, $A.thaw<byte>(compressed_frozen)) end
     | $Z.Deflated() => let
@@ -2515,6 +2581,7 @@ in
         | ~ContentBytes(content_owner, content, content_len) => let
             val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
             val () = (if !_load_generation = generation then _set_src(node, in_viewer, content_bytes, content_len, mime) else ())
+            val () = (if in_viewer then () else if !_load_generation = generation then _copy_stale() else ())
             val () = $A.drop<byte>(content_frozen, content_bytes)
           in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
     end
@@ -4044,8 +4111,13 @@ implement reader_pan(shift) =
 implement reader_pan_back() = _turn_return()
 
 (* Any turn ends at once, the page showing its place (the book closed) *)
+(* The book closed: any turn ends, and the copy kept for turns goes *)
 #pub fun reader_turn_settle(): void
-implement reader_turn_settle() = _turn_settle()
+implement reader_turn_settle() = let
+  val () = _turn_settle()
+  val () = !_copy_asked := !_copy_asked + 1
+  val () = ui_clear("turn-sheet")
+in !_copy := CopyMissing() end
 
 (* The page was scrolled (by a finger, the wheel, or a key the browser
    takes): scrolled, the place follows the screenful now shown *)

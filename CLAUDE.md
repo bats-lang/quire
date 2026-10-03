@@ -810,14 +810,22 @@ would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
 
 Every page turn is animated (#246): a tap, a key, a button, reading
-aloud and a drag. At a turn's start the page as it is is copied into
-an overlay (`page-turn`, bridge's `copy_node`: no ids, `inert`,
-`aria-hidden`), and the page itself goes to the incoming page at once,
-so the place, the indicator and the arenas' window move as before. The
-overlay is a strip of [copy | gap] scrolled each frame, so the copy
-slides off (mirrored right to left, along the axis for `Down`) with
-the stylesheet's edge shadow, over a shade (`turn-shade`) on the page
-beneath. 280 ms, eased out; a drag's commit takes what is left. Under
+aloud and a drag. A copy of the page is kept in an overlay
+(`page-turn`, idle: laid out but `visibility:hidden`), made by
+`ui_copy_inert` in one flush of the DOM stream's own operations
+(bridge's CLONE_NODE, then the copy's tabindex and gesture region
+removed, `inert` set, its scroll set: quire's policy, not bridge's),
+again a moment (`COPY_SETTLE_MS`) after the page last changed (a
+chapter shown, laid out anew, an image come in), so a turn only
+scrolls the copy to the place and shows it: on a 300 KB chapter its
+first frame comes in 20 to 30 ms, where making the copy at the turn
+took 110 to 200 (`e2e/page-turn.spec.js` holds it to 50). The page
+itself goes to the incoming page at once, so the place, the indicator
+and the arenas' window move as before. The overlay is a strip of
+[copy | gap] scrolled each frame, so the copy slides off (mirrored
+right to left, along the axis for `Down`) with the stylesheet's edge
+shadow, over a shade (`turn-shade`) on the page beneath. 280 ms,
+eased out; a drag's commit takes what is left. Under
 `prefers-reduced-motion: reduce` a turn is instant and nothing is laid
 over the page. The turn is a `turn_cell` in `src/reader.bats`
 (`TurnStill`, `TurnHeld`, `TurnReturning`, `TurnWaiting`,

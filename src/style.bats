@@ -1170,7 +1170,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition
+  | Appearance | ContainerType | UserSelect | Transition | Visibility
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -1201,7 +1201,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | ColumnFill() => "column-fill" | ColumnGap() => "column-gap"
   | ColumnWidth() => "column-width" | BreakAfter() => "break-after"
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
-  | Transition() => "transition"
+  | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
@@ -2701,6 +2701,10 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | af
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = close(sheet)
+  (* idle, between turns: laid out (its copy ready) but not seen *)
+  val sheet = rule(sheet, ".turn.idle")
+  val sheet = lay(sheet, Visibility(), "hidden")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".turn.to-up,.turn.to-down")
   val sheet = lay(sheet, FlexDirection(), "column")

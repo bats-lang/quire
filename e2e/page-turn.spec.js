@@ -13,21 +13,29 @@ import { start, readBook, place, bookPage, chapters, clickControl } from './help
 
 const book = (title, rtl = false) => ({ title, author: 'Turn Tests', rawChapters: chapters(2, 20), rtl });
 
-// How many times the first paragraph's text is in the document: the
-// page's, and the copy's while the page turns away from it
-const copies = (page, text = 'Para 1.0 ') => page.getByText(text).count();
+// Whether an element is seen (in the page's code below: not hidden, nor
+// in a hidden box): the page's paragraphs always are, wherever its
+// columns put them; the copy only while it lies over the page
+// How many times the first paragraph's text is seen: the page's, and
+// the copy's while the page turns away from it (the copy is kept, hidden,
+// between turns)
+const copies = (page, text = 'Para 1.0 ') => page.evaluate(([text]) => {
+  const visible = (el) => el.checkVisibility({ visibilityProperty: true });
+  return [...document.querySelectorAll('p')].filter(p => p.textContent.startsWith(text) && visible(p)).length;
+}, [text]);
 
 // Where the copy of the first paragraph is across the screen, frame by
 // frame, until the copy is gone: how the page being left moves
 // (waiting up to a second for it to come)
 const slide = page => page.evaluate(() => new Promise((resolve) => {
-  const seen = [];
+  const visible = (el) => el.checkVisibility({ visibilityProperty: true });
+  const seenAt = [];
   let waited = 0;
   const step = () => {
     const found = [...document.querySelectorAll('[aria-hidden="true"] p')]
-      .find(p => p.textContent.startsWith('Para 1.0 '));
-    if (found) seen.push(found.getBoundingClientRect().left);
-    else if (seen.length > 0 || waited++ > 60) { resolve(seen); return; }
+      .find(p => p.textContent.startsWith('Para 1.0 ') && visible(p));
+    if (found) seenAt.push(found.getBoundingClientRect().left);
+    else if (seenAt.length > 0 || waited++ > 60) { resolve(seenAt); return; }
     requestAnimationFrame(step);
   };
   step();
@@ -52,26 +60,23 @@ const drag = (page, x0, x1, y, { cancel = false, id = 31 } = {}) =>
   }, [x0, x1, y, cancel, id]);
 
 // What a turn looked like: the page shown at its end, and whether the
-// page being left was laid over it on the way (a copy of the page, the
-// first paragraph's text in it, added to the document at any time
-// during the turn, however short the turn)
+// page being left was laid over it on the way (the copy seen in any
+// frame of the turn, however short the turn)
 async function turn(page, act) {
   await expect.poll(() => copies(page)).toBe(1);
   await page.evaluate(() => {
+    const visible = (el) => el.checkVisibility({ visibilityProperty: true });
     window.turnLaid = false;
-    window.turnWatch = new MutationObserver((records) => {
-      for (const record of records) {
-        for (const node of record.addedNodes) {
-          if (node.nodeType === 1 && node.closest('[aria-hidden="true"]')
-            && node.textContent.includes('Para 1.0 ')) window.turnLaid = true;
-        }
-      }
-    });
-    window.turnWatch.observe(document.body, { childList: true, subtree: true });
+    window.turnWatching = true;
+    const step = () => {
+      if ([...document.querySelectorAll('[aria-hidden="true"] p')].some(visible)) window.turnLaid = true;
+      if (window.turnWatching) requestAnimationFrame(step);
+    };
+    step();
   });
   await act();
   await expect.poll(() => copies(page)).toBe(1);
-  const laid = await page.evaluate(() => { window.turnWatch.disconnect(); return window.turnLaid; });
+  const laid = await page.evaluate(() => { window.turnWatching = false; return window.turnLaid; });
   return { laid, at: (await place(page)).p };
 }
 
@@ -136,6 +141,44 @@ test.describe('a page turn', () => {
 // option is the context's; emulated here on the page itself)
 const lessMotion = ({ page }) => page.emulateMedia({ reducedMotion: 'reduce' });
 
+// How long, in ms, from a key's press to the first frame drawn after it
+// (the first frame of the turn it starts): watched from before the
+// press, then read once the frame has come
+const watchFirstFrame = (page) => page.evaluate(() => {
+  window.firstFrame = new Promise((resolve) => {
+    const onKey = () => {
+      window.removeEventListener('keydown', onKey, true);
+      const pressed = performance.now();
+      requestAnimationFrame(() => resolve(performance.now() - pressed));
+    };
+    window.addEventListener('keydown', onKey, true);
+  });
+});
+const firstFrame = (page) => page.evaluate(() => window.firstFrame);
+
+test.describe('a page turn on a long chapter', () => {
+  // The copy is kept between turns, so a turn only scrolls it and shows
+  // it: its first frame comes as soon as a turn without the copy's. On a
+  // chapter of about 300 KB, making the copy at the turn took 110 to 200
+  // ms here, the kept copy 20 to 30, and a turn with no copy 11 to 24
+  test('starts within 50 ms of the key, half the turns or more', async ({ page }) => {
+    await start(page);
+    await readBook(page, { title: 'A Long Chapter', author: 'Turn Tests', rawChapters: chapters(2, 900) });
+    // the copy, made a moment after the chapter is shown, kept hidden
+    await expect.poll(() => page.locator('[aria-hidden="true"] p').count()).toBeGreaterThan(0);
+    const times = [];
+    for (let i = 0; i < 6; i++) {
+      await watchFirstFrame(page);
+      await page.keyboard.press(i % 2 ? 'ArrowLeft' : 'ArrowRight');
+      times.push(await firstFrame(page));
+      await expect.poll(async () => (await place(page)).p).toBe(i % 2 ? 1 : 2);
+      await expect.poll(() => copies(page)).toBe(1);
+    }
+    times.sort((a, b) => a - b);
+    expect(times[2], `first frames: ${times.map(Math.round).join(', ')} ms`).toBeLessThanOrEqual(50);
+  });
+});
+
 test.describe('with less motion', () => {
   test.beforeEach(lessMotion);
 
@@ -177,7 +220,7 @@ test.describe('on a touch screen', () => {
       }));
       const frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const copy = () => [...document.querySelectorAll('[aria-hidden="true"] p')]
-        .find(p => p.textContent.startsWith('Para 1.0 '));
+        .find(p => p.textContent.startsWith('Para 1.0 ') && p.checkVisibility({ visibilityProperty: true }));
       const page = [...el.querySelectorAll('p')].find(p => p.textContent.startsWith('Para 1.0 '));
       const rest = page.getBoundingClientRect().left;
       ev('pointerdown', mid + 60);
