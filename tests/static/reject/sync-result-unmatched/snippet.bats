@@ -8,3 +8,5 @@ fn _static_failed (result: sync_result): bool =
   | Damaged() => true | NoMemory() => true | NoAddress() => true
   | SignInAgain() => true | NoGoogleAccount() => true | NotSetUp() => true
   | GoogleRefused() => true | SignInCanceled() => true
+  | DropboxSignInAgain() => true | DropboxNotSetUp() => true
+  | DropboxSignInRefused() => true | DropboxSignInCanceled() => true

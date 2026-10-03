@@ -81,6 +81,7 @@ jobs:
       - name: Sync clients
         env:
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
+          DROPBOX_CLIENT_ID: ${{ vars.DROPBOX_CLIENT_ID || secrets.DROPBOX_CLIENT_ID }}
         run: scripts/sync-clients.sh dist/pwa
 
       # The home page, privacy policy and terms (#216), published beside
