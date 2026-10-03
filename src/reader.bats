@@ -3391,12 +3391,17 @@ implement reader_save () = _record_position()
 #pub fun reader_anchor (): Int
 implement reader_anchor () = _anchor_now()
 
-(* The link covering a content node, if any: followed (a link within
-   the book, remembering where the reader was); true when there is one,
-   also for a link out of the book, which the browser opens *)
-fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): @(int, Int, bool, [l:agz][fragment_len:nat] @($A.arr(byte, l, fragment_len + 1), int fragment_len)) =
+(* The link covering a content node: none; one within the book (its
+   chapter, whether it is a note's reference, and its fragment); or one
+   out of the book, which the browser opens *)
+datavtype link_found =
+  | NoLink of ()
+  | {l:agz}{fragment_len:nat} InBook of (Int, bool, $A.arr(byte, l, fragment_len + 1), int fragment_len)
+  | OutOfBook of ()
+
+fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_found =
   case+ entries of
-  | links_nil() => let val empty = $A.alloc<byte>(1) in @(0, 0, false, @(empty, 0)) end
+  | links_nil() => NoLink()
   | @links_cons(first_node, end_node, chapter, fragment, fragment_len, note, rest) =>
     if (if first_node <= node then node < end_node else false) then let
       val found_chapter = chapter
@@ -3405,7 +3410,10 @@ fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): @(int,
       val () = _fragment_duplicate(fragment, copy, fragment_len + 1, 0)
       val copy_len = fragment_len
       prval () = fold@(entries)
-    in @((if found_chapter < 0 then 2 else 1), found_chapter, found_note, @(copy, copy_len)) end
+    in
+      if found_chapter < 0 then let val () = $A.free<byte>(copy) in OutOfBook() end
+      else InBook(found_chapter, found_note, copy, copy_len)
+    end
     else let
       val found = _link_find(rest, node)
       prval () = fold@(entries)
@@ -3690,11 +3698,15 @@ in if code_len = 3 then @(code, 3) else @(code, 2) end
 implement reader_link_at (node) = let
   val cell = _links_take()
   val+ @LinksCell(entries) = cell
-  val @(kind, chapter, note, @(fragment, fragment_len)) = _link_find(entries, node)
+  val found = _link_find(entries, node)
   prval () = fold@(cell)
   val () = _links_put(cell)
 in
-  if kind = 1 then
+  case+ found of
+  | ~NoLink() => false
+  (* followed by the browser *)
+  | ~OutOfBook() => true
+  | ~InBook(chapter, note, fragment, fragment_len) =>
     (* a note's reference to a note it names opens the note over the
        page; any other link is followed *)
     (if note then (if fragment_len > 0 then (if fragment_len <= 200 then let
@@ -3706,7 +3718,6 @@ in
        val () = _push_position()
        val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
      in true end)
-  else let val () = $A.free<byte>(fragment) in kind = 2 end
 end
 
 (* Goes to the note shown over the page, remembering where the reader

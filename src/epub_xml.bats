@@ -224,31 +224,75 @@ implement opf_language(data, nodes) = _opf_language_nodes(data, nodes)
    schema.org and dcterms:conformsTo properties, as flags
    ============================================================ *)
 
-(* The flags, a bit each (A11Y_KNOWN when any of these is in the OPF) *)
-#pub macdef A11Y_TRANSFORM = 1        (* accessibilityFeature displayTransformability *)
-#pub macdef A11Y_ALT = 2              (* alternativeText *)
-#pub macdef A11Y_LONGDESC = 4         (* longDescription *)
-#pub macdef A11Y_SUFF_TEXT = 8        (* accessModeSufficient textual *)
-#pub macdef A11Y_MODE_TEXT = 16       (* accessMode textual *)
-#pub macdef A11Y_MODE_VISUAL = 32     (* accessMode visual *)
-#pub macdef A11Y_HZ_NONE = 64         (* accessibilityHazard none *)
-#pub macdef A11Y_HZ_FLASH = 128       (* flashing *)
-#pub macdef A11Y_HZ_MOTION = 256      (* motionSimulation *)
-#pub macdef A11Y_HZ_SOUND = 512       (* sound *)
-#pub macdef A11Y_HZ_NOFLASH = 1024    (* noFlashingHazard *)
-#pub macdef A11Y_HZ_NOMOTION = 2048   (* noMotionSimulationHazard *)
-#pub macdef A11Y_HZ_NOSOUND = 4096    (* noSoundHazard *)
-#pub macdef A11Y_HZ_UNKNOWN = 8192    (* unknown *)
-#pub macdef A11Y_TOC = 16384          (* tableOfContents *)
-#pub macdef A11Y_INDEX = 32768        (* index *)
-#pub macdef A11Y_STRUCT = 65536       (* structuralNavigation *)
-#pub macdef A11Y_PAGES = 131072       (* pageNavigation *)
-#pub macdef A11Y_MATHML = 262144      (* MathML *)
-#pub macdef A11Y_TRANSCRIPT = 524288  (* transcript *)
-#pub macdef A11Y_CAPTIONS = 1048576   (* captions or closedCaptions *)
-#pub macdef A11Y_KNOWN = 2097152
-(* the WCAG level conformsTo names, times A11Y_LEVEL: 1 A, 2 AA, 3 AAA *)
-#pub macdef A11Y_LEVEL = 4194304
+(* A book's accessibility metadata, each feature a bit of the flags
+   stored with it (MetadataKnown when any of them is in the OPF) *)
+#pub datatype a11y_feature =
+  | Transformable (* accessibilityFeature displayTransformability *)
+  | AlternativeText (* alternativeText *)
+  | LongDescription (* longDescription *)
+  | SufficientText (* accessModeSufficient textual *)
+  | TextualMode (* accessMode textual *)
+  | VisualMode (* accessMode visual *)
+  | NoHazards (* accessibilityHazard none *)
+  | Flashing (* flashing *)
+  | MotionSimulation (* motionSimulation *)
+  | Sound (* sound *)
+  | NoFlashingHazard (* noFlashingHazard *)
+  | NoMotionHazard (* noMotionSimulationHazard *)
+  | NoSoundHazard (* noSoundHazard *)
+  | HazardsUnknown (* unknown *)
+  | TableOfContents (* tableOfContents *)
+  | TermIndex (* index *)
+  | StructuralNavigation (* structuralNavigation *)
+  | PageNavigation (* pageNavigation *)
+  | MathMarkup (* MathML *)
+  | Transcript (* transcript *)
+  | Captions (* captions or closedCaptions *)
+  | MetadataKnown (* any of these in the OPF *)
+
+(* The WCAG level conformsTo names *)
+#pub datatype wcag_level = NoLevel | LevelA | LevelAA | LevelAAA
+
+(* A feature's bit in the stored flags: the one place it is made *)
+#pub fn a11y_bit (feature: a11y_feature): int
+implement a11y_bit (feature) =
+  case+ feature of
+  | Transformable() => 1
+  | AlternativeText() => 2
+  | LongDescription() => 4
+  | SufficientText() => 8
+  | TextualMode() => 16
+  | VisualMode() => 32
+  | NoHazards() => 64
+  | Flashing() => 128
+  | MotionSimulation() => 256
+  | Sound() => 512
+  | NoFlashingHazard() => 1024
+  | NoMotionHazard() => 2048
+  | NoSoundHazard() => 4096
+  | HazardsUnknown() => 8192
+  | TableOfContents() => 16384
+  | TermIndex() => 32768
+  | StructuralNavigation() => 65536
+  | PageNavigation() => 131072
+  | MathMarkup() => 262144
+  | Transcript() => 524288
+  | Captions() => 1048576
+  | MetadataKnown() => 2097152
+
+(* A level's bits in the stored flags: times 4194304, 1 A, 2 AA, 3 AAA *)
+fn _level_bits (level: wcag_level): int =
+  case+ level of NoLevel() => 0 | LevelA() => 4194304 | LevelAA() => 8388608 | LevelAAA() => 12582912
+
+(* Whether the flags have feature *)
+#pub fn a11y_has (flags: int, feature: a11y_feature): bool
+implement a11y_has (flags, feature) = $AR.band_int_int(flags, a11y_bit(feature)) <> 0
+
+(* The WCAG level the flags hold *)
+#pub fn a11y_level (flags: int): wcag_level
+implement a11y_level (flags) = let
+  val level = $AR.band_int_int(flags / 4194304, 3)
+in if level = 3 then LevelAAA() else if level = 2 then LevelAA() else if level = 1 then LevelA() else NoLevel() end
 
 (* Whether data[offset, offset + span_len) is text, from position *)
 fun _span_is_from {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{text_len:nat}{position:nat | position <= text_len} .<text_len - position>.
@@ -303,19 +347,18 @@ fun _has_lowercase {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{
 
 fn _bit_or (left: int, right: int): int = $AR.bor_int_int(left, right)
 
-(* The WCAG level a conformance statement or URL names: 3 AAA, 2 AA,
-   1 A, 0 none *)
+(* The WCAG level a conformance statement or URL names *)
 fn _wcag_level {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
-  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): int =
-  if _has_lowercase(data, offset, span_len, "aaa", 3, 0) then 3
-  else if _has_lowercase(data, offset, span_len, "level aa", 8, 0) then 2
-  else if _has_lowercase(data, offset, span_len, "wcag-aa", 7, 0) then 2
-  else if _has_lowercase(data, offset, span_len, "level a", 7, 0) then 1
-  else if _has_lowercase(data, offset, span_len, "wcag-a", 6, 0) then 1
-  else 0
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): wcag_level =
+  if _has_lowercase(data, offset, span_len, "aaa", 3, 0) then LevelAAA()
+  else if _has_lowercase(data, offset, span_len, "level aa", 8, 0) then LevelAA()
+  else if _has_lowercase(data, offset, span_len, "wcag-aa", 7, 0) then LevelAA()
+  else if _has_lowercase(data, offset, span_len, "level a", 7, 0) then LevelA()
+  else if _has_lowercase(data, offset, span_len, "wcag-a", 6, 0) then LevelA()
+  else NoLevel()
 
 (* flags, with the bit that says the book has accessibility metadata *)
-fn _known (flags: int): int = _bit_or(flags, A11Y_KNOWN)
+fn _known (flags: int): int = _bit_or(flags, a11y_bit(MetadataKnown()))
 
 (* The flag a property's value sets *)
 fn _a11y_value {l:agz}{n:pos}{property_offset,property_len,value_offset,value_len:nat | property_offset + property_len <= n; value_offset + value_len <= n}
@@ -323,36 +366,36 @@ fn _a11y_value {l:agz}{n:pos}{property_offset,property_len,value_offset,value_le
   val @(value_offset, value_len) = _trim(data, value_offset, value_len)
 in
   if _span_is(data, property_offset, property_len, "schema:accessibilityFeature") then
-    _known(if _span_is(data, value_offset, value_len, "displayTransformability") then A11Y_TRANSFORM
-     else if _span_is(data, value_offset, value_len, "alternativeText") then A11Y_ALT
-     else if _span_is(data, value_offset, value_len, "longDescription") then A11Y_LONGDESC
-     else if _span_is(data, value_offset, value_len, "tableOfContents") then A11Y_TOC
-     else if _span_is(data, value_offset, value_len, "index") then A11Y_INDEX
-     else if _span_is(data, value_offset, value_len, "structuralNavigation") then A11Y_STRUCT
-     else if _span_is(data, value_offset, value_len, "pageNavigation") then A11Y_PAGES
-     else if _span_is(data, value_offset, value_len, "MathML") then A11Y_MATHML
-     else if _span_is(data, value_offset, value_len, "transcript") then A11Y_TRANSCRIPT
-     else if _span_is(data, value_offset, value_len, "closedCaptions") then A11Y_CAPTIONS
-     else if _span_is(data, value_offset, value_len, "captions") then A11Y_CAPTIONS
+    _known(if _span_is(data, value_offset, value_len, "displayTransformability") then a11y_bit(Transformable())
+     else if _span_is(data, value_offset, value_len, "alternativeText") then a11y_bit(AlternativeText())
+     else if _span_is(data, value_offset, value_len, "longDescription") then a11y_bit(LongDescription())
+     else if _span_is(data, value_offset, value_len, "tableOfContents") then a11y_bit(TableOfContents())
+     else if _span_is(data, value_offset, value_len, "index") then a11y_bit(TermIndex())
+     else if _span_is(data, value_offset, value_len, "structuralNavigation") then a11y_bit(StructuralNavigation())
+     else if _span_is(data, value_offset, value_len, "pageNavigation") then a11y_bit(PageNavigation())
+     else if _span_is(data, value_offset, value_len, "MathML") then a11y_bit(MathMarkup())
+     else if _span_is(data, value_offset, value_len, "transcript") then a11y_bit(Transcript())
+     else if _span_is(data, value_offset, value_len, "closedCaptions") then a11y_bit(Captions())
+     else if _span_is(data, value_offset, value_len, "captions") then a11y_bit(Captions())
      else 0)
   else if _span_is(data, property_offset, property_len, "schema:accessMode") then
-    _known(if _span_is(data, value_offset, value_len, "textual") then A11Y_MODE_TEXT
-     else if _span_is(data, value_offset, value_len, "visual") then A11Y_MODE_VISUAL
+    _known(if _span_is(data, value_offset, value_len, "textual") then a11y_bit(TextualMode())
+     else if _span_is(data, value_offset, value_len, "visual") then a11y_bit(VisualMode())
      else 0)
   else if _span_is(data, property_offset, property_len, "schema:accessModeSufficient") then
-    _known(if _span_is(data, value_offset, value_len, "textual") then A11Y_SUFF_TEXT else 0)
+    _known(if _span_is(data, value_offset, value_len, "textual") then a11y_bit(SufficientText()) else 0)
   else if _span_is(data, property_offset, property_len, "schema:accessibilityHazard") then
-    _known(if _span_is(data, value_offset, value_len, "none") then A11Y_HZ_NONE
-     else if _span_is(data, value_offset, value_len, "flashing") then A11Y_HZ_FLASH
-     else if _span_is(data, value_offset, value_len, "motionSimulation") then A11Y_HZ_MOTION
-     else if _span_is(data, value_offset, value_len, "sound") then A11Y_HZ_SOUND
-     else if _span_is(data, value_offset, value_len, "noFlashingHazard") then A11Y_HZ_NOFLASH
-     else if _span_is(data, value_offset, value_len, "noMotionSimulationHazard") then A11Y_HZ_NOMOTION
-     else if _span_is(data, value_offset, value_len, "noSoundHazard") then A11Y_HZ_NOSOUND
-     else if _span_is(data, value_offset, value_len, "unknown") then A11Y_HZ_UNKNOWN
+    _known(if _span_is(data, value_offset, value_len, "none") then a11y_bit(NoHazards())
+     else if _span_is(data, value_offset, value_len, "flashing") then a11y_bit(Flashing())
+     else if _span_is(data, value_offset, value_len, "motionSimulation") then a11y_bit(MotionSimulation())
+     else if _span_is(data, value_offset, value_len, "sound") then a11y_bit(Sound())
+     else if _span_is(data, value_offset, value_len, "noFlashingHazard") then a11y_bit(NoFlashingHazard())
+     else if _span_is(data, value_offset, value_len, "noMotionSimulationHazard") then a11y_bit(NoMotionHazard())
+     else if _span_is(data, value_offset, value_len, "noSoundHazard") then a11y_bit(NoSoundHazard())
+     else if _span_is(data, value_offset, value_len, "unknown") then a11y_bit(HazardsUnknown())
      else 0)
   else if _span_is(data, property_offset, property_len, "dcterms:conformsTo") then
-    _known(_wcag_level(data, value_offset, value_len) * A11Y_LEVEL)
+    _known(_level_bits(_wcag_level(data, value_offset, value_len)))
   else if _span_is(data, property_offset, property_len, "schema:accessibilitySummary") then _known(0)
   else 0
 end
@@ -425,7 +468,7 @@ and _a11y_node
   end
   | $X.xml_text(_, _) => @(flags, summary)
 
-(* The OPF's accessibility metadata: its flags (the A11Y_ bits), and its
+(* The OPF's accessibility metadata: its flags (a11y_bit's bits), and its
    accessibilitySummary's text, if any *)
 #pub fn opf_a11y
   {l:agz}{n:pos}{tree_size:nat}
