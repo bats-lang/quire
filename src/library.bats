@@ -1817,7 +1817,10 @@ end
    guidelines' words and order
    ============================================================ *)
 
-fn _has_flag (flags: int, flag: int): bool = $AR.band_int_int(flags, flag) <> 0
+(* Whether a level is the one given *)
+fn _is_level (level: wcag_level, wanted: wcag_level): bool = let
+  fn rank (level: wcag_level): int = case+ level of NoLevel() => 0 | LevelA() => 1 | LevelAA() => 2 | LevelAAA() => 3
+in rank(level) = rank(wanted) end
 
 (* Line number line of the section, with text; the next line's number *)
 fn _a11y_line {line:nat}{text_len:pos | text_len < 256} (line: int line, text: string text_len): [next:nat] int next = let
@@ -1860,41 +1863,44 @@ fn _line_of4 {line:nat}{first_len,second_len,third_len,fourth_len:pos | first_le
 fn _a11y_lines {line:nat} (flags: int, line: int line): [next:nat] int next = let
   (* Ways of reading and Conformance are shown even with no metadata *)
   val line = _a11y_group(line, "Ways of reading")
-  val line = _line_of2(_has_flag(flags, A11Y_TRANSFORM), line, "Appearance can be modified",
+  val line = _line_of2(a11y_has(flags, Transformable()), line, "Appearance can be modified",
     "No information about appearance modifiability is available")
-  val readable = _has_flag(flags, A11Y_SUFF_TEXT) || (_has_flag(flags, A11Y_MODE_TEXT) && ~_has_flag(flags, A11Y_MODE_VISUAL))
-  val line = _line_of3(readable, _has_flag(flags, A11Y_MODE_VISUAL), line, "Readable in read aloud or dynamic braille",
+  val readable = a11y_has(flags, SufficientText()) || (a11y_has(flags, TextualMode()) && ~a11y_has(flags, VisualMode()))
+  val line = _line_of3(readable, a11y_has(flags, VisualMode()), line, "Readable in read aloud or dynamic braille",
     "Not fully readable in read aloud or dynamic braille", "No information about nonvisual reading is available")
-  val line = _line_if(_has_flag(flags, A11Y_ALT), line, "Has alternative text")
+  val line = _line_if(a11y_has(flags, AlternativeText()), line, "Has alternative text")
   val line = _a11y_group(line, "Conformance")
-  val level = $AR.band_int_int(flags / A11Y_LEVEL, 3)
-  val line = _line_of4(level = 3, level = 2, level = 1, line,
+  val level = a11y_level(flags)
+  val line = _line_of4(_is_level(level, LevelAAA()), _is_level(level, LevelAA()), _is_level(level, LevelA()), line,
     "This publication exceeds accepted accessibility standards",
     "This publication meets accepted accessibility standards",
     "This publication meets minimum accessibility standards", "No information is available")
-  val navigation = $AR.band_int_int(flags, A11Y_TOC + A11Y_INDEX + A11Y_STRUCT + A11Y_PAGES) <> 0
+  val navigation = a11y_has(flags, TableOfContents()) || a11y_has(flags, TermIndex())
+    || a11y_has(flags, StructuralNavigation()) || a11y_has(flags, PageNavigation())
   val line = _group_if(navigation, line, "Navigation")
-  val line = _line_if(_has_flag(flags, A11Y_TOC), line, "Table of contents")
-  val line = _line_if(_has_flag(flags, A11Y_INDEX), line, "Index")
-  val line = _line_if(_has_flag(flags, A11Y_STRUCT), line, "Headings")
-  val line = _line_if(_has_flag(flags, A11Y_PAGES), line, "Go to page")
-  val rich = $AR.band_int_int(flags, A11Y_MATHML + A11Y_LONGDESC + A11Y_TRANSCRIPT + A11Y_CAPTIONS) <> 0
+  val line = _line_if(a11y_has(flags, TableOfContents()), line, "Table of contents")
+  val line = _line_if(a11y_has(flags, TermIndex()), line, "Index")
+  val line = _line_if(a11y_has(flags, StructuralNavigation()), line, "Headings")
+  val line = _line_if(a11y_has(flags, PageNavigation()), line, "Go to page")
+  val rich = a11y_has(flags, MathMarkup()) || a11y_has(flags, LongDescription())
+    || a11y_has(flags, Transcript()) || a11y_has(flags, Captions())
   val line = _group_if(rich, line, "Rich content")
-  val line = _line_if(_has_flag(flags, A11Y_MATHML), line, "Math as MathML")
-  val line = _line_if(_has_flag(flags, A11Y_LONGDESC), line, "Information-rich images are described by extended descriptions")
-  val line = _line_if(_has_flag(flags, A11Y_TRANSCRIPT), line, "Transcript(s) provided")
-  val line = _line_if(_has_flag(flags, A11Y_CAPTIONS), line, "Videos have closed captions")
-  val hazards = $AR.band_int_int(flags, A11Y_HZ_NONE + A11Y_HZ_FLASH + A11Y_HZ_MOTION + A11Y_HZ_SOUND
-    + A11Y_HZ_NOFLASH + A11Y_HZ_NOMOTION + A11Y_HZ_NOSOUND + A11Y_HZ_UNKNOWN) <> 0
+  val line = _line_if(a11y_has(flags, MathMarkup()), line, "Math as MathML")
+  val line = _line_if(a11y_has(flags, LongDescription()), line, "Information-rich images are described by extended descriptions")
+  val line = _line_if(a11y_has(flags, Transcript()), line, "Transcript(s) provided")
+  val line = _line_if(a11y_has(flags, Captions()), line, "Videos have closed captions")
+  val hazards = a11y_has(flags, NoHazards()) || a11y_has(flags, Flashing()) || a11y_has(flags, MotionSimulation())
+    || a11y_has(flags, Sound()) || a11y_has(flags, NoFlashingHazard()) || a11y_has(flags, NoMotionHazard())
+    || a11y_has(flags, NoSoundHazard()) || a11y_has(flags, HazardsUnknown())
   val line = _group_if(hazards, line, "Hazards")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_NONE), line, "No hazards")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_FLASH), line, "Flashing content")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_MOTION), line, "Motion simulation")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_SOUND), line, "Sounds")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_NOFLASH), line, "No flashing hazards")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_NOMOTION), line, "No motion simulation hazards")
-  val line = _line_if(_has_flag(flags, A11Y_HZ_NOSOUND), line, "No sound hazards")
-in _line_if(_has_flag(flags, A11Y_HZ_UNKNOWN), line, "The presence of hazards is unknown") end
+  val line = _line_if(a11y_has(flags, NoHazards()), line, "No hazards")
+  val line = _line_if(a11y_has(flags, Flashing()), line, "Flashing content")
+  val line = _line_if(a11y_has(flags, MotionSimulation()), line, "Motion simulation")
+  val line = _line_if(a11y_has(flags, Sound()), line, "Sounds")
+  val line = _line_if(a11y_has(flags, NoFlashingHazard()), line, "No flashing hazards")
+  val line = _line_if(a11y_has(flags, NoMotionHazard()), line, "No motion simulation hazards")
+  val line = _line_if(a11y_has(flags, NoSoundHazard()), line, "No sound hazards")
+in _line_if(a11y_has(flags, HazardsUnknown()), line, "The presence of hazards is unknown") end
 
 (* source[6 + j, 6 + count) into dest[j, count) *)
 fun _summary_copy {source_loc,dest_loc:agz}{owner:addr}{source_size:nat}{count:nat | count + 6 <= source_size}

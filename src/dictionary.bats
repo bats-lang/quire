@@ -189,13 +189,25 @@ end
    The dictionaries
    ============================================================ *)
 
-(* Each dictionary: its number (its files' keys), language, kind (1 a
-   .dict.dz, 2 with a .syn), name (name_len bytes, the .ifo's bookname)
-   and types (types_len bytes, its sametypesequence, or none) *)
+(* A dictionary's files: whether its .dict is compressed (a .dict.dz),
+   and whether it has a .syn *)
+typedef dict_form = @{ compressed = bool, synonyms = bool }
+
+(* A form as "dicts" stores it, a byte, and back: 1 for a .dict.dz, 2
+   for a .syn *)
+fn _form_code (form: dict_form): [code:nat | code <= 3] int code =
+  if form.compressed then (if form.synonyms then 3 else 1) else (if form.synonyms then 2 else 0)
+
+fn _form_of_code (code: int): dict_form =
+  @{ compressed = $AR.band_int_int(code, 1) <> 0, synonyms = $AR.band_int_int(code, 2) <> 0 }
+
+(* Each dictionary: its number (its files' keys), language, form, name
+   (name_len bytes, the .ifo's bookname) and types (types_len bytes, its
+   sametypesequence, or none) *)
 datavtype dicts(int) =
   | DictsNil(0) of ()
   | {count:nat}{name_loc,types_loc:agz}{name_len:pos | name_len <= 255}{types_len:nat | types_len <= 16}
-    DictsCons(count + 1) of (int, int, int, $A.arr(byte, name_loc, 256), int name_len, $A.arr(byte, types_loc, 16), int types_len, dicts(count))
+    DictsCons(count + 1) of (int, int, dict_form, $A.arr(byte, name_loc, 256), int name_len, $A.arr(byte, types_loc, 16), int types_len, dicts(count))
 
 fun _dicts_free {count:nat} .<count>. (list: dicts(count)): void =
   case+ list of
@@ -217,46 +229,46 @@ fun _dicts_count {count:nat} .<count>. (list: !dicts(count)): int count =
 fun _dicts_join {front,back:nat} .<front>. (list: dicts(front), back: dicts(back)): dicts(front + back) =
   case+ list of
   | ~DictsNil() => back
-  | ~DictsCons(id, language, kind, name, name_len, types, types_len, rest) =>
-    DictsCons(id, language, kind, name, name_len, types, types_len, _dicts_join(rest, back))
+  | ~DictsCons(id, language, form, name, name_len, types, types_len, rest) =>
+    DictsCons(id, language, form, name, name_len, types, types_len, _dicts_join(rest, back))
 
 (* list with extra put in at index (at its end, past it) *)
 fun _dicts_insert {count,extra:nat} .<count>. (list: dicts(count), index: int, extra: dicts(extra)): dicts(count + extra) =
   if index <= 0 then _dicts_join(extra, list)
   else (case+ list of
     | ~DictsNil() => extra
-    | ~DictsCons(id, language, kind, name, name_len, types, types_len, rest) =>
-      DictsCons(id, language, kind, name, name_len, types, types_len, _dicts_insert(rest, index - 1, extra)))
+    | ~DictsCons(id, language, form, name, name_len, types, types_len, rest) =>
+      DictsCons(id, language, form, name, name_len, types, types_len, _dicts_insert(rest, index - 1, extra)))
 
 (* list without the entry at index, and that entry (none past its end) *)
 fun _dicts_take_at {count:nat} .<count>. (list: dicts(count), index: int)
   : [left,taken:nat | left + taken == count; taken <= 1] @(dicts(left), dicts(taken)) =
   case+ list of
   | ~DictsNil() => @(DictsNil(), DictsNil())
-  | ~DictsCons(id, language, kind, name, name_len, types, types_len, rest) =>
-    if index = 0 then @(rest, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil()))
+  | ~DictsCons(id, language, form, name, name_len, types, types_len, rest) =>
+    if index = 0 then @(rest, DictsCons(id, language, form, name, name_len, types, types_len, DictsNil()))
     else let
       val @(left, taken) = _dicts_take_at(rest, index - 1)
-    in @(DictsCons(id, language, kind, name, name_len, types, types_len, left), taken) end
+    in @(DictsCons(id, language, form, name, name_len, types, types_len, left), taken) end
 
 (* list without the entry numbered id, and that entry *)
 fun _dicts_take_id {count:nat} .<count>. (list: dicts(count), id: int)
   : [left,taken:nat | left + taken == count; taken <= 1] @(dicts(left), dicts(taken)) =
   case+ list of
   | ~DictsNil() => @(DictsNil(), DictsNil())
-  | ~DictsCons(entry_id, language, kind, name, name_len, types, types_len, rest) =>
-    if entry_id = id then @(rest, DictsCons(entry_id, language, kind, name, name_len, types, types_len, DictsNil()))
+  | ~DictsCons(entry_id, language, form, name, name_len, types, types_len, rest) =>
+    if entry_id = id then @(rest, DictsCons(entry_id, language, form, name, name_len, types, types_len, DictsNil()))
     else let
       val @(left, taken) = _dicts_take_id(rest, id)
-    in @(DictsCons(entry_id, language, kind, name, name_len, types, types_len, left), taken) end
+    in @(DictsCons(entry_id, language, form, name, name_len, types, types_len, left), taken) end
 
-(* The number of the first dictionary of language, and its kind; -1 when none serves it *)
-fun _dicts_for {count:nat} .<count>. (list: !dicts(count), language: int): @(int, int) =
+(* The number of the first dictionary of language, and its form; -1 when none serves it *)
+fun _dicts_for {count:nat} .<count>. (list: !dicts(count), language: int): @(int, dict_form) =
   case+ list of
-  | DictsNil() => @(~1, 0)
-  | @DictsCons(id, entry_language, kind, _, _, _, _, rest) =>
+  | DictsNil() => @(~1, _form_of_code(0))
+  | @DictsCons(id, entry_language, form, _, _, _, _, rest) =>
     if entry_language = language then let
-      val found = @(id, kind)
+      val found = @(id, form)
       prval () = fold@(list)
     in found end
     else let
@@ -285,18 +297,18 @@ fn _copy_16 {l:agz} (source: !$A.arr(byte, l, 16)): [copy_loc:agz] $A.arr(byte, 
   val () = _copy_bytes(source, 0, copy, 0, 16, 0)
 in copy end
 
-(* An entry's kind, name and types, copied *)
+(* An entry's form, name and types, copied *)
 datavtype entry_got =
   | {name_loc,types_loc:agz}{name_len:pos | name_len <= 255}{types_len:nat | types_len <= 16}
-    EntryGot of (int, $A.arr(byte, name_loc, 256), int name_len, $A.arr(byte, types_loc, 16), int types_len)
+    EntryGot of (dict_form, $A.arr(byte, name_loc, 256), int name_len, $A.arr(byte, types_loc, 16), int types_len)
   | EntryNone of ()
 
 fun _dicts_entry {count:nat} .<count>. (list: !dicts(count), id: int): entry_got =
   case+ list of
   | DictsNil() => EntryNone()
-  | @DictsCons(entry_id, _, kind, name, name_len, types, types_len, rest) =>
+  | @DictsCons(entry_id, _, form, name, name_len, types, types_len, rest) =>
     if entry_id = id then let
-      val got = EntryGot(kind, _copy_256(name), name_len, _copy_16(types), types_len)
+      val got = EntryGot(form, _copy_256(name), name_len, _copy_16(types), types_len)
       prval () = fold@(list)
     in got end
     else let
@@ -358,15 +370,15 @@ fn _files_delete (id: int): void = let
 in _file_delete(88, id) end
 
 (* The entries of list at out[at, ...): each its number, language,
-   kind, name's length and name, and types' length and types *)
+   form, name's length and name, and types' length and types *)
 fun _write_entries {l:agz}{n:nat}{count:nat}{at:nat | at + ENTRY_MOST * count <= n} .<count>.
   (out: !$A.arr(byte, l, n), at: int at, list: !dicts(count)): [stop:nat | stop <= at + ENTRY_MOST * count] int stop =
   case+ list of
   | DictsNil() => at
-  | @DictsCons(id, language, kind, name, name_len, types, types_len, rest) => let
+  | @DictsCons(id, language, form, name, name_len, types, types_len, rest) => let
       val () = u32_put(out, at, id)
       val () = u32_put(out, at + 4, language)
-      val () = $A.write_byte(out, at + 8, $AR.low_byte(kind))
+      val () = $A.write_byte(out, at + 8, _form_code(form))
       val () = $A.write_byte(out, at + 9, name_len)
       val () = _copy_bytes(name, 0, out, at + 10, name_len, 0)
       val () = $A.write_byte(out, at + 10 + name_len, types_len)
@@ -414,7 +426,7 @@ fun _parse_entries {l:agz}{n:pos}{at:nat | at <= n}{remaining:nat}{count:nat} .<
   else let
     val id = u32_at(data, at)
     val language = u32_at(data, at + 4)
-    val kind = _byte_at(data, at + 8)
+    val form = _form_of_code(_byte_at(data, at + 8))
     val name_len = _byte_at(data, at + 9)
   in
     if name_len <= 0 then list
@@ -431,7 +443,7 @@ fun _parse_entries {l:agz}{n:pos}{at:nat | at <= n}{remaining:nat}{count:nat} .<
         val () = _copy_bytes(data, at + 10, name, 0, name_len, 0)
         val types = $A.alloc<byte>(16)
         val () = _copy_bytes(data, at + 11 + name_len, types, 0, types_len, 0)
-        val list = _dicts_join(list, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil()))
+        val list = _dicts_join(list, DictsCons(id, language, form, name, name_len, types, types_len, DictsNil()))
       in _parse_entries(data, n, at + 11 + name_len + types_len, remaining - 1, list) end
     end
   end
@@ -630,9 +642,9 @@ in
     in false end
   end
 
-(* Reads dictionary id's files (with its .syn when kind says it has
-   one); the promise resolves true once they are open *)
-fn _load (id: int, kind: int): $P.promise(bool, $P.Chained) = let
+(* Reads dictionary id's files (with its .syn when its form has one);
+   the promise resolves true once they are open *)
+fn _load (id: int, form: dict_form): $P.promise(bool, $P.Chained) = let
   val () = _loaded_put(Loading(id))
   val reading = !_reading + 1
   val () = !_reading := reading
@@ -640,7 +652,7 @@ fn _load (id: int, kind: int): $P.promise(bool, $P.Chained) = let
   val () = _slot_put(_gather_idx, NoFile())
   val () = _slot_put(_gather_dict, NoFile())
   val () = _slot_put(_gather_syn, NoFile())
-  val with_syn = $AR.band_int_int(kind, 2) <> 0
+  val with_syn = form.synonyms
   val gathered = $P.and_then<int><int>(_fetch(88, id, _gather_table, reading), llam(_) =>
     $P.and_then<int><int>(_fetch(73, id, _gather_idx, reading), llam(_) =>
       $P.and_then<int><int>(_fetch(68, id, _gather_dict, reading), llam(_) =>
@@ -719,64 +731,73 @@ fun _lower_bound {n:nat}{query_loc,word_loc:agz}{query_len:nat | query_len <= 65
     else if middle >= high then low
     else let
       val @(position, word_len) = _sample(table, table_size, dir_at, middle, word)
-      val order = (if position < 0 then 1 else word_fold_compare(word, 0, word_len, query, query_len)): int
+      val order = (if position < 0 then After() else word_fold_compare(word, 0, word_len, query, query_len)): word_order
     in
-      if order < 0 then _lower_bound(table, table_size, dir_at, query, query_len, middle + 1, high, word)
+      if (case+ order of Before() => true | Same() => false | After() => false) then _lower_bound(table, table_size, dir_at, query, query_len, middle + 1, high, word)
       else _lower_bound(table, table_size, dir_at, query, query_len, low, middle, word)
     end
   end
 
+(* How a query was found: its headword exactly, one that differs from it
+   only in ASCII case, or not *)
+datatype word_match = Exact | CaseFolded | NotFound
+
+fn _was_found (found: word_match): bool =
+  case+ found of Exact() => true | CaseFolded() => true | NotFound() => false
+
 (* The records of block[at, n), each a word, its 0 byte and tail bytes:
-   the first whose word is query (2), else the first that differs from
-   it only in ASCII case (1), else none (0); and its place *)
+   the first whose word is query, else the first that differs from it
+   only in ASCII case, else none; and its place *)
+(* What a walk found when it found no exact headword: the first that
+   differs only in case (at folded), or none *)
+fn _folded (folded: int): @(word_match, int) = if folded >= 0 then @(CaseFolded(), folded) else @(NotFound(), 0)
+
 fun _walk {l,query_loc:agz}{n:nat}{at:nat | at <= n}{tail:nat}{query_len:nat | query_len <= 65} .<n - at>.
   (block: !$A.arr(byte, l, n), n: int n, at: int at, tail: int tail,
-   query: !$A.arr(byte, query_loc, 65), query_len: int query_len, folded: int): @(int, int) =
-  if at >= n then (if folded >= 0 then @(1, folded) else @(0, 0))
+   query: !$A.arr(byte, query_loc, 65), query_len: int query_len, folded: int): @(word_match, int) =
+  if at >= n then _folded(folded)
   else let
     val limit = (if at + 256 < n then at + 256 else n): [limit:nat | at <= limit; limit <= n] int limit
     val zero = zero_at(block, at, limit)
   in
-    if zero >= limit then (if folded >= 0 then @(1, folded) else @(0, 0))
-    else if zero + 1 + tail > n then (if folded >= 0 then @(1, folded) else @(0, 0))
-    else let
-      val order = word_fold_compare(block, at, zero - at, query, query_len)
-    in
-      if order < 0 then _walk(block, n, zero + 1 + tail, tail, query, query_len, folded)
-      else if order > 0 then (if folded >= 0 then @(1, folded) else @(0, 0))
-      else if word_equal(block, at, zero - at, query, query_len) then @(2, at)
-      else _walk(block, n, zero + 1 + tail, tail, query, query_len, (if folded >= 0 then folded else at))
-    end
+    if zero >= limit then _folded(folded)
+    else if zero + 1 + tail > n then _folded(folded)
+    else (case+ word_fold_compare(block, at, zero - at, query, query_len) of
+      | Before() => _walk(block, n, zero + 1 + tail, tail, query, query_len, folded)
+      | After() => _folded(folded)
+      | Same() =>
+        if word_equal(block, at, zero - at, query, query_len) then @(Exact(), at)
+        else _walk(block, n, zero + 1 + tail, tail, query, query_len, (if folded >= 0 then folded else at)))
   end
 
 (* query among file's records [block_start, stop) (at most BLOCK_MOST bytes
    of them): as _walk finds it, with its position in the file *)
 fn _scan {n:nat}{query_loc:agz}{tail:nat}{query_len:nat | query_len <= 65}
   (file: !$BF.infile(n), size: int n, block_start: int, stop: int, tail: int tail,
-   query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(int, int) = let
+   query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(word_match, int) = let
   val block_start = g1ofg0(block_start)
   val stop = g1ofg0(stop)
 in
-  if block_start < 0 then @(0, 0)
-  else if stop > size then @(0, 0)
-  else if stop <= block_start then @(0, 0)
+  if block_start < 0 then @(NotFound(), 0)
+  else if stop > size then @(NotFound(), 0)
+  else if stop <= block_start then @(NotFound(), 0)
   else let
     val block_len = _least(stop - block_start, BLOCK_MOST)
     val block = $A.alloc<byte>(block_len)
     val () = $BF.file_read(file, block_start, block, block_len)
-    val @(kind, at) = _walk(block, block_len, 0, tail, query, query_len, ~1)
+    val @(matched, at) = _walk(block, block_len, 0, tail, query, query_len, ~1)
     val () = $A.free<byte>(block)
-  in @(kind, block_start + at) end
+  in @(matched, block_start + at) end
 end
 
 (* query in file's records, whose samples are the table's directory at
    dir_at (samples of them): where it is, and how it matched (as _walk) *)
 fn _search {n,table_n:nat}{query_loc:agz}{tail:nat}{query_len:nat | query_len <= 65}
   (file: !$BF.infile(n), size: int n, table: !$BF.infile(table_n), table_size: int table_n, dir_at: int, samples: int, tail: int tail,
-   query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(int, int) = let
+   query: !$A.arr(byte, query_loc, 65), query_len: int query_len): @(word_match, int) = let
   val samples = g1ofg0(samples)
 in
-  if samples <= 0 then @(0, 0)
+  if samples <= 0 then @(NotFound(), 0)
   else let
     val word = $A.alloc<byte>(256)
     val bound = _lower_bound(table, table_size, dir_at, query, query_len, 0, samples, word)
@@ -785,7 +806,7 @@ in
     val block_start = _sample_position(table, table_size, dir_at, start)
     val stop = (if start + 2 < samples then _sample_position(table, table_size, dir_at, start + 2) else size): int
   in
-    if block_start < 0 then @(0, 0)
+    if block_start < 0 then @(NotFound(), 0)
     else _scan(file, size, block_start, (if stop < 0 then size else stop), tail, query, query_len)
   end
 end
@@ -884,14 +905,14 @@ fn _lookup {idx_n,table_n:nat}{query_loc:agz}{query_len:nat | query_len <= 65}
   (idx: !$BF.infile(idx_n), idx_size: int idx_n, syn: !file_slot, table: !$BF.infile(table_n), table_size: int table_n,
    query: !$A.arr(byte, query_loc, 65), query_len: int query_len): record_got = let
   val idx_samples = _file_u32(table, table_size, 4)
-  val @(kind, position) = _search(idx, idx_size, table, table_size, 32, idx_samples, 8, query, query_len)
+  val @(matched, position) = _search(idx, idx_size, table, table_size, 32, idx_samples, 8, query, query_len)
 in
-  if kind > 0 then _idx_record(idx, idx_size, position)
+  if _was_found(matched) then _idx_record(idx, idx_size, position)
   else (case+ syn of
     | @FileSlot(syn_file, syn_size) => let
         val syn_samples = _file_u32(table, table_size, 12)
-        val @(syn_kind, syn_position) = _search(syn_file, syn_size, table, table_size, 32 + 4 * idx_samples, syn_samples, 4, query, query_len)
-        val target = (if syn_kind > 0 then _syn_target(syn_file, syn_size, syn_position) else ~1): int
+        val @(syn_matched, syn_position) = _search(syn_file, syn_size, table, table_size, 32 + 4 * idx_samples, syn_samples, 4, query, query_len)
+        val target = (if _was_found(syn_matched) then _syn_target(syn_file, syn_size, syn_position) else ~1): int
         prval () = fold@(syn)
       in
         if target < 0 then NoRecord()
@@ -962,7 +983,7 @@ implement dict_find (code, code_len, word, word_len) = let
   val start = _trim_start(word, 0, word_len)
   val stop = _trim_end(word, start, word_len)
   val+ ~DictCell(list, next_id) = _dicts_take()
-  val @(id, kind) = _dicts_for(list, language)
+  val @(id, form) = _dicts_for(list, language)
   val () = _dicts_put(DictCell(list, next_id))
 in
   if id < 0 then DictMissing()
@@ -990,7 +1011,7 @@ in
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-      in DictReading(_load(id, kind)) end
+      in DictReading(_load(id, form)) end
     (* the files are being read already: that read's lookup is made
        again once they are open *)
     | @Loading(loading_id) =>
@@ -998,10 +1019,10 @@ in
       else let
         prval () = fold@(current)
         val () = _loaded_put(current)
-      in DictReading(_load(id, kind)) end
+      in DictReading(_load(id, form)) end
     | NotLoaded() => let
         val () = _loaded_put(current)
-      in DictReading(_load(id, kind)) end
+      in DictReading(_load(id, form)) end
   end
 end
 
@@ -1109,7 +1130,7 @@ in
 end
 
 (* The article of the last lookup's word, read and shown *)
-fn _article (id: int, kind: int, offset: int, size: int): void = let
+fn _article (id: int, form: dict_form, offset: int, size: int): void = let
   val read_len = _least(g1ofg0(size), ARTICLE_READ_MOST)
   val offset = g1ofg0(offset)
   val current = _loaded_take()
@@ -1128,7 +1149,7 @@ in
       prval () = fold@(current)
       val () = _loaded_put(current)
     in _article_unread() end
-    else if $AR.band_int_int(kind, 1) <> 0 then let
+    else if form.compressed then let
       val () = _article_dz(id, dict, dict_size, table, table_size, offset, read_len)
       prval () = fold@(current)
     in _loaded_put(current) end
@@ -1166,13 +1187,13 @@ implement dict_show () =
     in
       case+ entry of
       | ~EntryNone() => ()
-      | ~EntryGot(kind, name, name_len, types, _) => let
+      | ~EntryGot(form, name, name_len, types, _) => let
           val () = $A.free<byte>(types)
           val () = ui_text_buf("dictionary-source", name, name_len)
           val () = ui_text("dictionary-article", "-")
           val () = layer_open(LDictionary())
           val () = ui_focus("dictionary-close")
-        in _article(id, kind, offset, size) end
+        in _article(id, form, offset, size) end
     end
 
 (* ============================================================
@@ -1366,31 +1387,33 @@ fn _ends_with {l:agz}{n:pos}{name_len:nat | name_len <= n}{suffix_len:pos}
   val suffix_len = g1u2i(string1_length(suffix))
 in if suffix_len > name_len then false else _ends_at(name, name_len, suffix, suffix_len, 0) end
 
-fn _name_kind {l:agz}{name_len:nat | name_len <= 16} (tail: !$A.arr(byte, l, 16), name_len: int name_len): int =
-  if _ends_with(tail, name_len, ".ifo") then 1
-  else if _ends_with(tail, name_len, ".idx") then 2
-  else if _ends_with(tail, name_len, ".dict") then 3
-  else if _ends_with(tail, name_len, ".dz") then 4
-  else if _ends_with(tail, name_len, ".syn") then 5
-  else 0
+(* What a file of a dictionary is, by its name's end *)
+datatype dictionary_file = IfoFile | IdxFile | DictFile | DictZipFile | SynFile | OtherFile
 
-(* What a file is, by its name's end: 1 an .ifo, 2 an .idx, 3 a .dict,
-   4 a .dict.dz, 5 a .syn, 0 none of them *)
-fn _file_kind {n:nat} (file: !$BF.infile(n)): int =
+fn _name_kind {l:agz}{name_len:nat | name_len <= 16} (tail: !$A.arr(byte, l, 16), name_len: int name_len): dictionary_file =
+  if _ends_with(tail, name_len, ".ifo") then IfoFile()
+  else if _ends_with(tail, name_len, ".idx") then IdxFile()
+  else if _ends_with(tail, name_len, ".dict") then DictFile()
+  else if _ends_with(tail, name_len, ".dz") then DictZipFile()
+  else if _ends_with(tail, name_len, ".syn") then SynFile()
+  else OtherFile()
+
+(* What a file is, by its name's end *)
+fn _file_kind {n:nat} (file: !$BF.infile(n)): dictionary_file =
   case+ $BF.file_name(file) of
-  | ~$R.none() => 0
+  | ~$R.none() => OtherFile()
   | ~$R.some(blob) => let
       val name_len = $BD.blob_len(blob)
     in
-      if name_len <= 0 then let val () = $BD.blob_free(blob) in 0 end
+      if name_len <= 0 then let val () = $BD.blob_free(blob) in OtherFile() end
       else let
         val tail_len = _least(name_len, 16)
         val tail = $A.alloc<byte>(16)
         val () = $BD.blob_read(blob, name_len - tail_len, tail, tail_len)
         val () = $BD.blob_free(blob)
-        val kind = _name_kind(tail, tail_len)
+        val file_kind = _name_kind(tail, tail_len)
         val () = $A.free<byte>(tail)
-      in kind end
+      in file_kind end
     end
 
 (* The file an open promise resolved with, kept by what it is; false
@@ -1403,18 +1426,17 @@ fn _keep_file (opened: $BF.opened): bool =
   | ~$BF.OpenFailed() => false
   | ~$BF.Opened(file) => let
       val size = $BF.file_size(file)
-      val kind = _file_kind(file)
-      val () =
-        if kind = 1 then _slot_put(_import_ifo, FileSlot(file, size))
-        else if kind = 2 then _slot_put(_import_idx, FileSlot(file, size))
-        else if kind = 3 then let
+      val () = (case+ _file_kind(file) of
+        | IfoFile() => _slot_put(_import_ifo, FileSlot(file, size))
+        | IdxFile() => _slot_put(_import_idx, FileSlot(file, size))
+        | DictFile() => let
           val () = !_import_compressed := false
         in _slot_put(_import_dict, FileSlot(file, size)) end
-        else if kind = 4 then let
+        | DictZipFile() => let
           val () = !_import_compressed := true
         in _slot_put(_import_dict, FileSlot(file, size)) end
-        else if kind = 5 then _slot_put(_import_syn, FileSlot(file, size))
-        else $BF.file_close(file)
+        | SynFile() => _slot_put(_import_syn, FileSlot(file, size))
+        | OtherFile() => $BF.file_close(file))
     in true end
 
 (* An index file (an .idx or a .syn) read whole, for its import *)
@@ -1768,7 +1790,7 @@ in
       val () = _free_entry(name, types)
     in _refuse("The dictionary is too large to import.") end
     else let
-      val kind = ((if compressed then 1 else 0): int) + ((if has_syn then 2 else 0): int)
+      val form = @{ compressed = compressed, synonyms = has_syn }: dict_form
       val language = !_import_language
       (* each file stored in turn; NotStored when one was not, so one
          that failed is not lost *)
@@ -1778,7 +1800,7 @@ in
             $P.ret<$IDB.stored>(_both_stored(_both_stored(idx_status, dict_status), syn_status)))))
       val () = _slot_put(_import_ifo, NoFile())
       val+ ~DictCell(list, next_id) = _dicts_take()
-      val () = _dicts_put(DictCell(_dicts_join(list, DictsCons(id, language, kind, name, name_len, types, types_len, DictsNil())), next_id))
+      val () = _dicts_put(DictCell(_dicts_join(list, DictsCons(id, language, form, name, name_len, types, types_len, DictsNil())), next_id))
       val () = _unload()
       val () = _render()
     in
