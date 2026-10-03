@@ -36,43 +36,46 @@
     ]
   },
   "static": {
-    "app": [
-      "check",
-      "checkers",
-      "reject/import-unmatched",
-      "reject/shelf-unmatched"
-    ],
     "aloud": [
       "accept/aloud-placement-matched",
-      "reject/aloud-placement-unmatched",
-      "reject/turn-unmatched"
+      "reject/aloud-placement-unmatched"
     ],
     "back": [
       "accept/back-offer",
-      "reject/back-forged-proof",
-      "reject/back-nothing-to-offer"
+      "reject/back-forged-proof"
     ],
     "narration": [
       "accept/clip-last",
-      "reject/clip-past-end",
-      "reject/highlight-unmatched",
-      "reject/back-other-timeout"
+      "reject/clip-past-end"
     ],
     "fixed-layout": [
       "accept/fixed-box-fits",
-      "reject/fixed-box-zoom-zero",
-      "reject/link-unmatched"
+      "reject/fixed-box-zoom-zero"
     ],
-    "storage": [
+    "sync": [
       "reject/sync-result-unmatched",
-      "reject/unreadable-unhandled",
-      "reject/dictionary-file-unmatched"
+      "reject/unreadable-unhandled"
     ],
     "controls": [
       "reject/control-unmatched",
-      "reject/brightness-not-a-choice",
-      "reject/theme-unmatched",
-      "reject/role-unmatched"
+      "reject/brightness-not-a-choice"
+    ],
+    "style": [
+      "reject/role-unmatched",
+      "reject/theme-unmatched"
+    ],
+    "reader": [
+      "checkers",
+      "reject/back-nothing-to-offer",
+      "reject/back-other-timeout",
+      "reject/turn-unmatched",
+      "reject/link-unmatched"
+    ],
+    "library": [
+      "reject/import-unmatched",
+      "reject/shelf-unmatched",
+      "reject/highlight-unmatched",
+      "reject/dictionary-file-unmatched"
     ]
   }
 }

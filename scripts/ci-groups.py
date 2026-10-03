@@ -6,11 +6,12 @@ Two kinds of group:
 * e2e: each a list of the specs under e2e/ one job runs, by area
   (library and import; the reader and its page turns; the reading tools;
   sync, backup, catalogues, settings and the rest);
-* static: each a list of what one job of the static tests runs: `check`
-  (bats check of the app itself), `checkers` (ids.py and case_plus.py,
-  with their fixtures), and the fixtures, `accept/<name>` and
-  `reject/<name>` under tests/static/ (each a full bats check of its
-  own, so they are the long part).
+* static: each a list of what one job of the static tests runs:
+  `checkers` (ids.py and case_plus.py, with their fixtures), and the
+  fixtures, `accept/<name>` and `reject/<name>` under tests/static/
+  (each a full bats check of its own, so they are the long part; every
+  job first checks the app itself, which fills the build cache, so it
+  is not a member).
 
 Every spec and every static member is in exactly one group of its kind,
 and every name a group lists exists: anything else fails, so a spec or a
@@ -40,9 +41,9 @@ def specs():
 
 
 def static_members():
-    """Everything the static tests run: the app's check, the checkers,
-    and each fixture."""
-    found = ['check', 'checkers']
+    """Everything the static tests run: the checkers, and each
+    fixture."""
+    found = ['checkers']
     for verdict in ('accept', 'reject'):
         directory = os.path.join(ROOT, 'tests', 'static', verdict)
         found += sorted(f'{verdict}/{name}' for name in os.listdir(directory)

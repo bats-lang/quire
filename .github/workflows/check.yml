@@ -102,9 +102,10 @@ jobs:
       - name: Run WASM smoke tests
         run: npx vitest run
 
-  # The static tests (tests/static/run.sh): bats check of the app, the
-  # checkers, and each fixture a full bats check of its own, so they run
-  # in groups side by side
+  # The static tests (tests/static/run.sh): the checkers, and each
+  # fixture a full bats check of its own, so they run in groups side by
+  # side; each group checks the app itself first (bats check), which
+  # fills the build cache its fixtures start from
   static:
     needs: plan
     runs-on: ubuntu-latest
