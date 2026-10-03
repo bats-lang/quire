@@ -241,6 +241,8 @@ test('Use Android says why it cannot sync, and Turn off signs out', async ({ bro
   await expect(librarySearch(page)).toBeVisible();
   await openSync(page);
   await expect(useAndroid(page)).toBeHidden();
+  // nor, in a build with no client, Google Drive
+  await expect(panel(page).getByRole('button', { name: 'Google Drive' })).toBeHidden();
   await web.close();
   // an app built without a client says it is not set up
   const bare = await device(browser, null, { client: null });
@@ -313,4 +315,91 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
   await expect.poll(async () => (await place(b.page)).ch).toBe(3);
   expect(unexpected(b)).toEqual([]);
   await b.context.close();
+});
+
+/** Google Identity Services, played in a browser page: each request
+    gives window.__gis.token (or, with window.__gis.closed, the reader
+    closes the window); revokes are counted */
+const IDENTITY_SERVICES = `
+  window.__gis = window.__gis || { token: 'token-1', closed: false, requests: 0, revoked: [], clients: [] };
+  window.google = { accounts: { oauth2: {
+    initTokenClient: o => {
+      window.__gis.clients.push({ client_id: o.client_id, scope: o.scope });
+      return { requestAccessToken: () => {
+        window.__gis.requests++;
+        setTimeout(() => window.__gis.closed ? o.error_callback({ type: 'popup_closed' }) : o.callback({ access_token: window.__gis.token }), 10);
+      } };
+    },
+    revoke: (token, done) => { window.__gis.revoked.push(token); done && done(); },
+  } } };
+`;
+
+/** A browser: Google's script and Drive routed, and the build's client */
+async function browserDevice(browser, server) {
+  const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await context.route('https://accounts.google.com/gsi/client', route => route.fulfill({
+    status: 200, headers: { 'content-type': 'text/javascript' }, body: IDENTITY_SERVICES,
+  }));
+  await context.route('https://www.googleapis.com/**', server.handle);
+  await context.route('**/sync-clients.json', route => route.fulfill({
+    status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ googleWebClient: CLIENT }),
+  }));
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.goto('/');
+  await expect(librarySearch(page)).toBeVisible();
+  return { context, page, errors };
+}
+
+test('in a browser, Google Drive syncs through the same app data folder, an hour at a time', async ({ browser }) => {
+  const server = drive();
+  const file = epubFile(book);
+  // the app's device writes the file; the browser joins it
+  const phone = await device(browser, server);
+  await importFiles(phone.page, [file], 1);
+  await openBook(phone.page, 'Shared Book');
+  await nextChapter(phone.page, 2);
+  await toLibrary(phone.page);
+  await joinAndroid(phone.page);
+  await phone.context.close();
+
+  const web = await browserDevice(browser, server);
+  await importFiles(web.page, [file], 1);
+  await openSync(web.page);
+  await expect(useAndroid(web.page)).toBeHidden();
+  const googleDrive = panel(web.page).getByRole('button', { name: 'Google Drive' });
+  await expect(panel(web.page)).toContainText('Google signs you in for an hour at a time');
+  // the reader closes Google's window: nothing is asked of Drive
+  await web.page.evaluate(() => { window.__gis.closed = true; });
+  const asked = server.requests.length;
+  await googleDrive.click();
+  await expect(status(web.page)).toHaveText('Google sign-in was canceled.');
+  expect(server.requests.length).toBe(asked);
+  await web.page.evaluate(() => { window.__gis.closed = false; });
+  await googleDrive.click();
+  await expect(status(web.page)).toHaveText(/^Last synced on /);
+  expect(await web.page.evaluate(() => window.__gis.clients[0])).toEqual({ client_id: CLIENT, scope: 'https://www.googleapis.com/auth/drive.appdata' });
+  await closeSync(web.page);
+  await openBook(web.page, 'Shared Book');
+  await expect.poll(async () => (await place(web.page)).ch).toBe(2);
+  await toLibrary(web.page);
+  await librarySettings(web.page);
+  await expect(row(web.page)).toHaveText(/^Google Drive · synced (just now|1 min ago)$/);
+  // the hour is up: Drive refuses the token, and Sync now asks Google again
+  server.token = 'token-2';
+  await web.page.evaluate(() => { window.__gis.token = 'token-2'; });
+  await settingsButton(web.page, 'Sync ›').click();
+  await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(web.page)).toContainText('Tap Sync now to sign in to Google again.');
+  await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(web.page)).toHaveText(/^Last synced on /);
+  expect(await web.page.evaluate(() => window.__gis.requests)).toBe(3);
+  // Turn off revokes the token
+  await panel(web.page).getByRole('button', { name: 'Turn off' }).click();
+  await expect(status(web.page)).toHaveText('Sync is off.');
+  expect(await web.page.evaluate(() => window.__gis.revoked)).toEqual(['token-2']);
+  expect(unexpected(web)).toEqual([]);
+  await web.context.close();
 });

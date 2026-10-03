@@ -270,7 +270,12 @@ the app's files, the only thing pwa's backup rules keep): each sync
 point merges it and writes it there, and the file a reinstall
 restores is merged at the first launch like any sync file; a store's
 write writes it too. `e2e/sync-android.spec.js` plays both plugins
-and Drive's API.
+and Drive's API. In a browser the same store is **Google Drive**
+(bridge's `google_token_get` there goes through Google Identity
+Services' token model: a token for about an hour, no refresh token),
+listed only in a build with a client, so Google's script is loaded
+only then; the summary says "Google Drive · ...", and Turn off revokes
+the token.
 
 ### Catalogues
 
@@ -489,6 +494,11 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
+its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
+a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
+`CaseFolded`, `NotFound`) by stardict's `word_order` (`Before`, `Same`,
+`After`); an article's part is a `part_kind`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
