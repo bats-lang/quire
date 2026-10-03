@@ -166,7 +166,7 @@ jobs:
   android:
     needs: check
     # Pinned by commit; the relock workflow moves it (#203)
-    uses: bats-lang/pwa/.github/workflows/android.yml@8827ba2a28e0ea8292c868097fd7e3654b620f21
+    uses: bats-lang/pwa/.github/workflows/android.yml@e02e1e23bc8da42c917b5d5f25ec2bbdf1bc829f
     secrets: inherit
     with:
       artifact: quire-android
