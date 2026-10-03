@@ -319,9 +319,12 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
 
 /** Google Identity Services, played in a browser page: each request
     gives window.__gis.token (or, with window.__gis.closed, the reader
-    closes the window); revokes are counted */
+    closes the window); revokes are counted. window.__gis is made as the
+    page starts (browserDevice), not by this script: the app loads the
+    script only once the Sync screen looks for a token, so the test,
+    which sets window.__gis.closed as that screen opens, could otherwise
+    run before the script has */
 const IDENTITY_SERVICES = `
-  window.__gis = window.__gis || { token: 'token-1', closed: false, requests: 0, revoked: [], clients: [] };
   window.google = { accounts: { oauth2: {
     initTokenClient: o => {
       window.__gis.clients.push({ client_id: o.client_id, scope: o.scope });
@@ -344,6 +347,9 @@ async function browserDevice(browser, server) {
   await context.route('**/sync-clients.json', route => route.fulfill({
     status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ googleWebClient: CLIENT }),
   }));
+  await context.addInitScript(() => {
+    window.__gis = { token: 'token-1', closed: false, requests: 0, revoked: [], clients: [] };
+  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
