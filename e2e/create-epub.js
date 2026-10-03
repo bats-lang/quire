@@ -227,6 +227,31 @@ export const TINY_PNG = Buffer.from(
 );
 
 /**
+ * A WAV file of silence: seconds of 8 kHz, 16-bit mono zeros. Playwright's
+ * Chromium plays WAV (it has no AAC), so a book's narration in the tests
+ * is one of these.
+ */
+export function silentWav(seconds) {
+  const rate = 8000;
+  const dataSize = Math.round(seconds * rate) * 2;
+  const wav = Buffer.alloc(44 + dataSize);
+  wav.write('RIFF', 0, 'ascii');
+  wav.writeUInt32LE(36 + dataSize, 4);
+  wav.write('WAVE', 8, 'ascii');
+  wav.write('fmt ', 12, 'ascii');
+  wav.writeUInt32LE(16, 16);        // the fmt chunk's size
+  wav.writeUInt16LE(1, 20);         // PCM
+  wav.writeUInt16LE(1, 22);         // mono
+  wav.writeUInt32LE(rate, 24);
+  wav.writeUInt32LE(rate * 2, 28);  // bytes a second
+  wav.writeUInt16LE(2, 32);         // bytes a sample
+  wav.writeUInt16LE(16, 34);        // bits a sample
+  wav.write('data', 36, 'ascii');
+  wav.writeUInt32LE(dataSize, 40);
+  return wav;
+}
+
+/**
  * A PNG of width by height pixels, all of one colour (r, g, b): a fixed
  * layout's page image, whose shape the tests measure.
  */
@@ -260,7 +285,10 @@ export function createEpub(opts = {}) {
   const parasPerChapter = opts.paragraphsPerChapter || 12;
   const coverImage = opts.coverImage || false;
   const svgCover = opts.svgCover || false;
-  const rawChapters = opts.rawChapters || null; // array of {body, images?, lang?}
+  // array of {body, images?, lang?, overlay?}: overlay is a Media
+  // Overlay's SMIL, kept as chapterN.smil and named by the chapter's
+  // manifest item
+  const rawChapters = opts.rawChapters || null;
   const language = opts.language === undefined ? 'en' : opts.language;
 
   // mimetype must be first entry, stored uncompressed
@@ -287,8 +315,14 @@ export function createEpub(opts = {}) {
   }
 
   const effectiveChapters = rawChapters ? rawChapters.length : numChapters;
+  const overlays = [];
   for (let i = 1; i <= effectiveChapters; i++) {
-    manifestItems += `    <item id="ch${i}" href="chapter${i}.xhtml" media-type="application/xhtml+xml"/>\n`;
+    const overlay = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].overlay;
+    if (overlay) {
+      manifestItems += `    <item id="mo${i}" href="chapter${i}.smil" media-type="application/smil+xml"/>\n`;
+      overlays.push({ name: `OEBPS/chapter${i}.smil`, data: overlay });
+    }
+    manifestItems += `    <item id="ch${i}" href="chapter${i}.xhtml" media-type="application/xhtml+xml"${overlay ? ` media-overlay="mo${i}"` : ''}/>\n`;
     // a raw chapter's itemref properties (rendition:layout-pre-paginated, say)
     const itemref = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].itemref;
     spineItems += `    <itemref idref="ch${i}"${itemref ? ` properties="${itemref}"` : ''}/>\n`;
@@ -369,7 +403,8 @@ ${tocItems}    </ol>
 ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
-  // opts.extraFiles: [{ name, data, mediaType }] more manifest items
+  // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
+  // items, deflated unless store
   for (const [k, f] of (opts.extraFiles || []).entries()) {
     manifestItems += `    <item id="x${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
   }
@@ -403,7 +438,8 @@ ${spineItems}  </spine>
     { name: 'OEBPS/content.opf', data: contentOpf, store: true },
     opts.ncx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
-  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data });
+  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
+  zipEntries.push(...overlays);
 
   // SVG cover wrap page (emulates real-world pattern: <svg><image xlink:href="...">)
   if (svgCover) {

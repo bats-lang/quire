@@ -28,6 +28,7 @@ from pathlib import Path
 MAKERS = {name: (1,) for name in (
     'ui_el', 'ui_add', 'ui_text_btn', 'ui_icon_btn', 'ui_menuitem',
     'ui_field', 'ui_img', 'ui_file_input', 'ui_link_out', 'ui_link_out_https', 'ui_link_out_path', 'ui_tab',
+    'ui_audio',
 )}
 # a range row: its label, its input and its value
 MAKERS['ui_range'] = (1, 3, 6)

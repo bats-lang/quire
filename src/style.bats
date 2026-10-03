@@ -1520,7 +1520,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 8300} (sheet: sheet(left, 0)): [after:nat | after >= left - 8300] sheet(after, 0) = let
+fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after >= left - 8600] sheet(after, 0) = let
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -1782,6 +1782,21 @@ fn _reader {left:nat | left >= 8300} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, "::highlight(bats-mark-4)")
   val sheet = lay(sheet, TextDecoration(), "underline 3px")
+  val sheet = close(sheet)
+  (* the text a book's narration reads (narration.bats): the same proven
+     pair as the sentence read aloud *)
+  val sheet = rule(sheet, "::highlight(bats-mark-5)")
+  val sheet = surf(S_markfg_mark | sheet, 15, 14)
+  val sheet = close(sheet)
+  (* the narration's controls, in the bottom bar's row *)
+  val sheet = rule(sheet, ".ngrp")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "4px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".nleave")
+  val sheet = lay(sheet, FontSize(), "14px")
+  val sheet = lay(sheet, Padding(), "0 8px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".scr")
   val sheet = lay(sheet, FlexBasis(), "100%")
