@@ -647,4 +647,41 @@ implement jr_id (buf, n, position) =
     else @(true, id_high, id_low, position + 16)
   end
 
+(* Where the value of the member named name starts, in the object whose
+   members start at position (past its brace); -1 when it has none *)
+#pub fn jr_member {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}{name_len:pos}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16), name: string name_len)
+  : [at:int | ~1 <= at; at < n] int at
+
+fun _member {l,key_loc:agz}{owner:addr}{n:nat}{position:nat | position <= n}{name_len:pos} .<n - position>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, position: int position, key: !$A.arr(byte, key_loc, 16), name: string name_len)
+  : [at:int | ~1 <= at; at < n] int at = let
+  val next = jr_ws(buf, n, position)
+in
+  if next >= n then ~1
+  else if jr_is(buf, n, next, 125) then ~1
+  else if jr_is(buf, n, next, 44) then _member(buf, n, next + 1, key, name)
+  else let
+    val @(found, key_len, value_at) = jr_key(buf, n, next, key, 16)
+  in
+    if ~found then ~1
+    else if value_at >= n then ~1
+    else if jr_key_is(key, key_len, name) then value_at
+    else _member(buf, n, jr_skip(buf, n, value_at), key, name)
+  end
+end
+
+implement jr_member (buf, n, position, key, name) = _member(buf, n, position, key, name)
+
+(* Where an object's members start: past the brace of the value at at;
+   -1 when it is not an object (or at is -1) *)
+#pub fn jr_object {l:agz}{owner:addr}{n:nat}{at:int | ~1 <= at; at < n}
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, at: int at): [inside:int | ~1 <= inside; inside <= n] int inside
+
+implement jr_object (buf, n, at) =
+  if at < 0 then ~1
+  else let
+    val start = jr_ws(buf, n, at)
+  in if start >= n then ~1 else if jr_is(buf, n, start, 123) then start + 1 else ~1 end
+
 end (* #target wasm *)
