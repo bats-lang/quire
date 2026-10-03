@@ -42,6 +42,7 @@ staload "drive.sats"
 staload "sync_clients.sats"
 staload "dropbox.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload "nextcloud.sats"
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -2312,7 +2313,7 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
   val () = ui_text("sync-title", "Sync")
   val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
-  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file in a WebDAV folder (Nextcloud, ownCloud, a NAS). Use an app password if your server offers one: it is kept on this device only, never in a backup. Your books' files are not synced.")
+  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
   val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
   val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
   val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
@@ -2322,6 +2323,15 @@ implement sync_screen_make () = let
   val () = ui_text_btn("sync-dropbox-row", "sync-dropbox", "btn", "Dropbox")
   val () = ui_el("sync-dropbox-row", "sync-dropbox-about", TDiv, "sabout")
   val () = ui_show("sync-dropbox-row", false)
+  (* Nextcloud: its address, then its own sign-in page (Login Flow v2),
+     which gives an app password *)
+  val () = ui_el("sync-box", "nextcloud-box", TDiv, "sfields")
+  val () = ui_field("nextcloud-box", "nextcloud-server", FUrl, "mname", "Nextcloud server")
+  val () = ui_text_btn("nextcloud-box", "nextcloud-sign-in", "btn", "Sign in with Nextcloud")
+  val () = ui_link_out("nextcloud-box", "nextcloud-page", "btn linkout", "Open Nextcloud's sign-in page")
+  val () = ui_show("nextcloud-page", false)
+  val () = ui_el("sync-box", "sync-webdav-title", TDiv, "sabout")
+  val () = ui_text("sync-webdav-title", "Or any WebDAV folder (ownCloud, a NAS): its address, user name and an app password.")
   val () = ui_el("sync-box", "sync-fields", TDiv, "sfields")
   val () = _fields_make()
   val () = ui_el("sync-box", "sync-status", TDiv, "cnone")
@@ -2604,10 +2614,184 @@ in
     | ~DropboxRefused(_) => ())
 end
 
+(* ============================================================
+   Nextcloud: signing in with its Login Flow v2 (nextcloud.bats),
+   which ends in a WebDAV store of the user's files folder, the login
+   name and an app password
+   ============================================================ *)
+
+(* Counts sign-ins: a poll an earlier one started (or one Turn off
+   ended) stops *)
+val _sign_in_generation = ref<int>(0)
+
+(* The polls a sign-in makes, a few seconds apart: the flow's token
+   lasts 20 minutes *)
+#define POLLS 400
+#define POLL_MILLISECONDS 3000
+
+(* A sign-in's progress, in the screen's status line *)
+fn _sign_in_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-status", text)
+
+(* What a failed step says *)
+fn _sign_in_failed (failure: nextcloud_failure): void = let
+  val () = ui_show("nextcloud-page", false)
+in
+  case+ failure of
+  | NextcloudUnreachable() => _sign_in_says("Can't reach the server, or it doesn't let a browser in (CORS). The Quire app can sign in; in a browser, the server must allow this app's origin.")
+  | NextcloudNotNextcloud() => _sign_in_says("That address isn't a Nextcloud server, or it didn't answer as one.")
+  | NextcloudRefused() => _sign_in_says("Nextcloud refused the app password it gave. Sign in again.")
+  | NextcloudMemory() => _sign_in_says("There isn't enough memory to sign in.")
+end
+
+(* A user's id nobody took (its promise let go), freed *)
+implement $P.dispose<user_found>(found) = user_found_free(found)
+
+(* The user's id asked for, signed in with the authorization made *)
+fn _user_id_asked {server_loc,authorization_loc:agz}{server_len:pos | server_len <= 1024}{authorization_len:nat | authorization_len <= 700}
+  (server: !$A.arr(byte, server_loc, 1024), server_len: int server_len,
+   authorization: !$A.arr(byte, authorization_loc, 700), authorization_len: int authorization_len): $P.promise(user_found, $P.Chained) =
+  if authorization_len > 0 then nextcloud_user_id(server, server_len, authorization, authorization_len)
+  else $P.ret<user_found>(UserNotFound(NextcloudNotNextcloud()))
+
+(* Signed in: the folder of the user's files found by their id, and
+   kept as the WebDAV store, then a sync *)
+fn _sign_in_granted {server_loc,name_loc,password_loc:agz}{server_len,name_len,password_len:pos | server_len <= 1024; name_len <= 1024; password_len <= 1024}
+  (generation: int, server: $A.arr(byte, server_loc, 1024), server_len: int server_len,
+   name: $A.arr(byte, name_loc, 1024), name_len: int name_len,
+   password: $A.arr(byte, password_loc, 1024), password_len: int password_len): void =
+  if name_len > USER_MAX then let
+    val () = $A.free<byte>(server)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+  in _sign_in_failed(NextcloudNotNextcloud()) end
+  else if password_len > PASSWORD_MAX then let
+    val () = $A.free<byte>(server)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+  in _sign_in_failed(NextcloudNotNextcloud()) end
+  else let
+    val user = $A.alloc<byte>(USER_MAX)
+    val () = _bytes_from(name, 0, name_len, user, 0)
+    val secret = $A.alloc<byte>(PASSWORD_MAX)
+    val () = _bytes_from(password, 0, password_len, secret, 0)
+    val () = $A.free<byte>(name)
+    val () = $A.free<byte>(password)
+    val authorization = $A.alloc<byte>(700)
+    val authorization_len = _authorization(user, name_len, secret, password_len, authorization)
+    val pending = _user_id_asked(server, server_len, authorization, authorization_len)
+    val () = $A.free<byte>(authorization)
+  in
+    $P.finish<user_found>(pending, llam(found) =>
+      if generation <> !_sign_in_generation then let
+        val () = user_found_free(found)
+        val () = $A.free<byte>(server)
+        val () = $A.free<byte>(user)
+      in $A.free<byte>(secret) end
+      else case+ found of
+      | ~UserNotFound(failure) => let
+          val () = $A.free<byte>(server)
+          val () = $A.free<byte>(user)
+          val () = $A.free<byte>(secret)
+        in _sign_in_failed(failure) end
+      | ~UserFound(id, id_len) => let
+          val folder = $A.alloc<byte>(4 * 1024 + 32)
+          val folder_len = nextcloud_folder(server, server_len, id, id_len, folder)
+          val () = $A.free<byte>(server)
+          val () = $A.free<byte>(id)
+        in
+          if folder_len > URL_MAX then let
+            val () = $A.free<byte>(folder)
+            val () = $A.free<byte>(user)
+            val () = $A.free<byte>(secret)
+          in _sign_in_failed(NextcloudNotNextcloud()) end
+          else let
+            val url = $A.alloc<byte>(URL_MAX)
+            val () = _bytes_from(folder, 0, folder_len, url, 0)
+            val () = $A.free<byte>(folder)
+            val () = _store_free(_store_swap(_store, WebDav(url, folder_len, user, name_len, secret, password_len)))
+            val () = _store_save()
+            val () = ui_show("nextcloud-page", false)
+            val () = _sign_in_says("Signed in to Nextcloud. Its app password is kept on this device only.")
+            val () = _fields_show()
+            val () = ui_show("sync-off", true)
+          in sync_run() end
+        end)
+  end
+
+(* Waits, then asks the flow's endpoint whether the reader has signed
+   in, polls left more times *)
+fun _sign_in_wait {endpoint_loc,token_loc:agz}{endpoint_len,token_len:pos | endpoint_len <= 1024; token_len <= 1024}{polls:nat} .<polls>.
+  (generation: int, endpoint: $A.arr(byte, endpoint_loc, 1024), endpoint_len: int endpoint_len,
+   token: $A.arr(byte, token_loc, 1024), token_len: int token_len, polls: int polls): void =
+  if polls <= 0 then let
+    val () = $A.free<byte>(endpoint)
+    val () = $A.free<byte>(token)
+    val () = ui_show("nextcloud-page", false)
+  in _sign_in_says("The sign-in timed out. Sign in with Nextcloud again.") end
+  else $P.finish<Int>($P.vow($TM.timer_set(POLL_MILLISECONDS)), llam(_) =>
+    if generation <> !_sign_in_generation then let
+      val () = $A.free<byte>(endpoint)
+    in $A.free<byte>(token) end
+    else $P.finish<login_polled>(nextcloud_poll(endpoint, endpoint_len, token, token_len), llam(polled) =>
+      if generation <> !_sign_in_generation then let
+        val () = login_polled_free(polled)
+        val () = $A.free<byte>(endpoint)
+      in $A.free<byte>(token) end
+      else case+ polled of
+      | ~LoginNotYet() => _sign_in_wait(generation, endpoint, endpoint_len, token, token_len, polls - 1)
+      | ~LoginPollFailed(failure) => let
+          val () = $A.free<byte>(endpoint)
+          val () = $A.free<byte>(token)
+        in _sign_in_failed(failure) end
+      | ~LoginGranted(server, server_len, name, name_len, password, password_len) => let
+          val () = $A.free<byte>(endpoint)
+          val () = $A.free<byte>(token)
+          val () = _sign_in_says("Signed in. Finding your files...")
+        in _sign_in_granted(generation, server, server_len, name, name_len, password, password_len) end))
+
+(* Sign in with Nextcloud (the screen's button): the flow started on the
+   server named, its sign-in page offered as a link (opened by the
+   reader's own tap, so no browser blocks it), and polled *)
+#pub fn sync_nextcloud_sign_in (): void
+implement sync_nextcloud_sign_in () = let
+  val @(address, address_len) = _field_value("nextcloud-server", 1024)
+  val () = !_sign_in_generation := !_sign_in_generation + 1
+  val generation = !_sign_in_generation
+  val () = ui_show("nextcloud-page", false)
+  (* https only: an app password is sent over it *)
+  val secure = _starts(address, address_len, "https://", 8, 0)
+in
+  if address_len <= 0 then let
+    val () = $A.free<byte>(address)
+  in _sign_in_says("Enter your Nextcloud's address, starting with https://.") end
+  else if ~secure then let
+    val () = $A.free<byte>(address)
+  in _sign_in_says("Enter your Nextcloud's address, starting with https://.") end
+  else let
+    val () = _sign_in_says("Asking the server...")
+    val pending = nextcloud_start(address, address_len)
+    val () = $A.free<byte>(address)
+  in
+    $P.finish<login_started>(pending, llam(started) =>
+      if generation <> !_sign_in_generation then login_started_free(started)
+      else case+ started of
+      | ~LoginNotStarted(failure) => _sign_in_failed(failure)
+      | ~LoginStarted(login, login_len, endpoint, endpoint_len, token, token_len) => let
+          val () = ui_https_href("nextcloud-page", login, login_len)
+          val () = ui_show("nextcloud-page", true)
+          val () = _sign_in_says("Open Nextcloud's sign-in page, sign in and grant access; Quire waits here for it.")
+        in _sign_in_wait(generation, endpoint, endpoint_len, token, token_len, POLLS) end)
+  end
+end
+
 (* Turn off (the screen's button): the folder, user name and password
    forgotten at once (they are kept only for the Undo offered) *)
 #pub fn sync_off (): void
-implement sync_off () =
+implement sync_off () = let
+  (* a sign-in under way stops *)
+  val () = !_sign_in_generation := !_sign_in_generation + 1
+  val () = ui_show("nextcloud-page", false)
+in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
   | ~Android(account, account_len) => let
@@ -2678,6 +2862,7 @@ implement sync_off () =
           end
         | Final() => _store_free(_store_swap(_store_off, NoStore())))
     end
+end
 
 (* The store chosen, read with its credentials, then a sync *)
 fn _stores_load (): $P.promise(int, $P.Chained) = let
