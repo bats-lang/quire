@@ -490,6 +490,11 @@ Opening an archive is done in an `import_mode` (`Reopen`, `AddNew`,
 resolves with an `import_outcome` (`Added(key)`, `Kept`, `Failed`), the
 duplicate question with a `duplicate_answer`, and a chapter's load with
 a `load_outcome` (`ChapterShown` or why not, `load_shown`).
+A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
+its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
+a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
+`CaseFolded`, `NotFound`) by stardict's `word_order` (`Before`, `Same`,
+`After`); an article's part is a `part_kind`.
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
