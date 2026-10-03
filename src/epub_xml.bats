@@ -1226,3 +1226,114 @@ and _viewport_node
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): viewport
 
 implement xhtml_viewport (data, nodes) = _viewport_nodes(data, nodes)
+
+(* ============================================================
+   Spreads (EPUB 3.3 §8.2.2): the OPF's rendition:spread, and each
+   itemref's page-spread-* property
+   ============================================================ *)
+
+(* When fixed pages are shown two at a time: never, only when the view
+   is wider than tall, always, or as the reader thinks best (which
+   quire takes as landscape, as Apple Books and Thorium do).
+   "portrait", deprecated, is read as both, as EPUB 3.3 says *)
+#pub datatype rendition_spread =
+  | SpreadNone
+  | SpreadLandscape
+  | SpreadBoth
+  | SpreadAuto
+
+(* What a <meta property="rendition:spread"> says, or that none is met *)
+datatype spread_said =
+  | SpreadUnsaid
+  | SpreadSaysNone
+  | SpreadSaysLandscape
+  | SpreadSaysBoth
+  | SpreadSaysAuto
+
+fn _spread_of_value {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): spread_said = let
+  val @(value_offset, value_len) = _trim(data, offset, span_len)
+in
+  if _span_is(data, value_offset, value_len, "none") then SpreadSaysNone()
+  else if _span_is(data, value_offset, value_len, "landscape") then SpreadSaysLandscape()
+  else if _span_is(data, value_offset, value_len, "both") then SpreadSaysBoth()
+  else if _span_is(data, value_offset, value_len, "portrait") then SpreadSaysBoth()
+  else SpreadSaysAuto()
+end
+
+fun _spread_meta_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): spread_said =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => (case+ _spread_meta(data, node) of
+    | SpreadUnsaid() => _spread_meta_nodes(data, rest)
+    | SpreadSaysNone() => SpreadSaysNone()
+    | SpreadSaysLandscape() => SpreadSaysLandscape()
+    | SpreadSaysBoth() => SpreadSaysBoth()
+    | SpreadSaysAuto() => SpreadSaysAuto())
+  | $X.xml_nodes_nil() => SpreadUnsaid()
+
+and _spread_meta
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): spread_said =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
+         if _span_is(data, property_offset, property_len, "rendition:spread") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) => _spread_of_value(data, value_offset, value_len)
+            | ~xspan_none() => SpreadUnsaid())
+         else SpreadUnsaid()
+       | ~xspan_none() => SpreadUnsaid())
+    else _spread_meta_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => SpreadUnsaid()
+
+(* The book's rendition:spread, auto when it has none *)
+#pub fn opf_spread
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): rendition_spread
+
+implement opf_spread (data, nodes) =
+  case+ _spread_meta_nodes(data, nodes) of
+  | SpreadSaysNone() => SpreadNone()
+  | SpreadSaysLandscape() => SpreadLandscape()
+  | SpreadSaysBoth() => SpreadBoth()
+  | SpreadSaysAuto() => SpreadAuto()
+  | SpreadUnsaid() => SpreadAuto()
+
+(* Which side of a spread a spine item asks for: either (none asked),
+   the left, the right, or the centre (a page shown alone, across both) *)
+#pub datatype page_spread =
+  | SpreadSlotAny
+  | SpreadSlotLeft
+  | SpreadSlotRight
+  | SpreadSlotCenter
+
+(* The side of a spread spine item item_index asks for: its itemref's
+   rendition:page-spread-left, -right or -center property, or the older
+   page-spread-left or -right (which those end with) *)
+#pub fn itemref_spread_n
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), item_index: int): page_spread
+
+implement itemref_spread_n (data, nodes, item_index) =
+  case+ _itemref_properties_nodes(data, nodes, item_index) of
+  | ~ItemrefAfter(_) => SpreadSlotAny()
+  | ~ItemrefFound(properties) => (case+ properties of
+    | ~xspan_none() => SpreadSlotAny()
+    | ~xspan_at(properties_offset, properties_len) => let
+        var left_chars = @[char][16]('p', 'a', 'g', 'e', '-', 's', 'p', 'r', 'e', 'a', 'd', '-', 'l', 'e', 'f', 't')
+        var right_chars = @[char][17]('p', 'a', 'g', 'e', '-', 's', 'p', 'r', 'e', 'a', 'd', '-', 'r', 'i', 'g', 'h', 't')
+        var center_chars = @[char][18]('p', 'a', 'g', 'e', '-', 's', 'p', 'r', 'e', 'a', 'd', '-', 'c', 'e', 'n', 't', 'e', 'r')
+      in
+        if _span_has(data, properties_offset, properties_len, left_chars, 16, 0) then SpreadSlotLeft()
+        else if _span_has(data, properties_offset, properties_len, right_chars, 17, 0) then SpreadSlotRight()
+        else if _span_has(data, properties_offset, properties_len, center_chars, 18, 0) then SpreadSlotCenter()
+        else SpreadSlotAny()
+      end)

@@ -10,6 +10,50 @@
 #use pwa as P
 #use result as R
 
+staload "version.sats"
+
+(* Appends to the Android project's android-release.gradle (which
+   build-android.sh appends to the app's build.gradle) the version of the
+   commit built from (#219): versionName is the version About shows, and
+   versionCode that commit's time in minutes since 2025, so it grows from
+   release to release. Set after pwa's run-number version code, it is
+   the one Gradle takes *)
+fn _android_version (): void = let
+  var b = $B.create()
+  val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
+  val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
+  val () = $B.bput(b, quire_version_code())
+  val () = $B.bput(b, "\n        versionName '")
+  val () = $B.bput(b, quire_version())
+  val () = $B.bput(b, "'\n    }\n}\n")
+  var path = $B.create()
+  val () = $B.bput(path, "dist/android/android-release.gradle")
+  val () = $B.put_char(path, 0)
+  val @(path_bytes, _) = $B.to_arr(path)
+  val @(path_frozen, path_borrow) = $A.freeze<byte>(path_bytes)
+  val opened = $F.file_open(path_borrow, 524288, $F.WriteOnly(), $F.CreateOrAppend(), 420)
+  val () = $A.drop<byte>(path_frozen, path_borrow)
+  val () = $A.free<byte>($A.thaw<byte>(path_frozen))
+  val @(content, content_len) = $B.to_arr(b)
+  val @(content_frozen, content_borrow) = $A.freeze<byte>(content)
+in
+  case+ opened of
+  | ~$R.ok(fd) => let
+      val () = (if content_len > 0 then let
+          val @(written, rest) = $A.borrow_split<byte>(content_frozen, content_borrow, content_len)
+          val () = $R.discard<int><$F.io_error>((case+ $F.file_write(fd, written, content_len) of
+            | ~$R.ok(w) => $R.ok(w) | ~$R.err(e) => $R.err(e)): $R.result(int, $F.io_error))
+          val () = $A.drop<byte>(content_frozen, $A.borrow_join<byte>(content_frozen, written, rest))
+        in $A.free<byte>($A.thaw<byte>(content_frozen)) end
+        else let
+          val () = $A.drop<byte>(content_frozen, content_borrow)
+        in $A.free<byte>($A.thaw<byte>(content_frozen)) end)
+    in $R.discard<int><$F.io_error>($F.file_close(fd)) end
+  | ~$R.err(_) => let
+      val () = $A.drop<byte>(content_frozen, content_borrow)
+    in $A.free<byte>($A.thaw<byte>(content_frozen)) end
+end
+
 implement main0 () = let
   (* The bundled fonts (the stylesheet names them) and the app's icons,
      copied next to the page: each path followed by a NUL (the array
@@ -54,5 +98,6 @@ implement main0 () = let
      published under on Google Play. It opens EPUBs, and is shared
      them. *)
   val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
+  val () = _android_version()
   val () = println! ("Android project generated in dist/android/")
 in end

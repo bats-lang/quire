@@ -65,6 +65,10 @@ jobs:
           # them: never this workflow.
           test -f bats.lock || { echo "::error::bats.lock is missing: run 'bats lock --repository <dir>' and commit it"; exit 1; }
 
+      # The version: the date and short SHA of the commit deployed (#219)
+      - name: Write the version
+        run: scripts/version.sh
+
       - name: Build the app and the PWA generator
         run: |
           bats build --repository $HOME/repository

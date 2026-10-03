@@ -61,6 +61,8 @@ test('a backup holds the settings, the books, their places and annotations', asy
   const json = await exportBackup(page);
   const b = JSON.parse(json);
   expect(b.quire).toBe(1);
+  // the version of Quire that wrote it, as About shows it (#219)
+  expect(b.appVersion).toMatch(/^\d{4}\.\d{1,2}\.\d{1,2}\.\d+ \([0-9a-f]{7,}\)$/);
   expect(b.settings).toMatchObject({
     size: 24, lineHeight: 16, margins: 2, font: 0, theme: 0, sort: 0,
     align: 0, hyphens: 1, paragraphSpacing: 8, letterSpacing: 0, wordSpacing: 10, dimImages: 1, tapZones: 0, volumeKeys: 0, ruby: 1,
