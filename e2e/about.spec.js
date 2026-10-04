@@ -1,5 +1,6 @@
 // The About screen, opened from Settings: the app's name and links out
-// of the app to its home page, privacy policy, terms and source. The
+// of the app to its home page, privacy policy and terms (and none to
+// the source). The
 // pages are published beside the app (homepage/), and the app's service
 // worker leaves them to the network: it neither answers them nor keeps
 // them (bridge's produce_service_worker answers only the app's own
@@ -10,12 +11,11 @@ import { start, dialog, librarySettings, settingsScreen, settingsButton, library
 
 const about = page => dialog(page, 'About Quire');
 // each link's href, and the address it leads to from the app at
-// baseURL: the pages beside the app relative to it, the source on GitHub
+// baseURL: the pages beside the app relative to it
 const links = {
   'Home page': ['./homepage/', '/homepage/'],
   'Privacy policy': ['./homepage/privacy.html', '/homepage/privacy.html'],
   'Terms of service': ['./homepage/terms.html', '/homepage/terms.html'],
-  'Source code': ['https://github.com/bats-lang/quire', 'https://github.com/bats-lang/quire'],
 };
 
 test('Settings opens About, which shows the app and links out of it', async ({ page, baseURL }) => {
@@ -39,6 +39,9 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
     await expect(link).toHaveAttribute('target', '_blank');
     await expect(link).toHaveAttribute('rel', /noopener/);
   }
+  // these three and no other: no link to the source
+  await expect(group.getByRole('link')).toHaveCount(Object.keys(links).length);
+  await expect(about(page).getByRole('link', { name: /source/i })).toHaveCount(0);
   await expect(about(page).getByRole('button', { name: 'Done' })).toBeFocused();
   // Done goes back to Settings, at its About row
   await about(page).getByRole('button', { name: 'Done' }).click();
