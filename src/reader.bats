@@ -2296,7 +2296,9 @@ fn _narration_offered (narrated: bool): void = let
   val () = ui_show("selection-read", speaks)
   val () = ui_show("speech-row", speaks)
   val () = ui_show("narration-speed-row", narrated)
-in ui_show("narration-skip-row", narrated) end
+  val () = ui_show("narration-skip-row", narrated)
+  (* the reading settings' Read aloud tab, for either *)
+in ui_show("typography-aloud-tab", (if narrated then true else speaks)) end
 
 (* Whether data[data_offset + i, data_offset + span_len) is
    smil[smil_offset + i, smil_offset + span_len) *)
@@ -2919,7 +2921,6 @@ fn _rows_set (): void = let
   (* the paragraphs' spacing stays set vertically: it is logical
      (margin-block-end), between their columns of lines *)
   val () = ui_show("paragraph-row", reflowed)
-  val () = ui_show("reading-text-title", reflowed)
   val () = ui_show("layout-row", horizontal)
   (* a fixed page's Columns are its spreads: one page, two, or as the
      book and the view's shape say *)

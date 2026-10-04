@@ -1,20 +1,85 @@
-// Typography and theme: each control changes the page as it moves, and
+// Reading settings: each control changes the page as it moves, and
 // every setting is kept without being saved by hand.
 
 import { test, expect } from './fixtures.js';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
-  readingSettings, openReadingSettings, closeReadingSettings,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 import { TINY_PNG } from './create-epub.js';
 
 const para = page => bookPage(page).locator('p').first();
 const style = (page, prop) => para(page).evaluate((e, p) => getComputedStyle(e)[p], prop);
-const sheet = page => dialog(page, 'Typography and theme');
+const sheet = page => dialog(page, 'Reading settings');
 const slider = (page, name) => sheet(page).getByRole('slider', { name });
 const choose = (page, name) => sheet(page).getByRole('button', { name, exact: true }).click();
-// the reading settings' screen, opened from the sheet, and its controls
+// the sheet as a whole, on whichever tab, and its sliders
 const more = page => readingSettings(page);
 const moreSlider = (page, name) => more(page).getByRole('slider', { name });
+
+// The sheet's tabs (#288): every reading setting one tap away in the one
+// sheet, with nothing opened over it; WAI-ARIA's tabs pattern (one tab
+// selected and in the Tab order, the arrow keys, Home and End moving
+// the focus and the panel with it)
+test('the reading settings are tabs in the one sheet, by tap and by keyboard', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Tabbed Sheet', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openSettings(page);
+  const tabs = sheet(page).getByRole('tablist', { name: 'Reading settings' });
+  const tab = name => tabs.getByRole('tab', { name, exact: true });
+  const panel = name => sheet(page).getByRole('tabpanel', { name, exact: true });
+  const names = ['Look', 'Page', 'Turning', 'Read aloud'];
+  await expect(tabs.getByRole('tab')).toHaveText(names);
+  // no control says only "More"
+  await expect(sheet(page).getByRole('button', { name: /^More\b/ })).toHaveCount(0);
+  const shown = async chosen => {
+    for (const name of names) {
+      await expect(tab(name)).toHaveAttribute('aria-selected', String(name === chosen));
+      await expect(tab(name)).toHaveAttribute('tabindex', name === chosen ? '0' : '-1');
+      if (name === chosen) await expect(panel(name)).toBeVisible();
+      else await expect(panel(name)).toBeHidden();
+    }
+    // one modal layer: the sheet, and nothing over it
+    await expect(page.locator('[aria-modal="true"]:visible')).toHaveCount(1);
+  };
+  // the sheet opens on Look
+  await shown('Look');
+  await expect(panel('Look').getByRole('group', { name: 'Theme', exact: true })).toBeVisible();
+  // by tap
+  await tab('Turning').click();
+  await shown('Turning');
+  await expect(panel('Turning').getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
+  await tab('Page').click();
+  await shown('Page');
+  await expect(panel('Page').getByRole('group', { name: 'Justify text' })).toBeVisible();
+  // by keyboard: the arrows move along, round at the ends, and Home and End
+  await expect(tab('Page')).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab('Turning')).toBeFocused();
+  await shown('Turning');
+  await page.keyboard.press('ArrowRight');
+  await expect(tab('Read aloud')).toBeFocused();
+  await shown('Read aloud');
+  await expect(panel('Read aloud').getByRole('combobox', { name: 'Reading speed' })).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab('Look')).toBeFocused();
+  await shown('Look');
+  await page.keyboard.press('ArrowLeft');
+  await expect(tab('Read aloud')).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(tab('Look')).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(tab('Read aloud')).toBeFocused();
+  await shown('Read aloud');
+  // Tab leaves the tabs for the panel, not the next tab
+  await page.keyboard.press('Tab');
+  await expect(panel('Read aloud').getByRole('combobox', { name: 'Reading speed' })).toBeFocused();
+  // one Escape closes the sheet, and it opens on Look again
+  await page.keyboard.press('Escape');
+  await expect(sheet(page)).toBeHidden();
+  await openSettings(page);
+  await shown('Look');
+  expect(errors).toEqual([]);
+});
 
 test('size, line spacing and margins change the page, and are kept', async ({ page }) => {
   const errors = await start(page);
@@ -25,11 +90,10 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
   await slider(page, 'Line spacing').fill('20');
   await expect.poll(() => style(page, 'lineHeight')).toBe(`${28 * 2}px`);
   const narrow = await style(page, 'paddingLeft');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await moreSlider(page, 'Margins').fill('4');
   await expect.poll(() => style(page, 'paddingLeft')).not.toBe(narrow);
   const wide = await style(page, 'paddingLeft');
-  await closeReadingSettings(page);
   await choose(page, 'Close');
   await expect(sheet(page)).toBeHidden();
   await toLibrary(page);
@@ -51,7 +115,7 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   expect(await style(page, 'textAlign')).toBe('start');
   expect(await style(page, 'hyphens')).toBe('auto');
   expect(await style(page, 'letterSpacing')).toBe('normal');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await expect(group('Justify text').getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
   await group('Justify text').getByRole('button', { name: 'On' }).click();
   await expect.poll(() => style(page, 'textAlign')).toBe('justify');
@@ -59,6 +123,7 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   await group('Hyphenation').getByRole('button', { name: 'Off' }).click();
   await expect.poll(() => style(page, 'hyphens')).toBe('manual');
   // the spacings reach what WCAG 1.4.12 asks a page to take
+  await openReadingSettings(page, 'Look');
   await moreSlider(page, 'Paragraph spacing').fill('20');
   await expect.poll(() => style(page, 'marginBottom')).toBe(`${18 * 2}px`);
   await moreSlider(page, 'Letter spacing').fill('12');
@@ -66,7 +131,6 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   await moreSlider(page, 'Word spacing').fill('16');
   await expect.poll(async () => parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
   await expect(more(page)).toContainText('0.12');
-  await closeReadingSettings(page);
   await choose(page, 'Close');
   await toLibrary(page);
   await reload(page);
@@ -76,10 +140,11 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   expect(await style(page, 'marginBottom')).toBe(`${18 * 2}px`);
   expect(parseFloat(await style(page, 'letterSpacing'))).toBeCloseTo(18 * 0.12, 1);
   expect(parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
-  // the screen scrolls on a short window to its last row
-  await openReadingSettings(page);
-  await more(page).getByRole('button', { name: 'Done', exact: true }).scrollIntoViewIfNeeded();
-  await expect(more(page).getByRole('button', { name: 'Done', exact: true })).toBeInViewport();
+  // the sheet scrolls on a short window to its last row
+  await openReadingSettings(page, 'Look');
+  const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
+  await reset.scrollIntoViewIfNeeded();
+  await expect(reset).toBeInViewport();
   expect(errors).toEqual([]);
 });
 
@@ -104,12 +169,10 @@ test('a book\'s images are dimmed in the dark theme, unless that is turned off',
   await choose(page, 'Sepia');
   await expect.poll(filter).toBe('none');
   await choose(page, 'Dark');
-  await openReadingSettings(page);
   const dim = more(page).getByRole('group', { name: 'Dim images in the dark themes' });
   await expect(dim.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
   await dim.getByRole('button', { name: 'Off' }).click();
   await expect.poll(filter).toBe('none');
-  await closeReadingSettings(page);
   await choose(page, 'Close');
   // a reload comes back to the book, and the setting was kept
   await reload(page);
@@ -220,9 +283,9 @@ test('reset puts the defaults back', async ({ page }) => {
   await openSettings(page);
   await slider(page, 'Size').fill('30');
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
-  // resetting (at the end of the reading settings) asks nothing, and
-  // can be undone
-  await openReadingSettings(page);
+  // resetting (at the end of the sheet, under every tab) asks nothing,
+  // and can be undone
+  await openReadingSettings(page, 'Page');
   const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
   await reset.click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
@@ -233,7 +296,7 @@ test('reset puts the defaults back', async ({ page }) => {
   await reset.click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   expect(await style(page, 'textAlign')).toBe('start');
-  await closeReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(slider(page, 'Size')).toHaveValue(String(parseInt(before, 10)));
 });
 
@@ -278,7 +341,7 @@ test('in the Android app, the screen: full screen, the rotation locked and the b
   });
   await start(page);
   await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(1) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   const brightness = more(page).getByRole('combobox', { name: 'Brightness' });
@@ -293,7 +356,7 @@ test('in the Android app, the screen: full screen, the rotation locked and the b
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Tabbed', author: 'Settings Tests', rawChapters: chapters(1) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await expect(more(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
   await expect(more(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
 });
@@ -333,7 +396,7 @@ test.describe('auto at night, to the minute', () => {
 test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   await expect(full).toHaveAttribute('aria-pressed', 'false');
   await full.click();
@@ -370,25 +433,28 @@ test('reset puts reading aloud\'s speed and voice, the brightness and the rotati
   await deviceStubs(page);
   await start(page);
   await readBook(page, { title: 'Device Reset', author: 'Settings Tests', rawChapters: chapters(1, 5) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   const speed = more(page).getByRole('combobox', { name: 'Reading speed' });
   const voice = more(page).getByRole('combobox', { name: 'Voice' });
   const brightness = more(page).getByRole('combobox', { name: 'Brightness' });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   await speed.selectOption('1.5');
   await voice.selectOption({ label: 'Narrator' });
+  await openReadingSettings(page, 'Page');
   await brightness.selectOption({ label: '25%' });
   await lock.click();
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
   await more(page).getByRole('button', { name: 'Reset to defaults', exact: true }).click();
-  await expect(speed).toHaveValue('1');
-  await expect(voice.locator('option:checked')).toHaveText('Automatic');
   await expect(brightness).toHaveValue('system');
   await expect(lock).toHaveAttribute('aria-pressed', 'false');
+  await openReadingSettings(page, 'Read aloud');
+  await expect(speed).toHaveValue('1');
+  await expect(voice.locator('option:checked')).toHaveText('Automatic');
   await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toEqual(['brightness {"brightness":-1}', 'unlock']);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(speed).toHaveValue('1.5');
   await expect(voice.locator('option:checked')).toHaveText('Narrator');
+  await openReadingSettings(page, 'Page');
   await expect(brightness).toHaveValue('25');
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => page.evaluate(() => window.calls.slice(-2).map(c => c.split(' ')[0]))).toEqual(['brightness', 'lock']);

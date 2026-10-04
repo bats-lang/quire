@@ -122,15 +122,13 @@ test('the Columns setting overrides: One shows single pages, Two pairs them in p
   await expectSides(page, ['', 'Page 1']);
   const columns = name => readingSettings(page).getByRole('group', { name: 'Pages on screen' })
     .getByRole('button', { name, exact: true });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await columns('One').click();
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expectSides(page, ['Page 1']);
   await page.setViewportSize(PORTRAIT);
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await columns('Two').click();
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expectSides(page, ['', 'Page 1']);
   await page.keyboard.press('ArrowRight');

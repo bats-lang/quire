@@ -8,7 +8,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, closeReadingSettings,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 /** The names of the visible controls among locators that reach out of
@@ -156,7 +156,7 @@ test("the reader's bottom bar: the progress row over the tools row, nothing cut 
   // the label over it
   for (const part of measured.label) expect(part.y + part.height).toBeLessThanOrEqual(measured.slider.y + 1);
   // the tools under it, in one row, each at least 48 px
-  const tools = ['Contents', 'Typography', 'Annotations'].map(button);
+  const tools = ['Contents', 'Reading settings', 'Annotations'].map(button);
   for (const tool of tools) {
     expect(tool.y).toBeGreaterThanOrEqual(measured.slider.y + measured.slider.height - 1);
     expect(tool.width).toBeGreaterThanOrEqual(48);
@@ -258,10 +258,12 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await fits(page, 'Contents');
   await page.keyboard.press('Escape');
   await openSettings(page);
-  await fits(page, 'Typography and theme');
-  await openReadingSettings(page);
-  await fits(page, 'More reading settings');
-  await page.keyboard.press('Escape');
+  await fits(page, 'Reading settings');
+  // each of its tabs (#288)
+  for (const tab of ['Look', 'Page', 'Turning', 'Read aloud']) {
+    await openReadingSettings(page, tab);
+    await fits(page, `Reading settings, ${tab}`);
+  }
   await page.keyboard.press('Escape');
   await clickControl(page, 'Annotations');
   await expect(dialog(page, 'Annotations')).toBeVisible();
@@ -324,19 +326,20 @@ test('the page keeps its text out of the safe area: a cutout above or beside it'
   await fits(page, 'the reader beside a cutout');
 });
 
-// The typography sheet scrolls within the window, and its Close stays
-// in reach however far it is scrolled, in full screen too (#275: in
-// full screen the sheet could no longer be scrolled to Close)
-test('the typography sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
+// The reading settings' sheet scrolls within the window, and its Close
+// and tabs stay in reach however far it is scrolled, in full screen too
+// (#275: in full screen the sheet could no longer be scrolled to Close)
+test('the reading settings sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
-  await closeReadingSettings(page);
-  const panel = dialog(page, 'Typography and theme');
+  await openReadingSettings(page, 'Look');
+  const panel = dialog(page, 'Reading settings');
   const close = panel.getByRole('button', { name: 'Close', exact: true });
-  const last = panel.getByRole('button', { name: /^More reading settings/ });
+  const tabs = panel.getByRole('tablist', { name: 'Reading settings' });
+  const last = panel.getByRole('button', { name: 'Reset to defaults', exact: true });
   const within = () => panel.evaluate(e => {
     const r = e.getBoundingClientRect();
     return r.top >= -1 && r.bottom <= innerHeight + 1;
@@ -352,7 +355,8 @@ test('the typography sheet scrolls within the window, Close always in reach, in 
   await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
   await expect(last).toBeInViewport({ ratio: 1 });
   await expect(close).toBeInViewport({ ratio: 1 });
-  await fits(page, 'Typography and theme, in full screen');
+  await expect(tabs).toBeInViewport({ ratio: 1 });
+  await fits(page, 'Reading settings, in full screen');
   await close.click();
   await expect(panel).toBeHidden();
   await page.evaluate(() => document.exitFullscreen());

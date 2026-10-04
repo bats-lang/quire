@@ -1855,8 +1855,8 @@ end
 #pub fn ui_sync_toast_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_toast_control)
 implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes, n, at, SyncGo(), 2)
 
-(* The typography sheet's and the reading settings screen's choices and
-   buttons, each by its element's id (typography_control_id) *)
+(* The reading settings sheet's choices and buttons, each by its
+   element's id (typography_control_id) *)
 #pub datatype typography_control =
   | FontLiterata
   | FontInter
@@ -1889,8 +1889,6 @@ implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes,
   | NarrationRead
   | TypographyReset
   | TypographyClose
-  | TypographyMore
-  | ReadingDone
   | ScreenFullscreen
   | ScreenLock
 
@@ -1928,8 +1926,6 @@ implement typography_control_id (control) =
   | NarrationRead() => "narration-read"
   | TypographyReset() => "typography-reset"
   | TypographyClose() => "typography-close"
-  | TypographyMore() => "typography-more"
-  | ReadingDone() => "reading-done"
   | ScreenFullscreen() => "screen-fullscreen"
   | ScreenLock() => "screen-lock"
 
@@ -1966,9 +1962,7 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | NarrationSkip() => $R.some(NarrationRead())
   | NarrationRead() => $R.some(TypographyReset())
   | TypographyReset() => $R.some(TypographyClose())
-  | TypographyClose() => $R.some(TypographyMore())
-  | TypographyMore() => $R.some(ReadingDone())
-  | ReadingDone() => $R.some(ScreenFullscreen())
+  | TypographyClose() => $R.some(ScreenFullscreen())
   | ScreenFullscreen() => $R.some(ScreenLock())
   | ScreenLock() => $R.none()
 
@@ -1986,7 +1980,41 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 35)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 33)
+
+(* The reading settings sheet's tabs (#288), each by its tab's id
+   (sheet_tab_control_id); sheet_tab_panel_id is the panel it shows *)
+#pub datatype sheet_tab = LookTab | PageTab | TurningTab | AloudTab
+
+#pub fn sheet_tab_control_id (tab: sheet_tab): [id_len:pos | id_len < 256] string id_len
+implement sheet_tab_control_id (tab) =
+  case+ tab of
+  | LookTab() => "typography-look-tab"
+  | PageTab() => "typography-page-tab"
+  | TurningTab() => "typography-turning-tab"
+  | AloudTab() => "typography-aloud-tab"
+
+#pub fn sheet_tab_panel_id (tab: sheet_tab): [id_len:pos | id_len < 256] string id_len
+implement sheet_tab_panel_id (tab) =
+  case+ tab of
+  | LookTab() => "typography-look"
+  | PageTab() => "typography-page"
+  | TurningTab() => "typography-turning"
+  | AloudTab() => "typography-aloud"
+
+(* Whether bytes[at, n) is tab's id *)
+fn _sheet_tab_is {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at, tab: sheet_tab): bool = let
+  val id = sheet_tab_control_id(tab)
+in _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) end
+
+(* The tab whose id is bytes[at, n), if it is one *)
+#pub fn ui_sheet_tab {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sheet_tab)
+implement ui_sheet_tab (bytes, n, at) =
+  if _sheet_tab_is(bytes, n, at, LookTab()) then $R.some(LookTab())
+  else if _sheet_tab_is(bytes, n, at, PageTab()) then $R.some(PageTab())
+  else if _sheet_tab_is(bytes, n, at, TurningTab()) then $R.some(TurningTab())
+  else if _sheet_tab_is(bytes, n, at, AloudTab()) then $R.some(AloudTab())
+  else $R.none()
 
 (* The catalogues' add and done, and its backdrop, each by its element's id (catalogues_control_id) *)
 #pub datatype catalogues_control =

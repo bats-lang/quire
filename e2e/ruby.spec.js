@@ -19,7 +19,7 @@ const rubyChapter = {
 const rubyBook = { title: 'Furigana', author: 'Ruby Tests', rawChapters: [rubyChapter, { body: chapterBody(2) }] };
 const plainBook = { title: 'Plain Text', author: 'Ruby Tests', rawChapters: chapters(2) };
 
-const sheet = page => dialog(page, 'Typography and theme');
+const sheet = page => dialog(page, 'Reading settings');
 const rubyGroup = page => readingSettings(page).getByRole('group', { name: 'Pronunciation over the characters (ruby)' });
 const display = (page, tag) => bookPage(page).locator(tag).first().evaluate(e => getComputedStyle(e).display);
 
@@ -76,13 +76,12 @@ test('the Ruby row is offered only for a book with ruby; Hide and Show are kept'
   const errors = await start(page);
   await importFiles(page, [epubFile(rubyBook), epubFile(plainBook)], 2);
   await openBook(page, 'Plain Text');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(rubyGroup(page)).toBeHidden();
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await openBook(page, 'Furigana');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(rubyGroup(page)).toBeVisible();
   await expect(rubyGroup(page).getByRole('button', { name: 'Show' })).toHaveAttribute('aria-pressed', 'true');
   await rubyGroup(page).getByRole('button', { name: 'Hide' }).click();
@@ -93,21 +92,19 @@ test('the Ruby row is offered only for a book with ruby; Hide and Show are kept'
   await rubyGroup(page).getByRole('button', { name: 'Hide' }).click();
   await expect.poll(() => display(page, 'rt')).toBe('none');
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
   // a reload comes back to the book, with the annotations still hidden
   await reload(page);
   await expect(bookPage(page)).toBeVisible();
   await expect(bookPage(page).locator('rt')).toHaveCount(1);
   await expect.poll(() => display(page, 'rt')).toBe('none');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(rubyGroup(page).getByRole('button', { name: 'Hide' })).toHaveAttribute('aria-pressed', 'true');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // the row goes again for the next book, which has none
   await toLibrary(page);
   await expect(cards(page)).toHaveCount(2);
   await openBook(page, 'Plain Text');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(rubyGroup(page)).toBeHidden();
   expect(errors).toEqual([]);
 });

@@ -772,7 +772,7 @@ implement aloud_event (event) =
   | ~$SP.SpeechBoundary(_, _) => ()
   | ~$SP.VoicesChanged() => _voices_show()
 
-(* The typography panel opened: the speeds and the book's language's
+(* The reading settings' sheet opened: the speeds and the book's language's
    voices offered, as chosen *)
 #pub fn aloud_choices_show (): void
 
@@ -792,6 +792,8 @@ implement aloud_offer () = let
   val speaks = $SP.speech_available()
   val () = ui_show("read-aloud", speaks)
   val () = ui_show("selection-read", speaks)
-in ui_show("speech-row", speaks) end
+  val () = ui_show("speech-row", speaks)
+  (* the reading settings' Read aloud tab, which holds its speed and voice *)
+in ui_show("typography-aloud-tab", speaks) end
 
 end (* #target wasm *)

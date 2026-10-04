@@ -204,6 +204,11 @@ fn _typography_control (clicked: !target): $R.option(typography_control) =
   | Target(bytes, n, _) => ui_typography_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
+fn _sheet_tab (clicked: !target): $R.option(sheet_tab) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_sheet_tab(bytes, n, 10)
+  | NoTarget() => $R.none()
+
 fn _catalogues_control (clicked: !target): $R.option(catalogues_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_catalogues_control(bytes, n, 10)
@@ -394,7 +399,6 @@ fn _show_library (): void = let
   (* the screen may sleep again, as it does outside the reader *)
   val () = $WN.keep_awake(false)
   val () = layer_close(LTypography())
-  val () = layer_close(LReading())
   val () = layer_close(LContents())
   val () = layer_close(LSearch())
   val () = layer_close(LAnnotations())
@@ -1483,6 +1487,11 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
     in 0 end)
 in listeners end
 
+(* Whether an element is shown *)
+fn _shown {id_len:pos | id_len < 256} (id: string id_len): bool = let
+  val () = ui_measure(id)
+in $DR.get_measure_w() > 0 end
+
 (* What each choice of where taps turn pages does, for the book open:
    read right to left, its back is on the right (_zone_click), and the
    drawings are mirrored (.taps.rtl) *)
@@ -1498,16 +1507,88 @@ fn _taps_describe (): void =
     val () = ui_text("taps-forward-about", "Anywhere forward, left side back, top shows the controls")
   in ui_text("taps-one-hand-about", "Top back, bottom forward, middle shows the controls") end
 
-(* The reading settings' screen opened over the typography sheet: the
-   volume keys offered in the app, where a page is given them (pwa's
-   MainActivity), and the taps said for the book open *)
-fn _reading_open (): void = let
+(* The reading settings' tab shown. The sheet opens on Look, which holds
+   what is changed while reading (the theme, the size); the other tabs
+   hold what is set once *)
+val _sheet_tab_shown = ref<sheet_tab>(LookTab())
+
+(* Whether tab is offered: Read aloud only where the platform speaks or
+   the book is narrated (the reader's _narration_offered shows it); the
+   sheet is open, so a tab hidden is one measured empty *)
+fn _sheet_tab_offered (tab: sheet_tab): bool =
+  case+ tab of
+  | AloudTab() => _shown("typography-aloud-tab")
+  | LookTab() => true
+  | PageTab() => true
+  | TurningTab() => true
+
+(* The tab after tab, and the one before it, round from the last to the
+   first; Read aloud is passed over where it is not offered *)
+fn _sheet_tab_after (tab: sheet_tab): sheet_tab =
+  case+ tab of
+  | LookTab() => PageTab()
+  | PageTab() => TurningTab()
+  | TurningTab() => if _sheet_tab_offered(AloudTab()) then AloudTab() else LookTab()
+  | AloudTab() => LookTab()
+
+fn _sheet_tab_before (tab: sheet_tab): sheet_tab =
+  case+ tab of
+  | LookTab() => if _sheet_tab_offered(AloudTab()) then AloudTab() else TurningTab()
+  | PageTab() => LookTab()
+  | TurningTab() => PageTab()
+  | AloudTab() => TurningTab()
+
+(* tab marked chosen or not: selected, in the Tab order, and its panel
+   shown, or none of them *)
+fn _sheet_tab_mark (tab: sheet_tab, chosen: bool): void = let
+  val id = sheet_tab_control_id(tab)
+  val () = ui_attr(id, ASelected, (if chosen then "true" else "false"): [value_len:pos | value_len < 256] string value_len)
+  val () = ui_attr(id, ATabindex, (if chosen then "0" else "-1"): [value_len:pos | value_len < 256] string value_len)
+in ui_show(sheet_tab_panel_id(tab), chosen) end
+
+(* The reading settings' tab chosen shown, and the others hidden
+   (WAI-ARIA's tabs pattern: one tab selected, the only one in the Tab
+   order) *)
+fn _sheet_tab_choose (chosen: sheet_tab): void = let
+  val () = !_sheet_tab_shown := chosen
+  val () = _sheet_tab_mark(LookTab(), (case+ chosen of LookTab() => true | _ => false): bool)
+  val () = _sheet_tab_mark(PageTab(), (case+ chosen of PageTab() => true | _ => false): bool)
+  val () = _sheet_tab_mark(TurningTab(), (case+ chosen of TurningTab() => true | _ => false): bool)
+in _sheet_tab_mark(AloudTab(), (case+ chosen of AloudTab() => true | _ => false): bool) end
+
+(* A key on the tabs: the arrows move to the tab beside the focused
+   one, Home to the first and End to the last, each shown as the focus
+   reaches it (the panels are there at once) *)
+fn _sheet_tab_key (pressed: key): void = let
+  val moved = (case+ pressed of
+    | ArrowRight() => $R.some(_sheet_tab_after(!_sheet_tab_shown))
+    | ArrowLeft() => $R.some(_sheet_tab_before(!_sheet_tab_shown))
+    | HomeKey() => $R.some(LookTab())
+    | EndKey() => $R.some(_sheet_tab_before(LookTab()))
+    | _ => $R.none()): $R.option(sheet_tab)
+in
+  case+ moved of
+  | ~$R.some(tab) => let
+      val () = _sheet_tab_choose(tab)
+    in ui_focus(sheet_tab_control_id(tab)) end
+  | ~$R.none() => ()
+end
+
+(* The reading settings' sheet opened: the screen's controls as the
+   platform has them now, the speeds and the book's voices to read
+   aloud, the volume keys offered in the app, where a page is given
+   them (pwa's MainActivity), the taps said for the book open, and its
+   first tab, Look *)
+fn _sheet_open (): void = let
+  val () = screen_controls_show()
+  val () = aloud_choices_show()
   val () = ui_show("volume-row", $BAPP.is_native_platform())
   val () = _taps_describe()
-  val () = layer_open(LReading())
-in ui_focus_first_in("reading-screen") end
+  val () = layer_open(LTypography())
+  val () = _sheet_tab_choose(LookTab())
+in ui_focus("typography-close") end
 
-(* A typography panel's control clicked: whether a setting changed *)
+(* A reading settings' control clicked: whether a setting changed *)
 fn _typography_chosen (control: typography_control): bool =
   case+ control of
   | FontLiterata() => let val () = set_font_set(Literata()) in true end
@@ -1546,37 +1627,34 @@ fn _typography_chosen (control: typography_control): bool =
   | NarrationRead() => let val () = set_narration_notes_set(NotesRead()) in true end
   | TypographyReset() => let val () = _settings_reset() in false end
   | TypographyClose() => let val () = layer_close(LTypography()) in false end
-  | TypographyMore() => let val () = _reading_open() in false end
-  (* back to the sheet, the focus on the row it was opened from *)
-  | ReadingDone() => let val () = layer_close(LReading()) in false end
   | ScreenFullscreen() => let val () = screen_fullscreen_toggle() in false end
   | ScreenLock() => let val () = screen_lock_toggle() in false end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
-      (* the screen's controls as the platform has them now, and the
-         speeds and the book's voices to read aloud *)
-      val () = screen_controls_show()
-      val () = aloud_choices_show()
-      val () = layer_open(LTypography())
-    in let val () = ui_focus("typography-close") in 0 end end)
+      val () = _sheet_open()
+    in 0 end)
   val listeners = RCons(listeners, OnEl("typography-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val control = _typography_control(clicked)
+      val tab = _sheet_tab(clicked)
       val () = _target_free(clicked)
+      val () = (case+ tab of
+        | ~$R.some(chosen) => _sheet_tab_choose(chosen)
+        | ~$R.none() => ())
       val changed = (case+ control of
         | ~$R.none() => false
         | ~$R.some(chosen) => _typography_chosen(chosen)): bool
     in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  (* the reading settings' screen: its controls are the sheet's kind *)
-  val listeners = RCons(listeners, OnEl("reading-screen"), "click", llam(h) => let
-      val clicked = _target(h)
-      val control = _typography_control(clicked)
-      val () = _target_free(clicked)
-      val changed = (case+ control of
-        | ~$R.none() => false
-        | ~$R.some(chosen) => _typography_chosen(chosen)): bool
-    in if changed then let val () = _settings_changed() in 0 end else 0 end)
+  (* the arrow keys, Home and End on the reading settings' tabs *)
+  val listeners = RCons(listeners, OnEl("typography-tabs"), "keydown", llam(h) =>
+      case+ take_blob(h) of
+      | ~NoBlobBytes() => 0
+      | ~BlobBytes(key_bytes, n) => let
+          val pressed = ui_key(key_bytes, n)
+          val () = $A.free<byte>(key_bytes)
+          val () = _sheet_tab_key(pressed)
+        in 0 end)
   val listeners = RCons(listeners, OnEl("size-row"), "input", llam(h) => let
       val () = set_size_set(_clamp(_input_number(h), 12, 32))
     in let val () = _settings_changed() in 0 end end)
@@ -1606,11 +1684,6 @@ in listeners end
 (* ============================================================
    Search
    ============================================================ *)
-
-(* Whether an element is shown *)
-fn _shown {id_len:pos | id_len < 256} (id: string id_len): bool = let
-  val () = ui_measure(id)
-in $DR.get_measure_w() > 0 end
 
 (* The search field, made again holding query[0, query_len) *)
 fn _search_value {l:agz}{n:pos}{query_len:nat | query_len <= n; query_len < 65536} (query: $A.arr(byte, l, n), query_len: int query_len): void =

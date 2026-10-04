@@ -10,7 +10,7 @@ import { start, readBook, chapters, bookPage, dialog, place, clickControl, contr
 // Each panel the bars open: its button (the bottom bar's, or the top
 // bar's Search) and its dialog's name
 const panels = [
-  { button: 'Typography', name: 'Typography and theme' },
+  { button: 'Reading settings', name: 'Reading settings' },
   { button: 'Contents', name: 'Contents' },
   { button: 'Annotations', name: 'Annotations' },
   { button: 'Search in book', name: 'Search in book', top: true },
@@ -133,15 +133,15 @@ test('Tab keeps to an open panel, round from its last element to its first and b
   const sheet = await open(page, panels[0]);
   const focusedId = () => page.evaluate(() => document.activeElement && document.activeElement.id);
   const inside = () => sheet.evaluate(el => el.contains(document.activeElement));
-  // forward, past the panel's last element (More reading settings):
-  // round to its first, Close in its head
-  await sheet.getByRole('button', { name: /^More reading settings/ }).focus();
+  // forward, past the panel's last element (Reset to defaults): round
+  // to its first, Close in its head
+  await sheet.getByRole('button', { name: 'Reset to defaults', exact: true }).focus();
   await page.keyboard.press('Tab');
   expect(await inside()).toBe(true);
   expect(await focusedId()).toBe('typography-close');
   // back from the first: round to the last
   await page.keyboard.press('Shift+Tab');
-  expect(await focusedId()).toBe('typography-more');
+  expect(await focusedId()).toBe('typography-reset');
   // all the way round, never leaving the panel
   for (let i = 0; i < 40; i++) {
     await page.keyboard.press('Tab');

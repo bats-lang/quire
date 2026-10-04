@@ -580,7 +580,7 @@ fn _reader (): void = let
   val () = ui_icon_btn("reader-bottom-bar", "next-page", "ibtn", IcNext, "Next page")
   val () = ui_el("reader-bottom-bar", "tools-row", TDiv, "tools")
   val () = ui_icon_btn("tools-row", "contents-button", "ibtn", IcContents, "Contents")
-  val () = ui_icon_btn("tools-row", "typography-button", "ibtn", IcFont, "Typography")
+  val () = ui_icon_btn("tools-row", "typography-button", "ibtn", IcFont, "Reading settings")
   val () = ui_icon_btn("tools-row", "annotations-button", "ibtn", IcNotes, "Annotations")
   (* read aloud from the page shown, or paused (read_aloud.bats), shown
      only where the platform speaks *)
@@ -645,20 +645,47 @@ fn _tap_choice {id_len,map_len,class_len,label_len,about_len:pos | id_len < 256;
   val () = ui_el(map, forward, TSpan, "tzf")
 in ui_el(id, about, TSpan, "tapabout") end
 
-(* The typography sheet: what a reader changes while reading (the
-   theme, the font, its size and line spacing, pages or scrolled), and a
-   row that opens the rest on a screen of its own (_reading_screen), as
-   Apple Books' Themes & Settings sheet opens Customize (#275) *)
+(* A tab of the reading settings' sheet and the panel it shows: the
+   panel is named by its tab, and only the chosen tab's is shown, the
+   only one of them in the Tab order (quire.bats's _sheet_tab_choose:
+   WAI-ARIA's tabs pattern, its focus moved by the arrow keys) *)
+fn _sheet_tab {tab_len,label_len,panel_len:pos | tab_len < 256; label_len < 256; panel_len < 256}
+  (tab: string tab_len, label: string label_len, panel: string panel_len, chosen: bool): void = let
+  val () = ui_tab("typography-tabs", tab, label, panel, chosen)
+  val () = ui_attr(tab, ATabindex, (if chosen then "0" else "-1"): [value_len:pos | value_len < 256] string value_len)
+  val () = ui_el("typography-panel", panel, TDiv, "tabpanel")
+  val () = ui_labelled(panel, NTabpanel, tab)
+in ui_show(panel, chosen) end
+
+(* The reading settings' sheet (#288): every reading setting, in named
+   tabs within the one sheet, as Kindle's Aa menu has them (Themes,
+   Font, Layout, More), so each is one tap away and nothing opens over
+   the sheet. Look: how the text looks (the theme, the font, its size,
+   its spacings, ruby, dimmed images). Page: how it is laid on the page
+   (pages or scrolled, pages on screen, margins, justified,
+   hyphenated) and the screen around it. Turning: how pages are turned,
+   by taps and by the volume keys. Read aloud: its speed and voice, or
+   a narrated book's. Reset to defaults, under them all, resets them
+   all *)
 fn _settings (): void = let
   val () = ui_el("bats-root", "typography-panel", TDiv, "sheet")
-  val () = ui_named("typography-panel", NModal, "Typography and theme")
-  (* its head, held at its top as it scrolls (.shead): Close is always
-     in reach, in full screen too (#275) *)
+  val () = ui_named("typography-panel", NModal, "Reading settings")
+  (* its head, held at its top as it scrolls (.shead): Close and the
+     tabs are always in reach, in full screen too (#275) *)
   val () = ui_el("typography-panel", "typography-head", TDiv, "shead")
   val () = ui_el("typography-head", "typography-title", TSpan, "grow")
-  val () = ui_text("typography-title", "Typography and theme")
+  val () = ui_text("typography-title", "Reading settings")
   val () = ui_text_btn("typography-head", "typography-close", "btn", "Close")
-  val () = ui_el("typography-panel", "theme-row", TDiv, "srow")
+  val () = ui_el("typography-head", "typography-tabs", TDiv, "tabs")
+  val () = ui_named("typography-tabs", NTablist, "Reading settings")
+  val () = _sheet_tab("typography-look-tab", "Look", "typography-look", true)
+  val () = _sheet_tab("typography-page-tab", "Page", "typography-page", false)
+  val () = _sheet_tab("typography-turning-tab", "Turning", "typography-turning", false)
+  (* where the platform speaks, or the book is narrated (the reader's
+     _narration_offered, read_aloud.bats's aloud_offer) *)
+  val () = _sheet_tab("typography-aloud-tab", "Read aloud", "typography-aloud", false)
+  (* Look *)
+  val () = ui_el("typography-look", "theme-row", TDiv, "srow")
   val () = ui_el("theme-row", "theme-label", TSpan, "slabel")
   val () = ui_text("theme-label", "Theme")
   val () = ui_el("theme-row", "theme-choice", TDiv, "seg")
@@ -669,7 +696,7 @@ fn _settings (): void = let
   val () = ui_text_btn("theme-choice", "theme-dark", "sbtn", "Dark")
   val () = ui_text_btn("theme-choice", "theme-night", "sbtn", "Night")
   val () = ui_text_btn("theme-choice", "theme-grey", "sbtn", "Grey")
-  val () = ui_el("typography-panel", "font-row", TDiv, "srow")
+  val () = ui_el("typography-look", "font-row", TDiv, "srow")
   val () = ui_el("font-row", "font-label", TSpan, "slabel")
   val () = ui_text("font-label", "Font")
   val () = ui_el("font-row", "font-choice", TDiv, "seg")
@@ -681,68 +708,15 @@ fn _settings (): void = let
   val () = ui_text_btn("font-choice", "font-book", "sbtn", "Book")
   (* the sliders' rows: their sliders are made at the settings'
      values (set_sliders) *)
-  val () = ui_el("typography-panel", "size-row", TDiv, "srow")
-  val () = ui_el("typography-panel", "line-height-row", TDiv, "srow")
-  (* pages turned across, or the chapter scrolled down *)
-  val () = ui_el("typography-panel", "layout-row", TDiv, "srow")
-  val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
-  val () = ui_text("layout-label", "Layout")
-  val () = ui_el("layout-row", "layout-choice", TDiv, "seg")
-  val () = ui_named("layout-choice", NGroup, "Layout")
-  val () = ui_text_btn("layout-choice", "layout-pages", "sbtn", "Pages")
-  val () = ui_text_btn("layout-choice", "layout-scroll", "sbtn", "Scroll")
-  (* the rest of the reading settings, on their screen *)
-  val () = ui_el("typography-panel", "typography-more-row", TDiv, "srow")
-  val () = ui_text_btn("typography-more-row", "typography-more", "btn", "More reading settings \xE2\x80\xBA")
-in _hide("typography-panel") end
-
-(* A heading of the reading settings' screen, over the rows of its
-   group *)
-fn _reading_heading {id_len,text_len:pos | id_len < 256; text_len < 256} (id: string id_len, text: string text_len): void = let
-  val () = ui_el("reading-box", id, TDiv, "a11yg")
-in ui_text(id, text) end
-
-(* The reading settings a reader sets once, or seldom, on a screen of
-   their own, opened from the typography sheet (More reading settings):
-   the text's spacing and edges, the pages on screen, how pages are
-   turned, reading aloud, the screen, and the reset of them all. Its
-   rows are the sheet's kind, and their controls answer as the sheet's
-   do (_wire_settings) *)
-fn _reading_screen (): void = let
-  val () = ui_el("bats-root", "reading-screen", TDiv, "info rset")
-  val () = ui_labelled("reading-screen", NModal, "reading-title")
-  val () = ui_el("reading-screen", "reading-box", TDiv, "info-in")
-  val () = ui_el("reading-box", "reading-title", TDiv, "mtitle")
-  val () = ui_text("reading-title", "More reading settings")
-  (* the text's spacing and its lines' ends, for a reflowed book (a
-     fixed page keeps its own, and the heading goes with them: the
-     reader's _rows_set) *)
-  val () = _reading_heading("reading-text-title", "Text")
-  val () = ui_el("reading-box", "margins-row", TDiv, "srow")
-  (* the text's alignment (justified, its lines' ends even, or ragged)
-     and hyphenation, each a named group, so its buttons are announced
-     with what they set *)
-  val () = ui_el("reading-box", "align-row", TDiv, "srow")
-  val () = ui_el("align-row", "align-label", TSpan, "slabel")
-  val () = ui_text("align-label", "Justify text")
-  val () = ui_el("align-row", "align-choice", TDiv, "seg")
-  val () = ui_named("align-choice", NGroup, "Justify text")
-  val () = ui_text_btn("align-choice", "align-justified", "sbtn", "On")
-  val () = ui_text_btn("align-choice", "align-ragged", "sbtn", "Off")
-  val () = ui_el("reading-box", "hyphens-row", TDiv, "srow")
-  val () = ui_el("hyphens-row", "hyphens-label", TSpan, "slabel")
-  val () = ui_text("hyphens-label", "Hyphenation")
-  val () = ui_el("hyphens-row", "hyphens-choice", TDiv, "seg")
-  val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
-  val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
-  val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
-  val () = ui_el("reading-box", "paragraph-row", TDiv, "srow")
-  val () = ui_el("reading-box", "letter-row", TDiv, "srow")
-  val () = ui_el("reading-box", "word-row", TDiv, "srow")
+  val () = ui_el("typography-look", "size-row", TDiv, "srow")
+  val () = ui_el("typography-look", "line-height-row", TDiv, "srow")
+  val () = ui_el("typography-look", "paragraph-row", TDiv, "srow")
+  val () = ui_el("typography-look", "letter-row", TDiv, "srow")
+  val () = ui_el("typography-look", "word-row", TDiv, "srow")
   (* a ruby's annotations (furigana) shown or hidden: offered only once
      a chapter of the open book has shown a ruby (reader_ruby_forget,
      the reader's _ruby_mark) *)
-  val () = ui_el("reading-box", "ruby-row", TDiv, "srow")
+  val () = ui_el("typography-look", "ruby-row", TDiv, "srow")
   val () = ui_el("ruby-row", "ruby-label", TSpan, "slabel")
   val () = ui_text("ruby-label", "Pronunciation (ruby)")
   val () = ui_el("ruby-row", "ruby-choice", TDiv, "seg")
@@ -750,9 +724,24 @@ fn _reading_screen (): void = let
   val () = ui_text_btn("ruby-choice", "ruby-show", "sbtn", "Show")
   val () = ui_text_btn("ruby-choice", "ruby-hide", "sbtn", "Hide")
   val () = _hide("ruby-row")
-  val () = _reading_heading("reading-pages-title", "Pages")
+  (* a book's images dimmed in the dark themes *)
+  val () = ui_el("typography-look", "dim-row", TDiv, "srow")
+  val () = ui_el("dim-row", "dim-label", TSpan, "slabel")
+  val () = ui_text("dim-label", "Dim images in dark themes")
+  val () = ui_el("dim-row", "dim-choice", TDiv, "seg")
+  val () = ui_named("dim-choice", NGroup, "Dim images in the dark themes")
+  val () = ui_text_btn("dim-choice", "dim-on", "sbtn", "On")
+  val () = ui_text_btn("dim-choice", "dim-off", "sbtn", "Off")
+  (* Page: pages turned across, or the chapter scrolled down *)
+  val () = ui_el("typography-page", "layout-row", TDiv, "srow")
+  val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
+  val () = ui_text("layout-label", "Layout")
+  val () = ui_el("layout-row", "layout-choice", TDiv, "seg")
+  val () = ui_named("layout-choice", NGroup, "Layout")
+  val () = ui_text_btn("layout-choice", "layout-pages", "sbtn", "Pages")
+  val () = ui_text_btn("layout-choice", "layout-scroll", "sbtn", "Scroll")
   (* paged, one column a screen or two: a spread *)
-  val () = ui_el("reading-box", "columns-row", TDiv, "srow")
+  val () = ui_el("typography-page", "columns-row", TDiv, "srow")
   val () = ui_el("columns-row", "columns-label", TSpan, "slabel")
   val () = ui_text("columns-label", "Pages on screen")
   val () = ui_el("columns-row", "columns-choice", TDiv, "seg")
@@ -760,19 +749,41 @@ fn _reading_screen (): void = let
   val () = ui_text_btn("columns-choice", "columns-auto", "sbtn", "Auto")
   val () = ui_text_btn("columns-choice", "columns-one", "sbtn", "One")
   val () = ui_text_btn("columns-choice", "columns-two", "sbtn", "Two")
-  (* a book's images dimmed in the dark themes *)
-  val () = ui_el("reading-box", "dim-row", TDiv, "srow")
-  val () = ui_el("dim-row", "dim-label", TSpan, "slabel")
-  val () = ui_text("dim-label", "Dim images in dark themes")
-  val () = ui_el("dim-row", "dim-choice", TDiv, "seg")
-  val () = ui_named("dim-choice", NGroup, "Dim images in the dark themes")
-  val () = ui_text_btn("dim-choice", "dim-on", "sbtn", "On")
-  val () = ui_text_btn("dim-choice", "dim-off", "sbtn", "Off")
-  (* how pages are turned: by taps where (each zone drawn, mirrored
-     for a book read right to left), and by the volume keys, where the
-     app has them (reader_controls_show) *)
-  val () = _reading_heading("reading-turning-title", "Turning pages")
-  val () = ui_el("reading-box", "taps-row", TDiv, "srow tapsrow")
+  val () = ui_el("typography-page", "margins-row", TDiv, "srow")
+  (* the text's alignment (justified, its lines' ends even, or ragged)
+     and hyphenation, each a named group, so its buttons are announced
+     with what they set *)
+  val () = ui_el("typography-page", "align-row", TDiv, "srow")
+  val () = ui_el("align-row", "align-label", TSpan, "slabel")
+  val () = ui_text("align-label", "Justify text")
+  val () = ui_el("align-row", "align-choice", TDiv, "seg")
+  val () = ui_named("align-choice", NGroup, "Justify text")
+  val () = ui_text_btn("align-choice", "align-justified", "sbtn", "On")
+  val () = ui_text_btn("align-choice", "align-ragged", "sbtn", "Off")
+  val () = ui_el("typography-page", "hyphens-row", TDiv, "srow")
+  val () = ui_el("hyphens-row", "hyphens-label", TSpan, "slabel")
+  val () = ui_text("hyphens-label", "Hyphenation")
+  val () = ui_el("hyphens-row", "hyphens-choice", TDiv, "seg")
+  val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
+  val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
+  val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
+  (* the screen: full screen, the rotation locked (as Kindle's Layout
+     tab locks the orientation), and (in the Android app) the
+     brightness, each shown only where it can be had
+     (screen_controls.bats) *)
+  val () = ui_el("typography-page", "screen-row", TDiv, "srow")
+  val () = ui_el("screen-row", "screen-label", TSpan, "slabel")
+  val () = ui_text("screen-label", "Screen")
+  val () = ui_text_btn("screen-row", "screen-fullscreen", "sbtn", "Full screen")
+  val () = ui_attr("screen-fullscreen", APressed, "false")
+  val () = ui_text_btn("screen-row", "screen-lock", "sbtn", "Lock rotation")
+  val () = ui_attr("screen-lock", APressed, "false")
+  val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel", "Brightness")
+  val () = _hide("screen-row")
+  (* Turning: by taps where (each zone drawn, mirrored for a book read
+     right to left), and by the volume keys, where the app has them
+     (quire.bats's _sheet_open) *)
+  val () = ui_el("typography-turning", "taps-row", TDiv, "srow tapsrow")
   val () = ui_el("taps-row", "taps-label", TSpan, "slabel")
   val () = ui_text("taps-label", "Tap to turn pages")
   val () = ui_el("taps-row", "taps-choice", TDiv, "seg taps")
@@ -783,16 +794,15 @@ fn _reading_screen (): void = let
     "taps-forward-back", "taps-forward-forward", "taps-forward-about")
   val () = _tap_choice("taps-one-hand", "taps-one-hand-map", "tapmap onehand", "One hand",
     "taps-one-hand-back", "taps-one-hand-forward", "taps-one-hand-about")
-  val () = ui_el("reading-box", "volume-row", TDiv, "srow")
+  val () = ui_el("typography-turning", "volume-row", TDiv, "srow")
   val () = ui_el("volume-row", "volume-choice", TDiv, "seg")
   val () = ui_text_btn("volume-choice", "volume-keys-turn", "sbtn", "Turn pages with volume keys")
   val () = ui_attr("volume-keys-turn", APressed, "false")
   val () = _hide("volume-row")
-  val () = _reading_heading("reading-aloud-title", "Read aloud")
-  (* reading aloud: its speed and voice (the voices of the book's
+  (* Read aloud: its speed and voice (the voices of the book's
      language), offered and kept by read_aloud.bats, where the platform
      speaks *)
-  val () = ui_el("reading-box", "speech-row", TDiv, "srow")
+  val () = ui_el("typography-aloud", "speech-row", TDiv, "srow")
   val () = ui_el("speech-row", "speech-label", TSpan, "slabel")
   val () = ui_text("speech-label", "Speed and voice")
   val () = ui_field("speech-row", "speech-rate", FChoice, "ssel", "Reading speed")
@@ -801,9 +811,9 @@ fn _reading_screen (): void = let
   (* a book's narration: its speed (its slider is made at the settings'
      value, set_sliders) and whether page numbers and notes are read,
      both offered only for a book that has one *)
-  val () = ui_el("reading-box", "narration-speed-row", TDiv, "srow")
+  val () = ui_el("typography-aloud", "narration-speed-row", TDiv, "srow")
   val () = _hide("narration-speed-row")
-  val () = ui_el("reading-box", "narration-skip-row", TDiv, "srow")
+  val () = ui_el("typography-aloud", "narration-skip-row", TDiv, "srow")
   val () = ui_el("narration-skip-row", "narration-skip-label", TSpan, "slabel")
   val () = ui_text("narration-skip-label", "Page numbers and notes")
   val () = ui_el("narration-skip-row", "narration-skip-choice", TDiv, "seg")
@@ -811,24 +821,10 @@ fn _reading_screen (): void = let
   val () = ui_text_btn("narration-skip-choice", "narration-skip", "sbtn", "Skip")
   val () = ui_text_btn("narration-skip-choice", "narration-read", "sbtn", "Read")
   val () = _hide("narration-skip-row")
-  (* the screen: full screen, the rotation locked, and (in the Android
-     app) the brightness, each shown only where it can be had
-     (screen_controls.bats) *)
-  val () = ui_el("reading-box", "screen-row", TDiv, "srow")
-  val () = ui_el("screen-row", "screen-label", TSpan, "slabel")
-  val () = ui_text("screen-label", "Screen")
-  val () = ui_text_btn("screen-row", "screen-fullscreen", "sbtn", "Full screen")
-  val () = ui_attr("screen-fullscreen", APressed, "false")
-  val () = ui_text_btn("screen-row", "screen-lock", "sbtn", "Lock rotation")
-  val () = ui_attr("screen-lock", APressed, "false")
-  val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel", "Brightness")
-  val () = _hide("screen-row")
-  (* reset, away from Done and asked first *)
-  val () = ui_el("reading-box", "typography-foot", TDiv, "srow sfoot")
+  (* reset, away from Close and asked first: every tab's settings *)
+  val () = ui_el("typography-panel", "typography-foot", TDiv, "srow sfoot")
   val () = ui_text_btn("typography-foot", "typography-reset", "link", "Reset to defaults")
-  val () = ui_el("reading-box", "reading-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("reading-buttons", "reading-done", "btn btn-p", "Done")
-in _hide("reading-screen") end
+in _hide("typography-panel") end
 
 (* The search panel *)
 fn _search (): void = let
@@ -936,7 +932,6 @@ implement app_build () = let
   val () = _scrim()
   val () = _toc()
   val () = _settings()
-  val () = _reading_screen()
   val () = _search()
   val () = _annotations()
   val () = _note()

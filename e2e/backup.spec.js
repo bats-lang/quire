@@ -56,9 +56,8 @@ test('a backup holds the settings, the books, their places and annotations', asy
   await selectionButton(page, 'Underline').click();
   await openSettings(page);
   await page.getByRole('slider', { name: 'Size' }).fill('24');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await page.getByRole('slider', { name: 'Word spacing' }).fill('10');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
@@ -97,13 +96,12 @@ test('a backup restored after a reset brings everything back, and a book importe
   const plain = await bg(page);
   await page.getByRole('button', { name: 'Sepia', exact: true }).click();
   await expect.poll(() => bg(page)).not.toBe(plain);
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('group', { name: 'Justify text' }).getByRole('button', { name: 'On', exact: true }).click();
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // the place as the book is left: justified text can move a page's
   // first paragraph to the page before
-  await expect(page.getByRole('dialog', { name: 'Typography and theme' })).toBeHidden();
+  await expect(page.getByRole('dialog', { name: 'Reading settings' })).toBeHidden();
   const left = await place(page);
   expect(left.ch).toBe(at.ch);
   await toLibrary(page);
@@ -266,14 +264,14 @@ test('a backup holds reading aloud\'s speed and voices, the brightness and the r
   await deviceStubs(page);
   await start(page);
   await readBook(page, { title: 'Device Backup', author: 'Keeper', rawChapters: chapters(1, 5) });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   const sheet = readingSettings(page);
   await sheet.getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
   await sheet.getByRole('combobox', { name: 'Voice' }).selectOption({ label: 'Narrator' });
+  await openReadingSettings(page, 'Page');
   await sheet.getByRole('combobox', { name: 'Brightness' }).selectOption({ label: '25%' });
   await sheet.getByRole('button', { name: 'Lock rotation', exact: true }).click();
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
@@ -292,9 +290,10 @@ test('a backup holds reading aloud\'s speed and voices, the brightness and the r
   await restored(page).getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toContain('brightness {"brightness":0.25}');
   await openBook(page, 'Device Backup');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   await expect(sheet.getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
   await expect(sheet.getByRole('combobox', { name: 'Voice' }).locator('option:checked')).toHaveText('Narrator');
+  await openReadingSettings(page, 'Page');
   await expect(sheet.getByRole('combobox', { name: 'Brightness' })).toHaveValue('25');
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });

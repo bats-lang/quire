@@ -5,14 +5,14 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog, openSettings,
+  start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog,
   place, indicator, chapters, japaneseChapters,
   readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
 
-const sheet = page => dialog(page, 'Typography and theme');
+const sheet = page => dialog(page, 'Reading settings');
 
 /** The page's scroll down, and its height */
 const scroll = page => bookPage(page).evaluate(e => ({ top: e.scrollTop, height: e.clientHeight }));
@@ -58,20 +58,17 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
   await start(page);
   await importFiles(page, [epubFile(verticalBook('縦組み')), epubFile({ title: 'Across', author: 'Vertical Tests', rawChapters: chapters(1) })], 2);
   await openBook(page, '縦組み');
-  await openSettings(page);
+  await openReadingSettings(page, 'Page');
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeHidden();
-  await openReadingSettings(page);
   await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeHidden();
   await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeHidden();
   await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeHidden();
   await expect(readingSettings(page).getByRole('group', { name: 'Hyphenation' })).toBeHidden();
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
   await toLibrary(page);
   await openBook(page, 'Across');
-  await openSettings(page);
+  await openReadingSettings(page, 'Page');
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeVisible();
-  await openReadingSettings(page);
   await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeVisible();
   await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeVisible();
   await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeVisible();
@@ -102,7 +99,7 @@ test('set vertically, the space after a paragraph is beside it, not below it, an
   expect(boxes.spacing).toBeGreaterThan(0);
   expect(boxes.below).toBe(0);
   expect(boxes.secondRight).toBeLessThanOrEqual(boxes.firstLeft - boxes.spacing + 0.5);
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Look');
   await expect(readingSettings(page).getByRole('slider', { name: 'Paragraph spacing' })).toBeVisible();
 });
 
@@ -110,7 +107,7 @@ test('a book set vertically is paged even when the layout is scrolled', async ({
   await start(page);
   await importFiles(page, [epubFile(verticalBook('段組')), epubFile({ title: 'Scrolled', author: 'Vertical Tests', rawChapters: chapters(1) })], 2);
   await openBook(page, 'Scrolled');
-  await openSettings(page);
+  await openReadingSettings(page, 'Page');
   await sheet(page).getByRole('group', { name: 'Layout' }).getByRole('button', { name: 'Scroll', exact: true }).click();
   await page.keyboard.press('Escape');
   await toLibrary(page);
