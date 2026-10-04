@@ -6,7 +6,6 @@
 // label or visible text. No test depends on an element's id or class.
 
 import { expect } from '@playwright/test';
-import { fastmailRefused } from './fixtures.js';
 import { createEpub, solidPng } from './create-epub.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,9 +79,13 @@ export const importInput = page => page.getByLabel('Import EPUB');
 /** The list of books */
 export const books = page => page.getByRole('region', { name: 'Books' });
 
-/** Every book's row in the list: a group named by the book's title,
-    holding its card and its "Book menu" button */
-export const cards = page => books(page).getByRole('group');
+/** The book to continue, above the list (and then not in it, #273) */
+export const continueReading = page => page.getByRole('region', { name: 'Continue reading' });
+
+/** Every book's row the library shows, in order: the book to continue,
+    then the list; each a group named by the book's title, holding its
+    card and its "Book menu" button */
+export const cards = page => page.getByRole('region', { name: /^(Continue reading|Books)$/ }).getByRole('group');
 
 /** The row of the book whose card has text */
 export function card(page, text) {
@@ -161,7 +164,7 @@ export async function bookMenu(page, text) {
 export async function start(page) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return errors;
@@ -351,12 +354,33 @@ export async function openSettings(page) {
   await expect(dialog(page, 'Typography and theme')).toBeVisible();
 }
 
+/** The reading settings' screen, opened from the typography sheet */
+export function readingSettings(page) {
+  return dialog(page, 'More reading settings');
+}
+
+/** Opens the reading settings' screen: the typography sheet, then its
+    More reading settings row */
+export async function openReadingSettings(page) {
+  if (!(await dialog(page, 'Typography and theme').isVisible())) await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('button', { name: /^More reading settings/ }).click();
+  await expect(readingSettings(page)).toBeVisible();
+}
+
+/** Back from the reading settings' screen to the typography sheet */
+export async function closeReadingSettings(page) {
+  await readingSettings(page).getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(readingSettings(page)).toBeHidden();
+}
+
 /** One column a screen, whatever the window: for a test of what a
     single page shows (a wide window in landscape shows a spread) */
 export async function oneColumn(page) {
-  await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' })
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('group', { name: 'Pages on screen' })
     .getByRole('button', { name: 'One', exact: true }).click();
+  // back to the sheet, and from it to the page
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(dialog(page, 'Typography and theme')).toBeHidden();
 }

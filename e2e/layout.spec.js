@@ -8,6 +8,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
+  readingSettings, openReadingSettings, closeReadingSettings,
 } from './helpers.js';
 
 /** The names of the visible controls among locators that reach out of
@@ -104,6 +105,86 @@ test('the page fills the window, and the bars fit it', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+/** The reader's bars as laid out now, measured at once (they hide
+    themselves after 5 s): each visible button's box and name, the
+    label's parts' boxes, the slider's box, and each label part's text
+    whole or not */
+async function bars(page) {
+  return page.evaluate(() => {
+    const toolbar = document.querySelector('[role=toolbar][aria-label="Page controls"]');
+    const shown = e => e.checkVisibility() && e.getClientRects().length > 0;
+    const box = e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, name: e.getAttribute('aria-label') || e.textContent.trim() }; };
+    const status = toolbar.querySelector('[role=status]');
+    const percent = status.parentElement.lastElementChild;
+    return {
+      buttons: [...toolbar.querySelectorAll('button')].filter(shown).map(box),
+      label: [status, percent].filter(shown).map(box),
+      // (the title and " · page " are read out, not shown, on a phone: 1 px)
+      slider: box(toolbar.querySelector('[role=slider]')),
+      cut: [status, ...status.children, percent].filter(shown).filter(e => e.clientWidth > 1 && e.scrollWidth > e.clientWidth + 1).map(e => e.textContent),
+    };
+  });
+}
+
+const overlap = (a, b) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+
+// #274: the bottom bar in two rows, the place ("6 of 40 in chapter ·
+// 1%") whole over the scrubber with the page turns at its ends, and the
+// tools in a row of their own, each a 48 px target, nothing over another
+test("the reader's bottom bar: the progress row over the tools row, nothing cut or overlapping", async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Bars', author: 'L', rawChapters: chapters(12, 40) });
+  await showChrome(page);
+  const measured = await bars(page);
+  expect(measured.cut, 'cut off in the label').toEqual([]);
+  const all = [...measured.buttons, ...measured.label, measured.slider];
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      expect(overlap(all[i], all[j]), `${all[i].name} over ${all[j].name}`).toBe(false);
+    }
+  }
+  const width = page.viewportSize().width;
+  for (const b of all) expect(b.x >= -1 && b.x + b.width <= width + 1, `${b.name} out of the window`).toBe(true);
+  const button = name => measured.buttons.find(b => b.name === name);
+  const previous = button('Previous page'), next = button('Next page');
+  const middle = b => b.y + b.height / 2;
+  // the page turns at the scrubber's ends, on its row
+  expect(previous.x + previous.width).toBeLessThanOrEqual(measured.slider.x + 1);
+  expect(next.x).toBeGreaterThanOrEqual(measured.slider.x + measured.slider.width - 1);
+  expect(Math.abs(middle(previous) - middle(measured.slider))).toBeLessThan(4);
+  expect(Math.abs(middle(next) - middle(measured.slider))).toBeLessThan(4);
+  // the label over it
+  for (const part of measured.label) expect(part.y + part.height).toBeLessThanOrEqual(measured.slider.y + 1);
+  // the tools under it, in one row, each at least 48 px
+  const tools = ['Contents', 'Typography', 'Annotations'].map(button);
+  for (const tool of tools) {
+    expect(tool.y).toBeGreaterThanOrEqual(measured.slider.y + measured.slider.height - 1);
+    expect(tool.width).toBeGreaterThanOrEqual(48);
+    expect(tool.height).toBeGreaterThanOrEqual(48);
+    expect(Math.abs(middle(tool) - middle(tools[0]))).toBeLessThan(2);
+  }
+  await fits(page, 'the reader with its bars');
+});
+
+// #274: every icon is a glyph of the bundled icon face, drawn in the
+// bar's own text colour; none is an emoji, which a platform may draw as
+// a colour picture
+test("no bar button's text is an emoji, and the icons' face is there", async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Icons', author: 'L', rawChapters: chapters(2) });
+  const texts = await page.evaluate(() => [...document.querySelectorAll('[role=navigation][aria-label=Book] button, [role=toolbar][aria-label="Page controls"] button')]
+    .map(e => ({ name: e.getAttribute('aria-label') || e.textContent, text: e.textContent })));
+  // the bars' buttons, narration's included, shown or not
+  expect(texts.length).toBeGreaterThanOrEqual(12);
+  for (const { name, text } of texts) {
+    expect(/\p{Extended_Pictographic}|\u{FE0F}/u.test(text), `${name}: ${JSON.stringify(text)} is an emoji`).toBe(false);
+  }
+  const icons = texts.filter(t => /^[\u{E000}-\u{F8FF}]$/u.test(t.text));
+  expect(icons.length).toBeGreaterThanOrEqual(11);
+  const loaded = await page.evaluate(async glyphs => (await document.fonts.load("24px 'Material Symbols'", glyphs)).length, icons.map(t => t.text).join(''));
+  expect(loaded, 'the icon face is loaded').toBe(1);
+});
+
 test('nothing is cut off in the library, its menus and its screens', async ({ page }) => {
   await start(page);
   await fits(page, 'the empty library');
@@ -178,6 +259,9 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await page.keyboard.press('Escape');
   await openSettings(page);
   await fits(page, 'Typography and theme');
+  await openReadingSettings(page);
+  await fits(page, 'More reading settings');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await clickControl(page, 'Annotations');
   await expect(dialog(page, 'Annotations')).toBeVisible();
@@ -194,4 +278,82 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await fits(page, 'Settings over the reader');
   await page.keyboard.press('Escape');
   await toLibrary(page);
+});
+
+/** The book's text on the page shown: each line box of the page's
+    paragraphs that is on screen (the page's other columns lie beside
+    it, out of sight) */
+async function shownLines(page) {
+  return bookPage(page).evaluate(doc => {
+    const box = doc.getBoundingClientRect();
+    const lines = [];
+    for (const p of doc.querySelectorAll('p')) {
+      for (const r of p.getClientRects()) {
+        if (r.width > 0 && r.right > box.left + 1 && r.left < box.right - 1) lines.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+      }
+    }
+    return lines;
+  });
+}
+
+// A screen's cutout (a camera hole, a notch) and rounded corners, as
+// the browser reads them out (env(safe-area-inset-*)): Android's
+// WebView gives the page the cutout's insets, in full screen too, and
+// the page's text keeps out of them on every side (#275). Chromium's
+// DevTools set the insets here, as a phone with a cutout at its top
+// (in portrait) or its side (in landscape) would
+test('the page keeps its text out of the safe area: a cutout above or beside it', async ({ page }) => {
+  const insets = { top: 64, left: 48, right: 24, bottom: 30 };
+  const devtools = await page.context().newCDPSession(page);
+  await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+  await start(page);
+  await readBook(page, { title: 'Cutout', author: 'L', rawChapters: chapters(3, 60) });
+  const v = page.viewportSize();
+  const twoColumns = v.width > v.height && v.width >= 960;
+  for (const turn of [false, true]) {
+    if (turn) await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await shownLines(page)).length).toBeGreaterThan(0);
+    const lines = await shownLines(page);
+    const outside = lines.filter(r => r.left < insets.left - 1 || r.right > v.width - insets.right + 1
+      || r.top < insets.top - 1 || r.bottom > v.height - insets.bottom + 1);
+    expect(outside, `text in the safe area's insets on ${turn ? 'the second' : 'the first'} page`).toEqual([]);
+    // a spread still shows two columns beside a cutout
+    const columns = new Set(lines.map(r => Math.round(r.left / 40)));
+    if (twoColumns) expect(columns.size, 'a spread\'s two columns').toBeGreaterThanOrEqual(2);
+  }
+  await fits(page, 'the reader beside a cutout');
+});
+
+// The typography sheet scrolls within the window, and its Close stays
+// in reach however far it is scrolled, in full screen too (#275: in
+// full screen the sheet could no longer be scrolled to Close)
+test('the typography sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await closeReadingSettings(page);
+  const panel = dialog(page, 'Typography and theme');
+  const close = panel.getByRole('button', { name: 'Close', exact: true });
+  const last = panel.getByRole('button', { name: /^More reading settings/ });
+  const within = () => panel.evaluate(e => {
+    const r = e.getBoundingClientRect();
+    return r.top >= -1 && r.bottom <= innerHeight + 1;
+  });
+  expect(await within(), 'the sheet within the window').toBe(true);
+  // scrolled from its top to its end, by the wheel as a reader would
+  await panel.evaluate(e => { e.scrollTop = 0; });
+  await expect(close).toBeInViewport({ ratio: 1 });
+  const box = await panel.boundingBox();
+  // over the rows' names, not a control
+  await page.mouse.move(box.x + 24, box.y + box.height / 2);
+  for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
+  await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
+  await expect(last).toBeInViewport({ ratio: 1 });
+  await expect(close).toBeInViewport({ ratio: 1 });
+  await fits(page, 'Typography and theme, in full screen');
+  await close.click();
+  await expect(panel).toBeHidden();
+  await page.evaluate(() => document.exitFullscreen());
 });

@@ -7,6 +7,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog, openSettings,
   place, indicator, chapters, japaneseChapters,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
@@ -59,19 +60,22 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
   await openBook(page, '縦組み');
   await openSettings(page);
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeHidden();
-  await expect(sheet(page).getByRole('group', { name: 'Columns' })).toBeHidden();
-  await expect(sheet(page).getByRole('slider', { name: 'Margins' })).toBeHidden();
-  await expect(sheet(page).getByRole('group', { name: 'Alignment' })).toBeHidden();
-  await expect(sheet(page).getByRole('group', { name: 'Hyphenation' })).toBeHidden();
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeHidden();
+  await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeHidden();
+  await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeHidden();
+  await expect(readingSettings(page).getByRole('group', { name: 'Hyphenation' })).toBeHidden();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await openBook(page, 'Across');
   await openSettings(page);
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeVisible();
-  await expect(sheet(page).getByRole('group', { name: 'Columns' })).toBeVisible();
-  await expect(sheet(page).getByRole('slider', { name: 'Margins' })).toBeVisible();
-  await expect(sheet(page).getByRole('group', { name: 'Alignment' })).toBeVisible();
-  await expect(sheet(page).getByRole('group', { name: 'Hyphenation' })).toBeVisible();
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeVisible();
+  await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeVisible();
+  await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeVisible();
+  await expect(readingSettings(page).getByRole('group', { name: 'Hyphenation' })).toBeVisible();
   // and the horizontal book is not set vertically
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).writingMode)).toBe('horizontal-tb');
 });
@@ -98,8 +102,8 @@ test('set vertically, the space after a paragraph is beside it, not below it, an
   expect(boxes.spacing).toBeGreaterThan(0);
   expect(boxes.below).toBe(0);
   expect(boxes.secondRight).toBeLessThanOrEqual(boxes.firstLeft - boxes.spacing + 0.5);
-  await openSettings(page);
-  await expect(sheet(page).getByRole('slider', { name: 'Paragraph spacing' })).toBeVisible();
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('slider', { name: 'Paragraph spacing' })).toBeVisible();
 });
 
 test('a book set vertically is paged even when the layout is scrolled', async ({ page }) => {

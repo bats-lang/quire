@@ -1,1 +1,4 @@
-pattern match is nonexhaustive
+function _static_unhandled
+line 4
+pattern match is nonexhaustive:
+ContentUnreadable()

@@ -1187,7 +1187,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition | Visibility
+  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -1220,6 +1220,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
+  | GridArea() => "grid-area"
 
 (* prop:value; *)
 fn lay {left:nat}{media:bool}{value_len:nat | value_len + 18 <= left}
@@ -1394,7 +1395,7 @@ in sheet end
    The stylesheet
    ============================================================ *)
 
-fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1010] sheet(after, false, false) = let
+fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1170] sheet(after, false, false) = let
   val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-latin.woff2) format('woff2');font-style:normal;font-weight:200 900;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-italic-latin.woff2) format('woff2');font-style:italic;font-weight:200 900;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:swap}")
@@ -1403,9 +1404,13 @@ fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, false, false)): [after:n
   val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-normal.woff2) format('woff2');font-style:normal;font-weight:700;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-italic.woff2) format('woff2');font-style:italic;font-weight:400;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
+  (* the icons (ui.bats's _glyph): a subset of Material Symbols, its
+     glyphs in the Private Use Area; block, so an icon never shows as a
+     fallback's box while the face loads *)
+  val () = raw(sheet, "@font-face{font-family:'Material Symbols';src:url(material-symbols-subset.woff2) format('woff2');font-weight:400;font-display:block}")
 in sheet end
 
-fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6600] sheet(after, false, false) = let
+fn _shell {left:nat | left >= 6690} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6690] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -1471,8 +1476,13 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = lay(sheet, FontSize(), "0")
   val sheet = close(sheet)
+  (* an icon button: its icon a glyph of the icon face, in the
+     button's own text colour; text it shows (Skip table) falls back to
+     the app's face *)
   val sheet = rule(sheet, ".ibtn")
-  val sheet = lay(sheet, FontSize(), "20px")
+  val sheet = lay(sheet, FontFamily(), "'Material Symbols',Inter,system-ui,sans-serif")
+  val sheet = lay(sheet, FontSize(), "24px")
+  val sheet = lay(sheet, LineHeight(), "1")
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
@@ -1714,7 +1724,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:n
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4500] sheet(after, false, false) = let
+fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1777,6 +1787,21 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [afte
   (* the offer of a new version, above the copy status *)
   val sheet = rule(sheet, ".toast.tnew")
   val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 280px)")
+  val sheet = close(sheet)
+  (* the scrim under a reader panel (.panel, .sheet, at 12), over the
+     reader and its bars: a ground with no text, as the dialog's veil *)
+  val sheet = rule(sheet, ".scrim")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Inset(), "0")
+  val sheet = veil(sheet)
+  val sheet = lay(sheet, ZIndex(), "11")
+  val sheet = close(sheet)
+  (* the focus stops around the reader's panels: fixed, so the focus
+     coming to one scrolls nothing, and empty *)
+  val sheet = rule(sheet, ".fstop")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = lay(sheet, Left(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
@@ -1935,12 +1960,16 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8600] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9200] sheet(after, false, false) = let
+  (* the reader is the window, whatever a viewport unit says (in an
+     Android WebView 100vh can be taller than what is shown, so the page
+     and a sheet's bottom could pass the screen's edge, #275): fixed to
+     the layout viewport, nothing behind it scrolls *)
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Height(), "100vh")
-  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Inset(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top,.bot")
@@ -1979,13 +2008,44 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = lay(sheet, TextOverflow(), "ellipsis")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".pinfo")
-  val sheet = lay(sheet, FontSize(), "13px")
-  val sheet = lay(sheet, WhiteSpace(), "nowrap")
-  val sheet = lay(sheet, Flex(), "1")
+  (* the bottom bar's progress row: the label, a line of its own over
+     the scrubber, whole (#274): it wraps before the percentage rather
+     than cut anything *)
+  val sheet = rule(sheet, ".plab")
+  val sheet = lay(sheet, FlexBasis(), "100%")
   val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = lay(sheet, JustifyContent(), "center")
+  val sheet = lay(sheet, AlignItems(), "baseline")
+  val sheet = lay(sheet, Gap(), "0 6px")
   val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = lay(sheet, PaddingTop(), "6px")
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = lay(sheet, TextAlign(), "center")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".pinfo")
+  val sheet = lay(sheet, WhiteSpace(), "nowrap")
+  val sheet = lay(sheet, Flex(), "0 1 auto")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".psep")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = close(sheet)
+  (* the tools row: each tool a 48 px target, spread evenly; the
+     narration's group goes to a line of its own where the row has no
+     room for it *)
+  val sheet = rule(sheet, ".tools")
+  val sheet = lay(sheet, FlexBasis(), "100%")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = lay(sheet, JustifyContent(), "space-evenly")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "4px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tools .ibtn")
+  val sheet = lay(sheet, Width(), "48px")
+  val sheet = lay(sheet, Height(), "48px")
   val sheet = close(sheet)
   (* a long chapter title is cut, and the page numbers after it are not *)
   val sheet = rule(sheet, ".pgt")
@@ -2031,10 +2091,17 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".chrome-off .foot")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = close(sheet)
+  (* the page keeps out of the screen's cutouts and rounded corners
+     (the safe area) on every side, in or out of full screen: above and
+     below in its paddings, and at its sides (a cutout there in
+     landscape) in its margins, so its columns, a page each, are the
+     safe width (#275) *)
   val sheet = rule(sheet, ".caf")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, MarginLeft(), "env(safe-area-inset-left)")
+  val sheet = lay(sheet, MarginRight(), "env(safe-area-inset-right)")
   val sheet = lay(sheet, PaddingTop(), "max(48px,env(safe-area-inset-top))")
   val sheet = lay(sheet, PaddingBottom(), "max(36px,env(safe-area-inset-bottom))")
   val sheet = lay(sheet, ColumnFill(), "auto")
@@ -2209,12 +2276,15 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "4px")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".nleave")
+  val sheet = rule(sheet, ".tools .nleave")
+  val sheet = lay(sheet, Width(), "auto")
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = lay(sheet, Padding(), "0 8px")
   val sheet = close(sheet)
+  (* the scrubber, between the page turns *)
   val sheet = rule(sheet, ".scr")
-  val sheet = lay(sheet, FlexBasis(), "100%")
+  val sheet = lay(sheet, Flex(), "1 1 0")
+  val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "8px")
@@ -2248,10 +2318,10 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tick")
   val sheet = lay(sheet, Position(), "absolute")
-  val sheet = lay(sheet, Top(), "16px")
+  val sheet = lay(sheet, Top(), "18px")
   val sheet = lay(sheet, Width(), "2px")
-  val sheet = lay(sheet, Height(), "12px")
-  val sheet = tint(sheet, true, 60)
+  val sheet = lay(sheet, Height(), "8px")
+  val sheet = tint(sheet, true, 45)
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".thumb")
@@ -2276,9 +2346,8 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pct")
-  val sheet = lay(sheet, FontSize(), "13px")
-  val sheet = lay(sheet, MinWidth(), "3em")
-  val sheet = lay(sheet, TextAlign(), "right")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pback")
   val sheet = lay(sheet, Position(), "absolute")
@@ -2359,13 +2428,16 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5400] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6100] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, Left(), "0")
-  val sheet = lay(sheet, Width(), "min(420px,100vw)")
+  (* a modal side panel leaves a strip of the scrim, a tap on which
+     closes it: as wide as the screen less 56 px, as Material's modal
+     navigation drawer *)
+  val sheet = lay(sheet, Width(), "min(420px,calc(100vw - 56px))")
   val sheet = lay(sheet, ZIndex(), "12")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Display(), "flex")
@@ -2524,9 +2596,29 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, MaxWidth(), "520px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, BorderRadius(), "12px 12px 0 0")
-  (* taller than a short screen allows: it scrolls *)
-  val sheet = lay(sheet, MaxHeight(), "85vh")
+  (* taller than a short screen allows: it scrolls, within the height
+     shown (dvh: in full screen, and in a WebView, vh can be more) *)
+  val sheet = lay(sheet, MaxHeight(), "85dvh")
   val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = close(sheet)
+  (* a sheet's head, its Close in it: held at the sheet's top as the
+     rest scrolls, so Close is always in reach (as Apple Books' sheet
+     keeps its close at its top) *)
+  val sheet = rule(sheet, ".shead")
+  val sheet = lay(sheet, Position(), "sticky")
+  val sheet = lay(sheet, Top(), "-12px")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, Margin(), "-12px -16px 0")
+  val sheet = lay(sheet, Padding(), "12px 16px 6px")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "8px")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".shead .grow")
+  val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = close(sheet)
   (* its rows keep their height, and the sheet scrolls instead *)
   val sheet = rule(sheet, ".sheet>*")
@@ -2534,7 +2626,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   (* a note's text, over the page: a long one scrolls *)
   val sheet = rule(sheet, ".fntext")
-  val sheet = lay(sheet, MaxHeight(), "50vh")
+  val sheet = lay(sheet, MaxHeight(), "50dvh")
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, LineHeight(), "1.5")
   val sheet = close(sheet)
@@ -2778,6 +2870,101 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [aft
   val sheet = _shade_rule(V_grey_8 | sheet, Grey(), 4, 8)
 in sheet end
 
+(* The reading settings' screen (app.bats's _reading_screen), on the
+   card's ground as the sheet it is opened from, and its choices of
+   where taps turn pages: a line each, a drawing of the page's zones
+   beside the choice's name and what it does. The drawing is the
+   page's ground framed by an edge, the back zone the line's colour and
+   the forward zone the accent (no text: their font size is 0); a book
+   read right to left has it mirrored (.taps.rtl). The drawing and the
+   line take no taps, so a tap on them is the button's *)
+fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
+  val sheet = rule(sheet, ".info.rset")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".srow.tapsrow")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, AlignItems(), "stretch")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapsrow .slabel")
+  val sheet = lay(sheet, Width(), "auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seg.taps")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seg button.tapbtn")
+  val sheet = lay(sheet, Display(), "grid")
+  val sheet = lay(sheet, GridTemplate(), "\"m n\" auto \"m a\" auto/32px 1fr")
+  val sheet = lay(sheet, Gap(), "2px 12px")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, TextAlign(), "start")
+  val sheet = lay(sheet, Padding(), "8px 12px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapmap")
+  val sheet = lay(sheet, GridArea(), "m")
+  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, Width(), "32px")
+  val sheet = lay(sheet, Height(), "48px")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, BorderRadius(), "4px")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, FontSize(), "0")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleGround())
+  val sheet = line(sheet, AllSides(), 1, RoleEdge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzb,.tzf")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, FontSize(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzb")
+  val sheet = fill(sheet, RoleLine())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzf")
+  val sheet = fill(sheet, RoleAccent())
+  val sheet = close(sheet)
+  (* sides: a quarter at each side, the middle the bars' *)
+  val sheet = rule(sheet, ".sides .tzb")
+  val sheet = lay(sheet, Inset(), "0 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sides .tzf")
+  val sheet = lay(sheet, Inset(), "0 0 0 75%")
+  val sheet = close(sheet)
+  (* forward: under the top eighth (the bars'), a quarter back, the
+     rest forward *)
+  val sheet = rule(sheet, ".forward .tzb")
+  val sheet = lay(sheet, Inset(), "12.5% 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".forward .tzf")
+  val sheet = lay(sheet, Inset(), "12.5% 0 0 25%")
+  val sheet = close(sheet)
+  (* one hand: the top third back, the bottom third forward *)
+  val sheet = rule(sheet, ".onehand .tzb")
+  val sheet = lay(sheet, Inset(), "0 0 66.6% 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".onehand .tzf")
+  val sheet = lay(sheet, Inset(), "66.6% 0 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .sides .tzb")
+  val sheet = lay(sheet, Inset(), "0 0 0 75%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .sides .tzf")
+  val sheet = lay(sheet, Inset(), "0 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .forward .tzb")
+  val sheet = lay(sheet, Inset(), "12.5% 0 0 75%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .forward .tzf")
+  val sheet = lay(sheet, Inset(), "12.5% 25% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapabout")
+  val sheet = lay(sheet, GridArea(), "a")
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = close(sheet)
+in sheet end
+
 (* The axes the page turn (gestures region 1, on .caf) owns: the
    stylesheet's touch-action for .caf comes from them, so the browser
    leaves exactly that axis to the recognizer *)
@@ -2829,6 +3016,7 @@ implement app_style () = let
   val sheet = _reader(sheet)
   val sheet = _page_turn(sheet)
   val sheet = _panels(sheet)
+  val sheet = _reading_settings(sheet)
   val sheet = _under_480px(sheet)
   val sheet = _under_600px(sheet)
   val sheet = rule(sheet, ".caf")

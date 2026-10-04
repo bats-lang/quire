@@ -2098,14 +2098,16 @@ fn _passes (nums: bnums): bool =
   | Finished() => nums.done > 0
   | AllBooks() => true
 
-fun _cards {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, shelf: shelf, query: !query, generation: int, shown: int): int =
+(* The cards of the books shown, but for the book to continue (index
+   continued, or -1), which its own card shows above *)
+fun _cards {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, continued: int, shelf: shelf, query: !query, generation: int, shown: int): int =
   case+ books of
   | books_nil() => shown
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-      val visible = (if same_shelf(nums.shelf, shelf) then (if _passes(nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
+      val visible = (if i = continued then false else if same_shelf(nums.shelf, shelf) then (if _passes(nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
       val () = (if visible then _card(book, i, generation, "book", "book-row", "book-more", "book-list", true) else ())
-    in _cards(rest, i + 1, shelf, query, generation, (if visible then shown + 1 else shown)) end
+    in _cards(rest, i + 1, continued, shelf, query, generation, (if visible then shown + 1 else shown)) end
 
 (* The book to continue: the one on the shelf opened last and not
    finished: its index, or -1 (best is the one so far, opened at
@@ -2118,12 +2120,13 @@ fun _latest {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, best: 
       val better = (if same_shelf(nums.shelf, OnShelf()) then (if nums.done <= 0 then (if nums.opened > 0 then nums.opened > latest_opened else false) else false) else false): bool
     in if better then _latest(rest, i + 1, i, nums.opened) else _latest(rest, i + 1, best, latest_opened) end
 
-(* Card want of books, into the Continue reading section *)
+(* Card want of books, into the Continue reading section, with the
+   same More button as the list's cards (the list leaves it out) *)
 fun _continue_card {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, want: int, generation: int): void =
   case+ books of
   | books_nil() => ()
   | books_cons(book, rest) =>
-    if i = want then _card(book, i, generation, "continue", "continue-row", "continue-more", "continue-list", false)
+    if i = want then _card(book, i, generation, "continue", "continue-row", "continue-more", "continue-list", true)
     else _continue_card(rest, i + 1, want, generation)
 
 (* The view's controls, pressed as the view is *)
@@ -2269,13 +2272,15 @@ implement lib_render () = let
   val has_query = (case+ query of QuerySome(_, _) => true | QueryNone() => false): bool
   val library = lib_take()
   val+ @LibCell(books, _) = library
-  val shown = _cards(books, 0, shelf, query, generation, 0)
   (* the book to continue, above the rest: on the shelf, unsearched, in
      no one collection, and unless only unread or finished books are
-     shown *)
+     shown. It is shown once: its card there, not again in the list
+     (quire#273), whatever the sort *)
   val shows_reading = (case+ !_filter of AllBooks() => true | BeingRead() => true | _ => false): bool
   val want = (if same_shelf(shelf, OnShelf()) then (if ~has_query then (if !_coll_shown < 0 then (if shows_reading then _latest(books, 0, ~1, 0) else ~1) else ~1) else ~1) else ~1): int
   val () = (if want >= 0 then _continue_card(books, 0, want, generation) else ())
+  val listed = _cards(books, 0, want, shelf, query, generation, 0)
+  val shown = (if want >= 0 then listed + 1 else listed): int
   prval () = fold@(library)
   val () = lib_put(library)
   val () = ui_show("continue-reading", want >= 0)

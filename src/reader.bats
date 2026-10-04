@@ -708,7 +708,11 @@ fn _anchor_now (): [node:int | node >= ~1] int node = let
     | VerticalLeftToRight() => page_left + 12
     | Horizontal() =>
       if _spread() then (if !_right_to_left then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
+  (* a reader panel's scrim and the reader's inertness would hide the
+     page from the hit test: it sees through them *)
+  val seen = layer_see_through()
   val node = _node_down(x, page_top + 24, 8)
+  val () = layer_see_through_end(seen)
   (* across the page, or down it *)
   val down = (case+ _page_axis() of Down() => true | Across() => false | AcrossBack() => false): bool
   val low = (if down then page_top - 1 else page_left - 1): int
@@ -2915,6 +2919,7 @@ fn _rows_set (): void = let
   (* the paragraphs' spacing stays set vertically: it is logical
      (margin-block-end), between their columns of lines *)
   val () = ui_show("paragraph-row", reflowed)
+  val () = ui_show("reading-text-title", reflowed)
   val () = ui_show("layout-row", horizontal)
   (* a fixed page's Columns are its spreads: one page, two, or as the
      book and the view's shape say *)

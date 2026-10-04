@@ -9,8 +9,14 @@ Two kinds of group:
 * static: each a list of what one job of the static tests runs: `check`
   (bats check of the app itself), `checkers` (ids.py and case_plus.py,
   with their fixtures), and the fixtures, `accept/<name>` and
-  `reject/<name>` under tests/static/ (each a full bats check of its
-  own, so they are the long part).
+  `reject/<name>` under tests/static/. Every job that runs a fixture
+  checks the app first (the long part: 9 min on CI), and each fixture
+  then checks only its module again: on CI about 13 s for a reject, 54 s
+  for an accept (which links the app), 7 min for one in style.bats,
+  whose proofs are the slowest to check. So a group is the app's check
+  and as many fixtures as keep it near the e2e path (build, 10.5 min,
+  then a group of e2e, 5): `app` (with `check`) takes the rejects,
+  `accepts` the accepts and a few rejects, `style` the style.bats one.
 
 Every spec and every static member is in exactly one group of its kind,
 and every name a group lists exists: anything else fails, so a spec or a

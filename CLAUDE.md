@@ -226,11 +226,11 @@ dictionaries' names and languages, not their files.
 reading time the same on the reader's devices, through one file,
 `quire-sync.json`, in the backup's JSON format plus each record's
 stamps, a `deleted` list per book and a `devices` list. Where the file
-is kept is a `store` (`WebDav(url, user, password)`, or `Android` or
-`Dropbox`, below): its credentials are stored on this device only, by
-the store's kind ("sync" names the kind, "sync-webdav" holds the WebDAV
-ones, "sync-android" the account's address, "sync-dropbox" the refresh
-token), never in the backup. The merge and its tries call only `store_read` (the file,
+is kept is a `store` (`WebDav(url, user, password)`, or `Fastmail`,
+`Android` or `Dropbox`, below): its credentials are stored on this
+device only, by the store's kind ("sync" names the kind, "sync-webdav"
+holds the WebDAV ones, "sync-fastmail" Fastmail's, "sync-android" the
+account's address, "sync-dropbox" the refresh token), never in the backup. The merge and its tries call only `store_read` (the file,
 none yet, or a failure) and `store_write` (written, a conflict, or a
 failure); WebDAV's read is a GET whose ETag is the version, its write
 a PUT with If-Match (a 412 is the conflict). A sync reads, merges and
@@ -241,8 +241,11 @@ the page is hidden, and from the screen's Sync now (`LSync`,
 `sync-screen`, opened from the Settings screen's Sync row; Turn off
 goes through Undo). That row says sync's state in short
 (`sync_summary_show`, refreshed with the screen's status line): "Off",
-"WebDAV · synced 2 min ago" ("Android · ...", "Dropbox · ..."), or how the last sync
-failed.
+"WebDAV · synced 2 min ago" ("Fastmail · ...", "Android · ...", "Dropbox · ..."), or how the last sync
+failed. The screen lists only what can be used where it runs, each row
+shown by its own `data-hide` (`ui_show` in `sync_screen_open`): no row
+is there only to say why it is unavailable (a provider a browser can't
+reach, a build with no client or key).
 
 Nextcloud is signed in to with its Login Flow v2 (`src/nextcloud.bats`,
 #184), which ends in the WebDAV store: the screen's Sign in with
@@ -256,6 +259,17 @@ user's id (`nextcloud_user_id`, OCS `cloud/user`: a login name can be an
 email, the files folder is named by the id) makes the folder,
 `<server>/remote.php/dav/files/<id>` (`nextcloud_folder`), kept with the
 login name and the app password as `WebDav`, and a sync runs.
+
+**Fastmail** (#184, #271), in the app only: the store `Fastmail(user,
+password)`, its files over WebDAV at
+`https://myfiles.fastmail.com/quire/quire-sync.json` (the folder made
+by MKCOL at the first write), with the Fastmail address and an app
+password the row's link and steps say how to make. Fastmail's WebDAV
+sends no CORS headers, so a browser page can't reach it, and a browser
+lists no Fastmail and sends it nothing; the app's requests are native.
+A refusal is `FastmailRefused`. `sync-providers.yml` checks weekly
+whether Fastmail now lets pages in (`fastmail-cors`), so browsers could
+list it too. `e2e/sync-fastmail.spec.js` plays its files.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -283,7 +297,8 @@ Google's sheet each time it is asked), so it is asked for only when
 the reader acts (Use Android, Sync now) and kept in memory while the
 app runs (`_token`); a sync the app makes by itself without one, or
 one Drive refuses (401), says "Tap Sync now to sign in to Google
-again". No account, a cancel, and a build with no client each say so;
+again". No account and a cancel each say so, and a build with no
+client lists no Use Android;
 Turn off signs out. The client ID is public and not compiled in:
 it is committed in `scripts/sync-clients.env` (#200: the Web
 application client `GOOGLE_WEB_CLIENT_ID`, with the Android client's ID
@@ -291,8 +306,8 @@ and Play's app signing SHA-1 recorded beside it, and Dropbox's app key,
 #239; all public, none a repository variable), and
 `scripts/sync-clients.sh` writes the Google client and the Dropbox key
 (checked) into `sync-clients.json` beside the app, in CI and a local
-build alike, read by `src/sync_clients.bats`; a build with none says
-Use Android is not set up. `sync-identity.yml` prints the upload key's
+build alike, read by `src/sync_clients.bats`; a build with none lists
+neither Use Android nor Google Drive. `sync-identity.yml` prints the upload key's
 fingerprints and checks the committed values (the IDs' form, and that
 Play's SHA-1 is not the upload key's). The e2e suite stubs Google's
 script (`googleStubbed` in `e2e/fixtures.js`), so it never reaches
@@ -321,7 +336,7 @@ conflict. `src/web_request.bats` holds the requests it shares with
 secret: the app key of the Dropbox app "Quire reader" is public,
 committed as `DROPBOX_CLIENT_ID` in `scripts/sync-clients.env` (#239)
 and written into `sync-clients.json` as `dropboxClient`; a build
-without one says Dropbox sync is not set up). `sync_dropbox`
+without one lists no Dropbox). `sync_dropbox`
 keeps the verifier and state ("sync-dropbox-sign-in") and leaves the
 page for Dropbox's (bridge's `navigate_away`), which sends the reader
 back to the page's own address with `?oauth=dropbox` (the registered
@@ -446,7 +461,7 @@ screen stays awake while the reader is open, so while it plays.
 
 The controls: Read aloud (`aria-pressed`), Previous phrase, Next phrase,
 and, inside an escapable structure, Skip table (list, figure, aside).
-The typography panel offers, for a narrated book, its speed (0.5× to
+The reading settings screen offers, for a narrated book, its speed (0.5× to
 2× in quarters, `audio_rate`, the pitch kept) and whether page numbers
 and notes are read (Skip by default: skippable clips are passed over).
 Both are the device's own, kept outside the settings record as `_ruby`
@@ -553,7 +568,7 @@ only where its platform has it, by its own `data-hide`.
   with the settings, Undo putting them back (`set_reset_undoable`;
   `screen_controls_apply` sets the screen again). Going to the library, opening
   another book, or the page going away (`pagehide`) stops reading.
-* **The screen** (`src/screen_controls.bats`, the typography panel's
+* **The screen** (`src/screen_controls.bats`, the reading settings screen's
   Screen row): Full screen (`fullscreen_*`, pressed as
   `listen_fullscreen` says), Lock rotation (`orientation_*`, a
   `rotation` kept with the settings and locked again as the app
@@ -715,6 +730,11 @@ Elements are made through `src/ui.bats`:
   button, a field or an image can only be made by a constructor that
   names it. A text button is named by its text alone, so its name
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
+  an icon is a glyph of one monochrome set, a subset of Material
+  Symbols (Apache-2.0, `assets/fonts/material-symbols-subset.woff2`,
+  made by `scripts/icon-font.py`) at its Private Use Area code point
+  (`_glyph`, `ui_icon_set`), drawn in the button's own proven text
+  colour, never an emoji (#274);
   images are decorative (`alt=""`); an audio element (`ui_audio`) has no
   controls and is hidden from assistive technology; a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
@@ -816,7 +836,9 @@ reading goal (also in the statistics panel; `stats_goal_show` marks
 both), Reset settings and Factory reset, each with its Undo, and
 About Quire › (`LAbout`, `about-screen`): the app's name and links out
 of the app (`ui_link_out_https`, an address dom's `set_url_literal`
-sets) to the home page, privacy policy, terms and source. A
+sets) to the home page, privacy policy and terms (no link to the
+source: nothing in the app or its pages points to the repository but
+the GitHub issues the pages give for contact). A
 restore or a factory reset from the reader goes back to the library
 first.
 
@@ -887,6 +909,32 @@ the page or the page between two places (`tests/static`'s
 (`VEILED`, written by `scripts/gen-harmony.py`): under it the text
 keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
 none.
+
+The typography sheet (`typography-panel`) holds what a reader changes
+while reading: the theme, the font, its size and line spacing, and
+pages or scrolled. Its last row, More reading settings ›, opens the
+rest on a screen of their own (`reading-screen`, the layer `LReading`,
+over the sheet, as Settings opens Sync), grouped: Text (margins,
+justify, hyphenation, the spacings, ruby), Pages (pages on screen,
+dimmed images), Turning pages (Tap to turn pages, each choice with a
+drawing of its zones, mirrored for a book read right to left, and in
+the app one switch, Turn pages with volume keys), Read aloud, the
+screen, and Reset to defaults (#275, which gives the research). Their
+controls are one `typography_control` datatype wherever they are, and
+they are stored, backed up and reset as before.
+
+The reader is fixed to the window (`.rv`, not a height in `vh`, which
+an Android WebView can make taller than what it shows), and the page
+keeps out of the screen's safe area on every side (#275): above and
+below in its paddings (`env(safe-area-inset-top)`, `-bottom`), at its
+sides in its margins (`-left`, `-right`), so no text is under a camera
+cutout, in or out of full screen, in either orientation. In the app the
+WebView is given the cutout's insets by Capacitor's SystemBars (pwa's
+`insetsHandling: native`: a WebView from 140 on reads them out, an
+older one is padded natively instead). A spread's columns are at least
+40vw, so two fit beside a cutout. A sheet's height is in `dvh`, and the
+typography sheet's head (`.shead`), with Close, is held at its top as
+it scrolls. `e2e/layout.spec.js` sets the insets through DevTools.
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
@@ -968,6 +1016,21 @@ closed (`reader_stack_clear`).
 `tests/static` holds code that must not type-check (a forged `TIMED`,
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
+
+A static fixture is a snippet put into one module (`file`, before the
+line `before`), and it knows what proof fails when it is built. A reject
+fixture's `expect` names the function of its snippet, the line of the
+snippet patsopt reports, and patsopt's error word for word (the
+constraint left unsolved, the case left out, the type that does not
+match); `tests/static/expect.py` passes it only when that is the one
+error of the check, in that module, at that line, inside that function.
+A substring that another error could also hold is not enough. An accept
+fixture must check. Each fixture is put into the app checked whole in
+the same job, so only its module is checked again, and what depends on
+it when its `#pub` declarations change (bats keeps a module's C while
+the `.sats` it staloads has only moved, and each of check's passes keeps
+a cache of its own, bats-lang/bats#243), and a reject fixture stops at
+its error: a fixture costs about what its snippet changes.
 
 CI runs the static tests and the e2e suite in groups side by side
 (`tests/groups.json`), the e2e groups on the app built once (the `build`

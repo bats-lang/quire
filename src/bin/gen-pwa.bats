@@ -120,6 +120,8 @@ implement main0 () = let
   val f7 = "assets/fonts/atkinson-700-normal.woff2"
   val f8 = "assets/fonts/atkinson-400-italic.woff2"
   val f9 = "assets/fonts/atkinson-700-italic.woff2"
+  (* the icons' face (style.bats's _fonts) *)
+  val f10 = "assets/fonts/material-symbols-subset.woff2"
   val n1 = g1u2i(string1_length(f1))
   val n2 = g1u2i(string1_length(f2))
   val n3 = g1u2i(string1_length(f3))
@@ -129,7 +131,8 @@ implement main0 () = let
   val n7 = g1u2i(string1_length(f7))
   val n8 = g1u2i(string1_length(f8))
   val n9 = g1u2i(string1_length(f9))
-  val n = n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + 9
+  val n10 = g1u2i(string1_length(f10))
+  val n = n1 + n2 + n3 + n4 + n5 + n6 + n7 + n8 + n9 + n10 + 10
   val assets = $A.alloc<byte>(n)
   val () = $A.write_text(assets, 0, $A.text_lit(f1), n1)
   val () = $A.write_text(assets, n1 + 1, $A.text_lit(f2), n2)
@@ -141,6 +144,7 @@ implement main0 () = let
   val () = $A.write_text(assets, p6 + n6 + 1, $A.text_lit(f7), n7)
   val () = $A.write_text(assets, p6 + n6 + n7 + 2, $A.text_lit(f8), n8)
   val () = $A.write_text(assets, p6 + n6 + n7 + n8 + 3, $A.text_lit(f9), n9)
+  val () = $A.write_text(assets, p6 + n6 + n7 + n8 + n9 + 4, $A.text_lit(f10), n10)
   (* installed, the system opens EPUBs with it and shares them with it *)
   val () = $P.create_pwa_opening("Quire", "dev.bats.quire",
     "dist/release/quire.wasm", "app.wasm", "dist/pwa",

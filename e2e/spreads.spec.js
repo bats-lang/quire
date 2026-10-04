@@ -8,6 +8,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, bookPage, dialog, openSettings, fixedLayoutBook, fixedPlace, readFixed, fixedBoxes,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const LANDSCAPE = { width: 1024, height: 768 };
@@ -119,15 +120,17 @@ test('the Columns setting overrides: One shows single pages, Two pairs them in p
   await start(page);
   await readFixed(page, fixedLayoutBook('Columns Chosen', 3));
   await expectSides(page, ['', 'Page 1']);
-  const columns = name => dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' })
+  const columns = name => readingSettings(page).getByRole('group', { name: 'Pages on screen' })
     .getByRole('button', { name, exact: true });
-  await openSettings(page);
+  await openReadingSettings(page);
   await columns('One').click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expectSides(page, ['Page 1']);
   await page.setViewportSize(PORTRAIT);
-  await openSettings(page);
+  await openReadingSettings(page);
   await columns('Two').click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expectSides(page, ['', 'Page 1']);
   await page.keyboard.press('ArrowRight');

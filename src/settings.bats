@@ -76,7 +76,8 @@ implement $P.dispose<settled>(_) = ()
 (* What a tap on the page does, where: sides (the left quarter back,
    the right on, between them the bars), forward (the top band the
    bars, the left quarter back, anywhere else on), or one hand (the top
-   third back, the bottom third on, between them the bars) *)
+   third back, the bottom third on, between them the bars); mirrored
+   for a book read right to left (quire.bats's _zone_click) *)
 #pub datatype tap_zones = SideZones | ForwardZones | OneHandZones
 #pub typedef set_taps = tap_zones
 
@@ -681,17 +682,21 @@ fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
 
 (* A spread: two columns a screen (each still at most 38rem wide, as
    .caf>* makes it), and the probe (spread-probe) shown, which is how
-   the reader knows *)
+   the reader knows. A column is at least 40vw, and the browser widens
+   it to fill the page: the page is the window's width less its safe
+   area's sides (style.bats), so two of 50vw would not fit beside a
+   cutout, and two of 40vw fit while the sides take under a fifth of
+   it; three never fit (#275) *)
 fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, columns: set_cols)
   : [stop:nat | stop <= position + 120] int stop =
   case+ columns of
-  | TwoColumns() => _put_text(buf, position, ".caf{column-width:50vw}.sprobe{display:block}")
+  | TwoColumns() => _put_text(buf, position, ".caf{column-width:40vw}.sprobe{display:block}")
   | OneColumn() => position
   (* auto: as Apple Books does on an iPad turned on its side, and with
      room for two lines of about 30em (Readium's auto column count) *)
   | AutoColumns() => _put_text(buf, position,
-    "@media (orientation:landscape) and (min-width:60em){.caf{column-width:50vw}.sprobe{display:block}}")
+    "@media (orientation:landscape) and (min-width:60em){.caf{column-width:40vw}.sprobe{display:block}}")
 
 fn _put_scrolled {l:agz}{position:nat | position + 72 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
@@ -843,7 +848,6 @@ fn _show_controls (): void = let
   val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
   val () = _pressed("taps-one-hand", taps = taps_code(OneHandZones()))
   val () = _pressed("volume-keys-turn", vol_code(current.volume_keys) = vol_code(KeysTurnPages()))
-  val () = _pressed("volume-keys-off", vol_code(current.volume_keys) = vol_code(KeysForVolume()))
   val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
   val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
   val () = (case+ set_narration_notes_get() of
