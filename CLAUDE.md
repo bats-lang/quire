@@ -831,7 +831,9 @@ reading goal (also in the statistics panel; `stats_goal_show` marks
 both), Reset settings and Factory reset, each with its Undo, and
 About Quire › (`LAbout`, `about-screen`): the app's name and links out
 of the app (`ui_link_out_https`, an address dom's `set_url_literal`
-sets) to the home page, privacy policy, terms and source. A
+sets) to the home page, privacy policy and terms (no link to the
+source: nothing in the app or its pages points to the repository but
+the GitHub issues the pages give for contact). A
 restore or a factory reset from the reader goes back to the library
 first.
 

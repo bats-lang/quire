@@ -350,7 +350,7 @@ fn _about_page {id_len,label_len:pos | id_len < 256; label_len < 256}{path_len,a
 
 (* The About screen, opened from Settings, the same in the web app and
    the Android app: the app's name, what it is, and links out of the app
-   to its home page, privacy policy, terms and source. The pages are
+   to its home page, privacy policy and terms. The pages are
    published beside the app but are not the app's: the service worker
    leaves them to the network. A link out opens in a new tab on the web;
    on Android the WebView hands an address outside the app to the
@@ -374,7 +374,6 @@ fn _about_screen (): void = let
   val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
   val () = _about_page("about-privacy", "Privacy policy", "homepage/privacy.html", "bats-lang.github.io/quire/homepage/privacy.html")
   val () = _about_page("about-terms", "Terms of service", "homepage/terms.html", "bats-lang.github.io/quire/homepage/terms.html")
-  val () = ui_link_out_https("about-links", "about-source", "btn linkout", "Source code", "github.com/bats-lang/quire")
   val () = ui_el("about-box", "about-buttons", TDiv, "mbtns")
   val () = ui_text_btn("about-buttons", "about-done", "btn btn-p", "Done")
 in _hide("about-screen") end
