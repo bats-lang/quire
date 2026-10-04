@@ -6,7 +6,7 @@
 // token for the device's account, Filesystem keeps files in a map), and
 // Google Drive's API is a mock routed in each (no real network).
 
-import { test, expect, clientsServed, fastmailStubbed, fastmailRefused } from './fixtures.js';
+import { test, expect, clientsServed } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,
@@ -231,10 +231,9 @@ test('a file another device wrote meanwhile is read again and merged', async ({ 
   await b.context.close();
 });
 
-test('Use Android says why it cannot sync, and Turn off signs out', async ({ browser }) => {
+test('Use Android is listed only where it can sync, says why it cannot, and Turn off signs out', async ({ browser }) => {
   // in a browser there is no Use Android
   const web = await browser.newContext();
-  await fastmailStubbed(web);
   await clientsServed(web, {});
   const page = await web.newPage();
   await page.goto('/');
@@ -244,12 +243,12 @@ test('Use Android says why it cannot sync, and Turn off signs out', async ({ bro
   // nor, in a build with no client, Google Drive
   await expect(panel(page).getByRole('button', { name: 'Google Drive' })).toBeHidden();
   await web.close();
-  // an app built without a client says it is not set up
+  // nor, in an app built without a client, Use Android: a row that
+  // could only say it is not set up is not listed
   const bare = await device(browser, null, { client: null });
   await openSync(bare.page);
-  await expect(panel(bare.page)).toContainText("Android sync isn't set up in this build of Quire.");
-  await useAndroid(bare.page).click();
-  await expect(status(bare.page)).toHaveText("Android sync isn't set up in this build of Quire.");
+  await expect(useAndroid(bare.page)).toBeHidden();
+  await expect(panel(bare.page)).not.toContainText("isn't set up", { useInnerText: true });
   await bare.context.close();
 
   const server = drive();
@@ -340,7 +339,6 @@ const IDENTITY_SERVICES = `
 /** A browser: Google's script and Drive routed, and the build's client */
 async function browserDevice(browser, server) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await fastmailStubbed(context);
   await context.route('https://accounts.google.com/gsi/client', route => route.fulfill({
     status: 200, headers: { 'content-type': 'text/javascript' }, body: IDENTITY_SERVICES,
   }));
@@ -352,7 +350,7 @@ async function browserDevice(browser, server) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return { context, page, errors };
