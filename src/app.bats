@@ -632,6 +632,12 @@ in _hide("contents-panel") end
 fn _settings (): void = let
   val () = ui_el("bats-root", "typography-panel", TDiv, "sheet")
   val () = ui_named("typography-panel", NModal, "Typography and theme")
+  (* its head, held at its top as it scrolls (.shead): Close is always
+     in reach, in full screen too (#275) *)
+  val () = ui_el("typography-panel", "typography-head", TDiv, "shead")
+  val () = ui_el("typography-head", "typography-title", TSpan, "grow")
+  val () = ui_text("typography-title", "Typography and theme")
+  val () = ui_text_btn("typography-head", "typography-close", "btn", "Close")
   val () = ui_el("typography-panel", "font-row", TDiv, "srow")
   val () = ui_el("font-row", "font-label", TSpan, "slabel")
   val () = ui_text("font-label", "Font")
@@ -764,8 +770,6 @@ fn _settings (): void = let
   (* reset, away from Close and asked first *)
   val () = ui_el("typography-panel", "typography-foot", TDiv, "srow sfoot")
   val () = ui_text_btn("typography-foot", "typography-reset", "link", "Reset to defaults")
-  val () = ui_el("typography-foot", "typography-spacer", TSpan, "grow")
-  val () = ui_text_btn("typography-foot", "typography-close", "btn", "Close")
 in _hide("typography-panel") end
 
 (* The search panel *)

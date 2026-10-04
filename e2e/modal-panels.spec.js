@@ -133,15 +133,15 @@ test('Tab keeps to an open panel, round from its last element to its first and b
   const sheet = await open(page, panels[0]);
   const focusedId = () => page.evaluate(() => document.activeElement && document.activeElement.id);
   const inside = () => sheet.evaluate(el => el.contains(document.activeElement));
-  // forward, past the panel's last element (Close): round to its first
-  await sheet.getByRole('button', { name: 'Close', exact: true }).focus();
+  // forward, past the panel's last element (Reset to defaults): round
+  // to its first, Close in its head
+  await sheet.getByRole('button', { name: 'Reset to defaults', exact: true }).focus();
   await page.keyboard.press('Tab');
   expect(await inside()).toBe(true);
-  const first = await focusedId();
-  expect(first).not.toBe('typography-close');
+  expect(await focusedId()).toBe('typography-close');
   // back from the first: round to the last
   await page.keyboard.press('Shift+Tab');
-  expect(await focusedId()).toBe('typography-close');
+  expect(await focusedId()).toBe('typography-reset');
   // all the way round, never leaving the panel
   for (let i = 0; i < 40; i++) {
     await page.keyboard.press('Tab');

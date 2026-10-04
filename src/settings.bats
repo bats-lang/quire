@@ -681,17 +681,21 @@ fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
 
 (* A spread: two columns a screen (each still at most 38rem wide, as
    .caf>* makes it), and the probe (spread-probe) shown, which is how
-   the reader knows *)
+   the reader knows. A column is at least 40vw, and the browser widens
+   it to fill the page: the page is the window's width less its safe
+   area's sides (style.bats), so two of 50vw would not fit beside a
+   cutout, and two of 40vw fit while the sides take under a fifth of
+   it; three never fit (#275) *)
 fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, columns: set_cols)
   : [stop:nat | stop <= position + 120] int stop =
   case+ columns of
-  | TwoColumns() => _put_text(buf, position, ".caf{column-width:50vw}.sprobe{display:block}")
+  | TwoColumns() => _put_text(buf, position, ".caf{column-width:40vw}.sprobe{display:block}")
   | OneColumn() => position
   (* auto: as Apple Books does on an iPad turned on its side, and with
      room for two lines of about 30em (Readium's auto column count) *)
   | AutoColumns() => _put_text(buf, position,
-    "@media (orientation:landscape) and (min-width:60em){.caf{column-width:50vw}.sprobe{display:block}}")
+    "@media (orientation:landscape) and (min-width:60em){.caf{column-width:40vw}.sprobe{display:block}}")
 
 fn _put_scrolled {l:agz}{position:nat | position + 72 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)

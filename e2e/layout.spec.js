@@ -275,3 +275,82 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await page.keyboard.press('Escape');
   await toLibrary(page);
 });
+
+/** The book's text on the page shown: each line box of the page's
+    paragraphs that is on screen (the page's other columns lie beside
+    it, out of sight) */
+async function shownLines(page) {
+  return bookPage(page).evaluate(doc => {
+    const box = doc.getBoundingClientRect();
+    const lines = [];
+    for (const p of doc.querySelectorAll('p')) {
+      for (const r of p.getClientRects()) {
+        if (r.width > 0 && r.right > box.left + 1 && r.left < box.right - 1) lines.push({ left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+      }
+    }
+    return lines;
+  });
+}
+
+// A screen's cutout (a camera hole, a notch) and rounded corners, as
+// the browser reads them out (env(safe-area-inset-*)): Android's
+// WebView gives the page the cutout's insets, in full screen too, and
+// the page's text keeps out of them on every side (#275). Chromium's
+// DevTools set the insets here, as a phone with a cutout at its top
+// (in portrait) or its side (in landscape) would
+test('the page keeps its text out of the safe area: a cutout above or beside it', async ({ page }) => {
+  const insets = { top: 64, left: 48, right: 24, bottom: 30 };
+  const devtools = await page.context().newCDPSession(page);
+  await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+  await start(page);
+  await readBook(page, { title: 'Cutout', author: 'L', rawChapters: chapters(3, 60) });
+  const v = page.viewportSize();
+  const twoColumns = v.width > v.height && v.width >= 960;
+  for (const turn of [false, true]) {
+    if (turn) await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => (await shownLines(page)).length).toBeGreaterThan(0);
+    const lines = await shownLines(page);
+    const outside = lines.filter(r => r.left < insets.left - 1 || r.right > v.width - insets.right + 1
+      || r.top < insets.top - 1 || r.bottom > v.height - insets.bottom + 1);
+    expect(outside, `text in the safe area's insets on ${turn ? 'the second' : 'the first'} page`).toEqual([]);
+    // a spread still shows two columns beside a cutout
+    const columns = new Set(lines.map(r => Math.round(r.left / 40)));
+    if (twoColumns) expect(columns.size, 'a spread\'s two columns').toBeGreaterThanOrEqual(2);
+  }
+  await fits(page, 'the reader beside a cutout');
+});
+
+// The typography sheet scrolls within the window, and its Close stays
+// in reach however far it is scrolled, in full screen too (#275: in
+// full screen the sheet could no longer be scrolled to Close)
+test('the typography sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
+  await openSettings(page);
+  const panel = dialog(page, 'Typography and theme');
+  const close = panel.getByRole('button', { name: 'Close', exact: true });
+  const reset = panel.getByRole('button', { name: 'Reset to defaults', exact: true });
+  const full = panel.getByRole('button', { name: 'Full screen', exact: true });
+  await full.scrollIntoViewIfNeeded();
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  const within = () => panel.evaluate(e => {
+    const r = e.getBoundingClientRect();
+    return r.top >= -1 && r.bottom <= innerHeight + 1;
+  });
+  expect(await within(), 'the sheet within the window').toBe(true);
+  // scrolled from its top to its end, by the wheel as a reader would
+  await panel.evaluate(e => { e.scrollTop = 0; });
+  await expect(close).toBeInViewport({ ratio: 1 });
+  const box = await panel.boundingBox();
+  // over the rows' names, not a control
+  await page.mouse.move(box.x + 24, box.y + box.height / 2);
+  for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
+  await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
+  await expect(reset).toBeInViewport({ ratio: 1 });
+  await expect(close).toBeInViewport({ ratio: 1 });
+  await fits(page, 'Typography and theme, in full screen');
+  await close.click();
+  await expect(panel).toBeHidden();
+  await page.evaluate(() => document.exitFullscreen());
+});
