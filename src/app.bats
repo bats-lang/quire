@@ -209,7 +209,7 @@ in _hide("dictionaries-panel") end
    online, and Close *)
 fn _dictionary (): void = let
   val () = ui_el("bats-root", "dictionary-panel", TDiv, "sheet")
-  val () = ui_named("dictionary-panel", NDialog, "Dictionary")
+  val () = ui_named("dictionary-panel", NModal, "Dictionary")
   val () = ui_el("dictionary-panel", "dictionary-word", TDiv, "mtitle")
   val () = ui_el("dictionary-panel", "dictionary-article", TDiv, "fntext dart")
   val () = ui_el("dictionary-panel", "dictionary-source", TDiv, "hstyle")
@@ -607,7 +607,7 @@ in _hide("reader") end
 (* The contents panel: the book's table of contents and its bookmarks *)
 fn _toc (): void = let
   val () = ui_el("bats-root", "contents-panel", TDiv, "panel")
-  val () = ui_named("contents-panel", NDialog, "Contents")
+  val () = ui_named("contents-panel", NModal, "Contents")
   val () = ui_el("contents-panel", "contents-header", TDiv, "ph")
   val () = ui_el("contents-header", "contents-tabs", TSpan, "tabs")
   val () = ui_named("contents-tabs", NTablist, "Contents and bookmarks")
@@ -631,7 +631,7 @@ in _hide("contents-panel") end
 (* The settings sheet *)
 fn _settings (): void = let
   val () = ui_el("bats-root", "typography-panel", TDiv, "sheet")
-  val () = ui_named("typography-panel", NDialog, "Typography and theme")
+  val () = ui_named("typography-panel", NModal, "Typography and theme")
   val () = ui_el("typography-panel", "font-row", TDiv, "srow")
   val () = ui_el("font-row", "font-label", TSpan, "slabel")
   val () = ui_text("font-label", "Font")
@@ -771,7 +771,7 @@ in _hide("typography-panel") end
 (* The search panel *)
 fn _search (): void = let
   val () = ui_el("bats-root", "search-panel", TDiv, "panel panel-r")
-  val () = ui_named("search-panel", NDialog, "Search in book")
+  val () = ui_named("search-panel", NModal, "Search in book")
   val () = ui_el("search-panel", "search-header", TDiv, "sbar")
   val () = app_book_search()
   val () = ui_el("search-panel", "search-status", TDiv, "snav")
@@ -792,7 +792,7 @@ in _hide("search-panel") end
 (* The annotations panel *)
 fn _annotations (): void = let
   val () = ui_el("bats-root", "annotations-panel", TDiv, "panel panel-r")
-  val () = ui_named("annotations-panel", NDialog, "Annotations")
+  val () = ui_named("annotations-panel", NModal, "Annotations")
   val () = ui_el("annotations-panel", "annotations-header", TDiv, "ph")
   val () = ui_el("annotations-header", "annotations-spacer", TSpan, "grow")
   val () = ui_text("annotations-spacer", "Annotations")
@@ -816,7 +816,7 @@ in _hide("annotations-panel") end
    the note itself, and Close *)
 fn _note (): void = let
   val () = ui_el("bats-root", "footnote", TDiv, "sheet")
-  val () = ui_named("footnote", NDialog, "Footnote")
+  val () = ui_named("footnote", NModal, "Footnote")
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
   val () = ui_text_btn("footnote-bar", "footnote-go", "link", "Go to note")
@@ -828,11 +828,26 @@ in _hide("footnote") end
    scrolled; the image is the page's, whose alt says what it shows *)
 fn _image_viewer (): void = let
   val () = ui_el("bats-root", "image-viewer", TDiv, "imview")
-  val () = ui_named("image-viewer", NDialog, "Image")
+  val () = ui_named("image-viewer", NModal, "Image")
   val () = ui_el("image-viewer", "image-box", TDiv, "imbox")
   val () = ui_img("image-box", "image-full", "imimg")
   val () = ui_icon_btn("image-viewer", "image-close", "ibtn imclose", IcClose, "Close")
 in _hide("image-viewer") end
+
+(* What makes the reader's panels modal (layer.bats): the scrim over the
+   reader while one is open, which a tap closes it by, and the focus
+   stops before and after the panels, which send the focus round to the
+   open panel's last or first element, so Tab keeps to it. The stops
+   take the focus only while a panel is open *)
+fn _scrim (): void = let
+  val () = ui_el("bats-root", "panel-scrim", TDiv, "scrim")
+  val () = _hide("panel-scrim")
+  val () = ui_el("bats-root", "focus-wrap-start", TDiv, "fstop")
+in ui_attr("focus-wrap-start", ATabindex, "-1") end
+
+fn _focus_wrap_end (): void = let
+  val () = ui_el("bats-root", "focus-wrap-end", TDiv, "fstop")
+in ui_attr("focus-wrap-end", ATabindex, "-1") end
 
 (* Makes every element of the app, in the root element bats-root *)
 #pub fn app_build (): void
@@ -856,6 +871,7 @@ implement app_build () = let
   val () = _about_screen()
   val () = _info()
   val () = _reader()
+  val () = _scrim()
   val () = _toc()
   val () = _settings()
   val () = _search()
@@ -864,6 +880,7 @@ implement app_build () = let
   val () = _image_viewer()
   val () = _dictionaries()
   val () = _dictionary()
+  val () = _focus_wrap_end()
   val () = _catalogues()
   val () = _catalogue()
   val () = _undo_toast()
