@@ -41,8 +41,18 @@ staload BACKUP = "wasm.bats-packages.dev/bridge/src/backup_file.sats"
 staload "drive.sats"
 staload "sync_clients.sats"
 staload "dropbox.sats"
+staload "web_request.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
+staload BT = "wasm.bats-packages.dev/bridge/src/browser_tab.sats"
 staload "nextcloud.sats"
+
+(* Whether this app can sign in to Dropbox through the system's browser:
+   it opens Dropbox's page in a tab over the app (bridge's Browser
+   plugin) and is told the address Dropbox sends the reader back to (its
+   App plugin). Both are needed: quire's own sequencing of the two *)
+fn _round_trip_available (): bool =
+  $BT.browser_tab_available() && $AL.app_link_available()
 
 (* The sync file's most bytes: a larger one is refused *)
 #define SYNC_MAX_BYTES 16777216
@@ -2388,16 +2398,19 @@ implement sync_screen_open () = let
     else if client_len <= 0 then ui_text_long("sync-android-about", "Android sync isn't set up in this build of Quire.")
     else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
     else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
-  (* Dropbox in a browser (the app's sign-in through the system's
-     browser is still to come): what it does, or that this build has no
-     key to sign in with *)
+  (* Dropbox: in a browser, its page signs the reader in in place of
+     this one; in the app, in the system's browser over it (an app
+     without that browser does not list it). What it does, or that this
+     build has no key to sign in with *)
   val key = $A.alloc<byte>(256)
   val key_len = sync_clients_dropbox(key)
   val () = $A.free<byte>(key)
-  val () = ui_show("sync-dropbox-row", ~app)
+  val dropbox = (if app then _round_trip_available() else true): bool
+  val () = ui_show("sync-dropbox-row", dropbox)
   val () = ui_show("sync-dropbox", key_len > 0)
-  val () = (if app then ()
+  val () = (if ~dropbox then ()
     else if key_len <= 0 then ui_text_long("sync-dropbox-about", "Dropbox sync isn't set up in this build of Quire.")
+    else if app then ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page opens in your browser to sign you in, then brings you back here.")
     else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
   val () = _fields_show()
   val () = _status_show()
@@ -2975,16 +2988,20 @@ in
   else base
 end
 
-(* The address Dropbox sends the reader back to: the page's own, without
-   its query, fragment or "index.html", and "?oauth=dropbox" (the
-   addresses registered for the app's key are of this form) *)
-fn _redirect {l:agz} (out: !$A.arr(byte, l, 2100)): [length:nat | length <= 2100] int length = let
-  val page = $A.alloc<byte>(2048)
-  val page_len = $NAV.get_url(page, 2048)
-  val base = _redirect_base(page, page_len)
-  val () = _bytes_from(page, 0, base, out, 0)
-  val () = $A.free<byte>(page)
-in _put_literal(out, base, "?oauth=dropbox") end
+(* The address Dropbox sends the reader back to: in a browser, the
+   page's own, without its query, fragment or "index.html", and
+   "?oauth=dropbox"; in the app, its own scheme's, which opens it again
+   from the system's browser (RFC 8252). The addresses registered for
+   the app's key are these (sync-identity.yml) *)
+fn _redirect {l:agz} (out: !$A.arr(byte, l, 2100)): [length:nat | length <= 2100] int length =
+  if $BAPP.is_native_platform() then _put_literal(out, 0, "quire://oauth/dropbox")
+  else let
+    val page = $A.alloc<byte>(2048)
+    val page_len = $NAV.get_url(page, 2048)
+    val base = _redirect_base(page, page_len)
+    val () = _bytes_from(page, 0, base, out, 0)
+    val () = $A.free<byte>(page)
+  in _put_literal(out, base, "?oauth=dropbox") end
 
 (* Whether url[position, n) starts with name *)
 fun _name_at {l:agz}{size,n:nat | n <= size}{position:int}{name_len:nat}{j:nat | j <= name_len} .<name_len - j>.
@@ -3122,6 +3139,24 @@ end
 #pub fn sync_returning (): bool
 implement sync_returning () = !_returning
 
+(* An address the app was opened at (bridge's listen_app_link): Dropbox's
+   sign-in coming back from the system browser's tab,
+   "quire://oauth/dropbox?code=...&state=..." (or "?error=..."), is
+   taken as a browser takes it from its address, and the tab closed; any
+   other address is not sync's *)
+#pub fn sync_app_link {k:pos} (link: $BD.dblob(k)): void
+
+(* When a return from Dropbox's sign-in is taken: as the page opens (the
+   stores are not loaded yet: they are loaded with it), or while the app
+   runs (the system's browser brought the app back) *)
+datatype return_moment = AtStart | WhileOpen
+
+(* The stores loaded, when they are not yet *)
+fn _after_stores (moment: return_moment): $P.promise(int, $P.Chained) =
+  case+ moment of
+  | AtStart() => _stores_load()
+  | WhileOpen() => $P.ret<int>(0)
+
 (* A Dropbox sign-in that failed, said on the sync screen *)
 fn _dropbox_failed (result: sync_result): void = let
   val () = (if layer_is_open(LSync()) then () else sync_screen_open())
@@ -3165,7 +3200,8 @@ fn _same_state {sent_loc,given_loc:agz}{given_len:nat | given_len <= 512}
    (another's is refused), then the code exchanged for tokens, with the
    verifier kept as the page left *)
 fn _dropbox_exchanged {code_loc,state_loc:agz}{code_len,state_len:pos | code_len <= 512; state_len <= 512}
-  (code: $A.arr(byte, code_loc, 512), code_len: int code_len, state: $A.arr(byte, state_loc, 512), state_len: int state_len): $P.promise(int, $P.Chained) = let
+  (code: $A.arr(byte, code_loc, 512), code_len: int code_len, state: $A.arr(byte, state_loc, 512), state_len: int state_len,
+   moment: return_moment): $P.promise(int, $P.Chained) = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
   val pending = $IDB.idb_get(key_bytes, 20)
   (* the sign-in is taken once: a reload does not take it again *)
@@ -3179,7 +3215,7 @@ in
         val () = $A.free<byte>(record)
         val () = $A.free<byte>(code)
         val () = $A.free<byte>(state)
-      in $P.and_then<int><int>(_stores_load(), llam(_) => let
+      in $P.and_then<int><int>(_after_stores(moment), llam(_) => let
           val () = _dropbox_failed(DropboxSignInRefused())
         in $P.ret<int>(0) end) end
       else let
@@ -3195,14 +3231,14 @@ in
           val () = $A.free<byte>(record)
           val () = $A.free<byte>(code)
           val () = $A.free<byte>(key)
-        in $P.and_then<int><int>(_stores_load(), llam(_) => let
+        in $P.and_then<int><int>(_after_stores(moment), llam(_) => let
             val () = _dropbox_failed(DropboxSignInRefused())
           in $P.ret<int>(0) end) end
         else if key_len <= 0 then let
           val () = $A.free<byte>(record)
           val () = $A.free<byte>(code)
           val () = $A.free<byte>(key)
-        in $P.and_then<int><int>(_stores_load(), llam(_) => let
+        in $P.and_then<int><int>(_after_stores(moment), llam(_) => let
             val () = _dropbox_failed(DropboxNotSetUp())
           in $P.ret<int>(0) end) end
         else let
@@ -3223,11 +3259,11 @@ in
               else let
                 val () = $A.free<byte>(access)
                 val () = $A.free<byte>(refresh)
-              in $P.and_then<int><int>(_stores_load(), llam(_) => let
+              in $P.and_then<int><int>(_after_stores(moment), llam(_) => let
                   val () = _dropbox_failed(DropboxSignInRefused())
                 in $P.ret<int>(0) end) end
             | ~DropboxRefused(status) =>
-              $P.and_then<int><int>(_stores_load(), llam(_) => let
+              $P.and_then<int><int>(_after_stores(moment), llam(_) => let
                 val () = _dropbox_failed(if status = 0 then Unreachable() else DropboxSignInRefused())
               in $P.ret<int>(0) end))
         end
@@ -3235,20 +3271,52 @@ in
     | ~NothingStored() => let
         val () = $A.free<byte>(code)
         val () = $A.free<byte>(state)
-      in $P.and_then<int><int>(_stores_load(), llam(_) => let
-          val () = _dropbox_failed(DropboxSignInRefused())
-        in $P.ret<int>(0) end) end
+      in
+        case+ moment of
+        | AtStart() => $P.and_then<int><int>(_after_stores(moment), llam(_) => let
+            val () = _dropbox_failed(DropboxSignInRefused())
+          in $P.ret<int>(0) end)
+        (* no sign-in under way while the app runs: a return already
+           taken, opened again from the system's browser (its page kept
+           or reloaded), is not a new sign-in, and nothing is said *)
+        | WhileOpen() => $P.ret<int>(0)
+      end
     | ~StoredUnreadable() => let
         val () = $A.free<byte>(code)
         val () = $A.free<byte>(state)
-      in $P.and_then<int><int>(_stores_load(), llam(_) => let
+      in $P.and_then<int><int>(_after_stores(moment), llam(_) => let
           val () = _dropbox_failed(DropboxSignInRefused())
         in $P.ret<int>(0) end) end)
 end
 
-(* Dropbox (the screen's button, in a browser): the sign-in under way
-   kept, then the page left for Dropbox's, which sends the reader back
-   to this page with a code (PKCE: no secret in the app) *)
+(* The address url[0, url_len) of Dropbox's sign-in page, opened: in the
+   app, in the system browser's tab over it (Dropbox sends the reader
+   back to the app's own address, sync_app_link); in a browser, the page
+   left for it *)
+fn _dropbox_page_open {l:agz}{url_len:pos | url_len <= REQUEST_URL_MAX} (url: $A.arr(byte, l, REQUEST_URL_MAX), url_len: int url_len): void = let
+  val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
+  val @(used, rest) = $A.borrow_split<byte>(url_frozen, url_bytes, url_len)
+in
+  if _round_trip_available() then let
+    val opening = $BT.browser_tab_open(used, url_len)
+    val url_bytes = $A.borrow_join<byte>(url_frozen, used, rest)
+    val () = release_bytes(url_frozen, url_bytes)
+  in
+    $P.finish<$BT.tab_opened>(opening, llam(opened) =>
+      case+ opened of
+      | $BT.TabOpened() => ()
+      | $BT.TabNotOpened() => _ask_failed(DropboxSignInRefused()))
+  end
+  else let
+    val left = $NAV.navigate_away(used, url_len)
+    val url_bytes = $A.borrow_join<byte>(url_frozen, used, rest)
+    val () = release_bytes(url_frozen, url_bytes)
+  in if left then () else _ask_failed(DropboxSignInRefused()) end
+end
+
+(* Dropbox (the screen's button): the sign-in under way kept, then
+   Dropbox's page opened, which sends the reader back to this page (in
+   the app, to the app) with a code (PKCE: no secret in the app) *)
 #pub fn sync_dropbox (): void
 implement sync_dropbox () = let
   val key = $A.alloc<byte>(256)
@@ -3289,16 +3357,68 @@ in
     in _ask_failed(DropboxSignInRefused()) end
     else $P.finish<$IDB.stored>(saving, llam(status) =>
       case+ status of
-      | $IDB.Stored() => let
-          val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
-          val @(used, rest) = $A.borrow_split<byte>(url_frozen, url_bytes, url_len)
-          val left = $NAV.navigate_away(used, url_len)
-          val url_bytes = $A.borrow_join<byte>(url_frozen, used, rest)
-          val () = release_bytes(url_frozen, url_bytes)
-        in if left then () else _ask_failed(DropboxSignInRefused()) end
+      | $IDB.Stored() => _dropbox_page_open(url, url_len)
       | $IDB.NotStored() => let
           val () = $A.free<byte>(url)
         in _ask_failed(NoMemory()) end)
+  end
+end
+
+(* How far sync_start is: still loading (a return from Dropbox's sign-in
+   that the app is given waits for it), done, or done without the sync
+   state, which leaves sync off this session (a return is dropped) *)
+datatype start_state = StartUnderWay | Started | StartedUnreadable
+
+val _start = ref<start_state>(StartUnderWay())
+
+(* A return from Dropbox's sign-in taken: its code exchanged (the state
+   checked), or why it signed no one in said *)
+fn _returned_handle (returned: dropbox_return, moment: return_moment): $P.promise(int, $P.Chained) =
+  case+ returned of
+  | ~NotReturned() => _after_stores(moment)
+  | ~ReturnedCode(code, code_len, state, state_len) => _dropbox_exchanged(code, code_len, state, state_len, moment)
+  | ~ReturnedRefused(canceled) => let
+    (* the sign-in under way is over *)
+    val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
+    val () = save_checked($IDB.idb_delete(key_bytes, 20))
+    val () = release_bytes(key_frozen, key_bytes)
+  in
+    $P.and_then<int><int>(_after_stores(moment), llam(_) => let
+      val () = _dropbox_failed(if canceled then DropboxSignInCanceled() else DropboxSignInRefused())
+    in $P.ret<int>(0) end)
+  end
+
+(* A return the app was given, taken now that sync has started *)
+fn _returned_pending (): void =
+  case+ !_start of
+  | StartUnderWay() => ()
+  | StartedUnreadable() => _returned_free(_returned_swap(NotReturned()))
+  (* ignored: the return's own chain says how it ended *)
+  | Started() => $P.finish<int>(_returned_handle(_returned_swap(NotReturned()), WhileOpen()), llam(_) => ())
+
+(* Whether link[0, n) is Dropbox's return to the app:
+   "quire://oauth/dropbox", then its query or nothing *)
+fn _dropbox_link {l:agz}{size,n:nat | n <= size} (link: !$A.arr(byte, l, size), n: int n): bool =
+  if ~_name_at(link, n, 0, "quire://oauth/dropbox", 21, 0) then false
+  else if n = 21 then true
+  else _name_at(link, n, 21, "?", 1, 0)
+
+implement sync_app_link (link) = let
+  val n = $BD.blob_len(link)
+in
+  if n > 2048 then $BD.blob_free(link)
+  else let
+    val page = $A.alloc<byte>(2048)
+    val () = $BD.blob_read(link, 0, page, n)
+    val () = $BD.blob_free(link)
+  in
+    if ~_dropbox_link(page, n) then $A.free<byte>(page)
+    else let
+      (* the tab over the app went as the app came forward (its activity
+         is singleTask, bats-lang/bridge#135) *)
+      val () = _returned_free(_returned_swap(_returned_of(page, n)))
+      val () = $A.free<byte>(page)
+    in _returned_pending() end
   end
 end
 
@@ -3325,37 +3445,24 @@ implement sync_start () = let
           val () = $A.free<byte>(record)
         in true end): bool
   in $P.ret<bool>(readable) end)
-  (* ignored: each read in the chain deals with its own value (none read
-     leaves sync off, as at its first run) *)
   (* the clients are read first: Dropbox's key is needed to finish its
      sign-in, and Use Android says it is not set up while there are none *)
   val clients_read = $P.and_then<bool><bool>(state_read, llam(readable) =>
     $P.and_then<int><bool>(sync_clients_load(), llam(_) => $P.ret<bool>(readable)))
+  (* a state that could not be read leaves sync off this session: a
+     sync would save this device's state over it (its number, #174) *)
+  val started = $P.and_then<bool><bool>(clients_read, llam(readable) =>
+    if readable then $P.and_then<int><bool>(_returned_handle(_returned_swap(NotReturned()), AtStart()), llam(_) => $P.ret<bool>(true))
+    else let
+      val () = _returned_free(_returned_swap(NotReturned()))
+    in $P.ret<bool>(false) end)
 in
   (* ignored: each read in the chain deals with its own value (none read
      leaves sync off, as at its first run) *)
-  $P.finish<int>($P.and_then<bool><int>(clients_read, llam(readable) =>
-    (* a state that could not be read leaves sync off this session: a
-       sync would save this device's state over it (its number, #174) *)
-    case+ _returned_swap(NotReturned()) of
-    | ~NotReturned() => if readable then _stores_load() else $P.ret<int>(0)
-    | ~ReturnedCode(code, code_len, state, state_len) =>
-      if readable then _dropbox_exchanged(code, code_len, state, state_len)
-      else let
-        val () = $A.free<byte>(code)
-        val () = $A.free<byte>(state)
-      in $P.ret<int>(0) end
-    | ~ReturnedRefused(canceled) => let
-      (* the sign-in under way is over *)
-      val @(key_frozen, key_bytes) = $A.freeze<byte>(_dropbox_sign_in_key())
-      val () = save_checked($IDB.idb_delete(key_bytes, 20))
-      val () = release_bytes(key_frozen, key_bytes)
-    in
-      if readable then $P.and_then<int><int>(_stores_load(), llam(_) => let
-          val () = _dropbox_failed(if canceled then DropboxSignInCanceled() else DropboxSignInRefused())
-        in $P.ret<int>(0) end)
-      else $P.ret<int>(0)
-    end), llam(_) => ())
+  $P.finish<bool>(started, llam(readable) => let
+    val () = !_start := (if readable then Started() else StartedUnreadable())
+    (* a return the app was given meanwhile *)
+  in _returned_pending() end)
 end
 
 end (* #target wasm *)

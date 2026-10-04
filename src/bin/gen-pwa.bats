@@ -12,26 +12,15 @@
 
 staload "version.sats"
 
-(* Appends to the Android project's android-release.gradle (which
-   build-android.sh appends to the app's build.gradle) the version of the
-   commit built from (#219): versionName is the version About shows, and
-   versionCode that commit's time in minutes since 2025, so it grows from
-   release to release. Set after pwa's run-number version code, it is
-   the one Gradle takes *)
-fn _android_version (): void = let
-  var b = $B.create()
-  val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
-  val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
-  val () = $B.bput(b, quire_version_code())
-  val () = $B.bput(b, "\n        versionName '")
-  val () = $B.bput(b, quire_version())
-  val () = $B.bput(b, "'\n    }\n}\n")
+(* Writes what b holds to the file at name: added to its end, or in
+   place of what it held (mode) *)
+fn _write_file {nn:pos | nn < 256}{n:nat | n <= $B.BUILDER_CAP} (name: string nn, b: $B.builder(n), mode: $F.opening): void = let
   var path = $B.create()
-  val () = $B.bput(path, "dist/android/android-release.gradle")
+  val () = $B.bput(path, name)
   val () = $B.put_char(path, 0)
   val @(path_bytes, _) = $B.to_arr(path)
   val @(path_frozen, path_borrow) = $A.freeze<byte>(path_bytes)
-  val opened = $F.file_open(path_borrow, 524288, $F.WriteOnly(), $F.CreateOrAppend(), 420)
+  val opened = $F.file_open(path_borrow, 524288, $F.WriteOnly(), mode, 420)
   val () = $A.drop<byte>(path_frozen, path_borrow)
   val () = $A.free<byte>($A.thaw<byte>(path_frozen))
   val @(content, content_len) = $B.to_arr(b)
@@ -53,6 +42,70 @@ in
       val () = $A.drop<byte>(content_frozen, content_borrow)
     in $A.free<byte>($A.thaw<byte>(content_frozen)) end
 end
+
+(* Appends to the Android project's android-release.gradle (which
+   build-android.sh appends to the app's build.gradle) the version of the
+   commit built from (#219): versionName is the version About shows, and
+   versionCode that commit's time in minutes since 2025, so it grows from
+   release to release. Set after pwa's run-number version code, it is
+   the one Gradle takes *)
+fn _android_version (): void = let
+  var b = $B.create()
+  val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
+  val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
+  val () = $B.bput(b, quire_version_code())
+  val () = $B.bput(b, "\n        versionName '")
+  val () = $B.bput(b, quire_version())
+  val () = $B.bput(b, "'\n    }\n}\n")
+in _write_file("dist/android/android-release.gradle", b, $F.CreateOrAppend()) end
+
+(* The scheme the app is opened at: Dropbox's sign-in in the system's
+   browser comes back to quire://oauth/dropbox (#184) *)
+#define APP_SCHEME "quire"
+
+(* Whether c may be a URI scheme's character (RFC 3986: a letter, then
+   letters, digits, "+", "-" or "."; Android matches schemes in lower
+   case only, so a letter is a lowercase one); first: its first *)
+fn _scheme_char (c: char, first: bool): bool =
+  if c >= 'a' && c <= 'z' then true
+  else if first then false
+  else if c >= '0' && c <= '9' then true
+  else c = '+' || c = '-' || c = '.'
+
+fun _scheme_from {ns:nat}{i:nat | i <= ns} .<ns - i>. (scheme: string ns, n: int ns, i: int i): bool =
+  if i >= n then true
+  else if ~_scheme_char(string_get_at(scheme, i), i = 0) then false
+  else _scheme_from(scheme, n, i + 1)
+
+(* Whether scheme is a URI scheme Android can match *)
+fn _is_scheme {ns:nat} (scheme: string ns): bool = let
+  val n = g1u2i(string1_length(scheme))
+in if n <= 0 then false else _scheme_from(scheme, n, 0) end
+
+(* The Android project's intent filters (build-android.sh adds them to
+   MainActivity): pwa's, which open EPUBs and take them shared, then
+   quire's own, which lets the system's browser open the app at
+   APP_SCHEME's addresses (VIEW, DEFAULT, BROWSABLE: RFC 8252's
+   private-use scheme). Whether the scheme is one is checked here: one
+   that is not fails the build, rather than an app whose sign-in never
+   comes back. *)
+fn _intent_filters (): bool =
+  if ~_is_scheme(APP_SCHEME) then let
+    val () = println! ("gen-pwa: \"", APP_SCHEME, "\" is not a URI scheme Android can match")
+  in false end
+  else let
+    var b = $B.create()
+    val () = $P.build_intent_filters(b, "application/epub+zip")
+    val () = $B.bput(b, "            <intent-filter>\n")
+    val () = $B.bput(b, "                <action android:name=\"android.intent.action.VIEW\" />\n")
+    val () = $B.bput(b, "                <category android:name=\"android.intent.category.DEFAULT\" />\n")
+    val () = $B.bput(b, "                <category android:name=\"android.intent.category.BROWSABLE\" />\n")
+    val () = $B.bput(b, "                <data android:scheme=\"")
+    val () = $B.bput(b, APP_SCHEME)
+    val () = $B.bput(b, "\" />\n")
+    val () = $B.bput(b, "            </intent-filter>\n")
+    val () = _write_file("dist/android/intent-filters.xml", b, $F.CreateOrTruncate())
+  in true end
 
 implement main0 () = let
   (* The bundled fonts (the stylesheet names them) and the app's icons,
@@ -96,8 +149,12 @@ implement main0 () = let
   val () = println! ("PWA generated in dist/pwa/")
   (* The Capacitor project around it; its id is the one Quire is
      published under on Google Play. It opens EPUBs, and is shared
-     them. *)
+     them; and it is opened at quire:// addresses, as Dropbox's sign-in
+     in the system's browser comes back (quire://oauth/dropbox): its
+     intent filters are written again, with that scheme's *)
   val () = $P.create_android("Quire", "dev.middlefield.quire", "../pwa", "dist/android", "application/epub+zip")
   val () = _android_version()
-  val () = println! ("Android project generated in dist/android/")
-in end
+in
+  if _intent_filters() then println! ("Android project generated in dist/android/")
+  else exit(1)
+end

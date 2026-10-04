@@ -310,9 +310,7 @@ listed only in a build with a client, so Google's script is loaded
 only then; the summary says "Google Drive · ...", and Turn off revokes
 the token.
 
-**Dropbox** (#184), in a browser only for now (the app's sign-in
-through the system's browser, `quire://oauth/dropbox`, is still to
-come): the store `Dropbox(refresh)`, the same `quire-sync.json` in the
+**Dropbox** (#184): the store `Dropbox(refresh)`, the same `quire-sync.json` in the
 app's own folder (Apps › Quire; scopes `files.content.read` and
 `files.content.write`). `src/dropbox.bats` reads it with
 `files/download` (its rev from the `Dropbox-API-Result` header; a 409
@@ -334,10 +332,31 @@ the code is exchanged once the state matches (another's is refused);
 the refresh token is kept and the access token held in memory
 (`_token`), got again from the refresh token when Dropbox refuses it
 (401), with no sign-in. Turn off, once made final, revokes the grant.
+In the app (RFC 8252's way for a native app), Dropbox's page opens in
+the system browser's tab over the app (bridge's `browser_tab_open`,
+Capacitor's Browser plugin), and the redirect is the app's own address,
+`quire://oauth/dropbox`. `src/bin/gen-pwa.bats` writes the Android
+project's `intent-filters.xml` itself: pwa's `build_intent_filters`,
+then the `quire` scheme's filter (`APP_SCHEME`; a scheme Android cannot
+match fails the build). pwa's activity hands each such address to the
+page once, not again when it is recreated. The app is opened there,
+and bridge's `listen_app_link` (the App plugin's `appUrlOpen`, the
+`RAppLink` slot of `regs`) hands the address to `sync_app_link`, which
+takes the code and state as a browser takes them from its address; the
+tab is gone by then (the app's activity is `singleTask`, so coming
+forward finishes what is above it, bats-lang/bridge#135). One that
+starts the app again (Android stopped it while the reader was in the
+browser) waits for `sync_start` to load the stores (`start_state`); one
+while the app runs is taken at once (`return_moment`: `AtStart`,
+`WhileOpen`). Dropbox is listed in the app only with both plugins
+(`_round_trip_available`: `browser_tab_available` and
+`app_link_available`, quire's own sequencing of the two).
 Dynamic client registration was tried and Dropbox refuses it (only its
 trusted partners may), so the app is registered by hand (quire#239).
 `e2e/sync-dropbox.spec.js` plays Dropbox's sign-in page, token
-endpoint and files API.
+endpoint and files API (`e2e/dropbox-server.js`), and
+`e2e/sync-dropbox-android.spec.js` the app's Browser and App plugins
+with it.
 
 ### Catalogues
 
@@ -964,12 +983,12 @@ table's length, in its type, is at most 127: the bridge's last slot
 shares the bridge's table, so no listener of the table can take it.
 The platform's typed listeners take their slots in the same table:
 full screen's (`RFullscreen`), speech's (`RSpeech`), the install
-offer's (`RInstallOffer`) and the page's fonts' (`RFonts`), each given
-its event as bridge decodes it. A chapter's pages are counted again as
-it is shown, for 3 s (`_settle`), and whenever a load of the page's
-fonts ends (`RFonts`, bridge's `listen_fonts_loaded`): the reading face
-can arrive after those 3 s, and the count made with its fallback would
-stay.
+offer's (`RInstallOffer`), the app's links' (`RAppLink`) and the page's
+fonts' (`RFonts`), each given its event as bridge decodes it. A
+chapter's pages are counted again as it is shown, for 3 s (`_settle`),
+and whenever a load of the page's fonts ends (`RFonts`, bridge's
+`listen_fonts_loaded`): the reading face can arrive after those 3 s,
+and the count made with its fallback would stay.
 
 ## A page that stops answering in e2e explains itself (#244)
 
