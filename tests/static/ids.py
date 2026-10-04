@@ -7,7 +7,12 @@ Elements are made by ui.bats's constructors (ui_el, ui_add, ...), whose
 second argument is the id, and by helpers that pass one of their own
 parameters on to them (app.bats's _row, say): those are found here, so
 a literal handed to a helper counts where the helper makes it. A harm's
-menu item takes its id from ui_harm_id. Numbered ids are a prefix, a
+menu item takes its id from ui_harm_id.
+
+A click's target is decoded once, in ui.bats, into a listener's own
+control datatype: each one's id comes from its *_control_id function,
+whose cases name the ids (each must be made, and no two cases of one
+function may name the same id). Numbered ids are a prefix, a
 number and an optional suffix (nid_make, nid_make2), so each prefix is a
 family of ids, and neither a literal id nor another family may be one
 of its members.
@@ -183,6 +188,16 @@ def harm_ids(sources):
                     yield m.group(1)
 
 
+def control_ids(sources):
+    """(function, id) for each case of each *_control_id function: the
+    ids a click's target is decoded from."""
+    for _, text in sources:
+        for name, _, body in definitions(text):
+            if name.endswith('_control_id'):
+                for m in re.finditer(r'=>\s*"([^"]+)"', body):
+                    yield name, m.group(1)
+
+
 def family_regex(prefix, suffix):
     return re.compile(re.escape(prefix) + r'[0-9]+' + re.escape(suffix or '') + r'\Z')
 
@@ -240,6 +255,14 @@ def main(dirs):
     def known(ident):
         return (ident in made or ident in PAGE_IDS
                 or any(family_regex(p, s).match(ident) for p, s in families))
+
+    decoded = {}
+    for fn, ident in control_ids(sources):
+        if ident in decoded.setdefault(fn, set()):
+            problems.append(f'{fn} names "{ident}" twice')
+        decoded[fn].add(ident)
+        if not known(ident):
+            problems.append(f'{fn} decodes "{ident}", which no element has')
 
     for path, text in sources:
         for fn, poss in NAMERS.items():

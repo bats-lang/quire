@@ -2,7 +2,7 @@
 // the Settings screen's Dictionaries, each for one language, looked up from
 // the selection, removed with Undo, and kept across reloads.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {

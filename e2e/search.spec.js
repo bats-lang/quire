@@ -2,7 +2,7 @@
 // chapter, gone to with the match marked, stepped through, and closed
 // back to where reading was.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, showChrome, selectText, marks, chapters, dialog, selectionButton,
 } from './helpers.js';

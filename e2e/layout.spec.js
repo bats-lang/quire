@@ -2,7 +2,7 @@
 // its projects): nothing spills out of the window, the page fills it,
 // and the bars' controls fit.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator,

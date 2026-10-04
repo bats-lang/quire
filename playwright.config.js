@@ -10,6 +10,8 @@ const chromiumArgs = [
 
 export default defineConfig({
   testDir: './e2e',
+  // every spec's test carries the stall watch (e2e/stall-capture.js, #244)
+  globalSetup: './e2e/global-setup.js',
   timeout: 90000,
   expect: { timeout: 15000 },
   use: {

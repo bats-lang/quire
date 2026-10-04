@@ -2,7 +2,7 @@
 // read in a row, the books finished this year and a daily goal; each
 // book's time and speed in Book info; all of it kept in a backup.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, readBook, place, placeChanged, toLibrary, chapters, dialog, menuItem, libraryMenu, bookMenu,

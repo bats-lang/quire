@@ -625,6 +625,12 @@ accessibility metadata an `a11y_feature` each (its bit in the stored
 flags made by `a11y_bit` alone, asked by `a11y_has`) and a
 `wcag_level`; an OPDS list of links a `link_list`; the catalogue's
 fields `entry_field` and `page_field`, and a refused fetch a `refusal`.
+A click's target is decoded once, in `src/ui.bats`, into its listener's
+own control datatype (`typography_control`, `selection_control`, ...),
+each control's id given by its `*_control_id` (which
+`tests/static/ids.py` reads: each must be made, none twice), and each
+listener matches it with `case+`; a key event is decoded once into a
+`key` and its `modifiers` (`ui_key`, `ui_modifiers`).
 A dictionary's form (`dict_form`, a record: a .dict.dz, a .syn) is
 its byte in "dicts" (`_form_code`, `_form_of_code`); a file to import is
 a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
@@ -640,7 +646,9 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
   of the five themes. The proof is css's `CONTRAST` over the palette
-  (`PAL`): a table of every sRGB channel's linear light (`LIN`, made by
+  (`PAL(t, r, c)`, its theme a `palette` and its role a `colour_role`,
+  both datasorts, so a role is passed as a `role_value(r)`, never a
+  number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
   accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
@@ -660,8 +668,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
-* The sheet's size is in its type (`sheet(r, st)`: r bytes left), so it
-  always fits the 64 KiB text it is put in.
+* The sheet's size is in its type (`sheet(r, media, open)`: r bytes
+  left, and whether an @media block and a rule are open), so it always
+  fits the 64 KiB text it is put in, and a rule is opened only outside
+  another and closed only once.
 
 Elements are made through `src/ui.bats`:
 
@@ -675,8 +685,8 @@ Elements are made through `src/ui.bats`:
 * Each element id is made at one place in the code, no numbered id
   (`nid_make`, a prefix and a number) can spell another, and every id
   the code names is one it makes: `tests/static/ids.py` checks the
-  source (the constructors, `ui_harm_id`, and helpers that pass an id
-  on), in CI through `tests/static/run.sh`. An element made again to
+  source (the constructors, `ui_harm_id`, the controls' `*_control_id`,
+  and helpers that pass an id on), in CI through `tests/static/run.sh`. An element made again to
   reset it (a search field, a file input) is made by one function,
   called at startup and at the reset.
 * `ui_attr` takes a typed attribute that cannot be a name, a role or a
@@ -923,6 +933,13 @@ closed (`reader_stack_clear`).
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
 
+CI runs the static tests and the e2e suite in groups side by side
+(`tests/groups.json`), the e2e groups on the app built once (the `build`
+job). Every spec and every static fixture is in exactly one group, or
+`scripts/ci-groups.py` fails the run: a new one is put in a group, by
+area and balanced by time. The `check` job, which main's branch
+protection requires, passes only when every group did.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot
@@ -931,3 +948,21 @@ shares the bridge's table, so no listener of the table can take it.
 The platform's typed listeners take their slots in the same table:
 full screen's (`RFullscreen`), speech's (`RSpeech`) and the install
 offer's (`RInstallOffer`), each given its event as bridge decodes it.
+
+## A page that stops answering in e2e explains itself (#244)
+
+Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js`
+refuses a spec that does not), whose auto fixture `stallWatch`
+(`e2e/stall-capture.js`) arms each page as it is made: a DevTools
+session of its own with the debugger enabled and breakpoints inactive,
+since a page already stuck in a loop can no longer be attached to or
+have its debugger enabled (only `Debugger.pause` and a few others
+interrupt running script). It asks each page to evaluate `1` every 2 s;
+a page that does not answer within 5 s, and every page of a test 15 s
+before its timeout, is captured: the frames `Debugger.pause` stops in
+(wasm ones by function and byte offset), a CPU profile when nothing
+pauses, which commands the renderer still answers, and the renderers'
+CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
+output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
+summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
+loop forever in script and in wasm.

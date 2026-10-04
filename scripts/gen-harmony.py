@@ -12,10 +12,12 @@ path = os.path.join(root, "src", "style.bats")
 src = open(path).read()
 
 pal = {}
-for t, role, c in re.findall(r"PAL(\d)_(\w+)\(\d, \w+, 0x([0-9a-f]{6})\)", src):
+for t, role, c in re.findall(r"PAL(\d)_(\w+)\(\w+, \w+, 0x([0-9a-f]{6})\)", src):
     pal[(int(t), role)] = int(c, 16)
 THEMES = (0, 1, 2, 3, 4)
 NAMES = {0: "light", 1: "sepia", 2: "dark", 3: "night", 4: "grey"}
+# each theme's index in the palette datasort
+PALETTES = {0: "PaletteLight", 1: "PaletteSepia", 2: "PaletteDark", 3: "PaletteNight", 4: "PaletteGrey"}
 
 # Text on a ground (SURF, 4.5:1) and control edges (EDGEP, 3:1)
 SURFS = [("fg", "bg"), ("fg", "card"), ("fg", "line"), ("fg", "hl"), ("fg", "hl2"), ("muted", "bg"),
@@ -124,7 +126,7 @@ for t in THEMES:
                     f"$H.CALMc({mxmn(P('accent'))}), $H.CALMc({mxmn(P('danger'))}), $H.CALMc({mxmn(P('edge'))}))")
     else:
         args.append(f"MODE_light($H.LIGHTERc({L(P('bg'))}, {L(P('fg'))}))")
-    out.append(f"prval H_{NAMES[t]}: HARMONY({t}) = HARMONYc(\n  " + ",\n  ".join(args) + ")")
+    out.append(f"prval H_{NAMES[t]}: HARMONY({PALETTES[t]}) = HARMONYc(\n  " + ",\n  ".join(args) + ")")
 
 # The page turn's shade: black at each strength over the page (its
 # four levels' strengths, the strongest last) leaves every pair the

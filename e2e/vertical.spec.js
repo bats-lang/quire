@@ -3,7 +3,7 @@
 // is not used). Its columns follow the inline axis, down the page, so
 // its pages go down: a turn scrolls one page height.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog, openSettings,
   place, indicator, chapters, japaneseChapters,

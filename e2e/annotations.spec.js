@@ -1,7 +1,7 @@
 // Bookmarks, highlights and notes: made from the reader, listed, gone
 // to, kept, and exported as Markdown.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,

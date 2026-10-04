@@ -9,7 +9,7 @@
 // up hosts catalogue.test and elsewhere.test; any other request off
 // the app's own server is aborted, so nothing reaches the network.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import { start, libraryMenu, menuItem, dialog, reload, cards, card, librarySettings, settingsButton } from './helpers.js';

@@ -2,7 +2,7 @@
 // empty one (#174): the banner says so, nothing is saved over it this
 // session, and it is all there again once it can be read.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,

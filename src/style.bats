@@ -54,69 +54,71 @@ staload GT = "gestures/src/tracker.sats"
    ============================================================ *)
 
 (* A role is a custom property, --<name>, set per theme *)
-stadef BG = 0
-stadef FG = 1
-stadef MUTED = 2
-stadef CARD = 3
-stadef LINE = 4
-stadef EDGE = 5
-stadef BAR = 6
-stadef BARFG = 7
-stadef ACCENT = 8
-stadef ACCENTFG = 9
-stadef HL = 10
-stadef BARHI = 11
-stadef BANNER = 12
-stadef BANNERFG = 13
-stadef MARK = 14
-stadef MARKFG = 15
-stadef DANGER = 16
-stadef HL2 = 17
-#pub stadef NROLE = 18
+datasort colour_role =
+  | BG | FG | MUTED | CARD | LINE | EDGE | BAR | BARFG | ACCENT | ACCENTFG | HL | BARHI | BANNER | BANNERFG | MARK | MARKFG | DANGER | HL2
 
-#pub typedef role(r:int) = int(r)
-#pub typedef role = [r:nat | r < NROLE] int r
+(* A role as a value, indexed by the role it is *)
+datatype role_value(colour_role) =
+  | RoleGround(BG) of ()
+  | RoleText(FG) of ()
+  | RoleMuted(MUTED) of ()
+  | RoleCard(CARD) of ()
+  | RoleLine(LINE) of ()
+  | RoleEdge(EDGE) of ()
+  | RoleBar(BAR) of ()
+  | RoleBarText(BARFG) of ()
+  | RoleAccent(ACCENT) of ()
+  | RoleAccentText(ACCENTFG) of ()
+  | RoleHighlight(HL) of ()
+  | RoleBarHigh(BARHI) of ()
+  | RoleBanner(BANNER) of ()
+  | RoleBannerText(BANNERFG) of ()
+  | RoleMark(MARK) of ()
+  | RoleMarkText(MARKFG) of ()
+  | RoleDanger(DANGER) of ()
+  | RoleSecondHighlight(HL2) of ()
 
 (* Themes: light, sepia, dark, night (warm, low in blue, for reading in
    the dark) and grey, each indexed by its number in the palette (PAL's
    first index): the one place a theme becomes that number *)
-#pub datatype palette_theme(int) =
-  | Light(0) of () | Sepia(1) of () | Dark(2) of () | Night(3) of () | Grey(4) of ()
-#pub typedef theme = [number:nat | number < 5] palette_theme(number)
+#pub datasort palette = PaletteLight | PaletteSepia | PaletteDark | PaletteNight | PaletteGrey
+#pub datatype palette_theme(palette) =
+  | Light(PaletteLight) of () | Sepia(PaletteSepia) of () | Dark(PaletteDark) of () | Night(PaletteNight) of () | Grey(PaletteGrey) of ()
+#pub typedef theme = [which:palette] palette_theme(which)
 
-(* A theme's number in the palette, as its type says *)
-#pub fn theme_palette {number:int} (which: palette_theme(number)): int number
+(* A theme's number, as settings store it (after auto) *)
+#pub fn theme_palette {which:palette} (which: palette_theme(which)): [number:nat | number < 5] int number
 implement theme_palette (which) =
   case+ which of Light() => 0 | Sepia() => 1 | Dark() => 2 | Night() => 3 | Grey() => 4
 
 (* The rule's selector of a theme (the light theme's is also the root's) *)
-fn _theme_selector {number:int} (which: palette_theme(number)): [length:nat | length <= 20] string length =
+fn _theme_selector {which:palette} (which: palette_theme(which)): [length:nat | length <= 20] string length =
   case+ which of
   | Light() => ":root,.th-light" | Sepia() => ".th-sepia" | Dark() => ".th-dark" | Night() => ".th-night"
   | Grey() => ".th-grey"
 
 (* PAL(t, r, c): in theme t, role r is the colour 0xc *)
-dataprop PAL(int, int, int) =
-  | PAL0_bg(0, BG, 0xfaf8f5) | PAL1_bg(1, BG, 0xf0e6d2) | PAL2_bg(2, BG, 0x1e1e1e) | PAL3_bg(3, BG, 0x1f1a14) | PAL4_bg(4, BG, 0x3a3a3a)
-  | PAL0_fg(0, FG, 0x2a2a2a) | PAL1_fg(1, FG, 0x3b2f22) | PAL2_fg(2, FG, 0xe2e2e2) | PAL3_fg(3, FG, 0xc2b296) | PAL4_fg(4, FG, 0xe2e2e2)
-  | PAL0_muted(0, MUTED, 0x6b6b6b) | PAL1_muted(1, MUTED, 0x6e5e4a) | PAL2_muted(2, MUTED, 0xa0a0a0) | PAL3_muted(3, MUTED, 0x9a8a70) | PAL4_muted(4, MUTED, 0xb8b8b8)
-  | PAL0_card(0, CARD, 0xffffff) | PAL1_card(1, CARD, 0xf7efdf) | PAL2_card(2, CARD, 0x2a2a2a) | PAL3_card(3, CARD, 0x2a231b) | PAL4_card(4, CARD, 0x444444)
-  | PAL0_line(0, LINE, 0xdddddd) | PAL1_line(1, LINE, 0xd6c7a8) | PAL2_line(2, LINE, 0x3d3d3d) | PAL3_line(3, LINE, 0x3d342a) | PAL4_line(4, LINE, 0x4f4f4f)
-  | PAL0_edge(0, EDGE, 0x8a8a8a) | PAL1_edge(1, EDGE, 0x8f7d62) | PAL2_edge(2, EDGE, 0x7a7a7a) | PAL3_edge(3, EDGE, 0x857560) | PAL4_edge(4, EDGE, 0x999999)
-  | PAL0_bar(0, BAR, 0x333333) | PAL1_bar(1, BAR, 0x4a3b2a) | PAL2_bar(2, BAR, 0x111111) | PAL3_bar(3, BAR, 0x15110c) | PAL4_bar(4, BAR, 0x2a2a2a)
-  | PAL0_barfg(0, BARFG, 0xffffff) | PAL1_barfg(1, BARFG, 0xf7efdf) | PAL2_barfg(2, BARFG, 0xe2e2e2) | PAL3_barfg(3, BARFG, 0xc2b296) | PAL4_barfg(4, BARFG, 0xe2e2e2)
-  | PAL0_accent(0, ACCENT, 0x2f6f4f) | PAL1_accent(1, ACCENT, 0x7a4f1d) | PAL2_accent(2, ACCENT, 0x7fc49b) | PAL3_accent(3, ACCENT, 0xc9a36b) | PAL4_accent(4, ACCENT, 0x8fd0a8)
-  | PAL0_accentfg(0, ACCENTFG, 0xffffff) | PAL1_accentfg(1, ACCENTFG, 0xffffff) | PAL2_accentfg(2, ACCENTFG, 0x10231a) | PAL3_accentfg(3, ACCENTFG, 0x1f1a14) | PAL4_accentfg(4, ACCENTFG, 0x10231a)
+dataprop PAL(palette, colour_role, int) =
+  | PAL0_bg(PaletteLight, BG, 0xfaf8f5) | PAL1_bg(PaletteSepia, BG, 0xf0e6d2) | PAL2_bg(PaletteDark, BG, 0x1e1e1e) | PAL3_bg(PaletteNight, BG, 0x1f1a14) | PAL4_bg(PaletteGrey, BG, 0x3a3a3a)
+  | PAL0_fg(PaletteLight, FG, 0x2a2a2a) | PAL1_fg(PaletteSepia, FG, 0x3b2f22) | PAL2_fg(PaletteDark, FG, 0xe2e2e2) | PAL3_fg(PaletteNight, FG, 0xc2b296) | PAL4_fg(PaletteGrey, FG, 0xe2e2e2)
+  | PAL0_muted(PaletteLight, MUTED, 0x6b6b6b) | PAL1_muted(PaletteSepia, MUTED, 0x6e5e4a) | PAL2_muted(PaletteDark, MUTED, 0xa0a0a0) | PAL3_muted(PaletteNight, MUTED, 0x9a8a70) | PAL4_muted(PaletteGrey, MUTED, 0xb8b8b8)
+  | PAL0_card(PaletteLight, CARD, 0xffffff) | PAL1_card(PaletteSepia, CARD, 0xf7efdf) | PAL2_card(PaletteDark, CARD, 0x2a2a2a) | PAL3_card(PaletteNight, CARD, 0x2a231b) | PAL4_card(PaletteGrey, CARD, 0x444444)
+  | PAL0_line(PaletteLight, LINE, 0xdddddd) | PAL1_line(PaletteSepia, LINE, 0xd6c7a8) | PAL2_line(PaletteDark, LINE, 0x3d3d3d) | PAL3_line(PaletteNight, LINE, 0x3d342a) | PAL4_line(PaletteGrey, LINE, 0x4f4f4f)
+  | PAL0_edge(PaletteLight, EDGE, 0x8a8a8a) | PAL1_edge(PaletteSepia, EDGE, 0x8f7d62) | PAL2_edge(PaletteDark, EDGE, 0x7a7a7a) | PAL3_edge(PaletteNight, EDGE, 0x857560) | PAL4_edge(PaletteGrey, EDGE, 0x999999)
+  | PAL0_bar(PaletteLight, BAR, 0x333333) | PAL1_bar(PaletteSepia, BAR, 0x4a3b2a) | PAL2_bar(PaletteDark, BAR, 0x111111) | PAL3_bar(PaletteNight, BAR, 0x15110c) | PAL4_bar(PaletteGrey, BAR, 0x2a2a2a)
+  | PAL0_barfg(PaletteLight, BARFG, 0xffffff) | PAL1_barfg(PaletteSepia, BARFG, 0xf7efdf) | PAL2_barfg(PaletteDark, BARFG, 0xe2e2e2) | PAL3_barfg(PaletteNight, BARFG, 0xc2b296) | PAL4_barfg(PaletteGrey, BARFG, 0xe2e2e2)
+  | PAL0_accent(PaletteLight, ACCENT, 0x2f6f4f) | PAL1_accent(PaletteSepia, ACCENT, 0x7a4f1d) | PAL2_accent(PaletteDark, ACCENT, 0x7fc49b) | PAL3_accent(PaletteNight, ACCENT, 0xc9a36b) | PAL4_accent(PaletteGrey, ACCENT, 0x8fd0a8)
+  | PAL0_accentfg(PaletteLight, ACCENTFG, 0xffffff) | PAL1_accentfg(PaletteSepia, ACCENTFG, 0xffffff) | PAL2_accentfg(PaletteDark, ACCENTFG, 0x10231a) | PAL3_accentfg(PaletteNight, ACCENTFG, 0x1f1a14) | PAL4_accentfg(PaletteGrey, ACCENTFG, 0x10231a)
   (* a highlight, opaque: the old translucent yellows over each page *)
-  | PAL0_hl(0, HL, 0xfde59a) | PAL1_hl(1, HL, 0xe6cf8a) | PAL2_hl(2, HL, 0x6d5e2f) | PAL3_hl(3, HL, 0x4f4318) | PAL4_hl(4, HL, 0x6d5e2f)
-  | PAL0_barhi(0, BARHI, 0x4a4a4a) | PAL1_barhi(1, BARHI, 0x5e4c38) | PAL2_barhi(2, BARHI, 0x2e2e2e) | PAL3_barhi(3, BARHI, 0x342b21) | PAL4_barhi(4, BARHI, 0x3d3d3d)
-  | PAL0_banner(0, BANNER, 0xfbe3e1) | PAL1_banner(1, BANNER, 0xfbe3e1) | PAL2_banner(2, BANNER, 0xfbe3e1) | PAL3_banner(3, BANNER, 0xfbe3e1) | PAL4_banner(4, BANNER, 0xfbe3e1)
-  | PAL0_bannerfg(0, BANNERFG, 0x6b1d16) | PAL1_bannerfg(1, BANNERFG, 0x6b1d16) | PAL2_bannerfg(2, BANNERFG, 0x6b1d16) | PAL3_bannerfg(3, BANNERFG, 0x6b1d16) | PAL4_bannerfg(4, BANNERFG, 0x6b1d16)
-  | PAL0_mark(0, MARK, 0xffb300) | PAL1_mark(1, MARK, 0xffb300) | PAL2_mark(2, MARK, 0xffb300) | PAL3_mark(3, MARK, 0xffb300) | PAL4_mark(4, MARK, 0xffb300)
-  | PAL0_markfg(0, MARKFG, 0x000000) | PAL1_markfg(1, MARKFG, 0x000000) | PAL2_markfg(2, MARKFG, 0x000000) | PAL3_markfg(3, MARKFG, 0x000000) | PAL4_markfg(4, MARKFG, 0x000000)
-  | PAL0_danger(0, DANGER, 0xb3261e) | PAL1_danger(1, DANGER, 0x9c2a1c) | PAL2_danger(2, DANGER, 0xffb4ab) | PAL3_danger(3, DANGER, 0xe8a598) | PAL4_danger(4, DANGER, 0xffb4ab)
+  | PAL0_hl(PaletteLight, HL, 0xfde59a) | PAL1_hl(PaletteSepia, HL, 0xe6cf8a) | PAL2_hl(PaletteDark, HL, 0x6d5e2f) | PAL3_hl(PaletteNight, HL, 0x4f4318) | PAL4_hl(PaletteGrey, HL, 0x6d5e2f)
+  | PAL0_barhi(PaletteLight, BARHI, 0x4a4a4a) | PAL1_barhi(PaletteSepia, BARHI, 0x5e4c38) | PAL2_barhi(PaletteDark, BARHI, 0x2e2e2e) | PAL3_barhi(PaletteNight, BARHI, 0x342b21) | PAL4_barhi(PaletteGrey, BARHI, 0x3d3d3d)
+  | PAL0_banner(PaletteLight, BANNER, 0xfbe3e1) | PAL1_banner(PaletteSepia, BANNER, 0xfbe3e1) | PAL2_banner(PaletteDark, BANNER, 0xfbe3e1) | PAL3_banner(PaletteNight, BANNER, 0xfbe3e1) | PAL4_banner(PaletteGrey, BANNER, 0xfbe3e1)
+  | PAL0_bannerfg(PaletteLight, BANNERFG, 0x6b1d16) | PAL1_bannerfg(PaletteSepia, BANNERFG, 0x6b1d16) | PAL2_bannerfg(PaletteDark, BANNERFG, 0x6b1d16) | PAL3_bannerfg(PaletteNight, BANNERFG, 0x6b1d16) | PAL4_bannerfg(PaletteGrey, BANNERFG, 0x6b1d16)
+  | PAL0_mark(PaletteLight, MARK, 0xffb300) | PAL1_mark(PaletteSepia, MARK, 0xffb300) | PAL2_mark(PaletteDark, MARK, 0xffb300) | PAL3_mark(PaletteNight, MARK, 0xffb300) | PAL4_mark(PaletteGrey, MARK, 0xffb300)
+  | PAL0_markfg(PaletteLight, MARKFG, 0x000000) | PAL1_markfg(PaletteSepia, MARKFG, 0x000000) | PAL2_markfg(PaletteDark, MARKFG, 0x000000) | PAL3_markfg(PaletteNight, MARKFG, 0x000000) | PAL4_markfg(PaletteGrey, MARKFG, 0x000000)
+  | PAL0_danger(PaletteLight, DANGER, 0xb3261e) | PAL1_danger(PaletteSepia, DANGER, 0x9c2a1c) | PAL2_danger(PaletteDark, DANGER, 0xffb4ab) | PAL3_danger(PaletteNight, DANGER, 0xe8a598) | PAL4_danger(PaletteGrey, DANGER, 0xffb4ab)
   (* a second highlight, orange: the yellows' family, apart in hue *)
-  | PAL0_hl2(0, HL2, 0xfbc58a) | PAL1_hl2(1, HL2, 0xe8b880) | PAL2_hl2(2, HL2, 0x7b5831) | PAL3_hl2(3, HL2, 0x5c3f1f) | PAL4_hl2(4, HL2, 0x7b5831)
+  | PAL0_hl2(PaletteLight, HL2, 0xfbc58a) | PAL1_hl2(PaletteSepia, HL2, 0xe8b880) | PAL2_hl2(PaletteDark, HL2, 0x7b5831) | PAL3_hl2(PaletteNight, HL2, 0x5c3f1f) | PAL4_hl2(PaletteGrey, HL2, 0x7b5831)
 
 (* Luminance of each palette colour, from css's table *)
 prval L_faf8f5 = $CT.LUMc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5())
@@ -184,42 +186,42 @@ prval L_8fd0a8 = $CT.LUMc($CT.LIN_8f(), $CT.LIN_d0(), $CT.LIN_a8())
    4.5:1 in every theme, and does not vibrate on it (one of them is
    calm); EDGEP(edge, ground): a control's edge in role edge on ground
    is at least 3:1 *)
-dataprop SURF(int, int) =
-  | {text,ground:int}
+dataprop SURF(colour_role, colour_role) =
+  | {text,ground:colour_role}
     {text_light,ground_light,
      text_sepia,ground_sepia,
      text_dark,ground_dark,
      text_night,ground_night,
      text_grey,ground_grey:int}
     SURFc(text, ground) of (
-       PAL(0, text, text_light), PAL(0, ground, ground_light),
+       PAL(PaletteLight, text, text_light), PAL(PaletteLight, ground, ground_light),
        $CT.CONTRAST(text_light, ground_light, 45), $H.NOVIB(text_light, ground_light),
-       PAL(1, text, text_sepia), PAL(1, ground, ground_sepia),
+       PAL(PaletteSepia, text, text_sepia), PAL(PaletteSepia, ground, ground_sepia),
        $CT.CONTRAST(text_sepia, ground_sepia, 45), $H.NOVIB(text_sepia, ground_sepia),
-       PAL(2, text, text_dark), PAL(2, ground, ground_dark),
+       PAL(PaletteDark, text, text_dark), PAL(PaletteDark, ground, ground_dark),
        $CT.CONTRAST(text_dark, ground_dark, 45), $H.NOVIB(text_dark, ground_dark),
-       PAL(3, text, text_night), PAL(3, ground, ground_night),
+       PAL(PaletteNight, text, text_night), PAL(PaletteNight, ground, ground_night),
        $CT.CONTRAST(text_night, ground_night, 45), $H.NOVIB(text_night, ground_night),
-       PAL(4, text, text_grey), PAL(4, ground, ground_grey),
+       PAL(PaletteGrey, text, text_grey), PAL(PaletteGrey, ground, ground_grey),
        $CT.CONTRAST(text_grey, ground_grey, 45), $H.NOVIB(text_grey, ground_grey))
 
-dataprop EDGEP(int, int) =
-  | {edge,ground:int}
+dataprop EDGEP(colour_role, colour_role) =
+  | {edge,ground:colour_role}
     {edge_light,ground_light,
      edge_sepia,ground_sepia,
      edge_dark,ground_dark,
      edge_night,ground_night,
      edge_grey,ground_grey:int}
     EDGEc(edge, ground) of (
-       PAL(0, edge, edge_light), PAL(0, ground, ground_light),
+       PAL(PaletteLight, edge, edge_light), PAL(PaletteLight, ground, ground_light),
        $CT.CONTRAST(edge_light, ground_light, 30),
-       PAL(1, edge, edge_sepia), PAL(1, ground, ground_sepia),
+       PAL(PaletteSepia, edge, edge_sepia), PAL(PaletteSepia, ground, ground_sepia),
        $CT.CONTRAST(edge_sepia, ground_sepia, 30),
-       PAL(2, edge, edge_dark), PAL(2, ground, ground_dark),
+       PAL(PaletteDark, edge, edge_dark), PAL(PaletteDark, ground, ground_dark),
        $CT.CONTRAST(edge_dark, ground_dark, 30),
-       PAL(3, edge, edge_night), PAL(3, ground, ground_night),
+       PAL(PaletteNight, edge, edge_night), PAL(PaletteNight, ground, ground_night),
        $CT.CONTRAST(edge_night, ground_night, 30),
-       PAL(4, edge, edge_grey), PAL(4, ground, ground_grey),
+       PAL(PaletteGrey, edge, edge_grey), PAL(PaletteGrey, ground, ground_grey),
        $CT.CONTRAST(edge_grey, ground_grey, 30))
 
 (* Each theme's hue families (css's harmony.bats): at most three arcs,
@@ -228,12 +230,12 @@ dataprop EDGEP(int, int) =
    accent brown in the same family, red. Dark and grey: grey neutrals,
    the warm highlight, a green accent, red. Night: as sepia, on a dark
    ground. *)
-dataprop FAM(int, int, int, int, int, int, int) =
-  | FAM_light(0, 25, 50, 135, 165, ~15, 15) of $H.FAMILIES(25, 50, 135, 165, ~15, 15)
-  | FAM_sepia(1, 25, 50, 25, 50, ~15, 15) of $H.FAMILIES(25, 50, 25, 50, ~15, 15)
-  | FAM_dark(2, 25, 50, 130, 160, ~15, 15) of $H.FAMILIES(25, 50, 130, 160, ~15, 15)
-  | FAM_night(3, 25, 50, 25, 50, ~15, 15) of $H.FAMILIES(25, 50, 25, 50, ~15, 15)
-  | FAM_grey(4, 25, 50, 130, 160, ~15, 15) of $H.FAMILIES(25, 50, 130, 160, ~15, 15)
+dataprop FAM(palette, int, int, int, int, int, int) =
+  | FAM_light(PaletteLight, 25, 50, 135, 165, ~15, 15) of $H.FAMILIES(25, 50, 135, 165, ~15, 15)
+  | FAM_sepia(PaletteSepia, 25, 50, 25, 50, ~15, 15) of $H.FAMILIES(25, 50, 25, 50, ~15, 15)
+  | FAM_dark(PaletteDark, 25, 50, 130, 160, ~15, 15) of $H.FAMILIES(25, 50, 130, 160, ~15, 15)
+  | FAM_night(PaletteNight, 25, 50, 25, 50, ~15, 15) of $H.FAMILIES(25, 50, 25, 50, ~15, 15)
+  | FAM_grey(PaletteGrey, 25, 50, 130, 160, ~15, 15) of $H.FAMILIES(25, 50, 130, 160, ~15, 15)
 
 (* A theme with dark text on a light ground asks nothing more; one with
    light text on a dark ground (Material's dark theme) has a ground that
@@ -257,8 +259,8 @@ dataprop MODE(int, int, int, int, int, int) =
    * a card is lighter than the page;
    * body text is at least 7:1 (WCAG AAA), as a reader's should be;
    * a dark theme follows MODE_dark. *)
-dataprop HARMONY(int) =
-  | {theme_number,first_low,first_high,second_low,second_high,third_low,third_high:int}
+dataprop HARMONY(palette) =
+  | {theme_number:palette}{first_low,first_high,second_low,second_high,third_low,third_high:int}
     {ground,text,muted,card,line,edge,bar,bar_text,accent,accent_text,
      highlight,bar_high,banner,banner_text,mark,mark_text,danger,second_highlight:int}
     HARMONYc(theme_number) of (
@@ -523,7 +525,7 @@ prval E_barfg_bar = EDGEc(
   PAL2_barfg(), PAL2_bar(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_111111),
   PAL3_barfg(), PAL3_bar(), $CT.CONTRAST_lighter_first(L_c2b296, L_15110c),
   PAL4_barfg(), PAL4_bar(), $CT.CONTRAST_lighter_first(L_e2e2e2, L_2a2a2a))
-prval H_light: HARMONY(0) = HARMONYc(
+prval H_light: HARMONY(PaletteLight) = HARMONYc(
   PAL0_bg(), PAL0_fg(), PAL0_muted(), PAL0_card(), PAL0_line(), PAL0_edge(), PAL0_bar(), PAL0_barfg(), PAL0_accent(), PAL0_accentfg(), PAL0_hl(), PAL0_barhi(), PAL0_banner(), PAL0_bannerfg(), PAL0_mark(), PAL0_markfg(), PAL0_danger(), PAL0_hl2(),
   FAM_light($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xfa,0xf8,0xf5}())), $H.HUE_r_g_b{0xfaf8f5,0xfa,0xf8,0xf5,25,50}($H.RGBc{0xfa,0xf8,0xf5}())),
@@ -554,7 +556,7 @@ prval H_light: HARMONY(0) = HARMONYc(
   $H.LIGHTERc(L_ffffff, L_faf8f5),
   $CT.CONTRAST_lighter_second(L_2a2a2a, L_faf8f5),
   MODE_light($H.LIGHTERc(L_faf8f5, L_2a2a2a)))
-prval H_sepia: HARMONY(1) = HARMONYc(
+prval H_sepia: HARMONY(PaletteSepia) = HARMONYc(
   PAL1_bg(), PAL1_fg(), PAL1_muted(), PAL1_card(), PAL1_line(), PAL1_edge(), PAL1_bar(), PAL1_barfg(), PAL1_accent(), PAL1_accentfg(), PAL1_hl(), PAL1_barhi(), PAL1_banner(), PAL1_bannerfg(), PAL1_mark(), PAL1_markfg(), PAL1_danger(), PAL1_hl2(),
   FAM_sepia($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0xf0,0xe6,0xd2}())), $H.HUE_r_g_b{0xf0e6d2,0xf0,0xe6,0xd2,25,50}($H.RGBc{0xf0,0xe6,0xd2}())),
@@ -585,7 +587,7 @@ prval H_sepia: HARMONY(1) = HARMONYc(
   $H.LIGHTERc(L_f7efdf, L_f0e6d2),
   $CT.CONTRAST_lighter_second(L_3b2f22, L_f0e6d2),
   MODE_light($H.LIGHTERc(L_f0e6d2, L_3b2f22)))
-prval H_dark: HARMONY(2) = HARMONYc(
+prval H_dark: HARMONY(PaletteDark) = HARMONYc(
   PAL2_bg(), PAL2_fg(), PAL2_muted(), PAL2_card(), PAL2_line(), PAL2_edge(), PAL2_bar(), PAL2_barfg(), PAL2_accent(), PAL2_accentfg(), PAL2_hl(), PAL2_barhi(), PAL2_banner(), PAL2_bannerfg(), PAL2_mark(), PAL2_markfg(), PAL2_danger(), PAL2_hl2(),
   FAM_dark($H.FAMILIESc()),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x1e,0x1e,0x1e}()))),
@@ -618,7 +620,7 @@ prval H_dark: HARMONY(2) = HARMONYc(
   MODE_dark($H.LIGHTERc(L_e2e2e2, L_1e1e1e), $H.PEAKc($H.MXMN_rgb($H.RGBc{0x1e,0x1e,0x1e}())),
     $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())), $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())),
     $H.CALMc($H.MXMN_gbr($H.RGBc{0x7f,0xc4,0x9b}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0xff,0xb4,0xab}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0x7a,0x7a,0x7a}()))))
-prval H_night: HARMONY(3) = HARMONYc(
+prval H_night: HARMONY(PaletteNight) = HARMONYc(
   PAL3_bg(), PAL3_fg(), PAL3_muted(), PAL3_card(), PAL3_line(), PAL3_edge(), PAL3_bar(), PAL3_barfg(), PAL3_accent(), PAL3_accentfg(), PAL3_hl(), PAL3_barhi(), PAL3_banner(), PAL3_bannerfg(), PAL3_mark(), PAL3_markfg(), PAL3_danger(), PAL3_hl2(),
   FAM_night($H.FAMILIESc()),
   $H.NEUTRAL_tint($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x1f,0x1a,0x14}())), $H.HUE_r_g_b{0x1f1a14,0x1f,0x1a,0x14,25,50}($H.RGBc{0x1f,0x1a,0x14}())),
@@ -651,7 +653,7 @@ prval H_night: HARMONY(3) = HARMONYc(
   MODE_dark($H.LIGHTERc(L_c2b296, L_1f1a14), $H.PEAKc($H.MXMN_rgb($H.RGBc{0x1f,0x1a,0x14}())),
     $H.PEAKc($H.MXMN_rgb($H.RGBc{0xc2,0xb2,0x96}())), $H.PEAKc($H.MXMN_rgb($H.RGBc{0xc2,0xb2,0x96}())),
     $H.CALMc($H.MXMN_rgb($H.RGBc{0xc9,0xa3,0x6b}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0xe8,0xa5,0x98}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0x85,0x75,0x60}()))))
-prval H_grey: HARMONY(4) = HARMONYc(
+prval H_grey: HARMONY(PaletteGrey) = HARMONYc(
   PAL4_bg(), PAL4_fg(), PAL4_muted(), PAL4_card(), PAL4_line(), PAL4_edge(), PAL4_bar(), PAL4_barfg(), PAL4_accent(), PAL4_accentfg(), PAL4_hl(), PAL4_barhi(), PAL4_banner(), PAL4_bannerfg(), PAL4_mark(), PAL4_markfg(), PAL4_danger(), PAL4_hl2(),
   FAM_grey($H.FAMILIESc()),
   $H.NEUTRAL_grey($H.CHROMAc($H.MXMN_rgb($H.RGBc{0x3a,0x3a,0x3a}()))),
@@ -1051,9 +1053,10 @@ prval V_grey_8: VEILED(4, 8) = VEILEDc(
 
 stadef BUDGET = 60000
 
-(* state: 0 top level, 1 in a rule, 2 in @media, 3 in a rule in @media *)
-datavtype sheet(int, int) =
-  | {written,left:nat | written + left <= BUDGET}{state:nat | state < 4} Sheet(left, state) of ($B.builder(written))
+(* sheet(left, media, open): left bytes left; whether an @media block is
+   open, and whether a rule is *)
+datavtype sheet(int, bool, bool) =
+  | {written,left:nat | written + left <= BUDGET}{media,open:bool} Sheet(left, media, open) of ($B.builder(written))
 
 (* Bytes a selector or layout value may not hold: none of them can end
    a declaration or a rule, or make one !important *)
@@ -1073,45 +1076,59 @@ fun _put_plain {length:nat}{i:nat | i <= length}{written:nat | written + length 
   end
 
 (* text, with any of ; { } ! dropped *)
-fn plain {left:nat}{state:nat}{length:nat | length <= left}
-  (sheet: !sheet(left, state) >> sheet(left - length, state), text: string length): void = let
+fn plain {left:nat}{media,open:bool}{length:nat | length <= left}
+  (sheet: !sheet(left, media, open) >> sheet(left - length, media, open), text: string length): void = let
   val+ @Sheet(builder) = sheet
   val () = _put_plain(builder, text, g1u2i(string1_length(text)), 0)
   prval () = fold@(sheet)
 in end
 
 (* text as written: only this module's fixed text *)
-fn raw {left:nat}{state:nat}{length:nat | length <= left}
-  (sheet: !sheet(left, state) >> sheet(left - length, state), text: string length): void = let
+fn raw {left:nat}{media,open:bool}{length:nat | length <= left}
+  (sheet: !sheet(left, media, open) >> sheet(left - length, media, open), text: string length): void = let
   val+ @Sheet(builder) = sheet
   val () = $B.bput(builder, text)
   prval () = fold@(sheet)
 in end
 
-fn _colour {left:nat | left >= 7}{state:nat}{colour:nat | colour < 16777216}
-  (sheet: !sheet(left, state) >> sheet(left - 7, state), colour: int colour): void = let
+fn _colour {left:nat | left >= 7}{media,open:bool}{colour:nat | colour < 16777216}
+  (sheet: !sheet(left, media, open) >> sheet(left - 7, media, open), colour: int colour): void = let
   val+ @Sheet(builder) = sheet
   val () = $CT.put_rgb(builder, colour)
   prval () = fold@(sheet)
 in end
 
 (* a small number (at most 11 bytes) *)
-fn _number {left:nat | left >= 11}{state:nat}
-  (sheet: sheet(left, state), value: int): sheet(left - 11, state) = let
+fn _number {left:nat | left >= 11}{media,open:bool}
+  (sheet: sheet(left, media, open), value: int): sheet(left - 11, media, open) = let
   val+ ~Sheet(builder) = sheet
   val () = $B.put_int(builder, value)
 in Sheet(builder) end
 
-fn _role_name {role:nat | role < NROLE} (role: int role): [length:pos | length <= 9] string length =
+fn _role_name {role:colour_role} (role: role_value(role)): [length:pos | length <= 9] string length =
   case+ role of
-  | 0 => "bg" | 1 => "fg" | 2 => "muted" | 3 => "card" | 4 => "line"
-  | 5 => "edge" | 6 => "bar" | 7 => "barfg" | 8 => "accent" | 9 => "accentfg"
-  | 10 => "hl" | 11 => "barhi" | 12 => "banner" | 13 => "bannerfg"
-  | 14 => "mark" | 15 => "markfg" | 16 => "danger" | _ => "hl2"
+  | RoleGround() => "bg"
+  | RoleText() => "fg"
+  | RoleMuted() => "muted"
+  | RoleCard() => "card"
+  | RoleLine() => "line"
+  | RoleEdge() => "edge"
+  | RoleBar() => "bar"
+  | RoleBarText() => "barfg"
+  | RoleAccent() => "accent"
+  | RoleAccentText() => "accentfg"
+  | RoleHighlight() => "hl"
+  | RoleBarHigh() => "barhi"
+  | RoleBanner() => "banner"
+  | RoleBannerText() => "bannerfg"
+  | RoleMark() => "mark"
+  | RoleMarkText() => "markfg"
+  | RoleDanger() => "danger"
+  | RoleSecondHighlight() => "hl2"
 
 (* var(--<role>) *)
-fn _role_variable {left:nat | left >= 16}{state:nat}{role:nat | role < NROLE}
-  (sheet: !sheet(left, state) >> [after:nat | after >= left - 16] sheet(after, state), role: int role): void = let
+fn _role_variable {left:nat | left >= 16}{media,open:bool}{role:colour_role}
+  (sheet: !sheet(left, media, open) >> [after:nat | after >= left - 16] sheet(after, media, open), role: role_value(role)): void = let
   val () = raw(sheet, "var(--")
   val () = raw(sheet, _role_name(role))
 in raw(sheet, ")") end
@@ -1122,30 +1139,30 @@ in raw(sheet, ")") end
 
 
 (* selector { *)
-fn rule {left:nat}{state:nat | state == 0 || state == 2}{length:nat | length + 1 <= left}
-  (sheet: sheet(left, state), selector: string length): sheet(left - length - 1, state + 1) = let
+fn rule {left:nat}{media:bool}{length:nat | length + 1 <= left}
+  (sheet: sheet(left, media, false), selector: string length): sheet(left - length - 1, media, true) = let
   val () = plain(sheet, selector)
   val () = raw(sheet, "{")
   val+ ~Sheet(builder) = sheet
 in Sheet(builder) end
 
 (* } *)
-fn close {left:pos}{state:nat | state == 1 || state == 3}
-  (sheet: sheet(left, state)): sheet(left - 1, state - 1) = let
+fn close {left:pos}{media:bool}
+  (sheet: sheet(left, media, true)): sheet(left - 1, media, false) = let
   val () = raw(sheet, "}")
   val+ ~Sheet(builder) = sheet
 in Sheet(builder) end
 
 (* @media condition { *)
 fn media {left:nat}{length:nat | length + 8 <= left}
-  (sheet: sheet(left, 0), condition: string length): sheet(left - length - 8, 2) = let
+  (sheet: sheet(left, false, false), condition: string length): sheet(left - length - 8, true, false) = let
   val () = raw(sheet, "@media ")
   val () = plain(sheet, condition)
   val () = raw(sheet, "{")
   val+ ~Sheet(builder) = sheet
 in Sheet(builder) end
 
-fn media_end {left:pos} (sheet: sheet(left, 2)): sheet(left - 1, 0) = let
+fn media_end {left:pos} (sheet: sheet(left, true, false)): sheet(left - 1, false, false) = let
   val () = raw(sheet, "}")
   val+ ~Sheet(builder) = sheet
 in Sheet(builder) end
@@ -1205,8 +1222,8 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
 
 (* prop:value; *)
-fn lay {left:nat}{state:nat | state == 1 || state == 3}{value_len:nat | value_len + 18 <= left}
-  (sheet: sheet(left, state), property: prop, value: string value_len): [after:nat | after >= left - value_len - 18] sheet(after, state) = let
+fn lay {left:nat}{media:bool}{value_len:nat | value_len + 18 <= left}
+  (sheet: sheet(left, media, true), property: prop, value: string value_len): [after:nat | after >= left - value_len - 18] sheet(after, media, true) = let
   val () = raw(sheet, _property_name(property))
   val () = raw(sheet, ":")
   val () = plain(sheet, value)
@@ -1215,8 +1232,8 @@ in sheet end
 
 (* color:var(--text);background-color:var(--ground); : text on ground,
    proven *)
-fn surf {left:nat | left >= 60}{state:nat | state == 1 || state == 3}{text,ground:nat | text < NROLE; ground < NROLE}
-  (legible: SURF(text, ground) | sheet: sheet(left, state), text: int text, ground: int ground): [after:nat | after >= left - 60] sheet(after, state) = let
+fn surf {left:nat | left >= 60}{media:bool}{text,ground:colour_role}
+  (legible: SURF(text, ground) | sheet: sheet(left, media, true), text: role_value(text), ground: role_value(ground)): [after:nat | after >= left - 60] sheet(after, media, true) = let
   val () = raw(sheet, "color:")
   val () = _role_variable(sheet, text)
   val () = raw(sheet, ";background-color:")
@@ -1225,16 +1242,16 @@ fn surf {left:nat | left >= 60}{state:nat | state == 1 || state == 3}{text,groun
 in sheet end
 
 (* A ground with no text: a bar, a track, a placeholder *)
-fn fill {left:nat | left >= 50}{state:nat | state == 1 || state == 3}{ground:nat | ground < NROLE}
-  (sheet: sheet(left, state), ground: int ground): [after:nat | after >= left - 50] sheet(after, state) = let
+fn fill {left:nat | left >= 50}{media:bool}{ground:colour_role}
+  (sheet: sheet(left, media, true), ground: role_value(ground)): [after:nat | after >= left - 50] sheet(after, media, true) = let
   val () = raw(sheet, "background-color:")
   val () = _role_variable(sheet, ground)
   val () = raw(sheet, ";font-size:0;")
 in sheet end
 
 (* A ground of white or black at alpha percent, with no text *)
-fn tint {left:nat | left >= 60}{state:nat | state == 1 || state == 3}{alpha:nat | alpha <= 100}
-  (sheet: sheet(left, state), white: bool, alpha: int alpha): [after:nat | after >= left - 60] sheet(after, state) = let
+fn tint {left:nat | left >= 60}{media:bool}{alpha:nat | alpha <= 100}
+  (sheet: sheet(left, media, true), white: bool, alpha: int alpha): [after:nat | after >= left - 60] sheet(after, media, true) = let
   val () = raw(sheet, (if white then "background-color:rgba(255,255,255," else "background-color:rgba(0,0,0,"): [length:pos | length <= 34] string length)
   val sheet = _number(sheet, alpha)
   val () = raw(sheet, "%);font-size:0;")
@@ -1242,16 +1259,16 @@ in sheet end
 
 (* The veil behind a menu or dialog: dark, and its own text (none)
    transparent, so only what sits on it in a proven surface shows *)
-fn veil {left:nat | left >= 60}{state:nat | state == 1 || state == 3}
-  (sheet: sheet(left, state)): [after:nat | after >= left - 60] sheet(after, state) =
+fn veil {left:nat | left >= 60}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 60] sheet(after, media, true) =
   let val () = raw(sheet, "background-color:rgba(0,0,0,.5);color:transparent;") in sheet end
 
 (* A decorative line in a role (a card's outline, a separator): not
    what identifies a control, which the base rules give text fields *)
 #pub datatype side = AllSides | TopSide | BottomSide | LeftSide
 
-fn line {left:nat | left >= 60}{state:nat | state == 1 || state == 3}{width:pos | width <= 9}{role:nat | role < NROLE}
-  (sheet: sheet(left, state), side: side, width: int width, role: int role): [after:nat | after >= left - 60] sheet(after, state) = let
+fn line {left:nat | left >= 60}{media:bool}{width:pos | width <= 9}{role:colour_role}
+  (sheet: sheet(left, media, true), side: side, width: int width, role: role_value(role)): [after:nat | after >= left - 60] sheet(after, media, true) = let
   val () = raw(sheet, (case+ side of AllSides() => "border:" | TopSide() => "border-top:"
     | BottomSide() => "border-bottom:" | LeftSide() => "border-left:"): [length:pos | length <= 14] string length)
   val sheet = _number(sheet, width)
@@ -1260,35 +1277,35 @@ fn line {left:nat | left >= 60}{state:nat | state == 1 || state == 3}{width:pos 
   val () = raw(sheet, ";")
 in sheet end
 
-fn no_line {left:nat | left >= 12}{state:nat | state == 1 || state == 3}
-  (sheet: sheet(left, state)): [after:nat | after >= left - 12] sheet(after, state) =
+fn no_line {left:nat | left >= 12}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 12] sheet(after, media, true) =
   let val () = raw(sheet, "border:none;") in sheet end
 
 (* A control's accent (a slider's fill and thumb) in role edge on
    ground *)
-fn accent {left:nat | left >= 40}{state:nat | state == 1 || state == 3}{edge,ground:nat | edge < NROLE; ground < NROLE}
-  (visible: EDGEP(edge, ground) | sheet: sheet(left, state), edge: int edge, ground: int ground): [after:nat | after >= left - 40] sheet(after, state) = let
+fn accent {left:nat | left >= 40}{media:bool}{edge,ground:colour_role}
+  (visible: EDGEP(edge, ground) | sheet: sheet(left, media, true), edge: role_value(edge), ground: role_value(ground)): [after:nat | after >= left - 40] sheet(after, media, true) = let
   val () = raw(sheet, "accent-color:")
   val () = _role_variable(sheet, edge)
   val () = raw(sheet, ";")
 in sheet end
 
 (* translateX(-50%): the only transform, which moves and never scales *)
-fn centre_x {left:nat | left >= 32}{state:nat | state == 1 || state == 3}
-  (sheet: sheet(left, state)): [after:nat | after >= left - 32] sheet(after, state) =
+fn centre_x {left:nat | left >= 32}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 32] sheet(after, media, true) =
   let val () = raw(sheet, "transform:translateX(-50%);") in sheet end
 
 (* opacity 0: an invisible target over a visible one (a file input) *)
-fn invisible {left:nat | left >= 12}{state:nat | state == 1 || state == 3}
-  (sheet: sheet(left, state)): [after:nat | after >= left - 12] sheet(after, state) =
+fn invisible {left:nat | left >= 12}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 12] sheet(after, media, true) =
   let val () = raw(sheet, "opacity:0;") in sheet end
 
 (* ============================================================
    The themes and the base rules
    ============================================================ *)
 
-fn _declare_role {left:nat | left >= 30}{role:nat | role < NROLE}{colour:nat | colour < 16777216}
-  (sheet: sheet(left, 1), role: int role, colour: int colour): [after:nat | after >= left - 30] sheet(after, 1) = let
+fn _declare_role {left:nat | left >= 30}{role:colour_role}{colour:nat | colour < 16777216}
+  (sheet: sheet(left, false, true), role: role_value(role), colour: int colour): [after:nat | after >= left - 30] sheet(after, false, true) = let
   val () = raw(sheet, "--")
   val () = raw(sheet, _role_name(role))
   val () = raw(sheet, ":")
@@ -1298,7 +1315,7 @@ in sheet end
 
 (* .th-<name>{--role:#rrggbb;...} for a theme: each colour is the one
    PAL gives, so the proofs above are about these *)
-fn theme {theme_number:int}{left:nat | left >= 740}
+fn theme {theme_number:palette}{left:nat | left >= 740}
   {bg_colour,fg_colour,muted_colour,card_colour,line_colour,
    edge_colour,bar_colour,barfg_colour,accent_colour,accentfg_colour,
    hl_colour,barhi_colour,banner_colour,bannerfg_colour,mark_colour,
@@ -1319,36 +1336,36 @@ fn theme {theme_number:int}{left:nat | left >= 740}
    mark_from_pal: PAL(theme_number, MARK, mark_colour), markfg_from_pal: PAL(theme_number, MARKFG, markfg_colour),
    danger_from_pal: PAL(theme_number, DANGER, danger_colour), hl2_from_pal: PAL(theme_number, HL2, hl2_colour),
    harmony: HARMONY(theme_number) |
-   sheet: sheet(left, 0), which: palette_theme(theme_number),
+   sheet: sheet(left, false, false), which: palette_theme(theme_number),
    bg_colour: int bg_colour, fg_colour: int fg_colour, muted_colour: int muted_colour,
    card_colour: int card_colour, line_colour: int line_colour, edge_colour: int edge_colour,
    bar_colour: int bar_colour, barfg_colour: int barfg_colour, accent_colour: int accent_colour,
    accentfg_colour: int accentfg_colour, hl_colour: int hl_colour, barhi_colour: int barhi_colour,
    banner_colour: int banner_colour, bannerfg_colour: int bannerfg_colour, mark_colour: int mark_colour,
-   markfg_colour: int markfg_colour, danger_colour: int danger_colour, hl2_colour: int hl2_colour): [after:nat | after >= left - 740] sheet(after, 0) = let
+   markfg_colour: int markfg_colour, danger_colour: int danger_colour, hl2_colour: int hl2_colour): [after:nat | after >= left - 740] sheet(after, false, false) = let
   val sheet = rule(sheet, _theme_selector(which))
-  val sheet = _declare_role(sheet, 0, bg_colour)
-  val sheet = _declare_role(sheet, 1, fg_colour)
-  val sheet = _declare_role(sheet, 2, muted_colour)
-  val sheet = _declare_role(sheet, 3, card_colour)
-  val sheet = _declare_role(sheet, 4, line_colour)
-  val sheet = _declare_role(sheet, 5, edge_colour)
-  val sheet = _declare_role(sheet, 6, bar_colour)
-  val sheet = _declare_role(sheet, 7, barfg_colour)
-  val sheet = _declare_role(sheet, 8, accent_colour)
-  val sheet = _declare_role(sheet, 9, accentfg_colour)
-  val sheet = _declare_role(sheet, 10, hl_colour)
-  val sheet = _declare_role(sheet, 11, barhi_colour)
-  val sheet = _declare_role(sheet, 12, banner_colour)
-  val sheet = _declare_role(sheet, 13, bannerfg_colour)
-  val sheet = _declare_role(sheet, 14, mark_colour)
-  val sheet = _declare_role(sheet, 15, markfg_colour)
-  val sheet = _declare_role(sheet, 16, danger_colour)
-  val sheet = _declare_role(sheet, 17, hl2_colour)
+  val sheet = _declare_role(sheet, RoleGround(), bg_colour)
+  val sheet = _declare_role(sheet, RoleText(), fg_colour)
+  val sheet = _declare_role(sheet, RoleMuted(), muted_colour)
+  val sheet = _declare_role(sheet, RoleCard(), card_colour)
+  val sheet = _declare_role(sheet, RoleLine(), line_colour)
+  val sheet = _declare_role(sheet, RoleEdge(), edge_colour)
+  val sheet = _declare_role(sheet, RoleBar(), bar_colour)
+  val sheet = _declare_role(sheet, RoleBarText(), barfg_colour)
+  val sheet = _declare_role(sheet, RoleAccent(), accent_colour)
+  val sheet = _declare_role(sheet, RoleAccentText(), accentfg_colour)
+  val sheet = _declare_role(sheet, RoleHighlight(), hl_colour)
+  val sheet = _declare_role(sheet, RoleBarHigh(), barhi_colour)
+  val sheet = _declare_role(sheet, RoleBanner(), banner_colour)
+  val sheet = _declare_role(sheet, RoleBannerText(), bannerfg_colour)
+  val sheet = _declare_role(sheet, RoleMark(), mark_colour)
+  val sheet = _declare_role(sheet, RoleMarkText(), markfg_colour)
+  val sheet = _declare_role(sheet, RoleDanger(), danger_colour)
+  val sheet = _declare_role(sheet, RoleSecondHighlight(), hl2_colour)
 in close(sheet) end
 
 (* The rules the guarantees rest on; the only !important in the sheet *)
-fn _base {left:nat | left >= 1400} (sheet: sheet(left, 0)): [after:nat | after >= left - 1400] sheet(after, 0) = let
+fn _base {left:nat | left >= 1400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1400] sheet(after, false, false) = let
   val () = raw(sheet, "[data-hide='1'],[hidden]{display:none!important}")
   (* 44 x 44 targets: every button and field, everything given a
      control's role, and the app's links out (ui_link_out); links in a
@@ -1377,7 +1394,7 @@ in sheet end
    The stylesheet
    ============================================================ *)
 
-fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, 0)): [after:nat | after >= left - 1010] sheet(after, 0) = let
+fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1010] sheet(after, false, false) = let
   val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-latin.woff2) format('woff2');font-style:normal;font-weight:200 900;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-italic-latin.woff2) format('woff2');font-style:italic;font-weight:200 900;font-display:swap}")
   val () = raw(sheet, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:swap}")
@@ -1388,14 +1405,14 @@ fn _fonts {left:nat | left >= 1010} (sheet: sheet(left, 0)): [after:nat | after 
   val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
 in sheet end
 
-fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after >= left - 6600] sheet(after, 0) = let
+fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6600] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".app")
   val sheet = lay(sheet, MinHeight(), "100vh")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, FontFamily(), "Inter,system-ui,sans-serif")
   val sheet = lay(sheet, FontSize(), "16px")
   val sheet = lay(sheet, LineHeight(), "1.4")
@@ -1419,7 +1436,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "8px")
   val sheet = lay(sheet, Padding(), "8px 0")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ttl")
   val sheet = lay(sheet, FontFamily(), "Literata,Georgia,serif")
@@ -1434,15 +1451,15 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = lay(sheet, Padding(), "8px 14px")
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, FontSize(), "15px")
   val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".btn-p")
-  val sheet = surf(S_accentfg_accent | sheet, 9, 8)
-  val sheet = line(sheet, AllSides(), 1, 8)
+  val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
+  val sheet = line(sheet, AllSides(), 1, RoleAccent())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".btn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
@@ -1457,7 +1474,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = rule(sheet, ".ibtn")
   val sheet = lay(sheet, FontSize(), "20px")
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sfield")
   val sheet = lay(sheet, FlexBasis(), "100%")
@@ -1488,10 +1505,10 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Padding(), "10px 12px")
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
-  val sheet = surf(S_bannerfg_banner | sheet, 13, 12)
+  val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
-  val sheet = surf(S_bannerfg_banner | sheet, 13, 12)
+  val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner span")
   val sheet = lay(sheet, Flex(), "1")
@@ -1500,8 +1517,8 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = lay(sheet, Padding(), "10px 12px")
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imp-n")
   val sheet = lay(sheet, FontWeight(), "bold")
@@ -1510,19 +1527,19 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imp-s")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imp-bar")
   val sheet = lay(sheet, Height(), "6px")
-  val sheet = fill(sheet, 4)
+  val sheet = fill(sheet, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "3px")
   val sheet = lay(sheet, MarginTop(), "6px")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imp-fill")
   val sheet = lay(sheet, Height(), "100%")
-  val sheet = fill(sheet, 8)
+  val sheet = fill(sheet, RoleAccent())
   val sheet = lay(sheet, Width(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".list")
@@ -1561,7 +1578,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Padding(), "12px")
   val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = lay(sheet, BorderRadius(), "8px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   (* the collections, a row of their own under the view's controls *)
   val sheet = rule(sheet, ".crow")
@@ -1621,9 +1638,9 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Gap(), "12px")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Padding(), "10px")
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "8px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".card *")
@@ -1632,8 +1649,8 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = rule(sheet, ".cmore")
   val sheet = lay(sheet, FontSize(), "22px")
   val sheet = lay(sheet, BorderRadius(), "8px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".cov")
   val sheet = lay(sheet, Width(), "48px")
@@ -1641,7 +1658,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, ObjectFit(), "cover")
   val sheet = lay(sheet, BorderRadius(), "3px")
   val sheet = lay(sheet, Flex(), "none")
-  val sheet = fill(sheet, 4)
+  val sheet = fill(sheet, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".cinfo")
   val sheet = lay(sheet, Flex(), "1")
@@ -1654,19 +1671,19 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, TextOverflow(), "ellipsis")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ba")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   (* a book's series and number *)
   val sheet = rule(sheet, ".bser")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".prog")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "8px")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = lay(sheet, MarginTop(), "4px")
   val sheet = close(sheet)
@@ -1674,17 +1691,17 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, MaxWidth(), "160px")
   val sheet = lay(sheet, Height(), "5px")
-  val sheet = fill(sheet, 4)
+  val sheet = fill(sheet, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "3px")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pfill")
   val sheet = lay(sheet, Height(), "100%")
-  val sheet = fill(sheet, 8)
+  val sheet = fill(sheet, RoleAccent())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".empty")
   val sheet = lay(sheet, TextAlign(), "center")
-  val sheet = surf(S_muted_bg | sheet, 2, 0)
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
   val sheet = lay(sheet, Padding(), "16px")
   val sheet = lay(sheet, MarginTop(), "15vh")
   val sheet = lay(sheet, FontSize(), "18px")
@@ -1692,7 +1709,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, 0)): [after:nat | after 
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | after >= left - 4500] sheet(after, 0) = let
+fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4500] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1702,7 +1719,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, ZIndex(), "14")
-  val sheet = fill(sheet, 0)
+  val sheet = fill(sheet, RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imbox")
   val sheet = lay(sheet, Width(), "100%")
@@ -1722,7 +1739,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "max(8px,env(safe-area-inset-top))")
   val sheet = lay(sheet, Right(), "8px")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "50%")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".toast")
@@ -1736,7 +1753,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "12px")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = lay(sheet, Padding(), "4px 4px 4px 16px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
@@ -1766,7 +1783,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".menu,.mbox")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = lay(sheet, Padding(), "8px")
   val sheet = lay(sheet, MinWidth(), "200px")
@@ -1779,20 +1796,20 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, TextAlign(), "left")
   val sheet = lay(sheet, Padding(), "12px 14px")
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi:hover")
-  val sheet = surf(S_fg_line | sheet, 1, 4)
+  val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi[data-harm=y]")
-  val sheet = surf(S_danger_card | sheet, 16, 3)
+  val sheet = surf(S_danger_card | sheet, RoleDanger(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi[data-harm=y]:hover")
-  val sheet = surf(S_danger_line | sheet, 16, 4)
+  val sheet = surf(S_danger_line | sheet, RoleDanger(), RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".menu .mi.btn")
   val sheet = no_line(sheet)
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, JustifyContent(), "flex-start")
   val sheet = lay(sheet, Padding(), "12px 14px")
   val sheet = lay(sheet, FontSize(), "inherit")
@@ -1826,7 +1843,7 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".cnone")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, Padding(), "8px 0")
   val sheet = lay(sheet, FontStyle(), "italic")
   val sheet = close(sheet)
@@ -1836,10 +1853,10 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, JustifyContent(), "space-between")
   val sheet = lay(sheet, Gap(), "16px")
   val sheet = lay(sheet, Padding(), "8px 0")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow b")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mta")
   val sheet = lay(sheet, MinHeight(), "120px")
@@ -1854,14 +1871,14 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".btn[data-harm=y]")
-  val sheet = surf(S_danger_card | sheet, 16, 3)
-  val sheet = line(sheet, AllSides(), 1, 16)
+  val sheet = surf(S_danger_card | sheet, RoleDanger(), RoleCard())
+  val sheet = line(sheet, AllSides(), 1, RoleDanger())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
   val sheet = lay(sheet, ZIndex(), "15")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, Padding(), "max(12px,env(safe-area-inset-top)) 16px 24px")
   val sheet = close(sheet)
@@ -1903,30 +1920,30 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, 0)): [after:nat | aft
   val sheet = rule(sheet, ".irow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, JustifyContent(), "space-between")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = lay(sheet, Padding(), "8px 0")
-  val sheet = surf(S_muted_bg | sheet, 2, 0)
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".irow b")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, FontWeight(), "normal")
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after >= left - 8600] sheet(after, 0) = let
+fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8600] sheet(after, false, false) = let
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, Height(), "100vh")
   val sheet = lay(sheet, Position(), "relative")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top,.bot")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "4px")
   val sheet = lay(sheet, Padding(), "2px 6px")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, ZIndex(), "3")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top")
@@ -1945,10 +1962,10 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, PaddingBottom(), "max(2px,env(safe-area-inset-bottom))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top .ibtn,.bot .ibtn,.snavf .ibtn")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top .ibtn:hover,.bot .ibtn:hover,.snavf .ibtn:hover")
-  val sheet = surf(S_barfg_barhi | sheet, 7, 11)
+  val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ctitle")
   val sheet = lay(sheet, Flex(), "1")
@@ -2004,7 +2021,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, FontSize(), "12px")
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = lay(sheet, PointerEvents(), "none")
-  val sheet = surf(S_muted_bg | sheet, 2, 0)
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".chrome-off .foot")
   val sheet = lay(sheet, Display(), "flex")
@@ -2053,7 +2070,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf hr")
   val sheet = no_line(sheet)
-  val sheet = line(sheet, TopSide(), 1, 4)
+  val sheet = line(sheet, TopSide(), 1, RoleLine())
   val sheet = lay(sheet, Margin(), "2em auto")
   val sheet = lay(sheet, MaxWidth(), "200px")
   val sheet = close(sheet)
@@ -2073,11 +2090,11 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, BorderCollapse(), "collapse")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf td,.caf th")
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, Padding(), "2px 6px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf a,.caf [role=link]")
-  val sheet = surf(S_accent_bg | sheet, 8, 0)
+  val sheet = surf(S_accent_bg | sheet, RoleAccent(), RoleGround())
   val sheet = lay(sheet, TextDecoration(), "underline")
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = close(sheet)
@@ -2159,19 +2176,19 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, LineHeight(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, "::highlight(bats-mark-1)")
-  val sheet = surf(S_fg_hl | sheet, 1, 10)
+  val sheet = surf(S_fg_hl | sheet, RoleText(), RoleHighlight())
   val sheet = close(sheet)
   val sheet = rule(sheet, "::highlight(bats-mark-2)")
-  val sheet = surf(S_markfg_mark | sheet, 15, 14)
+  val sheet = surf(S_markfg_mark | sheet, RoleMarkText(), RoleMark())
   val sheet = close(sheet)
   (* the orange highlight; and the underline, in the text's own colour
      (so its contrast is the text's), thick enough to tell from a link's *)
   val sheet = rule(sheet, "::highlight(bats-mark-3)")
-  val sheet = surf(S_fg_hl2 | sheet, 1, 17)
+  val sheet = surf(S_fg_hl2 | sheet, RoleText(), RoleSecondHighlight())
   val sheet = close(sheet)
   (* the sentence read aloud (read_aloud.bats) *)
   val sheet = rule(sheet, "::highlight(bats-mark-5)")
-  val sheet = surf(S_markfg_mark | sheet, 15, 14)
+  val sheet = surf(S_markfg_mark | sheet, RoleMarkText(), RoleMark())
   val sheet = close(sheet)
   val sheet = rule(sheet, "::highlight(bats-mark-4)")
   val sheet = lay(sheet, TextDecoration(), "underline 3px")
@@ -2179,7 +2196,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   (* the text a book's narration reads (narration.bats): the same proven
      pair as the sentence read aloud *)
   val sheet = rule(sheet, "::highlight(bats-mark-5)")
-  val sheet = surf(S_markfg_mark | sheet, 15, 14)
+  val sheet = surf(S_markfg_mark | sheet, RoleMarkText(), RoleMark())
   val sheet = close(sheet)
   (* the narration's controls, in the bottom bar's row *)
   val sheet = rule(sheet, ".ngrp")
@@ -2220,7 +2237,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Left(), "0")
   val sheet = lay(sheet, Top(), "20px")
   val sheet = lay(sheet, Height(), "4px")
-  val sheet = fill(sheet, 7)
+  val sheet = fill(sheet, RoleBarText())
   val sheet = lay(sheet, BorderRadius(), "2px")
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
@@ -2239,14 +2256,14 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Height(), "24px")
   val sheet = lay(sheet, MarginLeft(), "-12px")
   val sheet = lay(sheet, BorderRadius(), "50%")
-  val sheet = fill(sheet, 7)
+  val sheet = fill(sheet, RoleBarText())
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tip")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Bottom(), "46px")
   val sheet = centre_x(sheet)
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Padding(), "2px 8px")
   val sheet = lay(sheet, BorderRadius(), "4px")
   val sheet = lay(sheet, FontSize(), "13px")
@@ -2263,7 +2280,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Left(), "12px")
   val sheet = lay(sheet, Bottom(), "106px")
   val sheet = lay(sheet, ZIndex(), "4")
-  val sheet = surf(S_accentfg_accent | sheet, 9, 8)
+  val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
   val sheet = lay(sheet, BorderRadius(), "22px")
   val sheet = lay(sheet, Padding(), "8px 16px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
@@ -2279,7 +2296,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Width(), "fit-content")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, ZIndex(), "4")
-  val sheet = surf(S_accentfg_accent | sheet, 9, 8)
+  val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
   val sheet = lay(sheet, BorderRadius(), "22px")
   val sheet = lay(sheet, Padding(), "10px 18px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
@@ -2297,7 +2314,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, ZIndex(), "5")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "4px")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "10px")
   val sheet = lay(sheet, Padding(), "4px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
@@ -2309,12 +2326,12 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seltb button,.seltb a")
   val sheet = lay(sheet, Padding(), "8px 14px")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seltb button:hover,.seltb a:hover")
-  val sheet = surf(S_barfg_barhi | sheet, 7, 11)
+  val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".snavf")
   val sheet = lay(sheet, Position(), "absolute")
@@ -2325,7 +2342,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "6px")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = surf(S_barfg_bar | sheet, 7, 6)
+  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "24px")
   val sheet = lay(sheet, Padding(), "2px 8px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
@@ -2337,7 +2354,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after >= left - 5400] sheet(after, 0) = let
+fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5400] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2345,7 +2362,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Left(), "0")
   val sheet = lay(sheet, Width(), "min(420px,100vw)")
   val sheet = lay(sheet, ZIndex(), "12")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, BoxShadow(), "2px 0 16px rgba(0,0,0,.3)")
@@ -2360,14 +2377,14 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "6px")
   val sheet = lay(sheet, Padding(), "6px 8px")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .grow")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .ibtn")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tabs")
   val sheet = lay(sheet, Display(), "flex")
@@ -2376,10 +2393,10 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = rule(sheet, ".tab")
   val sheet = lay(sheet, Padding(), "8px 12px")
   val sheet = lay(sheet, BorderRadius(), "6px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tab[aria-selected=true]")
-  val sheet = surf(S_fg_line | sheet, 1, 4)
+  val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".plist")
   val sheet = lay(sheet, Flex(), "1")
@@ -2392,12 +2409,12 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, TextAlign(), "left")
   val sheet = lay(sheet, Padding(), "10px 14px")
   val sheet = lay(sheet, BoxSizing(), "border-box")
-  val sheet = line(sheet, BottomSide(), 1, 4)
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
-  val sheet = surf(S_fg_line | sheet, 1, 4)
+  val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pi1")
   val sheet = lay(sheet, PaddingLeft(), "30px")
@@ -2410,23 +2427,23 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, ".snip")
   val sheet = lay(sheet, Display(), "block")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = lay(sheet, MarginTop(), "2px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hq")
   val sheet = lay(sheet, Display(), "block")
-  val sheet = line(sheet, LeftSide(), 3, 8)
+  val sheet = line(sheet, LeftSide(), 3, RoleAccent())
   val sheet = lay(sheet, PaddingLeft(), "8px")
   val sheet = lay(sheet, FontStyle(), "italic")
   val sheet = close(sheet)
   (* a highlight's quote, marked as it is on the page, after its style's
      name *)
   val sheet = rule(sheet, ".hq-yellow")
-  val sheet = surf(S_fg_hl | sheet, 1, 10)
+  val sheet = surf(S_fg_hl | sheet, RoleText(), RoleHighlight())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hq-orange")
-  val sheet = surf(S_fg_hl2 | sheet, 1, 17)
+  val sheet = surf(S_fg_hl2 | sheet, RoleText(), RoleSecondHighlight())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hq-under")
   val sheet = lay(sheet, TextDecoration(), "underline 3px")
@@ -2434,7 +2451,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = rule(sheet, ".hstyle")
   val sheet = lay(sheet, Display(), "block")
   val sheet = lay(sheet, FontSize(), "12px")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seg.afilter")
   val sheet = lay(sheet, Margin(), "8px 12px")
@@ -2452,13 +2469,13 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hbtns button")
   val sheet = lay(sheet, Padding(), "4px 12px")
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, FontSize(), "14px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hrow")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = lay(sheet, Padding(), "8px 12px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hgo")
@@ -2474,7 +2491,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Padding(), "10px 14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pi.hgo .snip")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = lay(sheet, MarginTop(), "0")
   val sheet = lay(sheet, LineHeight(), "1.45")
@@ -2482,7 +2499,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = rule(sheet, ".grp")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = lay(sheet, Padding(), "12px 12px 4px")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = lay(sheet, LetterSpacing(), ".04em")
   val sheet = lay(sheet, TextTransform(), "uppercase")
@@ -2493,7 +2510,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Right(), "0")
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, ZIndex(), "12")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Padding(), "12px 16px max(16px,env(safe-area-inset-bottom))")
   val sheet = lay(sheet, BoxShadow(), "0 -2px 16px rgba(0,0,0,.3)")
   val sheet = lay(sheet, Display(), "flex")
@@ -2526,7 +2543,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "12px")
   val sheet = lay(sheet, Padding(), "10px 14px")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   (* the fields that add a catalogue *)
   val sheet = rule(sheet, ".cform")
@@ -2541,12 +2558,12 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = close(sheet)
   val sheet = rule(sheet, ".slabel")
   val sheet = lay(sheet, Width(), "7em")
-  val sheet = surf(S_muted_card | sheet, 2, 3)
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow input[type=range]")
   val sheet = lay(sheet, Flex(), "1")
-  val sheet = accent(E_accent_card | sheet, 8, 3)
+  val sheet = accent(E_accent_card | sheet, RoleAccent(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sval")
   val sheet = lay(sheet, Width(), "3em")
@@ -2562,14 +2579,14 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = rule(sheet, ".seg button")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Padding(), "8px 6px")
-  val sheet = line(sheet, AllSides(), 1, 4)
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, FontSize(), "14px")
-  val sheet = surf(S_fg_card | sheet, 1, 3)
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seg button[aria-pressed=true]")
-  val sheet = surf(S_accentfg_accent | sheet, 9, 8)
-  val sheet = line(sheet, AllSides(), 1, 8)
+  val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
+  val sheet = line(sheet, AllSides(), 1, RoleAccent())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sfoot")
   val sheet = lay(sheet, Display(), "flex")
@@ -2578,7 +2595,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".link")
-  val sheet = surf(S_accent_card | sheet, 8, 3)
+  val sheet = surf(S_accent_card | sheet, RoleAccent(), RoleCard())
   val sheet = lay(sheet, TextDecoration(), "underline")
   val sheet = lay(sheet, Padding(), "6px 0")
   val sheet = close(sheet)
@@ -2587,7 +2604,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, Gap(), "6px")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Padding(), "6px 8px")
-  val sheet = line(sheet, BottomSide(), 1, 4)
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sbar input")
   val sheet = lay(sheet, Flex(), "1")
@@ -2601,12 +2618,12 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, 0)): [after:nat | after
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = lay(sheet, Gap(), "8px")
   val sheet = lay(sheet, Padding(), "6px")
-  val sheet = line(sheet, TopSide(), 1, 4)
+  val sheet = line(sheet, TopSide(), 1, RoleLine())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
 in sheet end
 
-fn _under_480px {left:nat | left >= 430} (sheet: sheet(left, 0)): [after:nat | after >= left - 430] sheet(after, 0) = let
+fn _under_480px {left:nat | left >= 430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 430] sheet(after, false, false) = let
   val sheet = media(sheet, "(max-width:480px)")
   val sheet = rule(sheet, ".lib")
   val sheet = lay(sheet, PaddingLeft(), "10px")
@@ -2640,7 +2657,7 @@ fn _under_480px {left:nat | left >= 430} (sheet: sheet(left, 0)): [after:nat | a
   val sheet = media_end(sheet)
 in sheet end
 
-fn _under_600px {left:nat | left >= 57} (sheet: sheet(left, 0)): [after:nat | after >= left - 57] sheet(after, 0) = let
+fn _under_600px {left:nat | left >= 57} (sheet: sheet(left, false, false)): [after:nat | after >= left - 57] sheet(after, false, false) = let
   val sheet = media(sheet, "(max-width:600px)")
   val sheet = rule(sheet, ".caf p")
   val sheet = lay(sheet, TextAlign(), "start")
@@ -2762,7 +2779,7 @@ implement page_turn_axes () = $GT.AxH()
 
 implement app_style () = let
   val builder = $B.create()
-  val sheet: sheet(BUDGET, 0) = Sheet(builder)
+  val sheet: sheet(BUDGET, false, false) = Sheet(builder)
   val sheet = _fonts(sheet)
   (* the light theme is also the root's, so the page behind the app has
      the palette too *)
