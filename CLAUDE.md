@@ -553,7 +553,14 @@ only where its platform has it, by its own `data-hide`.
   library imports (`OnExternalFiles`); pwa writes no JS of its own
   (bats-lang/pwa#49), so bridge's service worker keeps a file shared
   with the installed web app, and bridge's `batsNative` entry points
-  are what the Android activity calls.
+  are what the Android activity calls. They are asked for only once
+  the stored library is read (#262): `_external_wait` in
+  `src/bin/quire.bats` needs the proof `LIBRARY_READ`, which only
+  `_library_read` makes, after `lib_load`, so a book is never added
+  to the library the read then replaces; until then the bridge keeps
+  the files in their order. When the library could not be read, each
+  file is kept (`_handed_kept`, linear) and not added, and the banner
+  says so.
 
 ## What allocates is linear
 

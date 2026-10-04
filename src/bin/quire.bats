@@ -11,6 +11,7 @@ staload "book.sats"
 staload "pages.sats"
 staload "ui.sats"
 staload "notice.sats"
+staload "storage.sats"
 staload "layer.sats"
 staload "app.sats"
 staload "style.sats"
@@ -48,6 +49,7 @@ staload GT = "gestures/src/tracker.sats"
 staload GD = "gestures/src/decode.sats"
 staload GS = "gestures/src/source.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BE = "wasm.bats-packages.dev/bridge/src/external.sats"
 staload BW = "wasm.bats-packages.dev/bridge/src/build_watch.sats"
 
@@ -2300,17 +2302,98 @@ fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
    session, one after another. A metric needs the bound *)
 #define EXTERNAL_ROUNDS 100000
 
-(* Imports each file handed to the app from outside it, as it comes:
-   one at a time, the next asked for when the last one's import is
-   done. The library is shown first, where the import is seen *)
-fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
+(* Files handed to the app from outside it, kept: linear, so none is
+   dropped without its file closed *)
+datavtype handed(int) =
+  | HandedNone(0)
+  | {count:nat} HandedMore(count + 1) of ($BE.external, handed(count))
+
+fn _handed_name_free (name: $R.option([k:nat] $BD.dblob(k))): void =
+  case+ name of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
+(* Files closed: none is here in practice (see _handed_keep) *)
+fun _handed_close {count:nat} .<count>. (files: handed(count)): void =
+  case+ files of
+  | ~HandedNone() => ()
+  | ~HandedMore(file, rest) => let
+      val () = (case+ file of
+        | ~$BE.External(book_file, name) => let
+            val () = $BF.file_close(book_file)
+          in _handed_name_free(name) end
+        | ~$BE.ExternalUnreadable(name) => _handed_name_free(name))
+    in _handed_close(rest) end
+
+(* The files handed over while the library could not be read, kept for
+   the session: a book added to a library that could not be read could
+   not be saved (#174), and a file is not dropped (#262) *)
+val _handed_kept = ref<[count:nat] handed(count)>(HandedNone())
+
+fn _handed_keep (file: $BE.external): void = let
+  var kept: [count:nat] handed(count) = HandedNone()
+  val () = ref_exch_elt<[count:nat] handed(count)>(_handed_kept, kept)
+  var whole: [count:nat] handed(count) = HandedMore(file, kept)
+  val () = ref_exch_elt<[count:nat] handed(count)>(_handed_kept, whole)
+  (* what the cell held between the two exchanges: nothing, since
+     nothing runs between them *)
+in _handed_close(whole) end
+
+(* LIBRARY_READ: the library stored under "lib" has been read (or there
+   was none), so a book added now is added to it. Before, a book imported
+   was put in the library the read then replaced, and so was not shown
+   (#262). Its constructor is local to _library_read, which makes one
+   only once lib_load is done and the library was readable *)
+local
+dataprop LIBRARY_READ_() = LibraryReadProof of ()
+in
+stadef LIBRARY_READ = LIBRARY_READ_
+
+(* How reading the library went: read, with the proof; or not readable
+   (storage_unreadable has said so) *)
+datavtype library_reading =
+  | LibraryRead of (LIBRARY_READ() | )
+  | LibraryUnreadable of ()
+
+implement $P.dispose<library_reading>(reading) =
+  case+ reading of ~LibraryRead(_ | ) => () | ~LibraryUnreadable() => ()
+
+(* Reads the library: until it is read, no file handed to the app from
+   outside it is asked for, so the bridge keeps them in their order *)
+fn _library_read (): $P.promise(library_reading, $P.Chained) =
+  $P.and_then<int><library_reading>(lib_load(), llam(_) =>
+    if storage_savable(LibraryRecord()) then $P.ret<library_reading>(LibraryRead(LibraryReadProof() | ))
+    else $P.ret<library_reading>(LibraryUnreadable()))
+end
+
+(* Imports each file handed to the app from outside it, as it comes,
+   the library read (the proof): one at a time, the next asked for when
+   the last one's import is done. The library is shown first, where the
+   import is seen *)
+fun _external_wait {rounds:nat} .<rounds>. (pf: LIBRARY_READ() | rounds: int rounds): void =
   if rounds <= 0 then ()
   else $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
       val () = (if _in_reader() then _show_library() else ())
     in import_external(handed) end), llam(outcome) => let
       (* its outcome is already reported *)
       val () = import_outcome_free(outcome)
-    in _external_wait(rounds - 1) end)
+    in _external_wait(pf | rounds - 1) end)
+
+(* The library could not be read: each file handed over is kept, not
+   added, and the banner says so *)
+fun _external_keep {rounds:nat} .<rounds>. (rounds: int rounds): void =
+  if rounds <= 0 then ()
+  else $P.finish<$BE.external>($BE.external_next(), llam(handed) => let
+      val () = _handed_keep(handed)
+      val () = notice_error("This book was not added: Quire could not read your library. Reopen Quire, then open or share the book again.")
+    in _external_keep(rounds - 1) end)
+
+(* Files handed to the app from outside it, once the library's reading
+   is known: imported when it was read, kept when it was not *)
+fn _external_start (reading: library_reading): void =
+  case+ reading of
+  | ~LibraryRead(pf | ) => _external_wait(pf | EXTERNAL_ROUNDS)
+  | ~LibraryUnreadable() => _external_keep(EXTERNAL_ROUNDS)
 
 implement main0 () = let
   val () = app_build()
@@ -2324,9 +2407,6 @@ implement main0 () = let
   val listeners = narration_listen(listeners)
   val () = ui_listen_all(listeners)
   val () = _build_watch()
-  (* files handed to the app from outside it (an Android intent, the
-     installed app opened with a file or shared one) *)
-  val () = _external_wait(EXTERNAL_ROUNDS)
   (* what the platform offers: reading aloud, sharing, installing, and
      whether the storage is kept *)
   val () = aloud_offer()
@@ -2347,11 +2427,15 @@ implement main0 () = let
   val loaded = $P.and_then<int><int>(set_load(), llam(state) => let
       val () = lib_sort_label(lib_state_sort(state))
     in
-      $P.and_then<int><int>(lib_load(), llam(_) => let
+      $P.and_then<library_reading><int>(_library_read(), llam(reading) => let
         val () = lib_state_set(state)
         (* the screen's controls, with the brightness and the lock kept *)
         val () = screen_controls_start()
         val () = lib_render()
+        (* files handed to the app from outside it (an Android intent,
+           the installed app opened with a file or shared one), once the
+           library is read: the bridge keeps them until then (#262) *)
+        val () = _external_start(reading)
         (* sync, once the library is read *)
         val () = sync_start()
       in
