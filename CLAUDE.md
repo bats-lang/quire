@@ -888,6 +888,19 @@ the page or the page between two places (`tests/static`'s
 keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
 none.
 
+The reader is fixed to the window (`.rv`, not a height in `vh`, which
+an Android WebView can make taller than what it shows), and the page
+keeps out of the screen's safe area on every side (#275): above and
+below in its paddings (`env(safe-area-inset-top)`, `-bottom`), at its
+sides in its margins (`-left`, `-right`), so no text is under a camera
+cutout, in or out of full screen, in either orientation. In the app the
+WebView is given the cutout's insets by Capacitor's SystemBars (pwa's
+`insetsHandling: native`: a WebView from 140 on reads them out, an
+older one is padded natively instead). A spread's columns are at least
+40vw, so two fit beside a cutout. A sheet's height is in `dvh`, and the
+typography sheet's head (`.shead`), with Close, is held at its top as
+it scrolls. `e2e/layout.spec.js` sets the insets through DevTools.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for

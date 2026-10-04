@@ -1936,11 +1936,15 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [afte
 in sheet end
 
 fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8600] sheet(after, false, false) = let
+  (* the reader is the window, whatever a viewport unit says (in an
+     Android WebView 100vh can be taller than what is shown, so the page
+     and a sheet's bottom could pass the screen's edge, #275): fixed to
+     the layout viewport, nothing behind it scrolls *)
   val sheet = rule(sheet, ".rv")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Height(), "100vh")
-  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Inset(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top,.bot")
@@ -2031,10 +2035,17 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".chrome-off .foot")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = close(sheet)
+  (* the page keeps out of the screen's cutouts and rounded corners
+     (the safe area) on every side, in or out of full screen: above and
+     below in its paddings, and at its sides (a cutout there in
+     landscape) in its margins, so its columns, a page each, are the
+     safe width (#275) *)
   val sheet = rule(sheet, ".caf")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, MarginLeft(), "env(safe-area-inset-left)")
+  val sheet = lay(sheet, MarginRight(), "env(safe-area-inset-right)")
   val sheet = lay(sheet, PaddingTop(), "max(48px,env(safe-area-inset-top))")
   val sheet = lay(sheet, PaddingBottom(), "max(36px,env(safe-area-inset-bottom))")
   val sheet = lay(sheet, ColumnFill(), "auto")
@@ -2359,7 +2370,7 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5400] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6000} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6000] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2524,9 +2535,29 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, MaxWidth(), "520px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, BorderRadius(), "12px 12px 0 0")
-  (* taller than a short screen allows: it scrolls *)
-  val sheet = lay(sheet, MaxHeight(), "85vh")
+  (* taller than a short screen allows: it scrolls, within the height
+     shown (dvh: in full screen, and in a WebView, vh can be more) *)
+  val sheet = lay(sheet, MaxHeight(), "85dvh")
   val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = close(sheet)
+  (* a sheet's head, its Close in it: held at the sheet's top as the
+     rest scrolls, so Close is always in reach (as Apple Books' sheet
+     keeps its close at its top) *)
+  val sheet = rule(sheet, ".shead")
+  val sheet = lay(sheet, Position(), "sticky")
+  val sheet = lay(sheet, Top(), "-12px")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, Margin(), "-12px -16px 0")
+  val sheet = lay(sheet, Padding(), "12px 16px 6px")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, Gap(), "8px")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = line(sheet, BottomSide(), 1, RoleLine())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".shead .grow")
+  val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = close(sheet)
   (* its rows keep their height, and the sheet scrolls instead *)
   val sheet = rule(sheet, ".sheet>*")
@@ -2534,7 +2565,7 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   (* a note's text, over the page: a long one scrolls *)
   val sheet = rule(sheet, ".fntext")
-  val sheet = lay(sheet, MaxHeight(), "50vh")
+  val sheet = lay(sheet, MaxHeight(), "50dvh")
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, LineHeight(), "1.5")
   val sheet = close(sheet)
