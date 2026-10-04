@@ -5,7 +5,7 @@
 // them (bridge's produce_service_worker answers only the app's own
 // files, directly in its scope).
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { start, dialog, librarySettings, settingsScreen, settingsButton, libraryMenu, menuItem, librarySearch } from './helpers.js';
 
 const about = page => dialog(page, 'About Quire');

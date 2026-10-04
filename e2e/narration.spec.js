@@ -4,7 +4,7 @@
 // notes passed over, a table left. The narration here is silence (a WAV,
 // which Playwright's Chromium plays), cut into clips of 0.6 s.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { silentWav } from './create-epub.js';
 import {
   start, readBook, place, bookPage, chapterTitle, control, dialog, openSettings, reload, startsOnPage,

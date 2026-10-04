@@ -935,3 +935,21 @@ The platform's typed listeners take their slots in the same table:
 full screen's (`RFullscreen`), speech's (`RSpeech`), the install
 offer's (`RInstallOffer`) and the app's links' (`RAppLink`), each given
 its event as bridge decodes it.
+
+## A page that stops answering in e2e explains itself (#244)
+
+Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js`
+refuses a spec that does not), whose auto fixture `stallWatch`
+(`e2e/stall-capture.js`) arms each page as it is made: a DevTools
+session of its own with the debugger enabled and breakpoints inactive,
+since a page already stuck in a loop can no longer be attached to or
+have its debugger enabled (only `Debugger.pause` and a few others
+interrupt running script). It asks each page to evaluate `1` every 2 s;
+a page that does not answer within 5 s, and every page of a test 15 s
+before its timeout, is captured: the frames `Debugger.pause` stops in
+(wasm ones by function and byte offset), a CPU profile when nothing
+pauses, which commands the renderer still answers, and the renderers'
+CPU time over 1 s. The capture is `stall-capture-<n>.json` in the test's
+output (CI's `e2e-stall-captures-<group>` artifact), attached to the test, and
+summed up on stderr. `e2e/stall-capture.spec.js` checks it on pages that
+loop forever in script and in wasm.

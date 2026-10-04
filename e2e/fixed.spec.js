@@ -5,7 +5,7 @@
 // §8.1.2). A fixed page is not restyled: only the theme and what the
 // reader does (taps, keys, reading aloud, the screen) are offered.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, card, bookPage, indicator, dialog, openSettings, toLibrary, chapters,
   fixedLayoutBook, imagePage, fixedPlace, readFixed, fixedBoxes as boxes,

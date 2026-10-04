@@ -8,7 +8,7 @@
 // app until a listener is added, as Capacitor does), and Dropbox is the
 // mock the browser's tests use, routed in each (no real network).
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
