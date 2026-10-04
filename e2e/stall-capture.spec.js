@@ -6,6 +6,7 @@
  */
 
 import { test, expect } from './fixtures.js';
+import { CAPTURE_MOST_MS } from './stall-capture.js';
 
 /** A wasm module whose one export, `spin`, is a function named spinInWasm that loops forever. */
 const SPIN_MODULE = (() => {
@@ -82,12 +83,25 @@ test('a page that answers is not captured', async ({ page, stallWatch }) => {
   expect(stallWatch.captures).toEqual([]);
 });
 
-test('every page of a test about to time out is captured', async ({ page, stallWatch }) => {
-  // a short timeout of its own, so the capture comes soon (15 s before
-  // a timeout, or a third of a shorter one)
-  test.setTimeout(30000);
+// The timeout this test starts with, short so the capture begins soon
+const NEAR_TIMEOUT_MS = 30000;
+
+test('every page of a test about to time out is captured', async ({ page, stallWatch }, testInfo) => {
+  // The capture begins TIMEOUT_MARGIN_MS before the timeout (a third of
+  // a shorter one), at the watch's next scan: here at 30 s - min(15 s,
+  // 30 s / 3) = 20 s, by 20 s + SCAN_EVERY_MS = 21 s on an idle runner.
+  // It can then take up to CAPTURE_MOST_MS (25 s), more than the 9 s
+  // left, as it can in any test (whose capture is evidence for a test
+  // failing anyway). So the test waits for the capture to begin (for as
+  // long as its timeout, which bounds that wait anyway), then puts its
+  // timeout off by twice CAPTURE_MOST_MS, 50 s, as headroom for a loaded
+  // runner, and waits for the capture itself for at most that long.
+  test.setTimeout(NEAR_TIMEOUT_MS);
   await page.setContent('<!doctype html><title>Idle</title><p>Idle</p>');
-  const capture = await stallWatch.next(page, 25000);
+  await stallWatch.started(page, NEAR_TIMEOUT_MS);
+  const headroom = 2 * CAPTURE_MOST_MS;
+  test.setTimeout(testInfo.timeout + headroom);
+  const capture = await stallWatch.next(page, headroom);
   expect(capture.reason).toBe('test about to time out');
   // nothing runs, so nothing pauses; the profile is taken instead
   expect(capture.paused).toBeUndefined();
