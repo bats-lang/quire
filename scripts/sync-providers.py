@@ -14,8 +14,9 @@
                 never sent, so sync-identity.yml checks it.
   fastmail-cors Whether a browser page may now reach Fastmail's files:
                 the CORS preflight a page's PROPFIND would make. Not a
-                failure either way; the app's Sync screen asks the same
-                each time it opens, and offers Fastmail when it can.
+                failure either way. The Sync screen lists Fastmail in
+                the app only, and asks a browser nothing; a notice here
+                says when browsers could have it too.
   round-trips   With a test account's secrets (each service skipped
                 without its own), the file the app keeps, written,
                 read back, written again over a stale version (which
@@ -237,11 +238,12 @@ def fastmail_cors():
     summary("## Fastmail's files from a browser\n")
     if allowed in (origin, '*') and 200 <= status < 300:
         summary(f'The preflight answered {status} with `Access-Control-Allow-Origin: {allowed}`: '
-                'a browser page can now reach Fastmail, and the Sync screen offers Fastmail in browsers too.\n')
-        print('::notice::Fastmail now lets browser pages reach its files (CORS)')
+                'a browser page can now reach Fastmail, so the Sync screen could list Fastmail in browsers too '
+                '(it lists it in the app only).\n')
+        print('::notice::Fastmail now lets browser pages reach its files (CORS): the Sync screen could list it in browsers too')
     else:
         summary(f'The preflight answered {status}, with no CORS headers for a page: '
-                "browsers still can't reach Fastmail's files, so only the app offers Fastmail.\n")
+                "browsers still can't reach Fastmail's files, so only the app lists Fastmail.\n")
 
 
 # ---- round trips ----
