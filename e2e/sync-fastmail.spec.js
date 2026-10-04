@@ -1,11 +1,12 @@
 // Fastmail (#184): its files over WebDAV, at
 // https://myfiles.fastmail.com/quire/quire-sync.json, with the Fastmail
-// address and an app password. Fastmail's WebDAV sends no CORS headers,
-// so a browser page can't reach it: in a browser the row says so and
-// can't be chosen, unless the request the Sync screen sends when it
-// opens gets through (a Fastmail that one day lets pages in). The server
-// is a mock routed at myfiles.fastmail.com (no real network): as Fastmail
-// is today (no CORS), or as one that lets the app's origin in.
+// address and an app password, in the app only. Fastmail's WebDAV sends
+// no CORS headers, so a browser page can't reach it: a browser lists no
+// Fastmail and sends it nothing. The app's requests are native, which no
+// CORS check stands in the way of. The server is a mock routed at
+// myfiles.fastmail.com (no real network): as Fastmail is today to a
+// page (no CORS), or as the app's native requests meet it (played by a
+// mock that lets the page's origin in).
 
 import { test, expect } from './fixtures.js';
 import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen } from './helpers.js';
@@ -16,10 +17,11 @@ const ADDRESS = 'reader@fastmail.com';
 const APP_PASSWORD = 'fm-app-9k2x7q4w';
 
 /** The mock Fastmail: its files, with a folder quire made by MKCOL; with
-    cors, it lets the app's origin in, else it answers as Fastmail does
-    today, 401 with no CORS headers. What was asked of it */
+    cors, it lets the page's origin in (as the app's native requests
+    get through), else it refuses a page, as Fastmail does today. What
+    was asked of it */
 function fastmail({ cors = true } = {}) {
-  const server = { requests: [], probes: 0, folder: false, body: null, version: 0, puts: 0 };
+  const server = { requests: [], folder: false, body: null, version: 0, puts: 0 };
   const allowed = origin => cors ? {
     'Access-Control-Allow-Origin': origin || '*',
     'Access-Control-Allow-Methods': 'GET, PUT, MKCOL, PROPFIND, OPTIONS',
@@ -35,7 +37,6 @@ function fastmail({ cors = true } = {}) {
     // (a routed answer is not checked for them)
     if (!cors) return route.abort('failed');
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers, body: '' });
-    if (request.method() === 'PROPFIND') { server.probes++; return route.fulfill({ status: 207, headers, body: '' }); }
     const basic = 'Basic ' + Buffer.from(`${ADDRESS}:${APP_PASSWORD}`).toString('base64');
     if (request.headers().authorization !== basic) return route.fulfill({ status: 401, headers, body: '' });
     if (request.method() === 'MKCOL' && path === '/quire/') {
@@ -67,6 +68,17 @@ const status = page => panel(page).getByRole('status');
 const fastmailButton = page => panel(page).getByRole('button', { name: 'Sync with Fastmail' });
 const syncRow = page => settingsScreen(page).getByRole('group', { name: 'Sync' });
 
+/** The Android app (its platform played): Fastmail routed in its own
+    context. Its page, and the page's errors */
+async function app(browser, server) {
+  const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await context.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+  await context.route(`${SERVER}/**`, server.handle);
+  const page = await context.newPage();
+  const errors = await start(page);
+  return { context, page, errors };
+}
+
 async function openSync(page) {
   await librarySettings(page);
   await settingsButton(page, 'Sync ›').click();
@@ -77,30 +89,34 @@ async function openSync(page) {
     there yet (404), credentials refused (401) */
 const unexpected = errors => errors.filter(e => !/status of (401|404)/.test(e));
 
-test('in a browser, Fastmail is offered only once it lets a page in, and says why not', async ({ page }) => {
+test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({ page }) => {
   const errors = await start(page);
+  const sent = [];
+  page.on('request', request => { if (request.url().startsWith(SERVER)) sent.push(request.url()); });
   const server = fastmail({ cors: false });
   await page.context().route(`${SERVER}/**`, server.handle);
   await openSync(page);
-  await expect(panel(page)).toContainText("Fastmail works in the Quire app; browsers can't reach Fastmail's files.");
-  // it was asked, and refused the page
-  await expect.poll(() => server.requests.length).toBeGreaterThan(0);
+  await expect(panel(page).getByLabel('Folder URL')).toBeVisible();
   await expect(fastmailButton(page)).toBeHidden();
   await expect(panel(page).getByLabel('Fastmail address')).toBeHidden();
   await expect(panel(page).getByRole('link', { name: 'Make an app password' })).toBeHidden();
-  // nothing of the reader's was sent
-  expect(server.requests.every(r => !r.includes(FILE))).toBe(true);
-  // the browser's log of the refusal is not the app's error
-  expect(unexpected(errors)).toEqual([]);
+  // not named anywhere on the screen
+  await expect(panel(page)).not.toContainText('Fastmail', { useInnerText: true });
+  // opened again, from Settings: still no request
+  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await settingsButton(page, 'Sync ›').click();
+  await expect(panel(page)).toBeVisible();
+  await page.waitForTimeout(500);
+  expect(sent).toEqual([]);
+  expect(server.requests).toEqual([]);
+  expect(errors).toEqual([]);
 });
 
-test("the first sync makes Fastmail's folder, then syncs there; the link makes an app password", async ({ page }) => {
-  const errors = await start(page);
+test("in the app, the first sync makes Fastmail's folder, then syncs there; the link makes an app password", async ({ browser }) => {
   const server = fastmail();
-  await page.context().route(`${SERVER}/**`, server.handle);
+  const { context, page, errors } = await app(browser, server);
   await openSync(page);
   await expect(fastmailButton(page)).toBeVisible();
-  expect(server.probes).toBe(1);
   await expect(panel(page)).toContainText('Syncs through Fastmail');
   // the app password is made in Fastmail's settings, in a tab of its own
   const link = panel(page).getByRole('link', { name: 'Make an app password' });
@@ -112,7 +128,7 @@ test("the first sync makes Fastmail's folder, then syncs there; the link makes a
   await fastmailButton(page).click();
   await expect(status(page)).toHaveText(/^Last synced on /);
   // no file yet: the folder made, then the file written into it
-  const kept = server.requests.filter(r => !r.startsWith('OPTIONS') && !r.startsWith('PROPFIND'));
+  const kept = server.requests.filter(r => !r.startsWith('OPTIONS'));
   expect(kept).toEqual([`GET ${FILE}`, 'MKCOL /quire/', `PUT ${FILE}`]);
   expect(server.puts).toBe(1);
   expect(JSON.parse(server.body).devices.length).toBe(1);
@@ -134,12 +150,12 @@ test("the first sync makes Fastmail's folder, then syncs there; the link makes a
   await expect(status(page)).toHaveText('Sync is off.');
   await expect(panel(page).getByLabel('Fastmail address')).toHaveValue('');
   expect(unexpected(errors)).toEqual([]);
+  await context.close();
 });
 
-test('an address or app password Fastmail refuses is said so, and empty fields are asked for', async ({ page }) => {
-  await start(page);
+test('in the app, an address or app password Fastmail refuses is said so, and empty fields are asked for', async ({ browser }) => {
   const server = fastmail();
-  await page.context().route(`${SERVER}/**`, server.handle);
+  const { context, page } = await app(browser, server);
   await openSync(page);
   await expect(fastmailButton(page)).toBeVisible();
   await fastmailButton(page).click();
@@ -151,20 +167,16 @@ test('an address or app password Fastmail refuses is said so, and empty fields a
   expect(server.puts).toBe(0);
   await panel(page).getByRole('button', { name: 'Done' }).click();
   await expect(syncRow(page)).toContainText('Wrong Fastmail address or app password');
+  await context.close();
 });
 
-test('in the app, Fastmail is offered with no question to it: its requests are native', async ({ browser }) => {
-  const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await context.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, Plugins: {} }; });
+test('in the app, Fastmail is listed with no question to it first', async ({ browser }) => {
   const server = fastmail({ cors: false });
-  await context.route(`${SERVER}/**`, server.handle);
-  const page = await context.newPage();
-  await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  const { context, page } = await app(browser, server);
   await openSync(page);
   await expect(fastmailButton(page)).toBeVisible();
   await expect(panel(page).getByLabel('Fastmail address')).toBeVisible();
-  await expect(panel(page)).not.toContainText("browsers can't reach");
+  await expect(panel(page)).toContainText('Syncs through Fastmail');
   expect(server.requests).toEqual([]);
   await context.close();
 });

@@ -224,7 +224,7 @@ test('in the app, a return from Dropbox that starts the app again is taken once 
   await a.context.close();
 });
 
-test('in the app, Dropbox is not listed without the system browser\'s tab or the app\'s links, and says when the build has no key', async ({ browser }) => {
+test('in the app, Dropbox is not listed without the system browser\'s tab or the app\'s links, nor when the build has no key', async ({ browser }) => {
   const server = dropbox();
   // each plugin without the other: no round trip, so no Dropbox
   for (const plugins of [{ tab: false }, { app: false }]) {
@@ -237,8 +237,8 @@ test('in the app, Dropbox is not listed without the system browser\'s tab or the
 
   const b = await device(browser, server, { key: '' });
   await openSync(b.page);
-  await expect(panel(b.page)).toContainText('Dropbox sync isn\'t set up in this build of Quire.');
   await expect(dropboxButton(b.page)).toBeHidden();
+  await expect(panel(b.page)).not.toContainText('Dropbox', { useInnerText: true });
   expect(unexpected(b)).toEqual([]);
   await b.context.close();
 });
