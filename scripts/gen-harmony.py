@@ -128,6 +128,28 @@ for t in THEMES:
         args.append(f"MODE_light($H.LIGHTERc({L(P('bg'))}, {L(P('fg'))}))")
     out.append(f"prval H_{NAMES[t]}: HARMONY({PALETTES[t]}) = HARMONYc(\n  " + ",\n  ".join(args) + ")")
 
+# The page turn's shade: black at each strength over the page (its
+# four levels' strengths, the strongest last) leaves every pair the
+# page shows legible (VEILED): its text at 7:1, the rest at 4.5:1
+SHADES = {0: (6, 12, 18, 24), 1: (5, 10, 15, 20), 2: (2, 4, 6, 8), 3: (0,), 4: (2, 4, 6, 8)}
+VEILED = [("fg", "bg", 70), ("accent", "bg", 45), ("fg", "hl", 45), ("fg", "hl2", 45), ("markfg", "mark", 45)]
+ROLE_STATIC = {"fg": "FG", "bg": "BG", "accent": "ACCENT", "hl": "HL", "hl2": "HL2", "markfg": "MARKFG", "mark": "MARK"}
+def shaded(c, strength):
+    return sum(((v * (100 - strength) + 50) // 100) << s for v, s in zip(ch(c), (16, 8, 0)))
+def lin_of(v): return f"$CT.LIN_{v:02x}()"
+def lum_of(c): return "$CT.LUMc(" + ", ".join(lin_of(v) for v in ch(c)) + ")"
+def shade_proof(c, strength):
+    return "SHADEc(" + ", ".join(lin_of(v) for v in ch(c) + ch(shaded(c, strength))) + ")"
+for t in THEMES:
+    for strength in SHADES[t]:
+        parts = []
+        for f, b, k in VEILED:
+            fs, bs = shaded(pal[(t, f)], strength), shaded(pal[(t, b)], strength)
+            side = "first" if lum(fs) > lum(bs) else "second"
+            parts.append(f"SHADEDc(PAL{t}_{f}(), PAL{t}_{b}(),\n    {shade_proof(pal[(t, f)], strength)},\n    "
+                         f"{shade_proof(pal[(t, b)], strength)},\n    $CT.CONTRAST_lighter_{side}({lum_of(fs)}, {lum_of(bs)}))")
+        out.append(f"prval V_{NAMES[t]}_{strength}: VEILED({PALETTES[t]}, {strength}) = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
+
 begin = "(* BEGIN proofs: written by scripts/gen-harmony.py *)"
 end = "(* END proofs *)"
 i, j = src.index(begin), src.index(end)

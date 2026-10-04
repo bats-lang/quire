@@ -489,6 +489,19 @@ fn _reader (): void = let
   (* the page turn's gesture region (quire.bats's PAGE_REGION) *)
   val () = ui_attr("page", AGestureRegion, "1")
   val () = ui_named("page", NDocument, "Page")
+  (* a page turn (reader.bats): the shade over the incoming page, and
+     over it the page being left, a copy of the page in turn-sheet,
+     sliding off; both shown only while a page turns, decorative, and
+     taps go through them to the page *)
+  val () = ui_el("reader", "turn-shade", TDiv, "shade")
+  val () = ui_attr("turn-shade", AHidden, "true")
+  val () = _hide("turn-shade")
+  (* page-turn is laid out even while no page turns (idle: hidden), so
+     the copy kept in it is ready for a turn (reader.bats) *)
+  val () = ui_el("reader", "page-turn", TDiv, "turn idle")
+  val () = ui_attr("page-turn", AHidden, "true")
+  val () = ui_el("page-turn", "turn-sheet", TDiv, "leaf")
+  val () = ui_el("page-turn", "turn-gap", TDiv, "tgap")
   (* the running footer, shown while the bars are hidden; what it says
      the page indicator (a status) says too, so it is not read out *)
   val () = ui_el("reader", "footer", TDiv, "foot")
