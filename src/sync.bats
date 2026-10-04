@@ -2466,16 +2466,20 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
   val () = ui_text("sync-title", "Sync")
   val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
-  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Fastmail or Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
   val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
   val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
   val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
   val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
   val () = ui_show("sync-android-row", false)
-  (* Fastmail: its files over WebDAV, with its address and an app
-     password, which Fastmail's settings make (the link and the steps) *)
+  (* Fastmail, in the app only: its files over WebDAV, with its address
+     and an app password, which Fastmail's settings make (the link and
+     the steps). Fastmail's WebDAV sends no CORS headers (checked
+     2026-10-01 and 2026-10-04: its preflight answers 401 with none), so
+     a browser page can't reach it, and a browser lists no Fastmail; the
+     app's requests are native, and can *)
   val () = ui_el("sync-box", "sync-fastmail-row", TDiv, "sfields")
   val () = ui_el("sync-fastmail-row", "sync-fastmail-about", TDiv, "sabout")
+  val () = ui_text_long("sync-fastmail-about", "Syncs through Fastmail's Files, in a folder named quire, with your Fastmail address and an app password.")
   val () = ui_el("sync-fastmail-row", "fastmail-form", TDiv, "sfields")
   val () = ui_el("fastmail-form", "fastmail-fields", TDiv, "sfields")
   val () = _fastmail_fields_make()
@@ -2483,7 +2487,7 @@ implement sync_screen_make () = let
   val () = ui_text_long("fastmail-steps", "Make an app password in Fastmail's Settings, under Privacy & Security: choose Manage app passwords, give the new one access to Files (WebDAV), then copy it here.")
   val () = ui_link_out_https("fastmail-form", "fastmail-app-password", "btn linkout", "Make an app password", "app.fastmail.com/settings/security")
   val () = ui_text_btn("fastmail-form", "sync-fastmail", "btn", "Sync with Fastmail")
-  val () = ui_show("fastmail-form", false)
+  val () = ui_show("sync-fastmail-row", false)
   val () = ui_el("sync-box", "sync-dropbox-row", TDiv, "sfields")
   val () = ui_text_btn("sync-dropbox-row", "sync-dropbox", "btn", "Dropbox")
   val () = ui_el("sync-dropbox-row", "sync-dropbox-about", TDiv, "sabout")
@@ -2544,91 +2548,41 @@ in
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
 end
 
-(* Fastmail's row: its form where Fastmail's files can be reached, or
-   why not. Fastmail's WebDAV sends no CORS headers (checked 2026-10-01
-   and 2026-10-04: its preflight answers 401 with none), so a browser
-   page can't reach it; the app's requests are native, and can *)
-fn _fastmail_offered (reachable: bool): void = let
-  val () = ui_show("fastmail-form", reachable)
-in
-  if reachable then ui_text_long("sync-fastmail-about", "Syncs through Fastmail's Files, in a folder named quire, with your Fastmail address and an app password.")
-  else ui_text_long("sync-fastmail-about", "Fastmail works in the Quire app; browsers can't reach Fastmail's files.")
-end
-
-(* In a browser, whether Fastmail now lets a page in: a request a
-   browser asks Fastmail about first (a PROPFIND, with an Authorization
-   header, as a sync's), whose answer, whatever its status, means the
-   browser let it through. So a Fastmail that one day sends CORS headers
-   is offered with no change here *)
-fn _fastmail_probe (): void = let
-  val method = $A.alloc<byte>(8)
-  val () = $A.write_text(method, 0, $A.text_lit("PROPFIND"), 8)
-  val url = $A.alloc<byte>(29)
-  val () = $A.write_text(url, 0, $A.text_lit("https://myfiles.fastmail.com/"), 29)
-  (* no one's: an empty user name and password *)
-  val authorization = $A.alloc<byte>(10)
-  val () = $A.write_text(authorization, 0, $A.text_lit("Basic Og=="), 10)
-  (* no If-Match, and no body *)
-  val no_match = $A.alloc<byte>(1)
-  val no_body = $A.alloc<byte>(1)
-  val @(method_frozen, method_bytes) = $A.freeze<byte>(method)
-  val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
-  val @(authorization_frozen, authorization_bytes) = $A.freeze<byte>(authorization)
-  val @(no_match_frozen, no_match_bytes) = $A.freeze<byte>(no_match)
-  val @(no_body_frozen, no_body_bytes) = $A.freeze<byte>(no_body)
-  val pending = $FE.fetch_send(method_bytes, 8, url_bytes, 29, authorization_bytes, 10, no_match_bytes, 0, no_body_bytes, 0)
-  val () = release_bytes(no_body_frozen, no_body_bytes)
-  val () = release_bytes(no_match_frozen, no_match_bytes)
-  val () = release_bytes(authorization_frozen, authorization_bytes)
-  val () = release_bytes(url_frozen, url_bytes)
-  val () = release_bytes(method_frozen, method_bytes)
-in
-  $P.finish<$FE.fetched>(pending, llam(got) => let
-    val reachable = (case+ got of
-      | ~$FE.NoResponse() => false
-      | ~$FE.Responded(response) => let
-          val () = $BD.blob_free($FE.fetch_body(response))
-        in true end): bool
-  in if layer_is_open(LSync()) then _fastmail_offered(reachable) else () end)
-end
-
 (* Opens the sync screen *)
 #pub fn sync_screen_open (): void
 implement sync_screen_open () = let
-  (* Use Android in the app, Google Drive in a browser: what it does, or
-     (in the app) that this build has no client to sign in with *)
+  (* Use Android in the app, Google Drive in a browser, and what it
+     does; a build with no client to sign in with lists neither *)
   val app = $BAPP.is_native_platform()
   val client = $A.alloc<byte>(256)
   val client_len = sync_clients_google(client)
   val () = $A.free<byte>(client)
   (* in a browser, a build with no client lists no Google Drive, and
      Google's script is loaded only when there is one *)
-  val android = (if app then $GOOGLE.google_token_available()
-    else if client_len > 0 then $GOOGLE.google_token_available() else false): bool
+  val android = (if client_len > 0 then $GOOGLE.google_token_available() else false): bool
   val () = ui_show("sync-android-row", android)
   val () = ui_show("sync-android", app)
   val () = ui_show("sync-google", ~app)
   val () = (if ~android then ()
-    else if client_len <= 0 then ui_text_long("sync-android-about", "Android sync isn't set up in this build of Quire.")
     else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
     else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
   (* Dropbox: in a browser, its page signs the reader in in place of
      this one; in the app, in the system's browser over it (an app
-     without that browser does not list it). What it does, or that this
-     build has no key to sign in with *)
+     without that browser does not list it), and what it does; a build
+     with no key to sign in with does not list it *)
   val key = $A.alloc<byte>(256)
   val key_len = sync_clients_dropbox(key)
   val () = $A.free<byte>(key)
-  val dropbox = (if app then _round_trip_available() else true): bool
+  val dropbox = (if key_len <= 0 then false else if app then _round_trip_available() else true): bool
   val () = ui_show("sync-dropbox-row", dropbox)
-  val () = ui_show("sync-dropbox", key_len > 0)
   val () = (if ~dropbox then ()
-    else if key_len <= 0 then ui_text_long("sync-dropbox-about", "Dropbox sync isn't set up in this build of Quire.")
     else if app then ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page opens in your browser to sign you in, then brings you back here.")
     else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
-  (* Fastmail: offered in the app; in a browser, once it answers one *)
-  val () = (if app then _fastmail_offered(true)
-    else let val () = _fastmail_offered(false) in _fastmail_probe() end)
+  (* Fastmail: in the app only *)
+  val () = ui_show("sync-fastmail-row", app)
+  (* what sync keeps the same, and where: Fastmail only where it is listed *)
+  val () = (if app then ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Fastmail or Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
+    else ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced."))
   val () = _fields_show()
   val () = _status_show()
   val () = ui_show("sync-off", _store_on())
@@ -3726,7 +3680,7 @@ implement sync_start () = let
         in true end): bool
   in $P.ret<bool>(readable) end)
   (* the clients are read first: Dropbox's key is needed to finish its
-     sign-in, and Use Android says it is not set up while there are none *)
+     sign-in, and Use Android is listed only when there are some *)
   val clients_read = $P.and_then<bool><bool>(state_read, llam(readable) =>
     $P.and_then<int><bool>(sync_clients_load(), llam(_) => $P.ret<bool>(readable)))
   (* a state that could not be read leaves sync off this session: a

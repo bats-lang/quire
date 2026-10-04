@@ -4,7 +4,7 @@
 // comes back with a code. Dropbox (its sign-in page, token endpoint and
 // files API) is a mock routed in each browser context: no real network.
 
-import { test, expect, clientsServed, fastmailStubbed, fastmailRefused } from './fixtures.js';
+import { test, expect, clientsServed } from './fixtures.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
@@ -14,7 +14,6 @@ import {
 /** A browser with Dropbox routed, and the build's key (none: key '') */
 async function device(browser, server, { key = KEY } = {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await fastmailStubbed(context);
   await context.route('https://www.dropbox.com/oauth2/authorize**', server.authorize);
   await context.route('https://api.dropboxapi.com/**', server.api);
   await context.route('https://content.dropboxapi.com/**', server.api);
@@ -22,7 +21,7 @@ async function device(browser, server, { key = KEY } = {}) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return { context, page, errors };
@@ -158,12 +157,12 @@ test('a Dropbox sign-in the reader refuses changes nothing, and a code it did no
   await a.context.close();
 });
 
-test('a build with no Dropbox key says Dropbox sync is not set up', async ({ browser }) => {
+test('a build with no Dropbox key lists no Dropbox', async ({ browser }) => {
   const server = dropbox();
   const a = await device(browser, server, { key: '' });
   await openSync(a.page);
-  await expect(panel(a.page)).toContainText('Dropbox sync isn\'t set up in this build of Quire.');
   await expect(dropboxButton(a.page)).toBeHidden();
+  await expect(panel(a.page)).not.toContainText('Dropbox', { useInnerText: true });
   expect(unexpected(a)).toEqual([]);
   await a.context.close();
 });
