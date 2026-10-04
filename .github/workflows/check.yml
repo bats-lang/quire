@@ -45,13 +45,9 @@ jobs:
       - name: Generate PWA
         run: ./dist/debug/gen-pwa
 
-      # The OAuth clients it signs in with: public IDs. Google's are
-      # committed (scripts/sync-clients.env); Dropbox's key, not yet
-      # registered (#239), from the repository's variables (a secret of
-      # the same name works too)
+      # The OAuth clients it signs in with: public IDs, committed in
+      # scripts/sync-clients.env
       - name: Sync clients
-        env:
-          DROPBOX_CLIENT_ID: ${{ vars.DROPBOX_CLIENT_ID || secrets.DROPBOX_CLIENT_ID }}
         run: scripts/sync-clients.sh dist/pwa
 
       # The same commit always gives the same version, whatever the clock

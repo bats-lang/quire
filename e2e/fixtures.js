@@ -17,6 +17,16 @@ export async function googleStubbed(context) {
   }));
 }
 
+/** The build's OAuth clients, as sync-clients.json serves them, in place
+    of the ones committed in scripts/sync-clients.env: a spec that plays
+    a provider serves its own test client, and one that tests a build
+    with no client serves none ({}) */
+export async function clientsServed(context, clients) {
+  await context.route('**/sync-clients.json', route => route.fulfill({
+    status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(clients),
+  }));
+}
+
 export const test = base.extend({
   stallWatch: [async ({ browser }, use, testInfo) => {
     const watch = stallWatch(browser, testInfo);

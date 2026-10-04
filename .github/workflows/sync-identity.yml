@@ -1,7 +1,8 @@
 # What the sync services need registered for Quire (bats-lang/quire#184):
 # the Android signing key's fingerprints, computed from the keystore
-# secrets ANDROID.md describes, and a check of the Google clients and
-# Play's signing SHA-1 committed in scripts/sync-clients.env (#200).
+# secrets ANDROID.md describes, and a check of the Google clients,
+# Play's signing SHA-1 and Dropbox's app key committed in
+# scripts/sync-clients.env (#200, #239).
 # Fingerprints and client IDs are public (they are in every signed APK
 # and page); the keystore and its passwords never leave the runner.
 name: sync identity
@@ -68,12 +69,12 @@ jobs:
       - name: Sync client IDs
         env:
           UPLOAD_SHA1: ${{ steps.upload.outputs.sha1 }}
-          DROPBOX_CLIENT_ID: ${{ vars.DROPBOX_CLIENT_ID || secrets.DROPBOX_CLIENT_ID }}
         run: |
           value() { sed -n "s/^$1=//p" scripts/sync-clients.env; }
           web=$(value GOOGLE_WEB_CLIENT_ID)
           android=$(value GOOGLE_ANDROID_CLIENT_ID)
           play=$(value PLAY_SIGNING_SHA1)
+          dropbox=$(value DROPBOX_CLIENT_ID)
           for id in "$web" "$android"; do
             printf '%s' "$id" | grep -Eqx '[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com' \
               || { echo "::error::scripts/sync-clients.env: '$id' is not a Google client ID"; exit 1; }
@@ -84,20 +85,20 @@ jobs:
           # Play Console shows the upload key's certificate beside the app
           # signing key's: the one committed must be Play's own
           test "$play" != "$UPLOAD_SHA1" || { echo "::error::PLAY_SIGNING_SHA1 is the upload key's SHA-1, not Play's app signing key's"; exit 1; }
-          if [ -n "$DROPBOX_CLIENT_ID" ]; then dropbox=set; else dropbox=missing; fi
+          printf '%s' "$dropbox" | grep -Eqx '[a-z0-9]{8,64}' \
+            || { echo "::error::scripts/sync-clients.env: DROPBOX_CLIENT_ID is not a Dropbox app key"; exit 1; }
           echo "Play app signing SHA-1: $play"
-          echo "DROPBOX_CLIENT_ID: $dropbox" >&2
           {
             echo "## Sync clients"
             echo
-            echo "Google's are committed in \`scripts/sync-clients.env\`; Dropbox's key is a repository variable until it is registered (#239)."
+            echo "All are committed in \`scripts/sync-clients.env\`."
             echo
             echo "| Name | |"
             echo "|---|---|"
             echo "| Google Web application client | \`$web\` |"
             echo "| Google Android client (upload key) | \`$android\` |"
             echo "| Play app signing SHA-1 | \`$play\` |"
-            echo "| \`DROPBOX_CLIENT_ID\` | $dropbox |"
+            echo "| Dropbox app key (Quire reader) | \`$dropbox\` |"
             echo
             echo "## Entries to register"
             echo
