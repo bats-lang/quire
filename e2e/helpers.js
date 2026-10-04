@@ -6,7 +6,6 @@
 // label or visible text. No test depends on an element's id or class.
 
 import { expect } from '@playwright/test';
-import { fastmailRefused } from './fixtures.js';
 import { createEpub, solidPng } from './create-epub.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -80,9 +79,13 @@ export const importInput = page => page.getByLabel('Import EPUB');
 /** The list of books */
 export const books = page => page.getByRole('region', { name: 'Books' });
 
-/** Every book's row in the list: a group named by the book's title,
-    holding its card and its "Book menu" button */
-export const cards = page => books(page).getByRole('group');
+/** The book to continue, above the list (and then not in it, #273) */
+export const continueReading = page => page.getByRole('region', { name: 'Continue reading' });
+
+/** Every book's row the library shows, in order: the book to continue,
+    then the list; each a group named by the book's title, holding its
+    card and its "Book menu" button */
+export const cards = page => page.getByRole('region', { name: /^(Continue reading|Books)$/ }).getByRole('group');
 
 /** The row of the book whose card has text */
 export function card(page, text) {
@@ -161,7 +164,7 @@ export async function bookMenu(page, text) {
 export async function start(page) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return errors;

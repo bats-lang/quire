@@ -1219,7 +1219,7 @@ fn _stats_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_show() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1267,12 +1267,21 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 22) = let
         | ~$R.some(CollectionRename()) => let val () = _collection_rename() in false end
         | ~$R.some(CollectionDelete()) => let val () = lib_coll_delete(lib_coll_shown()) in false end): bool
     in if changed then let val () = set_save(lib_state_get()) in 0 end else 0 end)
-  (* the book to continue: opened *)
+  (* the book to continue: opened, and its book menu, as a list card's *)
   val listeners = RCons(listeners, OnEl("continue-list"), "click", llam(h) => let
       val clicked = _target(h)
       val book = _row_of(clicked, "continue")
+      val menu_book = _row_of(clicked, "continue-more")
       val () = _target_free(clicked)
-    in if book >= 0 then let val () = _open_book(book) in 0 end else 0 end)
+    in
+      if book >= 0 then let val () = _open_book(book) in 0 end
+      else if menu_book >= 0 then let val () = _menu_open(menu_book) in 0 end
+      else 0
+    end)
+  val listeners = RCons(listeners, OnEl("continue-list"), "contextmenu", llam(h) => let
+      val () = $EV.prevent_default()
+      val book = _target_number(h, "continue")
+    in if book >= 0 then let val () = _menu_open(book) in 0 end else 0 end)
   val listeners = RCons(listeners, OnEl("book-list"), "contextmenu", llam(h) => let
       val () = $EV.prevent_default()
       val book = _target_number(h, "book")
