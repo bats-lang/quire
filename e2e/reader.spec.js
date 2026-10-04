@@ -343,7 +343,8 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   expect(await place(page)).toEqual(at);
   await note.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(note).toBeHidden();
-  await expect(bookPage(page)).toBeFocused();
+  // the focus is back on the reference that opened it
+  await expect(bookPage(page).getByRole('link', { name: '1', exact: true })).toBeFocused();
   // a footnote in the same chapter, its reference decoded, closed with Escape
   await bookPage(page).getByRole('link', { name: '2', exact: true }).click();
   await expect(note).toContainText('Same-chapter note & its words.');
@@ -1099,17 +1100,30 @@ test('Escape closes the overlay opened last, one at a time', async ({ page }) =>
   await start(page);
   await readBook(page, { title: 'Layered', author: 'L', rawChapters: chapters(1) });
   await openSettings(page);
-  // the search panel opens over the typography sheet
-  await page.keyboard.press('/');
   const search = dialog(page, 'Search in book');
   const sheet = dialog(page, 'Typography and theme');
-  await expect(search).toBeVisible();
+  // the sheet is modal: the reader's keys (/ opens search) are not
+  // taken behind it
+  await page.keyboard.press('/');
   await expect(sheet).toBeVisible();
-  await page.keyboard.press('Escape');
   await expect(search).toBeHidden();
-  await expect(sheet).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(sheet).toBeHidden();
+  // a note's dialog over the annotations panel: Escape answers the
+  // dialog, then closes the panel
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await showChrome(page);
+  await control(page, 'Annotations').click();
+  const panel = dialog(page, 'Annotations');
+  const note = dialog(page, 'Note');
+  await panel.getByRole('button', { name: 'Add note' }).click();
+  await expect(note).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(note).toBeHidden();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel).toBeHidden();
 });
 
 // Scrolled: the chapter down the page, a screenful for a page

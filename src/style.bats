@@ -1715,7 +1715,7 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:n
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4500] sheet(after, false, false) = let
+fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1778,6 +1778,21 @@ fn _overlays {left:nat | left >= 4500} (sheet: sheet(left, false, false)): [afte
   (* the offer of a new version, above the copy status *)
   val sheet = rule(sheet, ".toast.tnew")
   val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 280px)")
+  val sheet = close(sheet)
+  (* the scrim under a reader panel (.panel, .sheet, at 12), over the
+     reader and its bars: a ground with no text, as the dialog's veil *)
+  val sheet = rule(sheet, ".scrim")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Inset(), "0")
+  val sheet = veil(sheet)
+  val sheet = lay(sheet, ZIndex(), "11")
+  val sheet = close(sheet)
+  (* the focus stops around the reader's panels: fixed, so the focus
+     coming to one scrolls nothing, and empty *)
+  val sheet = rule(sheet, ".fstop")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = lay(sheet, Left(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
@@ -2371,13 +2386,16 @@ fn _reader {left:nat | left >= 8600} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 6000} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6000] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6100] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, Left(), "0")
-  val sheet = lay(sheet, Width(), "min(420px,100vw)")
+  (* a modal side panel leaves a strip of the scrim, a tap on which
+     closes it: as wide as the screen less 56 px, as Material's modal
+     navigation drawer *)
+  val sheet = lay(sheet, Width(), "min(420px,calc(100vw - 56px))")
   val sheet = lay(sheet, ZIndex(), "12")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, Display(), "flex")
