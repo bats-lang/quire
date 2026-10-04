@@ -7,16 +7,40 @@
 # snippet (snippet.bats) that is put into a copy of this checkout, in the
 # file named in its `file`, before the line equal to its `before`.
 # Each fixture under tests/static/accept/ must then pass `bats check`;
-# each under tests/static/reject/ must fail it, with the message in its
-# `expect` file (so it is rejected for the right reason).
+# each under tests/static/reject/ must fail it, exactly as its `expect`
+# says (below).
 #
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
 # the app itself), `checkers` (ids.py and case_plus.py, with their
 # fixtures), and fixtures, `accept/<name>` or `reject/<name>`. With none,
-# it runs the checkers and every fixture. Each fixture starts from no
-# build (its copy leaves out dist/), so a check run before it does not
-# make it faster.
+# it runs the checkers and every fixture.
+#
+# A fixture knows what proof fails when it is built. A reject fixture's
+# `expect` names the function of its snippet, the line of the snippet
+# patsopt reports, and patsopt's error word for word:
+#
+#   function <name>
+#   line <n>
+#   <the error, after "error(N): ", and the lines patsopt adds to it>
+#
+# and expect.py passes it only when that is what the check fails with
+# and nothing else: in the module the snippet is in, at that line, in
+# that function. A substring another error could also hold is not
+# enough.
+#
+# The fixtures start from the app checked whole: the app is checked first
+# (as `check`, or for the fixtures alone) in a copy of the checkout, and
+# each fixture is put into that copy with its build as the check left
+# it (each of check's passes keeps a cache of its own), so only the
+# module its snippet is in is checked again, and a reject fixture stops
+# at its error. A snippet adds private code, which only moves the #pub
+# declarations after it to other lines of its module's .sats, and bats
+# checks the modules that staload a .sats again only when more than that
+# changed (bats-lang/bats#243). patsopt names C symbols by the absolute
+# path of their files, so every fixture is checked at the same path, one
+# after another. The app must check for its fixtures to mean anything,
+# so a fixture run fails when the app does.
 #
 # usage: tests/static/run.sh <repository-dir> [<member> ...]
 #        (bats must be on PATH)
@@ -42,33 +66,32 @@ for member in $selected; do
   esac
 done
 
+# The fixtures to run, as accept/<name> and reject/<name>
+fixtures=""
+for verdict in accept reject; do
+  for d in "$ROOT"/tests/static/$verdict/*/; do
+    [ -d "$d" ] || continue
+    n=$(basename "$d")
+    if named "$verdict/$n"; then fixtures="$fixtures $verdict/$n"; fi
+  done
+done
+
 fail=0
 
-# The app itself
-if named check; then
-  if (cd "$ROOT" && bats check --repository "$repository") > "$TMP/app.log" 2>&1; then echo "ok   check"
-  else echo "FAIL check:"; cat "$TMP/app.log"; fail=1; fi
-fi
-
-check() { # fixture dir -> 0 when bats check passes; log in $TMP/<name>.log
-  n=$(basename "$1")
-  w="$TMP/w-$n"
-  mkdir -p "$w"
-  # the checkout, with its fetched modules and build cache (so only what
-  # the snippet changes is compiled again), but not the outputs
+# The app itself, checked whole in a copy of the checkout (with its
+# fetched modules, not its outputs): as `check`, and as what the fixtures
+# start from, its build kept aside to be put back after each
+app="$TMP/app"
+if named check || [ -n "$fixtures" ]; then
+  mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
-    --exclude=./test-results --exclude=./.git .) | (cd "$w" && tar xf -)
-  f="$w/$(cat "$1/file")"
-  before=$(cat "$1/before")
-  if ! grep -qxF -- "$before" "$f"; then
-    echo "no line \"$before\" in $(cat "$1/file")" > "$TMP/$n.log"
-    return 2
-  fi
-  awk -v before="$before" -v snip="$1/snippet.bats" '
-    $0 == before && !done { while ((getline l < snip) > 0) print l; print ""; done = 1 }
-    { print }' "$f" > "$f.new" && mv "$f.new" "$f"
-  (cd "$w" && bats check --repository "$2") > "$TMP/$n.log" 2>&1
-}
+    --exclude=./build --exclude=./test-results --exclude=./.git .) | (cd "$app" && tar xf -)
+  if (cd "$app" && bats check --repository "$repository") > "$TMP/app.log" 2>&1; then
+    if named check; then echo "ok   check"; fi
+  elif named check; then echo "FAIL check:"; cat "$TMP/app.log"; fail=1
+  else echo "FAIL check (the app, which the fixtures start from):"; cat "$TMP/app.log"; fail=1; fi
+  [ -z "$fixtures" ] || cp -a "$app/build" "$TMP/build-checked"
+fi
 
 # Element ids (ids.py): the app's own, and the checker's fixtures, each
 # a src.bats that must pass it or (reject/) fail it with its `expect`
@@ -102,20 +125,39 @@ for d in "$ROOT"/tests/static/case/reject/*/; do
 done
 fi
 
-for d in "$ROOT"/tests/static/accept/*/; do
-  [ -d "$d" ] || continue
-  n=$(basename "$d")
-  named "accept/$n" || continue
-  if check "$d" "$repository"; then echo "ok   accept/$n"
-  else echo "FAIL accept/$n: should type-check"; grep -E 'error|no line' "$TMP/$n.log" | head -5; fail=1; fi
-done
-
-for d in "$ROOT"/tests/static/reject/*/; do
-  [ -d "$d" ] || continue
-  n=$(basename "$d")
-  named "reject/$n" || continue
-  if check "$d" "$repository"; then echo "FAIL reject/$n: should be rejected"; fail=1
-  elif grep -qF -- "$(cat "$d/expect")" "$TMP/$n.log"; then echo "ok   reject/$n"
-  else echo "FAIL reject/$n: rejected, but not with: $(cat "$d/expect")"; grep -E 'error|no line' "$TMP/$n.log" | head -5; fail=1; fi
+# The fixtures, one after another, each put into the checked copy
+for member in $fixtures; do
+  fixture="$ROOT/tests/static/$member"
+  n=$(basename "$member")
+  file=$(cat "$fixture/file")
+  f="$app/$file"
+  before=$(cat "$fixture/before")
+  log="$TMP/$n.log"
+  started=$(date +%s)
+  if ! grep -qxF -- "$before" "$f"; then
+    echo "FAIL $member: no line \"$before\" in $file"; fail=1; continue
+  fi
+  # the line of the module the snippet's first line is at
+  at=$(grep -nxF -- "$before" "$f" | head -1 | cut -d: -f1)
+  awk -v before="$before" -v snip="$fixture/snippet.bats" '
+    $0 == before && !done { while ((getline l < snip) > 0) print l; print ""; done = 1 }
+    { print }' "$f" > "$f.new" && mv "$f.new" "$f"
+  status=0
+  (cd "$app" && bats check --repository "$repository") > "$log" 2>&1 || status=$?
+  took="($(( $(date +%s) - started )) s)"
+  case $member in
+    accept/*)
+      if [ "$status" = 0 ]; then echo "ok   $member $took"
+      else echo "FAIL $member: should type-check"; grep -E 'error' "$log" | head -5; fail=1; fi ;;
+    reject/*)
+      if [ "$status" = 0 ]; then echo "FAIL $member: should be rejected"; fail=1
+      elif python3 "$ROOT/tests/static/expect.py" "$fixture" "$log" "$at" > "$TMP/$n.expect" 2>&1; then echo "ok   $member $took"
+      else echo "FAIL $member: rejected, but not as its expect says: $(cat "$TMP/$n.expect")"; grep -E 'error' "$log" | head -5; fail=1; fi ;;
+  esac
+  # the module and the build back as the app's check left them (cp -p:
+  # the same bytes and mtime, so the module is fresh again)
+  cp -p "$ROOT/$file" "$f"
+  rm -rf "$app/build"
+  cp -a "$TMP/build-checked" "$app/build"
 done
 exit $fail
