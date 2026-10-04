@@ -572,7 +572,14 @@ only where its platform has it, by its own `data-hide`.
   library imports (`OnExternalFiles`); pwa writes no JS of its own
   (bats-lang/pwa#49), so bridge's service worker keeps a file shared
   with the installed web app, and bridge's `batsNative` entry points
-  are what the Android activity calls.
+  are what the Android activity calls. They are asked for only once
+  the stored library is read (#262): `_external_wait` in
+  `src/bin/quire.bats` needs the proof `LIBRARY_READ`, which only
+  `_library_read` makes, after `lib_load`, so a book is never added
+  to the library the read then replaces; until then the bridge keeps
+  the files in their order. When the library could not be read, each
+  file is kept (`_handed_kept`, linear) and not added, and the banner
+  says so.
 
 ## What allocates is linear
 
@@ -838,6 +845,39 @@ pointer only once it has moved more than 4 px: capture at pointerdown
 would send the click to the reader view instead of the button under it,
 so no button in the reader could be clicked.
 
+Every page turn is animated (#246): a tap, a key, a button, reading
+aloud and a drag. A copy of the page is kept in an overlay
+(`page-turn`, idle: laid out but `visibility:hidden`), made by
+`ui_copy_inert` in one flush of the DOM stream's own operations
+(bridge's CLONE_NODE, then the copy's tabindex and gesture region
+removed, `inert` set, its scroll set: quire's policy, not bridge's),
+again a moment (`COPY_SETTLE_MS`) after the page last changed (a
+chapter shown, laid out anew, an image come in), so a turn only
+scrolls the copy to the place and shows it: on a 300 KB chapter its
+first frame comes in 20 to 30 ms, where making the copy at the turn
+took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
+instant turn's, in the same page). A turn shows only a `fresh_copy`,
+which only `_copy_ready` gives, making a stale copy again first, so no
+turn shows a chapter or a layout gone. The page
+itself goes to the incoming page at once, so the place, the indicator
+and the arenas' window move as before. The overlay is a strip of
+[copy | gap] scrolled each frame, so the copy slides off (mirrored
+right to left, along the axis for `Down`) with the stylesheet's edge
+shadow, over a shade (`turn-shade`) on the page beneath. 280 ms,
+eased out; a drag's commit takes what is left. Under
+`prefers-reduced-motion: reduce` a turn is instant and nothing is laid
+over the page. The turn is a `turn_cell` in `src/reader.bats`
+(`TurnStill`, `TurnHeld`, `TurnReturning`, `TurnWaiting`,
+`TurnSliding`), each holding a linear `turn_sheet(HELD | SLID)` whose
+constructors are local: a sliding sheet ends only by `_sheet_lift`, a
+held one only by `_sheet_put_back` (the page back at its place) or
+`_sheet_commit`, so no turn, interrupted or late, leaves the copy over
+the page or the page between two places (`tests/static`'s
+`page-turn-*`). The shade's levels are proven in each theme
+(`VEILED`, written by `scripts/gen-harmony.py`): under it the text
+keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
+none.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for
@@ -933,8 +973,12 @@ table's length, in its type, is at most 127: the bridge's last slot
 shares the bridge's table, so no listener of the table can take it.
 The platform's typed listeners take their slots in the same table:
 full screen's (`RFullscreen`), speech's (`RSpeech`), the install
-offer's (`RInstallOffer`) and the app's links' (`RAppLink`), each given
-its event as bridge decodes it.
+offer's (`RInstallOffer`), the app's links' (`RAppLink`) and the page's
+fonts' (`RFonts`), each given its event as bridge decodes it. A
+chapter's pages are counted again as it is shown, for 3 s (`_settle`),
+and whenever a load of the page's fonts ends (`RFonts`, bridge's
+`listen_fonts_loaded`): the reading face can arrive after those 3 s,
+and the count made with its fallback would stay.
 
 ## A page that stops answering in e2e explains itself (#244)
 

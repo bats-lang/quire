@@ -21,6 +21,7 @@ staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
+staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
 #use result as R
 staload "mem.sats"
 
@@ -282,6 +283,46 @@ fn _set_url_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{value_loc:agz}{value_s
   val () = _set_url_bytes(id_bytes, id_len, name, value_bytes, value_len)
   val () = release_bytes(value_frozen, value_bytes)
 in release_bytes(id_frozen, id_bytes) end
+
+(* A copy of element source, made copy and put at the end of element
+   parent's children, scrolled as scroll says: a picture of what
+   source shows, which nothing can use. It is inert (no focus, no
+   click, nothing read out inside it), and it has neither source's
+   focus stop (tabindex) nor its gesture region; the elements inside
+   have no ids (bridge's CLONE_NODE drops them: an id names one
+   element). All of it goes in one flush, so the copy is never shown
+   half made *)
+#pub datavtype scrolled = ScrolledAcross of (int) | ScrolledDown of (int)
+
+(* Element id scrolled in document, one axis *)
+fn _scroll_in {doc_loc,id_loc:agz}{id_len:pos | id_len < 256}
+  (document: !$D.document(doc_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, scroll: scrolled): void =
+  case+ scroll of
+  | ~ScrolledAcross(left) => $D.set_scroll_left(document, id_bytes, id_len, left)
+  | ~ScrolledDown(top) => $D.set_scroll_top(document, id_bytes, id_len, top)
+
+#pub fn ui_copy_inert {source_len,parent_len,copy_len:pos | source_len < 256; parent_len < 256; copy_len < 256}
+  (source: string source_len, parent: string parent_len, copy: string copy_len, scroll: scrolled): void
+implement ui_copy_inert (source, parent, copy, scroll) = let
+  val source_len = _length(source)
+  val parent_len = _length(parent)
+  val copy_len = _length(copy)
+  val @(source_frozen, source_bytes) = $A.freeze<byte>(_literal_bytes(source, source_len))
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(copy_frozen, copy_bytes) = $A.freeze<byte>(_literal_bytes(copy, copy_len))
+  val empty = $A.alloc<byte>(1)
+  val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.clone_element(document, source_bytes, source_len, parent_bytes, parent_len, copy_bytes, copy_len)
+  val () = $D.remove_attr(document, copy_bytes, copy_len, $D.Tabindex)
+  val () = $D.remove_attr(document, copy_bytes, copy_len, $D.Data("gesture-region"))
+  val () = $D.set_attr(document, copy_bytes, copy_len, $D.Inert, empty_bytes, 0, 0)
+  val () = _scroll_in(document, copy_bytes, copy_len, scroll)
+  val () = $D.destroy(document)
+  val () = release_bytes(empty_frozen, empty_bytes)
+  val () = release_bytes(source_frozen, source_bytes)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(copy_frozen, copy_bytes) end
 
 (* The source of image id emptied: "data:,", an empty text, so it shows
    nothing until it is given one *)
@@ -1063,8 +1104,9 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
    datatype, take a slot of the table each: full screen entered or
    left (RFullscreen), reading aloud's events (RSpeech) and the
    browser's offer to install the app coming and going
-   (RInstallOffer), and the addresses the native app is opened at
-   (RAppLink: a sign-in in the system's browser coming back). *)
+   (RInstallOffer), the addresses the native app is opened at
+   (RAppLink: a sign-in in the system's browser coming back), and a load
+   of the page's fonts ending (RFonts). *)
 #pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
@@ -1073,6 +1115,7 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {count:nat} RSpeech(count + 1) of (regs(count), ($SP.speech_event) -<lincloptr1> void)
   | {count:nat} RInstallOffer(count + 1) of (regs(count), ($BAPP.install_offer) -<lincloptr1> void)
   | {count:nat} RAppLink(count + 1) of (regs(count), ([k:pos] $BD.dblob(k)) -<lincloptr1> void)
+  | {count:nat} RFonts(count + 1) of (regs(count), ($ME.fonts_status) -<lincloptr1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
@@ -1117,6 +1160,10 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | ~RAppLink(rest, callback) => let
       val position = _listen_all(rest)
       val () = $AL.listen_app_link(position, callback)
+    in position + 1 end
+  | ~RFonts(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $ME.listen_fonts_loaded(position, callback)
     in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the

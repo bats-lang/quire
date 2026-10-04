@@ -49,6 +49,10 @@ NAMERS['ui_labelled'] = (0, 2)
 NAMERS['_is'] = (1,)
 for maker in MAKERS:
     NAMERS[maker] = (0,)
+# an inert copy of an element (source, parent, copy): it makes copy, and
+# names its source and its parent
+MAKERS['ui_copy_inert'] = (2,)
+NAMERS['ui_copy_inert'] = (0, 1)
 # function -> the numbered ids it makes or names: each the position of
 # its prefix argument, and its suffix (none, an argument's position, or
 # the suffix itself); the family is all of prefix + number + suffix

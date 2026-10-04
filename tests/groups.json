@@ -12,7 +12,8 @@
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
-      "spreads.spec.js"
+      "spreads.spec.js",
+      "page-turn.spec.js"
     ],
     "reading-tools": [
       "annotations.spec.js",
@@ -77,6 +78,22 @@
     "style": [
       "reject/role-unmatched",
       "reject/theme-unmatched"
+    ],
+    "page-turn": [
+      "accept/page-turn-ended",
+      "reject/page-turn-forged-sheet",
+      "reject/page-turn-held-lifted",
+      "reject/page-turn-left-unfinished"
+    ],
+    "page-turn-copy": [
+      "accept/page-turn-fresh-copy",
+      "reject/page-turn-forged-copy",
+      "reject/page-turn-copy-marked"
+    ],
+    "external-files": [
+      "reject/library-read-forged",
+      "reject/library-reading-unmatched",
+      "reject/external-file-dropped"
     ]
   }
 }

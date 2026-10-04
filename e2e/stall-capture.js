@@ -37,7 +37,20 @@ const SCAN_EVERY_MS = 1000; // new contexts and pages are armed this often
 const COMMAND_MS = 2000;    // how long a DevTools command is waited for
 const PAUSE_MS = 3000;
 const PROFILE_MS = 2000;
+// a test's pages are captured this long before its timeout (a third of a shorter one)
 const TIMEOUT_MARGIN_MS = 15000;
+
+/**
+ * The longest a capture can take, every wait in `record` and
+ * `captureArmed` run out one after another: the arming waited for (1
+ * command); the interrupting command, the task and Debugger.pause (3);
+ * the pause itself (PAUSE_MS); the debugger disabled, enabled and its
+ * breakpoints made inactive again (3); Profiler.enable and
+ * Profiler.start (2); the profile (PROFILE_MS); Profiler.stop (1). The
+ * renderers' CPU time (a session, two reads and 1 s between them) is
+ * taken alongside, and is shorter. 10 x 2 s + 3 s + 2 s = 25 s.
+ */
+export const CAPTURE_MOST_MS = 10 * COMMAND_MS + PAUSE_MS + PROFILE_MS;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -220,7 +233,8 @@ export function summary(result) {
  * given to watchContext, is watched at once, any other within 1 s), probes
  * each, captures a page that stops answering (once) and every page when
  * the test is about to time out. `captures` holds what it took;
- * `next(page, ms)` waits for a capture of that page.
+ * `next(page, ms)` waits for a capture of that page, and
+ * `started(page, ms)` for one to begin.
  */
 export function stallWatch(browser, testInfo) {
   const armed = new Map();     // page -> its armed session (a promise)
@@ -228,6 +242,7 @@ export function stallWatch(browser, testInfo) {
   const watchedContexts = new Set();
   const running = new Set();   // captures in progress
   const captures = [];
+  const starts = [];           // the pages whose capture has begun
   const waiters = [];
   let stopped = false;
   let count = 0;
@@ -262,6 +277,8 @@ export function stallWatch(browser, testInfo) {
     return result;
   };
   const start = (page, reason) => {
+    starts.push(page);
+    for (const waiter of waiters.splice(0)) waiter();
     const job = record(page, reason).catch((error) => console.error(`[stall-capture] failed: ${error && error.stack || error}`));
     running.add(job);
     job.finally(() => running.delete(job));
@@ -304,17 +321,27 @@ export function stallWatch(browser, testInfo) {
   scan();
   const scanTimer = setInterval(() => { scan(); nearTimeout(); }, SCAN_EVERY_MS);
 
+  // what `found` gives once it gives anything, woken by a capture's start
+  // or end; it fails, saying `missing`, when `ms` pass first
+  const waitFor = async (found, ms, missing) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const value = found();
+      if (value !== undefined) return value;
+      if (Date.now() >= deadline) throw new Error(`${missing} within ${ms} ms`);
+      await new Promise((resolve) => { waiters.push(resolve); setTimeout(resolve, 250); });
+    }
+  };
+
   return {
     captures,
     watchContext,
     async next(page, ms) {
-      const deadline = Date.now() + ms;
-      for (;;) {
-        const found = captures.find((entry) => entry.page === page);
-        if (found) return found.result;
-        if (Date.now() >= deadline) throw new Error(`no stall capture of the page within ${ms} ms`);
-        await new Promise((resolve) => { waiters.push(resolve); setTimeout(resolve, 250); });
-      }
+      const found = () => { const entry = captures.find((each) => each.page === page); return entry && entry.result; };
+      return waitFor(found, ms, 'no stall capture of the page');
+    },
+    async started(page, ms) {
+      await waitFor(() => (starts.includes(page) ? true : undefined), ms, 'no stall capture of the page began');
     },
     /** The page's armed session (null when arming failed): its commands still reach a page that hangs. */
     async session(page) {
