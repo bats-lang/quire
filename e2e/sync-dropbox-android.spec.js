@@ -8,7 +8,7 @@
 // app until a listener is added, as Capacitor does), and Dropbox is the
 // mock the browser's tests use, routed in each (no real network).
 
-import { test, expect } from './fixtures.js';
+import { test, expect, clientsServed } from './fixtures.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
@@ -51,9 +51,7 @@ async function device(browser, server, { key = KEY, tab = true, app = true } = {
   await context.addInitScript(capacitor, { browser: tab, app });
   await context.route('https://api.dropboxapi.com/**', server.api);
   await context.route('https://content.dropboxapi.com/**', server.api);
-  await context.route('**/sync-clients.json', route => route.fulfill({
-    status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify(key ? { dropboxClient: key } : {}),
-  }));
+  await clientsServed(context, key ? { dropboxClient: key } : {});
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
