@@ -2870,17 +2870,30 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [aft
   val sheet = _shade_rule(V_grey_8 | sheet, Grey(), 4, 8)
 in sheet end
 
-(* The reading settings' screen (app.bats's _reading_screen), on the
-   card's ground as the sheet it is opened from, and its choices of
-   where taps turn pages: a line each, a drawing of the page's zones
-   beside the choice's name and what it does. The drawing is the
+(* The reading settings' sheet's tabs (app.bats's _settings), a line of
+   their own under its title and Close, sharing it by their names'
+   widths, and its panels, a column of rows as the sheet is; and its
+   choices of where taps turn pages: a line each, a drawing of the
+   page's zones beside the choice's name and what it does. The drawing is the
    page's ground framed by an edge, the back zone the line's colour and
    the forward zone the accent (no text: their font size is 0); a book
    read right to left has it mirrored (.taps.rtl). The drawing and the
    line take no taps, so a tap on them is the button's *)
 fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
-  val sheet = rule(sheet, ".info.rset")
-  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = rule(sheet, ".shead")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".shead .tabs")
+  val sheet = lay(sheet, Flex(), "1 0 100%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".shead .tab")
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, Padding(), "8px 4px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tabpanel")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, Gap(), "10px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow.tapsrow")
   val sheet = lay(sheet, FlexDirection(), "column")

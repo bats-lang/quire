@@ -1,4 +1,4 @@
-(* screen_controls -- the typography panel's Screen row: full screen,
+(* screen_controls -- the reading settings' Screen row (its Page tab): full screen,
    the rotation locked, and the brightness *)
 
 (* Each control is shown only where the platform has it (bridge's

@@ -35,7 +35,7 @@ test('every theme passes the audit', async ({ page }) => {
   await importFiles(page, [epubFile({ title: 'Themed', author: 'Axe', rawChapters: chapters(2) })], 1);
   await cards(page).first().click();
   await expect(bookPage(page)).toBeVisible();
-  await clickControl(page, 'Typography');
+  await clickControl(page, 'Reading settings');
   for (const name of ['Light', 'Sepia', 'Dark', 'Night', 'Grey']) {
     const button = page.getByRole('button', { name, exact: true });
     await button.click();
@@ -52,7 +52,7 @@ test('no view has accessibility violations', async ({ page }) => {
   await cards(page).first().click();
   await expect(bookPage(page)).toBeVisible();
   expect(await audit(page)).toEqual([]);
-  await clickControl(page, 'Typography');
+  await clickControl(page, 'Reading settings');
   expect(await audit(page)).toEqual([]);
   await page.keyboard.press('Escape');
   await clickControl(page, 'Contents');
@@ -104,7 +104,7 @@ test('icon buttons have names', async ({ page }) => {
   for (const name of ['Back to library', 'Bookmark this page', 'Search in book']) {
     await expect(page.getByRole('navigation', { name: 'Book' }).getByRole('button', { name, exact: true })).toBeVisible();
   }
-  for (const name of ['Previous page', 'Next page', 'Contents', 'Typography', 'Annotations']) {
+  for (const name of ['Previous page', 'Next page', 'Contents', 'Reading settings', 'Annotations']) {
     await expect(control(page, name)).toBeVisible();
   }
   const bars = page.getByRole('navigation', { name: 'Book' }).or(page.getByRole('toolbar', { name: 'Page controls' }));

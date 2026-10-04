@@ -99,7 +99,7 @@ test('settings that cannot be read are said, the defaults used, and not saved ov
   await stubReads(page);
   await start(page);
   await readBook(page, { title: 'Set Once', author: 'Storage Tests', rawChapters: chapters(1) });
-  const sheet = dialog(page, 'Typography and theme');
+  const sheet = dialog(page, 'Reading settings');
   const fontSize = () => bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).fontSize);
   await openSettings(page);
   await sheet.getByRole('slider', { name: 'Size' }).fill('28');
@@ -159,9 +159,8 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await readBook(page, { title: 'Spoken Once', author: 'Storage Tests', rawChapters: chapters(1) });
   const sheet = readingSettings(page);
   const speed = sheet.getByRole('combobox', { name: 'Reading speed' });
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   await speed.selectOption('1.5');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await failReads(page, 'set');
@@ -169,17 +168,16 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await expect(alert(page)).toContainText('Quire could not read your settings.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Spoken Once');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   await expect(speed).toHaveValue('1');
   // a change now is used, but not saved over the settings stored
   await speed.selectOption('2');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await healReads(page);
   await reload(page);
   await expect(librarySearch(page)).toBeVisible();
   await openBook(page, 'Spoken Once');
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Read aloud');
   await expect(speed).toHaveValue('1.5');
 });

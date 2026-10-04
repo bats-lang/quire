@@ -138,7 +138,7 @@ export async function libraryMenu(page) {
 
 /** The Settings screen (sync, dictionaries, backup, the reading goal and
     the resets) */
-export const settingsScreen = page => dialog(page, 'Settings');
+export const settingsScreen = page => page.getByRole('dialog', { name: 'Settings', exact: true });
 
 /** A button of the Settings screen, by its name */
 export const settingsButton = (page, name) => settingsScreen(page).getByRole('button', { name, exact: true });
@@ -348,41 +348,35 @@ export async function clickControl(page, name) {
   }).toPass({ timeout: 20000 });
 }
 
-/** Opens the settings sheet */
+/** Opens the reading settings' sheet */
 export async function openSettings(page) {
-  await clickControl(page, 'Typography');
-  await expect(dialog(page, 'Typography and theme')).toBeVisible();
+  await clickControl(page, 'Reading settings');
+  await expect(dialog(page, 'Reading settings')).toBeVisible();
 }
 
-/** The reading settings' screen, opened from the typography sheet */
+/** The reading settings' sheet */
 export function readingSettings(page) {
-  return dialog(page, 'More reading settings');
+  return dialog(page, 'Reading settings');
 }
 
-/** Opens the reading settings' screen: the typography sheet, then its
-    More reading settings row */
-export async function openReadingSettings(page) {
-  if (!(await dialog(page, 'Typography and theme').isVisible())) await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('button', { name: /^More reading settings/ }).click();
-  await expect(readingSettings(page)).toBeVisible();
-}
-
-/** Back from the reading settings' screen to the typography sheet */
-export async function closeReadingSettings(page) {
-  await readingSettings(page).getByRole('button', { name: 'Done', exact: true }).click();
-  await expect(readingSettings(page)).toBeHidden();
+/** The reading settings' sheet open on its tab named tab (Look, Page,
+    Turning or Read aloud) */
+export async function openReadingSettings(page, tab) {
+  if (!tab) throw new Error('openReadingSettings: which tab?');
+  if (!(await readingSettings(page).isVisible())) await openSettings(page);
+  const named = readingSettings(page).getByRole('tab', { name: tab, exact: true });
+  await named.click();
+  await expect(named).toHaveAttribute('aria-selected', 'true');
 }
 
 /** One column a screen, whatever the window: for a test of what a
     single page shows (a wide window in landscape shows a spread) */
 export async function oneColumn(page) {
-  await openReadingSettings(page);
+  await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('group', { name: 'Pages on screen' })
     .getByRole('button', { name: 'One', exact: true }).click();
-  // back to the sheet, and from it to the page
   await page.keyboard.press('Escape');
-  await page.keyboard.press('Escape');
-  await expect(dialog(page, 'Typography and theme')).toBeHidden();
+  await expect(readingSettings(page)).toBeHidden();
 }
 
 /** The visible buttons within root whose text has a contrast ratio
