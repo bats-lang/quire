@@ -6,6 +6,7 @@
 // label or visible text. No test depends on an element's id or class.
 
 import { expect } from '@playwright/test';
+import { fastmailRefused } from './fixtures.js';
 import { createEpub, solidPng } from './create-epub.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -160,7 +161,7 @@ export async function bookMenu(page, text) {
 export async function start(page) {
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return errors;

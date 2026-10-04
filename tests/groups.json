@@ -30,6 +30,7 @@
       "sync-dropbox.spec.js",
       "sync-dropbox-android.spec.js",
       "sync-nextcloud.spec.js",
+      "sync-fastmail.spec.js",
       "backup.spec.js",
       "settings.spec.js",
       "settings-screen.spec.js",

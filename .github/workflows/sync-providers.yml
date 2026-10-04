@@ -1,0 +1,47 @@
+# The sync services Quire signs in to, checked weekly from outside the
+# app (bats-lang/quire#184, step 9): scripts/sync-providers.py.
+# - Each OAuth client in scripts/sync-clients.env is asked for its
+#   sign-in page, with no one signing in: a deleted client, a redirect
+#   address no longer registered or a scope refused fails the run.
+# - Fastmail's CORS: whether a browser page may now reach its files.
+# - Round trips with test accounts, each only when its secrets exist
+#   (write, read back, a stale write refused, delete). The secrets are
+#   read only here, on the schedule and on dispatch, never on pull
+#   requests.
+name: sync providers
+
+on:
+  schedule:
+    # Mondays, 06:17 UTC
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  providers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: The clients' sign-in pages
+        run: scripts/sync-providers.py clients
+
+      - name: Fastmail's CORS
+        if: always()
+        run: scripts/sync-providers.py fastmail-cors
+
+      - name: Round trips with test accounts
+        if: always()
+        env:
+          FASTMAIL_TEST_USER: ${{ secrets.FASTMAIL_TEST_USER }}
+          FASTMAIL_TEST_APP_PASSWORD: ${{ secrets.FASTMAIL_TEST_APP_PASSWORD }}
+          NEXTCLOUD_TEST_URL: ${{ secrets.NEXTCLOUD_TEST_URL }}
+          NEXTCLOUD_TEST_USER: ${{ secrets.NEXTCLOUD_TEST_USER }}
+          NEXTCLOUD_TEST_APP_PASSWORD: ${{ secrets.NEXTCLOUD_TEST_APP_PASSWORD }}
+          DROPBOX_TEST_REFRESH_TOKEN: ${{ secrets.DROPBOX_TEST_REFRESH_TOKEN }}
+          GOOGLE_TEST_CLIENT_ID: ${{ secrets.GOOGLE_TEST_CLIENT_ID }}
+          GOOGLE_TEST_CLIENT_SECRET: ${{ secrets.GOOGLE_TEST_CLIENT_SECRET }}
+          GOOGLE_TEST_REFRESH_TOKEN: ${{ secrets.GOOGLE_TEST_REFRESH_TOKEN }}
+        run: scripts/sync-providers.py round-trips
