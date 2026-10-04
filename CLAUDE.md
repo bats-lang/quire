@@ -285,10 +285,16 @@ app runs (`_token`); a sync the app makes by itself without one, or
 one Drive refuses (401), says "Tap Sync now to sign in to Google
 again". No account, a cancel, and a build with no client each say so;
 Turn off signs out. The client ID is public and not compiled in:
-`scripts/sync-clients.sh` writes the repository variable
-`GOOGLE_WEB_CLIENT_ID` (checked) into `sync-clients.json` beside the
-app, read by `src/sync_clients.bats`; with none, Use Android says it is
-not set up. With no store chosen, the app keeps the file for Android's
+it is committed in `scripts/sync-clients.env` (#200: the Web
+application client `GOOGLE_WEB_CLIENT_ID`, with the Android client's ID
+and Play's app signing SHA-1 recorded beside it, all public), and
+`scripts/sync-clients.sh` writes it (checked) into `sync-clients.json`
+beside the app, in CI and a local build alike, read by
+`src/sync_clients.bats`; a build with none says Use Android is not set
+up. `sync-identity.yml` prints the upload key's fingerprints and checks
+the committed values (the IDs' form, and that Play's SHA-1 is not the
+upload key's). The e2e suite stubs Google's script (`googleStubbed` in
+`e2e/fixtures.js`), so it never reaches Google. With no store chosen, the app keeps the file for Android's
 Auto Backup (`STORE_BACKUP`, bridge's `backup_file` in `backup/` of
 the app's files, the only thing pwa's backup rules keep): each sync
 point merges it and writes it there, and the file a reinstall
@@ -312,7 +318,8 @@ app's own folder (Apps › Quire; scopes `files.content.read` and
 conflict. `src/web_request.bats` holds the requests it shares with
 `src/drive.bats`. The sign-in is OAuth's code flow with PKCE (S256, no
 secret: the app key is public, from the repository variable
-`DROPBOX_CLIENT_ID` into `sync-clients.json` as `dropboxClient`;
+`DROPBOX_CLIENT_ID` into `sync-clients.json` as `dropboxClient`, until
+it is registered and committed as Google's are (#239);
 without it the row says Dropbox sync is not set up). `sync_dropbox`
 keeps the verifier and state ("sync-dropbox-sign-in") and leaves the
 page for Dropbox's (bridge's `navigate_away`), which sends the reader

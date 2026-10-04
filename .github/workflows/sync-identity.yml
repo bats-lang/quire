@@ -1,15 +1,16 @@
 # What the sync services need registered for Quire (bats-lang/quire#184):
 # the Android signing key's fingerprints, computed from the keystore
-# secrets ANDROID.md describes, and whether each sync client ID is set.
-# Fingerprints are public (they are in every signed APK); the keystore and
-# its passwords never leave the runner, and no ID's value is printed.
+# secrets ANDROID.md describes, and a check of the Google clients and
+# Play's signing SHA-1 committed in scripts/sync-clients.env (#200).
+# Fingerprints and client IDs are public (they are in every signed APK
+# and page); the keystore and its passwords never leave the runner.
 name: sync identity
 
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: [.github/workflows/sync-identity.yml]
+    paths: [.github/workflows/sync-identity.yml, scripts/sync-clients.env]
 
 permissions:
   contents: read
@@ -18,7 +19,10 @@ jobs:
   identity:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Signing key fingerprints
+        id: upload
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -44,6 +48,7 @@ jobs:
           # they go to the log too, where the API can read them.
           echo "Upload key SHA-1: $sha1"
           echo "Upload key SHA-256: $sha256"
+          echo "sha1=$sha1" >> "$GITHUB_OUTPUT"
           {
             echo "| | |"
             echo "|---|---|"
@@ -52,7 +57,7 @@ jobs:
             echo
             echo "Register an **Android** OAuth client in Google Cloud for this package and SHA-1."
             echo "Apps installed from Google Play are signed with Play's app signing key instead:"
-            echo "its SHA-1 is in Play Console → App integrity, and needs an Android client of its own."
+            echo "its SHA-1 is in Play Console → Protected with Play → Play app signing, and needs an Android client of its own."
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -62,27 +67,41 @@ jobs:
 
       - name: Sync client IDs
         env:
-          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID || secrets.GOOGLE_WEB_CLIENT_ID }}
-          GOOGLE_ANDROID_CLIENT_ID: ${{ vars.GOOGLE_ANDROID_CLIENT_ID || secrets.GOOGLE_ANDROID_CLIENT_ID }}
+          UPLOAD_SHA1: ${{ steps.upload.outputs.sha1 }}
           DROPBOX_CLIENT_ID: ${{ vars.DROPBOX_CLIENT_ID || secrets.DROPBOX_CLIENT_ID }}
-          PLAY_SIGNING_SHA1: ${{ vars.PLAY_SIGNING_SHA1 || secrets.PLAY_SIGNING_SHA1 }}
         run: |
+          value() { sed -n "s/^$1=//p" scripts/sync-clients.env; }
+          web=$(value GOOGLE_WEB_CLIENT_ID)
+          android=$(value GOOGLE_ANDROID_CLIENT_ID)
+          play=$(value PLAY_SIGNING_SHA1)
+          for id in "$web" "$android"; do
+            printf '%s' "$id" | grep -Eqx '[0-9]+-[0-9a-z]+\.apps\.googleusercontent\.com' \
+              || { echo "::error::scripts/sync-clients.env: '$id' is not a Google client ID"; exit 1; }
+          done
+          test "$web" != "$android" || { echo "::error::scripts/sync-clients.env: the Web and Android client IDs are the same"; exit 1; }
+          printf '%s' "$play" | grep -Eqx '([0-9A-F]{2}:){19}[0-9A-F]{2}' \
+            || { echo "::error::scripts/sync-clients.env: PLAY_SIGNING_SHA1 is not a SHA-1 fingerprint (AA:BB:… in capitals)"; exit 1; }
+          # Play Console shows the upload key's certificate beside the app
+          # signing key's: the one committed must be Play's own
+          test "$play" != "$UPLOAD_SHA1" || { echo "::error::PLAY_SIGNING_SHA1 is the upload key's SHA-1, not Play's app signing key's"; exit 1; }
+          if [ -n "$DROPBOX_CLIENT_ID" ]; then dropbox=set; else dropbox=missing; fi
+          echo "Play app signing SHA-1: $play"
+          echo "DROPBOX_CLIENT_ID: $dropbox" >&2
           {
-            echo "## Sync client IDs"
+            echo "## Sync clients"
+            echo
+            echo "Google's are committed in \`scripts/sync-clients.env\`; Dropbox's key is a repository variable until it is registered (#239)."
             echo
             echo "| Name | |"
             echo "|---|---|"
-            for name in GOOGLE_WEB_CLIENT_ID GOOGLE_ANDROID_CLIENT_ID DROPBOX_CLIENT_ID PLAY_SIGNING_SHA1; do
-              if [ -n "${!name}" ]; then state=set; else state=missing; fi
-              echo "$name: $state" >&2
-              echo "| \`$name\` | $state |"
-            done
-            echo
-            echo "Client IDs are public: store them as repository **variables**."
+            echo "| Google Web application client | \`$web\` |"
+            echo "| Google Android client (upload key) | \`$android\` |"
+            echo "| Play app signing SHA-1 | \`$play\` |"
+            echo "| \`DROPBOX_CLIENT_ID\` | $dropbox |"
             echo
             echo "## Entries to register"
             echo
             echo "* Google, Web application client: JavaScript origins \`https://bats-lang.github.io\` and \`http://localhost:3737\`; scope \`https://www.googleapis.com/auth/drive.appdata\`."
-            echo "* Google, Android client: package \`dev.middlefield.quire\`, the SHA-1 above (and Play's)."
+            echo "* Google, Android clients: package \`dev.middlefield.quire\`, one with the upload key's SHA-1 above and one with Play's."
             echo "* Dropbox: redirect URIs \`https://bats-lang.github.io/quire/?oauth=dropbox\`, \`http://localhost:3737/?oauth=dropbox\`, \`quire://oauth/dropbox\`; scopes \`files.content.read\`, \`files.content.write\`; App folder; public clients (PKCE) allowed."
           } >> "$GITHUB_STEP_SUMMARY"
