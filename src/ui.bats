@@ -282,6 +282,46 @@ fn _set_url_n_buf {id_loc:agz}{id_len:pos | id_len < 256}{value_loc:agz}{value_s
   val () = release_bytes(value_frozen, value_bytes)
 in release_bytes(id_frozen, id_bytes) end
 
+(* A copy of element source, made copy and put at the end of element
+   parent's children, scrolled as scroll says: a picture of what
+   source shows, which nothing can use. It is inert (no focus, no
+   click, nothing read out inside it), and it has neither source's
+   focus stop (tabindex) nor its gesture region; the elements inside
+   have no ids (bridge's CLONE_NODE drops them: an id names one
+   element). All of it goes in one flush, so the copy is never shown
+   half made *)
+#pub datavtype scrolled = ScrolledAcross of (int) | ScrolledDown of (int)
+
+(* Element id scrolled in document, one axis *)
+fn _scroll_in {doc_loc,id_loc:agz}{id_len:pos | id_len < 256}
+  (document: !$D.document(doc_loc), id_bytes: !$A.borrow(byte, id_loc, id_len), id_len: int id_len, scroll: scrolled): void =
+  case+ scroll of
+  | ~ScrolledAcross(left) => $D.set_scroll_left(document, id_bytes, id_len, left)
+  | ~ScrolledDown(top) => $D.set_scroll_top(document, id_bytes, id_len, top)
+
+#pub fn ui_copy_inert {source_len,parent_len,copy_len:pos | source_len < 256; parent_len < 256; copy_len < 256}
+  (source: string source_len, parent: string parent_len, copy: string copy_len, scroll: scrolled): void
+implement ui_copy_inert (source, parent, copy, scroll) = let
+  val source_len = _length(source)
+  val parent_len = _length(parent)
+  val copy_len = _length(copy)
+  val @(source_frozen, source_bytes) = $A.freeze<byte>(_literal_bytes(source, source_len))
+  val @(parent_frozen, parent_bytes) = $A.freeze<byte>(_literal_bytes(parent, parent_len))
+  val @(copy_frozen, copy_bytes) = $A.freeze<byte>(_literal_bytes(copy, copy_len))
+  val empty = $A.alloc<byte>(1)
+  val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = $D.clone_element(document, source_bytes, source_len, parent_bytes, parent_len, copy_bytes, copy_len)
+  val () = $D.remove_attr(document, copy_bytes, copy_len, $D.Tabindex)
+  val () = $D.remove_attr(document, copy_bytes, copy_len, $D.Data("gesture-region"))
+  val () = $D.set_attr(document, copy_bytes, copy_len, $D.Inert, empty_bytes, 0, 0)
+  val () = _scroll_in(document, copy_bytes, copy_len, scroll)
+  val () = $D.destroy(document)
+  val () = release_bytes(empty_frozen, empty_bytes)
+  val () = release_bytes(source_frozen, source_bytes)
+  val () = release_bytes(parent_frozen, parent_bytes)
+in release_bytes(copy_frozen, copy_bytes) end
+
 (* The source of image id emptied: "data:,", an empty text, so it shows
    nothing until it is given one *)
 #pub fn ui_src_empty {id_len:pos | id_len < 256} (id: string id_len): void
