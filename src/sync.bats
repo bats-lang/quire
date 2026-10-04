@@ -91,6 +91,11 @@ datavtype store =
     Android of ($A.arr(byte, account_loc, ACCOUNT_MAX), int account_len)
   | {refresh_loc:agz}{refresh_len:pos | refresh_len <= REFRESH_MAX}
     Dropbox of ($A.arr(byte, refresh_loc, REFRESH_MAX), int refresh_len)
+  (* Fastmail: its files over WebDAV, in the folder quire of the
+     account's own (FASTMAIL_FOLDER), with the Fastmail address and an
+     app password that may reach Files *)
+  | {user_loc,password_loc:agz}{user_len:pos | user_len <= USER_MAX}{password_len:pos | password_len <= PASSWORD_MAX}
+    Fastmail of ($A.arr(byte, user_loc, USER_MAX), int user_len, $A.arr(byte, password_loc, PASSWORD_MAX), int password_len)
 
 fn _store_free (held: store): void =
   case+ held of
@@ -101,6 +106,9 @@ fn _store_free (held: store): void =
     in $A.free<byte>(password) end
   | ~Android(account, _) => $A.free<byte>(account)
   | ~Dropbox(refresh, _) => $A.free<byte>(refresh)
+  | ~Fastmail(user, _, password, _) => let
+      val () = $A.free<byte>(user)
+    in $A.free<byte>(password) end
 
 val _store = ref<store>(NoStore())
 (* The store turned off, while its Undo is offered *)
@@ -113,7 +121,7 @@ in previous end
 
 fn _store_on (): bool = let
   val held = _store_swap(_store, NoStore())
-  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | Android(_, _) => true | Dropbox(_, _) => true | NoStore() => false): bool
+  val configured = (case+ held of WebDav(_, _, _, _, _, _) => true | Android(_, _) => true | Dropbox(_, _) => true | Fastmail(_, _, _, _) => true | NoStore() => false): bool
   val () = _store_free(_store_swap(_store, held))
 in configured end
 
@@ -134,16 +142,18 @@ val _last_status = ref<Int>(0)
    registered for this app), the reader said no. Dropbox: its sign-in no
    longer good (the reader took the app's access away), no app key in
    this build, a sign-in Dropbox or the page refused (a state that is
-   not the one sent), the reader said no *)
+   not the one sent), the reader said no. Fastmail: its address or app
+   password refused *)
 datatype sync_result =
   | NotSyncedYet | Synced | Unreachable | WrongCredentials | FolderNotFound | KeptChanging | ServerError
   | TooLarge | Damaged | NoMemory | Blocked | Syncing | NoAddress
   | SignInAgain | NoGoogleAccount | NotSetUp | GoogleRefused | SignInCanceled
   | DropboxSignInAgain | DropboxNotSetUp | DropboxSignInRefused | DropboxSignInCanceled
+  | FastmailRefused
 
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
-fn _result_code (result: sync_result): [code:nat | code <= 21] int code =
+fn _result_code (result: sync_result): [code:nat | code <= 22] int code =
   case+ result of
   | NotSyncedYet() => 0
   | Synced() => 1
@@ -167,6 +177,7 @@ fn _result_code (result: sync_result): [code:nat | code <= 21] int code =
   | DropboxNotSetUp() => 19
   | DropboxSignInRefused() => 20
   | DropboxSignInCanceled() => 21
+  | FastmailRefused() => 22
 
 fn _result_of_code (code: int): sync_result =
   if code = 1 then Synced()
@@ -190,6 +201,7 @@ fn _result_of_code (code: int): sync_result =
   else if code = 19 then DropboxNotSetUp()
   else if code = 20 then DropboxSignInRefused()
   else if code = 21 then DropboxSignInCanceled()
+  else if code = 22 then FastmailRefused()
   else NotSyncedYet()
 
 (* How the last sync ended *)
@@ -197,16 +209,17 @@ val _last_result = ref<sync_result>(NotSyncedYet())
 
 (* The store chosen, under "sync": "QS2\n" and its kind's byte
    (_kind_code); each kind's credentials under a key of its own,
-   "sync-webdav", "sync-android", "sync-dropbox". With none chosen, the app keeps the
+   "sync-webdav", "sync-android", "sync-dropbox", "sync-fastmail". With none chosen, the app keeps the
    file for Android's Auto Backup (BackupKind): the merge is written
    to a backed-up file, and the file a reinstall restored is merged *)
-datatype store_kind = WebDavKind | AndroidKind | BackupKind | DropboxKind | NoStoreKind
+datatype store_kind = WebDavKind | AndroidKind | BackupKind | DropboxKind | FastmailKind | NoStoreKind
 
-fn _kind_code (kind: store_kind): [code:nat | code <= 4] int code =
-  case+ kind of WebDavKind() => 1 | AndroidKind() => 2 | BackupKind() => 3 | DropboxKind() => 4 | NoStoreKind() => 0
+fn _kind_code (kind: store_kind): [code:nat | code <= 5] int code =
+  case+ kind of WebDavKind() => 1 | AndroidKind() => 2 | BackupKind() => 3 | DropboxKind() => 4 | FastmailKind() => 5 | NoStoreKind() => 0
 
 fn _kind_of_code (code: int): store_kind =
-  if code = 1 then WebDavKind() else if code = 2 then AndroidKind() else if code = 3 then BackupKind() else if code = 4 then DropboxKind() else NoStoreKind()
+  if code = 1 then WebDavKind() else if code = 2 then AndroidKind() else if code = 3 then BackupKind()
+  else if code = 4 then DropboxKind() else if code = 5 then FastmailKind() else NoStoreKind()
 
 fn _choice_key (): [l:agz] $A.arr(byte, l, 4) = let
   val key = $A.alloc<byte>(4)
@@ -230,6 +243,12 @@ fn _dropbox_key (): [l:agz] $A.arr(byte, l, 12) = let
   val () = $A.write_text(key, 0, $A.text_lit("sync-dropbox"), 12)
 in key end
 
+(* Fastmail's address and app password *)
+fn _fastmail_key (): [l:agz] $A.arr(byte, l, 13) = let
+  val key = $A.alloc<byte>(13)
+  val () = $A.write_text(key, 0, $A.text_lit("sync-fastmail"), 13)
+in key end
+
 fn _dropbox_sign_in_key (): [l:agz] $A.arr(byte, l, 20) = let
   val key = $A.alloc<byte>(20)
   val () = $A.write_text(key, 0, $A.text_lit("sync-dropbox-sign-in"), 20)
@@ -239,7 +258,8 @@ in key end
    app has one (BackupKind), else none *)
 fn _store_kind (): store_kind = let
   val held = _store_swap(_store, NoStore())
-  val kind = (case+ held of WebDav(_, _, _, _, _, _) => WebDavKind() | Android(_, _) => AndroidKind() | Dropbox(_, _) => DropboxKind() | NoStore() => NoStoreKind()): store_kind
+  val kind = (case+ held of WebDav(_, _, _, _, _, _) => WebDavKind() | Android(_, _) => AndroidKind() | Dropbox(_, _) => DropboxKind()
+    | Fastmail(_, _, _, _) => FastmailKind() | NoStore() => NoStoreKind()): store_kind
   val () = _store_free(_store_swap(_store, held))
 in
   case+ kind of
@@ -247,17 +267,21 @@ in
   | WebDavKind() => kind
   | AndroidKind() => kind
   | DropboxKind() => kind
+  | FastmailKind() => kind
   | BackupKind() => kind
 end
 
 (* Whether a sync runs: to a store chosen, or to the backed-up file *)
-fn _syncing (): bool = case+ _store_kind() of NoStoreKind() => false | WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | BackupKind() => true
+fn _syncing (): bool = case+ _store_kind() of NoStoreKind() => false | WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | FastmailKind() => true | BackupKind() => true
 
 (* Whether the store is the Android one *)
-fn _is_android (): bool = case+ _store_kind() of AndroidKind() => true | WebDavKind() => false | DropboxKind() => false | BackupKind() => false | NoStoreKind() => false
+fn _is_android (): bool = case+ _store_kind() of AndroidKind() => true | WebDavKind() => false | DropboxKind() => false | FastmailKind() => false | BackupKind() => false | NoStoreKind() => false
 
 (* Whether the store is the Dropbox one *)
-fn _store_kind_is_dropbox (): bool = case+ _store_kind() of DropboxKind() => true | AndroidKind() => false | WebDavKind() => false | BackupKind() => false | NoStoreKind() => false
+fn _store_kind_is_dropbox (): bool = case+ _store_kind() of DropboxKind() => true | AndroidKind() => false | WebDavKind() => false | FastmailKind() => false | BackupKind() => false | NoStoreKind() => false
+
+(* Whether the store is the Fastmail one *)
+fn _store_kind_is_fastmail (): bool = case+ _store_kind() of FastmailKind() => true | DropboxKind() => false | AndroidKind() => false | WebDavKind() => false | BackupKind() => false | NoStoreKind() => false
 
 fn _state_key (): [l:agz] $A.arr(byte, l, 10) = let
   val key = $A.alloc<byte>(10)
@@ -292,6 +316,26 @@ in release_bytes(choice_frozen, choice_bytes) end
 fn _store_save (): void =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  (* Fastmail's: "QS1\n", then the address and the app password (each
+     a u16 length and its bytes), under "sync-fastmail" *)
+  | ~Fastmail(user, user_len, password, password_len) => let
+      val record_len = 8 + user_len + password_len
+      val record = $A.alloc<byte>(8 + USER_MAX + PASSWORD_MAX)
+      val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
+      val () = $A.write_byte(record, 3, 10)
+      val () = $A.write_u16le(record, 4, user_len)
+      val () = _put_bytes(user, user_len, record, 6, 0)
+      val () = $A.write_u16le(record, 6 + user_len, password_len)
+      val () = _put_bytes(password, password_len, record, 8 + user_len, 0)
+      val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+      val @(used, rest) = $A.borrow_split<byte>(record_frozen, record_bytes, record_len)
+      val @(key_frozen, key_bytes) = $A.freeze<byte>(_fastmail_key())
+      val () = save_checked($IDB.idb_put(key_bytes, 13, used, record_len))
+      val () = release_bytes(key_frozen, key_bytes)
+      val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
+      val () = release_bytes(record_frozen, record_bytes)
+      val () = _choice_save(FastmailKind())
+    in _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len))) end
   | ~Dropbox(refresh, refresh_len) => let
       val record = $A.alloc<byte>(6 + REFRESH_MAX)
       val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
@@ -343,8 +387,7 @@ fn _store_save (): void =
       val () = _choice_save(WebDavKind())
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
 
-(* No store chosen, and the WebDAV credentials and the Android account
-   forgotten *)
+(* No store chosen, and every store's credentials forgotten *)
 fn _store_forget (): void = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_choice_key())
   (* checked as a save: a delete that failed would bring the store
@@ -359,7 +402,10 @@ fn _store_forget (): void = let
   val () = release_bytes(android_frozen, android_bytes)
   val @(dropbox_frozen, dropbox_bytes) = $A.freeze<byte>(_dropbox_key())
   val () = save_checked($IDB.idb_delete(dropbox_bytes, 12))
-in release_bytes(dropbox_frozen, dropbox_bytes) end
+  val () = release_bytes(dropbox_frozen, dropbox_bytes)
+  val @(fastmail_frozen, fastmail_bytes) = $A.freeze<byte>(_fastmail_key())
+  val () = save_checked($IDB.idb_delete(fastmail_bytes, 13))
+in release_bytes(fastmail_frozen, fastmail_bytes) end
 
 (* "QS1\n", this device's number, the last sync's minute, result and
    status (4 x i32), under "sync-state" *)
@@ -468,6 +514,31 @@ fn _dropbox_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): st
     in Dropbox(refresh, refresh_len) end
   end
 
+(* The Fastmail store kept in record[0, n) (checked here, once) *)
+fn _fastmail_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): store =
+  if n < 8 then NoStore()
+  else if byte2int0($A.get<byte>(record, 1)) <> 83 then NoStore()
+  else let
+    val user_len = _u16_at(record, 4)
+  in
+    if user_len <= 0 then NoStore()
+    else if user_len > USER_MAX then NoStore()
+    else if 8 + user_len > n then NoStore()
+    else let
+      val password_len = _u16_at(record, 6 + user_len)
+    in
+      if password_len <= 0 then NoStore()
+      else if password_len > PASSWORD_MAX then NoStore()
+      else if 8 + user_len + password_len > n then NoStore()
+      else let
+        val user = $A.alloc<byte>(USER_MAX)
+        val () = _bytes_from(record, 6, user_len, user, 0)
+        val password = $A.alloc<byte>(PASSWORD_MAX)
+        val () = _bytes_from(record, 8 + user_len, password_len, password, 0)
+      in Fastmail(user, user_len, password, password_len) end
+    end
+  end
+
 (* literal at out[position] *)
 fn _put_literal {l:agz}{n:nat}{position:nat}{text_len:nat | position + text_len <= n}
   (out: !$A.arr(byte, l, n), position: int position, text: string text_len): int(position + text_len) = let
@@ -507,6 +578,7 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | DropboxNotSetUp() => _put_literal(out, position, "Dropbox sync isn't set up in this build of Quire.")
   | DropboxSignInRefused() => _put_literal(out, position, "Dropbox didn't sign Quire in. Try again.")
   | DropboxSignInCanceled() => _put_literal(out, position, "Dropbox sign-in was canceled.")
+  | FastmailRefused() => _put_literal(out, position, "The Fastmail address or app password is wrong.")
   | ServerError() => _server_error(out, position, status)
   (* not failures: their own lines are _status_text's *)
   | NotSyncedYet() => _put_literal(out, position, "Not synced yet.")
@@ -557,6 +629,7 @@ fn _said_when_off (result: sync_result): bool =
   | DropboxSignInRefused() => true
   | DropboxSignInCanceled() => true
   | DropboxSignInAgain() => false
+  | FastmailRefused() => false
   | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
   | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
   | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
@@ -595,6 +668,7 @@ in
     | DropboxNotSetUp() => _tried(out, result)
     | DropboxSignInRefused() => _tried(out, result)
     | DropboxSignInCanceled() => _tried(out, result)
+    | FastmailRefused() => _tried(out, result)
 end
 
 (* How the last sync failed, in a few words (at most 40 bytes), at
@@ -620,6 +694,7 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | DropboxNotSetUp() => _put_literal(out, position, "Not set up in this build")
   | DropboxSignInRefused() => _put_literal(out, position, "Dropbox refused")
   | DropboxSignInCanceled() => _put_literal(out, position, "Sign-in canceled")
+  | FastmailRefused() => _put_literal(out, position, "Wrong Fastmail address or app password")
   | ServerError() => let
       val after = _put_literal(out, position, "Server error (")
       val after = $S.int_to_str(out, after, 512, status)
@@ -638,6 +713,7 @@ in
   if ~_store_on() then _put_literal(out, 0, "Off")
   else let
     val after = (if _store_kind_is_dropbox() then _put_literal(out, 0, "Dropbox \xC2\xB7 ")
+      else if _store_kind_is_fastmail() then _put_literal(out, 0, "Fastmail \xC2\xB7 ")
       else if ~_is_android() then _put_literal(out, 0, "WebDAV \xC2\xB7 ")
       else if $BAPP.is_native_platform() then _put_literal(out, 0, "Android \xC2\xB7 ")
       else _put_literal(out, 0, "Google Drive \xC2\xB7 ")): [after:nat | after <= 20] int after
@@ -680,6 +756,7 @@ in
     | DropboxNotSetUp() => _result_short(out, 0, result, !_last_status)
     | DropboxSignInRefused() => _result_short(out, 0, result, !_last_status)
     | DropboxSignInCanceled() => _result_short(out, 0, result, !_last_status)
+    | FastmailRefused() => _result_short(out, 0, result, !_last_status)
   end
 end
 
@@ -763,12 +840,38 @@ fn _file_url {url_loc,out_loc:agz}{url_len:pos | url_len <= URL_MAX}
   val () = copy(url, kept, out, 0)
 in _put_literal(out, kept, "/quire-sync.json") end
 
-(* The WebDAV store's file's URL in url and the Authorization header in
-   authorization: their lengths *)
+(* <folder>/ in out: its length *)
+fn _folder_url {url_loc,out_loc:agz}{url_len:pos | url_len <= URL_MAX}
+  (url: !$A.arr(byte, url_loc, URL_MAX), url_len: int url_len, out: !$A.arr(byte, out_loc, 1041)): [stop:pos | stop <= 1041] int stop = let
+  val kept = _trimmed(url, url_len)
+  fun copy {source_loc,copy_loc:agz}{count:nat | count <= URL_MAX}{j:nat | j <= count} .<count - j>.
+    (source: !$A.arr(byte, source_loc, URL_MAX), count: int count, out: !$A.arr(byte, copy_loc, 1041), j: int j): void =
+    if j >= count then ()
+    else let val () = $A.set<byte>(out, j, $A.get<byte>(source, j)) in copy(source, count, out, j + 1) end
+  val () = copy(url, kept, out, 0)
+in _put_literal(out, kept, "/") end
+
+(* What a request is for: the sync file, or the folder it is kept in
+   (made with MKCOL where it is missing) *)
+datatype target = TheFile | TheFolder
+
+(* Fastmail's file, or its folder: quire, in the account's own files *)
+fn _fastmail_url {l:agz} (out: !$A.arr(byte, l, 1041), aim: target): [stop:pos | stop <= 1041] int stop =
+  case+ aim of
+  | TheFile() => _put_literal(out, 0, "https://myfiles.fastmail.com/quire/quire-sync.json")
+  | TheFolder() => _put_literal(out, 0, "https://myfiles.fastmail.com/quire/")
+
+(* The WebDAV store's file's (or folder's) URL in url and the
+   Authorization header in authorization: their lengths *)
 fn _request_parts {url_loc,authorization_loc:agz}
-  (url: !$A.arr(byte, url_loc, 1041), authorization: !$A.arr(byte, authorization_loc, 700))
+  (url: !$A.arr(byte, url_loc, 1041), authorization: !$A.arr(byte, authorization_loc, 700), aim: target)
   : [url_len:pos | url_len <= 1041][authorization_len:nat | authorization_len <= 700] @(int url_len, int authorization_len) =
   case+ _store_swap(_store, NoStore()) of
+  | ~Fastmail(user, user_len, password, password_len) => let
+      val url_len = _fastmail_url(url, aim)
+      val authorization_len = _authorization(user, user_len, password, password_len, authorization)
+      val () = _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len)))
+    in @(url_len, authorization_len) end
   | ~NoStore() => let val _ = _put_literal(url, 0, "/") in @(1, 0) end
   | ~Android(account, account_len) => let
       val _ = _put_literal(url, 0, "/")
@@ -779,7 +882,7 @@ fn _request_parts {url_loc,authorization_loc:agz}
       val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
     in @(1, 0) end
   | ~WebDav(folder, folder_len, user, user_len, password, password_len) => let
-      val url_len = _file_url(folder, folder_len, url)
+      val url_len = (case+ aim of TheFile() => _file_url(folder, folder_len, url) | TheFolder() => _folder_url(folder, folder_len, url)): [stop:pos | stop <= 1041] int stop
       val authorization_len = _authorization(user, user_len, password, password_len, authorization)
       val () = _store_free(_store_swap(_store, WebDav(folder, folder_len, user, user_len, password, password_len)))
     in @(url_len, authorization_len) end
@@ -788,6 +891,10 @@ fn _request_parts {url_loc,authorization_loc:agz}
 fn _store_url {l:agz} (out: !$A.arr(byte, l, 1041)): [length:nat | length <= 1041] int length =
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => 0
+  | ~Fastmail(user, user_len, password, password_len) => let
+      val length = _fastmail_url(out, TheFile())
+      val () = _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len)))
+    in length end
   | ~Android(account, account_len) => let
       val () = _store_free(_store_swap(_store, Android(account, account_len)))
     in 0 end
@@ -812,17 +919,17 @@ fn _etag_set {l:agz}{etag_len:nat | etag_len <= ETAG_MAX} (etag: $A.arr(byte, l,
   val+ ~EtagCell(old, _) = _etag_swap(EtagCell(etag, etag_len))
 in $A.free<byte>(old) end
 
-(* Sends method for the file, with body[0, body_len) (none when 0), and
-   If-Match the ETag read when with_match; the promise resolves as
-   fetch's does *)
+(* Sends method for the file (or its folder, as aim says), with
+   body[0, body_len) (none when 0), and If-Match the ETag read when
+   with_match; the promise resolves as fetch's does *)
 fn _send {method_len:pos | method_len <= 16}{body_loc:agz}{body_size:nat}{body_len:nat | body_len <= body_size}
-  (method: string method_len, body: !$A.borrow(byte, body_loc, body_size), body_len: int body_len, with_match: bool): $P.promise($FE.fetched, $P.Chained) = let
+  (method: string method_len, body: !$A.borrow(byte, body_loc, body_size), body_len: int body_len, with_match: bool, aim: target): $P.promise($FE.fetched, $P.Chained) = let
   val method_len = g1u2i(string1_length(method))
   val method_bytes = $A.alloc<byte>(method_len)
   val () = $A.write_text(method_bytes, 0, $A.text_lit(method), method_len)
   val url = $A.alloc<byte>(1041)
   val authorization = $A.alloc<byte>(700)
-  val @(url_len, authorization_len) = _request_parts(url, authorization)
+  val @(url_len, authorization_len) = _request_parts(url, authorization, aim)
   val+ ~EtagCell(etag, etag_len) = _etag_swap(EtagCell($A.alloc<byte>(ETAG_MAX), 0))
   val match_len = (if with_match then etag_len else 0): [match_len:nat | match_len <= ETAG_MAX] int match_len
   val @(method_frozen, method_borrow) = $A.freeze<byte>(method_bytes)
@@ -919,11 +1026,11 @@ fn _http_answer (status: Int): http_answer =
     else if status = 412 then HttpChanged() else HttpOther())
   else HttpOther()
 
-(* What a status a store refused with says: the credentials, the place
-   the file is kept, or the server *)
-fn _failure_kind (answer: http_answer): sync_result =
+(* What a status a store refused with says: the credentials (as the
+   store says it, refused), the place the file is kept, or the server *)
+fn _failure_kind (answer: http_answer, refused: sync_result): sync_result =
   case+ answer of
-  | HttpRefused() => WrongCredentials()
+  | HttpRefused() => refused
   | HttpNotFound() => FolderNotFound()
   | HttpNoFolder() => FolderNotFound()
   | HttpSuccess() => ServerError()
@@ -953,16 +1060,17 @@ fn _tagged {l:agz}{etag_size:pos}
 fn _unreached (): sync_result = if _cross_origin() then Blocked() else Unreachable()
 
 (* A read the server refused with status *)
-fn _read_failed {n:nat}{l:agz} (body: $BD.dblob(n), etag: $A.arr(byte, l, ETAG_MAX), status: Int): read_answer = let
+fn _read_failed {n:nat}{l:agz} (body: $BD.dblob(n), etag: $A.arr(byte, l, ETAG_MAX), status: Int, refused: sync_result): read_answer = let
   val () = $BD.blob_free(body)
   val () = $A.free<byte>(etag)
-in ReadFailed(_failure_kind(_http_answer(status)), status) end
+in ReadFailed(_failure_kind(_http_answer(status), refused), status) end
 
-(* WebDAV: GET the file; its ETag is its version, and 404 is no file yet *)
-fn _webdav_read (): $P.promise(read_answer, $P.Chained) = let
+(* WebDAV: GET the file; its ETag is its version, and 404 is no file
+   yet. Credentials refused are said as refused *)
+fn _webdav_read (refused: sync_result): $P.promise(read_answer, $P.Chained) = let
   val empty = $A.alloc<byte>(1)
   val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
-  val pending = _send("GET", empty_bytes, 0, false)
+  val pending = _send("GET", empty_bytes, 0, false, TheFile())
   val () = release_bytes(empty_frozen, empty_bytes)
 in
   $P.and_then<$FE.fetched><read_answer>(pending, llam(got) => let
@@ -989,18 +1097,19 @@ in
                 val () = $BD.blob_free(body)
               in ReadFile(owner, file, size) end)
         end
-        | HttpRefused() => _read_failed(body, etag, status)
-        | HttpNoFolder() => _read_failed(body, etag, status)
-        | HttpChanged() => _read_failed(body, etag, status)
-        | HttpOther() => _read_failed(body, etag, status))): read_answer
+        | HttpRefused() => _read_failed(body, etag, status, refused)
+        | HttpNoFolder() => _read_failed(body, etag, status, refused)
+        | HttpChanged() => _read_failed(body, etag, status, refused)
+        | HttpOther() => _read_failed(body, etag, status, refused))): read_answer
   in $P.ret<read_answer>(answer) end)
 end
 
 (* WebDAV: PUT the file, If-Match the ETag read (unconditional when
-   there was none); 412 is a conflict *)
+   there was none); 412 is a conflict. Credentials refused are said as
+   refused *)
 fn _webdav_write {body_loc:agz}{body_size:pos}
-  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
-  val pending = _send("PUT", body, body_size, true)
+  (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size, refused: sync_result): $P.promise(write_answer, $P.Chained) = let
+  val pending = _send("PUT", body, body_size, true, TheFile())
 in
   $P.and_then<$FE.fetched><write_answer>(pending, llam(got) => let
     val etag = $A.alloc<byte>(ETAG_MAX)
@@ -1013,13 +1122,38 @@ in
           case+ _http_answer(status) of
           | HttpChanged() => WriteConflict()
           | HttpSuccess() => Written()
-          | HttpRefused() => WriteFailed(WrongCredentials(), status)
+          | HttpRefused() => WriteFailed(refused, status)
           | HttpNotFound() => WriteFailed(FolderNotFound(), status)
           | HttpNoFolder() => WriteFailed(FolderNotFound(), status)
           | HttpOther() => WriteFailed(ServerError(), status)
         end): write_answer
   in $P.ret<write_answer>(answer) end)
 end
+
+(* A response not looked at, let go *)
+fn _fetched_free (got: $FE.fetched): void =
+  case+ got of
+  | ~$FE.NoResponse() => ()
+  | ~$FE.Responded(response) => $BD.blob_free($FE.fetch_body(response))
+
+(* Fastmail: the WebDAV read, its refusal said as Fastmail's; with no
+   file yet, its folder is made (MKCOL), so the first write has one to
+   go in. A folder already there answers 405 and is left as it is; one
+   that could not be made makes the write fail, and says why *)
+fn _fastmail_read (): $P.promise(read_answer, $P.Chained) =
+  $P.and_then<read_answer><read_answer>(_webdav_read(FastmailRefused()), llam(answer) =>
+    case+ answer of
+    | ~ReadNothing() => let
+        val empty = $A.alloc<byte>(1)
+        val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
+        val pending = _send("MKCOL", empty_bytes, 0, false, TheFolder())
+        val () = release_bytes(empty_frozen, empty_bytes)
+      in
+        $P.and_then<$FE.fetched><read_answer>(pending, llam(got) => let
+          val () = _fetched_free(got)
+        in $P.ret<read_answer>(ReadNothing()) end)
+      end
+    | read => $P.ret<read_answer>(read))
 
 (* The access token for the Android store's account: asked for when the
    reader acts (Use Android, Sync now), kept only while the app runs,
@@ -1245,7 +1379,8 @@ fn _dropbox_write {body_loc:agz}{body_size:pos}
 (* Reads the file from the store *)
 fn store_read (): $P.promise(read_answer, $P.Chained) =
   case+ _store_kind() of
-  | WebDavKind() => _webdav_read()
+  | WebDavKind() => _webdav_read(WrongCredentials())
+  | FastmailKind() => _fastmail_read()
   | AndroidKind() => _android_read()
   | DropboxKind() => _dropbox_read()
   | BackupKind() => _backup_read()
@@ -1257,7 +1392,7 @@ fn store_read (): $P.promise(read_answer, $P.Chained) =
 fn store_write {body_loc:agz}{body_size:pos}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) = let
   val kind = _store_kind()
-  val backed_up = (case+ kind of WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | BackupKind() => false | NoStoreKind() => false): bool
+  val backed_up = (case+ kind of WebDavKind() => true | AndroidKind() => true | DropboxKind() => true | FastmailKind() => true | BackupKind() => false | NoStoreKind() => false): bool
   val () = (if ~backed_up then ()
     else if ~$BACKUP.backup_file_available() then ()
     (* ignored: the backed-up file is a safety net; one not written
@@ -1265,7 +1400,8 @@ fn store_write {body_loc:agz}{body_size:pos}
     else $P.finish<write_answer>(_backup_write(body, body_size), llam(_) => ()))
 in
   case+ kind of
-  | WebDavKind() => _webdav_write(body, body_size)
+  | WebDavKind() => _webdav_write(body, body_size, WrongCredentials())
+  | FastmailKind() => _webdav_write(body, body_size, FastmailRefused())
   | AndroidKind() =>
     if body_size > 16777216 then $P.ret<write_answer>(WriteFailed(TooLarge(), 0)) else _android_write(body, body_size)
   | DropboxKind() => _dropbox_write(body, body_size)
@@ -2311,6 +2447,13 @@ fn _fields_make (): void = let
   val () = ui_field("sync-fields", "sync-user", FUser, "mname", "User name")
 in ui_field("sync-fields", "sync-password", FPassword, "mname", "Password") end
 
+(* Fastmail's fields, empty: its address and an app password (made
+   again to be emptied) *)
+fn _fastmail_fields_make (): void = let
+  val () = ui_clear("fastmail-fields")
+  val () = ui_field("fastmail-fields", "fastmail-user", FUser, "mname", "Fastmail address")
+in ui_field("fastmail-fields", "fastmail-password", FPassword, "mname", "Fastmail app password") end
+
 (* The sync screen: what sync keeps the same, the WebDAV folder's URL,
    user name and password (kept on this device only), how the last sync
    went, and Turn off, Sync now and Done; and the toast that offers the
@@ -2323,12 +2466,24 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
   val () = ui_text("sync-title", "Sync")
   val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
-  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
+  val () = ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Fastmail or Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
   val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
   val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
   val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
   val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
   val () = ui_show("sync-android-row", false)
+  (* Fastmail: its files over WebDAV, with its address and an app
+     password, which Fastmail's settings make (the link and the steps) *)
+  val () = ui_el("sync-box", "sync-fastmail-row", TDiv, "sfields")
+  val () = ui_el("sync-fastmail-row", "sync-fastmail-about", TDiv, "sabout")
+  val () = ui_el("sync-fastmail-row", "fastmail-form", TDiv, "sfields")
+  val () = ui_el("fastmail-form", "fastmail-fields", TDiv, "sfields")
+  val () = _fastmail_fields_make()
+  val () = ui_el("fastmail-form", "fastmail-steps", TDiv, "sabout")
+  val () = ui_text_long("fastmail-steps", "Make an app password in Fastmail's Settings, under Privacy & Security: choose Manage app passwords, give the new one access to Files (WebDAV), then copy it here.")
+  val () = ui_link_out_https("fastmail-form", "fastmail-app-password", "btn linkout", "Make an app password", "app.fastmail.com/settings/security")
+  val () = ui_text_btn("fastmail-form", "sync-fastmail", "btn", "Sync with Fastmail")
+  val () = ui_show("fastmail-form", false)
   val () = ui_el("sync-box", "sync-dropbox-row", TDiv, "sfields")
   val () = ui_text_btn("sync-dropbox-row", "sync-dropbox", "btn", "Dropbox")
   val () = ui_el("sync-dropbox-row", "sync-dropbox-about", TDiv, "sabout")
@@ -2360,9 +2515,20 @@ in ui_show("sync-toast", false) end
 (* The fields, made again, with what is kept *)
 fn _fields_show (): void = let
   val () = _fields_make()
+  val () = _fastmail_fields_make()
 in
   case+ _store_swap(_store, NoStore()) of
   | ~NoStore() => ()
+  | ~Fastmail(user, user_len, password, password_len) => let
+      fn copy {source_loc:agz}{size:pos}{count:pos | count <= size; count <= 1024} (source: !$A.arr(byte, source_loc, size), count: int count): [l:agz] $A.arr(byte, l, count) = let
+        val out = $A.alloc<byte>(count)
+        fun fill {out_loc:agz}{j:nat | j <= count} .<count - j>. (source: !$A.arr(byte, source_loc, size), out: !$A.arr(byte, out_loc, count), j: int j): void =
+          if j >= count then () else let val () = $A.set<byte>(out, j, $A.get<byte>(source, j)) in fill(source, out, j + 1) end
+        val () = fill(source, out, 0)
+      in out end
+      val () = ui_attr_buf("fastmail-user", AValue, copy(user, user_len), user_len)
+      val () = ui_attr_buf("fastmail-password", AValue, copy(password, password_len), password_len)
+    in _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len))) end
   | ~Android(account, account_len) => _store_free(_store_swap(_store, Android(account, account_len)))
   | ~Dropbox(refresh, refresh_len) => _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
@@ -2376,6 +2542,54 @@ in
       val () = (if user_len > 0 then ui_attr_buf("sync-user", AValue, copy(user, user_len), user_len) else ())
       val () = (if password_len > 0 then ui_attr_buf("sync-password", AValue, copy(password, password_len), password_len) else ())
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
+end
+
+(* Fastmail's row: its form where Fastmail's files can be reached, or
+   why not. Fastmail's WebDAV sends no CORS headers (checked 2026-10-01
+   and 2026-10-04: its preflight answers 401 with none), so a browser
+   page can't reach it; the app's requests are native, and can *)
+fn _fastmail_offered (reachable: bool): void = let
+  val () = ui_show("fastmail-form", reachable)
+in
+  if reachable then ui_text_long("sync-fastmail-about", "Syncs through Fastmail's Files, in a folder named quire, with your Fastmail address and an app password.")
+  else ui_text_long("sync-fastmail-about", "Fastmail works in the Quire app; browsers can't reach Fastmail's files.")
+end
+
+(* In a browser, whether Fastmail now lets a page in: a request a
+   browser asks Fastmail about first (a PROPFIND, with an Authorization
+   header, as a sync's), whose answer, whatever its status, means the
+   browser let it through. So a Fastmail that one day sends CORS headers
+   is offered with no change here *)
+fn _fastmail_probe (): void = let
+  val method = $A.alloc<byte>(8)
+  val () = $A.write_text(method, 0, $A.text_lit("PROPFIND"), 8)
+  val url = $A.alloc<byte>(29)
+  val () = $A.write_text(url, 0, $A.text_lit("https://myfiles.fastmail.com/"), 29)
+  (* no one's: an empty user name and password *)
+  val authorization = $A.alloc<byte>(10)
+  val () = $A.write_text(authorization, 0, $A.text_lit("Basic Og=="), 10)
+  (* no If-Match, and no body *)
+  val no_match = $A.alloc<byte>(1)
+  val no_body = $A.alloc<byte>(1)
+  val @(method_frozen, method_bytes) = $A.freeze<byte>(method)
+  val @(url_frozen, url_bytes) = $A.freeze<byte>(url)
+  val @(authorization_frozen, authorization_bytes) = $A.freeze<byte>(authorization)
+  val @(no_match_frozen, no_match_bytes) = $A.freeze<byte>(no_match)
+  val @(no_body_frozen, no_body_bytes) = $A.freeze<byte>(no_body)
+  val pending = $FE.fetch_send(method_bytes, 8, url_bytes, 29, authorization_bytes, 10, no_match_bytes, 0, no_body_bytes, 0)
+  val () = release_bytes(no_body_frozen, no_body_bytes)
+  val () = release_bytes(no_match_frozen, no_match_bytes)
+  val () = release_bytes(authorization_frozen, authorization_bytes)
+  val () = release_bytes(url_frozen, url_bytes)
+  val () = release_bytes(method_frozen, method_bytes)
+in
+  $P.finish<$FE.fetched>(pending, llam(got) => let
+    val reachable = (case+ got of
+      | ~$FE.NoResponse() => false
+      | ~$FE.Responded(response) => let
+          val () = $BD.blob_free($FE.fetch_body(response))
+        in true end): bool
+  in if layer_is_open(LSync()) then _fastmail_offered(reachable) else () end)
 end
 
 (* Opens the sync screen *)
@@ -2412,6 +2626,9 @@ implement sync_screen_open () = let
     else if key_len <= 0 then ui_text_long("sync-dropbox-about", "Dropbox sync isn't set up in this build of Quire.")
     else if app then ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page opens in your browser to sign you in, then brings you back here.")
     else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
+  (* Fastmail: offered in the app; in a browser, once it answers one *)
+  val () = (if app then _fastmail_offered(true)
+    else let val () = _fastmail_offered(false) in _fastmail_probe() end)
   val () = _fields_show()
   val () = _status_show()
   val () = ui_show("sync-off", _store_on())
@@ -2583,6 +2800,7 @@ in
     (* no folder given: the Android store's sync, when it is the one *)
     if _is_android() then _android_now()
     else if _store_kind_is_dropbox() then sync_run()
+    else if _store_kind_is_fastmail() then sync_run()
     else let
       val () = !_last_result := NoAddress()
     in _status_show() end
@@ -2596,6 +2814,31 @@ in
   else let
     val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
     val () = _store_save()
+    val () = ui_show("sync-off", true)
+    (* not synced to it yet, while a sync of the backed-up file's ends *)
+    val () = (if !_busy then !_last_result := NotSyncedYet() else ())
+  in sync_run() end
+end
+
+(* Sync with Fastmail (its row's button): its address and app password
+   kept, then a sync *)
+#pub fn sync_fastmail (): void
+implement sync_fastmail () = let
+  val @(user, user_len) = _field_value("fastmail-user", USER_MAX)
+  val @(password, password_len) = _field_value("fastmail-password", PASSWORD_MAX)
+in
+  if user_len <= 0 then let
+    val () = $A.free<byte>(user)
+    val () = $A.free<byte>(password)
+  in ui_text_long("sync-status", "Enter your Fastmail address and an app password.") end
+  else if password_len <= 0 then let
+    val () = $A.free<byte>(user)
+    val () = $A.free<byte>(password)
+  in ui_text_long("sync-status", "Enter your Fastmail address and an app password.") end
+  else let
+    val () = _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len)))
+    val () = _store_save()
+    val () = _fields_show()
     val () = ui_show("sync-off", true)
     (* not synced to it yet, while a sync of the backed-up file's ends *)
     val () = (if !_busy then !_last_result := NotSyncedYet() else ())
@@ -2855,6 +3098,26 @@ in
           | ~Dropbox(refresh, refresh_len) => _dropbox_revoke(refresh, refresh_len)
           | other => _store_free(other)))
     end
+  | ~Fastmail(user, user_len, password, password_len) => let
+      val () = _store_free(_store_swap(_store_off, Fastmail(user, user_len, password, password_len)))
+      val () = _store_forget()
+      val () = _fields_show()
+      val () = _status_show()
+      val () = ui_show("sync-off", false)
+    in
+      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+        case+ how of
+        | Undone() => let
+            val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
+            val () = _store_save()
+          in
+            if layer_is_open(LSync()) then let
+              val () = _fields_show()
+              val () = ui_show("sync-off", true)
+            in _status_show() end else ()
+          end
+        | Final() => _store_free(_store_swap(_store_off, NoStore())))
+    end
   | ~WebDav(url, url_len, user, user_len, password, password_len) => let
       val () = _store_free(_store_swap(_store_off, WebDav(url, url_len, user, user_len, password, password_len)))
       val () = _store_forget()
@@ -2924,6 +3187,23 @@ fn _stores_load (): $P.promise(int, $P.Chained) = let
             | ~StoredUnreadable() => ()
             | ~StoredBytes(record, n) => let
                 val read = _dropbox_of_record(record, n)
+                val () = $A.free<byte>(record)
+              in _store_free(_store_swap(_store, read)) end)
+          val () = sync_run()
+        in $P.ret<int>(0) end)
+      end
+      | FastmailKind() => let
+        val @(fastmail_frozen, fastmail_bytes) = $A.freeze<byte>(_fastmail_key())
+        val fastmail_pending = $IDB.idb_get(fastmail_bytes, 13)
+        val () = release_bytes(fastmail_frozen, fastmail_bytes)
+      in
+        $P.and_then<$IDB.lookup><int>(fastmail_pending, llam(found) => let
+          val () = (case+ lookup_bytes(found) of
+            | ~NothingStored() => ()
+            (* no store: sync stays off this session *)
+            | ~StoredUnreadable() => ()
+            | ~StoredBytes(record, n) => let
+                val read = _fastmail_of_record(record, n)
                 val () = $A.free<byte>(record)
               in _store_free(_store_swap(_store, read)) end)
           val () = sync_run()

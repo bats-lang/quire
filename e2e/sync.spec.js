@@ -3,7 +3,7 @@
 // the file and its ETag, PUT honours If-Match (412 when the file
 // changed) and keeps what it is sent.
 
-import { test, expect, googleStubbed } from './fixtures.js';
+import { test, expect, googleStubbed, fastmailStubbed } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
@@ -59,6 +59,7 @@ function webdav() {
 async function device(browser, server, time) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
   await googleStubbed(context);
+  await fastmailStubbed(context);
   await context.route('**/dav/books/quire-sync.json', server.handle);
   const page = await context.newPage();
   if (time) await page.clock.install({ time });
@@ -93,7 +94,7 @@ async function setUp(page, password = PASSWORD) {
   await openSync(page);
   await panel(page).getByLabel('Folder URL').fill(folder(page));
   await panel(page).getByLabel('User name').fill(USER);
-  await panel(page).getByLabel('Password').fill(password);
+  await panel(page).getByLabel('Password', { exact: true }).fill(password);
   await panel(page).getByRole('button', { name: 'Sync now' }).click();
 }
 
@@ -293,7 +294,7 @@ test('a sync that fails says why, and changes nothing here', async ({ browser })
   await setUp(b.page, 'not-the-password');
   await expect(status(b.page)).toContainText('The user name or password is wrong.');
   // the folder missing (its file can be read, it cannot be written)
-  await panel(b.page).getByLabel('Password').fill(PASSWORD);
+  await panel(b.page).getByLabel('Password', { exact: true }).fill(PASSWORD);
   server.putStatus = 403;
   await panel(b.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(b.page)).toContainText('The user name or password is wrong.');
@@ -335,13 +336,13 @@ test('the folder, user name and password are kept on the device, never in a back
   await expect(cards(a.page)).toHaveCount(1);
   await openSync(a.page);
   await expect(panel(a.page).getByLabel('Folder URL')).toHaveValue(folder(a.page));
-  await expect(panel(a.page).getByLabel('Password')).toHaveValue(PASSWORD);
+  await expect(panel(a.page).getByLabel('Password', { exact: true })).toHaveValue(PASSWORD);
   // turned off, and back with Undo
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(a.page)).toHaveText('Sync is off.');
-  await expect(panel(a.page).getByLabel('Password')).toHaveValue('');
+  await expect(panel(a.page).getByLabel('Password', { exact: true })).toHaveValue('');
   await a.page.getByRole('button', { name: 'Undo' }).click();
-  await expect(panel(a.page).getByLabel('Password')).toHaveValue(PASSWORD);
+  await expect(panel(a.page).getByLabel('Password', { exact: true })).toHaveValue(PASSWORD);
   await a.context.close();
 });
 

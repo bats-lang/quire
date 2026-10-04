@@ -6,7 +6,7 @@
 // token for the device's account, Filesystem keeps files in a map), and
 // Google Drive's API is a mock routed in each (no real network).
 
-import { test, expect, clientsServed } from './fixtures.js';
+import { test, expect, clientsServed, fastmailStubbed, fastmailRefused } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,
@@ -234,6 +234,7 @@ test('a file another device wrote meanwhile is read again and merged', async ({ 
 test('Use Android says why it cannot sync, and Turn off signs out', async ({ browser }) => {
   // in a browser there is no Use Android
   const web = await browser.newContext();
+  await fastmailStubbed(web);
   await clientsServed(web, {});
   const page = await web.newPage();
   await page.goto('/');
@@ -339,6 +340,7 @@ const IDENTITY_SERVICES = `
 /** A browser: Google's script and Drive routed, and the build's client */
 async function browserDevice(browser, server) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await fastmailStubbed(context);
   await context.route('https://accounts.google.com/gsi/client', route => route.fulfill({
     status: 200, headers: { 'content-type': 'text/javascript' }, body: IDENTITY_SERVICES,
   }));
@@ -350,7 +352,7 @@ async function browserDevice(browser, server) {
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  page.on('console', m => { if (m.type() === 'error' && !fastmailRefused(m)) errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
   return { context, page, errors };
