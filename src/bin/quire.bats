@@ -52,6 +52,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BE = "wasm.bats-packages.dev/bridge/src/external.sats"
 staload BW = "wasm.bats-packages.dev/bridge/src/build_watch.sats"
+staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
 
 (* ============================================================
    State
@@ -837,6 +838,11 @@ fn _book_action {book:int} (book: int book, action: book_action): void =
 (* ============================================================
    Settings
    ============================================================ *)
+
+(* The page's fonts changed as they loaded: the open chapter's pages are
+   counted again *)
+fn _fonts_arrived (): void =
+  if _in_reader() then reader_relayout() else ()
 
 fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
@@ -2243,7 +2249,7 @@ in listeners end
    speech's events, and the page going away, which stops it), the
    screen's controls (the brightness, and full screen entered or left),
    and the browser's offer to install the app *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 8) = let
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 9) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -2262,6 +2268,14 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 8) = let
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
+  (* a face that arrives after the chapter was laid out with a fallback
+     changes its pages: they are counted again, the place kept. Whether
+     others are still loading or not, what has arrived has changed the
+     layout (one still loading may never arrive) *)
+  val listeners = RFonts(listeners, llam(status) =>
+      case+ status of
+      | $ME.FontsSettled() => _fonts_arrived()
+      | $ME.FontsStillLoading() => _fonts_arrived())
 in listeners end
 
 (* ============================================================
