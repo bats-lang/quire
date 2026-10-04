@@ -8,7 +8,7 @@
 // turns: so while it turns, the page's text is there twice (the copy is
 // hidden from assistive technology, and found here by its text alone).
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures.js';
 import { start, readBook, place, bookPage, chapters, clickControl } from './helpers.js';
 
 const book = (title, rtl = false) => ({ title, author: 'Turn Tests', rawChapters: chapters(2, 20), rtl });

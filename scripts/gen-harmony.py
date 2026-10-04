@@ -148,7 +148,7 @@ for t in THEMES:
             side = "first" if lum(fs) > lum(bs) else "second"
             parts.append(f"SHADEDc(PAL{t}_{f}(), PAL{t}_{b}(),\n    {shade_proof(pal[(t, f)], strength)},\n    "
                          f"{shade_proof(pal[(t, b)], strength)},\n    $CT.CONTRAST_lighter_{side}({lum_of(fs)}, {lum_of(bs)}))")
-        out.append(f"prval V_{NAMES[t]}_{strength}: VEILED({t}, {strength}) = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
+        out.append(f"prval V_{NAMES[t]}_{strength}: VEILED({PALETTES[t]}, {strength}) = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
 
 begin = "(* BEGIN proofs: written by scripts/gen-harmony.py *)"
 end = "(* END proofs *)"

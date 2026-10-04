@@ -316,15 +316,15 @@ dataprop SHADE(int, int, int) =
       ($CT.LIN(r, rl, rh), $CT.LIN(g, gl, gh), $CT.LIN(b, bl, bh),
        $CT.LIN(shaded_r, srl, srh), $CT.LIN(shaded_g, sgl, sgh), $CT.LIN(shaded_b, sbl, sbh))
 
-dataprop SHADED(int, int, int, int, int) =
-  | {t,text,ground,strength,k:int}{text_colour,ground_colour,text_shaded,ground_shaded:int}
+dataprop SHADED(palette, colour_role, colour_role, int, int) =
+  | {t:palette}{text,ground:colour_role}{strength,k:int}{text_colour,ground_colour,text_shaded,ground_shaded:int}
     SHADEDc(t, text, ground, strength, k) of (
       PAL(t, text, text_colour), PAL(t, ground, ground_colour),
       SHADE(text_colour, strength, text_shaded), SHADE(ground_colour, strength, ground_shaded),
       $CT.CONTRAST(text_shaded, ground_shaded, k))
 
-dataprop VEILED(int, int) =
-  | {t,strength:int}
+dataprop VEILED(palette, int) =
+  | {t:palette}{strength:int}
     VEILEDc(t, strength) of (
       SHADED(t, FG, BG, strength, 70), SHADED(t, ACCENT, BG, strength, 45),
       SHADED(t, FG, HL, strength, 45), SHADED(t, FG, HL2, strength, 45),
@@ -686,7 +686,7 @@ prval H_grey: HARMONY(PaletteGrey) = HARMONYc(
   MODE_dark($H.LIGHTERc(L_e2e2e2, L_3a3a3a), $H.PEAKc($H.MXMN_rgb($H.RGBc{0x3a,0x3a,0x3a}())),
     $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())), $H.PEAKc($H.MXMN_rgb($H.RGBc{0xe2,0xe2,0xe2}())),
     $H.CALMc($H.MXMN_gbr($H.RGBc{0x8f,0xd0,0xa8}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0xff,0xb4,0xab}())), $H.CALMc($H.MXMN_rgb($H.RGBc{0x99,0x99,0x99}()))))
-prval V_light_6: VEILED(0, 6) = VEILEDc(
+prval V_light_6: VEILED(PaletteLight, 6) = VEILEDc(
   SHADEDc(PAL0_fg(), PAL0_bg(),
     SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_27(), $CT.LIN_27(), $CT.LIN_27()),
     SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_eb(), $CT.LIN_e9(), $CT.LIN_e6()),
@@ -707,7 +707,7 @@ prval V_light_6: VEILED(0, 6) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
-prval V_light_12: VEILED(0, 12) = VEILEDc(
+prval V_light_12: VEILED(PaletteLight, 12) = VEILEDc(
   SHADEDc(PAL0_fg(), PAL0_bg(),
     SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_25(), $CT.LIN_25(), $CT.LIN_25()),
     SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_dc(), $CT.LIN_da(), $CT.LIN_d8()),
@@ -728,7 +728,7 @@ prval V_light_12: VEILED(0, 12) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_e0(), $CT.LIN_9e(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_e0(), $CT.LIN_9e(), $CT.LIN_00()))))
-prval V_light_18: VEILED(0, 18) = VEILEDc(
+prval V_light_18: VEILED(PaletteLight, 18) = VEILEDc(
   SHADEDc(PAL0_fg(), PAL0_bg(),
     SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_22(), $CT.LIN_22(), $CT.LIN_22()),
     SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_cd(), $CT.LIN_cb(), $CT.LIN_c9()),
@@ -749,7 +749,7 @@ prval V_light_18: VEILED(0, 18) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_d1(), $CT.LIN_93(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_d1(), $CT.LIN_93(), $CT.LIN_00()))))
-prval V_light_24: VEILED(0, 24) = VEILEDc(
+prval V_light_24: VEILED(PaletteLight, 24) = VEILEDc(
   SHADEDc(PAL0_fg(), PAL0_bg(),
     SHADEc($CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_2a(), $CT.LIN_20(), $CT.LIN_20(), $CT.LIN_20()),
     SHADEc($CT.LIN_fa(), $CT.LIN_f8(), $CT.LIN_f5(), $CT.LIN_be(), $CT.LIN_bc(), $CT.LIN_ba()),
@@ -770,7 +770,7 @@ prval V_light_24: VEILED(0, 24) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_c2(), $CT.LIN_88(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_c2(), $CT.LIN_88(), $CT.LIN_00()))))
-prval V_sepia_5: VEILED(1, 5) = VEILEDc(
+prval V_sepia_5: VEILED(PaletteSepia, 5) = VEILEDc(
   SHADEDc(PAL1_fg(), PAL1_bg(),
     SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_38(), $CT.LIN_2d(), $CT.LIN_20()),
     SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_e4(), $CT.LIN_db(), $CT.LIN_c8()),
@@ -791,7 +791,7 @@ prval V_sepia_5: VEILED(1, 5) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f2(), $CT.LIN_aa(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f2(), $CT.LIN_aa(), $CT.LIN_00()))))
-prval V_sepia_10: VEILED(1, 10) = VEILEDc(
+prval V_sepia_10: VEILED(PaletteSepia, 10) = VEILEDc(
   SHADEDc(PAL1_fg(), PAL1_bg(),
     SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_35(), $CT.LIN_2a(), $CT.LIN_1f()),
     SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_d8(), $CT.LIN_cf(), $CT.LIN_bd()),
@@ -812,7 +812,7 @@ prval V_sepia_10: VEILED(1, 10) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_e6(), $CT.LIN_a1(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_e6(), $CT.LIN_a1(), $CT.LIN_00()))))
-prval V_sepia_15: VEILED(1, 15) = VEILEDc(
+prval V_sepia_15: VEILED(PaletteSepia, 15) = VEILEDc(
   SHADEDc(PAL1_fg(), PAL1_bg(),
     SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_32(), $CT.LIN_28(), $CT.LIN_1d()),
     SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_cc(), $CT.LIN_c4(), $CT.LIN_b3()),
@@ -833,7 +833,7 @@ prval V_sepia_15: VEILED(1, 15) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_d9(), $CT.LIN_98(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_d9(), $CT.LIN_98(), $CT.LIN_00()))))
-prval V_sepia_20: VEILED(1, 20) = VEILEDc(
+prval V_sepia_20: VEILED(PaletteSepia, 20) = VEILEDc(
   SHADEDc(PAL1_fg(), PAL1_bg(),
     SHADEc($CT.LIN_3b(), $CT.LIN_2f(), $CT.LIN_22(), $CT.LIN_2f(), $CT.LIN_26(), $CT.LIN_1b()),
     SHADEc($CT.LIN_f0(), $CT.LIN_e6(), $CT.LIN_d2(), $CT.LIN_c0(), $CT.LIN_b8(), $CT.LIN_a8()),
@@ -854,7 +854,7 @@ prval V_sepia_20: VEILED(1, 20) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_cc(), $CT.LIN_8f(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_cc(), $CT.LIN_8f(), $CT.LIN_00()))))
-prval V_dark_2: VEILED(2, 2) = VEILEDc(
+prval V_dark_2: VEILED(PaletteDark, 2) = VEILEDc(
   SHADEDc(PAL2_fg(), PAL2_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
     SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
@@ -875,7 +875,7 @@ prval V_dark_2: VEILED(2, 2) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()))))
-prval V_dark_4: VEILED(2, 4) = VEILEDc(
+prval V_dark_4: VEILED(PaletteDark, 4) = VEILEDc(
   SHADEDc(PAL2_fg(), PAL2_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
     SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1d(), $CT.LIN_1d(), $CT.LIN_1d()),
@@ -896,7 +896,7 @@ prval V_dark_4: VEILED(2, 4) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()))))
-prval V_dark_6: VEILED(2, 6) = VEILEDc(
+prval V_dark_6: VEILED(PaletteDark, 6) = VEILEDc(
   SHADEDc(PAL2_fg(), PAL2_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
     SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
@@ -917,7 +917,7 @@ prval V_dark_6: VEILED(2, 6) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
-prval V_dark_8: VEILED(2, 8) = VEILEDc(
+prval V_dark_8: VEILED(PaletteDark, 8) = VEILEDc(
   SHADEDc(PAL2_fg(), PAL2_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
     SHADEc($CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1e(), $CT.LIN_1c(), $CT.LIN_1c(), $CT.LIN_1c()),
@@ -938,7 +938,7 @@ prval V_dark_8: VEILED(2, 8) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_eb(), $CT.LIN_a5(), $CT.LIN_00()))))
-prval V_night_0: VEILED(3, 0) = VEILEDc(
+prval V_night_0: VEILED(PaletteNight, 0) = VEILEDc(
   SHADEDc(PAL3_fg(), PAL3_bg(),
     SHADEc($CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96(), $CT.LIN_c2(), $CT.LIN_b2(), $CT.LIN_96()),
     SHADEc($CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14(), $CT.LIN_1f(), $CT.LIN_1a(), $CT.LIN_14()),
@@ -959,7 +959,7 @@ prval V_night_0: VEILED(3, 0) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00()))))
-prval V_grey_2: VEILED(4, 2) = VEILEDc(
+prval V_grey_2: VEILED(PaletteGrey, 2) = VEILEDc(
   SHADEDc(PAL4_fg(), PAL4_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_dd(), $CT.LIN_dd(), $CT.LIN_dd()),
     SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_39(), $CT.LIN_39(), $CT.LIN_39()),
@@ -980,7 +980,7 @@ prval V_grey_2: VEILED(4, 2) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_fa(), $CT.LIN_af(), $CT.LIN_00()))))
-prval V_grey_4: VEILED(4, 4) = VEILEDc(
+prval V_grey_4: VEILED(PaletteGrey, 4) = VEILEDc(
   SHADEDc(PAL4_fg(), PAL4_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d9(), $CT.LIN_d9(), $CT.LIN_d9()),
     SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_38(), $CT.LIN_38(), $CT.LIN_38()),
@@ -1001,7 +1001,7 @@ prval V_grey_4: VEILED(4, 4) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f5(), $CT.LIN_ac(), $CT.LIN_00()))))
-prval V_grey_6: VEILED(4, 6) = VEILEDc(
+prval V_grey_6: VEILED(PaletteGrey, 6) = VEILEDc(
   SHADEDc(PAL4_fg(), PAL4_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d4(), $CT.LIN_d4(), $CT.LIN_d4()),
     SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_37(), $CT.LIN_37(), $CT.LIN_37()),
@@ -1022,7 +1022,7 @@ prval V_grey_6: VEILED(4, 6) = VEILEDc(
     SHADEc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()),
     SHADEc($CT.LIN_ff(), $CT.LIN_b3(), $CT.LIN_00(), $CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()),
     $CT.CONTRAST_lighter_second($CT.LUMc($CT.LIN_00(), $CT.LIN_00(), $CT.LIN_00()), $CT.LUMc($CT.LIN_f0(), $CT.LIN_a8(), $CT.LIN_00()))))
-prval V_grey_8: VEILED(4, 8) = VEILEDc(
+prval V_grey_8: VEILED(PaletteGrey, 8) = VEILEDc(
   SHADEDc(PAL4_fg(), PAL4_bg(),
     SHADEc($CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_e2(), $CT.LIN_d0(), $CT.LIN_d0(), $CT.LIN_d0()),
     SHADEc($CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_3a(), $CT.LIN_35(), $CT.LIN_35(), $CT.LIN_35()),
@@ -2667,7 +2667,7 @@ in sheet end
 
 (* The selector of a page turn's shade at a level in a theme (the
    light theme's is also the default) *)
-fn _shade_selector {number:int}{level:pos | level <= 4} (which: palette_theme(number), level: int level): [length:pos | length <= 40] string length =
+fn _shade_selector {number:palette}{level:pos | level <= 4} (which: palette_theme(number), level: int level): [length:pos | length <= 40] string length =
   case+ which of
   | Light() => (case+ level of 1 => ".shade.s1,.th-light .shade.s1" | 2 => ".shade.s2,.th-light .shade.s2"
     | 3 => ".shade.s3,.th-light .shade.s3" | _ => ".shade.s4,.th-light .shade.s4")
@@ -2683,9 +2683,9 @@ fn _shade_selector {number:int}{level:pos | level <= 4} (which: palette_theme(nu
 (* The shade at a level (1 to 4, the strongest last) in a theme: black
    at strength percent, a ground with no text, at a strength proven to
    leave every pair the page shows legible under it (VEILED) *)
-fn _shade_rule {number:int}{strength:nat | strength <= 100}{level:pos | level <= 4}{left:nat | left >= 120}
-  (veiled: VEILED(number, strength) | sheet: sheet(left, 0), which: palette_theme(number), level: int level, strength: int strength)
-  : [after:nat | after >= left - 120] sheet(after, 0) = let
+fn _shade_rule {number:palette}{strength:nat | strength <= 100}{level:pos | level <= 4}{left:nat | left >= 120}
+  (veiled: VEILED(number, strength) | sheet: sheet(left, false, false), which: palette_theme(number), level: int level, strength: int strength)
+  : [after:nat | after >= left - 120] sheet(after, false, false) = let
   val sheet = rule(sheet, _shade_selector(which, level))
   val () = raw(sheet, "background-color:rgba(0,0,0,")
   val sheet = _number(sheet, strength)
@@ -2702,7 +2702,7 @@ in close(sheet) end
    dark ones it is weaker (Night's highlight is 4.70:1 at rest, so
    there no shade at all leaves it at 4.5:1), and the shadow and the
    slide carry the turn *)
-fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | after >= left - 3600] sheet(after, 0) = let
+fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 3600] sheet(after, false, false) = let
   val sheet = rule(sheet, ".shade")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Inset(), "0")
@@ -2732,7 +2732,7 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | af
   val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, MinHeight(), "0")
   val sheet = lay(sheet, Overflow(), "hidden")
-  val sheet = surf(S_fg_bg | sheet, 1, 0)
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, BoxShadow(), "0 0 24px rgba(0,0,0,.4)")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tgap")
@@ -2744,7 +2744,7 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, 0)): [after:nat | af
   val sheet = lay(sheet, Order(), "-1")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".turn.blank .tgap")
-  val sheet = fill(sheet, 0)
+  val sheet = fill(sheet, RoleGround())
   val sheet = close(sheet)
   val sheet = _shade_rule(V_light_6 | sheet, Light(), 1, 6)
   val sheet = _shade_rule(V_light_12 | sheet, Light(), 2, 12)
