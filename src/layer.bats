@@ -30,6 +30,7 @@ staload "ui.sats"
   | LSync          (* sync between devices: its folder, and how it went *)
   | LSettings      (* the Settings screen: sync, dictionaries, backup, goal, resets *)
   | LAbout         (* the About screen: the app's name, and links to its pages and source *)
+  | LReading       (* the reading settings set seldom, opened from the typography sheet *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   case+ overlay of
@@ -40,7 +41,7 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 256] string id_len =
   | LDictionaries() => "dictionaries-panel" | LDictionary() => "dictionary-panel"
   | LCatalogues() => "catalogues-panel" | LCatalogue() => "catalogue-panel"
   | LSync() => "sync-screen" | LSettings() => "settings-screen"
-  | LAbout() => "about-screen"
+  | LAbout() => "about-screen" | LReading() => "reading-screen"
 
 fn _number (overlay: layer): int =
   case+ overlay of
@@ -48,7 +49,7 @@ fn _number (overlay: layer): int =
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
   | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
   | LCatalogues() => 13 | LCatalogue() => 14
-  | LSync() => 15 | LSettings() => 16 | LAbout() => 17
+  | LSync() => 15 | LSettings() => 16 | LAbout() => 17 | LReading() => 18
 
 (* The open overlays, the last opened first *)
 datavtype layers(int) =

@@ -8,6 +8,7 @@ import { test, expect } from './fixtures.js';
 import { silentWav } from './create-epub.js';
 import {
   start, readBook, place, bookPage, chapterTitle, control, dialog, openSettings, reload, startsOnPage,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const CLIP = 0.6;
@@ -219,20 +220,22 @@ test('a page turned by hand while the narration plays moves it to that page', as
 test('the narration speed is kept, and plays the audio at it', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, denseBook('Faster'));
-  await openSettings(page);
-  const sheet = dialog(page, 'Typography and theme');
+  await openReadingSettings(page);
+  const sheet = readingSettings(page);
   const speed = sheet.getByRole('slider', { name: 'Narration speed' });
   await expect(speed).toHaveValue('4');
   await speed.fill('6');
   await expect(sheet.getByText('1.5×', { exact: true }).filter({ visible: true })).toHaveCount(1);
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await press(page, 'Read aloud');
   await expect.poll(async () => (await audio(page)).rate).toBe(1.5);
   await press(page, 'Read aloud');
   await reload(page);
   await expect(bookPage(page)).toBeVisible();
-  await openSettings(page);
-  await expect(dialog(page, 'Typography and theme').getByRole('slider', { name: 'Narration speed' })).toHaveValue('6');
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('slider', { name: 'Narration speed' })).toHaveValue('6');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await press(page, 'Read aloud');
   await expect.poll(async () => (await audio(page)).rate).toBe(1.5);
@@ -256,11 +259,12 @@ test('page numbers are passed over, unless the reader asks for them; a table can
   await expect(readAloud(page)).toHaveAttribute('aria-pressed', 'false');
   await expect(control(page, 'Skip table')).toBeHidden();
   // read: the page number is read too
-  await openSettings(page);
-  const group = dialog(page, 'Typography and theme').getByRole('group', { name: 'Page numbers and notes' });
+  await openReadingSettings(page);
+  const group = readingSettings(page).getByRole('group', { name: 'Page numbers and notes' });
   await expect(group.getByRole('button', { name: 'Skip' })).toHaveAttribute('aria-pressed', 'true');
   await group.getByRole('button', { name: 'Read' }).click();
   await expect(group.getByRole('button', { name: 'Read' })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.keyboard.press('Home');
   await watchMarks(page);
@@ -278,9 +282,9 @@ test('a book without overlays offers reading aloud by speech, and no narration',
   }).toPass({ timeout: 20000 });
   await expect(control(page, 'Previous phrase')).toBeHidden();
   await expect(control(page, 'Next phrase')).toBeHidden();
-  await openSettings(page);
-  await expect(dialog(page, 'Typography and theme').getByRole('slider', { name: 'Narration speed' })).toBeHidden();
-  await expect(dialog(page, 'Typography and theme').getByRole('group', { name: 'Page numbers and notes' })).toBeHidden();
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('slider', { name: 'Narration speed' })).toBeHidden();
+  await expect(readingSettings(page).getByRole('group', { name: 'Page numbers and notes' })).toBeHidden();
   expect(errors).toEqual([]);
 });
 

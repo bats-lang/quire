@@ -354,12 +354,33 @@ export async function openSettings(page) {
   await expect(dialog(page, 'Typography and theme')).toBeVisible();
 }
 
+/** The reading settings' screen, opened from the typography sheet */
+export function readingSettings(page) {
+  return dialog(page, 'More reading settings');
+}
+
+/** Opens the reading settings' screen: the typography sheet, then its
+    More reading settings row */
+export async function openReadingSettings(page) {
+  if (!(await dialog(page, 'Typography and theme').isVisible())) await openSettings(page);
+  await dialog(page, 'Typography and theme').getByRole('button', { name: /^More reading settings/ }).click();
+  await expect(readingSettings(page)).toBeVisible();
+}
+
+/** Back from the reading settings' screen to the typography sheet */
+export async function closeReadingSettings(page) {
+  await readingSettings(page).getByRole('button', { name: 'Done', exact: true }).click();
+  await expect(readingSettings(page)).toBeHidden();
+}
+
 /** One column a screen, whatever the window: for a test of what a
     single page shows (a wide window in landscape shows a spread) */
 export async function oneColumn(page) {
-  await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' })
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('group', { name: 'Pages on screen' })
     .getByRole('button', { name: 'One', exact: true }).click();
+  // back to the sheet, and from it to the page
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(dialog(page, 'Typography and theme')).toBeHidden();
 }

@@ -9,6 +9,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, card, bookPage, indicator, dialog, openSettings, toLibrary, chapters,
   fixedLayoutBook, imagePage, fixedPlace, readFixed, fixedBoxes as boxes,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 
@@ -98,14 +99,19 @@ test('a fixed-layout book is offered only the theme, its spreads and how the rea
   await expect(indicator(page)).toContainText('in book');
   await openSettings(page);
   const sheet = dialog(page, 'Typography and theme');
+  const more = readingSettings(page);
   await expect(sheet.getByRole('group', { name: 'Theme', exact: true })).toBeVisible();
-  await expect(sheet.getByRole('group', { name: 'What a tap on the page does' })).toBeVisible();
   await expect(sheet.getByRole('button', { name: 'Literata', exact: true })).toBeHidden();
-  await expect(sheet.getByRole('slider', { name: 'Margins' })).toBeHidden();
   await expect(sheet.getByRole('group', { name: 'Layout' })).toBeHidden();
-  // its Columns are its spreads (spreads.spec.js)
-  await expect(sheet.getByRole('group', { name: 'Columns' })).toBeVisible();
-  await expect(sheet.getByRole('group', { name: 'Alignment' })).toBeHidden();
+  await openReadingSettings(page);
+  await expect(more.getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
+  await expect(more.getByRole('slider', { name: 'Margins' })).toBeHidden();
+  // its pages on screen are its spreads (spreads.spec.js)
+  await expect(more.getByRole('group', { name: 'Pages on screen' })).toBeVisible();
+  await expect(more.getByRole('group', { name: 'Justify text' })).toBeHidden();
+  // the text's group goes with its rows
+  await expect(more.getByText('Text', { exact: true })).toBeHidden();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   // a reflowed book after it is offered them all, and is not a fixed page
@@ -113,8 +119,11 @@ test('a fixed-layout book is offered only the theme, its spreads and how the rea
   await expect(indicator(page)).toContainText('in chapter');
   await openSettings(page);
   await expect(sheet.getByRole('button', { name: 'Literata', exact: true })).toBeVisible();
-  await expect(sheet.getByRole('slider', { name: 'Margins' })).toBeVisible();
   await expect(sheet.getByRole('group', { name: 'Layout' })).toBeVisible();
+  await openReadingSettings(page);
+  await expect(more.getByRole('slider', { name: 'Margins' })).toBeVisible();
+  await expect(more.getByText('Text', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).columnWidth)).not.toBe('auto');
   expect(await bookPage(page).evaluate(e => [...e.querySelectorAll('[style]')].length)).toBe(0);

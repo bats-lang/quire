@@ -9,6 +9,7 @@ import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -487,8 +488,9 @@ test('a Hebrew book whose spine does not say reads right to left: its text, its 
   expect(await p.evaluate(e => getComputedStyle(e).direction)).toBe('rtl');
   // a spread starts on the right: its first page's text is right of the
   // page's middle, the next page's left of it
-  await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' }).getByRole('button', { name: 'Two', exact: true }).click();
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   const firstOnScreen = await bookPage(page).evaluate(doc => {
     const c = doc.getBoundingClientRect();
@@ -733,10 +735,16 @@ test('taps on the page follow the chosen zones: sides, forward or one hand', asy
   await turned(0.9, 0.5, 1);
   await tap(0.5, 0.5);
   await expect.poll(bars).toBe(true);
-  // forward: the middle turns on, the left quarter back, the top the bars
-  await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('group', { name: 'What a tap on the page does' })
-    .getByRole('button', { name: 'Forward' }).click();
+  // forward: the middle turns on, the left quarter back, the top the
+  // bars; each choice says so, and its name is first in it
+  await openReadingSettings(page);
+  const taps = readingSettings(page).getByRole('group', { name: 'Tap to turn pages' });
+  await expect(taps.getByRole('button', { name: /^Sides/ })).toHaveAccessibleName('Sides Left side back, right side forward, middle shows the controls');
+  await expect(taps.getByRole('button', { name: /^Sides/ })).toHaveAttribute('aria-pressed', 'true');
+  await expect(taps.getByRole('button', { name: /^Forward/ })).toHaveAccessibleName('Forward Anywhere forward, left side back, top shows the controls');
+  await taps.getByRole('button', { name: /^Forward/ }).click();
+  await expect(taps.getByRole('button', { name: /^Forward/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');
   await expect.poll(bars).toBe(false);
@@ -745,8 +753,9 @@ test('taps on the page follow the chosen zones: sides, forward or one hand', asy
   await tap(0.5, 0.03);
   await expect.poll(bars).toBe(true);
   // one hand: the top third back, the bottom third on, the middle the bars
-  await openSettings(page);
-  await dialog(page, 'Typography and theme').getByRole('button', { name: 'One hand' }).click();
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('button', { name: /^One hand/ }).click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');
   await expect.poll(bars).toBe(false);
@@ -756,7 +765,50 @@ test('taps on the page follow the chosen zones: sides, forward or one hand', asy
   await expect.poll(bars).toBe(true);
 });
 
+// Read right to left, the zones are mirrored: forward's back quarter is
+// on the right, where such a book starts, and the choices say so and
+// draw it so
+test('a book read right to left has its tap zones mirrored, said and drawn', async ({ page }) => {
+  await start(page);
+  await readBook(page, { ...book('Mirrored Taps', 1, 40), rtl: true });
+  await openReadingSettings(page);
+  const taps = readingSettings(page).getByRole('group', { name: 'Tap to turn pages' });
+  await expect(taps.getByRole('button', { name: /^Sides/ })).toHaveAccessibleName('Sides Right side back, left side forward, middle shows the controls');
+  const forward = taps.getByRole('button', { name: /^Forward/ });
+  await expect(forward).toHaveAccessibleName('Forward Anywhere forward, right side back, top shows the controls');
+  // the drawing's back zone at its right
+  const backZone = await page.locator('#taps-forward-back').evaluate(e => {
+    const zone = e.getBoundingClientRect(), map = e.parentElement.getBoundingClientRect();
+    return { right: Math.round(map.right - zone.right), left: Math.round(zone.left - map.left) };
+  });
+  // (inside the drawing's 1 px edge)
+  expect(backZone.right).toBeLessThanOrEqual(1);
+  expect(backZone.left).toBeGreaterThan(8);
+  await forward.click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => control(page, 'Previous page').isVisible()).toBe(false);
+  const tap = async (fx, fy) => {
+    const box = await bookPage(page).boundingBox();
+    await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  };
+  const turned = async (fx, by) => {
+    const before = await place(page);
+    await tap(fx, 0.5);
+    await expect.poll(async () => (await place(page)).p).toBe(before.p + by);
+  };
+  // the left and the middle forward, the right quarter back
+  await turned(0.1, 1);
+  await turned(0.5, 1);
+  await turned(0.9, -1);
+});
+
 test('the volume keys turn the page when the reader chooses, and are the volume\'s otherwise', async ({ page }) => {
+  // the app, where a page is given the volume keys (pwa's MainActivity)
+  await page.addInitScript(() => {
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {} };
+  });
   await start(page);
   await readBook(page, book('Volume', 1, 30));
   // Playwright has no volume keys: the keydown a browser that gives them
@@ -766,15 +818,35 @@ test('the volume keys turn the page when the reader chooses, and are the volume\
   // the volume's, to begin with
   await press('AudioVolumeDown');
   expect(await place(page)).toEqual(at);
-  await openSettings(page);
-  const vol = dialog(page, 'Typography and theme').getByRole('group', { name: 'Volume keys turn the page' });
-  await expect(vol.getByRole('button', { name: 'Volume' })).toHaveAttribute('aria-pressed', 'true');
-  await vol.getByRole('button', { name: 'Turn pages' }).click();
+  // one switch, off to begin with
+  await openReadingSettings(page);
+  const vol = readingSettings(page).getByRole('button', { name: 'Turn pages with volume keys', exact: true });
+  await expect(vol).toHaveAttribute('aria-pressed', 'false');
+  await vol.click();
+  await expect(vol).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await press('AudioVolumeDown');
   await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);
   await press('AudioVolumeUp');
   await expect.poll(async () => (await place(page)).p).toBe(at.p);
+  // and off again: the volume's
+  await openReadingSettings(page);
+  await vol.click();
+  await expect(vol).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await press('AudioVolumeDown');
+  await page.waitForTimeout(200);
+  expect(await place(page)).toEqual(at);
+});
+
+test('in a browser, where the page is not given the volume keys, their switch is not offered', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('No Keys', 1, 5));
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
+  await expect(readingSettings(page).getByRole('button', { name: 'Turn pages with volume keys' })).toBeHidden();
 });
 
 test('the t key shows and hides the bars', async ({ page }) => {
@@ -1116,10 +1188,11 @@ test('the first book opened says once how to turn the page', async ({ page }) =>
 test('two columns show a spread, turned as one and numbered as two pages; auto shows one on a wide screen turned on its side', async ({ page }) => {
   await start(page);
   await readBook(page, book('Spread', 2, 40));
-  await openSettings(page);
-  const columns = dialog(page, 'Typography and theme').getByRole('group', { name: 'Columns' });
+  await openReadingSettings(page);
+  const columns = readingSettings(page).getByRole('group', { name: 'Pages on screen' });
   await columns.getByRole('button', { name: 'Two', exact: true }).click();
   await expect(columns.getByRole('button', { name: 'Two', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(indicator(page)).toHaveText(/^Chapter 1 · pages 1–2 of (\d+) in chapter$/);
   const pages = +/of (\d+) in/.exec(await indicator(page).textContent())[1];
@@ -1137,13 +1210,15 @@ test('two columns show a spread, turned as one and numbered as two pages; auto s
   await page.keyboard.press('ArrowRight');
   await expect(indicator(page)).toHaveText(`Chapter 1 · pages 3–4 of ${pages} in chapter`);
   // one column: a page a screen, about twice as many
-  await openSettings(page);
+  await openReadingSettings(page);
   await columns.getByRole('button', { name: 'One', exact: true }).click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await expect(indicator(page)).toHaveText(/^Chapter 1 · page \d+ of \d+ in chapter$/);
   // auto: a spread exactly when the window is in landscape and wide
-  await openSettings(page);
+  await openReadingSettings(page);
   await columns.getByRole('button', { name: 'Auto', exact: true }).click();
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   const { width, height } = page.viewportSize();
   const wide = width > height && width >= 960;
@@ -1226,14 +1301,15 @@ test('read aloud goes on into the next chapter, from a selection, at the speed a
   await readBook(page, { title: 'Chaptered', author: 'Reader Tests', rawChapters: [
     { body: '<p>One. Two!</p>' }, { body: '<p>Three? Four.</p>' },
   ] });
-  // the speed and voice, in the typography panel
-  await openSettings(page);
-  const panel = dialog(page, 'Typography and theme');
+  // the speed and voice, in the reading settings
+  await openReadingSettings(page);
+  const panel = readingSettings(page);
   await panel.getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
   const voice = panel.getByRole('combobox', { name: 'Voice' });
   await voice.focus();
   await expect(voice.locator('option')).toHaveText(['Automatic', 'Reader', 'Narrator']);
   await voice.selectOption({ label: 'Narrator' });
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   // from a selection: the sentence it starts in
   await selectText(page, 5, 7);
@@ -1246,8 +1322,8 @@ test('read aloud goes on into the next chapter, from a selection, at the speed a
   await expect(chapterTitle(page)).toHaveText('Chapter 2');
   // the choices are kept
   await reload(page);
-  await openSettings(page);
-  await expect(dialog(page, 'Typography and theme').getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
+  await openReadingSettings(page);
+  await expect(readingSettings(page).getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
 });
 
 test('without speech in the browser, read aloud is not offered', async ({ page }) => {

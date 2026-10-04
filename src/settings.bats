@@ -76,7 +76,8 @@ implement $P.dispose<settled>(_) = ()
 (* What a tap on the page does, where: sides (the left quarter back,
    the right on, between them the bars), forward (the top band the
    bars, the left quarter back, anywhere else on), or one hand (the top
-   third back, the bottom third on, between them the bars) *)
+   third back, the bottom third on, between them the bars); mirrored
+   for a book read right to left (quire.bats's _zone_click) *)
 #pub datatype tap_zones = SideZones | ForwardZones | OneHandZones
 #pub typedef set_taps = tap_zones
 
@@ -847,7 +848,6 @@ fn _show_controls (): void = let
   val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
   val () = _pressed("taps-one-hand", taps = taps_code(OneHandZones()))
   val () = _pressed("volume-keys-turn", vol_code(current.volume_keys) = vol_code(KeysTurnPages()))
-  val () = _pressed("volume-keys-off", vol_code(current.volume_keys) = vol_code(KeysForVolume()))
   val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
   val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
   val () = (case+ set_narration_notes_get() of

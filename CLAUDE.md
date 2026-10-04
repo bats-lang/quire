@@ -461,7 +461,7 @@ screen stays awake while the reader is open, so while it plays.
 
 The controls: Read aloud (`aria-pressed`), Previous phrase, Next phrase,
 and, inside an escapable structure, Skip table (list, figure, aside).
-The typography panel offers, for a narrated book, its speed (0.5× to
+The reading settings screen offers, for a narrated book, its speed (0.5× to
 2× in quarters, `audio_rate`, the pitch kept) and whether page numbers
 and notes are read (Skip by default: skippable clips are passed over).
 Both are the device's own, kept outside the settings record as `_ruby`
@@ -568,7 +568,7 @@ only where its platform has it, by its own `data-hide`.
   with the settings, Undo putting them back (`set_reset_undoable`;
   `screen_controls_apply` sets the screen again). Going to the library, opening
   another book, or the page going away (`pagehide`) stops reading.
-* **The screen** (`src/screen_controls.bats`, the typography panel's
+* **The screen** (`src/screen_controls.bats`, the reading settings screen's
   Screen row): Full screen (`fullscreen_*`, pressed as
   `listen_fullscreen` says), Lock rotation (`orientation_*`, a
   `rotation` kept with the settings and locked again as the app
@@ -902,6 +902,19 @@ the page or the page between two places (`tests/static`'s
 (`VEILED`, written by `scripts/gen-harmony.py`): under it the text
 keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
 none.
+
+The typography sheet (`typography-panel`) holds what a reader changes
+while reading: the theme, the font, its size and line spacing, and
+pages or scrolled. Its last row, More reading settings ›, opens the
+rest on a screen of their own (`reading-screen`, the layer `LReading`,
+over the sheet, as Settings opens Sync), grouped: Text (margins,
+justify, hyphenation, the spacings, ruby), Pages (pages on screen,
+dimmed images), Turning pages (Tap to turn pages, each choice with a
+drawing of its zones, mirrored for a book read right to left, and in
+the app one switch, Turn pages with volume keys), Read aloud, the
+screen, and Reset to defaults (#275, which gives the research). Their
+controls are one `typography_control` datatype wherever they are, and
+they are stored, backed up and reset as before.
 
 The reader is fixed to the window (`.rv`, not a height in `vh`, which
 an Android WebView can make taller than what it shows), and the page
