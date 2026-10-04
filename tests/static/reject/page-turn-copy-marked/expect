@@ -1,1 +1,4 @@
-the dynamic identifier [_copy] is unrecognized
+function _static_copy_marked
+line 2
+the dynamic identifier [_copy] is unrecognized.
+the dynamic identifier [CopyKept] is unrecognized.

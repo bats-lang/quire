@@ -1,1 +1,3 @@
-needs to be consumed but it is preserved with the type
+function _static_dropped
+line 2
+the linear dynamic variable [handed$_(-1)] needs to be consumed but it is preserved with the type [S2Ecst(external)] instead.
