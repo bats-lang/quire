@@ -599,16 +599,32 @@ fn _document_button {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos |
   val () = _document_attr(document, id_bytes, id_len, $D.Type, "button")
 in _document_attr(document, id_bytes, id_len, $D.Class, class_name) end
 
-#pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
+(* The icons: each a glyph of the bundled subset of Material Symbols
+   (assets/fonts/material-symbols-subset.woff2, made by
+   scripts/icon-font.py; Apache-2.0), at its code point in the Private
+   Use Area. One monochrome set, drawn in the control's own text colour
+   (so the stylesheet's proven pairs cover it), never an emoji, which
+   a platform may draw as a colour picture (#274) *)
+#pub datatype icon = IcBack | IcClose | IcGear | IcBookmark | IcBookmarked | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak | IcPhrasePrevious | IcPhraseNext
 
 fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   case+ the_icon of
-  | IcBack() => "\xE2\x86\x90" | IcClose() => "\xE2\x9C\x95" | IcGear() => "\xE2\x9A\x99"
-  | IcStar() => "\xE2\x98\x86" | IcSearch() => "\xF0\x9F\x94\x8D" | IcPrev() => "\xE2\x80\xB9"
-  | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
-  | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE" | IcSpeak() => "\xF0\x9F\x94\x8A"
-  | IcPhrasePrevious() => "\xE2\x8F\xAE" | IcPhraseNext() => "\xE2\x8F\xAD"
+  | IcBack() => "\xEE\x97\x84"               (* arrow_back *)
+  | IcClose() => "\xEE\x97\x8D"              (* close *)
+  | IcGear() => "\xEE\xA2\xB8"               (* settings *)
+  | IcBookmark() => "\xEE\x96\x98"           (* bookmark_add *)
+  | IcBookmarked() => "\xEE\x96\x99"         (* bookmark_added *)
+  | IcSearch() => "\xEE\xA2\xB6"             (* search *)
+  | IcPrev() => "\xEE\x97\x8B"               (* chevron_left *)
+  | IcNext() => "\xEE\x97\x8C"               (* chevron_right *)
+  | IcContents() => "\xEE\xA3\x9E"           (* toc *)
+  | IcNotes() => "\xEE\x9D\x85"              (* edit_note *)
+  | IcFont() => "\xEF\x9B\xB1"               (* match_case: "Aa" *)
+  | IcMore() => "\xEE\x97\x94"               (* more_vert *)
+  | IcSpeak() => "\xEE\x81\x90"              (* volume_up *)
+  | IcPhrasePrevious() => "\xEE\x81\x85"     (* skip_previous *)
+  | IcPhraseNext() => "\xEE\x81\x84"         (* skip_next *)
 
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
@@ -740,6 +756,12 @@ implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, 
   (parent: string parent_len, id: string id_len, class_name: string class_len, the_icon: icon, name: string name_len): void
 
 implement ui_icon_btn(parent, id, class_name, the_icon, name) = _control_literal(parent, id, CIcon(class_name, the_icon, name))
+
+(* Icon button id shows the_icon instead (its name stays: a state it
+   shows, such as being pressed, is said by its own attribute) *)
+#pub fn ui_icon_set {id_len:pos | id_len < 256} (id: string id_len, the_icon: icon): void
+
+implement ui_icon_set(id, the_icon) = ui_text(id, _glyph(the_icon))
 
 #pub fn ui_icon_btn_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
   (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len,

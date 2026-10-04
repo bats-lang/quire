@@ -105,6 +105,86 @@ test('the page fills the window, and the bars fit it', async ({ page }) => {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 
+/** The reader's bars as laid out now, measured at once (they hide
+    themselves after 5 s): each visible button's box and name, the
+    label's parts' boxes, the slider's box, and each label part's text
+    whole or not */
+async function bars(page) {
+  return page.evaluate(() => {
+    const toolbar = document.querySelector('[role=toolbar][aria-label="Page controls"]');
+    const shown = e => e.checkVisibility() && e.getClientRects().length > 0;
+    const box = e => { const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, name: e.getAttribute('aria-label') || e.textContent.trim() }; };
+    const status = toolbar.querySelector('[role=status]');
+    const percent = status.parentElement.lastElementChild;
+    return {
+      buttons: [...toolbar.querySelectorAll('button')].filter(shown).map(box),
+      label: [status, percent].filter(shown).map(box),
+      // (the title and " · page " are read out, not shown, on a phone: 1 px)
+      slider: box(toolbar.querySelector('[role=slider]')),
+      cut: [status, ...status.children, percent].filter(shown).filter(e => e.clientWidth > 1 && e.scrollWidth > e.clientWidth + 1).map(e => e.textContent),
+    };
+  });
+}
+
+const overlap = (a, b) => a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
+
+// #274: the bottom bar in two rows, the place ("6 of 40 in chapter ·
+// 1%") whole over the scrubber with the page turns at its ends, and the
+// tools in a row of their own, each a 48 px target, nothing over another
+test("the reader's bottom bar: the progress row over the tools row, nothing cut or overlapping", async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Bars', author: 'L', rawChapters: chapters(12, 40) });
+  await showChrome(page);
+  const measured = await bars(page);
+  expect(measured.cut, 'cut off in the label').toEqual([]);
+  const all = [...measured.buttons, ...measured.label, measured.slider];
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      expect(overlap(all[i], all[j]), `${all[i].name} over ${all[j].name}`).toBe(false);
+    }
+  }
+  const width = page.viewportSize().width;
+  for (const b of all) expect(b.x >= -1 && b.x + b.width <= width + 1, `${b.name} out of the window`).toBe(true);
+  const button = name => measured.buttons.find(b => b.name === name);
+  const previous = button('Previous page'), next = button('Next page');
+  const middle = b => b.y + b.height / 2;
+  // the page turns at the scrubber's ends, on its row
+  expect(previous.x + previous.width).toBeLessThanOrEqual(measured.slider.x + 1);
+  expect(next.x).toBeGreaterThanOrEqual(measured.slider.x + measured.slider.width - 1);
+  expect(Math.abs(middle(previous) - middle(measured.slider))).toBeLessThan(4);
+  expect(Math.abs(middle(next) - middle(measured.slider))).toBeLessThan(4);
+  // the label over it
+  for (const part of measured.label) expect(part.y + part.height).toBeLessThanOrEqual(measured.slider.y + 1);
+  // the tools under it, in one row, each at least 48 px
+  const tools = ['Contents', 'Typography', 'Annotations'].map(button);
+  for (const tool of tools) {
+    expect(tool.y).toBeGreaterThanOrEqual(measured.slider.y + measured.slider.height - 1);
+    expect(tool.width).toBeGreaterThanOrEqual(48);
+    expect(tool.height).toBeGreaterThanOrEqual(48);
+    expect(Math.abs(middle(tool) - middle(tools[0]))).toBeLessThan(2);
+  }
+  await fits(page, 'the reader with its bars');
+});
+
+// #274: every icon is a glyph of the bundled icon face, drawn in the
+// bar's own text colour; none is an emoji, which a platform may draw as
+// a colour picture
+test("no bar button's text is an emoji, and the icons' face is there", async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Icons', author: 'L', rawChapters: chapters(2) });
+  const texts = await page.evaluate(() => [...document.querySelectorAll('[role=navigation][aria-label=Book] button, [role=toolbar][aria-label="Page controls"] button')]
+    .map(e => ({ name: e.getAttribute('aria-label') || e.textContent, text: e.textContent })));
+  // the bars' buttons, narration's included, shown or not
+  expect(texts.length).toBeGreaterThanOrEqual(12);
+  for (const { name, text } of texts) {
+    expect(/\p{Extended_Pictographic}|\u{FE0F}/u.test(text), `${name}: ${JSON.stringify(text)} is an emoji`).toBe(false);
+  }
+  const icons = texts.filter(t => /^[\u{E000}-\u{F8FF}]$/u.test(t.text));
+  expect(icons.length).toBeGreaterThanOrEqual(11);
+  const loaded = await page.evaluate(async glyphs => (await document.fonts.load("24px 'Material Symbols'", glyphs)).length, icons.map(t => t.text).join(''));
+  expect(loaded, 'the icon face is loaded').toBe(1);
+});
+
 test('nothing is cut off in the library, its menus and its screens', async ({ page }) => {
   await start(page);
   await fits(page, 'the empty library');
