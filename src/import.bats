@@ -27,6 +27,7 @@ staload "app.sats"
 staload "platform.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
+staload "trace.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
@@ -133,6 +134,7 @@ in ui_show("import-progress", false) end
 
 (* The import card: stage text and progress in percent *)
 fn _stage {text_len:pos | text_len < 256} (text: string text_len, percent: [percent:nat | percent <= 100] int percent): void = let
+  val () = trace(text)
   val () = ui_show("import-progress", true)
   val () = ui_text("import-status", text)
 in ui_place("import-fill", PWidth, percent * 10) end
@@ -731,7 +733,9 @@ implement import_dropped () = _import_seq(Dropped(), 0, $BF.dropped_count())
 
 (* ignored: the import's result is already reported, as each one's of
    _import_seq *)
-implement import_external (handed) =
+implement import_external (handed) = let
+  val () = trace("import: external file")
+in
   case+ handed of
   | ~$BE.ExternalUnreadable(name) => let
       val () = _keep_name(name)
@@ -741,6 +745,7 @@ implement import_external (handed) =
       val file_size = $BF.file_size(book_file)
       val () = _keep_name(name)
     in _import_file(book_file, file_size) end
+end
 
 (* ============================================================
    Reopening a stored book

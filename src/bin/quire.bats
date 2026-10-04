@@ -42,6 +42,7 @@ staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
+staload "trace.sats"
 staload WN = "wasm.bats-packages.dev/bridge/src/window.sats"
 staload GP = "gestures/src/pointer.sats"
 staload GT = "gestures/src/tracker.sats"
@@ -427,7 +428,7 @@ fn _chrome_set (shown: bool): void = let
   val () = !_chrome_generation := !_chrome_generation + 1
   val generation = !_chrome_generation
 in
-  if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), llam(_) =>
+  if shown then $P.finish<Int>($P.vow($TM.timer_set(30000)), llam(_) =>
       if !_chrome_generation = generation then _chrome_set_off() else ())
   else ()
 end
@@ -2305,12 +2306,24 @@ fn _wire_update {count:nat} (listeners: regs(count)): regs(count + 1) =
    done. The library is shown first, where the import is seen *)
 fun _external_wait {rounds:nat} .<rounds>. (rounds: int rounds): void =
   if rounds <= 0 then ()
-  else $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
+  else let
+    val () = trace("external: asked for the next file")
+  in $P.finish<import_outcome>($P.and_then<$BE.external><import_outcome>($BE.external_next(), llam(handed) => let
+      val () = trace("external: a file handed over")
       val () = (if _in_reader() then _show_library() else ())
     in import_external(handed) end), llam(outcome) => let
+      val () = trace("external: its import ended")
       (* its outcome is already reported *)
       val () = import_outcome_free(outcome)
-    in _external_wait(rounds - 1) end)
+    in _external_wait(rounds - 1) end) end
+
+(* A line every 30 s while the page runs (diagnostic) *)
+#define HEARTBEATS 100
+fun _heartbeat {rounds:nat} .<rounds>. (rounds: int rounds): void =
+  if rounds <= 0 then ()
+  else $P.finish<Int>($P.vow($TM.timer_set(30000)), llam(_) => let
+      val () = trace("heartbeat")
+    in _heartbeat(rounds - 1) end)
 
 implement main0 () = let
   val () = app_build()
@@ -2327,6 +2340,7 @@ implement main0 () = let
   (* files handed to the app from outside it (an Android intent, the
      installed app opened with a file or shared one) *)
   val () = _external_wait(EXTERNAL_ROUNDS)
+  val () = _heartbeat(HEARTBEATS)
   (* what the platform offers: reading aloud, sharing, installing, and
      whether the storage is kept *)
   val () = aloud_offer()
@@ -2352,6 +2366,7 @@ implement main0 () = let
         (* the screen's controls, with the brightness and the lock kept *)
         val () = screen_controls_start()
         val () = lib_render()
+        val () = trace("library: read and shown")
         (* sync, once the library is read *)
         val () = sync_start()
       in
