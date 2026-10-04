@@ -1,1 +1,3 @@
-S2Eeqeq(S2Eintinf(0); S2Eintinf(1))
+function _static_turn_held_lifted
+line 5
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(0); S2Eintinf(1)))

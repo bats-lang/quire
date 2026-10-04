@@ -1,1 +1,4 @@
-pattern match is nonexhaustive
+function _static_failed
+line 4
+pattern match is nonexhaustive:
+Blocked()
