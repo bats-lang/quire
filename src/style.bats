@@ -1187,7 +1187,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition | Visibility
+  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -1220,6 +1220,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
+  | GridArea() => "grid-area"
 
 (* prop:value; *)
 fn lay {left:nat}{media:bool}{value_len:nat | value_len + 18 <= left}
@@ -2869,6 +2870,101 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [aft
   val sheet = _shade_rule(V_grey_8 | sheet, Grey(), 4, 8)
 in sheet end
 
+(* The reading settings' screen (app.bats's _reading_screen), on the
+   card's ground as the sheet it is opened from, and its choices of
+   where taps turn pages: a line each, a drawing of the page's zones
+   beside the choice's name and what it does. The drawing is the
+   page's ground framed by an edge, the back zone the line's colour and
+   the forward zone the accent (no text: their font size is 0); a book
+   read right to left has it mirrored (.taps.rtl). The drawing and the
+   line take no taps, so a tap on them is the button's *)
+fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
+  val sheet = rule(sheet, ".info.rset")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".srow.tapsrow")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, AlignItems(), "stretch")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapsrow .slabel")
+  val sheet = lay(sheet, Width(), "auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seg.taps")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seg button.tapbtn")
+  val sheet = lay(sheet, Display(), "grid")
+  val sheet = lay(sheet, GridTemplate(), "\"m n\" auto \"m a\" auto/32px 1fr")
+  val sheet = lay(sheet, Gap(), "2px 12px")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, TextAlign(), "start")
+  val sheet = lay(sheet, Padding(), "8px 12px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapmap")
+  val sheet = lay(sheet, GridArea(), "m")
+  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, Width(), "32px")
+  val sheet = lay(sheet, Height(), "48px")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, BorderRadius(), "4px")
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, FontSize(), "0")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleGround())
+  val sheet = line(sheet, AllSides(), 1, RoleEdge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzb,.tzf")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, FontSize(), "0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzb")
+  val sheet = fill(sheet, RoleLine())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tzf")
+  val sheet = fill(sheet, RoleAccent())
+  val sheet = close(sheet)
+  (* sides: a quarter at each side, the middle the bars' *)
+  val sheet = rule(sheet, ".sides .tzb")
+  val sheet = lay(sheet, Inset(), "0 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sides .tzf")
+  val sheet = lay(sheet, Inset(), "0 0 0 75%")
+  val sheet = close(sheet)
+  (* forward: under the top eighth (the bars'), a quarter back, the
+     rest forward *)
+  val sheet = rule(sheet, ".forward .tzb")
+  val sheet = lay(sheet, Inset(), "12.5% 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".forward .tzf")
+  val sheet = lay(sheet, Inset(), "12.5% 0 0 25%")
+  val sheet = close(sheet)
+  (* one hand: the top third back, the bottom third forward *)
+  val sheet = rule(sheet, ".onehand .tzb")
+  val sheet = lay(sheet, Inset(), "0 0 66.6% 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".onehand .tzf")
+  val sheet = lay(sheet, Inset(), "66.6% 0 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .sides .tzb")
+  val sheet = lay(sheet, Inset(), "0 0 0 75%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .sides .tzf")
+  val sheet = lay(sheet, Inset(), "0 75% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .forward .tzb")
+  val sheet = lay(sheet, Inset(), "12.5% 0 0 75%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".taps.rtl .forward .tzf")
+  val sheet = lay(sheet, Inset(), "12.5% 25% 0 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tapabout")
+  val sheet = lay(sheet, GridArea(), "a")
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = close(sheet)
+in sheet end
+
 (* The axes the page turn (gestures region 1, on .caf) owns: the
    stylesheet's touch-action for .caf comes from them, so the browser
    leaves exactly that axis to the recognizer *)
@@ -2920,6 +3016,7 @@ implement app_style () = let
   val sheet = _reader(sheet)
   val sheet = _page_turn(sheet)
   val sheet = _panels(sheet)
+  val sheet = _reading_settings(sheet)
   val sheet = _under_480px(sheet)
   val sheet = _under_600px(sheet)
   val sheet = rule(sheet, ".caf")

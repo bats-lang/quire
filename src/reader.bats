@@ -2919,6 +2919,7 @@ fn _rows_set (): void = let
   (* the paragraphs' spacing stays set vertically: it is logical
      (margin-block-end), between their columns of lines *)
   val () = ui_show("paragraph-row", reflowed)
+  val () = ui_show("reading-text-title", reflowed)
   val () = ui_show("layout-row", horizontal)
   (* a fixed page's Columns are its spreads: one page, two, or as the
      book and the view's shape say *)

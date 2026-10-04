@@ -1855,7 +1855,8 @@ end
 #pub fn ui_sync_toast_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_toast_control)
 implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes, n, at, SyncGo(), 2)
 
-(* The typography panel's choices and buttons, each by its element's id (typography_control_id) *)
+(* The typography sheet's and the reading settings screen's choices and
+   buttons, each by its element's id (typography_control_id) *)
 #pub datatype typography_control =
   | FontLiterata
   | FontInter
@@ -1883,12 +1884,13 @@ implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes,
   | TapsSides
   | TapsForward
   | TapsOneHand
-  | VolumeKeysOff
   | VolumeKeysTurn
   | NarrationSkip
   | NarrationRead
   | TypographyReset
   | TypographyClose
+  | TypographyMore
+  | ReadingDone
   | ScreenFullscreen
   | ScreenLock
 
@@ -1921,12 +1923,13 @@ implement typography_control_id (control) =
   | TapsSides() => "taps-sides"
   | TapsForward() => "taps-forward"
   | TapsOneHand() => "taps-one-hand"
-  | VolumeKeysOff() => "volume-keys-off"
   | VolumeKeysTurn() => "volume-keys-turn"
   | NarrationSkip() => "narration-skip"
   | NarrationRead() => "narration-read"
   | TypographyReset() => "typography-reset"
   | TypographyClose() => "typography-close"
+  | TypographyMore() => "typography-more"
+  | ReadingDone() => "reading-done"
   | ScreenFullscreen() => "screen-fullscreen"
   | ScreenLock() => "screen-lock"
 
@@ -1958,13 +1961,14 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | DimOn() => $R.some(TapsSides())
   | TapsSides() => $R.some(TapsForward())
   | TapsForward() => $R.some(TapsOneHand())
-  | TapsOneHand() => $R.some(VolumeKeysOff())
-  | VolumeKeysOff() => $R.some(VolumeKeysTurn())
+  | TapsOneHand() => $R.some(VolumeKeysTurn())
   | VolumeKeysTurn() => $R.some(NarrationSkip())
   | NarrationSkip() => $R.some(NarrationRead())
   | NarrationRead() => $R.some(TypographyReset())
   | TypographyReset() => $R.some(TypographyClose())
-  | TypographyClose() => $R.some(ScreenFullscreen())
+  | TypographyClose() => $R.some(TypographyMore())
+  | TypographyMore() => $R.some(ReadingDone())
+  | ReadingDone() => $R.some(ScreenFullscreen())
   | ScreenFullscreen() => $R.some(ScreenLock())
   | ScreenLock() => $R.none()
 
@@ -1982,7 +1986,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 34)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 35)
 
 (* The catalogues' add and done, and its backdrop, each by its element's id (catalogues_control_id) *)
 #pub datatype catalogues_control =

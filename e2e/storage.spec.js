@@ -7,6 +7,7 @@ import {
   start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
   librarySettings, settingsButton,
+  readingSettings, openReadingSettings,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -156,27 +157,29 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   });
   await start(page);
   await readBook(page, { title: 'Spoken Once', author: 'Storage Tests', rawChapters: chapters(1) });
-  const sheet = dialog(page, 'Typography and theme');
+  const sheet = readingSettings(page);
   const speed = sheet.getByRole('combobox', { name: 'Reading speed' });
-  await openSettings(page);
+  await openReadingSettings(page);
   await speed.selectOption('1.5');
-  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
   await toLibrary(page);
   await failReads(page, 'set');
   await reload(page);
   await expect(alert(page)).toContainText('Quire could not read your settings.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Spoken Once');
-  await openSettings(page);
+  await openReadingSettings(page);
   await expect(speed).toHaveValue('1');
   // a change now is used, but not saved over the settings stored
   await speed.selectOption('2');
-  await sheet.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
   await toLibrary(page);
   await healReads(page);
   await reload(page);
   await expect(librarySearch(page)).toBeVisible();
   await openBook(page, 'Spoken Once');
-  await openSettings(page);
+  await openReadingSettings(page);
   await expect(speed).toHaveValue('1.5');
 });

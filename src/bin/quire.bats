@@ -37,6 +37,7 @@ staload "screen_controls.sats"
 staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -393,6 +394,7 @@ fn _show_library (): void = let
   (* the screen may sleep again, as it does outside the reader *)
   val () = $WN.keep_awake(false)
   val () = layer_close(LTypography())
+  val () = layer_close(LReading())
   val () = layer_close(LContents())
   val () = layer_close(LSearch())
   val () = layer_close(LAnnotations())
@@ -1481,6 +1483,30 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
     in 0 end)
 in listeners end
 
+(* What each choice of where taps turn pages does, for the book open:
+   read right to left, its back is on the right (_zone_click), and the
+   drawings are mirrored (.taps.rtl) *)
+fn _taps_describe (): void =
+  if reader_rtl() then let
+    val () = ui_attr("taps-choice", AClass, "seg taps rtl")
+    val () = ui_text("taps-sides-about", "Right side back, left side forward, middle shows the controls")
+    val () = ui_text("taps-forward-about", "Anywhere forward, right side back, top shows the controls")
+  in ui_text("taps-one-hand-about", "Top back, bottom forward, middle shows the controls") end
+  else let
+    val () = ui_attr("taps-choice", AClass, "seg taps")
+    val () = ui_text("taps-sides-about", "Left side back, right side forward, middle shows the controls")
+    val () = ui_text("taps-forward-about", "Anywhere forward, left side back, top shows the controls")
+  in ui_text("taps-one-hand-about", "Top back, bottom forward, middle shows the controls") end
+
+(* The reading settings' screen opened over the typography sheet: the
+   volume keys offered in the app, where a page is given them (pwa's
+   MainActivity), and the taps said for the book open *)
+fn _reading_open (): void = let
+  val () = ui_show("volume-row", $BAPP.is_native_platform())
+  val () = _taps_describe()
+  val () = layer_open(LReading())
+in ui_focus_first_in("reading-screen") end
+
 (* A typography panel's control clicked: whether a setting changed *)
 fn _typography_chosen (control: typography_control): bool =
   case+ control of
@@ -1510,16 +1536,23 @@ fn _typography_chosen (control: typography_control): bool =
   | TapsSides() => let val () = set_taps_set(SideZones()) in true end
   | TapsForward() => let val () = set_taps_set(ForwardZones()) in true end
   | TapsOneHand() => let val () = set_taps_set(OneHandZones()) in true end
-  | VolumeKeysOff() => let val () = set_vol_set(KeysForVolume()) in true end
-  | VolumeKeysTurn() => let val () = set_vol_set(KeysTurnPages()) in true end
+  (* one switch: the volume keys turn pages, or are the volume's *)
+  | VolumeKeysTurn() => let
+      val () = (case+ set_vol_get() of
+        | KeysTurnPages() => set_vol_set(KeysForVolume())
+        | KeysForVolume() => set_vol_set(KeysTurnPages()))
+    in true end
   | NarrationSkip() => let val () = set_narration_notes_set(NotesSkipped()) in true end
   | NarrationRead() => let val () = set_narration_notes_set(NotesRead()) in true end
   | TypographyReset() => let val () = _settings_reset() in false end
   | TypographyClose() => let val () = layer_close(LTypography()) in false end
+  | TypographyMore() => let val () = _reading_open() in false end
+  (* back to the sheet, the focus on the row it was opened from *)
+  | ReadingDone() => let val () = layer_close(LReading()) in false end
   | ScreenFullscreen() => let val () = screen_fullscreen_toggle() in false end
   | ScreenLock() => let val () = screen_lock_toggle() in false end
 
-fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 9) = let
+fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
       (* the screen's controls as the platform has them now, and the
          speeds and the book's voices to read aloud *)
@@ -1528,6 +1561,15 @@ fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 9) = let
       val () = layer_open(LTypography())
     in let val () = ui_focus("typography-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("typography-panel"), "click", llam(h) => let
+      val clicked = _target(h)
+      val control = _typography_control(clicked)
+      val () = _target_free(clicked)
+      val changed = (case+ control of
+        | ~$R.none() => false
+        | ~$R.some(chosen) => _typography_chosen(chosen)): bool
+    in if changed then let val () = _settings_changed() in 0 end else 0 end)
+  (* the reading settings' screen: its controls are the sheet's kind *)
+  val listeners = RCons(listeners, OnEl("reading-screen"), "click", llam(h) => let
       val clicked = _target(h)
       val control = _typography_control(clicked)
       val () = _target_free(clicked)
@@ -1687,8 +1729,9 @@ end
    sides, the left quarter back, the right quarter on, between them the
    bars shown or hidden; forward, the top eighth the bars, the left
    quarter back, anywhere else on; one hand, the top third back, the
-   bottom third on, between them the bars. Back and on are the book's:
-   a book read right to left turns the other way *)
+   bottom third on, between them the bars. A book read right to left
+   has them mirrored: its sides the other way, and forward's back
+   quarter on the right (_taps_describe says so) *)
 fn _zone_click (x: Int, y: Int): void = let
   val () = ui_measure("page")
   val page_x = $DR.get_measure_x()
@@ -1700,8 +1743,10 @@ in
   else case+ set_taps_get() of
   | ForwardZones() =>
     (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
-     else if x < page_x + page_width / 4 then _left()
-     else _right())
+     (* back at the edge the book starts from: the left, or the right
+        read right to left; anywhere else forward *)
+     else if (if reader_rtl() then x > page_x + page_width - page_width / 4 else x < page_x + page_width / 4) then _previous()
+     else _next())
   | OneHandZones() =>
     (if page_height <= 0 then _chrome_set(~(!_chrome))
      else if y < page_y + page_height / 3 then _previous()

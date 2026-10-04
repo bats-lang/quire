@@ -8,6 +8,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
+  readingSettings, openReadingSettings, closeReadingSettings,
 } from './helpers.js';
 
 /** The names of the visible controls among locators that reach out of
@@ -258,6 +259,9 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await page.keyboard.press('Escape');
   await openSettings(page);
   await fits(page, 'Typography and theme');
+  await openReadingSettings(page);
+  await fits(page, 'More reading settings');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await clickControl(page, 'Annotations');
   await expect(dialog(page, 'Annotations')).toBeVisible();
@@ -326,14 +330,13 @@ test('the page keeps its text out of the safe area: a cutout above or beside it'
 test('the typography sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
-  await openSettings(page);
+  await openReadingSettings(page);
+  await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await closeReadingSettings(page);
   const panel = dialog(page, 'Typography and theme');
   const close = panel.getByRole('button', { name: 'Close', exact: true });
-  const reset = panel.getByRole('button', { name: 'Reset to defaults', exact: true });
-  const full = panel.getByRole('button', { name: 'Full screen', exact: true });
-  await full.scrollIntoViewIfNeeded();
-  await full.click();
-  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  const last = panel.getByRole('button', { name: /^More reading settings/ });
   const within = () => panel.evaluate(e => {
     const r = e.getBoundingClientRect();
     return r.top >= -1 && r.bottom <= innerHeight + 1;
@@ -347,7 +350,7 @@ test('the typography sheet scrolls within the window, Close always in reach, in 
   await page.mouse.move(box.x + 24, box.y + box.height / 2);
   for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
   await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
-  await expect(reset).toBeInViewport({ ratio: 1 });
+  await expect(last).toBeInViewport({ ratio: 1 });
   await expect(close).toBeInViewport({ ratio: 1 });
   await fits(page, 'Typography and theme, in full screen');
   await close.click();
