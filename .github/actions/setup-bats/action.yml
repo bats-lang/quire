@@ -40,13 +40,16 @@ runs:
         ref: ${{ steps.pins.outputs.bats }}
         path: bats-src
 
+    # The release build (-O2): bats's own work (lexing, the recursion
+    # check, hashing the sources) takes half the time the debug build's
+    # does, which a static fixture's check is mostly made of
     - name: Build bats from checked-in bootstrap C
       shell: bash
       run: |
         cp -R bats-src/bootstrap/c ~/bats-c
-        make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2 debug/bats
+        make -j$(nproc) -C ~/bats-c PATSHOME=$HOME/.ats2/ATS2-Postiats-int-0.4.2 release/bats
         mkdir -p ~/bats-bin
-        cp ~/bats-c/debug/bats ~/bats-bin/bats
+        cp ~/bats-c/release/bats ~/bats-bin/bats
         rm -rf bats-src
         sudo cp $HOME/bats-bin/bats /bin/bats
 

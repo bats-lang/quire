@@ -1,1 +1,6 @@
-the dynamic expression cannot be assigned the type [S2Ecst(brightness_choice)]
+function _static_level
+line 2
+the dynamic expression cannot be assigned the type [S2Ecst(brightness_choice)].
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(g1int_int_t0ype); S2Eextkind(atstype_int), S2Eintinf(25))
+The needed term is: S2Ecst(brightness_choice)

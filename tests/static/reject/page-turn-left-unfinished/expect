@@ -1,1 +1,3 @@
-needs to be consumed but it is preserved with the type [S2Eapp(S2Ecst(turn_sheet_); S2Eintinf(1))]
+function _static_turn_dropped
+line 5
+the linear dynamic variable [sheet$_(-1)] needs to be consumed but it is preserved with the type [S2Eapp(S2Ecst(turn_sheet_); S2Eintinf(1))] instead.
