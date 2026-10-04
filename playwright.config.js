@@ -42,6 +42,17 @@ export default defineConfig({
         launchOptions: { args: chromiumArgs },
       },
     },
+    // the narrowest width content must work at (WCAG 1.4.10 Reflow:
+    // 320 CSS px), which a phone reaches at a large display size (#265)
+    {
+      name: 'narrow',
+      testMatch: /(layout|smoke|page-turn)\.spec\.js/,
+      use: {
+        browserName: 'chromium',
+        viewport: { width: 320, height: 640 },
+        launchOptions: { args: chromiumArgs },
+      },
+    },
     {
       name: 'mobile-landscape',
       testMatch: /(layout|smoke|page-turn)\.spec\.js/,

@@ -2248,8 +2248,9 @@ in listeners end
 (* The platform's: reading aloud (its button, its speed and voice,
    speech's events, and the page going away, which stops it), the
    screen's controls (the brightness, and full screen entered or left),
-   and the browser's offer to install the app *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 9) = let
+   the browser's offer to install the app, and the addresses the app is
+   opened at (Dropbox's sign-in coming back) *)
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -2268,6 +2269,7 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 9) = let
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
+  val listeners = RAppLink(listeners, llam(link) => sync_app_link(link))
   (* a face that arrives after the chapter was laid out with a fallback
      changes its pages: they are counted again, the place kept. Whether
      others are still loading or not, what has arrived has changed the

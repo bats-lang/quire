@@ -1553,6 +1553,11 @@ fn _shell {left:nat | left >= 6600} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, Gap(), "8px")
   val sheet = lay(sheet, Margin(), "8px 0")
   val sheet = close(sheet)
+  (* which books takes its labels' width: when it and List and Grid do
+     not fit one line (320 px, #265), List and Grid go to the next *)
+  val sheet = rule(sheet, ".lview>.seg")
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".seg.vseg")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
@@ -2576,8 +2581,13 @@ fn _panels {left:nat | left >= 5400} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)
+  (* a segment is never narrower than its label (the 44 px minimum
+     would let it shrink under it and cut it, #265): the segments that
+     do not fit go to the next line, and a label wider than the line
+     wraps in its segment *)
   val sheet = rule(sheet, ".seg button")
-  val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, Flex(), "1 0 auto")
+  val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = lay(sheet, Padding(), "8px 6px")
   val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, BorderRadius(), "6px")
