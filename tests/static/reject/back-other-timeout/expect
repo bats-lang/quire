@@ -1,1 +1,3 @@
-S2Eeqeq(S2Eintinf(2); S2Eintinf(1))
+function _static_other
+line 4
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eintinf(2); S2Eintinf(1)))

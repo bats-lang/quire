@@ -730,6 +730,11 @@ Elements are made through `src/ui.bats`:
   button, a field or an image can only be made by a constructor that
   names it. A text button is named by its text alone, so its name
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
+  an icon is a glyph of one monochrome set, a subset of Material
+  Symbols (Apache-2.0, `assets/fonts/material-symbols-subset.woff2`,
+  made by `scripts/icon-font.py`) at its Private Use Area code point
+  (`_glyph`, `ui_icon_set`), drawn in the button's own proven text
+  colour, never an emoji (#274);
   images are decorative (`alt=""`); an audio element (`ui_audio`) has no
   controls and is hidden from assistive technology; a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
@@ -998,6 +1003,21 @@ closed (`reader_stack_clear`).
 `tests/static` holds code that must not type-check (a forged `TIMED`,
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
+
+A static fixture is a snippet put into one module (`file`, before the
+line `before`), and it knows what proof fails when it is built. A reject
+fixture's `expect` names the function of its snippet, the line of the
+snippet patsopt reports, and patsopt's error word for word (the
+constraint left unsolved, the case left out, the type that does not
+match); `tests/static/expect.py` passes it only when that is the one
+error of the check, in that module, at that line, inside that function.
+A substring that another error could also hold is not enough. An accept
+fixture must check. Each fixture is put into the app checked whole in
+the same job, so only its module is checked again, and what depends on
+it when its `#pub` declarations change (bats keeps a module's C while
+the `.sats` it staloads has only moved, and each of check's passes keeps
+a cache of its own, bats-lang/bats#243), and a reject fixture stops at
+its error: a fixture costs about what its snippet changes.
 
 CI runs the static tests and the e2e suite in groups side by side
 (`tests/groups.json`), the e2e groups on the app built once (the `build`

@@ -599,16 +599,32 @@ fn _document_button {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos |
   val () = _document_attr(document, id_bytes, id_len, $D.Type, "button")
 in _document_attr(document, id_bytes, id_len, $D.Class, class_name) end
 
-#pub datatype icon = IcBack | IcClose | IcGear | IcStar | IcSearch | IcPrev | IcNext
+(* The icons: each a glyph of the bundled subset of Material Symbols
+   (assets/fonts/material-symbols-subset.woff2, made by
+   scripts/icon-font.py; Apache-2.0), at its code point in the Private
+   Use Area. One monochrome set, drawn in the control's own text colour
+   (so the stylesheet's proven pairs cover it), never an emoji, which
+   a platform may draw as a colour picture (#274) *)
+#pub datatype icon = IcBack | IcClose | IcGear | IcBookmark | IcBookmarked | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak | IcPhrasePrevious | IcPhraseNext
 
 fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   case+ the_icon of
-  | IcBack() => "\xE2\x86\x90" | IcClose() => "\xE2\x9C\x95" | IcGear() => "\xE2\x9A\x99"
-  | IcStar() => "\xE2\x98\x86" | IcSearch() => "\xF0\x9F\x94\x8D" | IcPrev() => "\xE2\x80\xB9"
-  | IcNext() => "\xE2\x80\xBA" | IcContents() => "\xE2\x98\xB0" | IcNotes() => "\xE2\x9C\x8E"
-  | IcFont() => "Aa" | IcMore() => "\xE2\x8B\xAE" | IcSpeak() => "\xF0\x9F\x94\x8A"
-  | IcPhrasePrevious() => "\xE2\x8F\xAE" | IcPhraseNext() => "\xE2\x8F\xAD"
+  | IcBack() => "\xEE\x97\x84"               (* arrow_back *)
+  | IcClose() => "\xEE\x97\x8D"              (* close *)
+  | IcGear() => "\xEE\xA2\xB8"               (* settings *)
+  | IcBookmark() => "\xEE\x96\x98"           (* bookmark_add *)
+  | IcBookmarked() => "\xEE\x96\x99"         (* bookmark_added *)
+  | IcSearch() => "\xEE\xA2\xB6"             (* search *)
+  | IcPrev() => "\xEE\x97\x8B"               (* chevron_left *)
+  | IcNext() => "\xEE\x97\x8C"               (* chevron_right *)
+  | IcContents() => "\xEE\xA3\x9E"           (* toc *)
+  | IcNotes() => "\xEE\x9D\x85"              (* edit_note *)
+  | IcFont() => "\xEF\x9B\xB1"               (* match_case: "Aa" *)
+  | IcMore() => "\xEE\x97\x94"               (* more_vert *)
+  | IcSpeak() => "\xEE\x81\x90"              (* volume_up *)
+  | IcPhrasePrevious() => "\xEE\x81\x85"     (* skip_previous *)
+  | IcPhraseNext() => "\xEE\x81\x84"         (* skip_next *)
 
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
@@ -740,6 +756,12 @@ implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, 
   (parent: string parent_len, id: string id_len, class_name: string class_len, the_icon: icon, name: string name_len): void
 
 implement ui_icon_btn(parent, id, class_name, the_icon, name) = _control_literal(parent, id, CIcon(class_name, the_icon, name))
+
+(* Icon button id shows the_icon instead (its name stays: a state it
+   shows, such as being pressed, is said by its own attribute) *)
+#pub fn ui_icon_set {id_len:pos | id_len < 256} (id: string id_len, the_icon: icon): void
+
+implement ui_icon_set(id, the_icon) = ui_text(id, _glyph(the_icon))
 
 #pub fn ui_icon_btn_nn {parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
   (parent: $A.arr(byte, parent_loc, parent_len), parent_len: int parent_len, id: $A.arr(byte, id_loc, id_len), id_len: int id_len,
@@ -1191,6 +1213,142 @@ implement ui_focus(id) = let
   val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
   val () = $BDOM.focus_node(id_bytes, id_len)
 in release_bytes(id_frozen, id_bytes) end
+
+(* Element id made inert (no focus, no click or pointer event, nothing
+   read out inside it), or not *)
+#pub fn ui_inert {id_len:pos | id_len < 256} (id: string id_len, inert: bool): void
+
+implement ui_inert(id, inert) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val empty = $A.alloc<byte>(1)
+  val @(empty_frozen, empty_bytes) = $A.freeze<byte>(empty)
+  val () = (if inert then let
+      val document = $D.open_document($A.text_lit("bats-root"), 9)
+      val () = $D.set_attr(document, id_bytes, id_len, $D.Inert, empty_bytes, 0, 0)
+    in $D.destroy(document) end
+    else let
+      val document = $D.open_document($A.text_lit("bats-root"), 9)
+      val () = $D.remove_attr(document, id_bytes, id_len, $D.Inert)
+    in $D.destroy(document) end)
+  val () = release_bytes(empty_frozen, empty_bytes)
+in release_bytes(id_frozen, id_bytes) end
+
+(* Where the focus goes back to when an overlay closes: the element
+   that had it when the overlay opened, by its id, or none *)
+#pub datavtype focus_return =
+  | NoFocusReturn of ()
+  | {l:agz}{n:pos | n < 256} FocusReturn of ($A.arr(byte, l, n), int n)
+
+#pub fn ui_focus_return_free (back: focus_return): void
+implement ui_focus_return_free (back) =
+  case+ back of
+  | ~NoFocusReturn() => ()
+  | ~FocusReturn(id, _) => $A.free<byte>(id)
+
+(* The id of the first element selector[0, selector_len) matches *)
+fn _query {l:agz}{n:pos} (selector: $A.arr(byte, l, n), selector_len: int n): focus_return = let
+  val @(selector_frozen, selector_bytes) = $A.freeze<byte>(selector)
+  val found = $DR.query_selector(selector_bytes, selector_len)
+  val () = release_bytes(selector_frozen, selector_bytes)
+in
+  case+ found of
+  | ~$R.none() => NoFocusReturn()
+  | ~$R.some(found_id) => let
+      val found_len = $BD.blob_len(found_id)
+    in
+      if found_len <= 0 then let val () = $BD.blob_free(found_id) in NoFocusReturn() end
+      else if found_len >= 256 then let val () = $BD.blob_free(found_id) in NoFocusReturn() end
+      else let
+        val id = $A.alloc<byte>(found_len)
+        val () = $BD.blob_read(found_id, 0, id, found_len)
+        val () = $BD.blob_free(found_id)
+      in FocusReturn(id, found_len) end
+    end
+end
+
+(* The element that has the focus now, if it has an id *)
+#pub fn ui_focused (): focus_return
+implement ui_focused () = let
+  val selector = $A.alloc<byte>(6)
+  val _ = _put_text(selector, 0, ":focus", 6, 0)
+in _query(selector, 6) end
+
+(* Focus to element id[0, id_len) *)
+fn _focus_bytes {l:agz}{n:pos | n < 256} (id: $A.arr(byte, l, n), id_len: int n): void = let
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+  val () = $BDOM.focus_node(id_bytes, id_len)
+in release_bytes(id_frozen, id_bytes) end
+
+(* The focus back where back says, when that element is still shown;
+   else to element fallback *)
+#pub fn ui_focus_back {fallback_len:pos | fallback_len < 256} (back: focus_return, fallback: string fallback_len): void
+implement ui_focus_back (back, fallback) =
+  case+ back of
+  | ~NoFocusReturn() => ui_focus(fallback)
+  | ~FocusReturn(id, id_len) => let
+      val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
+      val _ = $DR.measure(id_bytes, id_len)
+      val () = $A.drop<byte>(id_frozen, id_bytes)
+      val id = $A.thaw<byte>(id_frozen)
+    in
+      if $DR.get_measure_w() > 0 then _focus_bytes(id, id_len)
+      else let val () = $A.free<byte>(id) in ui_focus(fallback) end
+    end
+
+(* What can take the focus by Tab and is shown: a control, a link or a
+   focus stop, not disabled and not hidden (data-hide, which is how an
+   element is hidden, ui_show) *)
+#define FOCUSABLE ":is(button,input,select,textarea,a[href],[tabindex='0']):not(:disabled,[data-hide='1'],[data-hide='1'] *)"
+#define FOCUSABLE_LEN 105
+
+(* The focus to the first element of element id that can take it *)
+#pub fn ui_focus_first_in {id_len:pos | id_len < 128} (id: string id_len): void
+implement ui_focus_first_in (id) = let
+  val id_len = _length(id)
+  val selector_len = 2 + id_len + FOCUSABLE_LEN
+  val selector = $A.alloc<byte>(selector_len)
+  val at = _put_text(selector, 0, "#", 1, 0)
+  val at = _put_text(selector, at, id, id_len, 0)
+  val at = _put_text(selector, at, " ", 1, 0)
+  val _ = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+in
+  case+ _query(selector, selector_len) of
+  | ~NoFocusReturn() => ()
+  | ~FocusReturn(found, found_len) => _focus_bytes(found, found_len)
+end
+
+(* The focus to the last element of element id that can take it: one
+   with nothing that can take it after it inside id, neither among its
+   following siblings (or inside them) nor after any element it is in *)
+#pub fn ui_focus_last_in {id_len:pos | id_len < 128} (id: string id_len): void
+implement ui_focus_last_in (id) = let
+  val id_len = _length(id)
+  (* the selector: #id, then F not followed by an F sibling or a
+     sibling holding one, and not inside an element of #id so followed *)
+  val selector_len = 1 + id_len + 1 + FOCUSABLE_LEN + 12 + FOCUSABLE_LEN + 5 + FOCUSABLE_LEN + 8
+    + id_len + 8 + FOCUSABLE_LEN + 5 + FOCUSABLE_LEN + 4
+  val selector = $A.alloc<byte>(selector_len)
+  val at = _put_text(selector, 0, "#", 1, 0)
+  val at = _put_text(selector, at, id, id_len, 0)
+  val at = _put_text(selector, at, " ", 1, 0)
+  val at = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+  val at = _put_text(selector, at, ":not(:has(~ ", 12, 0)
+  val at = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+  val at = _put_text(selector, at, ",~ * ", 5, 0)
+  val at = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+  val at = _put_text(selector, at, ")):not(#", 8, 0)
+  val at = _put_text(selector, at, id, id_len, 0)
+  val at = _put_text(selector, at, " :has(~ ", 8, 0)
+  val at = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+  val at = _put_text(selector, at, ",~ * ", 5, 0)
+  val at = _put_text(selector, at, FOCUSABLE, FOCUSABLE_LEN, 0)
+  val _ = _put_text(selector, at, ") *)", 4, 0)
+in
+  case+ _query(selector, selector_len) of
+  | ~NoFocusReturn() => ()
+  | ~FocusReturn(found, found_len) => _focus_bytes(found, found_len)
+end
 
 (* Captures pointer pointer_id to element id (as the gestures package's
    pointer source asks, once a mouse has moved) *)

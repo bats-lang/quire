@@ -209,7 +209,7 @@ in _hide("dictionaries-panel") end
    online, and Close *)
 fn _dictionary (): void = let
   val () = ui_el("bats-root", "dictionary-panel", TDiv, "sheet")
-  val () = ui_named("dictionary-panel", NDialog, "Dictionary")
+  val () = ui_named("dictionary-panel", NModal, "Dictionary")
   val () = ui_el("dictionary-panel", "dictionary-word", TDiv, "mtitle")
   val () = ui_el("dictionary-panel", "dictionary-article", TDiv, "fntext dart")
   val () = ui_el("dictionary-panel", "dictionary-source", TDiv, "hstyle")
@@ -474,7 +474,7 @@ fn _reader (): void = let
   val () = ui_icon_btn("reader-top-bar", "back-to-library", "ibtn", IcBack, "Back to library")
   val () = ui_el("reader-top-bar", "chapter-title", TDiv, "ctitle")
   val () = ui_role("chapter-title", RHeading)
-  val () = ui_icon_btn("reader-top-bar", "bookmark-button", "ibtn", IcStar, "Bookmark this page")
+  val () = ui_icon_btn("reader-top-bar", "bookmark-button", "ibtn", IcBookmark, "Bookmark this page")
   val () = ui_attr("bookmark-button", APressed, "false")
   val () = ui_icon_btn("reader-top-bar", "search-button", "ibtn", IcSearch, "Search in book")
   (* the Settings screen: in this bar, whose title gives way, since the
@@ -545,33 +545,14 @@ fn _reader (): void = let
   val () = ui_link_out("selection-toolbar", "selection-lookup", "btn linkout", "Look up")
   val () = ui_text_btn("selection-toolbar", "selection-search", "btn", "Search")
   val () = _hide("selection-toolbar")
+  (* the bottom bar, in two rows (#274): the progress row (where the
+     page is, "6 of 40 in chapter · 1%", over the scrubber, with the
+     page turns at its ends) and the tools row, its buttons spread
+     evenly *)
   val () = ui_el("reader", "reader-bottom-bar", TDiv, "bot")
   val () = ui_named("reader-bottom-bar", NToolbar, "Page controls")
-  val () = ui_icon_btn("reader-bottom-bar", "previous-page", "ibtn", IcPrev, "Previous page")
-  val () = ui_icon_btn("reader-bottom-bar", "contents-button", "ibtn", IcContents, "Contents")
-  val () = ui_icon_btn("reader-bottom-bar", "typography-button", "ibtn", IcFont, "Typography")
-  val () = ui_icon_btn("reader-bottom-bar", "annotations-button", "ibtn", IcNotes, "Annotations")
-  (* read aloud from the page shown, or paused (read_aloud.bats), shown
-     only where the platform speaks *)
-  val () = ui_icon_btn("reader-bottom-bar", "read-aloud", "ibtn", IcSpeak, "Read aloud")
-  val () = ui_attr("read-aloud", APressed, "false")
-  val () = _hide("read-aloud")
-  (* a book with Media Overlays is read aloud by its own narration
-     instead (narration.bats): its controls, shown only for such a book
-     (the reader's _narration_offered) *)
-  val () = ui_el("reader-bottom-bar", "narration-controls", TDiv, "ngrp")
-  val () = ui_named("narration-controls", NGroup, "Narration")
-  val () = ui_icon_btn("narration-controls", "narration-toggle", "ibtn", IcSpeak, "Read aloud")
-  val () = ui_attr("narration-toggle", APressed, "false")
-  val () = ui_icon_btn("narration-controls", "narration-previous", "ibtn", IcPhrasePrevious, "Previous phrase")
-  val () = ui_icon_btn("narration-controls", "narration-next", "ibtn", IcPhraseNext, "Next phrase")
-  (* shown inside a table, list, figure or aside, named for it *)
-  val () = ui_text_btn("narration-controls", "narration-leave", "ibtn nleave", "Skip table")
-  val () = _hide("narration-leave")
-  val () = _hide("narration-controls")
-  (* what plays the narration: no controls of its own, and not read out *)
-  val () = ui_audio("reader", "narration")
-  val () = ui_el("reader-bottom-bar", "page-indicator", TDiv, "pinfo")
+  val () = ui_el("reader-bottom-bar", "progress-label", TDiv, "plab")
+  val () = ui_el("progress-label", "page-indicator", TDiv, "pinfo")
   val () = ui_named("page-indicator", NStatus, "Page")
   val () = ui_el("page-indicator", "indicator-title", TSpan, "pgt")
   (* " · page ", which a phone's bar has no room for, nor for the title:
@@ -579,7 +560,12 @@ fn _reader (): void = let
      bar *)
   val () = ui_el("page-indicator", "indicator-label", TSpan, "pgw")
   val () = ui_el("page-indicator", "indicator-pages", TSpan, "pgn")
-  val () = ui_icon_btn("reader-bottom-bar", "next-page", "ibtn", IcNext, "Next page")
+  (* between the place and the percentage; not read out *)
+  val () = ui_el("progress-label", "progress-separator", TSpan, "psep")
+  val () = ui_attr("progress-separator", AHidden, "true")
+  val () = ui_text("progress-separator", "\xC2\xB7")
+  val () = ui_el("progress-label", "scrubber-percent", TSpan, "pct")
+  val () = ui_icon_btn("reader-bottom-bar", "previous-page", "ibtn", IcPrev, "Previous page")
   (* scrubber *)
   val () = ui_el("reader-bottom-bar", "scrubber", TDiv, "scr")
   val () = ui_el("scrubber", "scrubber-track", TDiv, "trk")
@@ -591,13 +577,37 @@ fn _reader (): void = let
   val () = ui_el("scrubber-track", "scrubber-tip", TDiv, "tip")
   val () = ui_role("scrubber-tip", RTooltip)
   val () = _hide("scrubber-tip")
-  val () = ui_el("scrubber", "scrubber-percent", TDiv, "pct")
+  val () = ui_icon_btn("reader-bottom-bar", "next-page", "ibtn", IcNext, "Next page")
+  val () = ui_el("reader-bottom-bar", "tools-row", TDiv, "tools")
+  val () = ui_icon_btn("tools-row", "contents-button", "ibtn", IcContents, "Contents")
+  val () = ui_icon_btn("tools-row", "typography-button", "ibtn", IcFont, "Typography")
+  val () = ui_icon_btn("tools-row", "annotations-button", "ibtn", IcNotes, "Annotations")
+  (* read aloud from the page shown, or paused (read_aloud.bats), shown
+     only where the platform speaks *)
+  val () = ui_icon_btn("tools-row", "read-aloud", "ibtn", IcSpeak, "Read aloud")
+  val () = ui_attr("read-aloud", APressed, "false")
+  val () = _hide("read-aloud")
+  (* a book with Media Overlays is read aloud by its own narration
+     instead (narration.bats): its controls, shown only for such a book
+     (the reader's _narration_offered) *)
+  val () = ui_el("tools-row", "narration-controls", TDiv, "ngrp")
+  val () = ui_named("narration-controls", NGroup, "Narration")
+  val () = ui_icon_btn("narration-controls", "narration-toggle", "ibtn", IcSpeak, "Read aloud")
+  val () = ui_attr("narration-toggle", APressed, "false")
+  val () = ui_icon_btn("narration-controls", "narration-previous", "ibtn", IcPhrasePrevious, "Previous phrase")
+  val () = ui_icon_btn("narration-controls", "narration-next", "ibtn", IcPhraseNext, "Next phrase")
+  (* shown inside a table, list, figure or aside, named for it *)
+  val () = ui_text_btn("narration-controls", "narration-leave", "ibtn nleave", "Skip table")
+  val () = _hide("narration-leave")
+  val () = _hide("narration-controls")
+  (* what plays the narration: no controls of its own, and not read out *)
+  val () = ui_audio("reader", "narration")
 in _hide("reader") end
 
 (* The contents panel: the book's table of contents and its bookmarks *)
 fn _toc (): void = let
   val () = ui_el("bats-root", "contents-panel", TDiv, "panel")
-  val () = ui_named("contents-panel", NDialog, "Contents")
+  val () = ui_named("contents-panel", NModal, "Contents")
   val () = ui_el("contents-panel", "contents-header", TDiv, "ph")
   val () = ui_el("contents-header", "contents-tabs", TSpan, "tabs")
   val () = ui_named("contents-tabs", NTablist, "Contents and bookmarks")
@@ -621,7 +631,7 @@ in _hide("contents-panel") end
 (* The settings sheet *)
 fn _settings (): void = let
   val () = ui_el("bats-root", "typography-panel", TDiv, "sheet")
-  val () = ui_named("typography-panel", NDialog, "Typography and theme")
+  val () = ui_named("typography-panel", NModal, "Typography and theme")
   (* its head, held at its top as it scrolls (.shead): Close is always
      in reach, in full screen too (#275) *)
   val () = ui_el("typography-panel", "typography-head", TDiv, "shead")
@@ -765,7 +775,7 @@ in _hide("typography-panel") end
 (* The search panel *)
 fn _search (): void = let
   val () = ui_el("bats-root", "search-panel", TDiv, "panel panel-r")
-  val () = ui_named("search-panel", NDialog, "Search in book")
+  val () = ui_named("search-panel", NModal, "Search in book")
   val () = ui_el("search-panel", "search-header", TDiv, "sbar")
   val () = app_book_search()
   val () = ui_el("search-panel", "search-status", TDiv, "snav")
@@ -786,7 +796,7 @@ in _hide("search-panel") end
 (* The annotations panel *)
 fn _annotations (): void = let
   val () = ui_el("bats-root", "annotations-panel", TDiv, "panel panel-r")
-  val () = ui_named("annotations-panel", NDialog, "Annotations")
+  val () = ui_named("annotations-panel", NModal, "Annotations")
   val () = ui_el("annotations-panel", "annotations-header", TDiv, "ph")
   val () = ui_el("annotations-header", "annotations-spacer", TSpan, "grow")
   val () = ui_text("annotations-spacer", "Annotations")
@@ -810,7 +820,7 @@ in _hide("annotations-panel") end
    the note itself, and Close *)
 fn _note (): void = let
   val () = ui_el("bats-root", "footnote", TDiv, "sheet")
-  val () = ui_named("footnote", NDialog, "Footnote")
+  val () = ui_named("footnote", NModal, "Footnote")
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
   val () = ui_text_btn("footnote-bar", "footnote-go", "link", "Go to note")
@@ -822,11 +832,26 @@ in _hide("footnote") end
    scrolled; the image is the page's, whose alt says what it shows *)
 fn _image_viewer (): void = let
   val () = ui_el("bats-root", "image-viewer", TDiv, "imview")
-  val () = ui_named("image-viewer", NDialog, "Image")
+  val () = ui_named("image-viewer", NModal, "Image")
   val () = ui_el("image-viewer", "image-box", TDiv, "imbox")
   val () = ui_img("image-box", "image-full", "imimg")
   val () = ui_icon_btn("image-viewer", "image-close", "ibtn imclose", IcClose, "Close")
 in _hide("image-viewer") end
+
+(* What makes the reader's panels modal (layer.bats): the scrim over the
+   reader while one is open, which a tap closes it by, and the focus
+   stops before and after the panels, which send the focus round to the
+   open panel's last or first element, so Tab keeps to it. The stops
+   take the focus only while a panel is open *)
+fn _scrim (): void = let
+  val () = ui_el("bats-root", "panel-scrim", TDiv, "scrim")
+  val () = _hide("panel-scrim")
+  val () = ui_el("bats-root", "focus-wrap-start", TDiv, "fstop")
+in ui_attr("focus-wrap-start", ATabindex, "-1") end
+
+fn _focus_wrap_end (): void = let
+  val () = ui_el("bats-root", "focus-wrap-end", TDiv, "fstop")
+in ui_attr("focus-wrap-end", ATabindex, "-1") end
 
 (* Makes every element of the app, in the root element bats-root *)
 #pub fn app_build (): void
@@ -850,6 +875,7 @@ implement app_build () = let
   val () = _about_screen()
   val () = _info()
   val () = _reader()
+  val () = _scrim()
   val () = _toc()
   val () = _settings()
   val () = _search()
@@ -858,6 +884,7 @@ implement app_build () = let
   val () = _image_viewer()
   val () = _dictionaries()
   val () = _dictionary()
+  val () = _focus_wrap_end()
   val () = _catalogues()
   val () = _catalogue()
   val () = _undo_toast()
