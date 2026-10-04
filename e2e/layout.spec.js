@@ -229,6 +229,12 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await page.keyboard.press('Escape');
   await librarySettings(page);
   await fits(page, 'Settings');
+  // the Reading screen (#289): how pages are turned and read aloud
+  await settingsButton(page, 'Reading ›').click();
+  await expect(page.getByRole('dialog', { name: 'Reading', exact: true })).toBeVisible();
+  await fits(page, 'Reading');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog', { name: 'Reading', exact: true })).toBeHidden();
   await settingsButton(page, 'Sync ›').click();
   await expect(dialog(page, 'Sync')).toBeVisible();
   await fits(page, 'Sync');
@@ -278,6 +284,10 @@ test('nothing is cut off in the reader, its bars and its panels', async ({ page 
   await topBar(page).getByRole('button', { name: 'Settings' }).click();
   await expect(settingsScreen(page)).toBeVisible();
   await fits(page, 'Settings over the reader');
+  await settingsButton(page, 'Reading ›').click();
+  await expect(page.getByRole('dialog', { name: 'Reading', exact: true })).toBeVisible();
+  await fits(page, 'Reading over the reader');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
   await toLibrary(page);
 });

@@ -453,23 +453,36 @@ fn _bytes_of {text_len:pos | text_len < 256} (text: string text_len): [l:agz] @(
   val () = put(bytes, 0)
 in @(bytes, text_len) end
 
-fn _rate_add {number:nat} (rate: speech_rate, number: int number, chosen: speech_rate): void = let
+(* A speed's option's id in place: the sheet's, or the Reading
+   screen's *)
+fn _rate_option_id {number:nat} (place: reading_place, number: int number)
+  : [id_loc:agz][id_len:pos | id_len <= 32] @($A.arr(byte, id_loc, id_len), int id_len) =
+  case+ place of
+  | InSheet() => nid_make("rate-option", number)
+  | InSettings() => nid_make("reading-speed", number)
+
+fn _rate_add {number:nat} (place: reading_place, rate: speech_rate, number: int number, chosen: speech_rate): void = let
   val @(value, label) = _rate_option(rate)
-  val @(id, id_len) = nid_make("rate-option", number)
+  val @(id, id_len) = _rate_option_id(place, number)
   val @(value_bytes, value_len) = _bytes_of(value)
   val @(label_bytes, label_len) = _bytes_of(label)
-in ui_option("speech-rate", id, id_len, value_bytes, value_len, label_bytes, label_len, _same_rate(rate, chosen)) end
+in ui_option(reading_part_id(place, SpeechRate()), id, id_len, value_bytes, value_len, label_bytes, label_len, _same_rate(rate, chosen)) end
 
-(* The speeds' select, the one chosen chosen *)
-fn _rates_show (): void = let
+(* The speeds' select in place, the one chosen chosen *)
+fn _rates_show_in (place: reading_place): void = let
   val chosen = set_speech_rate_get()
-  val () = ui_clear("speech-rate")
-  val () = _rate_add(RateThreeQuarters(), 0, chosen)
-  val () = _rate_add(RateNormal(), 1, chosen)
-  val () = _rate_add(RateOneAndAQuarter(), 2, chosen)
-  val () = _rate_add(RateOneAndAHalf(), 3, chosen)
-  val () = _rate_add(RateOneAndThreeQuarters(), 4, chosen)
-in _rate_add(RateDouble(), 5, chosen) end
+  val () = ui_clear(reading_part_id(place, SpeechRate()))
+  val () = _rate_add(place, RateThreeQuarters(), 0, chosen)
+  val () = _rate_add(place, RateNormal(), 1, chosen)
+  val () = _rate_add(place, RateOneAndAQuarter(), 2, chosen)
+  val () = _rate_add(place, RateOneAndAHalf(), 3, chosen)
+  val () = _rate_add(place, RateOneAndThreeQuarters(), 4, chosen)
+in _rate_add(place, RateDouble(), 5, chosen) end
+
+(* The speeds' selects, in both places they are offered *)
+fn _rates_show (): void = let
+  val () = _rates_show_in(InSheet())
+in _rates_show_in(InSettings()) end
 
 (* Whether bytes[0, n) is text *)
 fun _bytes_are {l:agz}{size:nat}{n:nat | n <= size}{text_len:nat}{i:nat | i <= text_len} .<text_len - i>.
@@ -506,11 +519,9 @@ in
     end
 end
 
-(* A speed chosen: kept, and what is being said is said again at it *)
-#pub fn aloud_rate_chosen (): void
-
-implement aloud_rate_chosen () = let
-  val @(value, n) = _select_value("speech-rate")
+(* The speed place's select has chosen *)
+fn _rate_chosen_in (place: reading_place): speech_rate = let
+  val @(value, n) = _select_value(reading_part_id(place, SpeechRate()))
   val rate = (if _is(value, n, "0.75") then RateThreeQuarters()
     else if _is(value, n, "1.25") then RateOneAndAQuarter()
     else if _is(value, n, "1.5") then RateOneAndAHalf()
@@ -518,9 +529,7 @@ implement aloud_rate_chosen () = let
     else if _is(value, n, "2") then RateDouble()
     else RateNormal()): speech_rate
   val () = $A.free<byte>(value)
-  val () = set_speech_rate_set(rate)
-  val () = set_save(lib_state_get())
-in _again() end
+in rate end
 
 (* Whether a voice's language, lang[0, lang_len) ("en-US", "en_GB"),
    has the primary subtag code[0, code_len) ("en"), in any case *)
@@ -554,11 +563,19 @@ fun _name_copy {source_loc,copy_loc:agz}{name_len:pos}{i:nat | i <= name_len} .<
     val () = $A.set<byte>(copy, i, $A.get<byte>(source, i))
   in _name_copy(source, copy, name_len, i + 1) end
 
-(* The voices of the book's language (code[0, code_len)) as options,
-   numbered from number on, the one named kept[0, kept_len) chosen; the
-   next number *)
+(* A voice's option's id in place: the sheet's, or the Reading
+   screen's *)
+fn _voice_option_id {number:nat} (place: reading_place, number: int number)
+  : [id_loc:agz][id_len:pos | id_len <= 32] @($A.arr(byte, id_loc, id_len), int id_len) =
+  case+ place of
+  | InSheet() => nid_make("voice-option", number)
+  | InSettings() => nid_make("reading-voice", number)
+
+(* The voices of the book's language (code[0, code_len)) as options of
+   place's select, numbered from number on, the one named
+   kept[0, kept_len) chosen; the next number *)
 fun _voice_options {k:nat}{code_loc,kept_loc:agz}{code_len:pos | code_len <= 3}{kept_size:pos}{kept_len:nat | kept_len <= kept_size}{number:pos} .<k>.
-  (voices: !$SP.voices(k), code: !$A.arr(byte, code_loc, 3), code_len: int code_len,
+  (place: reading_place, voices: !$SP.voices(k), code: !$A.arr(byte, code_loc, 3), code_len: int code_len,
    kept: !$A.arr(byte, kept_loc, kept_size), kept_len: int kept_len, number: int number): [next:pos] int next =
   case+ voices of
   | $SP.VoicesEnd() => number
@@ -569,38 +586,44 @@ fun _voice_options {k:nat}{code_loc,kept_loc:agz}{code_len:pos | code_len <= 3}{
         | $SP.NoLanguage() => false
         | $SP.Language(lang_bytes, lang_len) => _lang_is(lang_bytes, lang_len, code, code_len)): bool
     in
-      if ~ours then _voice_options(rest, code, code_len, kept, kept_len, number)
-      else if name_len >= 256 then _voice_options(rest, code, code_len, kept, kept_len, number)
+      if ~ours then _voice_options(place, rest, code, code_len, kept, kept_len, number)
+      else if name_len >= 256 then _voice_options(place, rest, code, code_len, kept, kept_len, number)
       else let
-        val @(id, id_len) = nid_make("voice-option", number)
+        val @(id, id_len) = _voice_option_id(place, number)
         val value_text = $A.alloc<byte>(12)
         val value_len = $S.int_to_str(value_text, 0, 12, number)
         val label = $A.alloc<byte>(name_len)
         val () = _name_copy(name, label, name_len, 0)
         val chosen = _names_same(name, name_len, kept, kept_len, 0)
-        val () = (if value_len > 0 then ui_option("speech-voice", id, id_len, value_text, value_len, label, name_len, chosen)
+        val () = (if value_len > 0 then ui_option(reading_part_id(place, SpeechVoice()), id, id_len, value_text, value_len, label, name_len, chosen)
           else let val () = $A.free<byte>(id) val () = $A.free<byte>(value_text) in $A.free<byte>(label) end)
-      in _voice_options(rest, code, code_len, kept, kept_len, number + 1) end
+      in _voice_options(place, rest, code, code_len, kept, kept_len, number + 1) end
     end)
 
-(* The voices' select: Automatic, and the voices of the book's
-   language, the one kept for it chosen *)
-fn _voices_show (): void = let
-  val () = ui_clear("speech-voice")
+(* The voices' select in place: Automatic, and the voices of the
+   book's language (the book open, or the one last read), the one kept
+   for it chosen *)
+fn _voices_show_in (place: reading_place): void = let
+  val () = ui_clear(reading_part_id(place, SpeechVoice()))
   val @(code, code_len) = reader_lang_code()
   val @(kept, kept_len) = _voice_name()
-  val @(automatic_id, automatic_id_len) = nid_make("voice-option", 0)
+  val @(automatic_id, automatic_id_len) = _voice_option_id(place, 0)
   val @(automatic_value, automatic_value_len) = _bytes_of("0")
   val @(automatic_label, automatic_label_len) = _bytes_of("Automatic")
-  val () = ui_option("speech-voice", automatic_id, automatic_id_len, automatic_value, automatic_value_len,
+  val () = ui_option(reading_part_id(place, SpeechVoice()), automatic_id, automatic_id_len, automatic_value, automatic_value_len,
     automatic_label, automatic_label_len, kept_len = 0)
   val () = (case+ $SP.speech_voices() of
     | ~$R.none() => ()
     | ~$R.some(voices) => let
-        val _ = _voice_options(voices, code, code_len, kept, kept_len, 1)
+        val _ = _voice_options(place, voices, code, code_len, kept, kept_len, 1)
       in $SP.voices_free(voices) end)
   val () = $A.free<byte>(kept)
 in $A.free<byte>(code) end
+
+(* The voices' selects, in both places they are offered *)
+fn _voices_show (): void = let
+  val () = _voices_show_in(InSheet())
+in _voices_show_in(InSettings()) end
 
 (* The name of the voice-th voice of the book's language (from 1), in a
    new array; none when there is no such voice *)
@@ -636,12 +659,9 @@ fun _digits {l:agz}{size:pos}{n:nat | n <= size}{i:nat | i <= n} .<n - i>.
     else _digits(value, n, i + 1, number * 10 + (code - 48))
   end
 
-(* A voice chosen: kept for the book's language, and what is being
-   said is said again in it *)
-#pub fn aloud_voice_chosen (): void
-
-implement aloud_voice_chosen () = let
-  val @(value, n) = _select_value("speech-voice")
+(* The voice place's select has chosen, kept for the book's language *)
+fn _voice_chosen_in (place: reading_place): void = let
+  val @(value, n) = _select_value(reading_part_id(place, SpeechVoice()))
   val wanted = (if n > 0 then _digits(value, n, 0, 0) else ~1): int
   val () = $A.free<byte>(value)
   val @(code, code_len) = reader_lang_code()
@@ -653,8 +673,22 @@ implement aloud_voice_chosen () = let
           val () = $SP.voices_free(voices)
         in found end)): kept_voice
   val () = set_voice_set(code, code_len, chosen)
-  val () = $A.free<byte>(code)
+in $A.free<byte>(code) end
+
+(* A speed or a voice chosen in place (a change of its row: the event
+   does not say which select, so both are read, the other one as it
+   shows what is kept): kept, both places' selects and the Settings
+   screen's Reading row showing it, and what is being said is said
+   again as they are now *)
+#pub fn aloud_speech_chosen (place: reading_place): void
+
+implement aloud_speech_chosen (place) = let
+  val () = set_speech_rate_set(_rate_chosen_in(place))
+  val () = _voice_chosen_in(place)
   val () = set_save(lib_state_get())
+  val () = _rates_show()
+  val () = _voices_show()
+  val () = set_reading_show()
 in _again() end
 
 (* ============================================================
@@ -772,8 +806,8 @@ implement aloud_event (event) =
   | ~$SP.SpeechBoundary(_, _) => ()
   | ~$SP.VoicesChanged() => _voices_show()
 
-(* The reading settings' sheet opened: the speeds and the book's language's
-   voices offered, as chosen *)
+(* The reading settings' sheet or the Reading screen opened: the speeds
+   and the book's language's voices offered in both, as chosen *)
 #pub fn aloud_choices_show (): void
 
 implement aloud_choices_show () = let
@@ -792,7 +826,10 @@ implement aloud_offer () = let
   val speaks = $SP.speech_available()
   val () = ui_show("read-aloud", speaks)
   val () = ui_show("selection-read", speaks)
-  val () = ui_show("speech-row", speaks)
+  val () = ui_show(reading_part_id(InSheet(), SpeechRow()), speaks)
+  (* the Reading screen's speed and voice, under their title *)
+  val () = ui_show(reading_part_id(InSettings(), SpeechRow()), speaks)
+  val () = ui_show("reading-aloud-title", speaks)
   (* the reading settings' Read aloud tab, which holds its speed and voice *)
 in ui_show("typography-aloud-tab", speaks) end
 
