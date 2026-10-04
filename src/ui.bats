@@ -19,6 +19,8 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload SCR = "wasm.bats-packages.dev/bridge/src/screen.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
+staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 #use result as R
 staload "mem.sats"
 
@@ -1061,7 +1063,8 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
    datatype, take a slot of the table each: full screen entered or
    left (RFullscreen), reading aloud's events (RSpeech) and the
    browser's offer to install the app coming and going
-   (RInstallOffer). *)
+   (RInstallOffer), and the addresses the native app is opened at
+   (RAppLink: a sign-in in the system's browser coming back). *)
 #pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
@@ -1069,6 +1072,7 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {count:nat} RFullscreen(count + 1) of (regs(count), ($SCR.fullscreen_change) -<lincloptr1> void)
   | {count:nat} RSpeech(count + 1) of (regs(count), ($SP.speech_event) -<lincloptr1> void)
   | {count:nat} RInstallOffer(count + 1) of (regs(count), ($BAPP.install_offer) -<lincloptr1> void)
+  | {count:nat} RAppLink(count + 1) of (regs(count), ([k:pos] $BD.dblob(k)) -<lincloptr1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
@@ -1109,6 +1113,10 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | ~RInstallOffer(rest, callback) => let
       val position = _listen_all(rest)
       val () = $BAPP.listen_install_prompt(position, callback)
+    in position + 1 end
+  | ~RAppLink(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $AL.listen_app_link(position, callback)
     in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the
