@@ -418,7 +418,10 @@ fn _show_library (): void = let
   val () = sync_book_closed()
 in lib_render() end
 
-(* The reader's bars: shown, and hidden again after 5 seconds *)
+(* The reader's bars: shown, and hidden again after 5 seconds, unless a
+   reader panel is open then: the bars stay under its scrim, so the
+   button that opened it is there to have the focus back when it
+   closes (they go with the next turn or tap) *)
 fn _chrome_set_off (): void = let
   val () = !_chrome := false
 in ui_attr("reader", AClass, "rv chrome-off") end
@@ -433,7 +436,7 @@ fn _chrome_set (shown: bool): void = let
   val generation = !_chrome_generation
 in
   if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), llam(_) =>
-      if !_chrome_generation = generation then _chrome_set_off() else ())
+      if !_chrome_generation = generation then (if layer_reader_blocked() then () else _chrome_set_off()) else ())
   else ()
 end
 
@@ -1570,15 +1573,19 @@ fn _search_open (): void = let
   val () = layer_open(LSearch())
 in ui_focus("search-field") end
 
-(* Ends the search: the reader goes back to where it was before it
-   jumped to a hit *)
-fn _search_end (): void = let
-  val () = layer_close(LSearch())
+(* Ends the search, its panel closed: the reader goes back to where it
+   was before it jumped to a hit *)
+fn _search_clear (): void = let
   val () = reader_search_close()
   (* the next search starts afresh: an empty field, no old results *)
   val () = _search_field($A.alloc<byte>(1), 0)
   val () = ui_clear("search-results")
-  val () = ui_clear("search-status")
+in ui_clear("search-status") end
+
+(* Ends the search from its results' bar: the page has the focus *)
+fn _search_end (): void = let
+  val () = layer_close(LSearch())
+  val () = _search_clear()
 in ui_focus("page") end
 
 (* Searches for the field's text *)
@@ -1742,21 +1749,16 @@ fn _reader_key (pressed: key, held: modifiers): void =
 
 (* Escape: the dialog is answered with its first button, or else the
    overlay opened last closes (layer_escape); true when one did. After
-   a reader panel, the page has the focus again; after the search panel,
-   so does the page, and a search with no hits ends *)
+   a reader panel, the focus is back where it was when the panel opened
+   (layer.bats); after the search panel, the page has it, and a search
+   with no hits ends *)
 fn _escape_overlay (): bool =
   if modal_open_now() then let val () = modal_dismiss() in true end
   else case+ layer_escape() of
   | ~NothingOpen() => false
   | ~Escaped(LSearch()) => let
-      val () = (if _shown("search-nav") then ui_focus("page") else _search_end())
+      val () = (if _shown("search-nav") then ui_focus("page") else _search_clear())
     in true end
-  | ~Escaped(LContents()) => let val () = ui_focus("page") in true end
-  | ~Escaped(LTypography()) => let val () = ui_focus("page") in true end
-  | ~Escaped(LAnnotations()) => let val () = ui_focus("page") in true end
-  | ~Escaped(LNote()) => let val () = ui_focus("page") in true end
-  | ~Escaped(LImage()) => let val () = ui_focus("page") in true end
-  | ~Escaped(LDictionary()) => let val () = ui_focus("page") in true end
   | ~Escaped(_) => true
 
 (* A key while the search panel is open: Enter goes to the next hit
@@ -1768,7 +1770,7 @@ fn _search_key (pressed: key, held: modifiers): void =
     in if _shown("search-nav") then let val () = layer_close(LSearch()) in ui_focus("page") end else () end
   | EscapeKey() => let
       val () = layer_close(LSearch())
-    in if _shown("search-nav") then ui_focus("page") else _search_end() end
+    in if _shown("search-nav") then ui_focus("page") else _search_clear() end
   | _ => ()
 
 (* The contents panel, open on its contents tab *)
@@ -1909,6 +1911,13 @@ fn _gesture_record (h: $EV.event_payload): void =
           val () = _gestures_show(events)
         in _gestures_act(asked, FRAME_ROUNDS) end
       | ~GNone() => $A.free<byte>(record))
+
+(* A pointer record from the reader view while a panel is over it:
+   dropped *)
+fn _gesture_drop (h: $EV.event_payload): void =
+  case+ take_blob(h) of
+  | ~NoBlobBytes() => ()
+  | ~BlobBytes(record, _) => $A.free<byte>(record)
 
 (* The recognizer, with the page turn's region: horizontal drags, by
    touch or pen only (a mouse drag over the page selects text) *)
@@ -2055,9 +2064,10 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
     in
       case+ control of
       | ~$R.none() => 0
+      (* the focus goes back where it was (layer.bats) *)
       | ~$R.some(DictionaryClose()) => let
           val () = layer_close(LDictionary())
-        in let val () = ui_focus("page") in 0 end end
+        in 0 end
       (* the link opens the entry online *)
       | ~$R.some(DictionaryOnline()) => let val () = layer_close(LDictionary()) in 0 end
     end)
@@ -2097,9 +2107,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
           val () = layer_close(LNote())
           val () = reader_note_go()
         in ui_focus("page") end
-        | ~$R.some(FootnoteClose()) => let
-          val () = layer_close(LNote())
-        in ui_focus("page") end)
+        (* the focus goes back where it was (layer.bats) *)
+        | ~$R.some(FootnoteClose()) => layer_close(LNote()))
     in 0 end)
 in listeners end
 
@@ -2115,7 +2124,8 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
       val hit = _row_of(clicked, "search-hit")
       val close = (case+ _search_panel_control(clicked) of ~$R.some(SearchClose()) => true | ~$R.none() => false): bool
       val () = _target_free(clicked)
-      val () = (if close then _search_end()
+      (* the panel's Close: the focus goes back where it was (layer.bats) *)
+      val () = (if close then let val () = layer_close(LSearch()) in _search_clear() end
         else if hit >= 0 then let
           val () = layer_close(LSearch())
         in reader_search_go(hit) end
@@ -2133,7 +2143,7 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
     in 0 end)
 in listeners end
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
@@ -2173,9 +2183,10 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
       val close = (case+ _image_viewer_control(clicked) of ~$R.some(ImageClose()) => true | ~$R.none() => false): bool
       val () = _target_free(clicked)
     in
+      (* the focus goes back where it was (layer.bats) *)
       if close then let
         val () = layer_close(LImage())
-      in let val () = ui_focus("page") in 0 end end
+      in 0 end
       else 0
     end)
   (* a link within the book, focused from the keyboard, is followed with
@@ -2201,6 +2212,8 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
                fields), are over the reader: keys are theirs *)
             else if layer_is_open(LSettings()) then ()
             else if layer_is_open(LSearch()) then _search_key(pressed, held)
+            (* a reader panel is modal: no key turns the page behind it *)
+            else if layer_reader_blocked() then ()
             else _reader_key(pressed, held))
         in 0 end)
   (* the wheel turns a page, then pauses a quarter second *)
@@ -2229,7 +2242,23 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 13) = let
   (* pointer events for the gestures: a horizontal drag turns the page
      (the reader view is the stable root; the page is region 1) *)
   val listeners = RCons(listeners, OnPointer("reader"), "pointer", llam(h) => let
-      val () = _gesture_record(h)
+      (* a reader panel is modal: the recognizer gets nothing behind it
+         (the reader is inert then, and the scrim over it, so nothing
+         should come) *)
+      val () = (if layer_reader_blocked() then _gesture_drop(h) else _gesture_record(h))
+    in 0 end)
+  (* a tap on the scrim, outside a reader panel, closes the panel *)
+  val listeners = RCons(listeners, OnEl("panel-scrim"), "click", llam(_) => let
+      val () = layer_scrim_tapped()
+    in 0 end)
+  (* the focus at a stop before or after the panels: round to the open
+     panel's last or first element, so Tab keeps to it *)
+  val listeners = RCons(listeners, OnDocument(), "focusin", llam(h) => let
+      val focused = _target(h)
+      val () = (if _is(focused, "focus-wrap-end") then layer_focus_wrap(WrappedForward())
+        else if _is(focused, "focus-wrap-start") then layer_focus_wrap(WrappedBackward())
+        else ())
+      val () = _target_free(focused)
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
