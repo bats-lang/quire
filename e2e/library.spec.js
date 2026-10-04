@@ -6,7 +6,7 @@ import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
-  librarySettings, settingsButton,
+  librarySettings, settingsButton, continueReading,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -595,7 +595,6 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
 // A larger library: which books, as a list or a grid, and the one to
 // continue
 const show = page => page.getByRole('group', { name: 'Show' });
-const continueReading = page => page.getByRole('region', { name: 'Continue reading' });
 
 test('the library shows all, unread, reading or finished books, and the choice is kept', async ({ page }) => {
   await start(page);
@@ -657,16 +656,62 @@ test('the book last opened and not finished is offered to continue, above the re
   await page.keyboard.press('ArrowRight');
   await toLibrary(page);
   await expect(continueReading(page)).toBeVisible();
-  await expect(continueReading(page).getByRole('button')).toHaveCount(1);
+  await expect(continueReading(page).getByRole('group')).toHaveCount(1);
   await expect(continueReading(page)).toContainText('Later');
   // not while searching
   await librarySearch(page).fill('Earl');
   await expect(continueReading(page)).toBeHidden();
   await librarySearch(page).fill('');
   // it opens the book where it was left
-  await continueReading(page).getByRole('button').click();
+  await continueReading(page).getByRole('button').first().click();
   await pageShown(page);
   await expect.poll(async () => (await place(page)).p).toBe(2);
+});
+
+// The book to continue is shown once (#273): its card above, not again
+// in the list, whatever the sort; and its card has the list's Book menu
+const named = (page, title) => page.getByRole('group', { name: title, exact: true });
+
+test('a library of one book being read shows it once, with its Book menu', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Only One', author: 'A', rawChapters: chapters(2, 20) })], 1);
+  await openBook(page, 'Only One');
+  await page.keyboard.press('ArrowRight');
+  await toLibrary(page);
+  await expect(continueReading(page)).toBeVisible();
+  await expect(named(page, 'Only One')).toHaveCount(1);
+  await expect(page.getByRole('region', { name: 'Books' }).getByRole('group')).toHaveCount(0);
+  await expect(page.getByText(empty)).toBeHidden();
+  // the card's menu is the list's
+  await continueReading(page).getByRole('button', { name: 'Book menu' }).click();
+  await expect(page.getByRole('menu', { name: 'Book menu' })).toBeVisible();
+  await menuItem(page, 'Archive').click();
+  await expect(continueReading(page)).toBeHidden();
+  await expect(cards(page)).toHaveCount(0);
+});
+
+test('with several books, in each sort, the book to continue is shown exactly once', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'Alpha', author: 'Zed', rawChapters: chapters(2, 20) }),
+    epubFile({ title: 'Mid', author: 'Mann', rawChapters: chapters(2, 20) }),
+    epubFile({ title: 'Zulu', author: 'Abel', rawChapters: chapters(2, 20) }),
+  ], 3);
+  // the one being read (opened times are to the minute, so one only)
+  await openBook(page, 'Mid');
+  await page.keyboard.press('ArrowRight');
+  await toLibrary(page);
+  const seen = [];
+  for (let i = 0; i < 5; i++) {
+    seen.push(await sort(page).textContent());
+    await expect(continueReading(page).getByRole('group')).toHaveCount(1);
+    await expect(continueReading(page)).toContainText('Mid');
+    await expect(named(page, 'Mid')).toHaveCount(1);
+    await expect(cards(page)).toHaveCount(3);
+    await expect.poll(async () => (await titles(page)).sort()).toEqual(['Alpha', 'Mid', 'Zulu']);
+    await sort(page).click();
+  }
+  expect(new Set(seen).size).toBe(5);
 });
 
 test('books of a series are shown with their number, and sorted by series together, in order', async ({ page }) => {
