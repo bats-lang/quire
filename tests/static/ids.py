@@ -43,10 +43,12 @@ NAMERS = {name: (0,) for name in (
     'ui_text', 'ui_text_buf', 'ui_text_long', 'ui_tone', 'ui_role',
     'ui_named', 'ui_measure', 'ui_focus', 'ui_harm_item', 'OnEl', 'OnPointer',
     'ui_pointer_capture',
-    'ui_option', 'ui_src_empty',
+    'ui_option', 'ui_src_empty', 'ui_inert',
 )}
 NAMERS['ui_labelled'] = (0, 2)
 NAMERS['_is'] = (1,)
+# the focus given back, else to its fallback
+NAMERS['ui_focus_back'] = (1,)
 for maker in MAKERS:
     NAMERS[maker] = (0,)
 # an inert copy of an element (source, parent, copy): it makes copy, and

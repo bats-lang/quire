@@ -22,7 +22,8 @@
       "dictionary.spec.js",
       "vertical.spec.js",
       "fixed.spec.js",
-      "ruby.spec.js"
+      "ruby.spec.js",
+      "modal-panels.spec.js"
     ],
     "sync-and-settings": [
       "sync.spec.js",
