@@ -1,6 +1,8 @@
 name: check
 
 on:
+  workflow_dispatch:
+
 jobs:
   # The groups the tests run in, side by side (tests/groups.json): every
   # e2e spec and every static test in exactly one, or this fails
