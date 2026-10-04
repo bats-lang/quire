@@ -226,11 +226,11 @@ dictionaries' names and languages, not their files.
 reading time the same on the reader's devices, through one file,
 `quire-sync.json`, in the backup's JSON format plus each record's
 stamps, a `deleted` list per book and a `devices` list. Where the file
-is kept is a `store` (`WebDav(url, user, password)`, or `Android` or
-`Dropbox`, below): its credentials are stored on this device only, by
-the store's kind ("sync" names the kind, "sync-webdav" holds the WebDAV
-ones, "sync-android" the account's address, "sync-dropbox" the refresh
-token), never in the backup. The merge and its tries call only `store_read` (the file,
+is kept is a `store` (`WebDav(url, user, password)`, or `Fastmail`,
+`Android` or `Dropbox`, below): its credentials are stored on this
+device only, by the store's kind ("sync" names the kind, "sync-webdav"
+holds the WebDAV ones, "sync-fastmail" Fastmail's, "sync-android" the
+account's address, "sync-dropbox" the refresh token), never in the backup. The merge and its tries call only `store_read` (the file,
 none yet, or a failure) and `store_write` (written, a conflict, or a
 failure); WebDAV's read is a GET whose ETag is the version, its write
 a PUT with If-Match (a 412 is the conflict). A sync reads, merges and
@@ -241,8 +241,11 @@ the page is hidden, and from the screen's Sync now (`LSync`,
 `sync-screen`, opened from the Settings screen's Sync row; Turn off
 goes through Undo). That row says sync's state in short
 (`sync_summary_show`, refreshed with the screen's status line): "Off",
-"WebDAV · synced 2 min ago" ("Android · ...", "Dropbox · ..."), or how the last sync
-failed.
+"WebDAV · synced 2 min ago" ("Fastmail · ...", "Android · ...", "Dropbox · ..."), or how the last sync
+failed. The screen lists only what can be used where it runs, each row
+shown by its own `data-hide` (`ui_show` in `sync_screen_open`): no row
+is there only to say why it is unavailable (a provider a browser can't
+reach, a build with no client or key).
 
 Nextcloud is signed in to with its Login Flow v2 (`src/nextcloud.bats`,
 #184), which ends in the WebDAV store: the screen's Sign in with
@@ -256,6 +259,17 @@ user's id (`nextcloud_user_id`, OCS `cloud/user`: a login name can be an
 email, the files folder is named by the id) makes the folder,
 `<server>/remote.php/dav/files/<id>` (`nextcloud_folder`), kept with the
 login name and the app password as `WebDav`, and a sync runs.
+
+**Fastmail** (#184, #271), in the app only: the store `Fastmail(user,
+password)`, its files over WebDAV at
+`https://myfiles.fastmail.com/quire/quire-sync.json` (the folder made
+by MKCOL at the first write), with the Fastmail address and an app
+password the row's link and steps say how to make. Fastmail's WebDAV
+sends no CORS headers, so a browser page can't reach it, and a browser
+lists no Fastmail and sends it nothing; the app's requests are native.
+A refusal is `FastmailRefused`. `sync-providers.yml` checks weekly
+whether Fastmail now lets pages in (`fastmail-cors`), so browsers could
+list it too. `e2e/sync-fastmail.spec.js` plays its files.
 
 A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
@@ -283,7 +297,8 @@ Google's sheet each time it is asked), so it is asked for only when
 the reader acts (Use Android, Sync now) and kept in memory while the
 app runs (`_token`); a sync the app makes by itself without one, or
 one Drive refuses (401), says "Tap Sync now to sign in to Google
-again". No account, a cancel, and a build with no client each say so;
+again". No account and a cancel each say so, and a build with no
+client lists no Use Android;
 Turn off signs out. The client ID is public and not compiled in:
 it is committed in `scripts/sync-clients.env` (#200: the Web
 application client `GOOGLE_WEB_CLIENT_ID`, with the Android client's ID
@@ -291,8 +306,8 @@ and Play's app signing SHA-1 recorded beside it, and Dropbox's app key,
 #239; all public, none a repository variable), and
 `scripts/sync-clients.sh` writes the Google client and the Dropbox key
 (checked) into `sync-clients.json` beside the app, in CI and a local
-build alike, read by `src/sync_clients.bats`; a build with none says
-Use Android is not set up. `sync-identity.yml` prints the upload key's
+build alike, read by `src/sync_clients.bats`; a build with none lists
+neither Use Android nor Google Drive. `sync-identity.yml` prints the upload key's
 fingerprints and checks the committed values (the IDs' form, and that
 Play's SHA-1 is not the upload key's). The e2e suite stubs Google's
 script (`googleStubbed` in `e2e/fixtures.js`), so it never reaches
@@ -321,7 +336,7 @@ conflict. `src/web_request.bats` holds the requests it shares with
 secret: the app key of the Dropbox app "Quire reader" is public,
 committed as `DROPBOX_CLIENT_ID` in `scripts/sync-clients.env` (#239)
 and written into `sync-clients.json` as `dropboxClient`; a build
-without one says Dropbox sync is not set up). `sync_dropbox`
+without one lists no Dropbox). `sync_dropbox`
 keeps the verifier and state ("sync-dropbox-sign-in") and leaves the
 page for Dropbox's (bridge's `navigate_away`), which sends the reader
 back to the page's own address with `?oauth=dropbox` (the registered
