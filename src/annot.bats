@@ -694,15 +694,15 @@ fn _here (): int = let
   val () = _put(cell)
 in found end
 
-(* The bookmark button: filled when the page shown has a bookmark *)
+(* The bookmark button: "added" when the page shown has a bookmark *)
 #pub fn annot_star (): void
 
 implement annot_star () =
   if _here() >= 0 then let
-    val () = ui_text("bookmark-button", "\xE2\x98\x85")
+    val () = ui_icon_set("bookmark-button", IcBookmarked)
   in ui_attr("bookmark-button", APressed, "true") end
   else let
-    val () = ui_text("bookmark-button", "\xE2\x98\x86")
+    val () = ui_icon_set("bookmark-button", IcBookmark)
   in ui_attr("bookmark-button", APressed, "false") end
 
 (* annotations without its i-th annotation *)

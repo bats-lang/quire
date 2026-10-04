@@ -715,6 +715,11 @@ Elements are made through `src/ui.bats`:
   button, a field or an image can only be made by a constructor that
   names it. A text button is named by its text alone, so its name
   holds what it shows (WCAG 2.5.3); an icon button is given its name;
+  an icon is a glyph of one monochrome set, a subset of Material
+  Symbols (Apache-2.0, `assets/fonts/material-symbols-subset.woff2`,
+  made by `scripts/icon-font.py`) at its Private Use Area code point
+  (`_glyph`, `ui_icon_set`), drawn in the button's own proven text
+  colour, never an emoji (#274);
   images are decorative (`alt=""`); an audio element (`ui_audio`) has no
   controls and is hidden from assistive technology; a role that needs a name (dialog,
   region, toolbar, menu, group) is given one with it.
