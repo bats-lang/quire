@@ -88,6 +88,11 @@
       "accept/page-turn-fresh-copy",
       "reject/page-turn-forged-copy",
       "reject/page-turn-copy-marked"
+    ],
+    "external-files": [
+      "reject/library-read-forged",
+      "reject/library-reading-unmatched",
+      "reject/external-file-dropped"
     ]
   }
 }

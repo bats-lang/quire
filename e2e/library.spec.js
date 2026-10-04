@@ -494,6 +494,49 @@ test('a file handed over by the host that cannot be read is said, and the next i
   expect(errors).toEqual(['console: Failed to load resource: the server responded with a status of 404 (Not Found)']);
 });
 
+// A file handed over as the app starts, while its stored library is
+// still being read, is imported once the library is read, and so is not
+// put in a library the read then replaces (#262: the Android app opened
+// with a shared book anew, which the library then hid)
+test('a file handed over before the stored library is read is imported once, beside its books', async ({ page }) => {
+  const errors = await start(page);
+  await importFiles(page, [epubFile({ title: 'Already Here', author: 'Intent Test', chapters: 1 })], 1);
+  const shared = epubFile({ title: 'Handed At Start', author: 'Intent Test', chapters: 1 });
+  let fetched = 0;
+  await page.route('**/_capacitor_file_/at-start', r => {
+    fetched++;
+    return r.fulfill({ path: shared, contentType: 'application/octet-stream' });
+  });
+  // on the next start: the stored library's read answers 1.5 s late, and
+  // the file is handed over before the bridge loads
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('handed-at-start')) return;
+    sessionStorage.setItem('handed-at-start', 'yes');
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (...args) {
+      const request = get.apply(this, args);
+      if (args[0] === 'lib') {
+        let answer = null;
+        request.addEventListener('success', e => setTimeout(() => answer && answer.call(request, e), 1500));
+        Object.defineProperty(request, 'onsuccess', { set(f) { answer = f; }, get() { return answer; } });
+      }
+      return request;
+    };
+    (globalThis.batsExternalEarly = []).push({ url: '/_capacitor_file_/at-start', name: 'at-start.epub' });
+  });
+  await page.reload();
+  await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
+  await expect(card(page, 'Already Here')).toBeVisible();
+  await page.waitForTimeout(1000);
+  await expect(cards(page)).toHaveCount(2);
+  expect(fetched).toBe(1);
+  // and it is in the stored library: a reload shows both
+  await page.reload();
+  await expect(card(page, 'Handed At Start')).toBeVisible({ timeout: 30000 });
+  await expect(cards(page)).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
 // EPUB Accessibility 1.1's discovery metadata, shown in the W3C
 // Publishing CG's display guidelines' words
 const infoOf = async (page, title) => {
