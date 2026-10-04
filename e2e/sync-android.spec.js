@@ -6,7 +6,7 @@
 // token for the device's account, Filesystem keeps files in a map), and
 // Google Drive's API is a mock routed in each (no real network).
 
-import { test, expect } from './fixtures.js';
+import { test, expect, clientsServed } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,
@@ -112,9 +112,7 @@ async function device(browser, server, { mode = 'token', files = [], client = CL
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
   await context.addInitScript(capacitor, { mode, token: server ? server.token : 'token-1', files });
   if (server) await context.route('https://www.googleapis.com/**', server.handle);
-  await context.route('**/sync-clients.json', route => route.fulfill({
-    status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ googleWebClient: client || '' }),
-  }));
+  await clientsServed(context, client ? { googleWebClient: client } : {});
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
@@ -236,6 +234,7 @@ test('a file another device wrote meanwhile is read again and merged', async ({ 
 test('Use Android says why it cannot sync, and Turn off signs out', async ({ browser }) => {
   // in a browser there is no Use Android
   const web = await browser.newContext();
+  await clientsServed(web, {});
   const page = await web.newPage();
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
@@ -344,9 +343,7 @@ async function browserDevice(browser, server) {
     status: 200, headers: { 'content-type': 'text/javascript' }, body: IDENTITY_SERVICES,
   }));
   await context.route('https://www.googleapis.com/**', server.handle);
-  await context.route('**/sync-clients.json', route => route.fulfill({
-    status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ googleWebClient: CLIENT }),
-  }));
+  await clientsServed(context, { googleWebClient: CLIENT });
   await context.addInitScript(() => {
     window.__gis = { token: 'token-1', closed: false, requests: 0, revoked: [], clients: [] };
   });

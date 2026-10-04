@@ -3,7 +3,7 @@
 // the file and its ETag, PUT honours If-Match (412 when the file
 // changed) and keeps what it is sent.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, googleStubbed } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
@@ -58,6 +58,7 @@ function webdav() {
 /** A device: a browser context of its own, the folder routed in it */
 async function device(browser, server, time) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+  await googleStubbed(context);
   await context.route('**/dav/books/quire-sync.json', server.handle);
   const page = await context.newPage();
   if (time) await page.clock.install({ time });
