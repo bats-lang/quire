@@ -43,15 +43,27 @@
     "app": [
       "check",
       "checkers",
-      "reject/role-unmatched",
+      "reject/brightness-not-a-choice",
+      "reject/control-unmatched",
+      "reject/dictionary-file-unmatched",
+      "reject/external-file-dropped",
+      "reject/highlight-unmatched",
       "reject/import-unmatched",
+      "reject/library-read-forged",
+      "reject/library-reading-unmatched",
+      "reject/link-unmatched",
+      "reject/page-turn-copy-marked",
+      "reject/page-turn-forged-copy",
+      "reject/page-turn-forged-sheet",
+      "reject/page-turn-held-lifted",
+      "reject/page-turn-left-unfinished",
       "reject/shelf-unmatched",
       "reject/sync-result-unmatched",
       "reject/theme-unmatched",
-      "reject/unreadable-unhandled",
-      "reject/highlight-unmatched"
+      "reject/turn-unmatched",
+      "reject/unreadable-unhandled"
     ],
-    "fixtures": [
+    "accepts": [
       "accept/aloud-placement-matched",
       "accept/back-offer",
       "accept/clip-last",
@@ -62,21 +74,11 @@
       "reject/back-forged-proof",
       "reject/back-nothing-to-offer",
       "reject/back-other-timeout",
-      "reject/brightness-not-a-choice",
       "reject/clip-past-end",
-      "reject/control-unmatched",
-      "reject/dictionary-file-unmatched",
-      "reject/external-file-dropped",
-      "reject/fixed-box-zoom-zero",
-      "reject/library-read-forged",
-      "reject/library-reading-unmatched",
-      "reject/link-unmatched",
-      "reject/page-turn-copy-marked",
-      "reject/page-turn-forged-copy",
-      "reject/page-turn-forged-sheet",
-      "reject/page-turn-held-lifted",
-      "reject/page-turn-left-unfinished",
-      "reject/turn-unmatched"
+      "reject/fixed-box-zoom-zero"
+    ],
+    "style": [
+      "reject/role-unmatched"
     ]
   }
 }
