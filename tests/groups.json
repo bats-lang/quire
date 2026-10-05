@@ -43,9 +43,7 @@
       "layout.spec.js"
     ],
     "relaunch": [
-      "relaunch.spec.js"
-    ],
-    "relaunch-sync": [
+      "relaunch.spec.js",
       "relaunch-sync.spec.js"
     ]
   },
