@@ -700,20 +700,20 @@ fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
   | AutoColumns() => _put_text(buf, position,
     "@media (orientation:landscape) and (min-width:60em){.caf{column-width:40vw}.sprobe{display:block}}")
 
-(* Scrolled, the page's head and foot are margins, not paddings: a
-   padding scrolls with the text, so the text ran on under the status
-   bar, the running footer and the navigation bar (quire#300). As
-   margins they are outside the box that scrolls, so the text is cut at
-   them and never shows under an inset or the footer: the same
-   --page-top and --page-bottom the paged page's paddings are (style.bats,
-   #296), so it keeps the same clearances. A vertical page
-   and a fixed one keep their own (they are always paged) *)
-fn _put_scrolled {l:agz}{position:nat | position + 240 <= 1024}
+(* Scrolled: the chapter down the page, not in columns across. The page
+   is then the reading area itself (#296): its margins, not its
+   paddings, are the reading area's (style.bats, .rv), so the text
+   scrolls only inside it, clipped below the status bar and above the
+   footer, and never drawn under either. The bands the margins leave
+   are the page's own (two transparent bands, fixed over them), so a
+   tap or a drag there is still the page's. A vertical book and a fixed
+   page are never scrolled, and keep their own boxes *)
+fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
-  : [stop:nat | stop <= position + 240] int stop =
+  : [stop:nat | stop <= position + 440] int stop =
   case+ scrolled of
   | Scrolled() => _put_text(buf, position,
-    ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}.caf:not(.vertical,.vertical-lr,.fixed){padding-top:0;padding-bottom:0;margin-top:var(--page-top);margin-bottom:var(--page-bottom)}")
+    ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}.caf:not(.vertical,.vertical-lr,.fixed){padding-block:0;margin-block:var(--page-top) var(--page-bottom)}.caf:not(.vertical,.vertical-lr,.fixed)::before,.caf:not(.vertical,.vertical-lr,.fixed)::after{content:'';position:fixed;left:0;right:0;top:0;height:var(--page-top)}.caf:not(.vertical,.vertical-lr,.fixed)::after{top:auto;bottom:0;height:var(--page-bottom)}")
   | Paged() => position
 
 (* A ruby's annotations hidden: its rt and rtc (an rp is not shown

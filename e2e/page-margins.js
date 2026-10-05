@@ -1,11 +1,16 @@
 /**
- * The page's margins at its foot and head, measured (#296): a paged,
- * reflowed page with the bars down keeps its text clear of the running
+ * The page's margins at its foot and head, measured (#296): a reflowed
+ * page, paged or scrolled, with the bars down keeps its text clear of the running
  * footer, the footer clear of the screen's bottom inset (Android's
  * navigation bar), and its first line clear of the top inset (the
  * status bar). The fixture (fixtures.js) measures them at the end of
  * every test in the phone-sized projects, whenever the reader shows
  * such a page, so a spec that leaves the reader open checks them.
+ *
+ * What counts is the text as drawn: each line box cut to the page's
+ * own scrollport (its client box, where the browser clips what it
+ * scrolls), so a scrolled page whose text runs on under the footer or
+ * a system bar fails, and one clipped at its reading area passes.
  *
  * The insets are the page's own, env(safe-area-inset-*) as computed
  * (a DevTools override, or none), never assumed, and full screen is
@@ -25,7 +30,7 @@ export const TEXT_CLEARANCE_LEAST = 12;
 /** The least space between the footer's bottom and the bottom inset */
 export const FOOTER_CLEARANCE = 8;
 
-/** How the page shown measures: null when no reflowed paged page is
+/** How the page shown measures: null when no reflowed page is
     shown with the bars down, else what was measured and each margin
     that falls short */
 export async function pageMargins(page) {
@@ -39,8 +44,7 @@ export async function pageMargins(page) {
     // a fixed page and a vertical one keep their own layouts
     if (['fixed', 'vertical', 'vertical-lr'].some(c => doc.classList.contains(c))) return null;
     const style = getComputedStyle(doc);
-    // scrolled, the text runs on under the footer by design
-    if (style.overflowY === 'auto' || style.overflowY === 'scroll') return null;
+    const scrolled = style.overflowY === 'auto' || style.overflowY === 'scroll';
     const probe = document.createElement('div');
     probe.style.cssText = 'position:fixed;visibility:hidden;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)';
     document.body.append(probe);
@@ -54,6 +58,9 @@ export async function pageMargins(page) {
     const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.2;
     const least = Math.max(textLeast, line / 2);
     const box = doc.getBoundingClientRect();
+    // the scrollport: what the page draws of its text, scrolled or not
+    const clipTop = box.top + doc.clientTop;
+    const clipBottom = clipTop + doc.clientHeight;
     let first = Infinity;
     let last = -Infinity;
     let lines = 0;
@@ -73,17 +80,23 @@ export async function pageMargins(page) {
       for (const r of range.getClientRects()) {
         // the page's other columns lie beside it, out of sight
         if (r.width <= 0 || r.right <= box.left + 1 || r.left >= box.right - 1) continue;
-        first = Math.min(first, r.top);
-        last = Math.max(last, r.bottom);
+        // the part of the line drawn: scrolled, a line at the
+        // scrollport's edge is cut there, and one past it is not drawn
+        const top = Math.max(r.top, clipTop);
+        const bottom = Math.min(r.bottom, clipBottom);
+        if (bottom <= top) continue;
+        first = Math.min(first, top);
+        last = Math.max(last, bottom);
         lines++;
-        if (footer && r.bottom > footer.top + 0.5) underFooter++;
+        if (footer && bottom > footer.top + 0.5) underFooter++;
       }
     }
     if (!lines) return null;
     const measured = {
       window: { width: innerWidth, height: innerHeight, shownTop, shownBottom },
       insets: { top: insetTop, bottom: insetBottom },
-      line, least,
+      line, least, scrolled,
+      scrollport: { top: clipTop, bottom: clipBottom },
       firstLineTop: first, lastLineBottom: last,
       footer: footer ? { top: footer.top, bottom: footer.bottom } : null,
     };

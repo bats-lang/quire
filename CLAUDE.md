@@ -993,11 +993,19 @@ footer and of the top inset. A column is the page's height less those
 paddings, so it is exactly that area; a vertical page's column gap and a
 picture's largest height are the same paddings. Pages are counted
 across by the page's scroll width, which the column's height does not
-change. `e2e/page-margins.js` measures those margins against the
+change. Scrolled, the same variables are the page's margins instead
+of its paddings (`_put_scrolled` in `src/settings.bats`), so the page
+is the reading area itself and its text is clipped there, never drawn
+under the footer or a system bar; two transparent fixed bands (the
+page's `::before` and `::after`) keep a tap or a drag beside it the
+page's, and a turn (`_step`) scrolls the area's height less one line
+of the text, so the line its foot cuts is whole at the next screen's
+head. `e2e/page-margins.js` measures those margins against the
 insets the page computes, and the e2e fixture measures them at the end
 of every test in the phone-sized projects (`MARGIN_PROJECTS`), full
-screen too, whenever the reader shows a paged reflowed page with the
-bars down, so a spec that leaves the reader open checks them.
+screen too, whenever the reader shows a reflowed page, paged or
+scrolled, with the bars down, so a spec that leaves the reader open
+checks them; each line counts as drawn, cut to the page's scrollport.
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
@@ -1129,7 +1137,13 @@ fonts' (`RFonts`), each given its event as bridge decodes it. A
 chapter's pages are counted again as it is shown, for 3 s (`_settle`),
 and whenever a load of the page's fonts ends (`RFonts`, bridge's
 `listen_fonts_loaded`): the reading face can arrive after those 3 s,
-and the count made with its fallback would stay.
+and the count made with its fallback would stay. A layout made anew
+(those counts, a resize, the type) shows the page of the node the
+place is kept by (`_anchor_kept`: the one a jump took the reader to,
+else the one at the top of the page they last moved to) and keeps that
+node until the reader moves, never the node at the top of the page it
+then shows, which can begin before it, so layouts one after another do
+not move the place back (quire#305).
 
 ## A page that stops answering in e2e explains itself (#244)
 
