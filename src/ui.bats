@@ -1144,8 +1144,10 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
    left (RFullscreen), reading aloud's events (RSpeech) and the
    browser's offer to install the app coming and going
    (RInstallOffer), the addresses the native app is opened at
-   (RAppLink: a sign-in in the system's browser coming back), and a load
-   of the page's fonts ending (RFonts). *)
+   (RAppLink: a sign-in in the system's browser coming back), a load
+   of the page's fonts ending (RFonts), and the app's system bars as its
+   native side reports them (RSystemBars: a swipe from the screen's edge
+   brings hidden ones back). *)
 #pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
@@ -1155,6 +1157,7 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {count:nat} RInstallOffer(count + 1) of (regs(count), ($BAPP.install_offer) -<lincloptr1> void)
   | {count:nat} RAppLink(count + 1) of (regs(count), ([k:pos] $BD.dblob(k)) -<lincloptr1> void)
   | {count:nat} RFonts(count + 1) of (regs(count), ($ME.fonts_status) -<lincloptr1> void)
+  | {count:nat} RSystemBars(count + 1) of (regs(count), ($SCR.system_bars) -<lincloptr1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
@@ -1187,6 +1190,10 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | ~RFullscreen(rest, callback) => let
       val position = _listen_all(rest)
       val () = $SCR.listen_fullscreen(position, callback)
+    in position + 1 end
+  | ~RSystemBars(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $SCR.listen_system_bars(position, callback)
     in position + 1 end
   | ~RSpeech(rest, callback) => let
       val position = _listen_all(rest)

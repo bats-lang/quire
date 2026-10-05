@@ -1795,7 +1795,8 @@ in _page_waiter_resolve() end
    brings them back for a while at a swipe from the screen's edge
    (immersive mode's own way out), and full screen stays on, so a page
    turned hides them again, as a reading app keeps them hidden while it
-   reads (quire#300). Hiding hidden bars changes nothing. A browser's
+   reads (quire#300); meanwhile the Full screen switch shows them, as
+   the app reports them (quire#314). Hiding hidden bars changes nothing. A browser's
    full screen is left only by the reader (Escape), never brought back
    unasked *)
 fn _bars_hidden_again (): void =

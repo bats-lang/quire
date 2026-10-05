@@ -2525,7 +2525,7 @@ in listeners end
    screen's controls (the brightness, and full screen entered or left),
    the browser's offer to install the app, and the addresses the app is
    opened at (Dropbox's sign-in coming back) *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 10) = let
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 11) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -2545,6 +2545,7 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 10) = let
       val () = screen_brightness_chosen()
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
+  val listeners = RSystemBars(listeners, llam(bars) => screen_system_bars_changed(bars))
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
   val listeners = RAppLink(listeners, llam(link) => sync_app_link(link))
   (* a face that arrives after the chapter was laid out with a fallback

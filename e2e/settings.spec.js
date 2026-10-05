@@ -331,16 +331,24 @@ test.describe('auto at night', () => {
 
 // The Android app's plugins played: SystemBars keeps which bars are
 // hidden (no bar named is both, as Capacitor's own SystemBars.java
-// hides WindowInsetsCompat.Type.systemBars()), and each call
+// hides WindowInsetsCompat.Type.systemBars()), and each call. As pwa's
+// activity does at the window insets dispatch that follows, each bar's
+// visibility is reported to the page (bridge's batsNative.systemBars);
+// systemShows plays the system bringing the bars back (a swipe from the
+// screen's edge), reported the same way
 function barsPlayed() {
   window.calls = [];
   window.hidden = { status: false, navigation: false };
+  const report = () => setTimeout(() => {
+    if (globalThis.batsNative && globalThis.batsNative.systemBars) globalThis.batsNative.systemBars(!window.hidden.status, !window.hidden.navigation);
+  }, 0);
+  window.systemShows = () => { window.hidden = { status: false, navigation: false }; report(); };
   const bars = a => (a && a.bar === 'StatusBar') ? ['status'] : (a && a.bar === 'NavigationBar') ? ['navigation'] : ['status', 'navigation'];
   const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
   window.Capacitor = { isNativePlatform: () => true, Plugins: {
     SystemBars: {
-      hide: a => { for (const bar of bars(a)) window.hidden[bar] = true; return call('hide')(a); },
-      show: a => { for (const bar of bars(a)) window.hidden[bar] = false; return call('show')(a); },
+      hide: a => { for (const bar of bars(a)) window.hidden[bar] = true; report(); return call('hide')(a); },
+      show: a => { for (const bar of bars(a)) window.hidden[bar] = false; report(); return call('show')(a); },
     },
     ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
     ScreenBrightness: { setBrightness: call('brightness') },
@@ -412,6 +420,37 @@ test('in the Android app, full screen holds: bars the system brought back are hi
   await page.addInitScript(() => { const kept = sessionStorage.getItem('bars'); if (kept) window.hidden = JSON.parse(kept); });
   await page.reload();
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+});
+
+// quire#314: Android brings the hidden bars back at a swipe from the
+// screen's edge, and the activity reports them: the switch shows them at
+// once (off). They stay while the page does, and the next page shown
+// hides them again, the switch on (Android's immersive mode for reading,
+// a swipe the reader's own way out); the switch tapped while they are
+// shown hides them
+test('in the Android app, bars the system brought back show on the switch at once, and go at the next page or a tap', async ({ page }) => {
+  await page.addInitScript(barsPlayed);
+  await start(page);
+  await readBook(page, { title: 'Swiped', author: 'Settings Tests', rawChapters: chapters(3, 60) });
+  await openReadingSettings(page, 'Page');
+  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  await full.click();
+  await expect.poll(() => switchOn(full)).toBe('on');
+  await page.evaluate(() => window.systemShows());
+  await expect.poll(() => switchOn(full), { timeout: 1000 }).toBe('off');
+  await page.waitForTimeout(500);
+  expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  expect(await switchOn(full)).toBe('off');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await openReadingSettings(page, 'Page');
+  await expect.poll(() => switchOn(full)).toBe('on');
+  await page.evaluate(() => window.systemShows());
+  await expect.poll(() => switchOn(full), { timeout: 1000 }).toBe('off');
+  await full.click();
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await expect.poll(() => switchOn(full)).toBe('on');
 });
 
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {
