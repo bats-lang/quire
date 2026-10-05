@@ -285,7 +285,9 @@ in _hide("library-menu") end
 
 (* The Settings screen, opened from the library menu and the reader:
    one screen of groups, each complex area a screen of its own opened
-   from a row that says its state (Android's settings pattern). Sync
+   from a row that says its state (Android's settings pattern). Reading
+   (how pages are turned and read aloud, set once: its row says them in
+   short, settings.bats's set_reading_show), Sync
    (its row says whether it is on and how the last sync went, from
    sync_summary_show), the dictionaries, the backup (exported, or one
    restored), the daily reading goal (the statistics panel has it too),
@@ -296,10 +298,15 @@ fn _settings_screen (): void = let
   val () = ui_el("settings-screen", "settings-box", TDiv, "info-in")
   val () = ui_el("settings-box", "settings-title", TDiv, "mtitle")
   val () = ui_text("settings-title", "Settings")
+  (* reading: its screen, and its state (#289) *)
+  val () = ui_el("settings-box", "settings-reading-row", TDiv, "srow")
+  val () = ui_named("settings-reading-row", NGroup, "Reading")
+  val () = ui_text_btn("settings-reading-row", "settings-reading", "btn rowbtn", "Reading \xE2\x80\xBA")
+  val () = ui_add("settings-reading-row", "settings-reading-state", TSpan)
   (* sync: its screen, and its state *)
   val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
   val () = ui_named("settings-sync-row", NGroup, "Sync")
-  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn", "Sync \xE2\x80\xBA")
+  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn", "Sync \xE2\x80\xBA")
   val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
   val () = ui_role("settings-sync-state", RStatus)
   (* the dictionaries' panel *)
@@ -632,18 +639,53 @@ in _hide("contents-panel") end
    holding a drawing of the page's zones (decorative, hidden from
    assistive technology: back the edge's tint, forward the accent),
    its name, and a line that says what each zone does, which is part of
-   its name (reader.bats's taps_describe writes it, the other way round
+   its name (quire.bats's _taps_describe writes it, the other way round
    for a book read right to left) *)
-fn _tap_choice {id_len,map_len,class_len,label_len,about_len:pos | id_len < 256; map_len < 256; class_len < 256; label_len < 256; about_len < 256}
-  {back_len,forward_len:pos | back_len < 256; forward_len < 256}
-  (id: string id_len, map: string map_len, map_class: string class_len, label: string label_len,
-   back: string back_len, forward: string forward_len, about: string about_len): void = let
-  val () = ui_text_btn("taps-choice", id, "sbtn tapbtn", label)
-  val () = ui_el(id, map, TSpan, map_class)
-  val () = ui_attr(map, AHidden, "true")
-  val () = ui_el(map, back, TSpan, "tzb")
-  val () = ui_el(map, forward, TSpan, "tzf")
-in ui_el(id, about, TSpan, "tapabout") end
+fn _tap_choice {class_len,label_len:pos | class_len < 256; label_len < 256}
+  (place: reading_place, button: reading_part, map: reading_part, map_class: string class_len, label: string label_len,
+   back: reading_part, forward: reading_part, about: reading_part): void = let
+  val () = ui_text_btn(reading_part_id(place, TapsChoice()), reading_part_id(place, button), "sbtn tapbtn", label)
+  val () = ui_el(reading_part_id(place, button), reading_part_id(place, map), TSpan, map_class)
+  val () = ui_attr(reading_part_id(place, map), AHidden, "true")
+  val () = ui_el(reading_part_id(place, map), reading_part_id(place, back), TSpan, "tzb")
+  val () = ui_el(reading_part_id(place, map), reading_part_id(place, forward), TSpan, "tzf")
+in ui_el(reading_part_id(place, button), reading_part_id(place, about), TSpan, "tapabout") end
+
+(* How pages are turned, in place (into parent): by taps where (each
+   zone drawn, mirrored for a book read right to left), and by the
+   volume keys, where the app has them (quire.bats's _volume_offer).
+   The one function for both places (#289), so the sheet's Turning tab
+   and the Reading screen hold the same rows, each with its own ids *)
+fn _turning_rows {parent_len:pos | parent_len < 256} (place: reading_place, parent: string parent_len): void = let
+  val () = ui_el(parent, reading_part_id(place, TapsRow()), TDiv, "srow tapsrow")
+  val () = ui_el(reading_part_id(place, TapsRow()), reading_part_id(place, TapsLabel()), TSpan, "slabel")
+  val () = ui_text(reading_part_id(place, TapsLabel()), "Tap to turn pages")
+  val () = ui_el(reading_part_id(place, TapsRow()), reading_part_id(place, TapsChoice()), TDiv, "seg taps")
+  val () = ui_named(reading_part_id(place, TapsChoice()), NGroup, "Tap to turn pages")
+  val () = _tap_choice(place, TapsSidesButton(), TapsSidesMap(), "tapmap sides", "Sides",
+    TapsSidesBack(), TapsSidesForward(), TapsSidesAbout())
+  val () = _tap_choice(place, TapsForwardButton(), TapsForwardMap(), "tapmap forward", "Forward",
+    TapsForwardBack(), TapsForwardForward(), TapsForwardAbout())
+  val () = _tap_choice(place, TapsOneHandButton(), TapsOneHandMap(), "tapmap onehand", "One hand",
+    TapsOneHandBack(), TapsOneHandForward(), TapsOneHandAbout())
+  val () = ui_el(parent, reading_part_id(place, VolumeRow()), TDiv, "srow")
+  val () = ui_el(reading_part_id(place, VolumeRow()), reading_part_id(place, VolumeChoice()), TDiv, "seg")
+  val () = ui_text_btn(reading_part_id(place, VolumeChoice()), reading_part_id(place, VolumeKeysButton()), "sbtn",
+    "Turn pages with volume keys")
+  val () = ui_attr(reading_part_id(place, VolumeKeysButton()), APressed, "false")
+in _hide(reading_part_id(place, VolumeRow())) end
+
+(* Reading aloud's speed and voice (the voices of the book's language),
+   in place (into parent), offered and kept by read_aloud.bats where
+   the platform speaks; the one function for both places, as
+   _turning_rows is *)
+fn _aloud_rows {parent_len:pos | parent_len < 256} (place: reading_place, parent: string parent_len): void = let
+  val () = ui_el(parent, reading_part_id(place, SpeechRow()), TDiv, "srow")
+  val () = ui_el(reading_part_id(place, SpeechRow()), reading_part_id(place, SpeechLabel()), TSpan, "slabel")
+  val () = ui_text(reading_part_id(place, SpeechLabel()), "Speed and voice")
+  val () = ui_field(reading_part_id(place, SpeechRow()), reading_part_id(place, SpeechRate()), FChoice, "ssel", "Reading speed")
+  val () = ui_field(reading_part_id(place, SpeechRow()), reading_part_id(place, SpeechVoice()), FChoice, "ssel", "Voice")
+in _hide(reading_part_id(place, SpeechRow())) end
 
 (* A tab of the reading settings' sheet and the panel it shows: the
    panel is named by its tab, and only the chosen tab's is shown, the
@@ -780,34 +822,10 @@ fn _settings (): void = let
   val () = ui_attr("screen-lock", APressed, "false")
   val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel", "Brightness")
   val () = _hide("screen-row")
-  (* Turning: by taps where (each zone drawn, mirrored for a book read
-     right to left), and by the volume keys, where the app has them
-     (quire.bats's _sheet_open) *)
-  val () = ui_el("typography-turning", "taps-row", TDiv, "srow tapsrow")
-  val () = ui_el("taps-row", "taps-label", TSpan, "slabel")
-  val () = ui_text("taps-label", "Tap to turn pages")
-  val () = ui_el("taps-row", "taps-choice", TDiv, "seg taps")
-  val () = ui_named("taps-choice", NGroup, "Tap to turn pages")
-  val () = _tap_choice("taps-sides", "taps-sides-map", "tapmap sides", "Sides",
-    "taps-sides-back", "taps-sides-forward", "taps-sides-about")
-  val () = _tap_choice("taps-forward", "taps-forward-map", "tapmap forward", "Forward",
-    "taps-forward-back", "taps-forward-forward", "taps-forward-about")
-  val () = _tap_choice("taps-one-hand", "taps-one-hand-map", "tapmap onehand", "One hand",
-    "taps-one-hand-back", "taps-one-hand-forward", "taps-one-hand-about")
-  val () = ui_el("typography-turning", "volume-row", TDiv, "srow")
-  val () = ui_el("volume-row", "volume-choice", TDiv, "seg")
-  val () = ui_text_btn("volume-choice", "volume-keys-turn", "sbtn", "Turn pages with volume keys")
-  val () = ui_attr("volume-keys-turn", APressed, "false")
-  val () = _hide("volume-row")
-  (* Read aloud: its speed and voice (the voices of the book's
-     language), offered and kept by read_aloud.bats, where the platform
-     speaks *)
-  val () = ui_el("typography-aloud", "speech-row", TDiv, "srow")
-  val () = ui_el("speech-row", "speech-label", TSpan, "slabel")
-  val () = ui_text("speech-label", "Speed and voice")
-  val () = ui_field("speech-row", "speech-rate", FChoice, "ssel", "Reading speed")
-  val () = ui_field("speech-row", "speech-voice", FChoice, "ssel", "Voice")
-  val () = _hide("speech-row")
+  (* Turning, and Read aloud's speed and voice: made as the Reading
+     screen's are (_turning_rows, _aloud_rows) *)
+  val () = _turning_rows(InSheet(), "typography-turning")
+  val () = _aloud_rows(InSheet(), "typography-aloud")
   (* a book's narration: its speed (its slider is made at the settings'
      value, set_sliders) and whether page numbers and notes are read,
      both offered only for a book that has one *)
@@ -825,6 +843,33 @@ fn _settings (): void = let
   val () = ui_el("typography-panel", "typography-foot", TDiv, "srow sfoot")
   val () = ui_text_btn("typography-foot", "typography-reset", "link", "Reset to defaults")
 in _hide("typography-panel") end
+
+(* The Reading screen (#289), opened from Settings' Reading row: the
+   reading behaviour set once, as Play Books keeps "Use volume keys to
+   turn pages" on its settings page. How pages are turned (taps, and
+   the volume keys in the app) and reading aloud's speed and voice
+   (where the platform speaks; the voices of the book open, or of the
+   one last read), the same rows as the reading settings sheet's
+   Turning and Read aloud tabs, made by the same functions with this
+   screen's own ids. The sheet's tabs keep them in reach while
+   reading; this screen, from the library too *)
+fn _reading_screen (): void = let
+  val () = ui_el("bats-root", "reading-screen", TDiv, "info")
+  val () = ui_labelled("reading-screen", NDialog, "reading-title")
+  val () = ui_el("reading-screen", "reading-box", TDiv, "info-in")
+  val () = ui_el("reading-box", "reading-title", TDiv, "mtitle")
+  val () = ui_text("reading-title", "Reading")
+  val () = ui_el("reading-box", "reading-turning-title", TDiv, "a11yg")
+  val () = ui_text("reading-turning-title", "Turning pages")
+  val () = _turning_rows(InSettings(), "reading-box")
+  (* shown with the speech row, where the platform speaks *)
+  val () = ui_el("reading-box", "reading-aloud-title", TDiv, "a11yg")
+  val () = ui_text("reading-aloud-title", "Read aloud")
+  val () = _hide("reading-aloud-title")
+  val () = _aloud_rows(InSettings(), "reading-box")
+  val () = ui_el("reading-box", "reading-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("reading-buttons", "reading-done", "btn btn-p", "Done")
+in _hide("reading-screen") end
 
 (* The search panel *)
 fn _search (): void = let
@@ -926,6 +971,7 @@ implement app_build () = let
   val () = _stats()
   val () = _library_menu()
   val () = _settings_screen()
+  val () = _reading_screen()
   val () = _about_screen()
   val () = _info()
   val () = _reader()

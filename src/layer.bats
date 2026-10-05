@@ -30,6 +30,7 @@ staload "ui.sats"
   | LSync          (* sync between devices: its folder, and how it went *)
   | LSettings      (* the Settings screen: sync, dictionaries, backup, goal, resets *)
   | LAbout         (* the About screen: the app's name, and links to its pages and source *)
+  | LReading       (* the Reading screen: how pages are turned and read aloud, from Settings *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   case+ overlay of
@@ -40,7 +41,7 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   | LDictionaries() => "dictionaries-panel" | LDictionary() => "dictionary-panel"
   | LCatalogues() => "catalogues-panel" | LCatalogue() => "catalogue-panel"
   | LSync() => "sync-screen" | LSettings() => "settings-screen"
-  | LAbout() => "about-screen"
+  | LAbout() => "about-screen" | LReading() => "reading-screen"
 
 fn _number (overlay: layer): int =
   case+ overlay of
@@ -48,7 +49,7 @@ fn _number (overlay: layer): int =
   | LTypography() => 4 | LSearch() => 5 | LAnnotations() => 6 | LNote() => 7 | LImage() => 8
   | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
   | LCatalogues() => 13 | LCatalogue() => 14
-  | LSync() => 15 | LSettings() => 16 | LAbout() => 17
+  | LSync() => 15 | LSettings() => 16 | LAbout() => 17 | LReading() => 18
 
 (* The reader's panels, which are modal (Material 3's modal bottom
    sheet, WAI-ARIA's modal dialog): while one is open, a scrim covers the
@@ -64,7 +65,7 @@ fn _over_reader (overlay: layer): bool =
   | LBookMenu() => false | LLibraryMenu() => false | LBookInfo() => false
   | LCollections() => false | LStats() => false | LDictionaries() => false
   | LCatalogues() => false | LCatalogue() => false | LSync() => false
-  | LSettings() => false | LAbout() => false
+  | LSettings() => false | LAbout() => false | LReading() => false
 
 (* The open overlays, the last opened first, each with where the focus
    goes back to when it closes *)

@@ -830,7 +830,10 @@ Android's settings pattern: one screen of groups, each complex area a
 screen of its own opened from a row that shows its state. It opens
 from the library menu's Settings and from the reader's top bar (the
 gear after Search: the bottom bar, with Contents and Typography, has
-no room left for it on a phone), and holds Sync ›, Dictionaries ›, the backup
+no room left for it on a phone), and holds Reading › (`LReading`,
+`reading-screen`, #289: how pages are turned and read aloud, set once,
+its row saying them in short, `set_reading_show`: "Taps: sides ·
+volume keys off · read aloud 1×"), Sync ›, Dictionaries ›, the backup
 (Export backup, and Restore backup: the input `backup-file`), the daily
 reading goal (also in the statistics panel; `stats_goal_show` marks
 both), Reset settings and Factory reset, each with its Undo, and
@@ -927,6 +930,29 @@ focus and the panel with it (`_sheet_tab_key` in `src/bin/quire.bats`);
 the sheet opens on Look, and its head (title, Close and the tabs) stays
 at its top as it scrolls. Their controls are one `typography_control`
 datatype, stored, backed up and reset as before.
+
+The Turning and Read aloud tabs' rows (where taps turn pages, the
+volume keys, reading aloud's speed and voice) are also the Settings
+screen's Reading screen (#289), as Play Books keeps its volume keys
+setting on its settings page. Each group is made by one function,
+`_turning_rows` and `_aloud_rows` in `src/app.bats`, called once for
+each place, a `reading_place` (`InSheet | InSettings`); each element's
+id is `reading_part_id(place, part)` (`src/ui.bats`: the sheet's as
+before, the screen's each "reading-" and the sheet's), and its
+speeds' and voices' options are numbered apart ("rate-option",
+"reading-speed"; "voice-option", "reading-voice"). `ids.py` reads a
+`*_part_id` function's cases: a call of it with a part's constructor
+where an id is made makes that part's id in every place, there, so
+each is still made at one place in the code. A click on either
+place's control decodes to the same `typography_control`
+(`_typography_control_is`), so the listeners stay one match, and one
+function shows the state in both (`set_reading_show`, from
+`_show_controls`; the selects rebuilt in both by `aloud_speech_chosen`).
+A select's change does not say which select (bridge sends no target
+for it), so each place's speech row has one change listener, which
+reads both its speed and its voice. From the library the voices are
+those of the language last read (English before any book), and the
+taps are said as for a book read left to right.
 
 The reader is fixed to the window (`.rv`, not a height in `vh`, which
 an Android WebView can make taller than what it shows), and the page
