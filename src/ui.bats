@@ -614,7 +614,9 @@ in _document_attr(document, id_bytes, id_len, $D.Class, class_name) end
    scripts/icon-font.py; Apache-2.0), at its code point in the Private
    Use Area. One monochrome set, drawn in the control's own text colour
    (so the stylesheet's proven pairs cover it), never an emoji, which
-   a platform may draw as a colour picture (#274) *)
+   a platform may draw as a colour picture (#274). Every control that
+   shows one is marked data-icon (_control's CIcon), which alone the
+   stylesheet gives the icon face (#295) *)
 #pub datatype icon = IcBack | IcClose | IcGear | IcBookmark | IcBookmarked | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak | IcPhrasePrevious | IcPhraseNext
 
@@ -683,6 +685,11 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
     in _document_text(document, id_bytes, id_len, label) end
   | ~CIcon(class_name, the_icon, name) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+      (* the icon face (the stylesheet's [data-icon]): the icon's own
+         mark, whatever class the caller gives the button, and kept when
+         a class is set again, so no icon is drawn in another face, which
+         has no glyph for it (#295) *)
+      val () = _document_attr(document, id_bytes, id_len, $D.Data("icon"), "y")
       val () = _document_attr(document, id_bytes, id_len, $D.Aria("label"), name)
     in _document_text(document, id_bytes, id_len, _glyph(the_icon)) end
   | ~CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)

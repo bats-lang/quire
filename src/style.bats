@@ -1476,11 +1476,14 @@ fn _shell {left:nat | left >= 6690} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = lay(sheet, FontSize(), "0")
   val sheet = close(sheet)
-  (* an icon button: its icon a glyph of the icon face, in the
-     button's own text colour; text it shows (Skip table) falls back to
-     the app's face *)
-  val sheet = rule(sheet, ".ibtn")
+  (* every icon (ui.bats's CIcon marks it data-icon, whatever its
+     class: .ibtn, .cmore) is a glyph of the icon face, in the control's
+     own text colour (#295) *)
+  val sheet = rule(sheet, "[data-icon]")
   val sheet = lay(sheet, FontFamily(), "'Material Symbols',Inter,system-ui,sans-serif")
+  val sheet = close(sheet)
+  (* an icon button; text it shows (Skip table) is in the app's face *)
+  val sheet = rule(sheet, ".ibtn")
   val sheet = lay(sheet, FontSize(), "24px")
   val sheet = lay(sheet, LineHeight(), "1")
   val sheet = lay(sheet, BorderRadius(), "6px")

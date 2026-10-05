@@ -2,7 +2,7 @@
 // bars, keeping the place, and what a chapter's XHTML becomes on the
 // page.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import zlib from 'node:zlib';
 import { TINY_PNG } from './create-epub.js';
 import {
@@ -836,7 +836,8 @@ test('the volume keys turn the page when the reader chooses, and are the volume\
   expect(await place(page)).toEqual(at);
 });
 
-test('in a browser, where the page is not given the volume keys, their switch is not offered', async ({ page }) => {
+test('in a browser, where the page is not given the volume keys, their switch is not offered', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser does not give the page the volume keys; the Android app does (the test before this one)");
   await start(page);
   await readBook(page, book('No Keys', 1, 5));
   await openReadingSettings(page, 'Turning');

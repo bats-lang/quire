@@ -1,7 +1,7 @@
 // The library: importing, the cards, sorting, shelves, the book menu,
 // search, and what survives a reload.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
@@ -873,7 +873,8 @@ const storageOf = page => page.addInitScript(() => {
   Object.defineProperty(Navigator.prototype, 'storage', { get: () => storage, configurable: true });
 });
 
-test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }) => {
+test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's storage, which may be cleared: the Android app's own storage is always kept (the Android test below)");
   await storageOf(page);
   const errors = await start(page);
   const kept = menuItem(page, 'Your books are kept');
@@ -911,7 +912,8 @@ test('an EPUB the system opens with the installed app is imported', async ({ pag
 // files here are handed over by the host: a picked file is also asked
 // for by pwa's own page script until bats-lang/pwa#49's step 3 removes
 // it). The browser here refuses it, so every ask reaches persist()
-test('the storage is asked to be kept once, after the first book is imported', async ({ page }) => {
+test('the storage is asked to be kept once, after the first book is imported', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's storage, which may be cleared: the Android app's own storage is always kept (the Android test below)");
   await storageOf(page);
   const errors = await start(page);
   const first = epubFile({ title: 'First Kept', author: 'Storage Test', chapters: 1 });
@@ -929,6 +931,20 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await libraryMenu(page);
   await expect(menuItem(page, 'Your books may be cleared')).toBeVisible();
   await expect(menuItem(page, 'Your books are kept')).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+// The Android app's storage is its own, always kept: the menu says so,
+// and the browser is never asked to keep it
+test('in the Android app, the library menu says the books are kept, and nothing is asked', async ({ page }, testInfo) => {
+  test.skip(!onAndroid(testInfo), "the Android app's storage (Capacitor, played by fixtures.js's androidApp)");
+  await storageOf(page);
+  const errors = await start(page);
+  await importFiles(page, [epubFile({ title: 'Kept In The App', author: 'Storage Test', chapters: 1 })], 1);
+  await libraryMenu(page);
+  await expect(menuItem(page, 'Your books are kept')).toBeVisible();
+  await expect(menuItem(page, 'Your books may be cleared')).toBeHidden();
+  expect(await page.evaluate(() => window.persistCalls)).toBe(0);
   expect(errors).toEqual([]);
 });
 

@@ -1076,6 +1076,21 @@ job). Every spec and every static fixture is in exactly one group, or
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
 
+Each group runs every project of `playwright.config.js`: `desktop` and
+`mobile-portrait` every spec, `narrow` (320 px, WCAG's reflow width),
+`mobile-landscape`, `tablet` and `wide` the layout specs, and `android`
+every spec (#295): a Pixel-class phone (412 x 915 at 2.625, touch, the
+WebView's user agent), its status bar and gesture navigation as the
+safe area's insets, and the app's Capacitor played in the page
+(`androidApp` in `e2e/fixtures.js`), so bridge takes its Android branch.
+`scripts/ci-groups.py` fails the run when the `android` project is
+missing or narrowed (a testMatch, testIgnore or grep, in it or over the
+configuration, or a --project or --grep on CI's run); a spec that cannot
+apply on Android skips itself there, saying why (`test.skip`).
+`e2e/icons.spec.js` checks that every icon (a Private Use Area
+character) is drawn by the icon face, by drawing it on a canvas, so it
+does not hang on the machine's fonts.
+
 Listeners are registered only as one table (`regs` in `src/ui.bats`),
 each with its position as its id, so no two share an id, and the
 table's length, in its type, is at most 127: the bridge's last slot
