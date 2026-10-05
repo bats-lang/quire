@@ -2,6 +2,7 @@
   "e2e": {
     "library": [
       "library.spec.js",
+      "icons.spec.js",
       "storage.spec.js",
       "notices.spec.js",
       "smoke.spec.js",
@@ -25,13 +26,15 @@
       "ruby.spec.js",
       "modal-panels.spec.js"
     ],
-    "sync-and-settings": [
+    "sync": [
       "sync.spec.js",
       "sync-android.spec.js",
       "sync-dropbox.spec.js",
       "sync-dropbox-android.spec.js",
       "sync-nextcloud.spec.js",
-      "sync-fastmail.spec.js",
+      "sync-fastmail.spec.js"
+    ],
+    "settings": [
       "backup.spec.js",
       "settings.spec.js",
       "settings-screen.spec.js",

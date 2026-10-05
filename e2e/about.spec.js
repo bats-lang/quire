@@ -6,19 +6,29 @@
 // them (bridge's produce_service_worker answers only the app's own
 // files, directly in its scope).
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { start, dialog, librarySettings, settingsScreen, settingsButton, libraryMenu, menuItem, librarySearch } from './helpers.js';
 
 const about = page => dialog(page, 'About Quire');
 // each link's href, and the address it leads to from the app at
 // baseURL: the pages beside the app relative to it
+// (in the Android app, whose own address is the device's, the published
+// page's https address)
+const PUBLISHED = 'https://bats-lang.github.io/quire';
 const links = {
   'Home page': ['./homepage/', '/homepage/'],
   'Privacy policy': ['./homepage/privacy.html', '/homepage/privacy.html'],
   'Terms of service': ['./homepage/terms.html', '/homepage/terms.html'],
 };
 
-test('Settings opens About, which shows the app and links out of it', async ({ page, baseURL }) => {
+/** The href of the link to address (a path beside the app), and where
+    it leads, from the app at baseURL: relative in a browser, the
+    published page in the Android app */
+const linked = (testInfo, href, address, baseURL) => onAndroid(testInfo)
+  ? [PUBLISHED + address, PUBLISHED + address]
+  : [href, new URL(address, baseURL).href];
+
+test('Settings opens About, which shows the app and links out of it', async ({ page, baseURL }, testInfo) => {
   const errors = await start(page);
   await librarySettings(page);
   await settingsButton(page, 'About Quire ›').click();
@@ -32,8 +42,9 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   for (const [name, [href, address]] of Object.entries(links)) {
     const link = group.getByRole('link', { name, exact: true });
     await expect(link).toBeVisible();
-    await expect(link).toHaveAttribute('href', href);
-    expect(await link.evaluate(a => a.href)).toBe(new URL(address, baseURL).href);
+    const [attribute, leads] = linked(testInfo, href, address, baseURL);
+    await expect(link).toHaveAttribute('href', attribute);
+    expect(await link.evaluate(a => a.href)).toBe(leads);
     // a new tab on the web (the system's browser on Android), told
     // nothing of the app
     await expect(link).toHaveAttribute('target', '_blank');
@@ -59,7 +70,7 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   expect(errors).toEqual([]);
 });
 
-test('the library menu opens About, next to Settings, and Escape goes back to the library', async ({ page, baseURL }) => {
+test('the library menu opens About, next to Settings, and Escape goes back to the library', async ({ page, baseURL }, testInfo) => {
   const errors = await start(page);
   await libraryMenu(page);
   const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
@@ -71,8 +82,9 @@ test('the library menu opens About, next to Settings, and Escape goes back to th
   // its first link is the home page, beside the app
   const first = about(page).getByRole('group', { name: 'Links' }).getByRole('link').first();
   await expect(first).toHaveAccessibleName('Home page');
-  await expect(first).toHaveAttribute('href', './homepage/');
-  expect(await first.evaluate(a => a.href)).toBe(new URL('/homepage/', baseURL).href);
+  const [attribute, leads] = linked(testInfo, './homepage/', '/homepage/', baseURL);
+  await expect(first).toHaveAttribute('href', attribute);
+  expect(await first.evaluate(a => a.href)).toBe(leads);
   await page.keyboard.press('Escape');
   await expect(about(page)).toBeHidden();
   await expect(librarySearch(page)).toBeVisible();

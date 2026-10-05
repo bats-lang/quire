@@ -8,7 +8,7 @@
 // page (no CORS), or as the app's native requests meet it (played by a
 // mock that lets the page's origin in).
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen } from './helpers.js';
 
 const SERVER = 'https://myfiles.fastmail.com';
@@ -89,7 +89,8 @@ async function openSync(page) {
     there yet (404), credentials refused (401) */
 const unexpected = errors => errors.filter(e => !/status of (401|404)/.test(e));
 
-test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({ page }) => {
+test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser, where Fastmail's server refuses the page (no CORS): the Android app lists it (the app's tests below)");
   const errors = await start(page);
   const sent = [];
   page.on('request', request => { if (request.url().startsWith(SERVER)) sent.push(request.url()); });

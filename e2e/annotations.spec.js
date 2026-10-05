@@ -1,7 +1,7 @@
 // Bookmarks, highlights and notes: made from the reader, listed, gone
 // to, kept, and exported as Markdown.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
@@ -429,7 +429,8 @@ test('a selection is shared with its book, and the highlights and notes as the e
   expect(file.text).toMatch(/> Para 1\.0[^\n]*\n\n— Annotations Tests, \*Marked Up\*, Chapter 1\n\n\*\*Note:\*\* Shared note/);
 });
 
-test('where nothing can be shared, Share is not offered', async ({ page }) => {
+test('where nothing can be shared, Share is not offered', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share, which takes any file (the Android test below)");
   await page.addInitScript(() => { delete Navigator.prototype.share; delete navigator.share; });
   await start(page);
   await readBook(page, book);
@@ -452,7 +453,8 @@ async function fakeShareOf(page, canShareFile) {
   }, canShareFile.toString());
 }
 
-test('where files cannot be shared, the annotations are shared as their text', async ({ page }) => {
+test('where files cannot be shared, the annotations are shared as their text', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share, which takes any file (the Android test below)");
   await fakeShareOf(page, () => false);
   await start(page);
   await readBook(page, book);
@@ -468,7 +470,8 @@ test('where files cannot be shared, the annotations are shared as their text', a
   expect(one.text).toMatch(/> Para 1\.0/);
 });
 
-test('a Markdown file the platform will not take as a file is shared as its text', async ({ page }) => {
+test('a Markdown file the platform will not take as a file is shared as its text', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser's share sheet: the Android app shares through Capacitor's Share, which takes any file (the Android test below)");
   // files can be shared, but not this one (a text file can; Markdown cannot)
   await fakeShareOf(page, f => f.type !== 'text/markdown');
   await start(page);
@@ -482,4 +485,28 @@ test('a Markdown file the platform will not take as a file is shared as its text
   expect(one.files).toEqual([]);
   expect(one.title).toBe('quire-annotations.md');
   expect(one.text).toMatch(/^# Marked Up\n/);
+});
+
+// In the Android app, with no share sheet in the page: the annotations
+// are written to the app's cache (Filesystem) and that file shared
+// through Capacitor's Share, and a selection is shared as its text
+test('in the Android app, the annotations are shared as a file through Share', async ({ page }, testInfo) => {
+  test.skip(!onAndroid(testInfo), "the Android app's Share (Capacitor, played by fixtures.js's androidApp)");
+  await page.addInitScript(() => { delete Navigator.prototype.share; delete navigator.share; });
+  await start(page);
+  await readBook(page, book);
+  const calls = plugin => page.evaluate(name => window.__android.calls.filter(c => c.plugin === name), plugin);
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Share').click();
+  await expect.poll(async () => (await calls('Share')).length).toBe(1);
+  expect((await calls('Share'))[0].options).toEqual({ text: '“Para 1.0”\n— Annotations Tests, Marked Up' });
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await openPanel(page);
+  await panel(page).getByRole('button', { name: 'Share', exact: true }).click();
+  await expect.poll(async () => (await calls('Share')).length).toBe(2);
+  const written = (await calls('Filesystem')).find(c => c.method === 'writeFile' && c.options.path === 'quire-annotations.md');
+  expect(written.options.directory).toBe('CACHE');
+  expect(Buffer.from(written.options.data, 'base64').toString()).toMatch(/^# Marked Up\n## Annotations Tests\n/);
+  expect((await calls('Share'))[1].options).toEqual({ title: 'quire-annotations.md', files: ['file:///quire-annotations.md'] });
 });
