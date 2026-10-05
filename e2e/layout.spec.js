@@ -373,3 +373,85 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await expect(panel).toBeHidden();
   if (!onAndroid(testInfo)) await page.evaluate(() => document.exitFullscreen());
 });
+
+// The reading settings' sheet is as tall as its tallest tab, whichever
+// tab is shown (#301): switching tabs moves neither the sheet nor its
+// tabs, by tap or by key. The panels not shown still take their room,
+// but nothing in them can be focused or is read out (WAI-ARIA's tabs
+// pattern: only the shown panel is reachable), and nothing is cut off
+// on any tab
+test('the reading settings sheet keeps its box and its tabs in place on every tab', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Steady Sheet', author: 'L', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Look');
+  const sheet = readingSettings(page);
+  const tabs = sheet.getByRole('tablist', { name: 'Reading settings' });
+  const tab = name => tabs.getByRole('tab', { name, exact: true });
+  // each tab, and a control only its panel holds
+  const held = {
+    Look: sheet.getByRole('group', { name: 'Theme', exact: true }),
+    Page: sheet.getByRole('group', { name: 'Justify text', exact: true }),
+    Turning: sheet.getByRole('group', { name: 'Tap to turn pages' }),
+    'Read aloud': sheet.getByRole('combobox', { name: 'Reading speed' }),
+  };
+  const names = Object.keys(held);
+  const box = async () => {
+    const s = await sheet.boundingBox();
+    const t = await tabs.boundingBox();
+    return {
+      sheet: [s.x, s.y, s.width, s.height].map(Math.round),
+      tabs: [t.x, t.y, t.width, t.height].map(Math.round),
+    };
+  };
+  const first = await box();
+  // the tab chosen is shown, and the others' panels are neither
+  // focusable nor in the accessibility tree
+  const only = async (chosen, how) => {
+    await expect(tab(chosen)).toHaveAttribute('aria-selected', 'true');
+    await expect(held[chosen]).toBeVisible();
+    expect(await box(), `the sheet and its tabs on ${chosen}, by ${how}`).toEqual(first);
+    const tree = await sheet.ariaSnapshot();
+    for (const name of names) {
+      const panel = `tabpanel "${name}"`;
+      if (name === chosen) expect(tree, `${chosen}'s panel read out`).toContain(panel);
+      else {
+        expect(tree, `${name}'s panel read out on ${chosen}`).not.toContain(panel);
+        await expect(held[name], `${name}'s control on ${chosen}`).toBeHidden();
+      }
+    }
+    const focused = await sheet.evaluate(sheet => {
+      const controls = 'button, select, input, textarea, a[href], [tabindex]';
+      const was = document.activeElement;
+      const reached = [];
+      let tried = 0;
+      for (const panel of sheet.querySelectorAll('[role=tabpanel]')) {
+        const by = document.getElementById(panel.getAttribute('aria-labelledby'));
+        if (by.getAttribute('aria-selected') === 'true') continue;
+        for (const e of panel.querySelectorAll(controls)) {
+          tried++;
+          e.focus();
+          if (document.activeElement === e) reached.push(e.getAttribute('aria-label') || e.textContent.trim() || e.id);
+        }
+      }
+      was.focus();
+      return { tried, reached };
+    });
+    expect(focused.tried, `the other panels' controls on ${chosen}`).toBeGreaterThan(0);
+    expect(focused.reached, `focusable in the other panels on ${chosen}`).toEqual([]);
+    await fits(page, `Reading settings, ${chosen}, by ${how}`);
+  };
+  await only('Look', 'tap');
+  for (const name of names) {
+    await tab(name).click();
+    await only(name, 'tap');
+  }
+  // round by the arrows, both ways, and to the ends by Home and End
+  await tab('Look').click();
+  await expect(tab('Look')).toBeFocused();
+  for (const [key, name] of [['ArrowRight', 'Page'], ['ArrowRight', 'Turning'], ['ArrowRight', 'Read aloud'],
+    ['ArrowRight', 'Look'], ['ArrowLeft', 'Read aloud'], ['ArrowLeft', 'Turning'], ['Home', 'Look'], ['End', 'Read aloud']]) {
+    await page.keyboard.press(key);
+    await expect(tab(name)).toBeFocused();
+    await only(name, key);
+  }
+});

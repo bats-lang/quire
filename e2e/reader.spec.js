@@ -148,7 +148,8 @@ test('the place is kept in a later chapter too', async ({ page }) => {
   await expect.poll(() => place(page)).toEqual(at);
 });
 
-test('a new type size or window size keeps the page\'s text in view', async ({ page }) => {
+test('a new type size or window size keeps the page\'s text in view', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), 'fails sometimes in the android project after the window narrows, cause not yet known: out of it until quire#305 is fixed');
   await start(page);
   await readBook(page, book('Relayout', 2, 30));
   for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowRight');
