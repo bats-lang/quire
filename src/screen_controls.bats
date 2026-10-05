@@ -31,6 +31,27 @@ staload "mem.sats"
 (* Whether the screen's rotation is locked now (by this module) *)
 val _locked = ref<bool>(false)
 
+(* What the app's system bars show, as its native side last reported
+   them (bridge's listen_system_bars): full screen is what the screen
+   shows only when no bar is (quire#314). Not reported: a browser, or an
+   app whose activity does not report them *)
+datatype bars_seen =
+  | BarsNotReported
+  | SomeBarShown
+  | NoBarShown
+
+val _bars = ref<bars_seen>(BarsNotReported())
+
+(* Whether the screen is in full screen now: in the app, its system bars
+   all hidden, as reported (Android brings them back at a swipe from the
+   screen's edge, and full screen asked for stays asked: fullscreen_active
+   still says so); else as bridge has it *)
+fn _fullscreen_shown (): bool =
+  case+ !_bars of
+  | BarsNotReported() => $SCR.fullscreen_active()
+  | SomeBarShown() => false
+  | NoBarShown() => true
+
 (* The brightness last set on the screen *)
 val _brightness_on_screen = ref<brightness_choice>(BrightnessSystem())
 
@@ -48,7 +69,7 @@ implement screen_controls_show () = let
   val () = ui_show("screen-lock-row", lock)
   val () = ui_show("screen-brightness-row", brightness)
   val () = ui_show("screen-row", (if full then true else if lock then true else brightness))
-  val () = _pressed("screen-fullscreen", $SCR.fullscreen_active())
+  val () = _pressed("screen-fullscreen", _fullscreen_shown())
 in
   (* a lock the browser can no longer keep (full screen left) is let go *)
   if lock then ()
@@ -64,11 +85,12 @@ end
    Full screen
    ============================================================ *)
 
-(* Full screen clicked: into it, or out of it *)
+(* Full screen clicked: out of it, or into it from what the switch shows
+   (bars the system brought back are hidden again) *)
 #pub fn screen_fullscreen_toggle (): void
 
 implement screen_fullscreen_toggle () =
-  if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else $SCR.fullscreen_enter()
+  if _fullscreen_shown() then $SCR.fullscreen_exit() else $SCR.fullscreen_enter()
 
 fn _fullscreen_same (one: fullscreen_choice, other: fullscreen_choice): bool =
   case+ (one, other) of
@@ -97,6 +119,21 @@ implement screen_fullscreen_changed (change) = let
        in set_save(lib_state_get()) end)
     else ())
 in screen_controls_show() end
+
+(* The app's system bars reported (at each of Android's window insets
+   dispatches): the switch shows them at once. Bars the system brought
+   back stay until the next page is shown (reader.bats hides them again
+   while full screen is on), as a swipe from the edge is the reader's
+   own way out of immersive mode (quire#314) *)
+#pub fn screen_system_bars_changed (bars: $SCR.system_bars): void
+
+implement screen_system_bars_changed (bars) = let
+  val () = !_bars := (case+ bars of
+    | $SCR.BarsHidden() => NoBarShown()
+    | $SCR.BarsShown() => SomeBarShown()
+    | $SCR.StatusBarShown() => SomeBarShown()
+    | $SCR.NavigationBarShown() => SomeBarShown())
+in _pressed("screen-fullscreen", _fullscreen_shown()) end
 
 (* In the app, the screen put in full screen or out of it as the
    settings keep it, where it is not so already *)

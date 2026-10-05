@@ -610,7 +610,12 @@ only where its platform has it, by its own `data-hide`.
   a page opened again starts out of it, its switch off, and a click
   there does not change what is kept. While full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
-  brings them back at a swipe from the edge. Brightness while reading
+  brings them back at a swipe from the edge. Meanwhile the switch shows
+  them (quire#314): pwa's activity reports each bar's visibility at each
+  window insets dispatch (`batsNative.systemBars`, bridge's
+  `listen_system_bars`, `RSystemBars`), and the switch is on only while
+  no bar is shown (`_fullscreen_shown`; a tap on it while it reads off
+  hides them). Brightness while reading
   (`brightness_*`, the app only: a `brightness_choice`, the device's own
   ("Same as device") or 10 to 100%, kept with the settings and set again
   as the app starts) is a select under its own label, the whole width.
@@ -1163,7 +1168,8 @@ table's length, in its type, is at most 127: the bridge's last slot
 (of 128) is the media query listener's (`ui_media_listener`), which
 shares the bridge's table, so no listener of the table can take it.
 The platform's typed listeners take their slots in the same table:
-full screen's (`RFullscreen`), speech's (`RSpeech`), the install
+full screen's (`RFullscreen`), the app's system bars' (`RSystemBars`),
+speech's (`RSpeech`), the install
 offer's (`RInstallOffer`), the app's links' (`RAppLink`) and the page's
 fonts' (`RFonts`), each given its event as bridge decodes it. A
 chapter's pages are counted again as it is shown, for 3 s (`_settle`),
