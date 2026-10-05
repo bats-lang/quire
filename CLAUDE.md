@@ -300,29 +300,46 @@ deletion (`deleted`, kept 180 days, `QA3`) wins over a change made
 before it. A book only another device has is kept as an orphan ("o").
 
 **Use Android** (#184), in the app only (bridge's
-`google_token_available`): the store `Android(account)`, the file in
+`google_authorize_available`): the store `Android(account)`, the file in
 the app data folder of the device's Google account's Drive
 (`src/drive.bats`: a listing for its id and version, then its bytes; a
 write checks the version is still the one read, else it is a
 conflict, and replaces the bytes, or makes the file in
 `appDataFolder`). The access token for `drive.appdata` comes from
-bridge's `google_token_get` (Capawesome's Google Sign-In, which shows
-Google's sheet each time it is asked), so it is asked for only when
-the reader acts (Use Android, Sync now), and kept on the device
+bridge's `google_authorize` (#321: bats-lang/capacitor-plugins'
+google-authorize, Play services' `AuthorizationClient`, shaped as
+Flutter's google_sign_in 7.x; Capawesome's Google Sign-In, which shows
+Credential Manager's sheet each time, is not used). Use Android and
+Sync now ask with `google_authorize_scopes`, which shows Google's
+consent screen only when access is not granted; the syncs the app makes
+by itself (`_google_access`) with `google_authorization_for_scopes`,
+which never shows anything. The token is kept on the device
 ("sync-google-token", `_google_token_save`) as well as in memory
-(`_token`), so the syncs the app makes by itself go on after it is
-opened again (#304: neither Capawesome's plugin, which always shows
-Credential Manager's sheet before `AuthorizationClient.authorize`, nor
-Google Identity Services, whose window a page may open only at a tap,
-gives a token without UI). When Drive refuses it (401, its hour is
-up) it is forgotten and sync is paused (`SignInAgain`, `_paused`): the
-Sync row says "Android · paused, tap Sync now" ("Google Drive · ..."),
-the screen "Sync paused: tap Sync now to sign in to Google again", no
-banner; while paused with no token the app tries nothing by itself, so
-opening it again changes nothing, and Sync now asks Google once. No
-account and a cancel each say so, and a build with no client lists no
-Use Android;
-Turn off signs out. The client ID is public and not compiled in:
+(`_token`). When Drive refuses it (401, its hour is up) it is
+forgotten, taken out of Play services' cache (`google_clear_token`,
+which would otherwise give it again) and one asked for once with
+nothing shown (`_google_renewed`): a read is made again, a write's round
+reads, merges and writes again. Only `NotAuthorized` (the reader took
+access back in the Google account) pauses sync (`SignInAgain`): the
+Sync row says "Android · paused, tap Sync now", the screen "Sync
+paused: tap Sync now to sign in to Google again", no banner; each sync
+point still asks with nothing shown (`_paused` is a browser's only), so
+a grant given back ends the pause, and Sync now asks for consent. A
+cancel says so, and a failure by its code (`_authorize_failure`:
+NETWORK_ERROR or TIMEOUT can't reach the server, anything else Google
+refused). The account ("sync-android") is the one the authorization
+names, else Drive's (`drive_account_address`: about.get's
+`user.emailAddress`, which `drive.appdata` may read), else none. Turn
+off holds the token for the Undo; made final, it takes the grant back
+(`_google_revoke`): `google_revoke_access` with the account and the
+scope, or, with no account, Google's revocation endpoint with the token
+(`drive_grant_revoke`). A build with no client lists no Use Android.
+In a browser (Google Drive, below) the token comes from Google Identity
+Services, whose window a page may open only at a tap: there it is asked
+for only when the reader acts, a refused one pauses sync, and while
+paused with no token the app tries nothing by itself (`_paused`), so
+opening it again changes nothing. The client ID is public and not
+compiled in:
 it is committed in `scripts/sync-clients.env` (#200: the Web
 application client `GOOGLE_WEB_CLIENT_ID`, with the Android client's ID
 and Play's app signing SHA-1 recorded beside it, and Dropbox's app key,
@@ -340,8 +357,10 @@ Auto Backup (`STORE_BACKUP`, bridge's `backup_file` in `backup/` of
 the app's files, the only thing pwa's backup rules keep): each sync
 point merges it and writes it there, and the file a reinstall
 restores is merged at the first launch like any sync file; a store's
-write writes it too. `e2e/sync-android.spec.js` plays both plugins
-and Drive's API. In a browser the same store is **Google Drive**
+write writes it too. `e2e/sync-android.spec.js` plays GoogleAuthorize
+(the account's grant, Play services' token cache and the account it
+names, `capacitorPlayed` in `e2e/sync-stores.js`), Filesystem, Drive's
+API and Google's revocation endpoint. In a browser the same store is **Google Drive**
 (bridge's `google_token_get` there goes through Google Identity
 Services' token model: a token for about an hour, no refresh token),
 listed only in a build with a client, so Google's script is loaded

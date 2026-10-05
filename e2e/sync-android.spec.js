@@ -11,14 +11,15 @@ import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,
 } from './helpers.js';
-import { drive, CLIENT, capacitorPlayed, identityServicesPlayed } from './sync-stores.js';
+import { drive, CLIENT, SCOPE, capacitorPlayed, identityServicesPlayed } from './sync-stores.js';
 
 /** A device running the app: Capacitor played, Drive routed, and the
     build's client (none when client is null) */
-async function device(browser, server, { mode = 'token', files = [], client = CLIENT } = {}) {
+async function device(browser, server, { mode = 'consent', files = [], client = CLIENT } = {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  const kept = await capacitorPlayed(context, { mode, token: server ? server.token : 'token-1', files });
+  const { files: kept, google } = await capacitorPlayed(context, { mode, token: server ? server.token : 'token-1', files });
   if (server) await context.route('https://www.googleapis.com/**', server.handle);
+  if (server) await context.route('https://oauth2.googleapis.com/revoke', server.revoke);
   await clientsServed(context, client ? { googleWebClient: client } : {});
   const page = await context.newPage();
   const errors = [];
@@ -26,7 +27,7 @@ async function device(browser, server, { mode = 'token', files = [], client = CL
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
-  return { context, page, errors, files: kept };
+  return { context, page, errors, files: kept, google };
 }
 
 /** A device's errors, but a Drive answer the test made fail, which the
@@ -89,9 +90,9 @@ test('Use Android syncs through the app data folder of the device\'s Google acco
   await nextChapter(a.page, 3);
   await toLibrary(a.page);
   await joinAndroid(a.page);
-  const google = await a.page.evaluate(() => window.__google);
-  expect(google.signIns).toBe(1);
-  expect(google.initialized[0]).toEqual({ clientId: CLIENT, scopes: ['https://www.googleapis.com/auth/drive.appdata'] });
+  // the first time, Google's consent (authorizeScopes), for drive.appdata
+  // alone, and nothing else asked of Google
+  expect(a.google.calls).toEqual([{ method: 'authorizeScopes', options: { scopes: [SCOPE] } }]);
   expect(server.file.metadata).toEqual({ name: 'quire-sync.json', parents: ['appDataFolder'] });
   expect(server.json().books[0]).toMatchObject({ chapter: 2, title: 'Shared Book' });
   await librarySettings(a.page);
@@ -103,12 +104,13 @@ test('Use Android syncs through the app data folder of the device\'s Google acco
   expect(server.file.version).toBe(2);
   await openBook(b.page, 'Shared Book');
   await expect.poll(async () => (await place(b.page)).ch).toBe(3);
-  // a sync the app makes by itself uses the token it has: no sheet
+  // a sync the app makes by itself uses the token it has: nothing is
+  // asked of Google
   await toLibrary(b.page);
   const before = server.requests.length;
   await hide(b.page);
   await expect.poll(() => server.requests.length).toBeGreaterThan(before);
-  expect(await b.page.evaluate(() => window.__google.signIns)).toBe(1);
+  expect(b.google.calls.map(c => c.method)).toEqual(['authorizeScopes']);
   expect(unexpected(a)).toEqual([]);
   expect(unexpected(b)).toEqual([]);
   await a.context.close();
@@ -121,40 +123,66 @@ async function reopened(page) {
   await expect(librarySearch(page)).toBeVisible();
 }
 
-test('opened again, the app syncs with the token it kept; once Drive refuses it, sync is paused until Sync now, and opening the app again leaves it so', async ({ browser }) => {
+test('opened again, the app syncs with the token it kept, and once its hour is up gets another with nothing shown', async ({ browser }) => {
   const server = drive();
   const a = await device(browser, server);
   await importFiles(a.page, [epubFile(book)], 1);
   await joinAndroid(a.page);
+  expect(a.google.calls.map(c => c.method)).toEqual(['authorizeScopes']);
   // opened again: the sync made as it opens has the token, and asks
   // Google nothing
-  let asked = server.requests.length;
+  const asked = server.requests.length;
   await reopened(a.page);
   await expect.poll(() => server.requests.length).toBeGreaterThan(asked);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText(/^Android · synced (just now|1 min ago)$/);
   await settingsButton(a.page, 'Done').click();
-  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(0);
-  // the token's hour is up: the sync made as the app opens is refused,
-  // and sync is paused, said in the Sync row and on its screen
-  server.token = 'token-2';
+  expect(a.google.calls.map(c => c.method)).toEqual(['authorizeScopes']);
+  // the token's hour is up: Drive refuses it as the app opens again; the
+  // refused token is taken out of Play services' cache, and another is
+  // given with nothing shown, so the sync goes on
+  server.token = a.google.token = 'token-2';
+  await reopened(a.page);
+  await expect.poll(() => server.accepted.includes('token-2')).toBe(true);
+  await librarySettings(a.page);
+  await expect(row(a.page)).toHaveText(/^Android · synced (just now|1 min ago)$/);
+  expect(a.google.calls.slice(1)).toEqual([
+    { method: 'clearAuthorizationToken', options: { accessToken: 'token-1' } },
+    { method: 'authorizationForScopes', options: { scopes: [SCOPE] } },
+  ]);
+  expect(unexpected(a)).toEqual([]);
+  await a.context.close();
+});
+
+test('access taken back in the Google account pauses sync until Sync now asks for consent again', async ({ browser }) => {
+  const server = drive();
+  const a = await device(browser, server);
+  await importFiles(a.page, [epubFile(book)], 1);
+  await joinAndroid(a.page);
+  // the reader removes Quire in the Google account's settings: Drive
+  // refuses the token, and Google gives none without the reader
+  a.google.granted = false;
+  server.token = a.google.token = 'token-2';
   await reopened(a.page);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText('Android · paused, tap Sync now');
   await settingsButton(a.page, 'Done').click();
-  // opened again while paused: nothing is tried, nothing changes
-  asked = server.requests.length;
+  expect(a.google.asked('authorizeScopes')).toHaveLength(1);
+  // opened again while paused: the app asks Google with nothing shown,
+  // and with no token reaches no Drive, and stays paused
+  const requests = server.requests.length;
+  const calls = a.google.calls.length;
   await reopened(a.page);
   await hide(a.page);
+  await expect.poll(() => a.google.calls.length).toBeGreaterThan(calls);
   await openSync(a.page);
   await expect(status(a.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
-  expect(server.requests.length).toBe(asked);
-  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(0);
-  // Sync now asks Google (its sheet), then syncs
-  await a.page.evaluate(() => { window.__google.token = 'token-2'; });
+  expect(server.requests.length).toBe(requests);
+  expect(a.google.calls.slice(calls).map(c => c.method).filter(m => m !== 'authorizationForScopes')).toEqual([]);
+  // Sync now asks for Google's consent, then syncs
   await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(a.page)).toHaveText(/^Last synced on /);
-  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(1);
+  expect(a.google.asked('authorizeScopes')).toHaveLength(2);
   expect(unexpected(a)).toEqual([]);
   await a.context.close();
 });
@@ -182,7 +210,7 @@ test('a file another device wrote meanwhile is read again and merged', async ({ 
   await b.context.close();
 });
 
-test('Use Android is listed only where it can sync, says why it cannot, and Turn off signs out', async ({ browser }) => {
+test('Use Android is listed only where it can sync, says why it cannot, and Turn off takes the grant back', async ({ browser }) => {
   // in a browser there is no Use Android
   const web = await browser.newContext();
   await clientsServed(web, {});
@@ -203,33 +231,78 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   await bare.context.close();
 
   const server = drive();
-  const a = await device(browser, server, { mode: 'none' });
+  const a = await device(browser, server, { mode: 'cancel' });
   await openSync(a.page);
   await useAndroid(a.page).click();
-  await expect(status(a.page)).toHaveText('Android sync needs a Google account on this device.');
-  await a.page.evaluate(() => { window.__google.mode = 'cancel'; });
-  await useAndroid(a.page).click();
   await expect(status(a.page)).toHaveText('Google sign-in was canceled.');
+  a.google.mode = 'fail';
+  await useAndroid(a.page).click();
+  await expect(status(a.page)).toHaveText("Google refused: this build of Quire isn't registered with it.");
   expect(server.requests).toEqual([]);
-  // signed in; the token Drive stops taking asks for a sign-in again
-  await a.page.evaluate(() => { window.__google.mode = 'token'; });
+  // granted: Use Android syncs
+  a.google.mode = 'consent';
   await useAndroid(a.page).click();
   await expect(status(a.page)).toHaveText(/^Last synced on /);
-  server.token = 'token-2';
-  await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
-  await expect(status(a.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
-  await a.page.evaluate(() => { window.__google.token = 'token-2'; });
-  await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
-  await expect(status(a.page)).toHaveText(/^Last synced on /);
-  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(4);
-  // Turn off: signed out, and the row says Off
+  // Turn off: Undo puts it back, token and all, with nothing asked
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(a.page)).toHaveText('Sync is off.');
-  expect(await a.page.evaluate(() => window.__google.signOuts)).toBe(1);
+  await a.page.getByRole('button', { name: 'Undo' }).click();
+  await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(a.page)).toHaveText(/^Last synced on /);
+  expect(a.google.calls.map(c => c.method)).toEqual(['authorizeScopes', 'authorizeScopes', 'authorizeScopes']);
+  // Turn off, made final: the grant taken back for the account Google
+  // named, and the row says Off
+  await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
+  await expect(status(a.page)).toHaveText('Sync is off.');
+  await expect.poll(() => a.google.asked('revokeAccess'), { timeout: 15000 })
+    .toEqual([{ account: 'reader@example.com', scopes: [SCOPE] }]);
+  expect(server.revoked).toEqual([]);
   await a.page.keyboard.press('Escape');
   await expect(row(a.page)).toHaveText('Off');
+  // and opened again, nothing is asked of Google or Drive
+  const requests = server.requests.length;
+  const calls = a.google.calls.length;
+  await reopened(a.page);
+  await hide(a.page);
+  await librarySettings(a.page);
+  await expect(row(a.page)).toHaveText('Off');
+  expect(server.requests.length).toBe(requests);
+  expect(a.google.calls.length).toBe(calls);
   expect(unexpected(a)).toEqual([]);
   await a.context.close();
+});
+
+test('an authorization that names no account takes Drive\'s address, and with none from either, Turn off takes the grant back with the token', async ({ browser }) => {
+  // Google names no account: Drive's about gives its address, which
+  // Turn off takes the grant back for
+  const server = drive();
+  server.address = 'drive-reader@example.com';
+  const a = await device(browser, server);
+  a.google.account = null;
+  await openSync(a.page);
+  await useAndroid(a.page).click();
+  await expect(status(a.page)).toHaveText(/^Last synced on /);
+  expect(server.requests).toContain('GET /drive/v3/about?fields=user%2FemailAddress');
+  await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
+  await expect.poll(() => a.google.asked('revokeAccess'), { timeout: 15000 })
+    .toEqual([{ account: 'drive-reader@example.com', scopes: [SCOPE] }]);
+  expect(server.revoked).toEqual([]);
+  expect(unexpected(a)).toEqual([]);
+  await a.context.close();
+  // nor does Drive give one: Turn off takes the grant back with the
+  // token, at Google's revocation endpoint
+  const other = drive();
+  other.address = null;
+  const b = await device(browser, other);
+  b.google.account = null;
+  await openSync(b.page);
+  await useAndroid(b.page).click();
+  await expect(status(b.page)).toHaveText(/^Last synced on /);
+  await panel(b.page).getByRole('button', { name: 'Turn off' }).click();
+  await expect.poll(() => other.revoked, { timeout: 15000 }).toEqual(['token-1']);
+  expect(b.google.asked('revokeAccess')).toEqual([]);
+  expect(unexpected(b)).toEqual([]);
+  await b.context.close();
 });
 
 test('with no store chosen, the app keeps the file for Auto Backup, and a reinstall merges it', async ({ browser }) => {
@@ -251,7 +324,7 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
   // as last written)
   await expect.poll(async () => (((await backedUp()) || { books: [] }).books[0] || {}).chapter).toBe(2);
   expect((await backedUp()).books).toEqual([expect.objectContaining({ title: 'Shared Book' })]);
-  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(0);
+  expect(a.google.calls).toEqual([]);
   // Sync stays off
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText('Off');

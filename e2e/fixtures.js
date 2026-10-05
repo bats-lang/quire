@@ -49,11 +49,13 @@ export async function androidInsets(page) {
     plugins bridge calls), played in the page: the app runs natively, so
     bridge takes its Android branch (the system bars for full screen,
     ScreenOrientation, ScreenBrightness, Share, the files Auto Backup
-    keeps, the Browser tab and app links, the device's Google account).
+    keeps, the Browser tab and app links, Google's authorization).
     What each plugin was asked is kept in window.__android, and which
     system bars are hidden (`hidden`: SystemBars with no bar named hides
     or shows both, as Capacitor's SystemBars.java does; a new process
-    starts with them shown). The device has no Google account (a spec that plays one makes its own device,
+    starts with them shown). The device's Google account has granted
+    Quire nothing, and the reader backs out of Google's consent screen
+    (GoogleAuthorize: a spec that plays an account makes its own device,
     as sync-android.spec.js does) */
 export function androidApp() {
   const asked = window.__android = { calls: [], files: new Map(), brightness: -1, hidden: { status: false, navigation: false } };
@@ -91,10 +93,11 @@ export function androidApp() {
       },
       Browser: { open: call('Browser', 'open'), close: call('Browser', 'close') },
       App: { addListener: call('App', 'addListener', () => ({ remove: () => Promise.resolve() })) },
-      GoogleSignIn: {
-        initialize: call('GoogleSignIn', 'initialize'),
-        signIn: call('GoogleSignIn', 'signIn', () => { throw Object.assign(new Error('NO_CREDENTIAL_AVAILABLE'), { code: 'NO_CREDENTIAL_AVAILABLE' }); }),
-        signOut: call('GoogleSignIn', 'signOut'),
+      GoogleAuthorize: {
+        authorizationForScopes: call('GoogleAuthorize', 'authorizationForScopes', () => ({ authorization: null })),
+        authorizeScopes: call('GoogleAuthorize', 'authorizeScopes', () => { throw Object.assign(new Error('CANCELED'), { code: 'CANCELED' }); }),
+        clearAuthorizationToken: call('GoogleAuthorize', 'clearAuthorizationToken'),
+        revokeAccess: call('GoogleAuthorize', 'revokeAccess'),
       },
     },
   };
