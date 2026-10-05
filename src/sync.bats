@@ -37,6 +37,7 @@ staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload NAV = "wasm.bats-packages.dev/bridge/src/nav.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload GOOGLE = "wasm.bats-packages.dev/bridge/src/google_account.sats"
+staload GA = "wasm.bats-packages.dev/bridge/src/google_authorize.sats"
 staload BACKUP = "wasm.bats-packages.dev/bridge/src/backup_file.sats"
 staload "drive.sats"
 staload "sync_clients.sats"
@@ -1166,14 +1167,17 @@ fn _fastmail_read (): $P.promise(read_answer, $P.Chained) =
     | read => $P.ret<read_answer>(read))
 
 (* The access token for the Android store's account (Dropbox's store
-   holds its own here): asked for when the reader acts (Use Android, Sync
-   now), kept on this device (_google_token_save) so the syncs the app
-   makes by itself go on after it is opened again, and forgotten when
-   Drive refuses it (it lasts about an hour). A sync the app starts by
-   itself never asks for one: asking shows Google's sheet or window, and
-   a browser lets a page open a window only at the reader's tap. With
-   none, sync is paused (SignInAgain), and says that Sync now signs in
-   again (#304) *)
+   holds its own here), kept on this device (_google_token_save) so the
+   syncs the app makes by itself go on after it is opened again, and
+   forgotten when Drive refuses it (it lasts about an hour). In the app
+   (#321) a sync gets one with nothing shown (Play services'
+   AuthorizationClient, bridge's google_authorization_for_scopes) once
+   the reader has granted access, and Use Android and Sync now may show
+   Google's consent (google_authorize_scopes); only a grant taken back
+   pauses sync (SignInAgain) until Sync now. In a browser it is asked
+   for only when the reader acts (Use Android, Sync now): Google
+   Identity Services opens a window, which a page may do only at a tap,
+   so with none sync is paused until Sync now (#304) *)
 datavtype token_cell =
   | NoToken of ()
   | {l:agz}{token_len:pos | token_len <= TOKEN_MAX} Token of ($A.arr(byte, l, TOKEN_MAX), int token_len)
@@ -1237,6 +1241,175 @@ fn _google_token_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n
     in Token(token, token_len) end
   end
 
+(* length, or 0 when it is over most *)
+fn _within {length:nat}{most:nat} (length: int length, most: int most): [kept:nat | kept <= length; kept <= most] int kept =
+  if length <= most then length else 0
+
+(* Whether text[0, text_len) starts with beginning *)
+fun _starts {l:agz}{n:nat}{text_len:nat | text_len <= n}{beginning_len:nat}{j:nat | j <= beginning_len} .<beginning_len - j>.
+  (text: !$A.arr(byte, l, n), text_len: int text_len, beginning: string beginning_len, beginning_len: int beginning_len, j: int j): bool =
+  if j >= beginning_len then true
+  else if j >= text_len then false
+  else if byte2int0($A.get<byte>(text, j)) <> char2int0(string_get_at(beginning, j)) then false
+  else _starts(text, text_len, beginning, beginning_len, j + 1)
+
+(* A blob's bytes, at most most of them, in an array of most *)
+fn _blob_bytes {n:nat}{most:pos | most <= 4096} (blob: $BD.dblob(n), most: int most): [l:agz][kept:nat | kept <= most] @($A.arr(byte, l, most), int kept) = let
+  val out = $A.alloc<byte>(most)
+  val size = $BD.blob_len(blob)
+  val kept = _within(size, most)
+  val () = $BD.blob_read(blob, 0, out, kept)
+  val () = $BD.blob_free(blob)
+in @(out, kept) end
+
+(* The account's address Google gave (empty when it gave none) *)
+fn _address_of (account: $R.option([k:pos] $BD.dblob(k))): [l:agz][kept:nat | kept <= ACCOUNT_MAX] @($A.arr(byte, l, ACCOUNT_MAX), int kept) =
+  case+ account of
+  | ~$R.some(blob) => _blob_bytes(blob, ACCOUNT_MAX)
+  | ~$R.none() => let
+      val empty = $A.alloc<byte>(ACCOUNT_MAX)
+    in @(empty, 0) end
+
+(* The token Google gave, kept *)
+fn _token_keep {n:pos} (blob: $BD.dblob(n)): bool = let
+  val @(token, token_len) = _blob_bytes(blob, TOKEN_MAX)
+in
+  if token_len <= 0 then let val () = $A.free<byte>(token) in false end
+  else let
+    val () = _google_token_save(token, token_len)
+    val () = _token_free(_token_swap(Token(token, token_len)))
+  in true end
+end
+
+(* Whether an access token is held for the store (Google's or
+   Dropbox's), or why none could be got *)
+datavtype token_access = AccessHeld of () | AccessFailed of (sync_result)
+
+implement $P.dispose<token_access>(access) =
+  case+ access of
+  | ~AccessHeld() => ()
+  | ~AccessFailed(_) => ()
+
+(* The one scope the Google store asks for: drive.appdata, the app data
+   folder of the account's Drive *)
+#define SCOPE_LEN 45
+fn _scope (): [l:agz] $A.arr(byte, l, SCOPE_LEN) = let
+  val scope = $A.alloc<byte>(SCOPE_LEN)
+  val () = $A.write_text(scope, 0, $A.text_lit("https://www.googleapis.com/auth/drive.appdata"), SCOPE_LEN)
+in scope end
+
+(* How this platform gets the Google store's token: in the app, Play
+   services' authorization (bridge's google_authorize: a token with
+   nothing shown once access is granted, Google's consent screen before
+   that); in a browser, Google Identity Services (bridge's
+   google_account: a window at a tap, a token for an hour); or neither.
+   Capawesome's Google Sign-In, which google_account uses in the app, is
+   not used: it shows Google's sheet each time (#321) *)
+datatype google_way = AppAuthorization | BrowserIdentity | NoGoogleWay
+
+(* The way here. In a browser this loads Google's script, so it is asked
+   only where a Google store is offered or chosen *)
+fn _google_way (): google_way =
+  if $BAPP.is_native_platform() then
+    (if $GA.google_authorize_available() then AppAuthorization() else NoGoogleWay())
+  else if $GOOGLE.google_token_available() then BrowserIdentity()
+  else NoGoogleWay()
+
+(* A part of an authorization's answer, freed *)
+fn _part_free (part: $R.option([n:pos] $BD.dblob(n))): void =
+  case+ part of
+  | ~$R.some(blob) => $BD.blob_free(blob)
+  | ~$R.none() => ()
+
+(* Whether text[0, text_len) is code *)
+fn _is_code {l:agz}{n:nat}{text_len:nat | text_len <= n}{code_len:nat}
+  (text: !$A.arr(byte, l, n), text_len: int text_len, code: string code_len): bool = let
+  val code_len = g1u2i(string1_length(code))
+in if text_len <> code_len then false else _starts(text, text_len, code, code_len, 0) end
+
+(* What an authorization the app's platform refused says, by its code
+   (CommonStatusCodes' name): the network not reached (NETWORK_ERROR,
+   TIMEOUT); no plugin (UNIMPLEMENTED); anything else (DEVELOPER_ERROR,
+   the app not registered with Google, among them) Google's refusal *)
+fn _authorize_failure (code: $R.option([c:pos] $BD.dblob(c))): sync_result =
+  case+ code of
+  | ~$R.none() => GoogleRefused()
+  | ~$R.some(blob) => let
+      val @(text, text_len) = _blob_bytes(blob, 64)
+      val result = (if _is_code(text, text_len, "NETWORK_ERROR") then Unreachable()
+        else if _is_code(text, text_len, "TIMEOUT") then Unreachable()
+        else if _is_code(text, text_len, "UNIMPLEMENTED") then NotSetUp()
+        else GoogleRefused()): sync_result
+      val () = $A.free<byte>(text)
+    in result end
+
+(* An access token for drive.appdata, in the app, given with nothing
+   shown (bridge's google_authorization_for_scopes, Play services'
+   AuthorizationClient) once the reader has granted it: kept, here and
+   on the device. None when the reader must consent first (the grant
+   taken back in the Google account): sync pauses until Sync now *)
+fn _google_silently (): $P.promise(token_access, $P.Chained) = let
+  val @(scope_frozen, scope_bytes) = $A.freeze<byte>(_scope())
+  val pending = $GA.google_authorization_for_scopes(scope_bytes, SCOPE_LEN)
+  val () = release_bytes(scope_frozen, scope_bytes)
+in
+  $P.and_then<$GA.google_authorization($GA.Silently)><token_access>(pending, llam(answer) =>
+    case+ answer of
+    | ~$GA.Authorized(token, granted, account) => let
+        val () = _part_free(granted)
+        val () = _part_free(account)
+      in
+        if _token_keep(token) then $P.ret<token_access>(AccessHeld())
+        else $P.ret<token_access>(AccessFailed(GoogleRefused()))
+      end
+    | ~$GA.NotAuthorized() => $P.ret<token_access>(AccessFailed(SignInAgain()))
+    | ~$GA.AuthorizeFailed(code) => $P.ret<token_access>(AccessFailed(_authorize_failure(code))))
+end
+
+(* The Google store's access token: the one held; else, in the app, one
+   given with nothing shown. In a browser none is asked for here: Google
+   Identity Services opens its window only at a tap, so sync pauses
+   until Sync now *)
+fn _google_access (): $P.promise(token_access, $P.Chained) =
+  if _token_held() then $P.ret<token_access>(AccessHeld())
+  else if $GA.google_authorize_available() then _google_silently()
+  else $P.ret<token_access>(AccessFailed(SignInAgain()))
+
+(* A clear's or a revoke's answer, freed *)
+fn _change_free (change: $GA.google_authorization_change): void =
+  case+ change of
+  | ~$GA.Changed() => ()
+  | ~$GA.ChangeFailed(code) => _part_free(code)
+
+(* The token Drive refused (401: its hour is up, or the grant was taken
+   back) forgotten, here and where it is kept. In the app it is also
+   taken out of Play services' cache (google_clear_token), which would
+   otherwise give it again, and one is asked for once, with nothing
+   shown; in a browser, sync pauses until Sync now *)
+fn _google_renewed (): $P.promise(token_access, $P.Chained) = let
+  val refused = _token_swap(NoToken())
+  val () = _google_token_forget()
+in
+  if ~$GA.google_authorize_available() then let
+    val () = _token_free(refused)
+  in $P.ret<token_access>(AccessFailed(SignInAgain())) end
+  else case+ refused of
+    | ~NoToken() => _google_silently()
+    | ~Token(token, token_len) => let
+        val @(token_frozen, token_bytes) = $A.freeze<byte>(token)
+        val @(used, rest) = $A.borrow_split<byte>(token_frozen, token_bytes, token_len)
+        val pending = $GA.google_clear_token(used, token_len)
+        val token_bytes = $A.borrow_join<byte>(token_frozen, used, rest)
+        val () = release_bytes(token_frozen, token_bytes)
+      in
+        $P.and_then<$GA.google_authorization_change><token_access>(pending, llam(change) => let
+          (* cleared or not, one is asked for: should Play services give
+             the refused one again, Drive's second 401 pauses sync *)
+          val () = _change_free(change)
+        in _google_silently() end)
+      end
+end
+
 (* What a Drive status says: 401 is a token Drive no longer takes (it is
    forgotten, and sync paused until Sync now signs in again), -1 to -3
    drive.bats' own *)
@@ -1251,21 +1424,44 @@ fn _drive_failure (status: Int): sync_result =
   else if status = 403 then GoogleRefused()
   else ServerError()
 
-(* The Android store: the file in the account's Drive *)
-fn _android_read (): $P.promise(read_answer, $P.Chained) =
+(* The file read from the account's Drive with the token held *)
+fn _drive_read_held (): $P.promise(drive_got, $P.Chained) =
   case+ _token_swap(NoToken()) of
-  | ~NoToken() => $P.ret<read_answer>(ReadFailed(SignInAgain(), 0))
+  | ~NoToken() => $P.ret<drive_got>(DriveFailed(401))
   | ~Token(token, token_len) => let
       val pending = drive_read(token, token_len, SYNC_MAX_BYTES)
       val () = _token_free(_token_swap(Token(token, token_len)))
-    in
-      $P.and_then<drive_got><read_answer>(pending, llam(got) =>
-        case+ got of
-        | ~DriveGot(owner, file, n) => $P.ret<read_answer>(ReadFile(owner, file, n))
-        | ~DriveNothing() => $P.ret<read_answer>(ReadNothing())
-        | ~DriveFailed(status) => $P.ret<read_answer>(ReadFailed(_drive_failure(status), status)))
-    end
+    in pending end
 
+fn _drive_answer (got: drive_got): read_answer =
+  case+ got of
+  | ~DriveGot(owner, file, n) => ReadFile(owner, file, n)
+  | ~DriveNothing() => ReadNothing()
+  | ~DriveFailed(status) => ReadFailed(_drive_failure(status), status)
+
+(* The Android store: the file in the account's Drive, with the token
+   held or one given with nothing shown; a token Drive refuses is
+   replaced once (_google_renewed) *)
+fn _android_read (): $P.promise(read_answer, $P.Chained) =
+  $P.and_then<token_access><read_answer>(_google_access(), llam(access) =>
+    case+ access of
+    | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 0))
+    | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_drive_read_held(), llam(got) =>
+      case+ got of
+      | ~DriveFailed(status) =>
+        if status = 401 then
+          $P.and_then<token_access><read_answer>(_google_renewed(), llam(again) =>
+            case+ again of
+            | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 401))
+            | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_drive_read_held(), llam(got) =>
+              $P.ret<read_answer>(_drive_answer(got))))
+        else $P.ret<read_answer>(ReadFailed(_drive_failure(status), status))
+      | other => $P.ret<read_answer>(_drive_answer(other))))
+
+(* The write, with the token the read had. A token Drive refuses now
+   (its hour ran out since the read) is replaced as a read's is, and the
+   round reads, merges and writes again, as after another device's
+   write *)
 fn _android_write {body_loc:agz}{body_size:pos | body_size <= 16777216}
   (body: !$A.borrow(byte, body_loc, body_size), body_size: int body_size): $P.promise(write_answer, $P.Chained) =
   case+ _token_swap(NoToken()) of
@@ -1278,7 +1474,13 @@ fn _android_write {body_loc:agz}{body_size:pos | body_size <= 16777216}
         case+ put of
         | ~DrivePut() => $P.ret<write_answer>(Written())
         | ~DriveChanged() => $P.ret<write_answer>(WriteConflict())
-        | ~DrivePutFailed(status) => $P.ret<write_answer>(WriteFailed(_drive_failure(status), status)))
+        | ~DrivePutFailed(status) =>
+          if status = 401 then
+            $P.and_then<token_access><write_answer>(_google_renewed(), llam(again) =>
+              case+ again of
+              | ~AccessHeld() => $P.ret<write_answer>(WriteConflict())
+              | ~AccessFailed(why) => $P.ret<write_answer>(WriteFailed(why, 401)))
+          else $P.ret<write_answer>(WriteFailed(_drive_failure(status), status)))
     end
 
 (* The backed-up file's name: in bridge's backup directory, which
@@ -1325,44 +1527,35 @@ in
     | $BACKUP.BackupNotWritten() => $P.ret<write_answer>(WriteFailed(NoMemory(), 0)))
 end
 
-(* Whether an access token is held for the Dropbox store, or why none
-   could be got *)
-datavtype dropbox_access = AccessHeld of () | AccessFailed of (sync_result)
-
-implement $P.dispose<dropbox_access>(access) =
-  case+ access of
-  | ~AccessHeld() => ()
-  | ~AccessFailed(_) => ()
-
 (* The Dropbox store: an access token, kept, or got anew with the
    refresh token kept (no sheet, no page: Dropbox's token endpoint) *)
-fn _dropbox_access (): $P.promise(dropbox_access, $P.Chained) = let
+fn _dropbox_access (): $P.promise(token_access, $P.Chained) = let
   val held = _token_swap(NoToken())
   val have = (case+ held of Token(_, _) => true | NoToken() => false): bool
   val () = _token_free(_token_swap(held))
 in
-  if have then $P.ret<dropbox_access>(AccessHeld())
+  if have then $P.ret<token_access>(AccessHeld())
   else let
     val key = $A.alloc<byte>(256)
     val key_len = sync_clients_dropbox(key)
   in
     if key_len <= 0 then let
       val () = $A.free<byte>(key)
-    in $P.ret<dropbox_access>(AccessFailed(DropboxNotSetUp())) end
+    in $P.ret<token_access>(AccessFailed(DropboxNotSetUp())) end
     else (case+ _store_swap(_store, NoStore()) of
       | ~Dropbox(refresh, refresh_len) => let
           val pending = dropbox_refresh(key, key_len, refresh, refresh_len)
           val () = $A.free<byte>(key)
           val () = _store_free(_store_swap(_store, Dropbox(refresh, refresh_len)))
         in
-          $P.and_then<dropbox_tokens><dropbox_access>(pending, llam(tokens) =>
+          $P.and_then<dropbox_tokens><token_access>(pending, llam(tokens) =>
             case+ tokens of
             | ~DropboxTokens(access, access_len, refresh, _) => let
                 val () = $A.free<byte>(refresh)
                 val () = _token_free(_token_swap(Token(access, access_len)))
-              in $P.ret<dropbox_access>(AccessHeld()) end
+              in $P.ret<token_access>(AccessHeld()) end
             | ~DropboxRefused(status) =>
-              $P.ret<dropbox_access>(AccessFailed(if status = 0 then Unreachable()
+              $P.ret<token_access>(AccessFailed(if status = 0 then Unreachable()
                 else if status = 400 then DropboxSignInAgain()
                 else if status = 401 then DropboxSignInAgain()
                 else ServerError())))
@@ -1370,7 +1563,7 @@ in
       | other => let
           val () = $A.free<byte>(key)
           val () = _store_free(_store_swap(_store, other))
-        in $P.ret<dropbox_access>(AccessFailed(NotSyncedYet())) end)
+        in $P.ret<token_access>(AccessFailed(NotSyncedYet())) end)
   end
 end
 
@@ -1405,7 +1598,7 @@ fn _dropbox_answer (got: drive_got): read_answer =
    token Dropbox no longer takes (it expires after hours) is replaced
    once, with no sign-in *)
 fn _dropbox_read (): $P.promise(read_answer, $P.Chained) =
-  $P.and_then<dropbox_access><read_answer>(_dropbox_access(), llam(access) =>
+  $P.and_then<token_access><read_answer>(_dropbox_access(), llam(access) =>
     case+ access of
     | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 0))
     | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_dropbox_read_kept(), llam(got) =>
@@ -1414,7 +1607,7 @@ fn _dropbox_read (): $P.promise(read_answer, $P.Chained) =
         if status = 401 then let
           val () = _token_free(_token_swap(NoToken()))
         in
-          $P.and_then<dropbox_access><read_answer>(_dropbox_access(), llam(again) =>
+          $P.and_then<token_access><read_answer>(_dropbox_access(), llam(again) =>
             case+ again of
             | ~AccessFailed(why) => $P.ret<read_answer>(ReadFailed(why, 0))
             | ~AccessHeld() => $P.and_then<drive_got><read_answer>(_dropbox_read_kept(), llam(got) =>
@@ -2479,13 +2672,18 @@ in
         end))
 end
 
-(* Whether sync is paused for the reader: the Google store with no token,
-   its last sync already paused for one (SignInAgain, which says Sync now
-   signs in). Another try without a token would only say so again, and
-   a relaunch, which holds no more token than before it, changes nothing *)
+(* Whether sync is paused for the reader: in a browser, the Google store
+   with no token, its last sync already paused for one (SignInAgain,
+   which says Sync now signs in). Another try without a token would only
+   say so again, and a relaunch, which holds no more token than before
+   it, changes nothing *)
 fn _paused (): bool =
   if ~_is_android() then false
   else if _token_held() then false
+  (* in the app a token is asked for with nothing shown, so each sync
+     point tries: a grant given back since (another Sync now, or Google's
+     own settings) ends the pause at once *)
+  else if $GA.google_authorize_available() then false
   else case+ !_last_result of
     | SignInAgain() => true
     | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
@@ -2666,7 +2864,8 @@ implement sync_screen_open () = let
   val () = $A.free<byte>(client)
   (* in a browser, a build with no client lists no Google Drive, and
      Google's script is loaded only when there is one *)
-  val android = (if client_len > 0 then $GOOGLE.google_token_available() else false): bool
+  val android = (if client_len <= 0 then false
+    else case+ _google_way() of AppAuthorization() => true | BrowserIdentity() => true | NoGoogleWay() => false): bool
   val () = ui_show("sync-android-row", android)
   val () = ui_show("sync-android", app)
   val () = ui_show("sync-google", ~app)
@@ -2696,10 +2895,6 @@ implement sync_screen_open () = let
   val () = layer_open(LSync())
 in ui_focus("sync-url") end
 
-(* length, or 0 when it is over most *)
-fn _within {length:nat}{most:nat} (length: int length, most: int most): [kept:nat | kept <= length; kept <= most] int kept =
-  if length <= most then length else 0
-
 (* The field id's value, at most most bytes of it, in an array of most *)
 fn _field_value {id_len:pos | id_len < 256}{most:pos | most <= 1024} (id: string id_len, most: int most)
   : [l:agz][value_len:nat | value_len <= most] @($A.arr(byte, l, most), int value_len) = let
@@ -2721,14 +2916,6 @@ in
     in @(out, value_len) end
 end
 
-(* Whether text[0, text_len) starts with beginning *)
-fun _starts {l:agz}{n:nat}{text_len:nat | text_len <= n}{beginning_len:nat}{j:nat | j <= beginning_len} .<beginning_len - j>.
-  (text: !$A.arr(byte, l, n), text_len: int text_len, beginning: string beginning_len, beginning_len: int beginning_len, j: int j): bool =
-  if j >= beginning_len then true
-  else if j >= text_len then false
-  else if byte2int0($A.get<byte>(text, j)) <> char2int0(string_get_at(beginning, j)) then false
-  else _starts(text, text_len, beginning, beginning_len, j + 1)
-
 (* What asking for a token came to: the account's address (the token is
    kept, in _token), or how it failed (a sync_result) *)
 datavtype asked =
@@ -2740,37 +2927,77 @@ implement $P.dispose<asked>(answer) =
   | ~Asked(account, _) => $A.free<byte>(account)
   | ~AskFailed(_) => ()
 
-(* A blob's bytes, at most most of them, in an array of most *)
-fn _blob_bytes {n:nat}{most:pos | most <= 4096} (blob: $BD.dblob(n), most: int most): [l:agz][kept:nat | kept <= most] @($A.arr(byte, l, most), int kept) = let
-  val out = $A.alloc<byte>(most)
-  val size = $BD.blob_len(blob)
-  val kept = _within(size, most)
-  val () = $BD.blob_read(blob, 0, out, kept)
-  val () = $BD.blob_free(blob)
-in @(out, kept) end
+(* The account's address as Drive gives it, with the token held (empty
+   when Drive gives none) *)
+fn _drive_address (): $P.promise(asked, $P.Chained) =
+  case+ _token_swap(NoToken()) of
+  | ~NoToken() => $P.ret<asked>(Asked($A.alloc<byte>(ACCOUNT_MAX), 0))
+  | ~Token(token, token_len) => let
+      val pending = drive_account_address(token, token_len)
+      val () = _token_free(_token_swap(Token(token, token_len)))
+    in
+      $P.and_then<drive_address><asked>(pending, llam(found) =>
+        case+ found of
+        | ~DriveAddress(address, address_len) => $P.ret<asked>(Asked(address, address_len))
+        | ~DriveNoAddress() => $P.ret<asked>(Asked($A.alloc<byte>(ACCOUNT_MAX), 0)))
+    end
 
-(* The account's address Google gave (empty when it gave none) *)
-fn _address_of (account: $R.option([k:pos] $BD.dblob(k))): [l:agz][kept:nat | kept <= ACCOUNT_MAX] @($A.arr(byte, l, ACCOUNT_MAX), int kept) =
-  case+ account of
-  | ~$R.some(blob) => _blob_bytes(blob, ACCOUNT_MAX)
-  | ~$R.none() => let
-      val empty = $A.alloc<byte>(ACCOUNT_MAX)
-    in @(empty, 0) end
-
-(* The token Google gave, kept *)
-fn _token_keep {n:pos} (blob: $BD.dblob(n)): bool = let
-  val @(token, token_len) = _blob_bytes(blob, TOKEN_MAX)
+(* In the app: a token for drive.appdata, Google's consent screen shown
+   when the reader has not granted it (bridge's google_authorize_scopes),
+   and the account's address: the one the authorization names, else
+   Drive's (about.get), else none (Turn off then takes the grant back
+   with the token) *)
+fn _authorized_ask (): $P.promise(asked, $P.Chained) = let
+  val @(scope_frozen, scope_bytes) = $A.freeze<byte>(_scope())
+  val pending = $GA.google_authorize_scopes(scope_bytes, SCOPE_LEN)
+  val () = release_bytes(scope_frozen, scope_bytes)
 in
-  if token_len <= 0 then let val () = $A.free<byte>(token) in false end
-  else let
-    val () = _google_token_save(token, token_len)
-    val () = _token_free(_token_swap(Token(token, token_len)))
-  in true end
+  $P.and_then<$GA.google_authorization($GA.MayAsk)><asked>(pending, llam(answer) =>
+    case+ answer of
+    | ~$GA.Authorized(token, granted, account) => let
+        val () = _part_free(granted)
+        val kept = _token_keep(token)
+        val @(address, address_len) = _address_of(account)
+      in
+        if ~kept then let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
+        else if address_len > 0 then $P.ret<asked>(Asked(address, address_len))
+        else let val () = $A.free<byte>(address) in _drive_address() end
+      end
+    | ~$GA.AuthorizeCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
+    | ~$GA.AuthorizeFailed(code) => $P.ret<asked>(AskFailed(_authorize_failure(code))))
 end
 
-(* Asks Google for a token for drive.appdata, for the account on the
-   device: its sheet the first time, its consent the first time ever.
-   Only when the reader acts (Use Android, Sync now) *)
+(* In a browser: a token for drive.appdata from Google Identity
+   Services, its window opened at the reader's tap *)
+fn _identity_ask {client_loc:agz}{client_len:pos | client_len <= 256}
+  (client: $A.arr(byte, client_loc, 256), client_len: int client_len): $P.promise(asked, $P.Chained) = let
+  val @(scope_frozen, scope_bytes) = $A.freeze<byte>(_scope())
+  val @(client_frozen, client_bytes) = $A.freeze<byte>(client)
+  val @(client_used, client_rest) = $A.borrow_split<byte>(client_frozen, client_bytes, client_len)
+  val pending = $GOOGLE.google_token_get(client_used, client_len, scope_bytes, SCOPE_LEN)
+  val client_bytes = $A.borrow_join<byte>(client_frozen, client_used, client_rest)
+  val () = release_bytes(client_frozen, client_bytes)
+  val () = release_bytes(scope_frozen, scope_bytes)
+in
+  $P.and_then<$GOOGLE.google_token><asked>(pending, llam(answer) =>
+    case+ answer of
+    | ~$GOOGLE.GoogleToken(token, account) => let
+        val kept = _token_keep(token)
+        val @(address, address_len) = _address_of(account)
+      in
+        if kept then $P.ret<asked>(Asked(address, address_len))
+        else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
+      end
+    | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(NoGoogleAccount()))
+    | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
+    | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(GoogleRefused()))
+    | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(NotSetUp())))
+end
+
+(* Asks Google for a token for drive.appdata, for the reader's account:
+   its consent the first time (in the app), its window each time (in a
+   browser). Only when the reader acts (Use Android, Sync now); a build
+   with no client offers neither *)
 fn _token_ask (): $P.promise(asked, $P.Chained) = let
   val client = $A.alloc<byte>(256)
   val client_len = sync_clients_google(client)
@@ -2778,31 +3005,10 @@ in
   if client_len <= 0 then let
     val () = $A.free<byte>(client)
   in $P.ret<asked>(AskFailed(NotSetUp())) end
-  else let
-    val scope = $A.alloc<byte>(45)
-    val () = $A.write_text(scope, 0, $A.text_lit("https://www.googleapis.com/auth/drive.appdata"), 45)
-    val @(scope_frozen, scope_bytes) = $A.freeze<byte>(scope)
-    val @(client_frozen, client_bytes) = $A.freeze<byte>(client)
-    val @(client_used, client_rest) = $A.borrow_split<byte>(client_frozen, client_bytes, client_len)
-    val pending = $GOOGLE.google_token_get(client_used, client_len, scope_bytes, 45)
-    val client_bytes = $A.borrow_join<byte>(client_frozen, client_used, client_rest)
-    val () = release_bytes(client_frozen, client_bytes)
-    val () = release_bytes(scope_frozen, scope_bytes)
-  in
-    $P.and_then<$GOOGLE.google_token><asked>(pending, llam(answer) =>
-      case+ answer of
-      | ~$GOOGLE.GoogleToken(token, account) => let
-          val kept = _token_keep(token)
-          val @(address, address_len) = _address_of(account)
-        in
-          if kept then $P.ret<asked>(Asked(address, address_len))
-          else let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
-        end
-      | ~$GOOGLE.GoogleNoAccount() => $P.ret<asked>(AskFailed(NoGoogleAccount()))
-      | ~$GOOGLE.GoogleCanceled() => $P.ret<asked>(AskFailed(SignInCanceled()))
-      | ~$GOOGLE.GoogleRefused() => $P.ret<asked>(AskFailed(GoogleRefused()))
-      | ~$GOOGLE.GoogleUnavailable() => $P.ret<asked>(AskFailed(NotSetUp())))
-  end
+  else case+ _google_way() of
+    | AppAuthorization() => let val () = $A.free<byte>(client) in _authorized_ask() end
+    | BrowserIdentity() => _identity_ask(client, client_len)
+    | NoGoogleWay() => let val () = $A.free<byte>(client) in $P.ret<asked>(AskFailed(NotSetUp())) end
 end
 
 (* A sign-in that failed, said on the screen *)
@@ -2824,18 +3030,19 @@ fn _android_chosen {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} (accoun
     in ui_show("sync-off", true) end else ())
 in sync_run() end
 
-(* Use Android (the screen's button, in the app): Google's sheet for the
-   account on the device, then sync through its Drive *)
+(* Use Android (the screen's button, in the app; Google Drive in a
+   browser): Google's consent for the account on the device the first
+   time (its window, in a browser), then sync through its Drive *)
 #pub fn sync_android (): void
 implement sync_android () =
-  if ~$GOOGLE.google_token_available() then ()
-  else $P.finish<asked>(_token_ask(), llam(answer) =>
+  $P.finish<asked>(_token_ask(), llam(answer) =>
     case+ answer of
     | ~Asked(account, account_len) => _android_chosen(account, account_len)
     | ~AskFailed(result) => _ask_failed(result))
 
 (* Sync now with the Android store: with the token kept, or one asked
-   for (Google's sheet) *)
+   for (Google's consent, when access was taken back; Google's window,
+   in a browser) *)
 fn _android_now (): void = let
   val held = _token_swap(NoToken())
   val have = (case+ held of Token(_, _) => true | NoToken() => false): bool
@@ -3104,6 +3311,48 @@ in
   end
 end
 
+(* A token held for an Undo, put back: here and where it is kept *)
+fn _token_restored (held: token_cell): void =
+  case+ held of
+  | ~NoToken() => ()
+  | ~Token(token, token_len) => let
+      val () = _google_token_save(token, token_len)
+    in _token_free(_token_swap(Token(token, token_len))) end
+
+(* Turn off, made final, in the app: the reader's grant taken back from
+   Google, so the next Use Android asks for consent again. By the
+   account (google_revoke_access, Play services' revokeAccess), else
+   with the token (Google's revocation endpoint, drive_grant_revoke).
+   With neither there is nothing here to take it back with, and the
+   grant stays listed in the Google account's third-party connections,
+   where the reader can remove it *)
+fn _google_revoke {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
+  (account: $A.arr(byte, l, ACCOUNT_MAX), account_len: int account_len, held: token_cell): void =
+  if account_len > 0 then let
+    val () = _token_free(held)
+    val @(account_frozen, account_bytes) = $A.freeze<byte>(account)
+    val @(used, rest) = $A.borrow_split<byte>(account_frozen, account_bytes, account_len)
+    val @(scope_frozen, scope_bytes) = $A.freeze<byte>(_scope())
+    val pending = $GA.google_revoke_access(used, account_len, scope_bytes, SCOPE_LEN)
+    val () = release_bytes(scope_frozen, scope_bytes)
+    val account_bytes = $A.borrow_join<byte>(account_frozen, used, rest)
+    val () = release_bytes(account_frozen, account_bytes)
+  in
+    (* read and freed: sync is off here whatever Google says *)
+    $P.finish<$GA.google_authorization_change>(pending, llam(change) => _change_free(change))
+  end
+  else let
+    val () = $A.free<byte>(account)
+  in
+    case+ held of
+    | ~NoToken() => ()
+    | ~Token(token, token_len) => let
+        val pending = drive_grant_revoke(token, token_len)
+        val () = $A.free<byte>(token)
+        (* ignored: sync is off here whatever Google says *)
+      in $P.finish<int>(pending, llam(_) => ()) end
+  end
+
 (* Turn off (the screen's button): the folder, user name and password
    forgotten at once (they are kept only for the Undo offered) *)
 #pub fn sync_off (): void
@@ -3117,10 +3366,16 @@ in
   | ~Android(account, account_len) => let
       val () = _store_free(_store_swap(_store_off, Android(account, account_len)))
       val () = _store_forget()
-      val () = _token_free(_token_swap(NoToken()))
-      (* ignored: signed out or not, the token is forgotten here, and
-         the next Use Android asks again *)
-      val () = $P.finish<$GOOGLE.google_signed_out>($GOOGLE.google_sign_out(), llam(_) => ())
+      (* the token: in the app, held for the Undo and to take the grant
+         back with once Turn off is final; in a browser, Google Identity
+         Services' token revoked at once (ignored: revoked or not, the
+         token is forgotten here, and the next Google Drive asks again) *)
+      val app = $GA.google_authorize_available()
+      val held = _token_swap(NoToken())
+      val held = (if app then held else let
+          val () = _token_free(held)
+          val () = $P.finish<$GOOGLE.google_signed_out>($GOOGLE.google_sign_out(), llam(_) => ())
+        in NoToken() end): token_cell
       val () = _fields_show()
       val () = _status_show()
       val () = ui_show("sync-off", false)
@@ -3130,13 +3385,23 @@ in
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
             val () = _store_save()
+            val () = _token_restored(held)
           in
             if layer_is_open(LSync()) then let
               val () = _fields_show()
               val () = ui_show("sync-off", true)
             in _status_show() end else ()
           end
-        | Final() => _store_free(_store_swap(_store_off, NoStore())))
+        (* made final: in the app, the grant taken back from Google *)
+        | Final() => (case+ _store_swap(_store_off, NoStore()) of
+          | ~Android(account, account_len) =>
+            if app then _google_revoke(account, account_len, held)
+            else let
+              val () = $A.free<byte>(account)
+            in _token_free(held) end
+          | other => let
+              val () = _store_free(other)
+            in _token_free(held) end))
     end
   | ~Dropbox(refresh, refresh_len) => let
       val () = _store_free(_store_swap(_store_off, Dropbox(refresh, refresh_len)))

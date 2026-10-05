@@ -417,4 +417,126 @@ implement drive_write (token, token_len, body, body_size) =
               in $P.ret<drive_put>(DrivePutFailed(why)) end))
     end
 
+(* ============================================================
+   The account's address, and the grant taken back
+   ============================================================ *)
+
+(* The account's address as Drive gives it (about.get's
+   user.emailAddress, which drive.appdata may read), or none: Drive
+   leaves it out "if the user has not made their email address visible
+   to the requester", and a request that fails gives none *)
+#pub datavtype drive_address =
+  | {l:agz}{n:pos | n <= 256} DriveAddress of ($A.arr(byte, l, 256), int n)
+  | DriveNoAddress of ()
+
+implement $P.dispose<drive_address>(found) =
+  case+ found of
+  | ~DriveAddress(address, _) => $A.free<byte>(address)
+  | ~DriveNoAddress() => ()
+
+(* The address of the account the access token token[0, token_len) is
+   for *)
+#pub fn drive_account_address {token_loc:agz}{token_size:nat}{token_len:pos | token_len <= token_size; token_len <= 4096}
+  (token: !$A.arr(byte, token_loc, token_size), token_len: int token_len): $P.promise(drive_address, $P.Chained)
+
+(* The grant the access token token[0, token_len) belongs to taken back
+   (Google's OAuth revocation endpoint, RFC 7009, which revokes the
+   whole grant an access token is part of): resolves 0 when Google took
+   it *)
+#pub fn drive_grant_revoke {token_loc:agz}{token_size:nat}{token_len:pos | token_len <= token_size; token_len <= 4096}
+  (token: !$A.arr(byte, token_loc, token_size), token_len: int token_len): $P.promise(int, $P.Chained)
+
+(* about.get's answer, {"user": {"emailAddress": "..."}}: the address *)
+fn _address_by {l,key_loc:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n, key: !$A.arr(byte, key_loc, 16)): drive_address = let
+  val members = (if n > 0 then jr_object(buf, n, 0) else ~1): [inside:int | ~1 <= inside; inside <= n] int inside
+  val user_at = (if members >= 0 then jr_member(buf, n, members, key, "user") else ~1): [at:int | ~1 <= at; at < n] int at
+  val user_members = jr_object(buf, n, user_at)
+  val address_at = (if user_members >= 0 then jr_member(buf, n, user_members, key, "emailAddress") else ~1): [at:int | ~1 <= at; at < n] int at
+  val address = $A.alloc<byte>(256)
+  val @(found, address_len) = _string_at(buf, n, address_at, address, 256)
+in
+  if ~found then let val () = $A.free<byte>(address) in DriveNoAddress() end
+  else if address_len <= 0 then let val () = $A.free<byte>(address) in DriveNoAddress() end
+  else DriveAddress(address, address_len)
+end
+
+fn _address_in {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n): drive_address = let
+  val key = $A.alloc<byte>(16)
+  val found = _address_by(buf, n, key)
+  val () = $A.free<byte>(key)
+in found end
+
+implement drive_account_address (token, token_len) = let
+  val url = $A.alloc<byte>(URL_MAX)
+  val url_len = request_text(url, 0, "https://www.googleapis.com/drive/v3/about?fields=user%2FemailAddress")
+  val @(headers, headers_len) = _headers(token, token_len, "")
+  val pending = request_send_empty("GET", url, url_len, headers, headers_len)
+in
+  $P.and_then<$FE.fetched><drive_address>(pending, llam(got) =>
+    case+ request_answered(got) of
+    | ~Unanswered() => $P.ret<drive_address>(DriveNoAddress())
+    | ~Answered(status, blob) =>
+      if (if status < 200 then true else status >= 300) then let
+        val () = $BD.blob_free(blob)
+      in $P.ret<drive_address>(DriveNoAddress()) end
+      else (case+ request_body(blob, LISTING_MAX) of
+        | ~BodyRead(owner, bytes, n) => let
+            val found = _address_in(bytes, n)
+            val () = piece_free(owner, bytes)
+          in $P.ret<drive_address>(found) end
+        | ~BodyEmpty() => $P.ret<drive_address>(DriveNoAddress())
+        | ~BodyFailed(_) => $P.ret<drive_address>(DriveNoAddress())))
+end
+
+(* Whether a byte is one a form's value carries as itself (RFC 3986's
+   unreserved: letters, digits, "-", ".", "_", "~") *)
+fn _unreserved (b: int): bool =
+  if b >= 65 then (if b <= 90 then true else if b >= 97 then (if b <= 122 then true else b = 126) else b = 95)
+  else if b >= 48 then b <= 57
+  else if b = 45 then true
+  else b = 46
+
+(* A hexadecimal digit's byte, for d in [0, 16) *)
+fn _hex_digit {d:nat | d < 16} (d: int d): int = if d < 10 then 48 + d else 55 + d
+
+(* token[j, token_len), percent-encoded, at form[position]: where it
+   ends *)
+fun _form_encoded {token_loc,form_loc:agz}{token_size:nat}{token_len:nat | token_len <= token_size; token_len <= 4096}{j:nat | j <= token_len}{position:nat | position <= 6 + 3 * j} .<token_len - j>.
+  (token: !$A.arr(byte, token_loc, token_size), token_len: int token_len, form: !$A.arr(byte, form_loc, 12294), position: int position, j: int j)
+  : [stop:nat | stop <= 6 + 3 * token_len] int stop =
+  if j >= token_len then position
+  else let
+    val b = g1ofg0(byte2int0($A.get<byte>(token, j)))
+  in
+    if _unreserved(b) then let
+      val () = $A.set<byte>(form, position, int2byte0(b))
+    in _form_encoded(token, token_len, form, position + 1, j + 1) end
+    else let
+      val b = (if b >= 0 then (if b < 256 then b else 0) else 0): [b:nat | b < 256] int b
+      val () = $A.set<byte>(form, position, int2byte0(37))
+      val () = $A.set<byte>(form, position + 1, int2byte0(_hex_digit(b / 16)))
+      val () = $A.set<byte>(form, position + 2, int2byte0(_hex_digit(b - (b / 16) * 16)))
+    in _form_encoded(token, token_len, form, position + 3, j + 1) end
+  end
+
+implement drive_grant_revoke (token, token_len) = let
+  val url = $A.alloc<byte>(URL_MAX)
+  val url_len = request_text(url, 0, "https://oauth2.googleapis.com/revoke")
+  val headers = $A.alloc<byte>(HEADERS_MAX)
+  val headers_len = request_text(headers, 0, "Content-Type: application/x-www-form-urlencoded")
+  val form = $A.alloc<byte>(12294)
+  val () = $A.write_text(form, 0, $A.text_lit("token="), 6)
+  val form_len = _form_encoded(token, token_len, form, 6, 0)
+  val @(form_frozen, form_bytes) = $A.freeze<byte>(form)
+  val pending = request_send("POST", url, url_len, headers, headers_len, form_bytes, form_len)
+  val () = release_bytes(form_frozen, form_bytes)
+in
+  $P.and_then<$FE.fetched><int>(pending, llam(got) =>
+    case+ request_answered(got) of
+    | ~Unanswered() => $P.ret<int>(1)
+    | ~Answered(status, blob) => let
+        val () = $BD.blob_free(blob)
+      in $P.ret<int>(if status = 200 then 0 else 1) end)
+end
+
 end (* #target wasm *)

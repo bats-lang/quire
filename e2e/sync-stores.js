@@ -1,6 +1,6 @@
 // The stores sync keeps its file in, played for the e2e tests: a WebDAV
 // folder, Google Drive's app data folder, and the Android app's
-// Capacitor (Google's sign-in, and the files Auto Backup keeps). No real
+// Capacitor (Google's authorization, and the files Auto Backup keeps). No real
 // network. Each is shared by the devices (browser contexts) of a test;
 // Dropbox is played by dropbox-server.js.
 
@@ -60,6 +60,11 @@ export const CLIENT = '1234567890-quiretest.apps.googleusercontent.com';
 export function drive() {
   const d = {
     file: null, requests: [], token: 'token-1',
+    // the account's address about.get gives (none when null), and the
+    // tokens Google's revocation endpoint was given
+    address: 'reader@example.com', revoked: [],
+    // the token of each request Drive took
+    accepted: [],
     // a test's interference: another device's write, made as the app
     // checks the version it read
     beforeCheck: null,
@@ -77,7 +82,12 @@ export function drive() {
     const url = new URL(request.url());
     d.requests.push(`${request.method()} ${url.pathname}${url.search}`);
     if (request.headers().authorization !== `Bearer ${d.token}`) return json(route, { error: 'invalid token' }, 401);
+    d.accepted.push(d.token);
     const id = d.file && d.file.id;
+    if (request.method() === 'GET' && url.pathname === '/drive/v3/about') {
+      if (url.searchParams.get('fields') !== 'user/emailAddress') return json(route, { error: 'unexpected fields' }, 400);
+      return json(route, { user: d.address ? { emailAddress: d.address } : {} });
+    }
     if (request.method() === 'GET' && url.pathname === '/drive/v3/files') {
       if (url.searchParams.get('spaces') !== 'appDataFolder') return json(route, { error: 'not the app data folder' }, 400);
       return json(route, { files: d.file ? [{ id, version: String(d.file.version) }] : [] });
@@ -104,31 +114,43 @@ export function drive() {
     }
     return json(route, { error: 'not found' }, 404);
   };
+  // Google's OAuth revocation endpoint: route it at
+  // 'https://oauth2.googleapis.com/revoke'
+  d.revoke = async route => {
+    const request = route.request();
+    const token = new URLSearchParams(request.postData() || '').get('token');
+    const form = (request.headers()['content-type'] || '').startsWith('application/x-www-form-urlencoded');
+    if (request.method() !== 'POST' || !form || !token) return json(route, { error: 'invalid_request' }, 400);
+    d.revoked.push(token);
+    return json(route, {});
+  };
   d.json = () => JSON.parse(d.file.body);
   return d;
 }
 
-/** The app's Capacitor, played in a page: Google's sign-in (mode:
-    'token' gives a token for the device's account, 'none' finds no
-    account, 'cancel' is the reader saying no) and the Filesystem, whose
-    files are the context's (window.__file* bindings, kept by
-    capacitorPlayed), so they outlast the page as an app's files outlast
-    its process */
-function capacitor({ mode, token }) {
-  window.__google = { mode, token, signIns: 0, signOuts: 0, initialized: [] };
+/** The scope the Google store asks for */
+export const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+
+/** The app's Capacitor, played in a page: Google's authorization
+    (GoogleAuthorize, bats-lang/capacitor-plugins' google-authorize) and
+    the Filesystem. Both keep their state in the test (window.__google*
+    and window.__file* bindings, kept by capacitorPlayed), so it outlasts
+    the page as the account's grant and an app's files outlast its
+    process */
+function capacitor() {
+  const google = method => async (options = {}) => {
+    const answer = await window.__google(method, options);
+    if (answer && answer.error) throw Object.assign(new Error(answer.error), { code: answer.error });
+    return answer;
+  };
   window.Capacitor = {
     isNativePlatform: () => true,
     Plugins: {
-      GoogleSignIn: {
-        initialize: o => { window.__google.initialized.push(o); return Promise.resolve(); },
-        signIn: () => {
-          const g = window.__google;
-          g.signIns++;
-          if (g.mode === 'token') return Promise.resolve({ accessToken: g.token, email: 'reader@example.com' });
-          const code = g.mode === 'none' ? 'NO_CREDENTIAL_AVAILABLE' : 'SIGN_IN_CANCELED';
-          return Promise.reject(Object.assign(new Error(code), { code }));
-        },
-        signOut: () => { window.__google.signOuts++; return Promise.resolve(); },
+      GoogleAuthorize: {
+        authorizationForScopes: google('authorizationForScopes'),
+        authorizeScopes: google('authorizeScopes'),
+        clearAuthorizationToken: google('clearAuthorizationToken'),
+        revokeAccess: google('revokeAccess'),
       },
       Filesystem: {
         writeFile: async o => { await window.__fileWrite(o.path, o.data); return { uri: 'file:///' + o.path }; },
@@ -151,17 +173,57 @@ function capacitor({ mode, token }) {
   };
 }
 
-/** The context runs the app: its Capacitor played (mode as capacitor's,
-    token the one Google gives), its files kept in the Map returned
+/** The device's Google account, as Play services' AuthorizationClient
+    answers for it: whether the reader granted the scopes (granted),
+    the token it gives (token: the one Google issues now) and caches
+    until it is cleared (cached), the account it names (null for none),
+    and every call (calls). mode: 'consent' grants at authorizeScopes,
+    'cancel' is the reader backing out of the consent screen, 'fail'
+    rejects it with failure (a CommonStatusCodes name) */
+function googleAccount({ token, mode }) {
+  const google = { token, mode, failure: 'DEVELOPER_ERROR', granted: false, cached: null, account: 'reader@example.com', calls: [] };
+  const authorization = scopes => {
+    if (!google.cached) google.cached = google.token;
+    return { accessToken: google.cached, grantedScopes: scopes, account: google.account };
+  };
+  google.answer = (method, options) => {
+    google.calls.push({ method, options });
+    if (method === 'authorizationForScopes') return { authorization: google.granted ? authorization(options.scopes) : null };
+    if (method === 'authorizeScopes') {
+      if (google.mode === 'cancel') return { error: 'CANCELED' };
+      if (google.mode === 'fail') return { error: google.failure };
+      google.granted = true;
+      return { authorization: authorization(options.scopes) };
+    }
+    if (method === 'clearAuthorizationToken') {
+      if (options.accessToken === google.cached) google.cached = null;
+      return {};
+    }
+    if (method === 'revokeAccess') {
+      google.granted = false;
+      google.cached = null;
+      return {};
+    }
+    return { error: 'UNIMPLEMENTED' };
+  };
+  /** The calls of one method, their options */
+  google.asked = method => google.calls.filter(c => c.method === method).map(c => c.options);
+  return google;
+}
+
+/** The context runs the app: its Capacitor played, its Google account
+    (googleAccount's: mode, and the token Google gives) and its files
     (files, [path, base64] pairs, are those it starts with: what Auto
-    Backup gave back) */
-export async function capacitorPlayed(context, { mode = 'token', token = 'token-1', files = [] } = {}) {
+    Backup gave back), both returned */
+export async function capacitorPlayed(context, { mode = 'consent', token = 'token-1', files = [] } = {}) {
   const kept = new Map(files);
+  const google = googleAccount({ token, mode });
+  await context.exposeBinding('__google', (_, method, options) => google.answer(method, options));
   await context.exposeBinding('__fileWrite', (_, path, data) => { kept.set(path, data); });
   await context.exposeBinding('__fileRead', (_, path) => kept.get(path));
   await context.exposeBinding('__fileNames', () => [...kept.keys()]);
-  await context.addInitScript(capacitor, { mode, token });
-  return kept;
+  await context.addInitScript(capacitor);
+  return { files: kept, google };
 }
 
 /** Google Identity Services, played in a browser page: each request
