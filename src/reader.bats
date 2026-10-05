@@ -796,6 +796,15 @@ fn _page_of_node {page_count:pos}{current:nat | current < page_count}{node:nat} 
    view *)
 val _anchor_last = ref<Int>(~1)
 
+(* The node the reader's place is kept by, or -1: the node a jump took
+   them to, or the one a new layout (another size or type, a font
+   arriving) kept in view. A layout made again keeps that node, not the
+   one at the top of the page it then shows, which can begin before it:
+   each layout would move the place back a paragraph, and the text the
+   reader was at would leave the page (quire#305). It goes as the reader
+   moves: any page shown but by a jump or a layout *)
+val _anchor_kept = ref<Int>(~1)
+
 (* The chapter's pages across, its scroll width over its width: a
    spread's last screen can hold one column, half a screen, so its
    screens are counted up, past a few pixels of rounding *)
@@ -1456,7 +1465,8 @@ in _update_page_indicator() end
    then stored *)
 fn _record_position (): void = let
   val book_index = lib_index_of_key(open_key_get())
-  val anchor = _anchor_now()
+  (* the node the place is kept by, while it is; else the page's top *)
+  val anchor = (if !_anchor_kept >= 0 then !_anchor_kept else _anchor_now()): Int
   val () = !_anchor_last := anchor
   val now = $TM.epoch_minutes()
 in
@@ -1706,6 +1716,8 @@ fn _page_waiter_resolve (): void =
    says it, without moving the page *)
 fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
   (page: int page, page_count: int page_count, chapter: int chapter, chapter_count: int chapter_count): void = let
+  (* the reader moved: a jump or a layout keeps its node again after *)
+  val () = !_anchor_kept := ~1
   val () = reading_set(@(page, page_count, chapter, chapter_count))
   val () = window_show(page, page_count)
   val () = _update_page_indicator()
@@ -3433,26 +3445,30 @@ fn _show_target (page: Int, anchor: Int): void =
     else if page >= page_count then _show_page(page_count - 1, page_count, chapter, chapter_count)
     else _show_page(page, page_count, chapter, chapter_count)
 
+(* Shows the page of the chapter laid out anew that target names, as
+   _show_target does, and keeps the place by its node from then on *)
+fn _show_kept (page: Int, anchor: Int): void = let
+  val () = _show_target(page, anchor)
+in !_anchor_kept := anchor end
+
 (* ============================================================
    Settling: a chapter's layout can still change after its page is
    shown (a font arriving, an image loading), and with it the page its
    place is on. For a while after, the pages are counted again, and when
-   they changed the place is found again: by the node the reader was
-   taken to, until the reader turns a page
+   they changed the place is found again: by the node it is kept by
+   (_anchor_kept), until the reader moves
    ============================================================ *)
 
-(* The node the place was restored to, or -1 once a page is turned *)
-val _settle_anchor = ref<Int>(~1)
 val _settle_generation = ref<int>(0)
 
 (* What keeps the reader's place on page page of total when the chapter
    is laid out again, as _show_target takes it (a page, a node): the
-   node the place was restored to, while it holds; scrolled, the
+   node the place is kept by, while it is; scrolled, the
    chapter's end for a reader on its last screen past the first (the
    browser stops that screen short of a whole step, so the node at its
    top starts on the screen before); else the node at the page's top *)
 fn _place_kept (page: Int, total: Int): @(Int, Int) =
-  if !_settle_anchor >= 0 then @(page, !_settle_anchor)
+  if !_anchor_kept >= 0 then @(page, !_anchor_kept)
   else if _scrolled() && page > 0 && page >= total - 1 then @(~1, ~1)
   else @(page, !_anchor_last)
 
@@ -3472,7 +3488,7 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
       val () = (case+ reading_get() of
         | @(page, page_count, _, _) => let
             val count_now = _pages_now()
-            val anchor = !_settle_anchor
+            val anchor = !_anchor_kept
             (* the node the reader was taken to, if it is no longer on
                the page shown *)
             val moved = (if anchor < 0 then false else if page >= page_count then false
@@ -3482,15 +3498,15 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
-            in _show_target(target_page, target_anchor) end
-            else if moved then _show_target(page, anchor)
+            in _show_kept(target_page, target_anchor) end
+            else if moved then _show_kept(page, anchor)
             else ()
           end)
     in _settle(generation, times - 1) end)
 
 (* Starts settling the page just shown, which anchor (when >= 0) is on *)
 fn _settle_start (anchor: Int): void = let
-  val () = !_settle_anchor := anchor
+  val () = !_anchor_kept := anchor
   val () = !_settle_generation := !_settle_generation + 1
 in _settle(!_settle_generation, 12) end
 
@@ -3692,7 +3708,7 @@ end
 
 (* The next page: in this chapter, else the next chapter's first *)
 fn _page_next(): void = let
-  val () = !_settle_anchor := ~1
+  val () = !_anchor_kept := ~1
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
@@ -3721,7 +3737,7 @@ end
 
 (* The previous page: in this chapter, else the previous chapter's last *)
 fn _page_previous(): void = let
-  val () = !_settle_anchor := ~1
+  val () = !_anchor_kept := ~1
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
@@ -3759,7 +3775,7 @@ in
   else let
     val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
     val () = _measure_pagination()
-  in _show_target(page, anchor) end
+  in _show_kept(page, anchor) end
 end
 
 (* ============================================================
@@ -4172,7 +4188,7 @@ implement reader_scrolled () =
     in
       if screen = page then ()
       (* the reader moved: a restored place no longer holds them *)
-      else let val () = !_settle_anchor := ~1 in _place_shown(screen, page_count, chapter, chapter_count) end
+      else let val () = !_anchor_kept := ~1 in _place_shown(screen, page_count, chapter, chapter_count) end
     end
 
 (* The reader turns the page on or back. Reading on from where a jump
@@ -4763,7 +4779,7 @@ implement reader_relayout () = _relayout()
 #pub fun reader_page (page: Int): void
 implement reader_page (page) = let
   (* the reader moved: a restored place no longer holds them *)
-  val () = !_settle_anchor := ~1
+  val () = !_anchor_kept := ~1
   (* a jump within the chapter, not a turn: one under way ends *)
   val () = _turn_settle()
 in case+ reading_get() of
@@ -4796,7 +4812,7 @@ implement $P.dispose<turned>(_) = ()
 
 implement reader_turn_on () = let
   val () = reader_stack_clear()
-  val () = !_settle_anchor := ~1
+  val () = !_anchor_kept := ~1
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>

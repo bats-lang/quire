@@ -1127,7 +1127,13 @@ fonts' (`RFonts`), each given its event as bridge decodes it. A
 chapter's pages are counted again as it is shown, for 3 s (`_settle`),
 and whenever a load of the page's fonts ends (`RFonts`, bridge's
 `listen_fonts_loaded`): the reading face can arrive after those 3 s,
-and the count made with its fallback would stay.
+and the count made with its fallback would stay. A layout made anew
+(those counts, a resize, the type) shows the page of the node the
+place is kept by (`_anchor_kept`: the one a jump took the reader to,
+else the one at the top of the page they last moved to) and keeps that
+node until the reader moves, never the node at the top of the page it
+then shows, which can begin before it, so layouts one after another do
+not move the place back (quire#305).
 
 ## A page that stops answering in e2e explains itself (#244)
 

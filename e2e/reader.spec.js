@@ -148,19 +148,27 @@ test('the place is kept in a later chapter too', async ({ page }) => {
   await expect.poll(() => place(page)).toEqual(at);
 });
 
-test('a new type size or window size keeps the page\'s text in view', async ({ page }, testInfo) => {
-  test.skip(onAndroid(testInfo), 'fails sometimes in the android project after the window narrows, cause not yet known: out of it until quire#305 is fixed');
+test('a new type size or window size keeps the page\'s text in view', async ({ page }) => {
   await start(page);
   await readBook(page, book('Relayout', 2, 30));
   for (let k = 0; k < 3; k++) await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(4);
   const top = (await startsOnPage(page))[0];
+  // each check waits for the chapter's new page count, so it sees the
+  // page the new layout shows, not the old scroll over the new columns
+  // (which can hold the text by chance); and the second layout keeps
+  // the text the first kept, even where another paragraph now begins
+  // the page before it (quire#305)
+  const pages = (await place(page)).t;
   await openSettings(page);
   await page.getByRole('slider', { name: 'Size' }).fill('26');
   await page.keyboard.press('Escape');
+  await expect.poll(async () => (await place(page)).t).not.toBe(pages);
   await expect.poll(() => onPage(page, top)).toBe(true);
+  const larger = (await place(page)).t;
   const size = page.viewportSize();
   await page.setViewportSize({ width: Math.round(size.width * 0.7), height: size.height });
+  await expect.poll(async () => (await place(page)).t).not.toBe(larger);
   await expect.poll(() => onPage(page, top)).toBe(true);
 });
 
