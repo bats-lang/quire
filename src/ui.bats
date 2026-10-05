@@ -301,6 +301,16 @@ fn _scroll_in {doc_loc,id_loc:agz}{id_len:pos | id_len < 256}
   | ~ScrolledAcross(left) => $D.set_scroll_left(document, id_bytes, id_len, left)
   | ~ScrolledDown(top) => $D.set_scroll_top(document, id_bytes, id_len, top)
 
+(* Element id scrolled back to its top *)
+#pub fn ui_scroll_to_top {id_len:pos | id_len < 256} (id: string id_len): void
+implement ui_scroll_to_top (id) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _scroll_in(document, id_bytes, id_len, ScrolledDown(0))
+  val () = $D.destroy(document)
+in release_bytes(id_frozen, id_bytes) end
+
 #pub fn ui_copy_inert {source_len,parent_len,copy_len:pos | source_len < 256; parent_len < 256; copy_len < 256}
   (source: string source_len, parent: string parent_len, copy: string copy_len, scroll: scrolled): void
 implement ui_copy_inert (source, parent, copy, scroll) = let
