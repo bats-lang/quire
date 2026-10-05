@@ -1188,6 +1188,9 @@ in Sheet(builder) end
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
   | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea
+  (* the reader's own variables: the page's top and bottom paddings and
+     the running footer's place, each given once (_reader) *)
+  | PageTopVariable | PageBottomVariable | FooterBottomVariable | FooterHeightVariable
 
 fn _property_name (property: prop): [length:pos | length <= 16] string length =
   case+ property of
@@ -1221,6 +1224,8 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
   | GridArea() => "grid-area"
+  | PageTopVariable() => "--page-top" | PageBottomVariable() => "--page-bottom"
+  | FooterBottomVariable() => "--footer-bottom" | FooterHeightVariable() => "--footer-height"
 
 (* prop:value; *)
 fn lay {left:nat}{media:bool}{value_len:nat | value_len + 18 <= left}
@@ -1973,6 +1978,21 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
+  (* The visible reading area, given once here: what the page's
+     paddings keep clear (its columns are the page's height less them,
+     so the column is exactly that area), the running footer's place,
+     and a vertical page's column gap (#296). The footer sits 8px above
+     the screen's bottom inset (Android's navigation bar, which an app
+     drawn edge to edge has under it), 16px tall, and the text keeps
+     half a line (at least 12px) clear of the footer below and of the
+     top inset (the status bar) above: Material 3 spaces on 4dp steps
+     and pads what the system bars would cover by their insets.
+     A line-height unit (lh) in a variable is the line of the element
+     that uses it: the page's *)
+  val sheet = lay(sheet, FooterBottomVariable(), "calc(env(safe-area-inset-bottom) + 8px)")
+  val sheet = lay(sheet, FooterHeightVariable(), "16px")
+  val sheet = lay(sheet, PageTopVariable(), "max(48px,calc(env(safe-area-inset-top) + max(12px,.5lh)))")
+  val sheet = lay(sheet, PageBottomVariable(), "calc(var(--footer-bottom) + var(--footer-height) + max(12px,.5lh))")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top,.bot")
@@ -2083,7 +2103,9 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "0")
   val sheet = lay(sheet, Right(), "0")
-  val sheet = lay(sheet, Bottom(), "max(8px,env(safe-area-inset-bottom))")
+  val sheet = lay(sheet, Bottom(), "var(--footer-bottom)")
+  val sheet = lay(sheet, Height(), "var(--footer-height)")
+  val sheet = lay(sheet, LineHeight(), "var(--footer-height)")
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = lay(sheet, Padding(), "0 24px")
   val sheet = lay(sheet, FontSize(), "12px")
@@ -2096,7 +2118,8 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   (* the page keeps out of the screen's cutouts and rounded corners
      (the safe area) on every side, in or out of full screen: above and
-     below in its paddings, and at its sides (a cutout there in
+     below in its paddings (the reading area's, .rv, which keep the
+     running footer clear too, #296), and at its sides (a cutout there in
      landscape) in its margins, so its columns, a page each, are the
      safe width (#275) *)
   val sheet = rule(sheet, ".caf")
@@ -2105,8 +2128,8 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MarginLeft(), "env(safe-area-inset-left)")
   val sheet = lay(sheet, MarginRight(), "env(safe-area-inset-right)")
-  val sheet = lay(sheet, PaddingTop(), "max(48px,env(safe-area-inset-top))")
-  val sheet = lay(sheet, PaddingBottom(), "max(36px,env(safe-area-inset-bottom))")
+  val sheet = lay(sheet, PaddingTop(), "var(--page-top)")
+  val sheet = lay(sheet, PaddingBottom(), "var(--page-bottom)")
   val sheet = lay(sheet, ColumnFill(), "auto")
   val sheet = lay(sheet, ColumnGap(), "0")
   val sheet = lay(sheet, ColumnWidth(), "100vw")
@@ -2149,9 +2172,11 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Margin(), "2em auto")
   val sheet = lay(sheet, MaxWidth(), "200px")
   val sheet = close(sheet)
+  (* a picture is at most a column's height: the window's less the
+     page's paddings *)
   val sheet = rule(sheet, ".caf img")
   val sheet = lay(sheet, MaxWidth(), "100%")
-  val sheet = lay(sheet, MaxHeight(), "calc(100vh - 110px)")
+  val sheet = lay(sheet, MaxHeight(), "calc(100dvh - var(--page-top) - var(--page-bottom))")
   val sheet = lay(sheet, ObjectFit(), "contain")
   val sheet = lay(sheet, Height(), "auto")
   val sheet = lay(sheet, Display(), "block")
@@ -2195,7 +2220,7 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".caf.vertical,.caf.vertical-lr")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, ColumnWidth(), "100vh")
-  val sheet = lay(sheet, ColumnGap(), "calc(max(48px,env(safe-area-inset-top)) + max(36px,env(safe-area-inset-bottom)))")
+  val sheet = lay(sheet, ColumnGap(), "calc(var(--page-top) + var(--page-bottom))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.vertical")
   val sheet = lay(sheet, WritingMode(), "vertical-rl")

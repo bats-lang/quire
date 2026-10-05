@@ -8,8 +8,9 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, place, placeChanged,
 } from './helpers.js';
+import { checkPageMargins } from './page-margins.js';
 
 /** The names of the visible controls among locators that reach out of
     the window's width */
@@ -336,6 +337,63 @@ test('the page keeps its text out of the safe area: a cutout above or beside it'
   await fits(page, 'the reader beside a cutout');
 });
 
+// Scrolled, the text scrolls only inside the reading area (#296): it is
+// clipped below the top inset (the status bar) and above the footer,
+// which keeps its own band clear of the bottom inset, so no line is
+// drawn under the footer or a system bar, wherever the chapter is
+// scrolled to. A turn scrolls the area's height less a line, so the
+// line cut at its foot is whole at the next screen's head; and the
+// bands beside the area are still the page's, for a tap or a drag
+for (const insets of [
+  { top: 0, left: 0, right: 0, bottom: 0 },
+  { top: 45, left: 0, right: 0, bottom: 24 },
+  { top: 24, left: 0, right: 0, bottom: 48 },
+]) {
+  test(`scrolled, the text is clipped to the reading area, clear of its footer and the screen's insets (insets ${insets.top}/${insets.bottom})`, async ({ page }) => {
+    test.setTimeout(120000);
+    const devtools = await page.context().newCDPSession(page);
+    await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+    await start(page);
+    await readBook(page, { title: 'Scrolled', author: 'L', rawChapters: chapters(2, 60) });
+    await openReadingSettings(page, 'Page');
+    await readingSettings(page).getByRole('group', { name: 'Layout' }).getByRole('button', { name: 'Scroll', exact: true }).click();
+    await readingSettings(page).getByRole('button', { name: 'Close', exact: true }).click();
+    const view = bookPage(page);
+    await expect.poll(() => view.evaluate(e => getComputedStyle(e).overflowY)).toBe('auto');
+    await barsDown(page);
+    // turned a screen at a time (the first turn lands on the screens'
+    // steps, which the later ones are measured from), then scrolled by
+    // hand to where lines fall across the area's edges
+    await checkPageMargins(page, 'scrolled, at the chapter\'s head');
+    for (let turn = 0; turn < 3; turn++) {
+      const before = await view.evaluate(e => ({ top: e.scrollTop, height: e.clientHeight, line: parseFloat(getComputedStyle(e).lineHeight) }));
+      await page.keyboard.press('ArrowRight');
+      await expect.poll(() => view.evaluate(e => e.scrollTop)).toBeGreaterThan(before.top);
+      const moved = (await view.evaluate(e => e.scrollTop)) - before.top;
+      if (turn > 0) {
+        expect(moved, 'a turn keeps the last line of the screen before').toBeLessThanOrEqual(before.height - before.line + 1);
+        expect(moved, 'a turn scrolls the reading area less a line').toBeGreaterThanOrEqual(before.height - before.line - 2);
+      }
+      await barsDown(page);
+      await checkPageMargins(page, `scrolled, turn ${turn + 1}`);
+    }
+    for (const by of [37, 211]) {
+      await view.evaluate((e, by) => { e.scrollTop += by; }, by);
+      await barsDown(page);
+      const found = await checkPageMargins(page, `scrolled by hand ${by}px more`);
+      expect(found, 'a scrolled page with the bars down to measure').not.toBeNull();
+    }
+    // a tap in a band beside the area lands on the page
+    const bands = await page.evaluate(() => {
+      const doc = document.querySelector('[role=document]');
+      const box = doc.getBoundingClientRect();
+      const on = (x, y) => !!document.elementFromPoint(x, y)?.closest('[role=document]');
+      return { above: on(8, box.top / 2), below: on(8, (box.bottom + innerHeight) / 2) };
+    });
+    expect(bands, 'the bands above and below the reading area are the page\'s').toEqual({ above: true, below: true });
+  });
+}
+
 // The reading settings' sheet scrolls within the window, and its Close
 // and tabs stay in reach however far it is scrolled, in full screen too
 // (#275: in full screen the sheet could no longer be scrolled to Close)
@@ -373,6 +431,70 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await expect(panel).toBeHidden();
   if (!onAndroid(testInfo)) await page.evaluate(() => document.exitFullscreen());
 });
+
+/** The bars put down, so the running footer shows (a tap on the page's
+    middle brings them up and puts them down) */
+async function barsDown(page) {
+  const footer = page.locator('#footer');
+  if (!(await footer.isVisible())) {
+    const box = await bookPage(page).boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await expect(footer).toBeVisible();
+}
+
+// A paged page keeps its last line clear of its running footer, the
+// footer clear of the screen's bottom inset (Android's navigation bar,
+// which the app is drawn over edge to edge), and its first line clear
+// of the top inset (the status bar), so no line is cut in half (#296).
+// With the bars down, on several pages and at several text sizes (a
+// page's last line ends where the lines happen to fill it): with no
+// insets, a gesture bar's and a three-button bar's. pageMargins says
+// what each margin must be
+for (const insets of [
+  { top: 0, left: 0, right: 0, bottom: 0 },
+  { top: 45, left: 0, right: 0, bottom: 24 },
+  { top: 24, left: 0, right: 0, bottom: 48 },
+]) {
+  test(`the page's text keeps clear of its footer and the screen's insets (insets ${insets.top}/${insets.bottom})`, async ({ page }) => {
+    test.setTimeout(180000);
+    const devtools = await page.context().newCDPSession(page);
+    await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+    await start(page);
+    await readBook(page, { title: 'Footer', author: 'L', rawChapters: chapters(2, 80) });
+    for (const size of [18, 21, 24, 28]) {
+      await openSettings(page);
+      await page.getByRole('slider', { name: 'Size' }).fill(String(size));
+      await page.keyboard.press('Escape');
+      for (let turn = 0; turn < 4; turn++) {
+        if (turn > 0) {
+          const before = await place(page);
+          await page.keyboard.press('ArrowRight');
+          await placeChanged(page, before);
+        }
+        await barsDown(page);
+        const found = await checkPageMargins(page, `size ${size}, page ${turn + 1}`);
+        expect(found, 'a paged page with the bars down to measure').not.toBeNull();
+      }
+    }
+    // and in full screen, measured the same way
+    // (a browser's Fullscreen API, or in the Android app the status bar
+    // hidden: either way the button is pressed)
+    await openReadingSettings(page, 'Page');
+    const full = readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+    await full.click();
+    await expect(full).toHaveAttribute('aria-pressed', 'true');
+    await readingSettings(page).getByRole('button', { name: 'Close', exact: true }).click();
+    for (let turn = 0; turn < 2; turn++) {
+      const before = await place(page);
+      await page.keyboard.press('ArrowRight');
+      await placeChanged(page, before);
+      await barsDown(page);
+      const found = await checkPageMargins(page, `full screen, page ${turn + 1}`);
+      expect(found, 'a paged page with the bars down to measure').not.toBeNull();
+    }
+  });
+}
 
 // The reading settings' sheet is as tall as its tallest tab, whichever
 // tab is shown (#301): switching tabs moves neither the sheet nor its
