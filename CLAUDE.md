@@ -928,7 +928,13 @@ Reset to defaults under them all. The tabs (`sheet_tab` in
 selected and in the Tab order, the arrow keys, Home and End moving the
 focus and the panel with it (`_sheet_tab_key` in `src/bin/quire.bats`);
 the sheet opens on Look, and its head (title, Close and the tabs) stays
-at its top as it scrolls. Their controls are one `typography_control`
+at its top as it scrolls. The sheet is as tall as its tallest tab
+(#301): the panels lie one over another in one grid cell
+(`typography-panels`, `.tabpanels`), the ones not chosen `.unchosen`
+(`visibility: hidden`: their room kept, but not seen, focused or read
+out), so switching tabs moves neither the sheet nor its tabs, and the
+height follows the rows actually shown; a tab chosen shows from the
+sheet's top (`ui_scroll_to_top`). Their controls are one `typography_control`
 datatype, stored, backed up and reset as before.
 
 The Turning and Read aloud tabs' rows (where taps turn pages, the
