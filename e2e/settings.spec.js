@@ -1,7 +1,7 @@
 // Reading settings: each control changes the page as it moves, and
 // every setting is kept without being saved by hand.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { start, readBook, toLibrary, openBook, chapters, bookPage, dialog, openSettings, colours, reload,
   readingSettings, openReadingSettings,
 } from './helpers.js';
@@ -414,7 +414,8 @@ test('in the Android app, full screen holds: bars the system brought back are hi
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
 });
 
-test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }) => {
+test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "a browser tab's screen: the Android app has the rotation lock and the brightness (the test before this one)");
   await start(page);
   await readBook(page, { title: 'Tabbed', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
@@ -454,7 +455,8 @@ test.describe('auto at night, to the minute', () => {
   });
 });
 
-test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }) => {
+test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app's full screen hides the status bar (the app's screen test, before these)");
   await start(page);
   await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
