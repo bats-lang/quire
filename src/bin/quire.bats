@@ -1521,18 +1521,24 @@ fn _sheet_tab_before (tab: sheet_tab): sheet_tab =
   | AloudTab() => TurningTab()
 
 (* tab marked chosen or not: selected, in the Tab order, and its panel
-   shown, or none of them *)
+   shown, or none of them (a panel not chosen keeps its room in the
+   panels' one cell, unseen, unfocused and not read out: app.bats's
+   _sheet_tab, #301) *)
 fn _sheet_tab_mark (tab: sheet_tab, chosen: bool): void = let
   val id = sheet_tab_control_id(tab)
   val () = ui_attr(id, ASelected, (if chosen then "true" else "false"): [value_len:pos | value_len < 256] string value_len)
   val () = ui_attr(id, ATabindex, (if chosen then "0" else "-1"): [value_len:pos | value_len < 256] string value_len)
-in ui_show(sheet_tab_panel_id(tab), chosen) end
+in ui_class(sheet_tab_panel_id(tab),
+  (if chosen then "tabpanel" else "tabpanel unchosen"): [class_len:pos | class_len < 256] string class_len) end
 
 (* The reading settings' tab chosen shown, and the others hidden
    (WAI-ARIA's tabs pattern: one tab selected, the only one in the Tab
-   order) *)
+   order), from its top: the sheet is as tall as its tallest tab, so a
+   shorter one, shown where a taller was scrolled, would show only the
+   room under it *)
 fn _sheet_tab_choose (chosen: sheet_tab): void = let
   val () = !_sheet_tab_shown := chosen
+  val () = ui_scroll_to_top("typography-panel")
   val () = _sheet_tab_mark(LookTab(), (case+ chosen of LookTab() => true | _ => false): bool)
   val () = _sheet_tab_mark(PageTab(), (case+ chosen of PageTab() => true | _ => false): bool)
   val () = _sheet_tab_mark(TurningTab(), (case+ chosen of TurningTab() => true | _ => false): bool)
