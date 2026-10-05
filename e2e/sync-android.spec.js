@@ -115,6 +115,50 @@ test('Use Android syncs through the app data folder of the device\'s Google acco
   await b.context.close();
 });
 
+/** The app opened again (a relaunch): its page loaded anew */
+async function reopened(page) {
+  await page.reload();
+  await expect(librarySearch(page)).toBeVisible();
+}
+
+test('opened again, the app syncs with the token it kept; once Drive refuses it, sync is paused until Sync now, and opening the app again leaves it so', async ({ browser }) => {
+  const server = drive();
+  const a = await device(browser, server);
+  await importFiles(a.page, [epubFile(book)], 1);
+  await joinAndroid(a.page);
+  // opened again: the sync made as it opens has the token, and asks
+  // Google nothing
+  let asked = server.requests.length;
+  await reopened(a.page);
+  await expect.poll(() => server.requests.length).toBeGreaterThan(asked);
+  await librarySettings(a.page);
+  await expect(row(a.page)).toHaveText(/^Android · synced (just now|1 min ago)$/);
+  await settingsButton(a.page, 'Done').click();
+  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(0);
+  // the token's hour is up: the sync made as the app opens is refused,
+  // and sync is paused, said in the Sync row and on its screen
+  server.token = 'token-2';
+  await reopened(a.page);
+  await librarySettings(a.page);
+  await expect(row(a.page)).toHaveText('Android · paused, tap Sync now');
+  await settingsButton(a.page, 'Done').click();
+  // opened again while paused: nothing is tried, nothing changes
+  asked = server.requests.length;
+  await reopened(a.page);
+  await hide(a.page);
+  await openSync(a.page);
+  await expect(status(a.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
+  expect(server.requests.length).toBe(asked);
+  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(0);
+  // Sync now asks Google (its sheet), then syncs
+  await a.page.evaluate(() => { window.__google.token = 'token-2'; });
+  await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(a.page)).toHaveText(/^Last synced on /);
+  expect(await a.page.evaluate(() => window.__google.signIns)).toBe(1);
+  expect(unexpected(a)).toEqual([]);
+  await a.context.close();
+});
+
 test('a file another device wrote meanwhile is read again and merged', async ({ browser }) => {
   const server = drive();
   const file = epubFile(book);
@@ -173,7 +217,7 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   server.token = 'token-2';
   await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
-  await expect(status(a.page)).toContainText('Tap Sync now to sign in to Google again.');
+  await expect(status(a.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
   await a.page.evaluate(() => { window.__google.token = 'token-2'; });
   await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(a.page)).toHaveText(/^Last synced on /);
@@ -277,7 +321,7 @@ test('in a browser, Google Drive syncs through the same app data folder, an hour
   await web.page.evaluate(() => { window.__gis.token = 'token-2'; });
   await settingsButton(web.page, 'Sync ›').click();
   await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
-  await expect(status(web.page)).toContainText('Tap Sync now to sign in to Google again.');
+  await expect(status(web.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
   await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(web.page)).toHaveText(/^Last synced on /);
   expect(await web.page.evaluate(() => window.__gis.requests)).toBe(3);
@@ -285,6 +329,46 @@ test('in a browser, Google Drive syncs through the same app data folder, an hour
   await panel(web.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(web.page)).toHaveText('Sync is off.');
   expect(await web.page.evaluate(() => window.__gis.revoked)).toEqual(['token-2']);
+  expect(unexpected(web)).toEqual([]);
+  await web.context.close();
+});
+
+test('in a browser opened again, Google Drive syncs with the token it kept; once Drive refuses it, sync is paused until Sync now', async ({ browser }) => {
+  const server = drive();
+  const web = await browserDevice(browser, server);
+  await importFiles(web.page, [epubFile(book)], 1);
+  await openSync(web.page);
+  await panel(web.page).getByRole('button', { name: 'Google Drive' }).click();
+  await expect(status(web.page)).toHaveText(/^Last synced on /);
+  await closeSync(web.page);
+  // opened again: the sync made as it opens has the token, and opens
+  // no Google window (a page may open one only at a tap)
+  let asked = server.requests.length;
+  await reopened(web.page);
+  await expect.poll(() => server.requests.length).toBeGreaterThan(asked);
+  await librarySettings(web.page);
+  await expect(row(web.page)).toHaveText(/^Google Drive · synced (just now|1 min ago)$/);
+  await settingsButton(web.page, 'Done').click();
+  expect(await web.page.evaluate(() => window.__gis.requests)).toBe(0);
+  // the hour is up: paused, said in the Sync row and on its screen
+  server.token = 'token-2';
+  await reopened(web.page);
+  await librarySettings(web.page);
+  await expect(row(web.page)).toHaveText('Google Drive · paused, tap Sync now');
+  await settingsButton(web.page, 'Done').click();
+  // opened again while paused: nothing is tried, nothing changes
+  asked = server.requests.length;
+  await reopened(web.page);
+  await hide(web.page);
+  await openSync(web.page);
+  await expect(status(web.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
+  expect(server.requests.length).toBe(asked);
+  expect(await web.page.evaluate(() => window.__gis.requests)).toBe(0);
+  // one tap: Sync now asks Google (its window), then syncs
+  await web.page.evaluate(() => { window.__gis.token = 'token-2'; });
+  await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
+  await expect(status(web.page)).toHaveText(/^Last synced on /);
+  expect(await web.page.evaluate(() => window.__gis.requests)).toBe(1);
   expect(unexpected(web)).toEqual([]);
   await web.context.close();
 });
