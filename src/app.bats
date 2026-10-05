@@ -690,14 +690,18 @@ in _hide(reading_part_id(place, SpeechRow())) end
 (* A tab of the reading settings' sheet and the panel it shows: the
    panel is named by its tab, and only the chosen tab's is shown, the
    only one of them in the Tab order (quire.bats's _sheet_tab_choose:
-   WAI-ARIA's tabs pattern, its focus moved by the arrow keys) *)
+   WAI-ARIA's tabs pattern, its focus moved by the arrow keys). The
+   panels lie one over another in one cell (.tabpanels), so the sheet is
+   as tall as its tallest tab and does not move as the tabs are switched
+   (#301); one not chosen (.unchosen) keeps its room but is not seen,
+   focused or read out *)
 fn _sheet_tab {tab_len,label_len,panel_len:pos | tab_len < 256; label_len < 256; panel_len < 256}
   (tab: string tab_len, label: string label_len, panel: string panel_len, chosen: bool): void = let
   val () = ui_tab("typography-tabs", tab, label, panel, chosen)
   val () = ui_attr(tab, ATabindex, (if chosen then "0" else "-1"): [value_len:pos | value_len < 256] string value_len)
-  val () = ui_el("typography-panel", panel, TDiv, "tabpanel")
-  val () = ui_labelled(panel, NTabpanel, tab)
-in ui_show(panel, chosen) end
+  val () = ui_el("typography-panels", panel, TDiv,
+    (if chosen then "tabpanel" else "tabpanel unchosen"): [class_len:pos | class_len < 256] string class_len)
+in ui_labelled(panel, NTabpanel, tab) end
 
 (* The reading settings' sheet (#288): every reading setting, in named
    tabs within the one sheet, as Kindle's Aa menu has them (Themes,
@@ -720,6 +724,8 @@ fn _settings (): void = let
   val () = ui_text_btn("typography-head", "typography-close", "btn", "Close")
   val () = ui_el("typography-head", "typography-tabs", TDiv, "tabs")
   val () = ui_named("typography-tabs", NTablist, "Reading settings")
+  (* the tabs' panels, in one cell *)
+  val () = ui_el("typography-panel", "typography-panels", TDiv, "tabpanels")
   val () = _sheet_tab("typography-look-tab", "Look", "typography-look", true)
   val () = _sheet_tab("typography-page-tab", "Page", "typography-page", false)
   val () = _sheet_tab("typography-turning-tab", "Turning", "typography-turning", false)
