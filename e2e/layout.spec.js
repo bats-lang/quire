@@ -10,6 +10,8 @@ import {
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings,
 } from './helpers.js';
+import { cutOff, statesUnseen } from './controls-shown.js';
+import { solidPng } from './create-epub.js';
 
 /** The names of the visible controls among locators that reach out of
     the window's width */
@@ -26,43 +28,12 @@ async function outside(page, locators) {
   return bad;
 }
 
-/** What is cut off on the screen shown: each visible control whose
-    content is wider or taller than its box (its label clipped, cut by an
-    ellipsis, or spilling over its edges), and each visible element of
-    text whose text spills out of it (an ellipsis that shortens a title
-    on purpose is not counted: the title is whole elsewhere). The book's
-    own page is left out: its columns run past it by design */
-async function cutOff(page) {
-  return page.evaluate(() => {
-    const controls = 'button, a[href], label, [role=button], [role=menuitem], [role=tab], [role=link], [role=switch], [role=checkbox], [role=radio]';
-    const book = document.querySelector('[role=document]');
-    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
-    const named = e => (e.getAttribute('aria-label') || e.textContent || e.id || e.tagName).trim().slice(0, 40);
-    const bad = [];
-    for (const e of document.querySelectorAll('body *')) {
-      if (book && book.contains(e)) continue;
-      if (!shown(e)) continue;
-      const style = getComputedStyle(e);
-      // what scrolls holds more than it shows by design
-      if (/auto|scroll/.test(style.overflowX + style.overflowY)) continue;
-      // read out, not shown (1 px and clipped)
-      if (e.clientWidth <= 1 && e.clientHeight <= 1) continue;
-      const wide = e.scrollWidth > e.clientWidth + 1;
-      const tall = e.scrollHeight > e.clientHeight + 1;
-      if (e.matches(controls)) {
-        if (wide || tall) bad.push(`${named(e)} (${e.clientWidth}x${e.clientHeight} holds ${e.scrollWidth}x${e.scrollHeight})`);
-      } else if (wide && style.overflowX === 'visible' && [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) {
-        bad.push(`${named(e)} (text ${e.scrollWidth} px in ${e.clientWidth})`);
-      }
-    }
-    return bad;
-  });
-}
-
-/** Expects nothing cut off on the screen shown, and nothing wider than
+/** Expects nothing cut off on the screen shown (controls-shown.js), no
+    toggle whose state shows only in aria-pressed, and nothing wider than
     the window, naming the screen when something is */
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
+  expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
 
@@ -370,4 +341,185 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await close.click();
   await expect(panel).toBeHidden();
   await page.evaluate(() => document.exitFullscreen());
+});
+
+/** The Android app's plugins, played (Capacitor's SystemBars, the
+    rotation lock, the brightness), so the screens show the app's own
+    controls; each call kept in window.calls */
+function appPlayed() {
+  window.calls = [];
+  const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+  window.Capacitor = { isNativePlatform: () => true, Plugins: {
+    SystemBars: { hide: call('hide'), show: call('show') },
+    ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+    ScreenBrightness: { setBrightness: call('brightness') },
+  } };
+}
+
+// Every screen, sheet and tab of the app, the Android app's own rows
+// shown (the rotation lock, the brightness): no control's text cut (a
+// select's too: the brightness's "System" was cut to "Syste…") and no
+// toggle whose state shows only in aria-pressed (quire#300). Then every
+// dialog the app has made must have been one of those checked, so a
+// screen added later is walked here or this fails, naming it
+test('in the app, every screen shows each control\'s whole text and each toggle\'s state, and none is left unwalked', async ({ page }) => {
+  await page.addInitScript(appPlayed);
+  await start(page);
+  const seen = new Set();
+  const check = async screen => {
+    await fits(page, screen);
+    for (const id of await page.evaluate(() => [...document.querySelectorAll('[role=dialog]')]
+      .filter(e => e.checkVisibility() && e.getClientRects().length > 0).map(e => e.id))) seen.add(id);
+  };
+  await check('the empty library');
+  await importFiles(page, [
+    epubFile({ title: 'A Rather Long Title For A Book That Goes On And On', author: 'Someone With A Rather Long Name' }),
+    epubFile({ title: 'Short', author: 'S' }),
+  ], 2);
+  await check('the library');
+  await bookMenu(page, 'Short');
+  await check('the book menu');
+  await menuItem(page, 'Collections').click();
+  await expect(dialog(page, 'Collections')).toBeVisible();
+  await check('the collections panel');
+  await dialog(page, 'Collections').getByRole('button', { name: 'New collection' }).click();
+  await expect(dialog(page, 'New collection')).toBeVisible();
+  await check('the new collection dialog');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await bookMenu(page, 'Short');
+  await menuItem(page, 'Book info').click();
+  await expect(dialog(page, 'Book info')).toBeVisible();
+  await check('book info');
+  await page.keyboard.press('Escape');
+  await libraryMenu(page);
+  await check('the library menu');
+  await page.keyboard.press('Escape');
+  for (const name of ['Reading statistics', 'Catalogues', 'About Quire']) {
+    await libraryMenu(page);
+    await menuItem(page, name).click();
+    await expect(page.getByRole('dialog', { name: name === 'About Quire' ? 'About Quire' : name, exact: true })).toBeVisible();
+    await check(name);
+    await page.keyboard.press('Escape');
+  }
+  await librarySettings(page);
+  await check('Settings');
+  for (const row of ['Reading ›', 'Sync ›', 'Dictionaries ›', 'About Quire ›']) {
+    await settingsButton(page, row).click();
+    await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
+    await check(row);
+    await page.keyboard.press('Escape');
+  }
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
+  await bookMenu(page, 'Short');
+  await menuItem(page, 'Move to Trash').click();
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
+  await check('the Empty the Trash dialog');
+  await page.keyboard.press('Escape');
+  // a note and a picture, so the note and the picture's viewer open
+  await readBook(page, {
+    title: 'A Rather Long Title, Read', author: 'L',
+    rawChapters: [{ body: '<p>A claim<a epub:type="noteref" href="#n1">1</a>.</p><p><img src="images/map.png" alt="the map"/></p>' +
+      '<aside epub:type="footnote" id="n1"><p>The note.</p></aside>' }, ...chapters(2)],
+    extraImages: [{ name: 'images/map.png', data: solidPng(120, 120) }],
+  });
+  await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
+  await expect(dialog(page, 'Footnote')).toBeVisible();
+  await check('a footnote');
+  await page.keyboard.press('Escape');
+  const map = bookPage(page).getByRole('img', { name: 'the map' });
+  await expect.poll(() => map.evaluate(i => i.naturalWidth)).toBe(120);
+  await map.click();
+  await expect(dialog(page, 'Image')).toBeVisible();
+  await check('the picture viewer');
+  await page.keyboard.press('Escape');
+  await showChrome(page);
+  await check('the reader with its bars');
+  for (const name of ['Contents', 'Annotations']) {
+    await clickControl(page, name);
+    await expect(dialog(page, name)).toBeVisible();
+    await check(name);
+    await page.keyboard.press('Escape');
+  }
+  for (const tab of ['Look', 'Page', 'Turning', 'Read aloud']) {
+    await openReadingSettings(page, tab);
+    await check(`Reading settings, ${tab}`);
+  }
+  // each toggle of the Page tab on, too: its look on is checked as well
+  await openReadingSettings(page, 'Page');
+  for (const name of ['Full screen', 'Lock rotation']) {
+    const toggle = readingSettings(page).getByRole('button', { name, exact: true });
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  }
+  await check('Reading settings, Page, its switches on');
+  await page.keyboard.press('Escape');
+  await showChrome(page);
+  await topBar(page).getByRole('button', { name: 'Search in book' }).click();
+  await expect(dialog(page, 'Search in book')).toBeVisible();
+  await check('Search in book');
+  await page.keyboard.press('Escape');
+  await showChrome(page);
+  await topBar(page).getByRole('button', { name: 'Settings' }).click();
+  await check('Settings over the reader');
+  await page.keyboard.press('Escape');
+  const unwalked = await page.evaluate(seen => [...document.querySelectorAll('[role=dialog]')]
+    .map(e => e.id).filter(id => !seen.includes(id)), [...seen]);
+  expect(unwalked, 'screens this walk never checked: walk them here').toEqual([]);
+});
+
+/** The book's text lines as far as they show: each line box of the
+    page's paragraphs, cut to the box the page scrolls in (scrolled, a
+    line half out of it shows only its part in it) */
+async function seenLines(page) {
+  return bookPage(page).evaluate(doc => {
+    const box = doc.getBoundingClientRect();
+    const lines = [];
+    for (const p of doc.querySelectorAll('p')) {
+      for (const r of p.getClientRects()) {
+        const top = Math.max(r.top, box.top), bottom = Math.min(r.bottom, box.bottom);
+        if (r.width > 0 && bottom - top > 0.5 && r.right > box.left + 1 && r.left < box.right - 1) lines.push({ top, bottom, text: p.textContent.slice(0, 20) });
+      }
+    }
+    return lines;
+  });
+}
+
+// quire#300: in the app, full screen asked for while the system still
+// shows its bars (it may refuse, or bring them back at a swipe), and the
+// chapter scrolled: the text keeps to the insets the WebView reports
+// and stops above the running footer, scrolled part way as at its top.
+// A padding scrolls with the text, so the text used to run on under the
+// status bar, the footer and the navigation bar
+test('in the app, scrolled and in full screen with the bars still shown, no text runs under the bars or the footer', async ({ page }) => {
+  const insets = { top: 40, left: 0, right: 0, bottom: 48 };
+  await page.addInitScript(appPlayed);
+  const devtools = await page.context().newCDPSession(page);
+  await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+  await start(page);
+  await readBook(page, { title: 'Scrolled Under', author: 'L', rawChapters: chapters(2, 80) });
+  await openReadingSettings(page, 'Page');
+  await readingSettings(page).getByRole('button', { name: 'Scroll', exact: true }).click();
+  const full = readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+  await full.click();
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('Escape');
+  const footer = page.locator('#footer');
+  for (const by of [0, 333, 1000]) {
+    await bookPage(page).evaluate((doc, by) => { doc.scrollTop = by; }, by);
+    await expect.poll(async () => (await seenLines(page)).length).toBeGreaterThan(0);
+    const v = page.viewportSize();
+    const lines = await seenLines(page);
+    const under = lines.filter(r => r.top < insets.top - 1 || r.bottom > v.height - insets.bottom + 1);
+    expect(under, `text under the bars, scrolled ${by} px`).toEqual([]);
+    if (await footer.isVisible()) {
+      const f = await footer.boundingBox();
+      expect(f.y + f.height, 'the footer above the bottom inset').toBeLessThanOrEqual(v.height - insets.bottom + 1);
+      const covered = lines.filter(r => r.bottom > f.y + 1);
+      expect(covered, `text at or under the footer, scrolled ${by} px`).toEqual([]);
+    }
+  }
 });

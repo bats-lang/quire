@@ -2725,6 +2725,94 @@ fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
+(* The reading settings' switches and stacked rows (quire#300): a
+   switch is a button the row's width, its name at the start and a drawn
+   track at the end, whose knob sits at the start, in the edge's colour,
+   while it is off, and at the end, in the accent's text colour on a
+   track filled with the accent, while it is on (aria-pressed), so its
+   state shows in its look, not only to assistive technology (WCAG
+   1.4.1). Track and knob are graphics that say a state, so each keeps
+   3:1 against what is around it (WCAG 1.4.11): the edge on the card
+   (E_edge_card), the accent on the card (E_accent_card), the knob on
+   the accent (S_accentfg_accent). A bar's toggle on is marked too. A
+   stacked row puts a label, its
+   control the whole width (a select is never cut to "Syste...") and a
+   line saying what it does, one under another *)
+fn _switches {left:nat | left >= 1800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1800] sheet(after, false, false) = let
+  prval _ = E_edge_card
+  prval _ = E_accent_card
+  val sheet = rule(sheet, ".sgroup")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".srow.stack")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = lay(sheet, AlignItems(), "stretch")
+  val sheet = lay(sheet, Gap(), "4px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".stack .slabel")
+  val sheet = lay(sheet, Width(), "auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".stack .ssel")
+  val sheet = lay(sheet, MaxWidth(), "none")
+  val sheet = lay(sheet, Width(), "100%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sabout")
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sbtn.switch")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, JustifyContent(), "space-between")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = lay(sheet, Width(), "100%")
+  val sheet = lay(sheet, Padding(), "8px 0")
+  val sheet = lay(sheet, TextAlign(), "start")
+  val sheet = lay(sheet, FontSize(), "15px")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".switch .track")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, Width(), "44px")
+  val sheet = lay(sheet, Height(), "24px")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, BorderRadius(), "12px")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleCard())
+  val sheet = line(sheet, AllSides(), 2, RoleEdge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".switch .knob")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, Top(), "3px")
+  val sheet = lay(sheet, Left(), "3px")
+  val sheet = lay(sheet, Width(), "14px")
+  val sheet = lay(sheet, Height(), "14px")
+  val sheet = lay(sheet, BorderRadius(), "50%")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleEdge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".switch[aria-pressed=true] .track")
+  val sheet = fill(sheet, RoleAccent())
+  val sheet = line(sheet, AllSides(), 2, RoleAccent())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".switch[aria-pressed=true] .knob")
+  val sheet = lay(sheet, Left(), "23px")
+  val sheet = fill(sheet, RoleAccentText())
+  val sheet = close(sheet)
+  (* a bar's toggle (Read aloud, the narration's, the bookmark) on: the
+     bar's highlight, as under a finger, and a bar of its text's colour
+     under it, which a hover does not have *)
+  val sheet = rule(sheet, ".top .ibtn[aria-pressed=true],.bot .ibtn[aria-pressed=true]")
+  val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
+  val sheet = line(sheet, BottomSide(), 3, RoleBarText())
+  val sheet = close(sheet)
+in sheet end
+
 fn _under_480px {left:nat | left >= 430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 430] sheet(after, false, false) = let
   val sheet = media(sheet, "(max-width:480px)")
   val sheet = rule(sheet, ".lib")
@@ -3035,6 +3123,7 @@ implement app_style () = let
   val sheet = _page_turn(sheet)
   val sheet = _panels(sheet)
   val sheet = _reading_settings(sheet)
+  val sheet = _switches(sheet)
   val sheet = _under_480px(sheet)
   val sheet = _under_600px(sheet)
   val sheet = rule(sheet, ".caf")
