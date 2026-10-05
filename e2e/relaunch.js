@@ -145,8 +145,10 @@ async function scrolled(page) {
 /** The app's state, once it is still: the screen's pixels, what the
     page says to assistive technology (what is open, the book and its
     place, the library's view, every toast, dialog and banner), where
-    each element is scrolled, and every stored record (not the focus:
-    an app opened has none until the reader acts) */
+    each element is scrolled, every stored record, and in the Android
+    app which system bars are hidden (full screen, #313; drawn by the
+    system, not in the page's pixels) and whether the Full screen switch
+    is on (not the focus: an app opened has none until the reader acts) */
 export async function capture(page) {
   await settled(page);
   // the pointer away from every control: where the mouse last was is
@@ -159,6 +161,8 @@ export async function capture(page) {
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   const screen = await page.screenshot({ animations: 'disabled', caret: 'hide' });
   return {
+    bars: await page.evaluate(() => (window.__android ? window.__android.hidden : null)),
+    fullScreen: await page.evaluate(() => document.getElementById('screen-fullscreen')?.getAttribute('aria-pressed') ?? null),
     ringed,
     screen,
     page: await page.locator('body').ariaSnapshot(),
@@ -234,6 +238,8 @@ async function pixelsChanged(page, before, after) {
 export async function sameState(page, before, after) {
   expect(after.page, 'what the page shows (its accessibility tree)').toBe(before.page);
   expect(after.scrolled, 'where each element is scrolled').toEqual(before.scrolled);
+  expect(after.bars, 'the system bars hidden (the Android app)').toEqual(before.bars);
+  expect(after.fullScreen, 'the Full screen switch').toBe(before.fullScreen);
   const records = Object.keys({ ...before.stored, ...after.stored })
     .filter(key => before.stored[key] !== after.stored[key]).sort();
   expect(records.map(key => `${key}\n  before ${before.stored[key]}\n  after  ${after.stored[key]}`),

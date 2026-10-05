@@ -396,10 +396,11 @@ test('in the Android app, the screen: full screen hides both bars, the rotation 
 
 // quire#300: the switch says what the screen shows. Android shows the
 // hidden bars again at a swipe from the edge (immersive mode's way out)
-// and full screen stays on: the next page turned hides them again. The
-// app reopened starts out of full screen, its bars shown, whatever a
-// page before it hid
-test('in the Android app, full screen holds: bars the system brought back are hidden at the next page, and a reopened app starts with them shown', async ({ page }) => {
+// and full screen stays on: the next page turned hides them again.
+// quire#313: full screen is kept, so the app reopened starts as it was
+// left, whatever the bars were then: hidden and the switch on, or, once
+// turned off, shown and the switch off
+test('in the Android app, full screen holds: bars the system brought back are hidden at the next page, and a reopened app starts as it was left', async ({ page }) => {
   await page.addInitScript(barsPlayed);
   await start(page);
   await readBook(page, { title: 'Held', author: 'Settings Tests', rawChapters: chapters(3, 60) });
@@ -415,11 +416,67 @@ test('in the Android app, full screen holds: bars the system brought back are hi
   await openReadingSettings(page, 'Page');
   expect(await switchOn(full)).toBe('on');
   await page.keyboard.press('Escape');
-  // reopened: the bars, hidden until now, are shown, and the switch is off
-  await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify(window.hidden)));
+  // reopened with the bars brought back: they are hidden again, and the
+  // switch is on
   await page.addInitScript(() => { const kept = sessionStorage.getItem('bars'); if (kept) window.hidden = JSON.parse(kept); });
-  await page.reload();
+  await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify({ status: false, navigation: false })));
+  await reload(page);
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]).filter(c => c === 'show'))).toEqual([]);
+  await openReadingSettings(page, 'Page');
+  expect(await switchOn(full)).toBe('on');
+  // turned off, and reopened with the bars still hidden: they are shown
+  await full.click();
+  await expect.poll(() => switchOn(full)).toBe('off');
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify({ status: true, navigation: true })));
+  await reload(page);
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  await openReadingSettings(page, 'Page');
+  expect(await switchOn(full)).toBe('off');
+});
+
+// quire#313: a browser enters full screen only at a click (the
+// Fullscreen API needs the user's activation), so it keeps none: the
+// page opened again is out of full screen, its switch off, and what the
+// app keeps is as it was
+test('in a browser, full screen is not kept: the page opened again starts out of it, the switch off', async ({ page }, testInfo) => {
+  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app keeps its full screen (the test before this one)");
+  await start(page);
+  await readBook(page, { title: 'Unkept', author: 'Settings Tests', rawChapters: chapters(1) });
+  // the settings' record ("S2"), as its bytes
+  const record = () => page.evaluate(() => new Promise((resolve, reject) => {
+    const opened = indexedDB.open('bats');
+    opened.onerror = () => reject(opened.error);
+    opened.onsuccess = () => {
+      const db = opened.result;
+      const tx = db.transaction('kv', 'readonly');
+      let found = null;
+      tx.objectStore('kv').openCursor().onsuccess = event => {
+        const cursor = event.target.result;
+        if (!cursor) return;
+        const value = cursor.value;
+        const bytes = ArrayBuffer.isView(value) ? new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+          : value instanceof ArrayBuffer ? new Uint8Array(value) : null;
+        if (bytes && bytes.length > 20 && bytes[0] === 83 && bytes[1] === 50) found = [...bytes];
+        cursor.continue();
+      };
+      tx.oncomplete = () => { db.close(); resolve(found); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  }));
+  await openReadingSettings(page, 'Page');
+  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  const before = await record();
+  await full.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await page.waitForTimeout(500);
+  expect(await record()).toEqual(before);
+  await reload(page);
+  await openReadingSettings(page, 'Page');
+  await expect(full).toHaveAttribute('aria-pressed', 'false');
+  expect(await page.evaluate(() => !!document.fullscreenElement)).toBe(false);
 });
 
 // quire#314: Android brings the hidden bars back at a swipe from the

@@ -224,8 +224,8 @@ val _narration_notes = ref<narration_notes>(NotesSkipped())
 val _system_dark = ref<bool>(false)
 
 (* ============================================================
-   Reading aloud's speed and voices, the screen's brightness and its
-   rotation lock. Kept with the settings (bytes 20 on of their record),
+   Reading aloud's speed and voices, the screen's brightness, its
+   rotation lock and full screen. Kept with the settings (bytes 20 on of their record),
    apart from the record in memory, as _ruby is; in the backup, and
    reset (and put back by Undo) with the settings
    ============================================================ *)
@@ -306,9 +306,22 @@ fn _rotation_code (turn: rotation): [code:nat | code <= 1] int code =
 fn _rotation_of_code (code: int): rotation =
   if code = 1 then RotationLocked() else RotationFree()
 
+(* Whether the app shows its pages full screen, its system bars hidden
+   (quire#313). The app's own: a browser goes into full screen only at a
+   click (the Fullscreen API needs the user's activation), so there it
+   is not kept, and is never set again as a page opens *)
+#pub datatype fullscreen_choice = FullscreenOff | FullscreenOn
+
+fn _fullscreen_code (choice: fullscreen_choice): [code:nat | code <= 1] int code =
+  case+ choice of FullscreenOff() => 0 | FullscreenOn() => 1
+
+fn _fullscreen_of_code (code: int): fullscreen_choice =
+  if code = 1 then FullscreenOn() else FullscreenOff()
+
 val _speech_rate = ref<speech_rate>(RateNormal())
 val _brightness = ref<brightness_choice>(BrightnessSystem())
 val _rotation = ref<rotation>(RotationFree())
+val _fullscreen = ref<fullscreen_choice>(FullscreenOff())
 
 #pub fn set_speech_rate_get (): speech_rate
 implement set_speech_rate_get () = !_speech_rate
@@ -322,6 +335,10 @@ implement set_brightness_set (choice) = !_brightness := choice
 implement set_rotation_get () = !_rotation
 #pub fn set_rotation_set (turn: rotation): void
 implement set_rotation_set (turn) = !_rotation := turn
+#pub fn set_fullscreen_get (): fullscreen_choice
+implement set_fullscreen_get () = !_fullscreen
+#pub fn set_fullscreen_set (choice: fullscreen_choice): void
+implement set_fullscreen_set (choice) = !_fullscreen := choice
 
 (* The voice chosen for each language a book was read aloud in: its
    primary subtag ("en", lower case) and the voice's name; a language
@@ -615,6 +632,20 @@ fn _narration_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n
     val speed = byte2int0($A.get<byte>(record, at + 1))
     val () = !_narration_speed := (if speed < 2 then 4 else if speed > 8 then 4 else speed)
   in !_narration_notes := _notes_of_code(byte2int0($A.get<byte>(record, at + 2))) end
+
+(* "F" and full screen's byte at record[at, at + 2) *)
+fn _fullscreen_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 70)
+  in $A.write_byte(record, at + 1, _fullscreen_code(!_fullscreen)) end
+
+(* Full screen's byte after "F" at record[at]: checked here, once; off
+   when there is none (a record written before it) *)
+fn _fullscreen_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then !_fullscreen := FullscreenOff()
+  else if byte2int0($A.get<byte>(record, at)) <> 70 then !_fullscreen := FullscreenOff()
+  else !_fullscreen := _fullscreen_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
 (* ============================================================
    Applying
@@ -958,7 +989,8 @@ in ui_text_buf("word-value", buf, next) end
    a byte each; then the device's own: reading aloud's speed, the
    brightness and the rotation lock, a byte each, and the voices kept
    (their count, then each one's code and name, each after its length),
-   then "N" (78) and a book narration's speed and skipping, a byte each.
+   then "N" (78) and a book narration's speed and skipping, a byte each,
+   then "F" (70) and full screen's byte.
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -966,11 +998,12 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3
+  val record_size = 24 + voices_size + 3 + 2
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
   val () = _narration_write(record, record_size, 24 + voices_size)
+  val () = _fullscreen_write(record, record_size, 24 + voices_size + 3)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1221,6 +1254,7 @@ fn _reset (): void = let
   val () = !_speech_rate := RateNormal()
   val () = !_brightness := BrightnessSystem()
   val () = !_rotation := RotationFree()
+  val () = !_fullscreen := FullscreenOff()
   val () = !_narration_speed := 4
   val () = !_narration_notes := NotesSkipped()
   var aside: voices_cell = _voices_take()
@@ -1240,6 +1274,7 @@ implement set_reset_undoable (how) = let
   val rate_before = !_speech_rate
   val brightness_before = !_brightness
   val rotation_before = !_rotation
+  val fullscreen_before = !_fullscreen
   val speed_before = !_narration_speed
   val notes_before = !_narration_notes
   val () = _reset()
@@ -1253,6 +1288,7 @@ in
         val () = !_speech_rate := rate_before
         val () = !_brightness := brightness_before
         val () = !_rotation := rotation_before
+        val () = !_fullscreen := fullscreen_before
         val () = !_narration_speed := speed_before
         val () = !_narration_notes := notes_before
         var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
@@ -1368,6 +1404,7 @@ in
         val @(voices_read, voices_read_count) = _voices_read(record, n, 24, stored_voices, VoiceChoicesEnd(), 0)
         val voices_end = 24 + _voices_size(voices_read)
         val () = _narration_read(record, n, voices_end)
+        val () = _fullscreen_read(record, n, voices_end + 3)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,
