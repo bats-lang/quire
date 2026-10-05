@@ -8,52 +8,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
   selectText, selectionButton, showChrome, control, clickControl, oneColumn, pageShown, cards,
-  librarySettings, settingsButton, settingsScreen, restoreInput,
+  librarySettings, settingsButton, settingsScreen, restoreInput, reload, jumpBack,
 } from './helpers.js';
-
-/** The WebDAV folder: on the page's own origin, whatever port the
-    suite is served on (a request to another origin would be
-    cross-origin, and read as one the server does not let in) */
-const folder = page => new URL('/dav/books/', page.url()).href;
-const USER = 'reader';
-const PASSWORD = 'app-pass-4417';
-
-/** A WebDAV folder holding quire-sync.json, shared by the devices */
-function webdav() {
-  const server = {
-    body: null, version: 0, gets: 0, puts: 0,
-    // a test's interference: the status every request gets, a network
-    // failure, a missing folder, a write of another device's before
-    // the next PUT
-    status: null, offline: false, noFolder: false, putStatus: null, beforePut: null,
-  };
-  server.handle = async route => {
-    const request = route.request();
-    if (server.offline) return route.abort('internetdisconnected');
-    if (server.status) return route.fulfill({ status: server.status, body: '' });
-    const expected = 'Basic ' + Buffer.from(`${USER}:${PASSWORD}`).toString('base64');
-    if (request.headers().authorization !== expected) return route.fulfill({ status: 401, body: '' });
-    if (request.method() === 'GET') {
-      server.gets++;
-      if (server.body === null) return route.fulfill({ status: 404, body: '' });
-      return route.fulfill({ status: 200, body: server.body, headers: { ETag: `"v${server.version}"` } });
-    }
-    if (request.method() === 'PUT') {
-      server.puts++;
-      if (server.noFolder) return route.fulfill({ status: 409, body: '' });
-      if (server.putStatus) return route.fulfill({ status: server.putStatus, body: '' });
-      if (server.beforePut) { const write = server.beforePut; server.beforePut = null; write(); }
-      const match = request.headers()['if-match'];
-      if (match !== undefined && match !== `"v${server.version}"`) return route.fulfill({ status: 412, body: '' });
-      server.body = request.postData();
-      server.version++;
-      return route.fulfill({ status: 201, body: '' });
-    }
-    return route.fulfill({ status: 405, body: '' });
-  };
-  server.json = () => JSON.parse(server.body);
-  return server;
-}
+import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 
 /** A device: a browser context of its own, the folder routed in it */
 async function device(browser, server, time) {
@@ -140,7 +97,25 @@ async function closeAnnotations(page) {
 // (its contents name each of its 4 chapters)
 const book = { title: 'Shared Book', author: 'Sync Tests', chapters: 4, rawChapters: chapters(4) };
 
-test('the furthest place is taken, and offered for a book that is open', async ({ browser }) => {
+/** The offer of a place another device read: its button, shown with
+    the reader's bars */
+const offer = (page, chapter) =>
+  page.getByRole('button', { name: `Go to where you were on another device (chapter ${chapter})` });
+
+/** Whether any place is offered: the offer's button there, its row not
+    hidden */
+const offered = page => page.evaluate(() => [...document.querySelectorAll('button')]
+  .some(b => /^Go to /.test(b.textContent) && !b.closest('[data-hide="1"]')));
+
+/** The page hidden, and the sync it starts ended */
+async function hiddenSynced(d, server) {
+  const puts = server.puts;
+  await hide(d.page);
+  await expect.poll(() => server.puts).toBeGreaterThan(puts);
+  await d.page.waitForTimeout(300);
+}
+
+test('the latest place is taken, and offered for a book that is open', async ({ browser }) => {
   const server = webdav();
   const file = epubFile(book);
   const a = await device(browser, server);
@@ -164,17 +139,163 @@ test('the furthest place is taken, and offered for a book that is open', async (
   await nextChapter(a.page, 4);
   await toLibrary(a.page);
   await syncNow(a.page);
-  await hide(b.page);
-  const go = b.page.getByRole('button', { name: 'Go to the furthest place (chapter 4)' });
-  await expect(go).toBeVisible();
+  await hiddenSynced(b, server);
   expect((await place(b.page)).ch).toBe(3);
-  await go.click();
+  await showChrome(b.page);
+  await expect(offer(b.page, 4)).toBeVisible();
+  await offer(b.page, 4).click();
   await expect.poll(async () => (await place(b.page)).ch).toBe(4);
-  await expect(go).toBeHidden();
+  expect(await offered(b.page)).toBe(false);
   expect(unexpected(a)).toEqual([]);
   expect(unexpected(b)).toEqual([]);
   await a.context.close();
   await b.context.close();
+});
+
+test('another device\'s place is offered once; dismissed, only a later one of its is offered, backwards too', async ({ browser }) => {
+  const server = webdav();
+  const file = epubFile(book);
+  const a = await device(browser, server);
+  const b = await device(browser, server);
+  for (const d of [a, b]) {
+    await importFiles(d.page, [file], 1);
+    await joinSync(d.page);
+  }
+  // A reads at the start; B reads to chapter 3 and syncs
+  await openBook(a.page, 'Shared Book');
+  await openBook(b.page, 'Shared Book');
+  await nextChapter(b.page, 2);
+  await nextChapter(b.page, 3);
+  await hiddenSynced(b, server);
+  // A, reading, is offered B's place, and dismisses it
+  await hiddenSynced(a, server);
+  await showChrome(a.page);
+  await expect(offer(a.page, 3)).toBeVisible();
+  await a.page.getByRole('button', { name: 'Dismiss' }).click();
+  expect(await offered(a.page)).toBe(false);
+  expect((await place(a.page)).ch).toBe(1);
+  // not offered again: by a sync, by the book closed and opened (its
+  // place not taken either), by the app opened again
+  await hiddenSynced(a, server);
+  expect(await offered(a.page)).toBe(false);
+  await toLibrary(a.page);
+  await syncNow(a.page);
+  await openBook(a.page, 'Shared Book');
+  await a.page.waitForTimeout(1000);
+  expect(await offered(a.page)).toBe(false);
+  expect((await place(a.page)).ch).toBe(1);
+  await reload(a.page);
+  await pageShown(a.page);
+  await a.page.waitForTimeout(1000);
+  expect(await offered(a.page)).toBe(false);
+  expect((await place(a.page)).ch).toBe(1);
+  // B reads on: that place is offered, once
+  await nextChapter(b.page, 4);
+  await hiddenSynced(b, server);
+  await hiddenSynced(a, server);
+  await showChrome(a.page);
+  await expect(offer(a.page, 4)).toBeVisible();
+  await a.page.getByRole('button', { name: 'Dismiss' }).click();
+  // B goes back to chapter 2, later than anything A did: offered too
+  await jumpTo(b.page, 'Chapter 2');
+  await hiddenSynced(b, server);
+  await hiddenSynced(a, server);
+  await showChrome(a.page);
+  await expect(offer(a.page, 2)).toBeVisible();
+  await offer(a.page, 2).click();
+  await expect.poll(async () => (await place(a.page)).ch).toBe(2);
+  expect(unexpected(a)).toEqual([]);
+  expect(unexpected(b)).toEqual([]);
+  await a.context.close();
+  await b.context.close();
+});
+
+/** A jump to the chapter named title, from the contents */
+async function jumpTo(page, title) {
+  await clickControl(page, 'Contents');
+  const contents = dialog(page, 'Contents');
+  await expect(contents).toBeVisible();
+  await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: title, exact: true }).click();
+  await expect(contents).toBeHidden();
+}
+
+test('a jump to a far chapter and back leaves no far place: not after a reopen, a sync or a restore', async ({ browser }, testInfo) => {
+  const server = webdav();
+  const file = epubFile(book);
+  const a = await device(browser, server);
+  await importFiles(a.page, [file], 1);
+  await joinSync(a.page);
+  await openBook(a.page, 'Shared Book');
+  // a jump to the last chapter, and back
+  await jumpTo(a.page, 'Chapter 4');
+  await expect.poll(async () => (await place(a.page)).ch).toBe(4);
+  await expect(jumpBack(a.page)).toBeVisible();
+  await jumpBack(a.page).click();
+  await expect.poll(async () => (await place(a.page)).ch).toBe(1);
+  await hiddenSynced(a, server);
+  expect(server.json().books[0].chapter).toBe(0);
+  // reopened
+  await reload(a.page);
+  await pageShown(a.page);
+  await a.page.waitForTimeout(1000);
+  expect((await place(a.page)).ch).toBe(1);
+  expect(await offered(a.page)).toBe(false);
+  // synced from the library, and opened
+  await toLibrary(a.page);
+  await syncNow(a.page);
+  await openBook(a.page, 'Shared Book');
+  expect((await place(a.page)).ch).toBe(1);
+  await toLibrary(a.page);
+  // a backup, restored
+  await librarySettings(a.page);
+  const download = a.page.waitForEvent('download');
+  await settingsButton(a.page, 'Export backup').click();
+  const path = testInfo.outputPath('backup.json');
+  writeFileSync(path, readFileSync(await (await download).path(), 'utf8'));
+  expect(JSON.parse(readFileSync(path, 'utf8')).books[0].chapter).toBe(0);
+  await restoreInput(a.page).setInputFiles([path]);
+  await expect(dialog(a.page, 'Backup restored')).toBeVisible();
+  await dialog(a.page, 'Backup restored').getByRole('button').first().click();
+  await expect(settingsScreen(a.page)).toBeHidden();
+  await openBook(a.page, 'Shared Book');
+  expect((await place(a.page)).ch).toBe(1);
+  expect(unexpected(a)).toEqual([]);
+  await a.context.close();
+});
+
+test('two places changed at once: the further one is kept, on each device', async ({ browser }) => {
+  const server = webdav();
+  const file = epubFile(book);
+  const a = await device(browser, server);
+  await importFiles(a.page, [file], 1);
+  await openBook(a.page, 'Shared Book');
+  await nextChapter(a.page, 2);
+  await toLibrary(a.page);
+  await joinSync(a.page);
+  const written = server.json().books[0];
+  expect(written).toMatchObject({ chapter: 1 });
+  expect(written.placeModified).toBeGreaterThan(0);
+  // another device's change at the same stamp, behind: this one's is kept
+  const other = (chapter) => {
+    const file = server.json();
+    Object.assign(file.books[0], { chapter, page: 0, anchor: -1, placeDevice: 1 });
+    server.body = JSON.stringify(file);
+    server.version++;
+  };
+  other(0);
+  await syncNow(a.page);
+  expect(server.json().books[0]).toMatchObject({ chapter: 1 });
+  await openBook(a.page, 'Shared Book');
+  expect((await place(a.page)).ch).toBe(2);
+  await toLibrary(a.page);
+  // at the same stamp, further: that one is taken
+  other(2);
+  await syncNow(a.page);
+  expect(server.json().books[0]).toMatchObject({ chapter: 2 });
+  await openBook(a.page, 'Shared Book');
+  expect((await place(a.page)).ch).toBe(3);
+  expect(unexpected(a)).toEqual([]);
+  await a.context.close();
 });
 
 test('annotations made on each device are merged; a deletion and the later of two notes win', async ({ browser }) => {

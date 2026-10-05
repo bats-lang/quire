@@ -733,6 +733,27 @@ in
   in if first_starting >= 0 then first_starting else node end
 end
 
+(* The content node that marks the place of the page shown: the one it
+   starts with (_anchor_now), when one starts on it; else -1, and the
+   page itself is the place: a page wholly inside a paragraph carried
+   over (a chapter's last page, often) would be named by the page that
+   paragraph starts on, a page before (#302) *)
+fn _place_anchor (): [node:int | node >= ~1] int node = let
+  val node = _anchor_now()
+in
+  if node < 0 then node
+  else let
+    val () = _measure_literal("page")
+    val page_left = $DR.get_measure_x()
+    val page_top = $DR.get_measure_y()
+    val page_width = $DR.get_measure_w()
+    val page_height = $DR.get_measure_h()
+    val down = (case+ _page_axis() of Down() => true | Across() => false | AcrossBack() => false): bool
+    val low = (if down then page_top - 1 else page_left - 1): int
+    val high = (if down then page_top + page_height else page_left + page_width): int
+  in if _starts_in(node, low, high) then node else ~1 end
+end
+
 (* Scrolled, the screenful of page_count shown with the chapter scrolled down by
    top: the nearest whole step, and the last at the bottom, where the
    browser stops a scroll short of a whole step. A place kept, a hand
@@ -1463,18 +1484,41 @@ fn _measure_pagination(): void = let
 in _update_page_indicator() end
 
 
+(* Whether a move is dated now: not while a book opens at the place it
+   was left (its chapter shown, then its page, counted again as it
+   settles and as its faces come in, at any time after: no move of the
+   reader's, #302), until the reader acts: a turn, a jump, the bars
+   brought up, a hand scroll *)
+val _dating = ref<bool>(false)
+
+(* The place last dated (or the one a book opened at): its chapter
+   (from 0), page and pages. A move is a place shown other than it, in
+   another chapter or on another page of as many pages *)
+val _dated_chapter = ref<Int>(~1)
+val _dated_page = ref<Int>(0)
+val _dated_pages = ref<Int>(0)
+
 (* The position read to the open book's record in the library, which is
    then stored *)
 fn _record_position (): void = let
   val book_index = lib_index_of_key(open_key_get())
-  (* the node the place is kept by, while it is; else the page's top *)
-  val anchor = (if !_anchor_kept >= 0 then !_anchor_kept else _anchor_now()): Int
-  val () = !_anchor_last := anchor
+  (* a fixed page is its spine item, whole: no node marks a place in
+     it (a hit test there finds one or none as its image comes in, and
+     the place kept would change with no move: #302); else the node the
+     place is kept by, while it is; else the node the page starts with
+     (-1 when none starts on it) *)
+  val anchor = (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else _place_anchor()): Int
+  (* what a new layout keeps in view: that node, or the one at the
+     page's top, even one carried over *)
+  val () = !_anchor_last := (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else _anchor_now())
   val now = $TM.epoch_minutes()
 in
   case+ reading_get() of
   | @(page, page_count, chapter, chapter_count) =>
     if book_index < 0 then ()
+    (* no book opened yet this run (reader_open_at): the reader shows
+       none of its pages, and its place is not written over *)
+    else if !_dated_chapter < 0 then ()
     else let
       val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
       val at_end = (if chapter_count > 0 then (if chapter >= chapter_count then page + 1 >= page_count else false) else false): bool
@@ -1482,7 +1526,22 @@ in
       val pages_read = !_book_pages
       val () = !_book_minutes := 0
       val () = !_book_pages := 0
-      val () = (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(book_index, @{
+      val () = (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(record) => let
+        (* the reader moved: another chapter, or another page of the same
+           pages (a page counted anew, as a layout or a face that came in
+           changes them, is not a move); dated, so the latest move is
+           the place sync keeps *)
+        val moved = (if ~(!_dating) then false
+          else if chapter_index <> !_dated_chapter then true
+          else if page_count <> !_dated_pages then false
+          else page <> !_dated_page): bool
+        (* while the book opens, the place it opened at stays the one a
+           move is told from *)
+        val () = (if !_dating then let
+            val () = !_dated_chapter := chapter_index
+            val () = !_dated_page := page
+          in !_dated_pages := page_count end else ())
+      in lib_nums_set(book_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
@@ -1490,7 +1549,8 @@ in
         shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
         (* finished now: a change sync passes on *)
         finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
-        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
+        minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
+        place_modified = (if moved then stamp_now() else record.place_modified), place_declined = record.place_declined }) end)
       val () = lib_touch(book_index)
     in lib_save() end
 end
@@ -3447,12 +3507,17 @@ end
 fn _show_target (page: Int, anchor: Int): void =
   case+ reading_get() of
   | @(current, page_count, chapter, chapter_count) =>
-    (* scrolled, the node itself at the top of the screen *)
+    (* scrolled, the screen page when the node starts on it (the place
+       a reader paged to, kept as it was: #302), else the node itself at
+       the top of the screen *)
     if anchor >= 0 then (if _scrolled() then let
         val @(offset, bottom) = _node_down_by(anchor, current)
+        val step = _step()
+        val height = g1ofg0(!_page_height)
+        val top = (if page >= 0 then (if page * step <= offset then (if offset < page * step + height then page * step else offset) else offset) else offset): Int
       in
         if offset < 0 then _show_page(current, page_count, chapter, chapter_count)
-        else _show_page_down(_screen_at(offset, bottom, page_count), page_count, chapter, chapter_count, (if offset < bottom then offset else bottom))
+        else _show_page_down(_screen_at(top, bottom, page_count), page_count, chapter, chapter_count, (if top < bottom then top else bottom))
       end
       else _show_page(_page_of_node(anchor, page_count, current), page_count, chapter, chapter_count))
     else if page < 0 then _show_page(page_count - 1, page_count, chapter, chapter_count)
@@ -3494,6 +3559,11 @@ in if page_width > 0 then _count_pages() else ~1 end
 
 (* Every quarter second, so many more times, while no other chapter has been
    shown since (generation) *)
+(* Whether a book is opening at its place, and count pages are as many
+   as that place was kept on *)
+fn _opening_pages (count: Int): bool =
+  if !_dating then false else if count <= 0 then false else count = !_dated_pages
+
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
   if times <= 0 then ()
   else $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) =>
@@ -3509,6 +3579,11 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
               else _page_of_node(anchor, page_count, page) <> page): bool
           in
             if count_now <= 0 then ()
+            (* opening, laid out as when the place was kept (its face
+               come in): that very page *)
+            else if count_now <> page_count && _opening_pages(count_now) then let
+              val () = _measure_pagination()
+            in _show_target(!_dated_page, ~1) end
             else if count_now <> page_count then let
               val @(target_page, target_anchor) = _place_kept(page, page_count)
               val () = _measure_pagination()
@@ -3684,6 +3759,8 @@ in _ps_put(PsShown(armed | timeout, positions)) end
 
 (* Remembers where the reader is, before a jump *)
 fn _push_position (): void = let
+  (* a jump is the reader's move *)
+  val () = !_dating := true
   val anchor = _anchor_now()
   val cell = _ps_take()
   val positions = (case+ cell of
@@ -3789,7 +3866,12 @@ in
   else let
     val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
     val () = _measure_pagination()
-  in _show_kept(page, anchor) end
+    val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
+  in
+    (* opening, laid out as when the place was kept: that very page *)
+    if _opening_pages(count_now) then _show_target(!_dated_page, ~1)
+    else _show_kept(page, anchor)
+  end
 end
 
 (* ============================================================
@@ -4202,7 +4284,10 @@ implement reader_scrolled () =
     in
       if screen = page then ()
       (* the reader moved: a restored place no longer holds them *)
-      else let val () = !_anchor_kept := ~1 in _place_shown(screen, page_count, chapter, chapter_count) end
+      else let
+        val () = !_anchor_kept := ~1
+        val () = !_dating := true
+      in _place_shown(screen, page_count, chapter, chapter_count) end
     end
 
 (* The reader turns the page on or back. Reading on from where a jump
@@ -4231,7 +4316,20 @@ implement load_chapter(chapter_index) = _load_chapter(chapter_index)
 (* Loads a chapter and shows a page of it (the last for -1), or the
    page of content node anchor when anchor >= 0 *)
 #pub fun reader_goto (chapter: Int, page: Int, anchor: Int): $P.promise(load_outcome, $P.Chained)
-implement reader_goto (chapter, page, anchor) = _goto(chapter, page, anchor)
+implement reader_goto (chapter, page, anchor) = let
+  (* the reader's move (the narration going on into the next chapter) *)
+  val () = !_dating := true
+in _goto(chapter, page, anchor) end
+
+(* A book opened at the place it was left (as reader_goto shows it):
+   showing it there is no move of the reader's, so it is not dated *)
+#pub fun reader_open_at (chapter: Int, page: Int, pages: Int, anchor: Int): $P.promise(load_outcome, $P.Chained)
+implement reader_open_at (chapter, page, pages, anchor) = let
+  val () = !_dating := false
+  val () = !_dated_chapter := chapter
+  val () = !_dated_page := page
+  val () = !_dated_pages := pages
+in _goto(chapter, page, anchor) end
 
 (* Jumps to a row of the contents list, remembering where the reader
    was *)
@@ -4273,7 +4371,10 @@ implement reader_back () = _pop_position()
 (* Forgets the positions jumped from, and the back button goes: a book
    is opened or closed, a page turned, or the bars brought up *)
 #pub fun reader_stack_clear (): void
-implement reader_stack_clear () = _ps_put(PsHidden())
+implement reader_stack_clear () = let
+  (* the reader acted (a turn, the bars brought up): its moves are dated *)
+  val () = !_dating := true
+in _ps_put(PsHidden()) end
 
 (* A book opened: its first page is read from now, so the first turn
    counts the minutes since. Back in the library, nothing is being read
@@ -4792,6 +4893,7 @@ implement reader_relayout () = _relayout()
 (* Shows a page of the chapter shown (clamped to its pages) *)
 #pub fun reader_page (page: Int): void
 implement reader_page (page) = let
+  val () = !_dating := true
   (* the reader moved: a restored place no longer holds them *)
   val () = !_anchor_kept := ~1
   (* a jump within the chapter, not a turn: one under way ends *)

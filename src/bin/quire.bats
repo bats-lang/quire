@@ -194,9 +194,9 @@ fn _sync_screen_control (clicked: !target): $R.option(sync_screen_control) =
   | Target(bytes, n, _) => ui_sync_screen_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
-fn _sync_toast_control (clicked: !target): $R.option(sync_toast_control) =
+fn _sync_offer_control (clicked: !target): $R.option(sync_offer_control) =
   case+ clicked of
-  | Target(bytes, n, _) => ui_sync_toast_control(bytes, n, 10)
+  | Target(bytes, n, _) => ui_sync_offer_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
 fn _typography_control (clicked: !target): $R.option(typography_control) =
@@ -367,6 +367,57 @@ fn _view_save (book_key: int): void = let
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
+(* The library's search, kept across a reload (and the app killed and
+   started again) as the view is: "query", the words as typed, none
+   when the search is empty (#302) *)
+fn _query_key (): [l:agz] $A.arr(byte, l, 5) = let
+  val key = $A.alloc<byte>(5)
+  val () = $A.write_text(key, 0, $A.text_lit("query"), 5)
+in key end
+
+(* text[0, text_len), copied into an array of its own *)
+fn _text_copy {l:agz}{size:nat}{text_len:pos | text_len <= size; text_len < 256}
+  (text: !$A.arr(byte, l, size), text_len: int text_len): [copy_loc:agz] $A.arr(byte, copy_loc, text_len) = let
+  val copy = $A.alloc<byte>(text_len)
+  fun fill {copy_loc:agz}{j:nat | j <= text_len} .<text_len - j>. (text: !$A.arr(byte, l, size), copy: !$A.arr(byte, copy_loc, text_len), j: int j): void =
+    if j >= text_len then () else let val () = $A.set<byte>(copy, j, $A.get<byte>(text, j)) in fill(text, copy, j + 1) end
+  val () = fill(text, copy, 0)
+in copy end
+
+(* Keeps the search query[0, query_len) under "query" (an empty one is
+   none, and so is one of 256 bytes or more, as the library takes it) *)
+fn _query_save {l:agz}{size:nat}{query_len:nat | query_len <= size} (query: !$A.arr(byte, l, size), query_len: int query_len): void = let
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_query_key())
+  val () = (if query_len > 0 then (if query_len < 256 then let
+      val @(value_frozen, value_bytes) = $A.freeze<byte>(_text_copy(query, query_len))
+      (* ignored: a search not stored only opens the library unsearched *)
+      val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 5, value_bytes, query_len), llam(_) => ())
+    in release_bytes(value_frozen, value_bytes) end
+    (* ignored: a search not forgotten is only shown again next time *)
+    else $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 5), llam(_) => ()))
+    else $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 5), llam(_) => ()))
+in release_bytes(key_frozen, key_bytes) end
+
+(* The search kept by the last run, in its field and the library's *)
+fn _query_restore (): $P.promise(int, $P.Chained) = let
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_query_key())
+  val stored = $IDB.idb_get(key_bytes, 5)
+  val () = release_bytes(key_frozen, key_bytes)
+in
+  $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
+    case+ lookup_bytes(found) of
+    | ~NothingStored() => $P.ret<int>(0)
+    (* the library unsearched, as when none is kept *)
+    | ~StoredUnreadable() => $P.ret<int>(0)
+    | ~StoredBytes(query, query_len) =>
+      if query_len >= 256 then let val () = $A.free<byte>(query) in $P.ret<int>(0) end
+      else let
+        val () = ui_attr_buf("library-search", AValue, _text_copy(query, query_len), query_len)
+        val () = ui_show("library-search-clear", true)
+        val () = lib_query_set(query, query_len)
+      in $P.ret<int>(0) end)
+end
+
 (* While a book is open the auto theme follows the clock: night is
    checked each minute (22:00 to 07:00, local_time.bats), as well as at
    each page turn. Each opening of the reader is a watch of its own,
@@ -492,7 +543,13 @@ fn _hint_offer (): void =
     $P.finish<Int>($P.vow($TM.timer_set(8000)), llam(_) => _hint_hide())
   end
 
-fn _show_reader (): void = let
+(* What opened a book: the reader (a card, a key), whose focus goes to
+   the page, so a screen reader reads on from there; or the app as it
+   starts, back where the last run was, where nothing had the focus to
+   move, and a ring around the page would be all it showed (#302) *)
+datatype opening_cause = ReaderChose | LastRunKept
+
+fn _show_reader (cause: opening_cause): void = let
   val () = !_view := ReaderView()
   val () = _night_watch_start()
   val () = ui_show("library", false)
@@ -509,7 +566,11 @@ fn _show_reader (): void = let
   val () = $NAV.push_state(hash_bytes, 2)
   val () = release_bytes(hash_frozen, hash_bytes)
   val () = _chrome_set(true)
-in ui_focus("page") end
+in
+  case+ cause of
+  | ReaderChose() => ui_focus("page")
+  | LastRunKept() => ()
+end
 
 (* Opens library book i where it was left *)
 (* source[0, count) copied to destination[at, at + count) *)
@@ -559,7 +620,7 @@ fn _opened_checked (result: opened): void =
     val () = (if _in_reader() then _show_library() else ())
   in notice_part_unread() end
 
-fn _open_book {book:int} (book: int book): void =
+fn _open_book {book:int} (book: int book, cause: opening_cause): void =
   case+ lib_nums(book) of
   | ~$R.none() => ()
   | ~$R.some(book_numbers) =>
@@ -571,7 +632,7 @@ fn _open_book {book:int} (book: int book): void =
       val () = modal_inform("Archived")
     in modal_text_lit("This book is archived. Import its file again to read it.") end
     | _ => let
-      val () = _show_reader()
+      val () = _show_reader(cause)
       val () = _hint_offer()
       (* what another book was reading aloud stops *)
       val () = aloud_stop()
@@ -589,6 +650,7 @@ fn _open_book {book:int} (book: int book): void =
       val () = ui_clear("indicator-pages")
       val chapter = book_numbers.chapter
       val page = book_numbers.page
+      val pages = book_numbers.pages
       val anchor = book_numbers.anchor
       val id_high = book_numbers.id_high
       val id_low = book_numbers.id_low
@@ -598,7 +660,7 @@ fn _open_book {book:int} (book: int book): void =
       (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
         $P.finish<opened>($P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
-          $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
+          $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
           _opened_checked(result))
       else
         $P.finish<opened>($P.and_then<book_opening><opened>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
@@ -613,7 +675,7 @@ fn _open_book {book:int} (book: int book): void =
               val () = notice_error("This book could not be read from storage. Try again, or reopen Quire if it keeps happening.")
             in $P.ret<opened>(OpenedInLibrary()) end
           | BookOpened() => $P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
-            $P.and_then<load_outcome><opened>(reader_goto(chapter, page, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
+            $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
           _opened_checked(result))
     end
 
@@ -637,7 +699,7 @@ in
       | ~$R.none() => false
       | ~$R.some(book_numbers) => (case+ book_numbers.shelf of OnShelf() => true | Hidden() => true | _ => false))): bool
   in
-    if readable then let val () = _open_book(book) in $P.ret<int>(0) end
+    if readable then let val () = _open_book(book, LastRunKept()) in $P.ret<int>(0) end
     else let val () = _show_library() in $P.ret<int>(0) end
   end)
 end
@@ -1206,7 +1268,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
       val menu_book = _row_of(clicked, "book-more")
       val () = _target_free(clicked)
     in
-      if book >= 0 then let val () = _open_book(book) in 0 end
+      if book >= 0 then let val () = _open_book(book, ReaderChose()) in 0 end
       else if menu_book >= 0 then let val () = _menu_open(menu_book) in 0 end
       else 0
     end)
@@ -1239,7 +1301,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
       val menu_book = _row_of(clicked, "continue-more")
       val () = _target_free(clicked)
     in
-      if book >= 0 then let val () = _open_book(book) in 0 end
+      if book >= 0 then let val () = _open_book(book, ReaderChose()) in 0 end
       else if menu_book >= 0 then let val () = _menu_open(menu_book) in 0 end
       else 0
     end)
@@ -1299,6 +1361,10 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
   val listeners = RCons(listeners, OnEl("sort-button"), "click", llam(_) => let
       val sort_order = sort_next(lib_sort_get())
       val () = lib_sort(sort_order)
+      (* the library kept in its new order: a save the app makes later
+         (a sync as it opens) writes the order it reads back, so it
+         changes nothing (#302) *)
+      val () = lib_save()
       val () = lib_sort_label(sort_order)
       val () = set_apply(lib_state_get())
     in let val () = lib_render() in 0 end end)
@@ -1311,6 +1377,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
   val listeners = RCons(listeners, OnEl("library-search-box"), "input", llam(h) => let
       val @(query, query_len) = _input_text(h)
       val () = ui_show("library-search-clear", query_len > 0)
+      val () = _query_save(query, query_len)
       val () = lib_query_set(query, query_len)
     in let val () = lib_render() in 0 end end)
   val listeners = RCons(listeners, OnEl("library-search-box"), "click", llam(h) => let
@@ -1320,6 +1387,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
     in
       if clear then let
         val () = app_library_search()
+        val empty = $A.alloc<byte>(1)
+        val () = _query_save(empty, 0)
+        val () = $A.free<byte>(empty)
         val () = lib_query_set($A.alloc<byte>(1), 0)
         val () = lib_render()
       in let val () = ui_focus("library-search") in 0 end end
@@ -1410,7 +1480,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
     in 0 end)
 in listeners end
 
-(* Sync: its screen's buttons, its toast's, and the page hidden (a sync,
+(* Sync: its screen's buttons, its offer's, and the page hidden (a sync,
    so what was read here is on the other devices) *)
 fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
   val listeners = RCons(listeners, OnEl("sync-screen"), "click", llam(h) => let
@@ -1430,16 +1500,16 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(SyncOff()) => sync_off()
         | ~$R.some(SyncDone()) => layer_close(LSync()))
     in 0 end)
-  val listeners = RCons(listeners, OnEl("sync-toast"), "click", llam(h) => let
+  val listeners = RCons(listeners, OnEl("sync-offer"), "click", llam(h) => let
       val clicked = _target(h)
-      val control = _sync_toast_control(clicked)
+      val control = _sync_offer_control(clicked)
       val () = _target_free(clicked)
       val () = (case+ control of
         | ~$R.none() => ()
         | ~$R.some(SyncGo()) => let
           val @(chapter, page, anchor) = sync_further_take()
         in if chapter >= 0 then (if _in_reader() then reader_jump_to(chapter, page, anchor) else ()) else () end
-        | ~$R.some(SyncToastClose()) => sync_further_dismiss())
+        | ~$R.some(SyncOfferClose()) => sync_further_dismiss())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
       val () = (case+ $WN.get_visibility() of $WN.Hidden() => sync_run() | $WN.Visible() => ())
@@ -2662,7 +2732,7 @@ implement main0 () = let
         (* sync, once the library is read *)
         val () = sync_start()
       in
-        $P.and_then<int><int>(_view_restore(), llam(view) => let
+        $P.and_then<int><int>($P.and_then<int><int>(_query_restore(), llam(_) => _view_restore()), llam(view) => let
           (* back from Dropbox's sign-in: Settings, where it was asked
              for, and the sync screen comes over it as the sign-in ends *)
           val () = (if sync_returning() then _settings_open() else ())

@@ -41,6 +41,12 @@
       "a11y.spec.js",
       "about.spec.js",
       "layout.spec.js"
+    ],
+    "relaunch": [
+      "relaunch.spec.js"
+    ],
+    "relaunch-sync": [
+      "relaunch-sync.spec.js"
     ]
   },
   "static": {
