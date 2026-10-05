@@ -2791,6 +2791,11 @@ fn _switches {left:nat | left >= 2000} (sheet: sheet(left, false, false)): [afte
   val sheet = rule(sheet, ".ssel")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
+  (* a list row's button (a dictionary's or a catalogue's Remove) keeps
+     its word whole; the name beside it wraps instead (320 px) *)
+  val sheet = rule(sheet, ".srow>.btn")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".stack .ssel")
   val sheet = lay(sheet, MaxWidth(), "none")
   val sheet = lay(sheet, Width(), "100%")

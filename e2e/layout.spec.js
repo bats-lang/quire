@@ -487,7 +487,11 @@ test('in the app, every screen shows each control\'s whole text and each toggle\
   await page.keyboard.press('Escape');
   // the note, the picture and a word looked up, in the second chapter
   const map = bookPage(page).getByRole('img', { name: 'the map' });
-  const shown = () => map.evaluate(i => { const r = i.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }).catch(() => false);
+  // (read from the page: the picture is not there until its chapter is)
+  const shown = () => page.evaluate(() => [...document.querySelectorAll('[role=document] img[alt="the map"]')].some(i => {
+    const r = i.getBoundingClientRect();
+    return r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight;
+  }));
   for (let turn = 0; turn < 60 && !(await shown()); turn++) {
     await page.keyboard.press('ArrowRight');
     await page.waitForTimeout(400);
