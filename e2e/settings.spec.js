@@ -456,7 +456,7 @@ test.describe('auto at night, to the minute', () => {
 });
 
 test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }, testInfo) => {
-  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app's full screen hides the status bar (the app's screen test, before these)");
+  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app's full screen hides the system bars (the app's screen tests, before these)");
   await start(page);
   await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');

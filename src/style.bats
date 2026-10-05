@@ -2741,7 +2741,7 @@ in sheet end
    stacked row puts a label, its
    control the whole width (a select is never cut to "Syste...") and a
    line saying what it does, one under another *)
-fn _switches {left:nat | left >= 1800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1800] sheet(after, false, false) = let
+fn _switches {left:nat | left >= 2000} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2000] sheet(after, false, false) = let
   prval _ = E_edge_card
   prval _ = E_accent_card
   val sheet = rule(sheet, ".sgroup")
@@ -2756,6 +2756,15 @@ fn _switches {left:nat | left >= 1800} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
   val sheet = rule(sheet, ".stack .slabel")
   val sheet = lay(sheet, Width(), "auto")
+  val sheet = close(sheet)
+  (* a select is never narrower than its chosen option: in a row too
+     narrow for its label and its selects (Speed and voice at 320 px),
+     the last ones go to the next line instead *)
+  val sheet = rule(sheet, ".srow:has(>.ssel)")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".ssel")
+  val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".stack .ssel")
   val sheet = lay(sheet, MaxWidth(), "none")

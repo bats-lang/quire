@@ -8,10 +8,11 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, selectText, rawFile,
 } from './helpers.js';
 import { cutOff, statesUnseen } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
+import { createStardict } from './create-stardict.js';
 
 /** The names of the visible controls among locators that reach out of
     the window's width */
@@ -315,8 +316,8 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
-  // (in the Android app, full screen is the status bar hidden)
-  if (onAndroid(testInfo)) await expect.poll(() => page.evaluate(() => window.__android.calls.some(c => c.plugin === 'StatusBar' && c.method === 'hide'))).toBe(true);
+  // (in the Android app, full screen is the system bars hidden)
+  if (onAndroid(testInfo)) await expect.poll(() => page.evaluate(() => window.__android.calls.some(c => c.plugin === 'SystemBars' && c.method === 'hide'))).toBe(true);
   else await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
   await openReadingSettings(page, 'Look');
   const panel = dialog(page, 'Reading settings');
@@ -366,6 +367,14 @@ function appPlayed() {
 // screen added later is walked here or this fails, naming it
 test('in the app, every screen shows each control\'s whole text and each toggle\'s state, and none is left unwalked', async ({ page }) => {
   await page.addInitScript(appPlayed);
+  // Project Gutenberg's catalogue, played: one page holding one book
+  await page.route('https://www.gutenberg.org/**', route => route.fulfill({
+    status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, contentType: 'application/atom+xml',
+    body: '<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>urn:walk</id>' +
+      '<title>A Catalogue With A Rather Long Name</title><updated>2026-10-01T00:00:00Z</updated>' +
+      '<entry><title>A Book With A Rather Long Title</title><id>walked</id><author><name>Someone</name></author>' +
+      '<link rel="http://opds-spec.org/acquisition" href="/walked.epub" type="application/epub+zip"/></entry></feed>',
+  }));
   await start(page);
   const seen = new Set();
   const check = async screen => {
@@ -404,8 +413,23 @@ test('in the app, every screen shows each control\'s whole text and each toggle\
     await check(name);
     await page.keyboard.press('Escape');
   }
+  await libraryMenu(page);
+  await menuItem(page, 'Catalogues').click();
+  await dialog(page, 'Catalogues').getByRole('group', { name: 'Project Gutenberg' }).getByRole('button', { name: 'Project Gutenberg' }).click();
+  const browsed = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close catalogue' }) });
+  await expect(browsed.getByRole('group', { name: 'A Book With A Rather Long Title' })).toBeVisible();
+  await check('a catalogue\'s page');
+  await browsed.getByRole('button', { name: 'Close catalogue' }).click();
+  await expect(browsed).toBeHidden();
   await librarySettings(page);
   await check('Settings');
+  // a dictionary, so the Dictionaries screen lists one and a word is looked up below
+  const made = createStardict({ name: 'Pocket English', entries: [{ word: 'ephemeral', article: 'lasting a very short time' }] });
+  await settingsButton(page, 'Dictionaries ›').click();
+  await page.getByLabel('Import dictionary').setInputFiles([
+    rawFile('walk.ifo', made.ifo), rawFile('walk.idx', made.idx), rawFile('walk.dict', made.dict)]);
+  await expect(dialog(page, 'Dictionaries').getByRole('status')).toHaveText('Dictionary added.', { timeout: 30000 });
+  await page.keyboard.press('Escape');
   for (const row of ['Reading ›', 'Sync ›', 'Dictionaries ›', 'About Quire ›']) {
     await settingsButton(page, row).click();
     await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
@@ -421,23 +445,15 @@ test('in the app, every screen shows each control\'s whole text and each toggle\
   await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
   await check('the Empty the Trash dialog');
   await page.keyboard.press('Escape');
-  // a note and a picture, so the note and the picture's viewer open
+  // a note and a picture in its second chapter, so the note and the
+  // picture's viewer open (shown last: a tap in the page's middle,
+  // which brings up the bars, would open the picture)
   await readBook(page, {
     title: 'A Rather Long Title, Read', author: 'L',
-    rawChapters: [{ body: '<p>A claim<a epub:type="noteref" href="#n1">1</a>.</p><p><img src="images/map.png" alt="the map"/></p>' +
-      '<aside epub:type="footnote" id="n1"><p>The note.</p></aside>' }, ...chapters(2)],
+    rawChapters: [...chapters(1), { body: '<p>ephemeral claims<a epub:type="noteref" href="#n1">1</a>.</p><p><img src="images/map.png" alt="the map"/></p>' +
+      '<aside epub:type="footnote" id="n1"><p>The note.</p></aside>' }],
     extraImages: [{ name: 'images/map.png', data: solidPng(120, 120) }],
   });
-  await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
-  await expect(dialog(page, 'Footnote')).toBeVisible();
-  await check('a footnote');
-  await page.keyboard.press('Escape');
-  const map = bookPage(page).getByRole('img', { name: 'the map' });
-  await expect.poll(() => map.evaluate(i => i.naturalWidth)).toBe(120);
-  await map.click();
-  await expect(dialog(page, 'Image')).toBeVisible();
-  await check('the picture viewer');
-  await page.keyboard.press('Escape');
   await showChrome(page);
   await check('the reader with its bars');
   for (const name of ['Contents', 'Annotations']) {
@@ -467,6 +483,30 @@ test('in the app, every screen shows each control\'s whole text and each toggle\
   await showChrome(page);
   await topBar(page).getByRole('button', { name: 'Settings' }).click();
   await check('Settings over the reader');
+  await page.keyboard.press('Escape');
+  // the note, the picture and a word looked up, in the second chapter
+  const map = bookPage(page).getByRole('img', { name: 'the map' });
+  const shown = () => map.evaluate(i => { const r = i.getBoundingClientRect(); return r.width > 0 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }).catch(() => false);
+  for (let turn = 0; turn < 60 && !(await shown()); turn++) {
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(400);
+  }
+  await expect(map).toBeInViewport();
+  await bookPage(page).getByRole('link', { name: '1', exact: true }).click();
+  await expect(dialog(page, 'Footnote')).toBeVisible();
+  await check('a footnote');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => map.evaluate(i => i.naturalWidth)).toBe(120);
+  await map.click();
+  await expect(dialog(page, 'Image')).toBeVisible();
+  await check('the picture viewer');
+  await page.keyboard.press('Escape');
+  await selectText(page, 0, 9);
+  await expect(page.getByRole('toolbar', { name: 'Selection' })).toBeVisible();
+  await check('the selection\'s toolbar');
+  await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Look up', exact: true }).click();
+  await expect(dialog(page, 'Dictionary')).toBeVisible();
+  await check('a word looked up');
   await page.keyboard.press('Escape');
   const unwalked = await page.evaluate(seen => [...document.querySelectorAll('[role=dialog]')]
     .map(e => e.id).filter(id => !seen.includes(id)), [...seen]);
