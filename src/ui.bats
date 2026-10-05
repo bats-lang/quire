@@ -1842,38 +1842,38 @@ end
 #pub fn ui_sync_screen_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_screen_control)
 implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 8)
 
-(* The sync toast's buttons, each by its element's id (sync_toast_control_id) *)
-#pub datatype sync_toast_control =
+(* The buttons of sync's offer of a place, each by its element's id (sync_offer_control_id) *)
+#pub datatype sync_offer_control =
   | SyncGo
-  | SyncToastClose
+  | SyncOfferClose
 
-#pub fn sync_toast_control_id (control: sync_toast_control): [id_len:pos | id_len < 256] string id_len
-implement sync_toast_control_id (control) =
+#pub fn sync_offer_control_id (control: sync_offer_control): [id_len:pos | id_len < 256] string id_len
+implement sync_offer_control_id (control) =
   case+ control of
   | SyncGo() => "sync-go"
-  | SyncToastClose() => "sync-toast-close"
+  | SyncOfferClose() => "sync-offer-close"
 
 (* The control after control, in the order the decoder tries them *)
-fn _sync_toast_control_after (control: sync_toast_control): $R.option(sync_toast_control) =
+fn _sync_offer_control_after (control: sync_offer_control): $R.option(sync_offer_control) =
   case+ control of
-  | SyncGo() => $R.some(SyncToastClose())
-  | SyncToastClose() => $R.none()
+  | SyncGo() => $R.some(SyncOfferClose())
+  | SyncOfferClose() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
-fun _sync_toast_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: sync_toast_control, fuel: int fuel): $R.option(sync_toast_control) = let
-  val id = sync_toast_control_id(control)
+fun _sync_offer_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: sync_offer_control, fuel: int fuel): $R.option(sync_offer_control) = let
+  val id = sync_offer_control_id(control)
 in
   if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
   else if fuel <= 0 then $R.none()
-  else case+ _sync_toast_control_after(control) of
-    | ~$R.some(next) => _sync_toast_control_from(bytes, n, at, next, fuel - 1)
+  else case+ _sync_offer_control_after(control) of
+    | ~$R.some(next) => _sync_offer_control_from(bytes, n, at, next, fuel - 1)
     | ~$R.none() => $R.none()
 end
 
 (* The control whose id is bytes[at, n), if it is one *)
-#pub fn ui_sync_toast_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_toast_control)
-implement ui_sync_toast_control (bytes, n, at) = _sync_toast_control_from(bytes, n, at, SyncGo(), 2)
+#pub fn ui_sync_offer_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_offer_control)
+implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes, n, at, SyncGo(), 2)
 
 (* Where the reading behaviour set once is offered (#289): the reading
    settings sheet's Turning and Read aloud tabs, or the Settings

@@ -48,9 +48,11 @@ export default defineConfig({
     },
     // the narrowest width content must work at (WCAG 1.4.10 Reflow:
     // 320 CSS px), which a phone reaches at a large display size (#265)
+    // (the window's projects run the layout's specs, and the relaunch
+    // specs, which hold in every project: #302)
     {
       name: 'narrow',
-      testMatch: /(layout|smoke|page-turn|icons)\.spec\.js/,
+      testMatch: /(layout|smoke|page-turn|icons|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 320, height: 640 },
@@ -78,7 +80,7 @@ export default defineConfig({
     },
     {
       name: 'mobile-landscape',
-      testMatch: /(layout|smoke|page-turn)\.spec\.js/,
+      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 667, height: 375 },
@@ -87,7 +89,7 @@ export default defineConfig({
     },
     {
       name: 'tablet',
-      testMatch: /(layout|smoke|page-turn)\.spec\.js/,
+      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 768, height: 1024 },
@@ -96,7 +98,7 @@ export default defineConfig({
     },
     {
       name: 'wide',
-      testMatch: /(layout|smoke|page-turn)\.spec\.js/,
+      testMatch: /(layout|smoke|page-turn|relaunch|relaunch-sync)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 1440, height: 900 },

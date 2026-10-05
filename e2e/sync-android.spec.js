@@ -11,106 +11,13 @@ import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
   librarySearch, librarySettings, settingsButton, settingsScreen,
 } from './helpers.js';
-
-const CLIENT = '1234567890-quiretest.apps.googleusercontent.com';
-const ACCOUNT = 'reader@example.com';
-
-/** Google Drive's API for the app data folder, shared by the devices:
-    the file's id, version and bytes, and every request made */
-function drive() {
-  const d = {
-    file: null, requests: [], token: 'token-1',
-    // a test's interference: another device's write, made as the app
-    // checks the version it read
-    beforeCheck: null,
-  };
-  const cors = {
-    'access-control-allow-origin': '*',
-    'access-control-allow-headers': 'authorization, content-type',
-    'access-control-allow-methods': 'GET, POST, PATCH',
-  };
-  const json = (route, body, status = 200) =>
-    route.fulfill({ status, headers: { ...cors, 'content-type': 'application/json' }, body: JSON.stringify(body) });
-  d.handle = async route => {
-    const request = route.request();
-    if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
-    const url = new URL(request.url());
-    d.requests.push(`${request.method()} ${url.pathname}${url.search}`);
-    if (request.headers().authorization !== `Bearer ${d.token}`) return json(route, { error: 'invalid token' }, 401);
-    const id = d.file && d.file.id;
-    if (request.method() === 'GET' && url.pathname === '/drive/v3/files') {
-      if (url.searchParams.get('spaces') !== 'appDataFolder') return json(route, { error: 'not the app data folder' }, 400);
-      return json(route, { files: d.file ? [{ id, version: String(d.file.version) }] : [] });
-    }
-    if (request.method() === 'GET' && id && url.pathname === `/drive/v3/files/${id}`) {
-      if (url.searchParams.get('alt') === 'media')
-        return route.fulfill({ status: 200, headers: { ...cors, 'content-type': 'application/json' }, body: d.file.body });
-      if (d.beforeCheck) { const other = d.beforeCheck; d.beforeCheck = null; other(); }
-      return json(route, { version: String(d.file.version) });
-    }
-    if (request.method() === 'POST' && url.pathname === '/upload/drive/v3/files') {
-      const type = request.headers()['content-type'] || '';
-      const boundary = (type.match(/boundary=(.+)$/) || [])[1];
-      const parts = request.postData().split(`--${boundary}`).slice(1, -1)
-        .map(part => part.slice(part.indexOf('\r\n\r\n') + 4).replace(/\r\n$/, ''));
-      const metadata = JSON.parse(parts[0]);
-      d.file = { id: 'file-1', version: 1, body: parts[1], metadata };
-      return json(route, { id: d.file.id, version: '1' });
-    }
-    if (request.method() === 'PATCH' && id && url.pathname === `/upload/drive/v3/files/${id}`) {
-      d.file.body = request.postData();
-      d.file.version++;
-      return json(route, { id, version: String(d.file.version) });
-    }
-    return json(route, { error: 'not found' }, 404);
-  };
-  d.json = () => JSON.parse(d.file.body);
-  return d;
-}
-
-/** The app's Capacitor, played: Google's sign-in (mode: 'token' gives a
-    token for the device's account, 'none' finds no account, 'cancel'
-    is the reader saying no) and the files kept for Auto Backup */
-function capacitor({ mode, token, files }) {
-  window.__google = { mode, token, signIns: 0, signOuts: 0, initialized: [] };
-  window.__files = new Map(files);
-  window.Capacitor = {
-    isNativePlatform: () => true,
-    Plugins: {
-      GoogleSignIn: {
-        initialize: o => { window.__google.initialized.push(o); return Promise.resolve(); },
-        signIn: () => {
-          const g = window.__google;
-          g.signIns++;
-          if (g.mode === 'token') return Promise.resolve({ accessToken: g.token, email: 'reader@example.com' });
-          const code = g.mode === 'none' ? 'NO_CREDENTIAL_AVAILABLE' : 'SIGN_IN_CANCELED';
-          return Promise.reject(Object.assign(new Error(code), { code }));
-        },
-        signOut: () => { window.__google.signOuts++; return Promise.resolve(); },
-      },
-      Filesystem: {
-        writeFile: o => { window.__files.set(o.path, o.data); return Promise.resolve({ uri: 'file:///' + o.path }); },
-        // as Capacitor's: a directory's listing, and a call for a file not
-        // there rejects (the app's console logs it, so the app makes none)
-        readdir: o => {
-          const prefix = o.path ? o.path + '/' : '';
-          const names = [...new Set([...window.__files.keys()].filter(k => k.startsWith(prefix))
-            .map(k => k.slice(prefix.length).split('/')[0]))];
-          if (o.path && !names.length) return Promise.reject(new Error('Folder does not exist'));
-          return Promise.resolve({ files: names.map(name => ({ name, type: 'file' })) });
-        },
-        stat: o => window.__files.has(o.path) ? Promise.resolve({ type: 'file' }) : Promise.reject(new Error('File does not exist')),
-        readFile: o => Promise.resolve({ data: window.__files.get(o.path) }),
-      },
-    },
-  };
-}
+import { drive, CLIENT, capacitorPlayed, identityServicesPlayed } from './sync-stores.js';
 
 /** A device running the app: Capacitor played, Drive routed, and the
     build's client (none when client is null) */
 async function device(browser, server, { mode = 'token', files = [], client = CLIENT } = {}) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await context.addInitScript(capacitor, { mode, token: server ? server.token : 'token-1', files });
+  const kept = await capacitorPlayed(context, { mode, token: server ? server.token : 'token-1', files });
   if (server) await context.route('https://www.googleapis.com/**', server.handle);
   await clientsServed(context, client ? { googleWebClient: client } : {});
   const page = await context.newPage();
@@ -119,7 +26,7 @@ async function device(browser, server, { mode = 'token', files = [], client = CL
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
   await expect(librarySearch(page)).toBeVisible();
-  return { context, page, errors };
+  return { context, page, errors, files: kept };
 }
 
 /** A device's errors, but a Drive answer the test made fail, which the
@@ -292,10 +199,10 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
   // the app put in the background: the file written where Auto Backup
   // keeps it, and nothing asked of Google
   await hide(a.page);
-  const backedUp = () => a.page.evaluate(() => {
-    const data = window.__files.get('backup/quire-sync.json');
-    return data ? JSON.parse(atob(data)) : null;
-  });
+  const backedUp = () => {
+    const data = a.files.get('backup/quire-sync.json');
+    return data ? JSON.parse(Buffer.from(data, 'base64').toString()) : null;
+  };
   // (opening the book synced too, at its start: the file is the merge
   // as last written)
   await expect.poll(async () => (((await backedUp()) || { books: [] }).books[0] || {}).chapter).toBe(2);
@@ -304,7 +211,7 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
   // Sync stays off
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText('Off');
-  const files = await a.page.evaluate(() => [...window.__files.entries()]);
+  const files = [...a.files.entries()];
   await a.context.close();
   // reinstalled: Auto Backup gave the file back; the book, imported
   // again, opens at its place
@@ -316,37 +223,12 @@ test('with no store chosen, the app keeps the file for Auto Backup, and a reinst
   await b.context.close();
 });
 
-/** Google Identity Services, played in a browser page: each request
-    gives window.__gis.token (or, with window.__gis.closed, the reader
-    closes the window); revokes are counted. window.__gis is made as the
-    page starts (browserDevice), not by this script: the app loads the
-    script only once the Sync screen looks for a token, so the test,
-    which sets window.__gis.closed as that screen opens, could otherwise
-    run before the script has */
-const IDENTITY_SERVICES = `
-  window.google = { accounts: { oauth2: {
-    initTokenClient: o => {
-      window.__gis.clients.push({ client_id: o.client_id, scope: o.scope });
-      return { requestAccessToken: () => {
-        window.__gis.requests++;
-        setTimeout(() => window.__gis.closed ? o.error_callback({ type: 'popup_closed' }) : o.callback({ access_token: window.__gis.token }), 10);
-      } };
-    },
-    revoke: (token, done) => { window.__gis.revoked.push(token); done && done(); },
-  } } };
-`;
-
 /** A browser: Google's script and Drive routed, and the build's client */
 async function browserDevice(browser, server) {
   const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
-  await context.route('https://accounts.google.com/gsi/client', route => route.fulfill({
-    status: 200, headers: { 'content-type': 'text/javascript' }, body: IDENTITY_SERVICES,
-  }));
+  await identityServicesPlayed(context);
   await context.route('https://www.googleapis.com/**', server.handle);
   await clientsServed(context, { googleWebClient: CLIENT });
-  await context.addInitScript(() => {
-    window.__gis = { token: 'token-1', closed: false, requests: 0, revoked: [], clients: [] };
-  });
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));

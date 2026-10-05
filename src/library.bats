@@ -91,7 +91,15 @@ implement shelf_of_code (code) =
   (* the minutes it has been read and the pages turned on them on the
      other devices sync knows of, as it last saw them *)
   minutes_elsewhere = Int,
-  pages_elsewhere = Int
+  pages_elsewhere = Int,
+  (* when its place last changed: the stamp of this device's last move
+     in it, or of the change another device made that was taken; 0
+     never (a place kept before places were dated) *)
+  place_modified = Int,
+  (* the stamp of the latest place another device read that the reader
+     declined here (its offer dismissed), 0 none: neither offered nor
+     taken again *)
+  place_declined = Int
 }
 
 (* A book: its title and author (1 to 255 bytes), its series' name (0
@@ -348,6 +356,28 @@ implement lib_nums_set (index, changed) =
     prval () = fold@(cell)
   in lib_put(cell) end
 
+(* The book with key key: the offer of another device's place, dated
+   stamp, declined here; that place is neither offered nor taken again *)
+#pub fn lib_place_decline (key: Int, stamp: Int): void
+
+implement lib_place_decline (key, stamp) = let
+  val book_index = lib_index_of_key(key)
+in
+  if book_index < 0 then ()
+  else (case+ lib_nums(book_index) of
+    | ~$R.none() => ()
+    | ~$R.some(nums) => let
+        val () = lib_nums_set(book_index, @{
+          key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
+          chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections,
+          minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+          shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
+          finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+          place_modified = nums.place_modified, place_declined = stamp })
+      in lib_save() end)
+end
+
 (* The reading on other devices (sync's) of every book, forgotten: what
    sync reads next is summed anew *)
 fun _elsewhere_clear {count:nat} .<count>. (books: !books(count)): void =
@@ -360,7 +390,8 @@ fun _elsewhere_clear {count:nat} .<count>. (books: !books(count)): void =
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
         file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
-        finished_modified = nums.finished_modified, minutes_elsewhere = 0, pages_elsewhere = 0 }
+        finished_modified = nums.finished_modified, minutes_elsewhere = 0, pages_elsewhere = 0,
+        place_modified = nums.place_modified, place_declined = nums.place_declined }
       prval () = fold@(book)
       val () = _elsewhere_clear(rest)
       prval () = fold@(books)
@@ -385,7 +416,8 @@ implement lib_elsewhere_add (index, minutes, pages) =
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
     finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere + minutes,
-    pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int) }))
+    pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int),
+    place_modified = nums.place_modified, place_declined = nums.place_declined }))
 
 (* source[j, source_len) into dest[start + j, start + source_len) *)
 fun _copy {source_loc,dest_loc:agz}{source_len,source_size,dest_size:nat | source_len <= source_size}
@@ -519,7 +551,8 @@ in
       key = key, id_high = id_high, id_low = id_low, shelf = OnShelf(), added = now, opened = 0,
       chapter = 0, chapters = 0, page = 0, pages = 0, anchor = ~1, file_size = file_size, cover = cover, done = 0,
       series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
-      shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
+      shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0,
+      place_modified = 0, place_declined = 0
     }: bnums
     val () = lib_put(LibCell(books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), count + 1))
   in key end
@@ -612,7 +645,8 @@ implement lib_set_shelf (index, shelf) = let
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
     file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
+    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined }))
   val () = lib_save()
 in lib_render() end
 
@@ -704,7 +738,8 @@ fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int co
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined }))
   in _trash_all(i + 1, count) end
 
 (* Each book of shelved put back on its shelf *)
@@ -718,7 +753,8 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved_list(count)): void =
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
           file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
           shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
-          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere })) else ())
+          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined })) else ())
     in _unshelve(rest) end
 
 (* A factory reset's part in the library: every book moved to the Trash,
@@ -775,6 +811,17 @@ fun _less {first_loc,second_loc:agz}{first_len,second_len:nat}
 
 fn _is_before (c: comparison): bool = case+ c of Before() => true | _ => false
 
+(* Whether a book comes before another whose dates are the same (books
+   imported in one minute): by title (as by_title compares them), then
+   by id, so the order is one, whatever order the books were read in *)
+fn _tie_before (by_title: comparison, first_nums: bnums, second_nums: bnums): bool =
+  case+ by_title of
+  | Before() => true
+  | After() => false
+  | Same() =>
+    if first_nums.id_high <> second_nums.id_high then first_nums.id_high < second_nums.id_high
+    else first_nums.id_low < second_nums.id_low
+
 (* Whether first comes before second in order *)
 fn _before (first: !book, second: !book, order: sort_order): bool = let
   val+ Book(first_title, first_title_len, first_author, first_author_len, first_series, first_series_len, first_nums) = first
@@ -798,9 +845,11 @@ in
      | Before() => true
      | After() => false
      | Same() => _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0)))
-  | DateAdded() => first_nums.added > second_nums.added
+  | DateAdded() => (if first_nums.added <> second_nums.added then first_nums.added > second_nums.added
+        else _tie_before(_less(first_title, first_title_len, second_title, second_title_len, 0), first_nums, second_nums))
   | LastOpened() => (if first_nums.opened <> second_nums.opened then first_nums.opened > second_nums.opened
-        else first_nums.added > second_nums.added)
+        else if first_nums.added <> second_nums.added then first_nums.added > second_nums.added
+        else _tie_before(_less(first_title, first_title_len, second_title, second_title_len, 0), first_nums, second_nums))
 end
 
 fun _insert {count:nat} .<count>. (book: book, books: books(count), order: sort_order): books(count + 1) =
@@ -966,7 +1015,8 @@ fun _stamp_members {count:nat} .<count>. (books: !books(count), collection: int)
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
         file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified, collections_modified = stamp_now(),
-        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere } else ())
+        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined } else ())
       prval () = fold@(book)
       val () = _stamp_members(rest, collection)
       prval () = fold@(books)
@@ -1051,7 +1101,8 @@ fun _map_collections {count:nat} .<count>. (books: !books(count), change: !regro
         file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified,
         collections_modified = (if membership <> nums.collections then stamp_now() else nums.collections_modified),
-        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }
+        finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined }
       prval () = fold@(book)
       val () = _map_collections(rest, change)
       prval () = fold@(books)
@@ -1239,7 +1290,8 @@ implement lib_coll_toggle (index, collection) =
       file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
       collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = nums.shelf_modified, collections_modified = stamp_now(), finished_modified = nums.finished_modified,
-      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere }))
+      minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+    place_modified = nums.place_modified, place_declined = nums.place_declined }))
   in lib_save() end
 
 (* Collection deleted, with an Undo offer that puts it back: its books
@@ -1406,7 +1458,7 @@ in colls_put(cell) end
    Storage: key "lib"
    ============================================================ *)
 
-(* "QLB4", the collections (u8 count, then each name: u8 length,
+(* "QLB6", the collections (u8 count, then each name: u8 length,
    bytes), then each book: id (2 x i32), title (u8 length, bytes),
    author (u8 length, bytes), then 10 x i32: shelf, added, opened, ch,
    tch, pg, pgs, anchor, fsz, cover | done << 8; its series (u8 length,
@@ -1414,9 +1466,10 @@ in colls_put(cell) end
    the minutes it has been read, the pages turned on them, and when it
    was finished (3 x i32); when its shelf, collections and being
    finished last changed (3 stamps, i32), and the minutes it has been
-   read on other devices and the pages turned on them (2 x i32). At
-   most 856 bytes a book. QLB4 has none of the last five, QLB3 none of
-   the last eight. QLB2 has no collections, before or in the
+   read on other devices and the pages turned on them (2 x i32); when
+   its place last changed and the place declined here (2 stamps, i32).
+   At most 864 bytes a book. QLB5 has none of the last two, QLB4 none
+   of the last seven, QLB3 none of the last ten. QLB2 has no collections, before or in the
    books; QLB1 has no series either. *)
 
 
@@ -1442,7 +1495,7 @@ fun _write_names {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 41 * 
       prval () = fold@(collections)
     in stop end
 
-fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 856 * count <= n} .<count>.
+fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 864 * count <= n} .<count>.
   (out: !$A.arrx(byte, l, n, owner), start: int start, books: !books(count)): [stop:nat | stop <= n] int stop =
   case+ books of
   | books_nil() => start
@@ -1484,7 +1537,10 @@ fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 856 *
       val () = $A.write_i32(out, series_at + 29 + series_len, nums.finished_modified)
       val () = $A.write_i32(out, series_at + 33 + series_len, nums.minutes_elsewhere)
       val () = $A.write_i32(out, series_at + 37 + series_len, nums.pages_elsewhere)
-    in _write_books(out, series_at + 41 + series_len, rest) end
+      (* QLB6: when its place changed, and the place declined *)
+      val () = $A.write_i32(out, series_at + 41 + series_len, nums.place_modified)
+      val () = $A.write_i32(out, series_at + 45 + series_len, nums.place_declined)
+    in _write_books(out, series_at + 49 + series_len, rest) end
 
 (* Stores the library under "lib" *)
 #pub fn lib_save (): void
@@ -1494,7 +1550,7 @@ implement lib_save () = let
   val+ @LibCell(books, count) = library
   val collections_cell = colls_take()
   val+ @CollCell(collections, collection_count) = collections_cell
-  val size = 333 + 856 * count
+  val size = 333 + 864 * count
 in
   case+ piece_new(size) of
   | ~NoPiece() => let
@@ -1503,7 +1559,7 @@ in
       prval () = fold@(library)
     in lib_put(library) end
   | ~Piece(owner, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB5"), 4)
+      val () = $A.write_text(out, 0, $A.text_lit("QLB6"), 4)
       val () = $A.write_byte(out, 4, collection_count)
       val books_at = _write_names(out, 5, collections)
       prval () = fold@(collections_cell)
@@ -1587,14 +1643,15 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
           pages = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), file_size = _int32_at(buf, numbers_at + 32),
           cover = image_of_code($AR.low_byte(cover_done)), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
           series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
-          shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0
+          shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0,
+          place_modified = 0, place_declined = 0
         }: bnums
         (* QLB2 has the series after; QLB3, then the collections; QLB1,
            neither *)
         val series_at = numbers_at + 40
         val series_len = (if version >= 2 then (if series_at < n then $AR.low_byte(byte2int0($A.get<byte>(buf, series_at))) else 0) else 0)
           : [series_len:nat | series_len < 256] int series_len
-        val tail = (if version >= 5 then 41 else if version >= 4 then 21 else if version >= 3 then 9 else 5): [tail:int | tail == 5 || tail == 9 || tail == 21 || tail == 41] int tail
+        val tail = (if version >= 6 then 49 else if version >= 5 then 41 else if version >= 4 then 21 else if version >= 3 then 9 else 5): [tail:int | tail == 5 || tail == 9 || tail == 21 || tail == 41 || tail == 49] int tail
       in
         if version < 2 then _parse_books(buf, n, series_at, books_cons(Book(title, title_len, author, author_len, $A.alloc<byte>(1), 0, nums), books), parsed + 1, version)
         else if series_at + tail + series_len > n then let
@@ -1620,7 +1677,11 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
             collections_modified = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 25 + series_len) else 0) else 0): Int,
             finished_modified = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 29 + series_len) else 0) else 0): Int,
             minutes_elsewhere = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 33 + series_len) else 0) else 0): Int,
-            pages_elsewhere = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 37 + series_len) else 0) else 0): Int
+            pages_elsewhere = (if version >= 5 then (if series_at + 41 + series_len <= n then _int32_at(buf, series_at + 37 + series_len) else 0) else 0): Int,
+            (* QLB6: when its place last changed, and the latest place
+               another device read that was declined here *)
+            place_modified = (if version >= 6 then (if series_at + 49 + series_len <= n then _int32_at(buf, series_at + 41 + series_len) else 0) else 0): Int,
+            place_declined = (if version >= 6 then (if series_at + 49 + series_len <= n then _int32_at(buf, series_at + 45 + series_len) else 0) else 0): Int
           }: bnums
         in _parse_books(buf, n, series_at + tail + series_len,
              books_cons(Book(title, title_len, author, author_len, series, series_len, nums), books), parsed + 1, version) end
@@ -1678,7 +1739,7 @@ in
       if n < 4 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) > 53 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) > 54 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
       else let
         val version = byte2int0($A.get<byte>(buf, 3)) - 48
         val @(books_at, collections, collection_count) = _names_of(buf, n, version)

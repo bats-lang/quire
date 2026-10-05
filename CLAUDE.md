@@ -275,8 +275,22 @@ A change is dated by a stamp (`src/clock.bats`): a hybrid logical
 clock, minutes since 2025 times 64 plus a count, after every stamp made
 or seen here (the browser gives the time only to the minute), written
 in the file as milliseconds. Shelves, collections (by name) and being
-finished take the latest change; the place, the furthest (the open
-book's is offered by a toast instead); the reading log and each book's
+finished take the latest change, and so does the place (#302): each
+move in a book is dated (`place_modified`, only a move to another
+chapter or page, not a page counted anew, and none while a book opens
+at its place, `reader_open_at`, until the reader acts), and the file
+keeps the
+latest place with its stamp and the device that read it
+(`placeModified`, `placeDevice`); at the same stamp the further place
+wins, and a place never dated (kept before places were) never does. The
+open book's is not taken but offered, and only when another device read
+it later than this device's last move there: in a row of the reader's
+bottom bar (`sync-offer`, shown with the bars, so it covers no text),
+"Go to where you were on another device (chapter 3)". Dismissed, that
+place is declined (`place_declined`, in the library record only, not in
+the backup or the file): it is neither offered nor taken again, and only
+a later place of another device's is. A backup's place is restored by
+the same rule. The reading log and each book's
 time are each device's own (its entry in `devices`), summed for display
 (`stats_elsewhere_*`, `minutes_elsewhere`). An annotation's id is the
 SHA-256 of what never changes in it (bookmark or highlight, chapter,

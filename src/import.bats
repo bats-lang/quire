@@ -392,7 +392,8 @@ in
         file_size = file_size, cover = (if is_image(cover) then cover else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
         (* back on the shelf: a change sync passes on *)
         shelf_modified = (if same_shelf(record.shelf, OnShelf()) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
-        finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere }))
+        finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
+    place_modified = record.place_modified, place_declined = record.place_declined }))
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
       val key = (case+ lib_nums(library_index) of
         | ~$R.some(record) => record.key

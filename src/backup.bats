@@ -218,9 +218,11 @@ fn _collections_chunk (): jchunk =
    16) its minutes read, the pages turned on them and when it was
    finished; numbers[16, 19) when its shelf, collections and being
    finished last changed (stamps, clock.bats); numbers[19] its file's
-   size. A number a file does not give is -1 (0 for those before the
+   size; numbers[20] when its place last changed (a stamp) and
+   numbers[21] the device that made that change (its number in sync's
+   file). A number a file does not give is -1 (0 for those before the
    anchor, and for done) *)
-#pub stadef BOOK_NUMBERS = 20
+#pub stadef BOOK_NUMBERS = 22
 
 #define SLOT_SHELF 3
 #define SLOT_ADDED 4
@@ -239,11 +241,13 @@ fn _collections_chunk (): jchunk =
 #define SLOT_COLLECTIONS_MODIFIED 17
 #define SLOT_FINISHED_MODIFIED 18
 #define SLOT_SIZE 19
+#define SLOT_PLACE_MODIFIED 20
+#define SLOT_PLACE_DEVICE 21
 
 (* A book's numbers, before its members are read *)
 fun _clear_numbers {numbers_loc:agz}{i:nat | i <= BOOK_NUMBERS} .<BOOK_NUMBERS - i>.
   (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
-  if i >= 20 then ()
+  if i >= 22 then ()
   else let
     val () = $A.set<Int>(numbers, i, (if i = SLOT_ANCHOR then ~1 else if i >= SLOT_COLLECTIONS then ~1 else 0))
   in _clear_numbers(numbers, i + 1) end
@@ -254,7 +258,7 @@ implement backup_numbers_clear (numbers) = _clear_numbers(numbers, 0)
 (* A book's numbers, cleared *)
 #pub fn backup_numbers_new (): [numbers_loc:agz] $A.arr(Int, numbers_loc, BOOK_NUMBERS)
 implement backup_numbers_new () = let
-  val numbers = $A.alloc<Int>(20)
+  val numbers = $A.alloc<Int>(22)
   val () = _clear_numbers(numbers, 0)
 in numbers end
 
@@ -281,7 +285,21 @@ implement backup_numbers_of (nums, numbers) = let
   val () = $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, nums.shelf_modified)
   val () = $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, nums.collections_modified)
   val () = $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, nums.finished_modified)
+  val () = $A.set<Int>(numbers, SLOT_PLACE_MODIFIED, nums.place_modified)
+  (* which device made the change is sync's to say *)
+  val () = $A.set<Int>(numbers, SLOT_PLACE_DEVICE, ~1)
 in $A.set<Int>(numbers, SLOT_SIZE, nums.file_size) end
+
+(* The place's change, as numbers give it: when (a stamp; -1 not
+   given, 0 never) and by which device (-1 not given) *)
+#pub fn backup_numbers_place_change {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): @(Int, Int)
+implement backup_numbers_place_change (numbers) =
+  @($A.get<Int>(numbers, SLOT_PLACE_MODIFIED), $A.get<Int>(numbers, SLOT_PLACE_DEVICE))
+
+(* The place's change made by device (this device's number in sync's
+   file) *)
+#pub fn backup_numbers_place_device {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), device: Int): void
+implement backup_numbers_place_device (numbers, device) = $A.set<Int>(numbers, SLOT_PLACE_DEVICE, device)
 
 (* The book's id, when the numbers have one *)
 #pub fn backup_numbers_id {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): @(bool, Int, Int)
@@ -344,15 +362,47 @@ in
   else $A.get<Int>(other, value_slot) > $A.get<Int>(numbers, value_slot)
 end
 
+(* Whether other's place is the later change of the two: the later
+   stamp, or at the same stamp the further place (an order both devices
+   agree on). A place never dated (0, kept before places were) or not
+   dated at all (-1, a file written before) is never the later one: one
+   jump recorded long ago is not a place to go back to (#302) *)
+#pub fn backup_numbers_place_later {numbers_loc,other_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS)): bool
+implement backup_numbers_place_later (numbers, other) = let
+  val stamp = $A.get<Int>(numbers, SLOT_PLACE_MODIFIED)
+  val other_stamp = $A.get<Int>(other, SLOT_PLACE_MODIFIED)
+in
+  if other_stamp <= 0 then false
+  else if other_stamp > stamp then true
+  else if other_stamp < stamp then false
+  else backup_numbers_further(other, numbers)
+end
+
+(* Whether the two places are one: the same chapter, the same way
+   through it *)
+#pub fn backup_numbers_place_same {numbers_loc,other_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS)): bool
+implement backup_numbers_place_same (numbers, other) =
+  if backup_numbers_further(numbers, other) then false
+  else ~backup_numbers_further(other, numbers)
+
+(* numbers := other's place, with when and by which device it changed *)
+fn _take_place {numbers_loc,other_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS)): void = let
+  val () = _take_slots(numbers, other, SLOT_CHAPTER, 5)
+in _take_slots(numbers, other, SLOT_PLACE_MODIFIED, 2) end
+
 (* numbers merged with other's (the same book's on another device, both
-   with their collections numbered alike): the furthest place, unless
-   keep_place (the book is open here: the reader is offered the other
-   place instead); the shelf, the collections and being finished of the
-   later change; when it was added, the earliest; opened, the latest *)
+   with their collections numbered alike): the place of the later
+   change, unless keep_place (the book is open here, and the reader is
+   offered the other place instead; or the reader declined it); the
+   shelf, the collections and being finished of the later change; when
+   it was added, the earliest; opened, the latest *)
 #pub fn backup_numbers_merge {numbers_loc,other_loc:agz}
   (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS), keep_place: bool): void
 implement backup_numbers_merge (numbers, other, keep_place) = let
-  val () = (if keep_place then () else if backup_numbers_further(other, numbers) then _take_slots(numbers, other, SLOT_CHAPTER, 5) else ())
+  val () = (if keep_place then () else if backup_numbers_place_later(numbers, other) then _take_place(numbers, other) else ())
   val () = (if _later(numbers, other, SLOT_SHELF, SLOT_SHELF_MODIFIED) then let
       val () = $A.set<Int>(numbers, SLOT_SHELF, $A.get<Int>(other, SLOT_SHELF))
     in $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, $A.get<Int>(other, SLOT_SHELF_MODIFIED)) end else ())
@@ -378,6 +428,7 @@ end
 implement backup_numbers_seen (numbers) = let
   val () = stamp_seen($A.get<Int>(numbers, SLOT_SHELF_MODIFIED))
   val () = stamp_seen($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED))
+  val () = stamp_seen($A.get<Int>(numbers, SLOT_PLACE_MODIFIED))
 in stamp_seen($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED)) end
 
 (* The numbers of the collections a book is in (the bits of
@@ -467,6 +518,10 @@ implement backup_book_chunk (book_index, numbers, first) =
       val next = jw_stamp(out, next, _given(numbers, SLOT_COLLECTIONS_MODIFIED))
       val next = jw_lit(out, next, ",\"finishedModified\":")
       val next = jw_stamp(out, next, _given(numbers, SLOT_FINISHED_MODIFIED))
+      val next = jw_lit(out, next, ",\"placeModified\":")
+      val next = jw_stamp(out, next, _given(numbers, SLOT_PLACE_MODIFIED))
+      val next = jw_lit(out, next, ",\"placeDevice\":")
+      val next = jw_int(out, next, _given(numbers, SLOT_PLACE_DEVICE))
       val next = jw_lit(out, next, ",\"annotations\":")
     in JChunk(owner, out, next) end
 
@@ -550,21 +605,26 @@ in _export_books(0, lib_count(), true) end
 (* The record's numbers, in order: shelf, added, opened, chapter,
    chapters, page, pages, anchor, done, collections (as the library
    numbers them), minutes read, pages turned on them, finished, and when
-   the shelf, the collections and being finished last changed. A record
-   kept by an earlier version has the first 9 (RECORD_NUMBERS_FIRST), 10
-   or 13 of them. *)
-#define RECORD_NUMBERS 16
+   the shelf, the collections and being finished last changed, and when
+   the place did. A record kept by an earlier version has the first 9
+   (RECORD_NUMBERS_FIRST), 10, 13 or 16 of them. *)
+#define RECORD_NUMBERS 17
 #define RECORD_NUMBERS_FIRST 9
+
+(* The slot of numbers the record's i-th number is: numbers[3, 19) in
+   order, then when the place changed *)
+fn _record_slot {i:nat | i < RECORD_NUMBERS} (i: int i): [slot:nat | slot < BOOK_NUMBERS] int slot =
+  if i < 16 then 3 + i else SLOT_PLACE_MODIFIED
 
 fun _orphan_write {record_loc,numbers_loc:agz}{i:nat | i <= RECORD_NUMBERS} .<RECORD_NUMBERS - i>.
   (record: !$A.arr(byte, record_loc, 4 + 4 * RECORD_NUMBERS),
    numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
   if i >= RECORD_NUMBERS then ()
   else let
-    val () = $A.write_i32(record, 4 + 4 * i, $A.get<Int>(numbers, 3 + i))
+    val () = $A.write_i32(record, 4 + 4 * i, $A.get<Int>(numbers, _record_slot(i)))
   in _orphan_write(record, numbers, i + 1) end
 
-(* numbers[3 + i, 3 + count) := the count numbers at
+(* The numbers of the record's slots i to count - 1 := the numbers at
    record[4 + 4 * i, 4 + 4 * count) *)
 fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECORD_NUMBERS}
   {n:int | n >= 4 + 4 * count}{i:nat | i <= count} .<count - i>.
@@ -578,7 +638,7 @@ fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECOR
     val third = $AR.low_byte(byte2int0($A.get<byte>(record, offset + 2)))
     val highest = $AR.low_byte(byte2int0($A.get<byte>(record, offset + 3)))
     val signed_highest = (if highest < 128 then highest else highest - 256): Int
-    val () = $A.set<Int>(numbers, 3 + i, lowest + second * 256 + third * 65536 + signed_highest * 16777216)
+    val () = $A.set<Int>(numbers, _record_slot(i), lowest + second * 256 + third * 65536 + signed_highest * 16777216)
   in _orphan_read_numbers(record, count, numbers, i + 1) end
 
 (* A kept record's numbers, record[0, n), into numbers: RECORD_NUMBERS
@@ -586,11 +646,12 @@ fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECOR
 fn _orphan_read {record_loc,numbers_loc:agz}{n:int | n >= 4 + 4 * RECORD_NUMBERS_FIRST}
   (record: !$A.arr(byte, record_loc, n), n: int n, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void =
   if n >= 4 + 4 * RECORD_NUMBERS then _orphan_read_numbers(record, RECORD_NUMBERS, numbers, 0)
+  else if n >= 4 + 4 * 16 then _orphan_read_numbers(record, 16, numbers, 0)
   else if n >= 4 + 4 * 13 then _orphan_read_numbers(record, 13, numbers, 0)
   else if n >= 4 + 4 * 10 then _orphan_read_numbers(record, 10, numbers, 0)
   else _orphan_read_numbers(record, RECORD_NUMBERS_FIRST, numbers, 0)
 
-(* Keeps numbers[3, 19) (a book's numbers from a backup or from sync,
+(* Keeps numbers[3, 19) and when the place changed (a book's numbers from a backup or from sync,
    its collections as the library numbers them) under its "o" key, for
    when the book is imported *)
 #pub fn backup_orphan_put {numbers_loc:agz}
@@ -639,6 +700,7 @@ implement backup_apply_numbers (book_index, numbers, to_trash) = let
   val shelf_modified = _in_range($A.get<Int>(numbers, SLOT_SHELF_MODIFIED), ~1, 2147483647, ~1)
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1)
+  val place_modified = _in_range($A.get<Int>(numbers, SLOT_PLACE_MODIFIED), ~1, 2147483647, ~1)
 in
   (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(before) => lib_nums_set(book_index, @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
@@ -652,7 +714,9 @@ in
     shelf_modified = (if shelf_modified >= 0 then shelf_modified else before.shelf_modified),
     collections_modified = (if collections_modified >= 0 then collections_modified else before.collections_modified),
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
-    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere }))
+    minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere,
+    place_modified = (if place_modified >= 0 then place_modified else before.place_modified),
+    place_declined = before.place_declined }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)
@@ -721,6 +785,7 @@ fn _number_slot {key_loc:agz}{key_len:nat | key_len <= KEY_BYTES} (key: !$A.arr(
   else if jr_key_is(key, key_len, "readPages") then SLOT_PAGES_READ
   else if jr_key_is(key, key_len, "finished") then SLOT_FINISHED
   else if jr_key_is(key, key_len, "size") then SLOT_SIZE
+  else if jr_key_is(key, key_len, "placeDevice") then SLOT_PLACE_DEVICE
   else ~1
 
 (* The stamp a book member's key names, its slot in numbers; -1 for any
@@ -730,6 +795,7 @@ fn _stamp_slot {key_loc:agz}{key_len:nat | key_len <= KEY_BYTES} (key: !$A.arr(b
   if jr_key_is(key, key_len, "shelfModified") then SLOT_SHELF_MODIFIED
   else if jr_key_is(key, key_len, "collectionsModified") then SLOT_COLLECTIONS_MODIFIED
   else if jr_key_is(key, key_len, "finishedModified") then SLOT_FINISHED_MODIFIED
+  else if jr_key_is(key, key_len, "placeModified") then SLOT_PLACE_MODIFIED
   else ~1
 
 (* A number (or true or false) at value_start, kept in numbers[slot] *)
@@ -942,7 +1008,24 @@ in @(closed, annotations, deleted, stop) end
 fn _dated {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void = let
   val () = (if $A.get<Int>(numbers, SLOT_SHELF_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_SHELF_MODIFIED, stamp_now()) else ())
   val () = (if $A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, stamp_now()) else ())
+  val () = (if $A.get<Int>(numbers, SLOT_PLACE_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_PLACE_MODIFIED, stamp_now()) else ())
 in if $A.get<Int>(numbers, SLOT_FINISHED_MODIFIED) < 0 then $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, stamp_now()) else () end
+
+(* The place of library book book_index as a restore takes it, into
+   numbers: as sync has it, the backup's when it is the later change,
+   else the one read here since *)
+fn _place_kept {numbers_loc,own_loc:agz}
+  (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), own: !$A.arr(Int, own_loc, BOOK_NUMBERS)): void =
+  if backup_numbers_place_later(own, numbers) then () else _take_place(numbers, own)
+
+fn _place_restored {book_index:int}{numbers_loc:agz} (book_index: int book_index, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void =
+  case+ lib_nums(book_index) of
+  | ~$R.none() => ()
+  | ~$R.some(nums) => let
+      val own = backup_numbers_new()
+      val () = backup_numbers_of(nums, own)
+      val () = _place_kept(numbers, own)
+    in $A.free<Int>(own) end
 
 (* Puts a book's state back from numbers: into the library when the
    book is there, else kept under its "o" key; its annotations from the
@@ -957,6 +1040,7 @@ fn _restore_book {l,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{annotations_star
     val () = backup_map_collections(numbers, map)
     val () = _dated(numbers)
     val book_index = lib_find(id_high, id_low)
+    val () = (if book_index >= 0 then _place_restored(book_index, numbers) else ())
     val () = (if book_index >= 0 then backup_apply_numbers(book_index, numbers, false) else backup_orphan_put(id_high, id_low, numbers))
     val () = (if annotations >= 0 then let
         val _ = annot_json_store(buf, n, annotations, id_high, id_low)

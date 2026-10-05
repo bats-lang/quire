@@ -1744,10 +1744,12 @@ val _device_now = ref<Int>(0)
 val _books_written = ref<bool>(false)
 (* The open book's key (0 none): its place is offered, not taken *)
 val _open_key = ref<Int>(0)
-(* The further place offered for it: chapter (-1 none), page, anchor *)
+(* The place another device read offered for it: chapter (-1 none),
+   page, anchor, and when that device read it (its stamp) *)
 val _further_chapter = ref<Int>(~1)
 val _further_page = ref<Int>(0)
 val _further_anchor = ref<Int>(~1)
+val _further_stamp = ref<Int>(0)
 (* Whether a sync is under way, whether another was asked for meanwhile,
    and the tries of this one *)
 val _busy = ref<bool>(false)
@@ -1806,19 +1808,20 @@ in _end(Synced(), 0) end
    The merge, taken: once the file is written
    ============================================================ *)
 
-(* Offers the open book's further place: the toast's button names its
-   chapter *)
-fn _offer (chapter: Int, page: Int, anchor: Int): void = let
+(* Offers the open book's place another device read, dated stamp: the
+   offer's button names its chapter *)
+fn _offer (chapter: Int, page: Int, anchor: Int, stamp: Int): void = let
   val () = !_further_chapter := chapter
   val () = !_further_page := page
   val () = !_further_anchor := anchor
+  val () = !_further_stamp := stamp
   val label = $A.alloc<byte>(64)
-  val after = _put_literal(label, 0, "Go to the furthest place (chapter ")
+  val after = _put_literal(label, 0, "Go to where you were on another device (chapter ")
   val chapter_number = (if chapter >= 0 then chapter + 1 else 1): Int
   val after = $S.int_to_str(label, after, 64, chapter_number)
   val after = _put_literal(label, after, ")")
   val () = ui_text_buf("sync-go", label, after)
-in ui_show("sync-toast", true) end
+in ui_show("sync-offer", true) end
 
 (* A device's reading log's [day, minutes] pairs from position, to the
    array's closing bracket: added to the days read elsewhere *)
@@ -1931,9 +1934,22 @@ fun _devices_take {l,key_loc:agz}{owner:addr}{n:nat}{count:nat} .<count>. (file:
       val () = (if number <> device then _device_members(file, n, start + 1, key) else ())
     in _devices_take(file, n, rest, device, key) end
 
+(* The place numbers give (another device's, dated stamp) offered for
+   the open book when asked, unless it is its own place (own's) *)
+fn _offer_other {own_loc,numbers_loc:agz}
+  (own: !$A.arr(Int, own_loc, BOOK_NUMBERS), numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), asked: bool, stamp: Int): void =
+  if ~asked then ()
+  else if backup_numbers_place_same(own, numbers) then ()
+  else let
+    val @(chapter, page, anchor) = backup_numbers_place(numbers)
+  in _offer(chapter, page, anchor, stamp) end
+
 (* The file's numbers of the book id_high, id_low, taken: a library
-   book's merged with its own (the open book's place offered, not
-   taken); one this device does not have, kept for when it is imported *)
+   book's merged with its own; one this device does not have, kept for
+   when it is imported. The file's place is taken when it is the later
+   change (#302), unless the reader declined it here; for the open book
+   it is offered instead, and only when another device read it: this
+   device's own place, written to the file, is never offered back *)
 fn _book_take {numbers_loc:agz} (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), id_high: Int, id_low: Int): void = let
   val book_index = lib_find(id_high, id_low)
 in
@@ -1944,10 +1960,11 @@ in
         val own = backup_numbers_new()
         val () = backup_numbers_of(nums, own)
         val is_open = (nums.key = !_open_key)
-        val further = backup_numbers_further(numbers, own)
-        val @(chapter, page, anchor) = backup_numbers_place(numbers)
-        val () = (if is_open then (if further then _offer(chapter, page, anchor) else ()) else ())
-        val () = backup_numbers_merge(own, numbers, is_open)
+        val @(stamp, device) = backup_numbers_place_change(numbers)
+        val wanted = (if backup_numbers_place_later(own, numbers) then stamp > nums.place_declined else false): bool
+        val elsewhere = (if device > 0 then device <> !_device_now else false): bool
+        val () = _offer_other(own, numbers, (if is_open then (if wanted then elsewhere else false) else false), stamp)
+        val () = backup_numbers_merge(own, numbers, (if is_open then true else ~wanted))
         val () = backup_numbers_reading(own, ~1, ~1)
         val () = backup_apply_numbers(book_index, own, true)
       in $A.free<Int>(own) end)
@@ -2310,6 +2327,8 @@ fun _books {book_index,count:nat | book_index <= count} .<count - book_index>. (
         val () = backup_numbers_of(nums, numbers)
         (* its collections as the file numbers them *)
         val () = backup_numbers_collections(numbers, g1ofg0(_to_file(nums.collections, 0, 0)))
+        (* its place this device's, unless the file's is the later *)
+        val () = backup_numbers_place_device(numbers, !_device_now)
         val () = _merge_remote(numbers, id_high, id_low)
         (* its reading here and elsewhere, for a reader of the file (sync
            reads each device's from its entry) *)
@@ -2422,22 +2441,26 @@ in sync_run() end
 implement sync_book_closed () = let
   val () = !_open_key := 0
   val () = !_further_chapter := ~1
-in ui_show("sync-toast", false) end
+in ui_show("sync-offer", false) end
 
-(* The further place offered, taken (the toast's button): its chapter
-   (-1 when none is offered), page and anchor *)
+(* The place offered, taken (the offer's button): its chapter (-1 when
+   none is offered), page and anchor. Going there is a move of the
+   reader's, the latest *)
 #pub fn sync_further_take (): @(Int, Int, Int)
 implement sync_further_take () = let
   val chapter = !_further_chapter
   val () = !_further_chapter := ~1
-  val () = ui_show("sync-toast", false)
+  val () = ui_show("sync-offer", false)
 in @(chapter, !_further_page, !_further_anchor) end
 
-(* The toast dismissed: the place stays *)
+(* The offer dismissed: the place stays, and the place offered is
+   declined, so it is neither offered nor taken again (a place the
+   other device reads later is) *)
 #pub fn sync_further_dismiss (): void
 implement sync_further_dismiss () = let
+  val () = (if !_further_chapter >= 0 then lib_place_decline(!_open_key, !_further_stamp) else ())
   val () = !_further_chapter := ~1
-in ui_show("sync-toast", false) end
+in ui_show("sync-offer", false) end
 
 (* The screen's fields, empty: the folder's URL, the user name and the
    password (made again to be emptied) *)
@@ -2456,8 +2479,8 @@ in ui_field("fastmail-fields", "fastmail-password", FPassword, "mname", "Fastmai
 
 (* The sync screen: what sync keeps the same, the WebDAV folder's URL,
    user name and password (kept on this device only), how the last sync
-   went, and Turn off, Sync now and Done; and the toast that offers the
-   open book's further place *)
+   went, and Turn off, Sync now and Done; and the offer of the place
+   another device read in the open book *)
 #pub fn sync_screen_make (): void
 implement sync_screen_make () = let
   val () = ui_el("bats-root", "sync-screen", TDiv, "info")
@@ -2510,11 +2533,15 @@ implement sync_screen_make () = let
   val () = ui_text_btn("sync-buttons", "sync-now", "btn btn-p", "Sync now")
   val () = ui_text_btn("sync-buttons", "sync-done", "btn", "Done")
   val () = ui_show("sync-screen", false)
-  val () = ui_el("bats-root", "sync-toast", TDiv, "toast tup")
-  val () = ui_role("sync-toast", RStatus)
-  val () = ui_text_btn("sync-toast", "sync-go", "btn", "Go to the furthest place")
-  val () = ui_icon_btn("sync-toast", "sync-toast-close", "ibtn", IcClose, "Dismiss")
-in ui_show("sync-toast", false) end
+  (* the offer of the place another device read: a row of the reader's
+     bottom bar, over its progress, so it covers no text the bars do
+     not (#302); it is there whenever the bars are, until it is
+     answered or the book closed *)
+  val () = ui_el("reader-bottom-bar", "sync-offer", TDiv, "soffer")
+  val () = ui_role("sync-offer", RStatus)
+  val () = ui_text_btn("sync-offer", "sync-go", "btn", "Go to where you were on another device")
+  val () = ui_icon_btn("sync-offer", "sync-offer-close", "ibtn", IcClose, "Dismiss")
+in ui_show("sync-offer", false) end
 
 (* The fields, made again, with what is kept *)
 fn _fields_show (): void = let
