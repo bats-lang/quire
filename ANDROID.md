@@ -103,7 +103,9 @@ and upload the `.aab` inside to the Google Play Console.
 ## Building locally
 
 `bats build` then `dist/debug/gen-pwa` writes `dist/pwa` and
-`dist/android`. With Node, a JDK 21 and the Android SDK (`ANDROID_HOME`):
+`dist/android`. With Node 22 or 24 (the script runs pnpm through the
+corepack they ship; Node 25 ships none), a JDK 21 and the Android SDK
+(`ANDROID_HOME`):
 
 ```sh
 ANDROID_KEYSTORE=/path/to/release.jks \
