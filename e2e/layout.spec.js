@@ -3,7 +3,7 @@
 // spills out of the window, the page fills it, the bars' controls fit,
 // and no control's name or text is cut off on any screen (#265).
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
@@ -339,12 +339,14 @@ test('the page keeps its text out of the safe area: a cutout above or beside it'
 // The reading settings' sheet scrolls within the window, and its Close
 // and tabs stay in reach however far it is scrolled, in full screen too
 // (#275: in full screen the sheet could no longer be scrolled to Close)
-test('the reading settings sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }) => {
+test('the reading settings sheet scrolls within the window, Close always in reach, in full screen too', async ({ page }, testInfo) => {
   await start(page);
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
-  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  // (in the Android app, full screen is the status bar hidden)
+  if (onAndroid(testInfo)) await expect.poll(() => page.evaluate(() => window.__android.calls.some(c => c.plugin === 'StatusBar' && c.method === 'hide'))).toBe(true);
+  else await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
   await openReadingSettings(page, 'Look');
   const panel = dialog(page, 'Reading settings');
   const close = panel.getByRole('button', { name: 'Close', exact: true });
@@ -369,5 +371,5 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await fits(page, 'Reading settings, in full screen');
   await close.click();
   await expect(panel).toBeHidden();
-  await page.evaluate(() => document.exitFullscreen());
+  if (!onAndroid(testInfo)) await page.evaluate(() => document.exitFullscreen());
 });

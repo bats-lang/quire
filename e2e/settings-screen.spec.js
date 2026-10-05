@@ -4,7 +4,7 @@
 // Each complex area is a screen of its own, opened from its row, and
 // Escape closes the screen on top, then Settings.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, cards, card, openBook, readBook, toLibrary, chapters, dialog, menuItem, libraryMenu,
@@ -191,20 +191,24 @@ const readingScreen = page => page.getByRole('dialog', { name: 'Reading', exact:
 const readingRow = page => settingsScreen(page).getByRole('group', { name: 'Reading', exact: true });
 const tapChoice = (root, name) => root.getByRole('group', { name: 'Tap to turn pages' }).getByRole('button', { name: new RegExp(`^${name}`) });
 
-test('Reading opens from its row, from the library and the reader, and says its state in short', async ({ page }) => {
+test('Reading opens from its row, from the library and the reader, and says its state in short', async ({ page }, testInfo) => {
   await fakeVoices(page);
+  // (the Android app turns pages with the volume keys, off at first)
+  const keys = onAndroid(testInfo) ? ' · volume keys off' : '';
   const errors = await start(page);
   await librarySettings(page);
   // the first row, and in focus as Settings opens
   await expect(settingsButton(page, 'Reading ›')).toBeFocused();
-  await expect(readingRow(page)).toContainText('Taps: sides · read aloud 1×');
+  await expect(readingRow(page)).toContainText(`Taps: sides${keys} · read aloud 1×`);
   await settingsButton(page, 'Reading ›').click();
   await expect(readingScreen(page)).toBeVisible();
   await expect(tapChoice(readingScreen(page), 'Sides')).toBeFocused();
   await expect(tapChoice(readingScreen(page), 'Sides')).toHaveAttribute('aria-pressed', 'true');
   await expect(tapChoice(readingScreen(page), 'Forward')).toHaveAccessibleName('Forward Anywhere forward, left side back, top shows the controls');
-  // a browser does not give the page the volume keys
-  await expect(readingScreen(page).getByRole('button', { name: 'Turn pages with volume keys' })).toBeHidden();
+  // a browser does not give the page the volume keys; the Android app does
+  const volumeKeys = readingScreen(page).getByRole('button', { name: 'Turn pages with volume keys' });
+  if (onAndroid(testInfo)) await expect(volumeKeys).toBeVisible();
+  else await expect(volumeKeys).toBeHidden();
   // from the library: the voices of the language last read, English
   // before any book
   const voice = readingScreen(page).getByRole('combobox', { name: 'Voice' });
@@ -238,8 +242,9 @@ test('Reading opens from its row, from the library and the reader, and says its 
   expect(errors).toEqual([]);
 });
 
-test("a change on the Reading screen shows in the sheet's tabs, and one in the sheet on the Reading screen", async ({ page }) => {
+test("a change on the Reading screen shows in the sheet's tabs, and one in the sheet on the Reading screen", async ({ page }, testInfo) => {
   await fakeVoices(page);
+  const keys = onAndroid(testInfo) ? ' · volume keys off' : '';
   await start(page);
   await readBook(page, { title: 'Both Ways', author: 'Reader', rawChapters: chapters(2) });
   // the Reading screen to the sheet
@@ -249,7 +254,7 @@ test("a change on the Reading screen shows in the sheet's tabs, and one in the s
   await readingScreen(page).getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
   await readingScreen(page).getByRole('combobox', { name: 'Voice' }).selectOption({ label: 'Narrator' });
   await page.keyboard.press('Escape');
-  await expect(readingRow(page)).toContainText('Taps: forward · read aloud 1.5×');
+  await expect(readingRow(page)).toContainText(`Taps: forward${keys} · read aloud 1.5×`);
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
   await openReadingSettings(page, 'Turning');
@@ -266,7 +271,7 @@ test("a change on the Reading screen shows in the sheet's tabs, and one in the s
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   await readerSettings(page);
-  await expect(readingRow(page)).toContainText('Taps: sides · read aloud 2×');
+  await expect(readingRow(page)).toContainText(`Taps: sides${keys} · read aloud 2×`);
   await settingsButton(page, 'Reading ›').click();
   await expect(tapChoice(readingScreen(page), 'Sides')).toHaveAttribute('aria-pressed', 'true');
   await expect(tapChoice(readingScreen(page), 'Forward')).toHaveAttribute('aria-pressed', 'false');
@@ -275,7 +280,7 @@ test("a change on the Reading screen shows in the sheet's tabs, and one in the s
   // kept, as the sheet's are
   await reload(page);
   await readerSettings(page);
-  await expect(readingRow(page)).toContainText('Taps: sides · read aloud 2×');
+  await expect(readingRow(page)).toContainText(`Taps: sides${keys} · read aloud 2×`);
 });
 
 test('in the app, the volume keys are on the Reading screen too, the same switch as the sheet\'s', async ({ page }) => {

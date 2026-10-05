@@ -8,6 +8,10 @@ const chromiumArgs = [
   '--disable-software-rasterizer',
 ];
 
+// Android's System WebView on a Pixel, as the app's pages see it
+const ANDROID_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP4A.250105.002; wv) '
+  + 'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36';
+
 export default defineConfig({
   testDir: './e2e',
   // every spec's test carries the stall watch (e2e/stall-capture.js, #244)
@@ -46,10 +50,29 @@ export default defineConfig({
     // 320 CSS px), which a phone reaches at a large display size (#265)
     {
       name: 'narrow',
-      testMatch: /(layout|smoke|page-turn)\.spec\.js/,
+      testMatch: /(layout|smoke|page-turn|icons)\.spec\.js/,
       use: {
         browserName: 'chromium',
         viewport: { width: 320, height: 640 },
+        launchOptions: { args: chromiumArgs },
+      },
+    },
+    // Android, as the app runs there (#295): a Pixel-class phone (412 x
+    // 915 CSS px at 2.625 device pixels a CSS px, a touch screen, the
+    // WebView's user agent), its status bar and gesture navigation
+    // given as the safe area's insets (fixtures.js), and the app's
+    // Android branch where it keys on the platform. Every spec runs
+    // here, never narrowed (scripts/ci-groups.py fails CI if it is); a
+    // spec that cannot apply on Android skips itself, saying why
+    {
+      name: 'android',
+      use: {
+        browserName: 'chromium',
+        viewport: { width: 412, height: 915 },
+        deviceScaleFactor: 2.625,
+        isMobile: true,
+        hasTouch: true,
+        userAgent: ANDROID_USER_AGENT,
         launchOptions: { args: chromiumArgs },
       },
     },

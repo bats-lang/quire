@@ -137,7 +137,9 @@ test('the scrubber shows where the page is, and dragging it goes there', async (
   await showChrome(page);
   const scrubber = page.getByRole('slider', { name: 'Place in book' });
   await expect(scrubber).toHaveAttribute('aria-valuenow', '0');
-  await expect(page.getByText('0%', { exact: true })).toBeVisible();
+  // (the bar's: the library's Continue reading card, behind the
+  // reader, shows the book's too once a sync has listed it there)
+  await expect(page.getByRole('toolbar', { name: 'Page controls' }).getByText('0%', { exact: true })).toBeVisible();
   const box = await scrubber.boundingBox();
   await page.mouse.move(box.x + box.width * 0.8, box.y + box.height / 2);
   await page.mouse.down();
