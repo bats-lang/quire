@@ -43,6 +43,8 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
+staload SCR = "wasm.bats-packages.dev/bridge/src/screen.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
 fn _apply_diff_list(diffs: $W.diff_list): void = let
   val doc = $D.open_document($A.text_lit("bats-root"), 9)
@@ -1729,12 +1731,24 @@ fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_c
   val () = _record_position()
 in _page_waiter_resolve() end
 
+(* In the app's full screen, the system bars hidden again: Android
+   brings them back for a while at a swipe from the screen's edge
+   (immersive mode's own way out), and full screen stays on, so a page
+   turned hides them again, as a reading app keeps them hidden while it
+   reads (quire#300). Hiding hidden bars changes nothing. A browser's
+   full screen is left only by the reader (Escape), never brought back
+   unasked *)
+fn _bars_hidden_again (): void =
+  if $BAPP.is_native_platform() then (if $SCR.fullscreen_active() then $SCR.fullscreen_enter() else ())
+  else ()
+
 (* Shows a page of page_count, scrolled down by top when scrolled (the page's
    own step otherwise) *)
 fn _show_page_down {page_count:pos}{page:nat | page < page_count}{chapter,chapter_count:nat}
   (page: int page, page_count: int page_count, chapter: int chapter, chapter_count: int chapter_count, top: Int): void = let
   (* auto turns to Night when a page turned passes 22:00 *)
   val () = set_theme_recheck()
+  val () = _bars_hidden_again()
   val () = reading_set(@(page, page_count, chapter, chapter_count))
   val () = window_show(page, page_count)
   val page_id = $A.alloc<byte>(4)

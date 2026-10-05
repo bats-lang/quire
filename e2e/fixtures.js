@@ -47,7 +47,7 @@ export async function androidInsets(page) {
 
 /** The app's Capacitor as the Android app has it (pwa's project: the
     plugins bridge calls), played in the page: the app runs natively, so
-    bridge takes its Android branch (the status bar for full screen,
+    bridge takes its Android branch (the system bars for full screen,
     ScreenOrientation, ScreenBrightness, Share, the files Auto Backup
     keeps, the Browser tab and app links, the device's Google account).
     What each plugin was asked is kept in window.__android. The device
@@ -64,7 +64,7 @@ export function androidApp() {
     isNativePlatform: () => true,
     getPlatform: () => 'android',
     Plugins: {
-      StatusBar: { hide: call('StatusBar', 'hide'), show: call('StatusBar', 'show') },
+      SystemBars: { hide: call('SystemBars', 'hide'), show: call('SystemBars', 'show') },
       ScreenOrientation: { lock: call('ScreenOrientation', 'lock'), unlock: call('ScreenOrientation', 'unlock') },
       ScreenBrightness: {
         getBrightness: call('ScreenBrightness', 'getBrightness', () => ({ brightness: asked.brightness })),

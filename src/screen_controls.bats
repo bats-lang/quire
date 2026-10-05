@@ -1,12 +1,13 @@
-(* screen_controls -- the reading settings' Screen row (its Page tab): full screen,
+(* screen_controls -- the reading settings' screen rows (its Page tab): full screen,
    the rotation locked, and the brightness *)
 
 (* Each control is shown only where the platform has it (bridge's
    *_available): full screen in a browser with the Fullscreen API and in
    the app (its bars hidden); the rotation lock in the app, and in a
    browser that allows it (installed, or in full screen); the brightness
-   in the app only, as a web page cannot set it. The row goes when none
-   is. Full screen and the lock are toggles (aria-pressed); the
+   in the app only, as a web page cannot set it. Each is a row of its
+   own, and the group goes when none is. Full screen and the lock are
+   switches (aria-pressed, a drawn knob that moves); the
    brightness and the lock are kept with the settings (settings.bats),
    and put back as the app starts. *)
 
@@ -43,9 +44,9 @@ implement screen_controls_show () = let
   val full = $SCR.fullscreen_available()
   val lock = $SCR.orientation_available()
   val brightness = $SCR.brightness_available()
-  val () = ui_show("screen-fullscreen", full)
-  val () = ui_show("screen-lock", lock)
-  val () = ui_show("screen-brightness", brightness)
+  val () = ui_show("screen-fullscreen-row", full)
+  val () = ui_show("screen-lock-row", lock)
+  val () = ui_show("screen-brightness-row", brightness)
   val () = ui_show("screen-row", (if full then true else if lock then true else brightness))
   val () = _pressed("screen-fullscreen", $SCR.fullscreen_active())
 in
@@ -127,9 +128,9 @@ fn _setting_of (choice: brightness_choice): $SCR.brightness_setting =
   | BrightnessFull() => $SCR.Level(100)
 
 (* A choice's option: its value and what it shows *)
-fn _option_of (choice: brightness_choice): @([value_len:pos | value_len < 8] string value_len, [label_len:pos | label_len < 8] string label_len) =
+fn _option_of (choice: brightness_choice): @([value_len:pos | value_len < 8] string value_len, [label_len:pos | label_len < 16] string label_len) =
   case+ choice of
-  | BrightnessSystem() => @("system", "System")
+  | BrightnessSystem() => @("system", "Same as device")
   | BrightnessTenth() => @("10", "10%")
   | BrightnessQuarter() => @("25", "25%")
   | BrightnessHalf() => @("50", "50%")
@@ -147,7 +148,7 @@ fn _same (one: brightness_choice, other: brightness_choice): bool =
   | (_, _) => false
 
 (* A string's bytes in a new array *)
-fn _bytes_of {text_len:pos | text_len < 8} (text: string text_len): [l:agz] @($A.arr(byte, l, text_len), int text_len) = let
+fn _bytes_of {text_len:pos | text_len < 16} (text: string text_len): [l:agz] @($A.arr(byte, l, text_len), int text_len) = let
   val text_len = g1u2i(string1_length(text))
   val bytes = $A.alloc<byte>(text_len)
   fun put {l:agz}{i:nat | i <= text_len} .<text_len - i>. (bytes: !$A.arr(byte, l, text_len), i: int i): void =
@@ -266,7 +267,7 @@ end
    Startup
    ============================================================ *)
 
-(* Once the settings are read: the row as the platform has it, the
+(* Once the settings are read: the rows as the platform has them, the
    brightness select's levels, and what was kept put back: a brightness
    other than the system's, and (in the app, where nothing else asks
    for it) the rotation lock *)
@@ -274,6 +275,15 @@ end
 
 implement screen_controls_start () = let
   val () = _brightness_options()
+  (* the app starts out of full screen, its system bars shown: bars a
+     page before this one hid (the app reopened, its page loaded again)
+     are shown, so the switch, which starts off, says what the screen
+     shows (quire#300). A browser starts out of full screen anyway *)
+  val () = (if $BAPP.is_native_platform() then $SCR.fullscreen_exit() else ())
+  (* what full screen hides, on this platform: the system's bars in the
+     app, the browser's own around the page in a browser *)
+  val () = (if $BAPP.is_native_platform() then ui_text("screen-fullscreen-about", "Hides the status and navigation bars")
+    else ui_text("screen-fullscreen-about", "Hides the browser's bars around the page"))
   val () = screen_controls_show()
   val () = (if $SCR.brightness_available() then (case+ set_brightness_get() of
       | BrightnessSystem() => ()

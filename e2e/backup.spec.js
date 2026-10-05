@@ -245,7 +245,7 @@ async function deviceStubs(page) {
     window.calls = [];
     const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
     window.Capacitor = { isNativePlatform: () => true, Plugins: {
-      StatusBar: { hide: call('hide'), show: call('show') },
+      SystemBars: { hide: call('hide'), show: call('show') },
       ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
       ScreenBrightness: { setBrightness: call('brightness') },
     } };

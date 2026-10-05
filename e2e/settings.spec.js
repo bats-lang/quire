@@ -329,28 +329,89 @@ test.describe('auto at night', () => {
   });
 });
 
-test('in the Android app, the screen: full screen, the rotation locked and the brightness', async ({ page }) => {
-  await page.addInitScript(() => {
-    window.calls = [];
-    const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
-    window.Capacitor = { isNativePlatform: () => true, Plugins: {
-      StatusBar: { hide: call('hide'), show: call('show') },
-      ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
-      ScreenBrightness: { setBrightness: call('brightness') },
-    } };
+// The Android app's plugins played: SystemBars keeps which bars are
+// hidden (no bar named is both, as Capacitor's own SystemBars.java
+// hides WindowInsetsCompat.Type.systemBars()), and each call
+function barsPlayed() {
+  window.calls = [];
+  window.hidden = { status: false, navigation: false };
+  const bars = a => (a && a.bar === 'StatusBar') ? ['status'] : (a && a.bar === 'NavigationBar') ? ['navigation'] : ['status', 'navigation'];
+  const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
+  window.Capacitor = { isNativePlatform: () => true, Plugins: {
+    SystemBars: {
+      hide: a => { for (const bar of bars(a)) window.hidden[bar] = true; return call('hide')(a); },
+      show: a => { for (const bar of bars(a)) window.hidden[bar] = false; return call('show')(a); },
+    },
+    ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
+    ScreenBrightness: { setBrightness: call('brightness') },
+  } };
+}
+
+/** Whether switch shows on: pressed, and its knob at the track's end */
+async function switchOn(toggle) {
+  return toggle.evaluate(e => {
+    const track = e.querySelector('.track').getBoundingClientRect();
+    const knob = e.querySelector('.knob').getBoundingClientRect();
+    const atEnd = knob.left - track.left > track.right - knob.right;
+    return e.getAttribute('aria-pressed') === 'true' && atEnd ? 'on' : e.getAttribute('aria-pressed') === 'false' && !atEnd ? 'off' : 'mixed';
   });
+}
+
+// quire#300: full screen in the app hides both system bars, the status
+// bar and the navigation bar, and shows them again; its switch shows
+// which, by its knob, not only aria-pressed; the rotation lock and the
+// brightness each have a row of their own, the brightness named by what
+// it does
+test('in the Android app, the screen: full screen hides both bars, the rotation locked and the brightness', async ({ page }) => {
+  await page.addInitScript(barsPlayed);
   await start(page);
-  await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(1) });
+  await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(3) });
   await openReadingSettings(page, 'Page');
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
-  const brightness = more(page).getByRole('combobox', { name: 'Brightness' });
+  const brightness = more(page).getByRole('combobox', { name: 'Brightness while reading', exact: true });
+  await expect(more(page).getByText('Brightness while reading', { exact: true })).toBeVisible();
+  await expect(brightness.locator('option:checked')).toHaveText('Same as device');
+  await expect(full).toHaveAccessibleDescription('Hides the status and navigation bars');
+  expect(await switchOn(full)).toBe('off');
   await full.click();
-  await expect(full).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => switchOn(full)).toBe('on');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await full.click();
+  await expect.poll(() => switchOn(full)).toBe('off');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
   await lock.click();
-  await expect(lock).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => switchOn(lock)).toBe('on');
   await brightness.selectOption({ label: '25%' });
-  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['hide', 'lock', 'brightness']);
+  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['show', 'hide', 'show', 'lock', 'brightness']);
+});
+
+// quire#300: the switch says what the screen shows. Android shows the
+// hidden bars again at a swipe from the edge (immersive mode's way out)
+// and full screen stays on: the next page turned hides them again. The
+// app reopened starts out of full screen, its bars shown, whatever a
+// page before it hid
+test('in the Android app, full screen holds: bars the system brought back are hidden at the next page, and a reopened app starts with them shown', async ({ page }) => {
+  await page.addInitScript(barsPlayed);
+  await start(page);
+  await readBook(page, { title: 'Held', author: 'Settings Tests', rawChapters: chapters(3, 60) });
+  await openReadingSettings(page, 'Page');
+  const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
+  await full.click();
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await page.keyboard.press('Escape');
+  // the system brings the bars back (a swipe from the edge)
+  await page.evaluate(() => { window.hidden = { status: false, navigation: false }; });
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await openReadingSettings(page, 'Page');
+  expect(await switchOn(full)).toBe('on');
+  await page.keyboard.press('Escape');
+  // reopened: the bars, hidden until now, are shown, and the switch is off
+  await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify(window.hidden)));
+  await page.addInitScript(() => { const kept = sessionStorage.getItem('bars'); if (kept) window.hidden = JSON.parse(kept); });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
 });
 
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {
@@ -395,7 +456,7 @@ test.describe('auto at night, to the minute', () => {
 });
 
 test('in a browser, Full screen goes into full screen and out of it, its button pressed as it is', async ({ page }, testInfo) => {
-  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app's full screen hides the status bar (the app's screen test, before these)");
+  test.skip(onAndroid(testInfo), "the Fullscreen API of a browser: the Android app's full screen hides the system bars (the app's screen tests, before these)");
   await start(page);
   await readBook(page, { title: 'Fullscreened', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
@@ -416,7 +477,7 @@ async function deviceStubs(page) {
     window.calls = [];
     const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
     window.Capacitor = { isNativePlatform: () => true, Plugins: {
-      StatusBar: { hide: call('hide'), show: call('show') },
+      SystemBars: { hide: call('hide'), show: call('show') },
       ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
       ScreenBrightness: { setBrightness: call('brightness') },
     } };

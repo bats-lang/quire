@@ -635,6 +635,25 @@ fn _toc (): void = let
   val () = _hide("pages-list")
 in _hide("contents-panel") end
 
+(* A switch, a row of its own (in parent): a button named by its label
+   alone (a toggle, aria-pressed off at first), holding a drawn track and
+   its knob (decorative, hidden from assistive technology; the stylesheet
+   moves the knob and fills the track when it is pressed), and a line
+   under it saying what it does, which describes it (quire#300) *)
+fn _switch_row {parent_len,row_len,button_len,track_len,knob_len,about_len:pos | parent_len < 256; row_len < 256; button_len < 256; track_len < 256; knob_len < 256; about_len < 256}
+  {label_len,text_len:pos | label_len < 256; text_len < 256}
+  (parent: string parent_len, row: string row_len, button: string button_len, track: string track_len,
+   knob: string knob_len, about: string about_len, label: string label_len, text: string text_len): void = let
+  val () = ui_el(parent, row, TDiv, "srow stack")
+  val () = ui_text_btn(row, button, "sbtn switch", label)
+  val () = ui_attr(button, APressed, "false")
+  val () = ui_el(button, track, TSpan, "track")
+  val () = ui_attr(track, AHidden, "true")
+  val () = ui_el(track, knob, TSpan, "knob")
+  val () = ui_el(row, about, TSpan, "sabout")
+  val () = ui_text(about, text)
+in ui_attr(button, ADescribedBy, about) end
+
 (* A choice of where taps turn pages, a line of its own: its button,
    holding a drawing of the page's zones (decorative, hidden from
    assistive technology: back the edge's tint, forward the accent),
@@ -815,18 +834,28 @@ fn _settings (): void = let
   val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
   val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
   val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
-  (* the screen: full screen, the rotation locked (as Kindle's Layout
-     tab locks the orientation), and (in the Android app) the
-     brightness, each shown only where it can be had
-     (screen_controls.bats) *)
-  val () = ui_el("typography-page", "screen-row", TDiv, "srow")
-  val () = ui_el("screen-row", "screen-label", TSpan, "slabel")
-  val () = ui_text("screen-label", "Screen")
-  val () = ui_text_btn("screen-row", "screen-fullscreen", "sbtn", "Full screen")
-  val () = ui_attr("screen-fullscreen", APressed, "false")
-  val () = ui_text_btn("screen-row", "screen-lock", "sbtn", "Lock rotation")
-  val () = ui_attr("screen-lock", APressed, "false")
-  val () = ui_field("screen-row", "screen-brightness", FChoice, "ssel", "Brightness")
+  (* the screen (quire#300): full screen, the rotation locked (as
+     Kindle's Layout tab locks the orientation), and (in the Android
+     app) the brightness, each a row of its own, shown only where it can
+     be had (screen_controls.bats). Full screen and the lock are each a
+     switch, its name and a drawn track whose knob moves when it is on
+     (aria-pressed), with a line saying what it does; the brightness, a
+     select under its own label, the whole width *)
+  val () = ui_el("typography-page", "screen-row", TDiv, "sgroup")
+  val () = _switch_row("screen-row", "screen-fullscreen-row", "screen-fullscreen", "screen-fullscreen-track",
+    "screen-fullscreen-knob", "screen-fullscreen-about", "Full screen", "Hides the status and navigation bars")
+  val () = _switch_row("screen-row", "screen-lock-row", "screen-lock", "screen-lock-track",
+    "screen-lock-knob", "screen-lock-about", "Lock rotation", "Keeps the page in its current orientation when the device turns")
+  (* named by what it does, as Kindle's "Use system brightness" and Play
+     Books' Lighting are: its own brightness while Quire is shown, or the
+     device's, never the device's setting changed *)
+  val () = ui_el("screen-row", "screen-brightness-row", TDiv, "srow stack")
+  val () = ui_el("screen-brightness-row", "screen-brightness-label", TSpan, "slabel")
+  val () = ui_text("screen-brightness-label", "Brightness while reading")
+  val () = ui_field("screen-brightness-row", "screen-brightness", FChoice, "ssel", "Brightness while reading")
+  val () = ui_el("screen-brightness-row", "screen-brightness-about", TSpan, "sabout")
+  val () = ui_text("screen-brightness-about", "Changes the screen only while Quire is open")
+  val () = ui_attr("screen-brightness", ADescribedBy, "screen-brightness-about")
   val () = _hide("screen-row")
   (* Turning, and Read aloud's speed and voice: made as the Reading
      screen's are (_turning_rows, _aloud_rows) *)

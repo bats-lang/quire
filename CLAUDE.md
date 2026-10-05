@@ -569,12 +569,22 @@ only where its platform has it, by its own `data-hide`.
   `screen_controls_apply` sets the screen again). Going to the library, opening
   another book, or the page going away (`pagehide`) stops reading.
 * **The screen** (`src/screen_controls.bats`, the reading settings'
-  Screen row, on its Page tab): Full screen (`fullscreen_*`, pressed as
-  `listen_fullscreen` says), Lock rotation (`orientation_*`, a
-  `rotation` kept with the settings and locked again as the app
-  starts), and Brightness (`brightness_*`, the app only: a
-  `brightness_choice`, the system's or 10 to 100%, kept with the
-  settings and set again as the app starts).
+  Page tab, a row each, quire#300): Full screen (`fullscreen_*`; in the
+  app bridge hides both system bars, Capacitor's `SystemBars`, Android's
+  immersive mode) and Lock rotation (`orientation_*`, a `rotation` kept
+  with the settings and locked again as the app starts) are switches:
+  a button named by its label, with a drawn track whose knob moves when
+  it is pressed (`_switch_row` in `src/app.bats`), and a line saying
+  what it does (`aria-describedby`). The app starts with its bars shown
+  and the switch off; while full screen is on, a page shown hides the
+  bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
+  brings them back at a swipe from the edge. Brightness while reading
+  (`brightness_*`, the app only: a `brightness_choice`, the device's own
+  ("Same as device") or 10 to 100%, kept with the settings and set again
+  as the app starts) is a select under its own label, the whole width.
+  `e2e/controls-shown.js` checks, on every screen the layout spec walks,
+  that no control's text is cut (a select's chosen option too) and that
+  every toggle looks different on and off.
 * **Sharing** (`src/sharing.bats`): the selection, quoted and cited
   ("“…”\n— Author, Title"), by `share_text`; the annotations' Markdown
   file (`annot_export` to `ToShare`) by `share_file` where files can be
