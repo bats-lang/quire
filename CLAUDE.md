@@ -977,6 +977,22 @@ older one is padded natively instead). A spread's columns are at least
 typography sheet's head (`.shead`), with Close, is held at its top as
 it scrolls. `e2e/layout.spec.js` sets the insets through DevTools.
 
+The visible reading area is given once, as the reader view's (`.rv`)
+variables in `src/style.bats` (#296): the running footer sits 8px above
+the screen's bottom inset (`--footer-bottom`, Android's navigation bar,
+which the app is drawn over edge to edge), 16px tall
+(`--footer-height`), and the page's paddings (`--page-top`,
+`--page-bottom`) keep the text half a line (at least 12px) clear of the
+footer and of the top inset. A column is the page's height less those
+paddings, so it is exactly that area; a vertical page's column gap and a
+picture's largest height are the same paddings. Pages are counted
+across by the page's scroll width, which the column's height does not
+change. `e2e/page-margins.js` measures those margins against the
+insets the page computes, and the e2e fixture measures them at the end
+of every test in the phone-sized projects (`MARGIN_PROJECTS`), full
+screen too, whenever the reader shows a paged reflowed page with the
+bars down, so a spec that leaves the reader open checks them.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for
