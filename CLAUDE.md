@@ -308,11 +308,20 @@ conflict, and replaces the bytes, or makes the file in
 `appDataFolder`). The access token for `drive.appdata` comes from
 bridge's `google_token_get` (Capawesome's Google Sign-In, which shows
 Google's sheet each time it is asked), so it is asked for only when
-the reader acts (Use Android, Sync now) and kept in memory while the
-app runs (`_token`); a sync the app makes by itself without one, or
-one Drive refuses (401), says "Tap Sync now to sign in to Google
-again". No account and a cancel each say so, and a build with no
-client lists no Use Android;
+the reader acts (Use Android, Sync now), and kept on the device
+("sync-google-token", `_google_token_save`) as well as in memory
+(`_token`), so the syncs the app makes by itself go on after it is
+opened again (#304: neither Capawesome's plugin, which always shows
+Credential Manager's sheet before `AuthorizationClient.authorize`, nor
+Google Identity Services, whose window a page may open only at a tap,
+gives a token without UI). When Drive refuses it (401, its hour is
+up) it is forgotten and sync is paused (`SignInAgain`, `_paused`): the
+Sync row says "Android · paused, tap Sync now" ("Google Drive · ..."),
+the screen "Sync paused: tap Sync now to sign in to Google again", no
+banner; while paused with no token the app tries nothing by itself, so
+opening it again changes nothing, and Sync now asks Google once. No
+account and a cancel each say so, and a build with no client lists no
+Use Android;
 Turn off signs out. The client ID is public and not compiled in:
 it is committed in `scripts/sync-clients.env` (#200: the Web
 application client `GOOGLE_WEB_CLIENT_ID`, with the Android client's ID
@@ -337,7 +346,8 @@ and Drive's API. In a browser the same store is **Google Drive**
 Services' token model: a token for about an hour, no refresh token),
 listed only in a build with a client, so Google's script is loaded
 only then; the summary says "Google Drive · ...", and Turn off revokes
-the token.
+the token bridge was given in this session (one kept from an earlier
+session lapses within its hour) and forgets the one kept.
 
 **Dropbox** (#184): the store `Dropbox(refresh)`, the same `quire-sync.json` in the
 app's own folder (Apps › Quire; scopes `files.content.read` and

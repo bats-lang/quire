@@ -7,7 +7,7 @@
 
 import { test, expect, clientsServed, onAndroid } from './fixtures.js';
 import { settled, launch, chapterShown, nextChapter, previousChapter, pagesOn, unchanged } from './relaunch.js';
-import { webdav, folder, USER, PASSWORD, capacitorPlayed } from './sync-stores.js';
+import { webdav, folder, USER, PASSWORD, capacitorPlayed, drive, CLIENT, identityServicesPlayed } from './sync-stores.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, toLibrary, chapters, dialog, librarySettings, settingsButton, settingsScreen,
@@ -39,10 +39,9 @@ async function closeSync(page) {
 }
 
 /** Each store: how the context plays it, and how a reader turns it on
-    (none: no store, and in the app the file kept for Auto Backup). The
-    Google stores (Use Android, Google Drive) join when quire#304 is
-    fixed: their token is kept in memory only, so the sync made as the
-    app opens again fails, and says so */
+    (none: no store, and in the app the file kept for Auto Backup). A
+    Google store (Use Android, Google Drive) keeps its token on the
+    device, so the sync made as the app opens again has it (#304) */
 const stores = {
   'no store, in a browser': { browser: true, async play() {}, async join() {} },
   'no store, in the app (the file kept for Auto Backup)': {
@@ -82,11 +81,40 @@ const stores = {
       await closeSync(page);
     },
   },
+  'Google Drive, in a browser': {
+    browser: true,
+    async play(context) {
+      const server = drive();
+      await identityServicesPlayed(context);
+      await context.route('https://www.googleapis.com/**', server.handle);
+      await clientsServed(context, { googleWebClient: CLIENT });
+    },
+    async join(page) {
+      await openSync(page);
+      await panel(page).getByRole('button', { name: 'Google Drive' }).click();
+      await expect(status(page)).toHaveText(/^Last synced on /);
+      await closeSync(page);
+    },
+  },
+  'Android, in the app': {
+    async play(context) {
+      const server = drive();
+      await capacitorPlayed(context, { token: server.token });
+      await context.route('https://www.googleapis.com/**', server.handle);
+      await clientsServed(context, { googleWebClient: CLIENT });
+    },
+    async join(page) {
+      await openSync(page);
+      await panel(page).getByRole('button', { name: 'Use Android' }).click();
+      await expect(status(page)).toHaveText(/^Last synced on /);
+      await closeSync(page);
+    },
+  },
 };
 
 for (const [name, store] of Object.entries(stores)) {
   test(`with ${name}, after a sync, a book read and gone back in opens where it was, offering nothing`, async ({ context, page }, testInfo) => {
-    test.skip(store.browser && onAndroid(testInfo), 'a browser\'s case: in the Android app, the cases of the app run (no store, WebDAV)');
+    test.skip(store.browser && onAndroid(testInfo), 'a browser\'s case: in the Android app, the cases of the app run (no store, WebDAV, Use Android)');
     await store.play(context);
     await launch(context, page);
     await importFiles(page, [epubFile(book)], 1);

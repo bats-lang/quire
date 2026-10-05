@@ -81,7 +81,7 @@ fn _round_trip_available (): bool =
    the user name and the password. Android (the app): the Google account
    on the device, its address kept for the screen; the file is in its
    Drive's app data folder (drive.bats), read and written with an
-   access token kept only while the app runs (_token) *)
+   access token kept on this device (_token, _google_token_save) *)
 datavtype store =
   | NoStore of ()
   | {url_loc,user_loc,password_loc:agz}{url_len:pos | url_len <= URL_MAX}{user_len:nat | user_len <= USER_MAX}{password_len:nat | password_len <= PASSWORD_MAX}
@@ -249,6 +249,12 @@ fn _fastmail_key (): [l:agz] $A.arr(byte, l, 13) = let
   val () = $A.write_text(key, 0, $A.text_lit("sync-fastmail"), 13)
 in key end
 
+(* The Google store's access token, kept on this device (#304) *)
+fn _google_token_key (): [l:agz] $A.arr(byte, l, 17) = let
+  val key = $A.alloc<byte>(17)
+  val () = $A.write_text(key, 0, $A.text_lit("sync-google-token"), 17)
+in key end
+
 fn _dropbox_sign_in_key (): [l:agz] $A.arr(byte, l, 20) = let
   val key = $A.alloc<byte>(20)
   val () = $A.write_text(key, 0, $A.text_lit("sync-dropbox-sign-in"), 20)
@@ -405,7 +411,10 @@ fn _store_forget (): void = let
   val () = release_bytes(dropbox_frozen, dropbox_bytes)
   val @(fastmail_frozen, fastmail_bytes) = $A.freeze<byte>(_fastmail_key())
   val () = save_checked($IDB.idb_delete(fastmail_bytes, 13))
-in release_bytes(fastmail_frozen, fastmail_bytes) end
+  val () = release_bytes(fastmail_frozen, fastmail_bytes)
+  val @(google_frozen, google_bytes) = $A.freeze<byte>(_google_token_key())
+  val () = save_checked($IDB.idb_delete(google_bytes, 17))
+in release_bytes(google_frozen, google_bytes) end
 
 (* "QS1\n", this device's number, the last sync's minute, result and
    status (4 x i32), under "sync-state" *)
@@ -567,7 +576,7 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | Damaged() => _put_literal(out, position, "The sync file isn't one Quire can read.")
   | NoMemory() => _put_literal(out, position, "There isn't enough memory to sync.")
   | NoAddress() => _put_literal(out, position, "Enter the folder's address, starting with https://.")
-  | SignInAgain() => _put_literal(out, position, "Tap Sync now to sign in to Google again.")
+  | SignInAgain() => _put_literal(out, position, "Sync paused: tap Sync now to sign in to Google again. What changes here meanwhile is kept.")
   | NoGoogleAccount() => _put_literal(out, position, "Android sync needs a Google account on this device.")
   | NotSetUp() =>
     if $BAPP.is_native_platform() then _put_literal(out, position, "Android sync isn't set up in this build of Quire.")
@@ -685,7 +694,7 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | Damaged() => _put_literal(out, position, "The sync file can't be read")
   | NoMemory() => _put_literal(out, position, "Not enough memory")
   | NoAddress() => _put_literal(out, position, "No folder address")
-  | SignInAgain() => _put_literal(out, position, "tap Sync now to sign in")
+  | SignInAgain() => _put_literal(out, position, "paused, tap Sync now")
   | GoogleRefused() => _put_literal(out, position, "Google refused")
   | NoGoogleAccount() => _put_literal(out, position, "No Google account")
   | NotSetUp() => _put_literal(out, position, "Not set up in this build")
@@ -747,7 +756,8 @@ in
     | Damaged() => _result_short(out, 0, result, !_last_status)
     | NoMemory() => _result_short(out, 0, result, !_last_status)
     | NoAddress() => _result_short(out, 0, result, !_last_status)
-    | SignInAgain() => _result_short(out, 0, result, !_last_status)
+    (* paused, not failed: said after the store's name *)
+    | SignInAgain() => _result_short(out, after, result, !_last_status)
     | NoGoogleAccount() => _result_short(out, 0, result, !_last_status)
     | NotSetUp() => _result_short(out, 0, result, !_last_status)
     | GoogleRefused() => _result_short(out, 0, result, !_last_status)
@@ -1155,11 +1165,15 @@ fn _fastmail_read (): $P.promise(read_answer, $P.Chained) =
       end
     | read => $P.ret<read_answer>(read))
 
-(* The access token for the Android store's account: asked for when the
-   reader acts (Use Android, Sync now), kept only while the app runs,
-   and forgotten when Drive refuses it (it lasts about an hour). A sync
-   the app starts by itself never asks for one: asking shows Google's
-   sheet *)
+(* The access token for the Android store's account (Dropbox's store
+   holds its own here): asked for when the reader acts (Use Android, Sync
+   now), kept on this device (_google_token_save) so the syncs the app
+   makes by itself go on after it is opened again, and forgotten when
+   Drive refuses it (it lasts about an hour). A sync the app starts by
+   itself never asks for one: asking shows Google's sheet or window, and
+   a browser lets a page open a window only at the reader's tap. With
+   none, sync is paused (SignInAgain), and says that Sync now signs in
+   again (#304) *)
 datavtype token_cell =
   | NoToken of ()
   | {l:agz}{token_len:pos | token_len <= TOKEN_MAX} Token of ($A.arr(byte, l, TOKEN_MAX), int token_len)
@@ -1176,11 +1190,59 @@ fn _token_swap (cell: token_cell): token_cell = let
   val () = ref_exch_elt<token_cell>(_token, previous)
 in previous end
 
+(* Whether a token is held *)
+fn _token_held (): bool = let
+  val held = _token_swap(NoToken())
+  val have = (case+ held of Token(_, _) => true | NoToken() => false): bool
+  val () = _token_free(_token_swap(held))
+in have end
+
+(* The Google store's token kept: "QS1\n", then the token (a u16 length
+   and its bytes), under "sync-google-token" *)
+fn _google_token_save {l:agz}{token_len:pos | token_len <= TOKEN_MAX}
+  (token: !$A.arr(byte, l, TOKEN_MAX), token_len: int token_len): void = let
+  val record = $A.alloc<byte>(6 + TOKEN_MAX)
+  val () = $A.write_text(record, 0, $A.text_lit("QS1"), 3)
+  val () = $A.write_byte(record, 3, 10)
+  val () = $A.write_u16le(record, 4, token_len)
+  val () = _put_bytes(token, token_len, record, 6, 0)
+  val @(record_frozen, record_bytes) = $A.freeze<byte>(record)
+  val @(used, rest) = $A.borrow_split<byte>(record_frozen, record_bytes, 6 + token_len)
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_google_token_key())
+  val () = save_checked($IDB.idb_put(key_bytes, 17, used, 6 + token_len))
+  val () = release_bytes(key_frozen, key_bytes)
+  val record_bytes = $A.borrow_join<byte>(record_frozen, used, rest)
+in release_bytes(record_frozen, record_bytes) end
+
+(* The Google store's token forgotten, here and where it is kept *)
+fn _google_token_forget (): void = let
+  val () = _token_free(_token_swap(NoToken()))
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(_google_token_key())
+  val () = save_checked($IDB.idb_delete(key_bytes, 17))
+in release_bytes(key_frozen, key_bytes) end
+
+(* The Google store's token kept in record[0, n) (checked here, once) *)
+fn _google_token_of_record {l:agz}{n:nat} (record: !$A.arr(byte, l, n), n: int n): token_cell =
+  if n < 6 then NoToken()
+  else if byte2int0($A.get<byte>(record, 1)) <> 83 then NoToken()
+  else let
+    val token_len = _u16_at(record, 4)
+  in
+    if token_len <= 0 then NoToken()
+    else if token_len > TOKEN_MAX then NoToken()
+    else if 6 + token_len > n then NoToken()
+    else let
+      val token = $A.alloc<byte>(TOKEN_MAX)
+      val () = _bytes_from(record, 6, token_len, token, 0)
+    in Token(token, token_len) end
+  end
+
 (* What a Drive status says: 401 is a token Drive no longer takes (it is
-   forgotten), -1 to -3 drive.bats' own *)
+   forgotten, and sync paused until Sync now signs in again), -1 to -3
+   drive.bats' own *)
 fn _drive_failure (status: Int): sync_result =
   if status = 401 then let
-    val () = _token_free(_token_swap(NoToken()))
+    val () = _google_token_forget()
   in SignInAgain() end
   else if status = 0 then Unreachable()
   else if status = ~1 then TooLarge()
@@ -2417,11 +2479,29 @@ in
         end))
 end
 
-(* Syncs, when sync is on: at once, or once the sync under way ends *)
+(* Whether sync is paused for the reader: the Google store with no token,
+   its last sync already paused for one (SignInAgain, which says Sync now
+   signs in). Another try without a token would only say so again, and
+   a relaunch, which holds no more token than before it, changes nothing *)
+fn _paused (): bool =
+  if ~_is_android() then false
+  else if _token_held() then false
+  else case+ !_last_result of
+    | SignInAgain() => true
+    | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
+    | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
+    | Damaged() => false | NoMemory() => false | Blocked() => false | Syncing() => false | NoAddress() => false
+    | NoGoogleAccount() => false | NotSetUp() => false | GoogleRefused() => false | SignInCanceled() => false
+    | DropboxSignInAgain() => false | DropboxNotSetUp() => false | DropboxSignInRefused() => false
+    | DropboxSignInCanceled() => false | FastmailRefused() => false
+
+(* Syncs, when sync is on: at once, or once the sync under way ends; not
+   while it is paused for a sign-in *)
 #pub fn sync_run (): void
 implement sync_run () =
   if ~_syncing() then ()
   else if !_busy then !_again := true
+  else if _paused() then ()
   else let
     val () = _run_begin()
   in _rounds(ROUNDS_MOST) end
@@ -2682,7 +2762,10 @@ fn _token_keep {n:pos} (blob: $BD.dblob(n)): bool = let
   val @(token, token_len) = _blob_bytes(blob, TOKEN_MAX)
 in
   if token_len <= 0 then let val () = $A.free<byte>(token) in false end
-  else let val () = _token_free(_token_swap(Token(token, token_len))) in true end
+  else let
+    val () = _google_token_save(token, token_len)
+    val () = _token_free(_token_swap(Token(token, token_len)))
+  in true end
 end
 
 (* Asks Google for a token for drive.appdata, for the account on the
@@ -3153,8 +3236,23 @@ fn _stores_load (): $P.promise(int, $P.Chained) = let
                 val read = _android_of_record(record, n)
                 val () = $A.free<byte>(record)
               in _store_free(_store_swap(_store, read)) end)
-          val () = sync_run()
-        in $P.ret<int>(0) end)
+          (* and the token kept, so this sync goes on with it *)
+          val @(token_key_frozen, token_key_bytes) = $A.freeze<byte>(_google_token_key())
+          val token_pending = $IDB.idb_get(token_key_bytes, 17)
+          val () = release_bytes(token_key_frozen, token_key_bytes)
+        in
+          $P.and_then<$IDB.lookup><int>(token_pending, llam(token_found) => let
+            val () = (case+ lookup_bytes(token_found) of
+              (* none kept, or none read: sync pauses until Sync now *)
+              | ~NothingStored() => ()
+              | ~StoredUnreadable() => ()
+              | ~StoredBytes(record, n) => let
+                  val read = _google_token_of_record(record, n)
+                  val () = $A.free<byte>(record)
+                in _token_free(_token_swap(read)) end)
+            val () = sync_run()
+          in $P.ret<int>(0) end)
+        end)
       end
       | DropboxKind() => let
         val @(dropbox_frozen, dropbox_bytes) = $A.freeze<byte>(_dropbox_key())
