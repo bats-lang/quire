@@ -76,6 +76,13 @@ fn _narration_notes_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 
   | NotesRead() => jw_lit(out, position, "true")
   | NotesSkipped() => jw_lit(out, position, "false")
 
+(* Whether the app is kept in full screen: true or false *)
+fn _fullscreen_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
+  (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
+  case+ set_fullscreen_get() of
+  | FullscreenOn() => jw_lit(out, position, "true")
+  | FullscreenOff() => jw_lit(out, position, "false")
+
 fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 5] int stop =
   case+ set_rotation_get() of
@@ -83,10 +90,11 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
   | RotationFree() => jw_lit(out, position, "false")
 
 (* The file's start: its settings (reading aloud's speed and the voice
-   of each language, the brightness, the rotation lock among them), and
+   of each language, the brightness, the rotation lock and full screen
+   among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 64 + 100 + 24866 + 96) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       (* the version of Quire that wrote it (#219) *)
@@ -135,6 +143,8 @@ fn _settings_chunk (): jchunk =
       val next = _brightness_json(out, next)
       val next = jw_lit(out, next, ",\"rotationLocked\":")
       val next = _rotation_json(out, next)
+      val next = jw_lit(out, next, ",\"fullScreen\":")
+      val next = _fullscreen_json(out, next)
       val next = jw_lit(out, next, ",\"voices\":")
       val next = set_voices_json(out, next)
       (* the narration's speed, in hundredths (50 to 200) *)
@@ -1129,7 +1139,7 @@ in
       val @(is_int, value, stop) = jr_int(buf, n, value_start)
     in
       (* the members that are not numbers: the brightness the system's
-         own, the rotation lock, the voices *)
+         own, the rotation lock, full screen, the voices *)
       if ~is_int then
         (if jr_key_is(key, key_len, "brightness") then let
            val () = set_brightness_set(BrightnessSystem())
@@ -1137,6 +1147,11 @@ in
          else if jr_key_is(key, key_len, "narrationReadsNotes") then let
            val @(is_bool, reads, after) = jr_bool(buf, n, value_start)
            val () = (if is_bool then set_narration_notes_set(if reads then NotesRead() else NotesSkipped()) else ())
+           val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
+         in _settings_members(buf, n, next, key, sort) end
+         else if jr_key_is(key, key_len, "fullScreen") then let
+           val @(is_bool, full, after) = jr_bool(buf, n, value_start)
+           val () = (if is_bool then set_fullscreen_set(if full then FullscreenOn() else FullscreenOff()) else ())
            val next = (if is_bool then after else jr_skip(buf, n, value_start)): [next:int | position < next; next <= n] int next
          in _settings_members(buf, n, next, key, sort) end
          else if jr_key_is(key, key_len, "rotationLocked") then let
@@ -1342,7 +1357,7 @@ in
     val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())
     val () = set_sliders()
-    (* the brightness and the rotation lock restored, set *)
+    (* the brightness, the rotation lock and full screen restored, set *)
     val () = screen_controls_apply()
     val () = lib_save()
     val () = lib_render()

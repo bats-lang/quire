@@ -5,7 +5,7 @@
 // same browser (its storage kept), captured again once every launch step
 // (a sync included) has ended, and the two captures must be the same.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import { launch, chapterShown, nextChapter, previousChapter, pagesOn, unchanged } from './relaunch.js';
 import {
   epubFile, importFiles, openBook, toLibrary, librarySearch, cards, chapters, japaneseChapters, dialog, openReadingSettings, readingSettings, selectText, selectionButton, fixedLayoutBook, readFixed, indicator,
@@ -118,6 +118,46 @@ test('a fixed-layout book opens on the page it was on, alone or in a spread', as
   await expect(readingSettings(page)).toBeHidden();
   await unchanged(page);
 });
+
+// ---- full screen (#313) ----
+
+// In the Android app, full screen (both system bars hidden) is kept: the
+// app opens again with the bars hidden and the switch on, set as it
+// starts (the bars hidden, never shown first), or with them shown and
+// the switch off when it was turned off. A browser enters full screen
+// only at a click, so it keeps none (settings.spec.js)
+for (const kept of ['on', 'off']) {
+  test(`in the Android app, with full screen turned ${kept}, the app opens again so`, async ({ context, page }, testInfo) => {
+    test.skip(!onAndroid(testInfo), 'full screen is kept by the Android app only: a browser enters it only at a click (#313)');
+    await launch(context, page);
+    await midChapter(page);
+    const full = page => readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+    await openReadingSettings(page, 'Page');
+    await full(page).click();
+    await expect(full(page)).toHaveAttribute('aria-pressed', 'true');
+    if (kept === 'off') {
+      await full(page).click();
+      await expect(full(page)).toHaveAttribute('aria-pressed', 'false');
+    }
+    await page.keyboard.press('Escape');
+    await expect(readingSettings(page)).toBeHidden();
+    const hidden = kept === 'on';
+    await expect.poll(() => page.evaluate(() => window.__android.hidden)).toEqual({ status: hidden, navigation: hidden });
+    for (const how of ['quit', 'killed']) {
+      page = await unchanged(page, how);
+      expect(await page.evaluate(() => window.__android.hidden)).toEqual({ status: hidden, navigation: hidden });
+      // set as kept from the start: never shown and then hidden (a page
+      // shown in full screen hides them again, which changes nothing)
+      const asked = await page.evaluate(() => window.__android.calls.filter(c => c.plugin === 'SystemBars').map(c => c.method));
+      expect(asked.length).toBeGreaterThan(0);
+      expect(asked.filter(method => method !== (hidden ? 'hide' : 'show'))).toEqual([]);
+      await openReadingSettings(page, 'Page');
+      await expect(full(page)).toHaveAttribute('aria-pressed', String(hidden));
+      await page.keyboard.press('Escape');
+      await expect(readingSettings(page)).toBeHidden();
+    }
+  });
+}
 
 // ---- after going back in a book ----
 
