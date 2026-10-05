@@ -1,0 +1,183 @@
+From 7671a5e51bc1cb51a287334778abdf0fcc0753f5 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 15:17:28 +0000
+Subject: [PATCH 2/2] chore(google-sign-in): demo build of the example (not for
+ upstream)
+
+Demo only, for bats-lang/quire#316: the package
+io.github.batslang.googlesignindemo (its own Android OAuth client),
+Quire's Web client ID and the drive.appdata scope, and the debug build
+signed with a throwaway demo keystore so its SHA-1 is stable.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018S9SSb4Tp2je7dyuBCEXQ2
+---
+ .../example/android/app/build.gradle           |  17 +++++++++++++++--
+ .../example/android/app/demo.jks               | Bin 0 -> 2580 bytes
+ .../googlesignindemo}/MainActivity.java        |   2 +-
+ .../app/src/main/res/values/strings.xml        |   8 ++++----
+ .../example/capacitor.config.json              |   4 ++--
+ .../google-sign-in/example/src/js/script.js    |   5 +++--
+ 6 files changed, 25 insertions(+), 11 deletions(-)
+ create mode 100644 packages/google-sign-in/example/android/app/demo.jks
+ rename packages/google-sign-in/example/android/app/src/main/java/{com/example/plugin => io/github/batslang/googlesignindemo}/MainActivity.java (67%)
+
+diff --git a/packages/google-sign-in/example/android/app/build.gradle b/packages/google-sign-in/example/android/app/build.gradle
+index ff91947f..591d7e43 100644
+--- a/packages/google-sign-in/example/android/app/build.gradle
++++ b/packages/google-sign-in/example/android/app/build.gradle
+@@ -1,10 +1,10 @@
+ apply plugin: 'com.android.application'
+ 
+ android {
+-    namespace = "com.example.plugin"
++    namespace = "io.github.batslang.googlesignindemo"
+     compileSdk = rootProject.ext.compileSdkVersion
+     defaultConfig {
+-        applicationId "com.example.plugin"
++        applicationId "io.github.batslang.googlesignindemo"
+         minSdkVersion rootProject.ext.minSdkVersion
+         targetSdkVersion rootProject.ext.targetSdkVersion
+         versionCode 1
+@@ -16,7 +16,20 @@ android {
+             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+         }
+     }
++    // Demo only: a throwaway keystore, so the APK's SHA-1 is the one the
++    // demo's Android OAuth client is registered with (bats-lang/quire#316).
++    signingConfigs {
++        debug {
++            storeFile file('demo.jks')
++            storePassword 'g5jwKdpyVSP_qUndX1wglzKQ'
++            keyAlias 'demo'
++            keyPassword 'g5jwKdpyVSP_qUndX1wglzKQ'
++        }
++    }
+     buildTypes {
++        debug {
++            signingConfig signingConfigs.debug
++        }
+         release {
+             minifyEnabled false
+             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+diff --git a/packages/google-sign-in/example/android/app/demo.jks b/packages/google-sign-in/example/android/app/demo.jks
+new file mode 100644
+index 0000000000000000000000000000000000000000..22c7c22f356e8e72f26867637b2021decc02502b
+GIT binary patch
+literal 2580
+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
+QgeUV&@4zUI|2px%0lATzAOHXW
+
+literal 0
+HcmV?d00001
+
+diff --git a/packages/google-sign-in/example/android/app/src/main/java/com/example/plugin/MainActivity.java b/packages/google-sign-in/example/android/app/src/main/java/io/github/batslang/googlesignindemo/MainActivity.java
+similarity index 67%
+rename from packages/google-sign-in/example/android/app/src/main/java/com/example/plugin/MainActivity.java
+rename to packages/google-sign-in/example/android/app/src/main/java/io/github/batslang/googlesignindemo/MainActivity.java
+index 9aa7b475..ebeaf95b 100644
+--- a/packages/google-sign-in/example/android/app/src/main/java/com/example/plugin/MainActivity.java
++++ b/packages/google-sign-in/example/android/app/src/main/java/io/github/batslang/googlesignindemo/MainActivity.java
+@@ -1,4 +1,4 @@
+-package com.example.plugin;
++package io.github.batslang.googlesignindemo;
+ 
+ import com.getcapacitor.BridgeActivity;
+ 
+diff --git a/packages/google-sign-in/example/android/app/src/main/res/values/strings.xml b/packages/google-sign-in/example/android/app/src/main/res/values/strings.xml
+index 4f8fa140..4e6174bc 100644
+--- a/packages/google-sign-in/example/android/app/src/main/res/values/strings.xml
++++ b/packages/google-sign-in/example/android/app/src/main/res/values/strings.xml
+@@ -1,7 +1,7 @@
+ <?xml version='1.0' encoding='utf-8'?>
+ <resources>
+-    <string name="app_name">example</string>
+-    <string name="title_activity_main">example</string>
+-    <string name="package_name">com.example.plugin</string>
+-    <string name="custom_url_scheme">com.example.plugin</string>
++    <string name="app_name">Sign-in demo</string>
++    <string name="title_activity_main">Sign-in demo</string>
++    <string name="package_name">io.github.batslang.googlesignindemo</string>
++    <string name="custom_url_scheme">io.github.batslang.googlesignindemo</string>
+ </resources>
+diff --git a/packages/google-sign-in/example/capacitor.config.json b/packages/google-sign-in/example/capacitor.config.json
+index 9c83ff82..51648c11 100644
+--- a/packages/google-sign-in/example/capacitor.config.json
++++ b/packages/google-sign-in/example/capacitor.config.json
+@@ -1,6 +1,6 @@
+ {
+-  "appId": "com.example.plugin",
+-  "appName": "example",
++  "appId": "io.github.batslang.googlesignindemo",
++  "appName": "Sign-in demo",
+   "webDir": "dist",
+   "plugins": {
+     "SplashScreen": {
+diff --git a/packages/google-sign-in/example/src/js/script.js b/packages/google-sign-in/example/src/js/script.js
+index 18f80c3a..801d5133 100644
+--- a/packages/google-sign-in/example/src/js/script.js
++++ b/packages/google-sign-in/example/src/js/script.js
+@@ -1,10 +1,11 @@
+ import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+ 
++// Demo only (bats-lang/quire#316): Quire's Web client and Drive's app data scope.
+ const clientId =
+-  '85678314176-1e4f8ur01p711jf9t1mu1g68opjt3oh0.apps.googleusercontent.com';
++  '162611675413-0501vhs5c72jqbu1e2brlj7tcf9rv5og.apps.googleusercontent.com';
+ const redirectUrl =
+   'https://want-convertible-awards-machinery.trycloudflare.com';
+-const scopes = ['https://www.googleapis.com/auth/userinfo.email'];
++const scopes = ['https://www.googleapis.com/auth/drive.appdata'];
+ 
+ let accessToken = null;
+ 
+-- 
+2.43.0
+

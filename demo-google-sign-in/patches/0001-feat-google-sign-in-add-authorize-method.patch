@@ -1,0 +1,1024 @@
+From 1507b1747f50b0fbb64befe213265c3fc1f5bf62 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 5 Oct 2026 15:15:00 +0000
+Subject: [PATCH 1/2] feat(google-sign-in): add authorize() method
+
+Add `authorize({ interactive, offlineAccess })`, which returns an access
+token for the scopes given to `initialize()` without signing in again.
+Once the scopes are granted it shows no UI; with `interactive: false` it
+never shows UI and rejects with `NEEDS_INTERACTION` when consent is
+needed. `signIn()` is unchanged.
+
+- Android: `AuthorizationClient.authorize()` alone, reusing the existing
+  pending-intent handling for the consent screen.
+- iOS: `restorePreviousSignIn` and `refreshTokensIfNeeded`, or
+  `addScopes`/`signIn` when interactive and the scopes are missing.
+- Web: `interactive: false` rejects with `NEEDS_INTERACTION`;
+  `interactive: true` redirects as `signIn()` does.
+- Example: buttons for both calls, a token check and an on-screen log.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018S9SSb4Tp2je7dyuBCEXQ2
+---
+ .changeset/google-sign-in-authorize.md        |   5 +
+ packages/google-sign-in/README.md             |  78 +++++++++++
+ .../plugins/googlesignin/GoogleSignIn.java    |  74 ++++++++++
+ .../googlesignin/GoogleSignInPlugin.java      |  23 ++++
+ .../classes/CustomExceptions.java             |   5 +
+ .../classes/options/AuthorizeOptions.java     |  32 +++++
+ .../classes/results/AuthorizeResult.java      |  30 ++++
+ .../google-sign-in/example/src/index.html     |  13 ++
+ .../google-sign-in/example/src/js/script.js   | 128 +++++++++++++-----
+ .../ios/Plugin.xcodeproj/project.pbxproj      |   8 ++
+ .../Classes/Options/AuthorizeOptions.swift    |  12 ++
+ .../Classes/Results/AuthorizeResult.swift     |  19 +++
+ .../ios/Plugin/Enums/CustomError.swift        |  11 ++
+ .../ios/Plugin/GoogleSignIn.swift             |  90 ++++++++++++
+ .../ios/Plugin/GoogleSignInPlugin.swift       |  12 ++
+ packages/google-sign-in/src/definitions.ts    |  78 +++++++++++
+ packages/google-sign-in/src/web.ts            |  27 ++++
+ 17 files changed, 612 insertions(+), 33 deletions(-)
+ create mode 100644 .changeset/google-sign-in-authorize.md
+ create mode 100644 packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/options/AuthorizeOptions.java
+ create mode 100644 packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/results/AuthorizeResult.java
+ create mode 100644 packages/google-sign-in/ios/Plugin/Classes/Options/AuthorizeOptions.swift
+ create mode 100644 packages/google-sign-in/ios/Plugin/Classes/Results/AuthorizeResult.swift
+
+diff --git a/.changeset/google-sign-in-authorize.md b/.changeset/google-sign-in-authorize.md
+new file mode 100644
+index 00000000..c1b97a52
+--- /dev/null
++++ b/.changeset/google-sign-in-authorize.md
+@@ -0,0 +1,5 @@
++---
++"@capawesome/capacitor-google-sign-in": patch
++---
++
++feat: add `authorize(...)` method to get an access token without signing in again
+diff --git a/packages/google-sign-in/README.md b/packages/google-sign-in/README.md
+index dff3f3d0..9560d26e 100644
+--- a/packages/google-sign-in/README.md
++++ b/packages/google-sign-in/README.md
+@@ -171,6 +171,35 @@ const signIn = async () => {
+ };
+ ```
+ 
++### Get an access token without signing in again
++
++Access tokens expire after about an hour. Call `authorize(...)` to get a fresh access token for the `scopes` given to `initialize(...)` without showing the sign-in sheet again. Once the user has granted the scopes, no UI is shown. With `interactive: false`, the call never shows any UI and rejects with the `NEEDS_INTERACTION` error code when the user must consent first, which makes it safe to call from a background task. This follows Google's guidance to [separate authorization from authentication](https://developers.google.com/identity/authorization/android):
++
++```typescript
++import { ErrorCode, GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
++
++const authorize = async () => {
++  try {
++    const { accessToken } = await GoogleSignIn.authorize({
++      interactive: false,
++    });
++    console.log(accessToken);
++  } catch (error) {
++    if (error.code === ErrorCode.NeedsInteraction) {
++      // Ask the user to grant the scopes, e.g. after a tap on a button:
++      const { accessToken } = await GoogleSignIn.authorize({
++        interactive: true,
++      });
++      console.log(accessToken);
++    } else {
++      console.log('Another error occurred:', error);
++    }
++  }
++};
++```
++
++On Web, a token cannot be obtained without a redirect, so `interactive: false` always rejects with `NEEDS_INTERACTION`, and `interactive: true` redirects as `signIn()` does.
++
+ ### Complete the sign-in flow on the Web
+ 
+ On Web, the app is redirected back to the `redirectUrl` after the user signs in. Call `handleRedirectCallback()` there to exchange the authorization code for tokens and complete the sign-in flow. Only available on Web:
+@@ -209,6 +238,7 @@ const signOut = async () => {
+ 
+ <docgen-index>
+ 
++* [`authorize(...)`](#authorize)
+ * [`handleRedirectCallback()`](#handleredirectcallback)
+ * [`initialize(...)`](#initialize)
+ * [`signIn(...)`](#signin)
+@@ -220,6 +250,38 @@ const signOut = async () => {
+ <docgen-api>
+ <!--Update the source file JSDoc comments and rerun docgen to update the docs below-->
+ 
++### authorize(...)
++
++```typescript
++authorize(options?: AuthorizeOptions | undefined) => Promise<AuthorizeResult>
++```
++
++Get an access token for the `scopes` given to `initialize()`,
++without signing in again.
++
++Unlike `signIn()`, this only requests authorization: it does not show
++the sign-in sheet or return an ID token. Once the user has granted the
++scopes, it returns a fresh access token with no UI.
++
++With `interactive: false`, no UI is ever shown: the call rejects with
++the `NEEDS_INTERACTION` error code when the user must consent first.
++
++On Web, a token can't be obtained without a redirect, so
++`interactive: false` always rejects with `NEEDS_INTERACTION`, and
++`interactive: true` redirects as `signIn()` does: complete it with
++`handleRedirectCallback()`, whose result carries the access token.
++
++| Param         | Type                                                          |
++| ------------- | ------------------------------------------------------------- |
++| **`options`** | <code><a href="#authorizeoptions">AuthorizeOptions</a></code> |
++
++**Returns:** <code>Promise&lt;<a href="#authorizeresult">AuthorizeResult</a>&gt;</code>
++
++**Since:** 0.1.5
++
++--------------------
++
++
+ ### handleRedirectCallback()
+ 
+ ```typescript
+@@ -303,6 +365,22 @@ On Web, this is a no-op.
+ ### Interfaces
+ 
+ 
++#### AuthorizeResult
++
++| Prop                 | Type                        | Description                                                                                                                                                 | Since |
++| -------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- |
++| **`accessToken`**    | <code>string</code>         | The access token for accessing Google APIs.                                                                                                                 | 0.1.5 |
++| **`serverAuthCode`** | <code>string \| null</code> | The server auth code that can be exchanged on your backend for access and refresh tokens. Only available on Android and iOS when `offlineAccess` is `true`. | 0.1.5 |
++
++
++#### AuthorizeOptions
++
++| Prop                | Type                 | Description                                                                                                                                                                                                               | Default            | Since |
++| ------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----- |
++| **`interactive`**   | <code>boolean</code> | Whether to show the consent screen when the user has not granted the scopes yet. If `false`, the call rejects with the `NEEDS_INTERACTION` error code instead of showing any UI.                                          | <code>true</code>  | 0.1.5 |
++| **`offlineAccess`** | <code>boolean</code> | Whether to also request a server auth code that your backend can exchange for access and refresh tokens. Only available on Android and iOS. On iOS, a server auth code is only returned when the consent screen is shown. | <code>false</code> | 0.1.5 |
++
++
+ #### SignInResult
+ 
+ | Prop                 | Type                        | Description                                                                                                                                                                 | Since |
+diff --git a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignIn.java b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignIn.java
+index df289314..ab3d6e99 100644
+--- a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignIn.java
++++ b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignIn.java
+@@ -23,8 +23,10 @@ import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption;
+ import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.CustomException;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.CustomExceptions;
++import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.AuthorizeOptions;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.InitializeOptions;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.SignInOptions;
++import io.capawesome.capacitorjs.plugins.googlesignin.classes.results.AuthorizeResult;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.results.SignInResult;
+ import io.capawesome.capacitorjs.plugins.googlesignin.interfaces.EmptyCallback;
+ import io.capawesome.capacitorjs.plugins.googlesignin.interfaces.NonEmptyResultCallback;
+@@ -45,6 +47,9 @@ public class GoogleSignIn {
+     @Nullable
+     private NonEmptyResultCallback<SignInResult> pendingSignInCallback;
+ 
++    @Nullable
++    private NonEmptyResultCallback<AuthorizeResult> pendingAuthorizeCallback;
++
+     @Nullable
+     private String pendingIdToken;
+ 
+@@ -70,6 +75,48 @@ public class GoogleSignIn {
+         this.plugin = plugin;
+     }
+ 
++    public void authorize(@NonNull AuthorizeOptions options, @NonNull NonEmptyResultCallback<AuthorizeResult> callback) {
++        if (clientId == null) {
++            callback.error(CustomExceptions.NOT_INITIALIZED);
++            return;
++        }
++        if (scopes == null || scopes.length == 0) {
++            callback.error(CustomExceptions.SCOPES_MISSING);
++            return;
++        }
++
++        List<com.google.android.gms.common.api.Scope> scopeList = new java.util.ArrayList<>();
++        for (String scope : scopes) {
++            scopeList.add(new com.google.android.gms.common.api.Scope(scope));
++        }
++
++        AuthorizationRequest.Builder authRequestBuilder = AuthorizationRequest.builder().setRequestedScopes(scopeList);
++        if (options.getOfflineAccess()) {
++            authRequestBuilder.requestOfflineAccess(clientId);
++        }
++
++        Identity.getAuthorizationClient(plugin.getActivity())
++            .authorize(authRequestBuilder.build())
++            .addOnSuccessListener(authResult -> {
++                if (!authResult.hasResolution()) {
++                    handleAuthorizeResult(authResult, callback);
++                } else if (!options.getInteractive()) {
++                    callback.error(CustomExceptions.NEEDS_INTERACTION);
++                } else {
++                    PendingIntent pendingIntent = authResult.getPendingIntent();
++                    if (pendingIntent != null) {
++                        this.pendingAuthorizeCallback = callback;
++                        plugin.launchAuthorizationIntent(pendingIntent);
++                    } else {
++                        callback.error(new Exception("Authorization resolution has no pending intent."));
++                    }
++                }
++            })
++            .addOnFailureListener(exception -> {
++                callback.error(new Exception(exception.getMessage(), exception));
++            });
++    }
++
+     public void initialize(@NonNull InitializeOptions options, @NonNull EmptyCallback callback) {
+         this.clientId = options.getClientId();
+         this.scopes = options.getScopes();
+@@ -141,6 +188,12 @@ public class GoogleSignIn {
+     }
+ 
+     public void handleAuthorizationResult(@NonNull AuthorizationResult authResult) {
++        if (pendingAuthorizeCallback != null) {
++            NonEmptyResultCallback<AuthorizeResult> callback = pendingAuthorizeCallback;
++            this.pendingAuthorizeCallback = null;
++            handleAuthorizeResult(authResult, callback);
++            return;
++        }
+         if (pendingSignInCallback == null) {
+             return;
+         }
+@@ -163,6 +216,12 @@ public class GoogleSignIn {
+     }
+ 
+     public void handleAuthorizationCanceled() {
++        if (pendingAuthorizeCallback != null) {
++            NonEmptyResultCallback<AuthorizeResult> callback = pendingAuthorizeCallback;
++            this.pendingAuthorizeCallback = null;
++            callback.error(CustomExceptions.SIGN_IN_CANCELED);
++            return;
++        }
+         if (pendingSignInCallback == null) {
+             return;
+         }
+@@ -172,6 +231,12 @@ public class GoogleSignIn {
+     }
+ 
+     public void handleAuthorizationFailed(@NonNull Exception exception) {
++        if (pendingAuthorizeCallback != null) {
++            NonEmptyResultCallback<AuthorizeResult> callback = pendingAuthorizeCallback;
++            this.pendingAuthorizeCallback = null;
++            callback.error(exception);
++            return;
++        }
+         if (pendingSignInCallback == null) {
+             return;
+         }
+@@ -180,6 +245,15 @@ public class GoogleSignIn {
+         callback.error(exception);
+     }
+ 
++    private void handleAuthorizeResult(@NonNull AuthorizationResult authResult, @NonNull NonEmptyResultCallback<AuthorizeResult> callback) {
++        String accessToken = authResult.getAccessToken();
++        if (accessToken == null) {
++            callback.error(new Exception("Authorization result has no access token."));
++            return;
++        }
++        callback.success(new AuthorizeResult(accessToken, authResult.getServerAuthCode()));
++    }
++
+     private void handleCredentialResponse(@NonNull GetCredentialResponse response, @NonNull NonEmptyResultCallback<SignInResult> callback) {
+         Credential credential = response.getCredential();
+         if (!(credential instanceof CustomCredential)) {
+diff --git a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignInPlugin.java b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignInPlugin.java
+index a694ad40..dff718d2 100644
+--- a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignInPlugin.java
++++ b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/GoogleSignInPlugin.java
+@@ -17,8 +17,10 @@ import com.getcapacitor.annotation.CapacitorPlugin;
+ import com.google.android.gms.auth.api.identity.AuthorizationResult;
+ import com.google.android.gms.auth.api.identity.Identity;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.CustomException;
++import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.AuthorizeOptions;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.InitializeOptions;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.options.SignInOptions;
++import io.capawesome.capacitorjs.plugins.googlesignin.classes.results.AuthorizeResult;
+ import io.capawesome.capacitorjs.plugins.googlesignin.classes.results.SignInResult;
+ import io.capawesome.capacitorjs.plugins.googlesignin.interfaces.EmptyCallback;
+ import io.capawesome.capacitorjs.plugins.googlesignin.interfaces.NonEmptyResultCallback;
+@@ -43,6 +45,27 @@ public class GoogleSignInPlugin extends Plugin {
+         );
+     }
+ 
++    @PluginMethod
++    public void authorize(PluginCall call) {
++        try {
++            AuthorizeOptions options = new AuthorizeOptions(call);
++            NonEmptyResultCallback<AuthorizeResult> callback = new NonEmptyResultCallback<>() {
++                @Override
++                public void success(@NonNull AuthorizeResult result) {
++                    resolveCall(call, result);
++                }
++
++                @Override
++                public void error(Exception exception) {
++                    rejectCall(call, exception);
++                }
++            };
++            implementation.authorize(options, callback);
++        } catch (Exception exception) {
++            rejectCall(call, exception);
++        }
++    }
++
+     @PluginMethod
+     public void initialize(PluginCall call) {
+         try {
+diff --git a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/CustomExceptions.java b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/CustomExceptions.java
+index 41979a1b..e27e3513 100644
+--- a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/CustomExceptions.java
++++ b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/CustomExceptions.java
+@@ -3,6 +3,10 @@ package io.capawesome.capacitorjs.plugins.googlesignin.classes;
+ public class CustomExceptions {
+ 
+     public static final CustomException CLIENT_ID_MISSING = new CustomException(null, "clientId must be provided.");
++    public static final CustomException NEEDS_INTERACTION = new CustomException(
++        "NEEDS_INTERACTION",
++        "The user must grant the requested scopes first. Call authorize() with interactive set to true."
++    );
+     public static final CustomException NO_CREDENTIAL_AVAILABLE = new CustomException(
+         "NO_CREDENTIAL_AVAILABLE",
+         "No Google account is available on this device."
+@@ -15,5 +19,6 @@ public class CustomExceptions {
+         "PROVIDER_CONFIGURATION_ERROR",
+         "The credential provider is not configured correctly. Make sure that Google Play services is available and up to date."
+     );
++    public static final CustomException SCOPES_MISSING = new CustomException(null, "scopes must be provided to initialize().");
+     public static final CustomException SIGN_IN_CANCELED = new CustomException("SIGN_IN_CANCELED", "The user canceled the sign-in flow.");
+ }
+diff --git a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/options/AuthorizeOptions.java b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/options/AuthorizeOptions.java
+new file mode 100644
+index 00000000..9ff29bf4
+--- /dev/null
++++ b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/options/AuthorizeOptions.java
+@@ -0,0 +1,32 @@
++package io.capawesome.capacitorjs.plugins.googlesignin.classes.options;
++
++import androidx.annotation.NonNull;
++import com.getcapacitor.PluginCall;
++
++public class AuthorizeOptions {
++
++    private final boolean interactive;
++
++    private final boolean offlineAccess;
++
++    public AuthorizeOptions(@NonNull PluginCall call) {
++        this.interactive = getInteractiveFromCall(call);
++        this.offlineAccess = getOfflineAccessFromCall(call);
++    }
++
++    public boolean getInteractive() {
++        return interactive;
++    }
++
++    public boolean getOfflineAccess() {
++        return offlineAccess;
++    }
++
++    private static boolean getInteractiveFromCall(@NonNull PluginCall call) {
++        return call.getBoolean("interactive", true);
++    }
++
++    private static boolean getOfflineAccessFromCall(@NonNull PluginCall call) {
++        return call.getBoolean("offlineAccess", false);
++    }
++}
+diff --git a/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/results/AuthorizeResult.java b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/results/AuthorizeResult.java
+new file mode 100644
+index 00000000..73d19c4a
+--- /dev/null
++++ b/packages/google-sign-in/android/src/main/java/io/capawesome/capacitorjs/plugins/googlesignin/classes/results/AuthorizeResult.java
+@@ -0,0 +1,30 @@
++package io.capawesome.capacitorjs.plugins.googlesignin.classes.results;
++
++import androidx.annotation.NonNull;
++import androidx.annotation.Nullable;
++import com.getcapacitor.JSObject;
++import io.capawesome.capacitorjs.plugins.googlesignin.interfaces.Result;
++import org.json.JSONObject;
++
++public class AuthorizeResult implements Result {
++
++    @NonNull
++    private final String accessToken;
++
++    @Nullable
++    private final String serverAuthCode;
++
++    public AuthorizeResult(@NonNull String accessToken, @Nullable String serverAuthCode) {
++        this.accessToken = accessToken;
++        this.serverAuthCode = serverAuthCode;
++    }
++
++    @Override
++    @NonNull
++    public JSObject toJSObject() {
++        JSObject result = new JSObject();
++        result.put("accessToken", accessToken);
++        result.put("serverAuthCode", serverAuthCode == null ? JSONObject.NULL : serverAuthCode);
++        return result;
++    }
++}
+diff --git a/packages/google-sign-in/example/src/index.html b/packages/google-sign-in/example/src/index.html
+index 270861f1..c6291b5c 100644
+--- a/packages/google-sign-in/example/src/index.html
++++ b/packages/google-sign-in/example/src/index.html
+@@ -70,8 +70,21 @@
+             >Handle Redirect Callback</ion-button
+           >
+           <ion-button id="sign-in-button" expand="block">Sign In</ion-button>
++          <ion-button id="authorize-silently-button" expand="block"
++            >Authorize Silently</ion-button
++          >
++          <ion-button id="authorize-interactive-button" expand="block"
++            >Authorize (Interactive)</ion-button
++          >
++          <ion-button id="check-token-button" expand="block"
++            >Check Token</ion-button
++          >
+           <ion-button id="sign-out-button" expand="block">Sign Out</ion-button>
+         </ion-list>
++        <pre
++          id="log"
++          style="white-space: pre-wrap; word-break: break-all; font-size: 12px"
++        ></pre>
+       </ion-content>
+     </ion-app>
+   </body>
+diff --git a/packages/google-sign-in/example/src/js/script.js b/packages/google-sign-in/example/src/js/script.js
+index 4ee1a40e..18f80c3a 100644
+--- a/packages/google-sign-in/example/src/js/script.js
++++ b/packages/google-sign-in/example/src/js/script.js
+@@ -1,38 +1,100 @@
+ import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in';
+ 
+-document.addEventListener('DOMContentLoaded', () => {
+-  document
+-    .querySelector('#initialize-button')
+-    .addEventListener('click', async () => {
+-      await GoogleSignIn.initialize({
+-        clientId:
+-          '85678314176-1e4f8ur01p711jf9t1mu1g68opjt3oh0.apps.googleusercontent.com',
+-        redirectUrl:
+-          'https://want-convertible-awards-machinery.trycloudflare.com',
+-        scopes: ['https://www.googleapis.com/auth/userinfo.email'],
+-      });
+-    });
++const clientId =
++  '85678314176-1e4f8ur01p711jf9t1mu1g68opjt3oh0.apps.googleusercontent.com';
++const redirectUrl =
++  'https://want-convertible-awards-machinery.trycloudflare.com';
++const scopes = ['https://www.googleapis.com/auth/userinfo.email'];
++
++let accessToken = null;
++
++const log = (call, outcome) => {
++  const time = new Date().toISOString().substring(11, 23);
++  const line = `${time} ${call}: ${outcome}`;
++  console.log(line);
++  const logElement = document.querySelector('#log');
++  logElement.textContent = `${line}\n${logElement.textContent}`;
++};
++
++const tokenPrefix = token => (token ? `${token.substring(0, 8)}…` : 'null');
++
++const showSignInResult = result => {
++  document.querySelector('#id-token-input').value = result.idToken;
++  document.querySelector('#user-id-input').value = result.userId;
++  document.querySelector('#email-input').value = result.email ?? '';
++  accessToken = result.accessToken;
++};
++
++const run = async (call, action) => {
++  log(call, 'started');
++  try {
++    const outcome = await action();
++    log(call, `ok${outcome ? ` ${outcome}` : ''}`);
++  } catch (error) {
++    log(call, `error ${error.code ?? 'no code'} ${error.message ?? error}`);
++  }
++};
++
++const onClick = (selector, call, action) => {
+   document
+-    .querySelector('#handle-redirect-callback-button')
+-    .addEventListener('click', async () => {
++    .querySelector(selector)
++    .addEventListener('click', () => run(call, action));
++};
++
++document.addEventListener('DOMContentLoaded', () => {
++  onClick('#initialize-button', 'initialize', async () => {
++    await GoogleSignIn.initialize({ clientId, redirectUrl, scopes });
++    return `scopes ${scopes.join(' ')}`;
++  });
++  onClick(
++    '#handle-redirect-callback-button',
++    'handleRedirectCallback',
++    async () => {
+       const result = await GoogleSignIn.handleRedirectCallback();
+-      console.log(result);
+-      document.querySelector('#id-token-input').value = result.idToken;
+-      document.querySelector('#user-id-input').value = result.userId;
+-      document.querySelector('#email-input').value = result.email ?? '';
+-    });
+-  document
+-    .querySelector('#sign-in-button')
+-    .addEventListener('click', async () => {
+-      const result = await GoogleSignIn.signIn();
+-      console.log(result);
+-      document.querySelector('#id-token-input').value = result.idToken;
+-      document.querySelector('#user-id-input').value = result.userId;
+-      document.querySelector('#email-input').value = result.email ?? '';
+-    });
+-  document
+-    .querySelector('#sign-out-button')
+-    .addEventListener('click', async () => {
+-      await GoogleSignIn.signOut();
+-    });
++      showSignInResult(result);
++      return `accessToken ${tokenPrefix(result.accessToken)}`;
++    },
++  );
++  onClick('#sign-in-button', 'signIn', async () => {
++    const result = await GoogleSignIn.signIn();
++    showSignInResult(result);
++    return `accessToken ${tokenPrefix(result.accessToken)}`;
++  });
++  onClick(
++    '#authorize-silently-button',
++    'authorize({ interactive: false })',
++    async () => {
++      const result = await GoogleSignIn.authorize({ interactive: false });
++      accessToken = result.accessToken;
++      return `accessToken ${tokenPrefix(result.accessToken)}`;
++    },
++  );
++  onClick(
++    '#authorize-interactive-button',
++    'authorize({ interactive: true })',
++    async () => {
++      const result = await GoogleSignIn.authorize({ interactive: true });
++      accessToken = result.accessToken;
++      return `accessToken ${tokenPrefix(result.accessToken)}`;
++    },
++  );
++  onClick('#check-token-button', 'tokeninfo', async () => {
++    if (!accessToken) {
++      throw new Error('No access token yet.');
++    }
++    const response = await fetch(
++      `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
++    );
++    const info = await response.json();
++    if (!response.ok) {
++      throw new Error(
++        `${response.status} ${info.error_description ?? info.error}`,
++      );
++    }
++    return `token ${tokenPrefix(accessToken)} scope ${info.scope} expires_in ${info.expires_in}`;
++  });
++  onClick('#sign-out-button', 'signOut', async () => {
++    await GoogleSignIn.signOut();
++    accessToken = null;
++  });
+ });
+diff --git a/packages/google-sign-in/ios/Plugin.xcodeproj/project.pbxproj b/packages/google-sign-in/ios/Plugin.xcodeproj/project.pbxproj
+index 050529b3..2fe31175 100644
+--- a/packages/google-sign-in/ios/Plugin.xcodeproj/project.pbxproj
++++ b/packages/google-sign-in/ios/Plugin.xcodeproj/project.pbxproj
+@@ -18,6 +18,8 @@
+ 		A1B2C3D400000001AABBCC02 /* CustomError.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCC02 /* CustomError.swift */; };
+ 		A1B2C3D400000001AABBCC03 /* InitializeOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCC03 /* InitializeOptions.swift */; };
+ 		A1B2C3D400000001AABBCC04 /* SignInResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCC04 /* SignInResult.swift */; };
++		A1B2C3D400000001AABBCC05 /* AuthorizeOptions.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCC05 /* AuthorizeOptions.swift */; };
++		A1B2C3D400000001AABBCC06 /* AuthorizeResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D400000002AABBCC06 /* AuthorizeResult.swift */; };
+ /* End PBXBuildFile section */
+ 
+ /* Begin PBXContainerItemProxy section */
+@@ -47,6 +49,8 @@
+ 		A1B2C3D400000002AABBCC02 /* CustomError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomError.swift; sourceTree = "<group>"; };
+ 		A1B2C3D400000002AABBCC03 /* InitializeOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InitializeOptions.swift; sourceTree = "<group>"; };
+ 		A1B2C3D400000002AABBCC04 /* SignInResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInResult.swift; sourceTree = "<group>"; };
++		A1B2C3D400000002AABBCC05 /* AuthorizeOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizeOptions.swift; sourceTree = "<group>"; };
++		A1B2C3D400000002AABBCC06 /* AuthorizeResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthorizeResult.swift; sourceTree = "<group>"; };
+ 		F65BB2953ECE002E1EF3E424 /* Pods-PluginTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-PluginTests.release.xcconfig"; path = "Pods/Target Support Files/Pods-PluginTests/Pods-PluginTests.release.xcconfig"; sourceTree = "<group>"; };
+ 		F6753A823D3815DB436415E3 /* Pods_PluginTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_PluginTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+ /* End PBXFileReference section */
+@@ -138,6 +142,7 @@
+ 		A1B2C3D400000003AABBCC02 /* Options */ = {
+ 			isa = PBXGroup;
+ 			children = (
++				A1B2C3D400000002AABBCC05 /* AuthorizeOptions.swift */,
+ 				A1B2C3D400000002AABBCC03 /* InitializeOptions.swift */,
+ 			);
+ 			path = Options;
+@@ -146,6 +151,7 @@
+ 		A1B2C3D400000003AABBCC03 /* Results */ = {
+ 			isa = PBXGroup;
+ 			children = (
++				A1B2C3D400000002AABBCC06 /* AuthorizeResult.swift */,
+ 				A1B2C3D400000002AABBCC04 /* SignInResult.swift */,
+ 			);
+ 			path = Results;
+@@ -371,6 +377,8 @@
+ 				A1B2C3D400000001AABBCC02 /* CustomError.swift in Sources */,
+ 				A1B2C3D400000001AABBCC03 /* InitializeOptions.swift in Sources */,
+ 				A1B2C3D400000001AABBCC04 /* SignInResult.swift in Sources */,
++				A1B2C3D400000001AABBCC05 /* AuthorizeOptions.swift in Sources */,
++				A1B2C3D400000001AABBCC06 /* AuthorizeResult.swift in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+diff --git a/packages/google-sign-in/ios/Plugin/Classes/Options/AuthorizeOptions.swift b/packages/google-sign-in/ios/Plugin/Classes/Options/AuthorizeOptions.swift
+new file mode 100644
+index 00000000..0b27eb15
+--- /dev/null
++++ b/packages/google-sign-in/ios/Plugin/Classes/Options/AuthorizeOptions.swift
+@@ -0,0 +1,12 @@
++import Foundation
++import Capacitor
++
++@objc public class AuthorizeOptions: NSObject {
++    let interactive: Bool
++    let offlineAccess: Bool
++
++    init(_ call: CAPPluginCall) {
++        self.interactive = call.getBool("interactive", true)
++        self.offlineAccess = call.getBool("offlineAccess", false)
++    }
++}
+diff --git a/packages/google-sign-in/ios/Plugin/Classes/Results/AuthorizeResult.swift b/packages/google-sign-in/ios/Plugin/Classes/Results/AuthorizeResult.swift
+new file mode 100644
+index 00000000..d3d803a3
+--- /dev/null
++++ b/packages/google-sign-in/ios/Plugin/Classes/Results/AuthorizeResult.swift
+@@ -0,0 +1,19 @@
++import Foundation
++import Capacitor
++
++@objc public class AuthorizeResult: NSObject, Result {
++    let accessToken: String
++    let serverAuthCode: String?
++
++    init(accessToken: String, serverAuthCode: String?) {
++        self.accessToken = accessToken
++        self.serverAuthCode = serverAuthCode
++    }
++
++    @objc public func toJSObject() -> AnyObject {
++        var result = JSObject()
++        result["accessToken"] = accessToken
++        result["serverAuthCode"] = serverAuthCode == nil ? NSNull() : serverAuthCode
++        return result as AnyObject
++    }
++}
+diff --git a/packages/google-sign-in/ios/Plugin/Enums/CustomError.swift b/packages/google-sign-in/ios/Plugin/Enums/CustomError.swift
+index ac065d09..749d80bb 100644
+--- a/packages/google-sign-in/ios/Plugin/Enums/CustomError.swift
++++ b/packages/google-sign-in/ios/Plugin/Enums/CustomError.swift
+@@ -8,11 +8,15 @@ public enum CustomError: Error {
+     case signInResultMissing
+     case idTokenMissing
+     case userIdMissing
++    case needsInteraction
++    case scopesMissing
+ 
+     public var code: String? {
+         switch self {
+         case .signInCanceled:
+             return "SIGN_IN_CANCELED"
++        case .needsInteraction:
++            return "NEEDS_INTERACTION"
+         default:
+             return nil
+         }
+@@ -36,6 +40,13 @@ extension CustomError: LocalizedError {
+             return NSLocalizedString("ID token is missing from the sign-in result.", comment: "idTokenMissing")
+         case .userIdMissing:
+             return NSLocalizedString("User ID is missing from the sign-in result.", comment: "userIdMissing")
++        case .needsInteraction:
++            return NSLocalizedString(
++                "The user must grant the requested scopes first. Call authorize() with interactive set to true.",
++                comment: "needsInteraction"
++            )
++        case .scopesMissing:
++            return NSLocalizedString("scopes must be provided to initialize().", comment: "scopesMissing")
+         }
+     }
+ }
+diff --git a/packages/google-sign-in/ios/Plugin/GoogleSignIn.swift b/packages/google-sign-in/ios/Plugin/GoogleSignIn.swift
+index 1b212e0a..047bca14 100644
+--- a/packages/google-sign-in/ios/Plugin/GoogleSignIn.swift
++++ b/packages/google-sign-in/ios/Plugin/GoogleSignIn.swift
+@@ -10,6 +10,45 @@ import GoogleSignIn
+         self.plugin = plugin
+     }
+ 
++    @objc public func authorize(_ options: AuthorizeOptions, completion: @escaping (_ result: AuthorizeResult?, _ error: Error?) -> Void) {
++        guard let scopes = self.scopes, !scopes.isEmpty else {
++            completion(nil, CustomError.scopesMissing)
++            return
++        }
++        DispatchQueue.main.async {
++            GIDSignIn.sharedInstance.restorePreviousSignIn { user, error in
++                guard let user = user else {
++                    if let error = error, (error as NSError).code != GIDSignInError.hasNoAuthInKeychain.rawValue {
++                        completion(nil, error)
++                    } else if options.interactive {
++                        self.authorizeBySigningIn(scopes: scopes, options: options, completion: completion)
++                    } else {
++                        completion(nil, CustomError.needsInteraction)
++                    }
++                    return
++                }
++                let grantedScopes = Set(user.grantedScopes ?? [])
++                let missingScopes = scopes.filter { !grantedScopes.contains($0) }
++                if !missingScopes.isEmpty {
++                    if options.interactive {
++                        self.authorizeByAddingScopes(missingScopes, user: user, options: options, completion: completion)
++                    } else {
++                        completion(nil, CustomError.needsInteraction)
++                    }
++                    return
++                }
++                user.refreshTokensIfNeeded { refreshedUser, error in
++                    if let error = error {
++                        completion(nil, error)
++                        return
++                    }
++                    let accessToken = (refreshedUser ?? user).accessToken.tokenString
++                    completion(AuthorizeResult(accessToken: accessToken, serverAuthCode: nil), nil)
++                }
++            }
++        }
++    }
++
+     @objc public func initialize(_ options: InitializeOptions, completion: @escaping (_ error: Error?) -> Void) {
+         guard let iosClientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String else {
+             completion(CustomError.iosClientIdMissing)
+@@ -88,4 +127,55 @@ import GoogleSignIn
+         GIDSignIn.sharedInstance.signOut()
+         completion(nil)
+     }
++
++    private func authorizeBySigningIn(
++        scopes: [String],
++        options: AuthorizeOptions,
++        completion: @escaping (_ result: AuthorizeResult?, _ error: Error?) -> Void
++    ) {
++        guard let viewController = self.plugin.bridge?.viewController else {
++            completion(nil, CustomError.viewControllerUnavailable)
++            return
++        }
++        GIDSignIn.sharedInstance.signIn(withPresenting: viewController, hint: nil, additionalScopes: scopes) { result, error in
++            self.handleAuthorizeSignInResult(result, error, options: options, completion: completion)
++        }
++    }
++
++    private func authorizeByAddingScopes(
++        _ scopes: [String],
++        user: GIDGoogleUser,
++        options: AuthorizeOptions,
++        completion: @escaping (_ result: AuthorizeResult?, _ error: Error?) -> Void
++    ) {
++        guard let viewController = self.plugin.bridge?.viewController else {
++            completion(nil, CustomError.viewControllerUnavailable)
++            return
++        }
++        user.addScopes(scopes, presenting: viewController) { result, error in
++            self.handleAuthorizeSignInResult(result, error, options: options, completion: completion)
++        }
++    }
++
++    private func handleAuthorizeSignInResult(
++        _ result: GIDSignInResult?,
++        _ error: Error?,
++        options: AuthorizeOptions,
++        completion: @escaping (_ result: AuthorizeResult?, _ error: Error?) -> Void
++    ) {
++        if let error = error {
++            if (error as NSError).code == GIDSignInError.canceled.rawValue {
++                completion(nil, CustomError.signInCanceled)
++            } else {
++                completion(nil, error)
++            }
++            return
++        }
++        guard let result = result else {
++            completion(nil, CustomError.signInResultMissing)
++            return
++        }
++        let serverAuthCode = options.offlineAccess ? result.serverAuthCode : nil
++        completion(AuthorizeResult(accessToken: result.user.accessToken.tokenString, serverAuthCode: serverAuthCode), nil)
++    }
+ }
+diff --git a/packages/google-sign-in/ios/Plugin/GoogleSignInPlugin.swift b/packages/google-sign-in/ios/Plugin/GoogleSignInPlugin.swift
+index 43fd52fc..a3ddadb4 100644
+--- a/packages/google-sign-in/ios/Plugin/GoogleSignInPlugin.swift
++++ b/packages/google-sign-in/ios/Plugin/GoogleSignInPlugin.swift
+@@ -6,6 +6,7 @@ public class GoogleSignInPlugin: CAPPlugin, CAPBridgedPlugin {
+     public let identifier = "GoogleSignInPlugin"
+     public let jsName = "GoogleSignIn"
+     public let pluginMethods: [CAPPluginMethod] = [
++        CAPPluginMethod(name: "authorize", returnType: CAPPluginReturnPromise),
+         CAPPluginMethod(name: "initialize", returnType: CAPPluginReturnPromise),
+         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
+         CAPPluginMethod(name: "signOut", returnType: CAPPluginReturnPromise),
+@@ -19,6 +20,17 @@ public class GoogleSignInPlugin: CAPPlugin, CAPBridgedPlugin {
+         self.implementation = GoogleSignInImpl(plugin: self)
+     }
+ 
++    @objc func authorize(_ call: CAPPluginCall) {
++        let options = AuthorizeOptions(call)
++        implementation?.authorize(options, completion: { result, error in
++            if let error = error {
++                self.rejectCall(call, error)
++            } else {
++                self.resolveCall(call, result)
++            }
++        })
++    }
++
+     @objc func handleRedirectCallback(_ call: CAPPluginCall) {
+         rejectCallAsUnimplemented(call)
+     }
+diff --git a/packages/google-sign-in/src/definitions.ts b/packages/google-sign-in/src/definitions.ts
+index fbe4871d..486a3dda 100644
+--- a/packages/google-sign-in/src/definitions.ts
++++ b/packages/google-sign-in/src/definitions.ts
+@@ -2,6 +2,25 @@
+  * @since 0.1.0
+  */
+ export interface GoogleSignInPlugin {
++  /**
++   * Get an access token for the `scopes` given to `initialize()`,
++   * without signing in again.
++   *
++   * Unlike `signIn()`, this only requests authorization: it does not show
++   * the sign-in sheet or return an ID token. Once the user has granted the
++   * scopes, it returns a fresh access token with no UI.
++   *
++   * With `interactive: false`, no UI is ever shown: the call rejects with
++   * the `NEEDS_INTERACTION` error code when the user must consent first.
++   *
++   * On Web, a token can't be obtained without a redirect, so
++   * `interactive: false` always rejects with `NEEDS_INTERACTION`, and
++   * `interactive: true` redirects as `signIn()` does: complete it with
++   * `handleRedirectCallback()`, whose result carries the access token.
++   *
++   * @since 0.1.5
++   */
++  authorize(options?: AuthorizeOptions): Promise<AuthorizeResult>;
+   /**
+    * Handle the redirect callback from the OAuth provider.
+    *
+@@ -44,6 +63,55 @@ export interface GoogleSignInPlugin {
+   signOut(): Promise<void>;
+ }
+ 
++/**
++ * @since 0.1.5
++ */
++export interface AuthorizeOptions {
++  /**
++   * Whether to show the consent screen when the user has not granted
++   * the scopes yet.
++   *
++   * If `false`, the call rejects with the `NEEDS_INTERACTION` error code
++   * instead of showing any UI.
++   *
++   * @since 0.1.5
++   * @default true
++   */
++  interactive?: boolean;
++  /**
++   * Whether to also request a server auth code that your backend can
++   * exchange for access and refresh tokens.
++   *
++   * Only available on Android and iOS.
++   * On iOS, a server auth code is only returned when the consent screen is shown.
++   *
++   * @since 0.1.5
++   * @default false
++   */
++  offlineAccess?: boolean;
++}
++
++/**
++ * @since 0.1.5
++ */
++export interface AuthorizeResult {
++  /**
++   * The access token for accessing Google APIs.
++   *
++   * @since 0.1.5
++   */
++  accessToken: string;
++  /**
++   * The server auth code that can be exchanged on your backend
++   * for access and refresh tokens.
++   *
++   * Only available on Android and iOS when `offlineAccess` is `true`.
++   *
++   * @since 0.1.5
++   */
++  serverAuthCode: string | null;
++}
++
+ /**
+  * @since 0.1.0
+  */
+@@ -168,6 +236,13 @@ export interface SignInResult {
+  * @since 0.1.0
+  */
+ export enum ErrorCode {
++  /**
++   * The user must grant the requested scopes before an access token can be
++   * returned, but `authorize()` was called with `interactive: false`.
++   *
++   * @since 0.1.5
++   */
++  NeedsInteraction = 'NEEDS_INTERACTION',
+   /**
+    * No Google account is available on the device.
+    *
+@@ -187,6 +262,9 @@ export enum ErrorCode {
+   /**
+    * The user canceled the sign-in flow.
+    *
++   * This is also returned when the user cancels the consent screen
++   * shown by `authorize()`.
++   *
+    * @since 0.1.0
+    */
+   SignInCanceled = 'SIGN_IN_CANCELED',
+diff --git a/packages/google-sign-in/src/web.ts b/packages/google-sign-in/src/web.ts
+index 227349e0..a72fbaa2 100644
+--- a/packages/google-sign-in/src/web.ts
++++ b/packages/google-sign-in/src/web.ts
+@@ -1,6 +1,9 @@
+ import { WebPlugin } from '@capacitor/core';
+ 
++import { ErrorCode } from './definitions';
+ import type {
++  AuthorizeOptions,
++  AuthorizeResult,
+   GoogleSignInPlugin,
+   InitializeOptions,
+   SignInOptions,
+@@ -17,6 +20,22 @@ export class GoogleSignInWeb extends WebPlugin implements GoogleSignInPlugin {
+   private redirectUrl: string | undefined;
+   private scopes: string[] | undefined;
+ 
++  async authorize(options?: AuthorizeOptions): Promise<AuthorizeResult> {
++    if (!this.scopes || this.scopes.length === 0) {
++      throw new Error('scopes must be provided to initialize().');
++    }
++    const interactive = options?.interactive ?? true;
++    if (!interactive) {
++      // The redirect-based OAuth flow cannot return a token without
++      // leaving the page, so no token can be obtained silently on Web.
++      throw this.createNeedsInteractionError();
++    }
++    await this.signIn();
++    // `signIn()` redirects, so this is never reached.
++    // eslint-disable-next-line @typescript-eslint/no-empty-function
++    return new Promise<AuthorizeResult>(() => {});
++  }
++
+   async handleRedirectCallback(): Promise<SignInResult> {
+     const hash = window.location.hash.substring(1);
+     const params = new URLSearchParams(hash);
+@@ -116,6 +135,14 @@ export class GoogleSignInWeb extends WebPlugin implements GoogleSignInPlugin {
+     sessionStorage.removeItem(SESSION_STORAGE_KEY_STATE);
+   }
+ 
++  private createNeedsInteractionError(): Error & { code: ErrorCode } {
++    const error = new Error(
++      'The user must grant the requested scopes first. Call authorize() with interactive set to true.',
++    ) as Error & { code: ErrorCode };
++    error.code = ErrorCode.NeedsInteraction;
++    return error;
++  }
++
+   private decodeJwtPayload(token: string): JwtPayload {
+     const parts = token.split('.');
+     if (parts.length !== 3) {
+-- 
+2.43.0
+
