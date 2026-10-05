@@ -8,8 +8,8 @@
    in the app only, as a web page cannot set it. Each is a row of its
    own, and the group goes when none is. Full screen and the lock are
    switches (aria-pressed, a drawn knob that moves); the
-   brightness and the lock are kept with the settings (settings.bats),
-   and put back as the app starts. *)
+   brightness, the lock and (in the app) full screen are kept with the
+   settings (settings.bats), and put back as the app starts. *)
 
 #target wasm begin
 
@@ -70,15 +70,42 @@ end
 implement screen_fullscreen_toggle () =
   if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else $SCR.fullscreen_enter()
 
+fn _fullscreen_same (one: fullscreen_choice, other: fullscreen_choice): bool =
+  case+ (one, other) of
+  | (FullscreenOn(), FullscreenOn()) => true
+  | (FullscreenOff(), FullscreenOff()) => true
+  | (_, _) => false
+
 (* Full screen entered or left (Escape leaves it too): the toggle
-   follows, and the lock, which a browser allows only in full screen *)
+   follows, and the lock, which a browser allows only in full screen. In
+   the app, what the screen now shows is kept with the settings (a
+   change to it saved), so the app opens again as it was (quire#313); a
+   browser's full screen is a moment's, never kept *)
 #pub fn screen_fullscreen_changed (change: $SCR.fullscreen_change): void
 
 implement screen_fullscreen_changed (change) = let
-  val () = (case+ change of
-    | $SCR.FullscreenEntered() => _pressed("screen-fullscreen", true)
-    | $SCR.FullscreenLeft() => _pressed("screen-fullscreen", false))
+  val shown = (case+ change of
+    | $SCR.FullscreenEntered() => FullscreenOn()
+    | $SCR.FullscreenLeft() => FullscreenOff()): fullscreen_choice
+  val () = (case+ shown of
+    | FullscreenOn() => _pressed("screen-fullscreen", true)
+    | FullscreenOff() => _pressed("screen-fullscreen", false))
+  val () = (if $BAPP.is_native_platform() then
+      (if _fullscreen_same(shown, set_fullscreen_get()) then ()
+       else let
+         val () = set_fullscreen_set(shown)
+       in set_save(lib_state_get()) end)
+    else ())
 in screen_controls_show() end
+
+(* In the app, the screen put in full screen or out of it as the
+   settings keep it, where it is not so already *)
+fn _fullscreen_apply (): void =
+  if $BAPP.is_native_platform() then
+    (case+ set_fullscreen_get() of
+     | FullscreenOn() => if $SCR.fullscreen_active() then () else $SCR.fullscreen_enter()
+     | FullscreenOff() => if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else ())
+  else ()
 
 (* ============================================================
    The rotation lock
@@ -236,12 +263,14 @@ end
    The settings, set again
    ============================================================ *)
 
-(* The settings' brightness and rotation lock set on the screen, where
-   they differ from what is set (a reset of the settings, its Undo, a
-   backup restored): the select and the toggle follow *)
+(* The settings' brightness, rotation lock and (in the app) full screen
+   set on the screen, where they differ from what is set (a reset of the
+   settings, its Undo, a backup restored): the select and the toggles
+   follow *)
 #pub fn screen_controls_apply (): void
 
 implement screen_controls_apply () = let
+  val () = _fullscreen_apply()
   val chosen = set_brightness_get()
   val () = _brightness_options()
   val () = (if _same(chosen, !_brightness_on_screen) then ()
@@ -267,24 +296,37 @@ end
    Startup
    ============================================================ *)
 
-(* Once the settings are read: the rows as the platform has them, the
-   brightness select's levels, and what was kept put back: a brightness
-   other than the system's, and (in the app, where nothing else asks
-   for it) the rotation lock *)
+(* Once the settings are read, before the first view is shown: the rows
+   as the platform has them, the brightness select's levels, and what
+   was kept put back: in the app, full screen, a brightness other than
+   the system's, and (where nothing else asks for it) the rotation
+   lock *)
 #pub fn screen_controls_start (): void
 
 implement screen_controls_start () = let
   val () = _brightness_options()
-  (* the app starts out of full screen, its system bars shown: bars a
-     page before this one hid (the app reopened, its page loaded again)
-     are shown, so the switch, which starts off, says what the screen
-     shows (quire#300). A browser starts out of full screen anyway *)
-  val () = (if $BAPP.is_native_platform() then $SCR.fullscreen_exit() else ())
+  (* the app starts as full screen was kept (quire#313): its system bars
+     hidden, or shown (bars a page before this one hid, the app reopened
+     and its page loaded again, are shown), set either way, so the screen
+     is as kept whatever an earlier page left (quire#300). A browser
+     starts out of full screen: it enters it only at a click *)
+  val () = (if $BAPP.is_native_platform() then
+      (case+ set_fullscreen_get() of
+       | FullscreenOn() => $SCR.fullscreen_enter()
+       | FullscreenOff() => $SCR.fullscreen_exit())
+    else ())
   (* what full screen hides, on this platform: the system's bars in the
      app, the browser's own around the page in a browser *)
   val () = (if $BAPP.is_native_platform() then ui_text("screen-fullscreen-about", "Hides the status and navigation bars")
     else ui_text("screen-fullscreen-about", "Hides the browser's bars around the page"))
   val () = screen_controls_show()
+  (* the switch says so from the first frame: the bars are hidden as the
+     plugin answers, and its change confirms it *)
+  val () = (if $BAPP.is_native_platform() then
+      (case+ set_fullscreen_get() of
+       | FullscreenOn() => _pressed("screen-fullscreen", true)
+       | FullscreenOff() => ())
+    else ())
   val () = (if $SCR.brightness_available() then (case+ set_brightness_get() of
       | BrightnessSystem() => ()
       | _ => let
