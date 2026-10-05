@@ -243,9 +243,14 @@ test('a backup holds the collections, and restoring it puts each book back in it
 async function deviceStubs(page) {
   await page.addInitScript(() => {
     window.calls = [];
+    // which system bars are hidden (both, with no bar named)
+    window.hidden = false;
     const call = name => a => { window.calls.push(name + (a ? ' ' + JSON.stringify(a) : '')); return Promise.resolve(); };
     window.Capacitor = { isNativePlatform: () => true, Plugins: {
-      SystemBars: { hide: call('hide'), show: call('show') },
+      SystemBars: {
+        hide: a => { window.hidden = true; return call('hide')(a); },
+        show: a => { window.hidden = false; return call('show')(a); },
+      },
       ScreenOrientation: { lock: call('lock'), unlock: call('unlock') },
       ScreenBrightness: { setBrightness: call('brightness') },
     } };
@@ -260,7 +265,7 @@ async function deviceStubs(page) {
   });
 }
 
-test('a backup holds reading aloud\'s speed and voices, the brightness and the rotation lock, and a restore puts them back', async ({ page }) => {
+test('a backup holds reading aloud\'s speed and voices, the brightness, the rotation lock and full screen, a reset and its Undo carry them, and a restore puts them back', async ({ page }) => {
   await deviceStubs(page);
   await start(page);
   await readBook(page, { title: 'Device Backup', author: 'Keeper', rawChapters: chapters(1, 5) });
@@ -272,23 +277,37 @@ test('a backup holds reading aloud\'s speed and voices, the brightness and the r
   await sheet.getByRole('combobox', { name: 'Brightness' }).selectOption({ label: '25%' });
   await sheet.getByRole('button', { name: 'Lock rotation', exact: true }).click();
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // full screen, kept by the app (#313)
+  await sheet.getByRole('button', { name: 'Full screen', exact: true }).click();
+  await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
   await toLibrary(page);
   const json = await exportBackup(page);
   const b = JSON.parse(json);
-  expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 25, rotationLocked: true, voices: { en: 'Narrator' } });
+  expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 25, rotationLocked: true, fullScreen: true, voices: { en: 'Narrator' } });
+  // reset: out of full screen; its Undo: back in it
+  await librarySettings(page);
+  await settingsButton(page, 'Reset settings').click();
+  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
+  await settingsButton(page, 'Done').click();
+  const undone = JSON.parse(await exportBackup(page));
+  expect(undone.settings).toMatchObject({ rotationLocked: true, fullScreen: true });
   // reset, then restored
   await librarySettings(page);
   await settingsButton(page, 'Reset settings').click();
   await settingsButton(page, 'Done').click();
   await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
   const reset = JSON.parse(await exportBackup(page));
-  expect(reset.settings).toMatchObject({ readingSpeed: 100, brightness: 'system', rotationLocked: false, voices: {} });
+  expect(reset.settings).toMatchObject({ readingSpeed: 100, brightness: 'system', rotationLocked: false, fullScreen: false, voices: {} });
+  expect(await page.evaluate(() => window.hidden)).toBe(false);
   const path = rawFile('device-backup.json', json);
   await restoreBackup(page, path);
   await expect(restored(page)).toBeVisible();
   await restored(page).getByRole('button', { name: 'OK' }).click();
-  await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toContain('brightness {"brightness":0.25}');
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-3))).toContain('brightness {"brightness":0.25}');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
   await openBook(page, 'Device Backup');
   await openReadingSettings(page, 'Read aloud');
   await expect(sheet.getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
@@ -296,4 +315,5 @@ test('a backup holds reading aloud\'s speed and voices, the brightness and the r
   await openReadingSettings(page, 'Page');
   await expect(sheet.getByRole('combobox', { name: 'Brightness' })).toHaveValue('25');
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });

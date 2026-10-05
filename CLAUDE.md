@@ -587,8 +587,9 @@ only where its platform has it, by its own `data-hide`.
   are kept with the settings, outside the settings record (bytes 20
   and 23 on of "S2", as `ruby` is), so like them they are not saved
   over settings that could not be read (`storage_savable`, #174). They are settings like the others,
-  and so are the brightness and the rotation lock: in the backup
-  (`readingSpeed`, `voices`, `brightness`, `rotationLocked`) and reset
+  and so are the brightness, the rotation lock and full screen: in the
+  backup (`readingSpeed`, `voices`, `brightness`, `rotationLocked`,
+  `fullScreen`) and reset
   with the settings, Undo putting them back (`set_reset_undoable`;
   `screen_controls_apply` sets the screen again). Going to the library, opening
   another book, or the page going away (`pagehide`) stops reading.
@@ -599,8 +600,15 @@ only where its platform has it, by its own `data-hide`.
   with the settings and locked again as the app starts) are switches:
   a button named by its label, with a drawn track whose knob moves when
   it is pressed (`_switch_row` in `src/app.bats`), and a line saying
-  what it does (`aria-describedby`). The app starts with its bars shown
-  and the switch off; while full screen is on, a page shown hides the
+  what it does (`aria-describedby`). In the app full screen is kept
+  (quire#313): a `fullscreen_choice` (`FullscreenOff | FullscreenOn`),
+  the device's own, after an "F" at the end of the "S2" record, set as
+  the screen shows it (`screen_fullscreen_changed`) and set again as
+  the app starts, before the first view is shown, the switch saying so
+  from the first frame (`screen_controls_start`). A browser keeps none:
+  the Fullscreen API enters only at a click (the user's activation), so
+  a page opened again starts out of it, its switch off, and a click
+  there does not change what is kept. While full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge. Brightness while reading
   (`brightness_*`, the app only: a `brightness_choice`, the device's own

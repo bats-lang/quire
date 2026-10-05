@@ -50,11 +50,14 @@ export async function androidInsets(page) {
     bridge takes its Android branch (the system bars for full screen,
     ScreenOrientation, ScreenBrightness, Share, the files Auto Backup
     keeps, the Browser tab and app links, the device's Google account).
-    What each plugin was asked is kept in window.__android. The device
-    has no Google account (a spec that plays one makes its own device,
+    What each plugin was asked is kept in window.__android, and which
+    system bars are hidden (`hidden`: SystemBars with no bar named hides
+    or shows both, as Capacitor's SystemBars.java does; a new process
+    starts with them shown). The device has no Google account (a spec that plays one makes its own device,
     as sync-android.spec.js does) */
 export function androidApp() {
-  const asked = window.__android = { calls: [], files: new Map(), brightness: -1 };
+  const asked = window.__android = { calls: [], files: new Map(), brightness: -1, hidden: { status: false, navigation: false } };
+  const bars = o => (o && o.bar === 'StatusBar') ? ['status'] : (o && o.bar === 'NavigationBar') ? ['navigation'] : ['status', 'navigation'];
   const call = (plugin, method, answer = () => ({})) => (options = {}) => {
     asked.calls.push({ plugin, method, options });
     try { return Promise.resolve(answer(options)); } catch (e) { return Promise.reject(e); }
@@ -64,7 +67,10 @@ export function androidApp() {
     isNativePlatform: () => true,
     getPlatform: () => 'android',
     Plugins: {
-      SystemBars: { hide: call('SystemBars', 'hide'), show: call('SystemBars', 'show') },
+      SystemBars: {
+        hide: call('SystemBars', 'hide', o => { for (const bar of bars(o)) asked.hidden[bar] = true; return {}; }),
+        show: call('SystemBars', 'show', o => { for (const bar of bars(o)) asked.hidden[bar] = false; return {}; }),
+      },
       ScreenOrientation: { lock: call('ScreenOrientation', 'lock'), unlock: call('ScreenOrientation', 'unlock') },
       ScreenBrightness: {
         getBrightness: call('ScreenBrightness', 'getBrightness', () => ({ brightness: asked.brightness })),
