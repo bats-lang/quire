@@ -280,6 +280,10 @@ implement screen_controls_start () = let
      are shown, so the switch, which starts off, says what the screen
      shows (quire#300). A browser starts out of full screen anyway *)
   val () = (if $BAPP.is_native_platform() then $SCR.fullscreen_exit() else ())
+  (* what full screen hides, on this platform: the system's bars in the
+     app, the browser's own around the page in a browser *)
+  val () = (if $BAPP.is_native_platform() then ui_text("screen-fullscreen-about", "Hides the status and navigation bars")
+    else ui_text("screen-fullscreen-about", "Hides the browser's bars around the page"))
   val () = screen_controls_show()
   val () = (if $SCR.brightness_available() then (case+ set_brightness_get() of
       | BrightnessSystem() => ()
