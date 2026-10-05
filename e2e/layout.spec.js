@@ -8,8 +8,9 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, place, placeChanged,
 } from './helpers.js';
+import { checkPageMargins } from './page-margins.js';
 
 /** The names of the visible controls among locators that reach out of
     the window's width */
@@ -373,3 +374,67 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await expect(panel).toBeHidden();
   if (!onAndroid(testInfo)) await page.evaluate(() => document.exitFullscreen());
 });
+
+/** The bars put down, so the running footer shows (a tap on the page's
+    middle brings them up and puts them down) */
+async function barsDown(page) {
+  const footer = page.locator('#footer');
+  if (!(await footer.isVisible())) {
+    const box = await bookPage(page).boundingBox();
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  }
+  await expect(footer).toBeVisible();
+}
+
+// A paged page keeps its last line clear of its running footer, the
+// footer clear of the screen's bottom inset (Android's navigation bar,
+// which the app is drawn over edge to edge), and its first line clear
+// of the top inset (the status bar), so no line is cut in half (#296).
+// With the bars down, on several pages and at several text sizes (a
+// page's last line ends where the lines happen to fill it): with no
+// insets, a gesture bar's and a three-button bar's. pageMargins says
+// what each margin must be
+for (const insets of [
+  { top: 0, left: 0, right: 0, bottom: 0 },
+  { top: 45, left: 0, right: 0, bottom: 24 },
+  { top: 24, left: 0, right: 0, bottom: 48 },
+]) {
+  test(`the page's text keeps clear of its footer and the screen's insets (insets ${insets.top}/${insets.bottom})`, async ({ page }) => {
+    test.setTimeout(180000);
+    const devtools = await page.context().newCDPSession(page);
+    await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+    await start(page);
+    await readBook(page, { title: 'Footer', author: 'L', rawChapters: chapters(2, 80) });
+    for (const size of [18, 21, 24, 28]) {
+      await openSettings(page);
+      await page.getByRole('slider', { name: 'Size' }).fill(String(size));
+      await page.keyboard.press('Escape');
+      for (let turn = 0; turn < 4; turn++) {
+        if (turn > 0) {
+          const before = await place(page);
+          await page.keyboard.press('ArrowRight');
+          await placeChanged(page, before);
+        }
+        await barsDown(page);
+        const found = await checkPageMargins(page, `size ${size}, page ${turn + 1}`);
+        expect(found, 'a paged page with the bars down to measure').not.toBeNull();
+      }
+    }
+    // and in full screen, measured the same way
+    // (a browser's Fullscreen API, or in the Android app the status bar
+    // hidden: either way the button is pressed)
+    await openReadingSettings(page, 'Page');
+    const full = readingSettings(page).getByRole('button', { name: 'Full screen', exact: true });
+    await full.click();
+    await expect(full).toHaveAttribute('aria-pressed', 'true');
+    await readingSettings(page).getByRole('button', { name: 'Close', exact: true }).click();
+    for (let turn = 0; turn < 2; turn++) {
+      const before = await place(page);
+      await page.keyboard.press('ArrowRight');
+      await placeChanged(page, before);
+      await barsDown(page);
+      const found = await checkPageMargins(page, `full screen, page ${turn + 1}`);
+      expect(found, 'a paged page with the bars down to measure').not.toBeNull();
+    }
+  });
+}

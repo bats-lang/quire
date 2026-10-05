@@ -6,6 +6,7 @@
 
 import { test as base, expect } from '@playwright/test';
 import { stallWatch } from './stall-capture.js';
+import { MARGIN_PROJECTS, checkPageMargins } from './page-margins.js';
 
 /** Google's sign-in script, stubbed with one that defines nothing: the
     build has a Google client (scripts/sync-clients.env), so the Sync
@@ -107,10 +108,16 @@ export const test = base.extend({
     await use(context);
   },
   // in the android project, every page of the test's context has
-  // Android's insets before it loads anything
+  // Android's insets before it loads anything; and a test that passed
+  // and leaves the reader showing a paged page with the bars down has
+  // that page's head and foot measured (#296), in the phone-sized
+  // projects: no spec has to remember to
   page: async ({ page }, use, testInfo) => {
     if (onAndroid(testInfo)) await androidInsets(page);
     await use(page);
+    if (!MARGIN_PROJECTS.includes(testInfo.project.name)) return;
+    if (testInfo.status !== 'passed' || page.isClosed()) return;
+    await checkPageMargins(page, 'as the test ended');
   },
 });
 
