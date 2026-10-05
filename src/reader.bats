@@ -282,15 +282,21 @@ fn _page_axis (): page_axis =
   else if !_right_to_left then AcrossBack
   else Across
 
-(* How far a turn scrolls: scrolled, the page's height, less its
-   paddings (84 px) and a line's overlap, so no line is lost between
-   screens; set vertically, the page's height, which is one column and
-   its gap (the paddings, style.bats) *)
+(* How far a turn scrolls: scrolled, the page's height, which is the
+   reading area (its margins keep it clear of the status bar above and
+   the footer below, style.bats, #296), less one line of the text, so a
+   line the area's foot cuts is whole at the next screen's head; set
+   vertically, the page's height, which is one column and its gap (the
+   paddings, style.bats) *)
 fn _step (): [step:pos] int step = let
   val height = g1ofg0(!_page_height)
 in
   if _is_vertical() then (if height > 0 then height else 1)
-  else if height > 240 then height - 120 else 120
+  else let
+    (* the text's line: its size times its spacing (in tenths), rounded up *)
+    val line = (set_size_get() * set_lh_get() + 9) / 10
+    val step = height - line
+  in if step > 0 then step else 1 end
 end
 
 (* A content node of the chapter, and how far below the

@@ -977,11 +977,19 @@ footer and of the top inset. A column is the page's height less those
 paddings, so it is exactly that area; a vertical page's column gap and a
 picture's largest height are the same paddings. Pages are counted
 across by the page's scroll width, which the column's height does not
-change. `e2e/page-margins.js` measures those margins against the
+change. Scrolled, the same variables are the page's margins instead
+of its paddings (`_put_scrolled` in `src/settings.bats`), so the page
+is the reading area itself and its text is clipped there, never drawn
+under the footer or a system bar; two transparent fixed bands (the
+page's `::before` and `::after`) keep a tap or a drag beside it the
+page's, and a turn (`_step`) scrolls the area's height less one line
+of the text, so the line its foot cuts is whole at the next screen's
+head. `e2e/page-margins.js` measures those margins against the
 insets the page computes, and the e2e fixture measures them at the end
 of every test in the phone-sized projects (`MARGIN_PROJECTS`), full
-screen too, whenever the reader shows a paged reflowed page with the
-bars down, so a spec that leaves the reader open checks them.
+screen too, whenever the reader shows a reflowed page, paged or
+scrolled, with the bars down, so a spec that leaves the reader open
+checks them; each line counts as drawn, cut to the page's scrollport.
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and

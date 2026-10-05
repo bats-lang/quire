@@ -109,9 +109,9 @@ export const test = base.extend({
   },
   // in the android project, every page of the test's context has
   // Android's insets before it loads anything; and a test that passed
-  // and leaves the reader showing a paged page with the bars down has
-  // that page's head and foot measured (#296), in the phone-sized
-  // projects: no spec has to remember to
+  // and leaves the reader showing a reflowed page, paged or scrolled,
+  // with the bars down has that page's head and foot measured (#296),
+  // in the phone-sized projects: no spec has to remember to
   page: async ({ page }, use, testInfo) => {
     if (onAndroid(testInfo)) await androidInsets(page);
     await use(page);
