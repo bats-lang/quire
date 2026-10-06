@@ -30,8 +30,10 @@ the page, which imports it. Its launcher icon is the PWA's
 `icon-512.png`.
 
 The app id is `dev.middlefield.quire`, the one Quire is published under.
-The version code is the workflow's run number plus 1 (Google Play needs
-each upload's to be higher than the last).
+The version name and code come from the commit (CLAUDE.md, "The version
+is the commit's"): the name is `YEAR.MONTH.DAY.SECONDS (sha)`, and the code
+is the commit's time in minutes since 2025, so it grows from release to
+release as Google Play needs.
 
 ## Signing secrets
 
@@ -97,8 +99,29 @@ which does not carry environment secrets.
 ### 4. Build
 
 Push to main. When the `check` workflow's `android` job is done,
-download `release-aab` from the run's artifacts
-and upload the `.aab` inside to the Google Play Console.
+download `release-aab` from the run's artifacts.
+
+### 5. Release: internal testing first, then production
+
+Every release goes through Play's **internal testing** track before
+production:
+
+1. In the Play Console, under Testing › Internal testing, create a
+   release and upload the `.aab` from `release-aab`.
+2. Install it from Play on a test device, as a tester, not by
+   sideloading. A device that has the production app installed needs no
+   uninstall: Play updates it in place.
+3. Check what the release changed on that device. Play signs it with the
+   app signing key, as production is, so Google sign-in, Drive sync and
+   anything else tied to the signing certificate behave as they will in
+   production. A sideloaded `release-apk` is signed with the upload key
+   instead, and Google refuses its sign-in (`DEVELOPER_ERROR`): Quire's
+   Android OAuth client is registered with Play's app signing SHA-1
+   (`scripts/sync-clients.env`).
+4. Then promote that same release to production, in the Play Console.
+
+The `release-apk` artifact stays for quick checks that don't involve
+anything tied to the signing key.
 
 ## Building locally
 
