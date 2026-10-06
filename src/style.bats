@@ -1236,6 +1236,56 @@ fn lay {left:nat}{media:bool}{value_len:nat | value_len + 18 <= left}
   val () = raw(sheet, ";")
 in sheet end
 
+(* ============================================================
+   The spacing scale (#331): Material's grid (8 px between and around
+   components, 4 px within them; 16 px a compact screen's margins and a
+   list item's insets, 24 px a dialog's), one length a step. The
+   paddings, margins and gaps of the screens, sheets, menus and dialogs
+   are written from it (spaced, spaced_pair), not chosen rule by rule.
+   A step is indexed by its length, so a rule can be asked to prove a
+   length at least the least inset (#332 builds on it)
+   ============================================================ *)
+
+#pub datatype space(int) =
+  | SpaceTight(4) of ()
+  | SpaceSmall(8) of ()
+  | SpaceMedium(12) of ()
+  | SpaceLarge(16) of ()
+  | SpaceExtraLarge(24) of ()
+
+(* The least a control keeps from its container's edges: Material's
+   least space between two targets. The page gives it as --space-inset
+   (_spacing), which the e2e layout walk checks every control against *)
+stadef SPACE_INSET = 8
+
+(* The step that is the least inset: a step of another length does not
+   type-check here *)
+fn space_inset (): space(SPACE_INSET) = SpaceSmall()
+
+fn _space_length {length:int} (step: space(length)): [text_len:pos | text_len <= 4] string text_len =
+  case+ step of
+  | SpaceTight() => "4px"
+  | SpaceSmall() => "8px"
+  | SpaceMedium() => "12px"
+  | SpaceLarge() => "16px"
+  | SpaceExtraLarge() => "24px"
+
+(* prop:<step>; *)
+fn spaced {left:nat | left >= 22}{media:bool}{length:int}
+  (sheet: sheet(left, media, true), property: prop, step: space(length)): [after:nat | after >= left - 22] sheet(after, media, true) =
+  lay(sheet, property, _space_length(step))
+
+(* prop:<block> <inline>; (the top and bottom, then the sides) *)
+fn spaced_pair {left:nat | left >= 28}{media:bool}{block,inline:int}
+  (sheet: sheet(left, media, true), property: prop, block: space(block), inline: space(inline)): [after:nat | after >= left - 28] sheet(after, media, true) = let
+  val () = raw(sheet, _property_name(property))
+  val () = raw(sheet, ":")
+  val () = raw(sheet, _space_length(block))
+  val () = raw(sheet, " ")
+  val () = raw(sheet, _space_length(inline))
+  val () = raw(sheet, ";")
+in sheet end
+
 (* color:var(--text);background-color:var(--ground); : text on ground,
    proven *)
 fn surf {left:nat | left >= 60}{media:bool}{text,ground:colour_role}
@@ -1423,7 +1473,7 @@ fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:n
   val () = raw(sheet, "@font-face{font-family:'Material Symbols';src:url(material-symbols-subset.woff2) format('woff2');font-weight:400;font-display:block}")
 in sheet end
 
-fn _shell {left:nat | left >= 6690} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6690] sheet(after, false, false) = let
+fn _shell {left:nat | left >= 6750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6750] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -1740,7 +1790,7 @@ fn _shell {left:nat | left >= 6690} (sheet: sheet(left, false, false)): [after:n
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4800] sheet(after, false, false) = let
+fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4860] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1786,7 +1836,8 @@ fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "8px")
-  val sheet = lay(sheet, Padding(), "4px 4px 4px 16px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
+  val sheet = spaced(sheet, PaddingLeft(), SpaceLarge())
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = lay(sheet, Width(), "max-content")
   val sheet = lay(sheet, MaxWidth(), "min(92vw,420px)")
@@ -1827,7 +1878,7 @@ fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [afte
   val sheet = rule(sheet, ".menu,.mbox")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = lay(sheet, BorderRadius(), "8px")
-  val sheet = lay(sheet, Padding(), "8px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, MinWidth(), "200px")
   val sheet = lay(sheet, MaxWidth(), "min(92vw,420px)")
   val sheet = lay(sheet, Display(), "flex")
@@ -1856,9 +1907,10 @@ fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, Padding(), "12px 14px")
   val sheet = lay(sheet, FontSize(), "inherit")
   val sheet = close(sheet)
+  (* a dialog: Material's 24 px round it, 16 px between its parts *)
   val sheet = rule(sheet, ".mbox")
-  val sheet = lay(sheet, Padding(), "16px")
-  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = spaced(sheet, Padding(), SpaceExtraLarge())
+  val sheet = spaced(sheet, Gap(), SpaceLarge())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mtitle")
   val sheet = lay(sheet, FontWeight(), "bold")
@@ -1929,7 +1981,7 @@ fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Gap(), "8px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.btn")
   val sheet = lay(sheet, AlignSelf(), "flex-start")
@@ -1972,7 +2024,7 @@ fn _overlays {left:nat | left >= 4800} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9200] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9260] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2433,7 +2485,7 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Gap(), "4px")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "10px")
-  val sheet = lay(sheet, Padding(), "4px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
   (* no wider than the screen: its items go on a second row instead *)
   val sheet = lay(sheet, Width(), "max-content")
@@ -2471,7 +2523,7 @@ fn _reader {left:nat | left >= 9200} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6100] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6160] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2495,8 +2547,8 @@ fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".ph")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, Gap(), "6px")
-  val sheet = lay(sheet, Padding(), "6px 8px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .grow")
@@ -2511,7 +2563,7 @@ fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Gap(), "4px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tab")
-  val sheet = lay(sheet, Padding(), "8px 12px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
@@ -2521,14 +2573,17 @@ fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".plist")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Overflow(), "auto")
-  val sheet = lay(sheet, Padding(), "4px 0")
+  (* its rows inset from the panel's sides, as Material's navigation
+     drawer insets its items *)
+  val sheet = spaced_pair(sheet, Padding(), SpaceTight(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pi")
   val sheet = lay(sheet, Display(), "block")
   val sheet = lay(sheet, Width(), "100%")
   val sheet = lay(sheet, TextAlign(), "left")
-  val sheet = lay(sheet, Padding(), "10px 14px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
   val sheet = lay(sheet, BoxSizing(), "border-box")
+  val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
@@ -2746,9 +2801,9 @@ fn _panels {left:nat | left >= 6100} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sbar")
   val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, Gap(), "6px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, Padding(), "6px 8px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = line(sheet, BottomSide(), 1, RoleLine())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sbar input")
@@ -2867,6 +2922,62 @@ fn _switches {left:nat | left >= 2000} (sheet: sheet(left, false, false)): [afte
   val sheet = rule(sheet, ".top .ibtn[aria-pressed=true],.bot .ibtn[aria-pressed=true]")
   val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
   val sheet = line(sheet, BottomSide(), 3, RoleBarText())
+  val sheet = close(sheet)
+in sheet end
+
+(* The spacing scale on the screens (#331): the least inset given to the
+   page (--space-inset, the e2e walk's minimum); a full screen's rows and
+   notes drawn as cards (Material's list item: 8 px above and below, 16
+   px at the sides, so no button touches a card's edge) that wrap
+   rather than cut a button; a panel opened as a dialog 16 px round
+   its content. And the Sync screen's parts: its status card (where,
+   how it went, its actions), its footer note, and its sign-in step,
+   which hides the screen's list while it is shown *)
+fn _spacing {left:nat | left >= 1200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1200] sheet(after, false, false) = let
+  val sheet = rule(sheet, ":root")
+  val () = raw(sheet, "--space-inset:")
+  val () = raw(sheet, _space_length(space_inset()))
+  val () = raw(sheet, ";")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".menu[role=dialog]")
+  val sheet = spaced(sheet, Padding(), SpaceLarge())
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".info .srow")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceLarge())
+  val sheet = lay(sheet, BorderRadius(), "12px")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".info-in>.sabout,.info-in>.cnone,.scard")
+  val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
+  val sheet = lay(sheet, BorderRadius(), "12px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".scard")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".swhere")
+  val sheet = lay(sheet, FontWeight(), "bold")
+  val sheet = close(sheet)
+  (* a sign-in step's words, on the screen's own ground *)
+  val sheet = rule(sheet, ".stext")
+  val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".snote")
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceTight(), SpaceLarge())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sstep")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sstep:not([data-hide='1'])~*")
+  val sheet = lay(sheet, Display(), "none")
   val sheet = close(sheet)
 in sheet end
 
@@ -3194,6 +3305,7 @@ implement app_style () = let
   val sheet = _panels(sheet)
   val sheet = _reading_settings(sheet)
   val sheet = _switches(sheet)
+  val sheet = _spacing(sheet)
   val sheet = _under_480px(sheet)
   val sheet = _under_600px(sheet)
   val sheet = rule(sheet, ".caf")

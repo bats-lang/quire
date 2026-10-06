@@ -242,10 +242,25 @@ the page is hidden, and from the screen's Sync now (`LSync`,
 goes through Undo). That row says sync's state in short
 (`sync_summary_show`, refreshed with the screen's status line): "Off",
 "WebDAV · synced 2 min ago" ("Fastmail · ...", "Android · ...", "Dropbox · ..."), or how the last sync
-failed. The screen lists only what can be used where it runs, each row
-shown by its own `data-hide` (`ui_show` in `sync_screen_open`): no row
-is there only to say why it is unavailable (a provider a browser can't
-reach, a build with no client or key).
+failed. The screen (#331, from Android's Backup and Add account
+screens and Material's settings) is a status card at its top (where
+sync is kept, how the last sync went or what it needs, and Turn off and
+Sync now while it is on), then "Sync with": a row per service, its name
+only (`sync_service`: Google Drive, Dropbox, Fastmail, Nextcloud,
+WebDAV) and, for the one chosen, a word of state ("Connected",
+"Paused", "Not syncing"), then a line on what sync keeps. A row opens
+its service's own sign-in step (`sync_step_open`, the layer
+`LSyncStep`, `sync-step`, first in the screen so the stylesheet hides
+what follows it while it shows): what the service does, its fields,
+its link, Cancel and its one button (Use Android or Sign in to Google
+Drive, Sign in to Dropbox, Sync with Fastmail, Sign in with Nextcloud,
+Sync with this folder); a field left empty is said in the step, and
+once the sign-in begins the step closes and the card says how it goes.
+Escape and Cancel close the step (`sync_step_cancel`, which stops a
+Nextcloud poll). The screen lists only what can be used where it runs,
+each row shown by its own `data-hide` (`ui_show` in
+`sync_screen_open`): no row is there only to say why it is unavailable
+(a provider a browser can't reach, a build with no client or key).
 
 Nextcloud is signed in to with its Login Flow v2 (`src/nextcloud.bats`,
 #184), which ends in the WebDAV store: the screen's Sign in with
@@ -782,6 +797,17 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   of them is calm (`SURF`). `scripts/gen-harmony.py` writes the proofs
   from `PAL`; the solver checks them, so a palette that breaks a rule
   does not type-check.
+* Spacing comes from one scale (#331): `space(n)`, Material's grid as
+  a datatype indexed by its length (4, 8, 12, 16 and 24 px), written
+  by `spaced` and `spaced_pair` into the paddings, margins and gaps of
+  the screens, sheets, menus and dialogs. `SPACE_INSET` (8 px,
+  Material's least gap between targets) is the least a control keeps
+  from its container's edges; the page gives it as `--space-inset`,
+  and the layout walk (`insetsShort` in `e2e/controls-shown.js`, run
+  by `fits` on every screen it walks) fails any control nearer its
+  container's padding box than that. A full screen's rows and notes
+  are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
+  16 px, a dialog 24 px. #332 is to prove the insets statically.
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
@@ -882,7 +908,7 @@ unread book's annotations cannot be made; the banner says so. A backup
 that could not read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
-screens: Settings, Sync) are a `layer` (`src/layer.bats`), whose
+screens: Settings, Sync, a sync service's step) are a `layer` (`src/layer.bats`), whose
 element ids only that module knows: they are shown and hidden only by
 `layer_open` and `layer_close`, which keep the stack of open overlays,
 last opened on top. Escape answers the dialog if one is open, and

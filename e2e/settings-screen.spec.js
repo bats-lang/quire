@@ -70,13 +70,24 @@ test('Settings opens from the reader top bar, and Escape closes it back to the p
   await expect(bookPage(page)).toBeVisible();
 });
 
-test('Sync opens from its row, and Escape closes Sync, then Settings', async ({ page }) => {
+test('Sync opens from its row, a service\'s step from its own, and Escape closes the step, Sync, then Settings', async ({ page }) => {
   await start(page);
   await librarySettings(page);
   await expect(syncRow(page)).toContainText('Off');
   await settingsButton(page, 'Sync ›').click();
   const sync = dialog(page, 'Sync');
   await expect(sync).toBeVisible();
+  // a service's row opens its own step over the list, and Escape (as
+  // Cancel) goes back to the list (#331)
+  await sync.getByRole('button', { name: 'WebDAV ›' }).click();
+  await expect(sync.getByLabel('Folder URL')).toBeVisible();
+  await expect(sync.getByRole('button', { name: 'WebDAV ›' })).toBeHidden();
+  await page.keyboard.press('Escape');
+  await expect(sync.getByLabel('Folder URL')).toBeHidden();
+  await sync.getByRole('button', { name: 'WebDAV ›' }).click();
+  await sync.getByRole('button', { name: 'Cancel' }).click();
+  await expect(sync.getByLabel('Folder URL')).toBeHidden();
+  await expect(sync.getByRole('button', { name: 'WebDAV ›' })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(sync).toBeHidden();
   await expect(settingsScreen(page)).toBeVisible();

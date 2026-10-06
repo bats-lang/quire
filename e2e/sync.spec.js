@@ -45,13 +45,20 @@ async function closeSync(page) {
   await expect(settingsScreen(page)).toBeHidden();
 }
 
+/** The WebDAV row's own step (#331): its fields and its button */
+async function webdavStep(page) {
+  await panel(page).getByRole('button', { name: 'WebDAV ›' }).click();
+  await expect(panel(page).getByLabel('Folder URL')).toBeVisible();
+}
+
 /** Sync set up, and a first sync: the folder, user name and password */
 async function setUp(page, password = PASSWORD) {
   await openSync(page);
+  await webdavStep(page);
   await panel(page).getByLabel('Folder URL').fill(folder(page));
   await panel(page).getByLabel('User name').fill(USER);
   await panel(page).getByLabel('Password', { exact: true }).fill(password);
-  await panel(page).getByRole('button', { name: 'Sync now' }).click();
+  await panel(page).getByRole('button', { name: 'Sync with this folder' }).click();
 }
 
 /** Sync set up and done, its screen closed */
@@ -414,9 +421,10 @@ test('a sync that fails says why, and changes nothing here', async ({ browser })
   await setUp(b.page, 'not-the-password');
   await expect(status(b.page)).toContainText('The user name or password is wrong.');
   // the folder missing (its file can be read, it cannot be written)
+  await webdavStep(b.page);
   await panel(b.page).getByLabel('Password', { exact: true }).fill(PASSWORD);
   server.putStatus = 403;
-  await panel(b.page).getByRole('button', { name: 'Sync now' }).click();
+  await panel(b.page).getByRole('button', { name: 'Sync with this folder' }).click();
   await expect(status(b.page)).toContainText('The user name or password is wrong.');
   server.putStatus = null;
   server.noFolder = true;

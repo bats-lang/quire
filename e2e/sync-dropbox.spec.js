@@ -34,6 +34,11 @@ const unexpected = d => d.errors.filter(e => !/status of (401|409)/.test(e));
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 const dropboxButton = page => panel(page).getByRole('button', { name: 'Dropbox' });
+/** The Dropbox row's own step (#331), then its Sign in to Dropbox */
+async function chooseDropbox(page) {
+  await panel(page).getByRole('button', { name: 'Dropbox ›' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Dropbox' }).click();
+}
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 
 async function openSync(page) {
@@ -53,7 +58,7 @@ async function closeSync(page) {
     to the sync screen, over Settings, synced */
 async function joinDropbox(page) {
   await openSync(page);
-  await dropboxButton(page).click();
+  await chooseDropbox(page);
   await page.waitForURL(url => url.searchParams.get('oauth') === 'dropbox' && url.searchParams.has('code'));
   await expect(status(page)).toHaveText(/^Last synced on /);
   // the code is not left in the address
@@ -78,7 +83,9 @@ test('Dropbox signs in with PKCE and syncs two browsers through the app folder',
   await nextChapter(a.page, 2);
   await toLibrary(a.page);
   await openSync(a.page);
+  await panel(a.page).getByRole('button', { name: 'Dropbox ›' }).click();
   await expect(panel(a.page)).toContainText('in a folder of its own (Apps, then Quire) that only Quire sees');
+  await panel(a.page).getByRole('button', { name: 'Cancel' }).click();
   await closeSync(a.page);
   await joinDropbox(a.page);
   // the sign-in asked for the app folder's files only, with S256 PKCE
@@ -137,7 +144,7 @@ test('a Dropbox sign-in the reader refuses changes nothing, and a code it did no
   const a = await device(browser, server);
   server.answer = 'deny';
   await openSync(a.page);
-  await dropboxButton(a.page).click();
+  await chooseDropbox(a.page);
   await a.page.waitForURL(url => url.searchParams.get('error') === 'access_denied');
   await expect(status(a.page)).toHaveText('Dropbox sign-in was canceled.');
   expect(new URL(a.page.url()).search).toBe('');

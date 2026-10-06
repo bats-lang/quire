@@ -68,6 +68,11 @@ const unexpected = d => d.errors.filter(e => !/status of (401|409)/.test(e));
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 const dropboxButton = page => panel(page).getByRole('button', { name: 'Dropbox' });
+/** The Dropbox row's own step (#331), then its Sign in to Dropbox */
+async function chooseDropbox(page) {
+  await panel(page).getByRole('button', { name: 'Dropbox ›' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Dropbox' }).click();
+}
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 const links = page => page.evaluate(() => ({ opened: window.__links.opened }));
 
@@ -88,7 +93,7 @@ async function closeSync(page) {
     system's browser */
 async function signInPage(page) {
   const before = (await links(page)).opened.length;
-  await dropboxButton(page).click();
+  await chooseDropbox(page);
   await expect.poll(async () => (await links(page)).opened.length).toBe(before + 1);
   return (await links(page)).opened[before];
 }
@@ -129,7 +134,9 @@ test('in the app, Dropbox signs in through the system browser and comes back at 
   await nextChapter(a.page, 2);
   await toLibrary(a.page);
   await openSync(a.page);
+  await panel(a.page).getByRole('button', { name: 'Dropbox ›' }).click();
   await expect(panel(a.page)).toContainText('Dropbox\'s page opens in your browser to sign you in, then brings you back here.');
+  await panel(a.page).getByRole('button', { name: 'Cancel' }).click();
   await closeSync(a.page);
   const address = a.page.url();
   const authorize = await joinDropbox(a.page, server);
