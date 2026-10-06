@@ -1488,7 +1488,15 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(NextcloudSignIn()) => sync_nextcloud_sign_in()
         | ~$R.some(SyncDropbox()) => sync_dropbox()
         | ~$R.some(SyncOff()) => sync_off()
-        | ~$R.some(SyncDone()) => layer_close(LSync()))
+        | ~$R.some(SyncDone()) => layer_close(LSync())
+        (* a service's row: its own sign-in step (#331) *)
+        | ~$R.some(SyncRowGoogle()) => sync_step_open(ServiceGoogle())
+        | ~$R.some(SyncRowDropbox()) => sync_step_open(ServiceDropbox())
+        | ~$R.some(SyncRowFastmail()) => sync_step_open(ServiceFastmail())
+        | ~$R.some(SyncRowNextcloud()) => sync_step_open(ServiceNextcloud())
+        | ~$R.some(SyncRowWebDav()) => sync_step_open(ServiceWebDav())
+        | ~$R.some(SyncWebDav()) => sync_webdav()
+        | ~$R.some(SyncStepCancel()) => sync_step_cancel())
     in 0 end)
   val listeners = RCons(listeners, OnEl("sync-offer"), "click", llam(h) => let
       val clicked = _target(h)
@@ -1993,6 +2001,11 @@ fn _escape_overlay (): bool =
   (* back to Settings, to the row that opened it, as Done goes *)
   | ~Escaped(LReading()) => let
       val () = ui_focus("settings-reading")
+    in true end
+  (* a sync service's step: its sign-in under way stops, and the list
+     is back *)
+  | ~Escaped(LSyncStep()) => let
+      val () = sync_step_cancel()
     in true end
   | ~Escaped(_) => true
 

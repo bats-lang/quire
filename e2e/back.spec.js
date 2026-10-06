@@ -32,12 +32,16 @@ const minimized = page => page.evaluate(() => window.__android.calls.filter(c =>
 
 /** Presses Back and expects exactly one step back: one overlay fewer,
     the others still there (and the book still open under them), or,
-    with none open in the reader, the library */
-async function stepBack(page, testInfo) {
+    with none open in the reader, the library; or, for a step within a
+    screen (within says which), the same overlays still open (the walk
+    checks the screen is back where it was) */
+async function stepBack(page, testInfo, within) {
   const before = await overlaysShown(page);
   const reading = await bookPage(page).isVisible();
   await pressBack(page, testInfo);
-  if (before.length > 0) {
+  if (within) {
+    await expect.poll(() => overlaysShown(page), `one step back from ${within}`).toEqual(before);
+  } else if (before.length > 0) {
     await expect.poll(() => overlaysShown(page).then(shown => shown.length), `one step back from ${before}`).toBe(before.length - 1);
     expect(before, `one step back from ${before}`).toEqual(expect.arrayContaining(await overlaysShown(page)));
     if (reading) await expect(bookPage(page)).toBeVisible();
@@ -72,7 +76,7 @@ test('Back goes exactly one step back from every screen, sheet, menu and dialog,
   // the app's own screen rows, as the layout's walk shows them (the
   // android project has the app's Capacitor already)
   if (!onAndroid(testInfo)) await page.addInitScript(appPlayed);
-  await walkEveryScreen(page, { look: async () => {}, back: () => stepBack(page, testInfo) });
+  await walkEveryScreen(page, { look: async () => {}, back: within => stepBack(page, testInfo, within) });
   await stepBack(page, testInfo);
   await backAtRoot(page, testInfo);
 });

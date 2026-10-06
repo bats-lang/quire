@@ -1809,6 +1809,15 @@ implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(by
   | SyncDropbox
   | SyncOff
   | SyncDone
+  (* the services' rows (#331), each opening its own sign-in step *)
+  | SyncRowGoogle
+  | SyncRowDropbox
+  | SyncRowFastmail
+  | SyncRowNextcloud
+  | SyncRowWebDav
+  (* the WebDAV step's own button, and the step's Cancel *)
+  | SyncWebDav
+  | SyncStepCancel
 
 #pub fn sync_screen_control_id (control: sync_screen_control): [id_len:pos | id_len < 256] string id_len
 implement sync_screen_control_id (control) =
@@ -1821,6 +1830,13 @@ implement sync_screen_control_id (control) =
   | SyncDropbox() => "sync-dropbox"
   | SyncOff() => "sync-off"
   | SyncDone() => "sync-done"
+  | SyncRowGoogle() => "sync-row-google"
+  | SyncRowDropbox() => "sync-row-dropbox"
+  | SyncRowFastmail() => "sync-row-fastmail"
+  | SyncRowNextcloud() => "sync-row-nextcloud"
+  | SyncRowWebDav() => "sync-row-webdav"
+  | SyncWebDav() => "sync-webdav"
+  | SyncStepCancel() => "sync-step-cancel"
 
 (* The control after control, in the order the decoder tries them *)
 fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_screen_control) =
@@ -1832,7 +1848,14 @@ fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_scr
   | NextcloudSignIn() => $R.some(SyncDropbox())
   | SyncDropbox() => $R.some(SyncOff())
   | SyncOff() => $R.some(SyncDone())
-  | SyncDone() => $R.none()
+  | SyncDone() => $R.some(SyncRowGoogle())
+  | SyncRowGoogle() => $R.some(SyncRowDropbox())
+  | SyncRowDropbox() => $R.some(SyncRowFastmail())
+  | SyncRowFastmail() => $R.some(SyncRowNextcloud())
+  | SyncRowNextcloud() => $R.some(SyncRowWebDav())
+  | SyncRowWebDav() => $R.some(SyncWebDav())
+  | SyncWebDav() => $R.some(SyncStepCancel())
+  | SyncStepCancel() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -1848,7 +1871,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_sync_screen_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_screen_control)
-implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 8)
+implement ui_sync_screen_control (bytes, n, at) = _sync_screen_control_from(bytes, n, at, SyncNow(), 15)
 
 (* The buttons of sync's offer of a place, each by its element's id (sync_offer_control_id) *)
 #pub datatype sync_offer_control =

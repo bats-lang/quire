@@ -28,8 +28,25 @@ export function appPlayed() {
   } };
 }
 
+/** Each service the Sync screen lists, its own sign-in step opened
+    (#331) and checked, then left by back (Escape, unless given): one
+    step back, within the screen */
+export async function syncSteps(page, checked, back = () => page.keyboard.press('Escape')) {
+  const sync = dialog(page, 'Sync');
+  const rows = await sync.getByRole('group', { name: 'Sync with' }).getByRole('button').allTextContents();
+  expect(rows.length, 'the services listed').toBeGreaterThan(0);
+  for (const row of rows) {
+    await sync.getByRole('button', { name: row, exact: true }).click();
+    await expect(sync.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await checked(`Sync, ${row.replace(' ›', '')}'s step`);
+    await back('a step within Sync');
+    await expect(sync.getByRole('button', { name: row, exact: true })).toBeVisible();
+  }
+}
+
 /** Walks every screen: look(screen) is called on each as it is shown
-    (named), and back() closes the one on top, one step back */
+    (named), and back() closes the one on top, one step back (given
+    what it is when it is a step within a screen, not a screen) */
 export async function walkEveryScreen(page, { look, back }) {
   // Project Gutenberg's catalogue, played: one page holding one book
   await page.route('https://www.gutenberg.org/**', route => route.fulfill({
@@ -98,6 +115,7 @@ export async function walkEveryScreen(page, { look, back }) {
     await settingsButton(page, row).click();
     await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
     await check(row);
+    if (row === 'Sync ›') await syncSteps(page, check, back);
     await back();
   }
   await back();

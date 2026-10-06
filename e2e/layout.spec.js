@@ -11,10 +11,10 @@ import {
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
-import { walkEveryScreen, appPlayed } from './walk.js';
+import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
 
 /** The names of the visible controls among locators that reach out of
     the window's width */
@@ -32,11 +32,13 @@ async function outside(page, locators) {
 }
 
 /** Expects nothing cut off on the screen shown (controls-shown.js), no
-    toggle whose state shows only in aria-pressed, and nothing wider than
-    the window, naming the screen when something is */
+    toggle whose state shows only in aria-pressed, no control nearer its
+    container's edge than the spacing scale allows (#331), and nothing
+    wider than the window, naming the screen when something is */
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
+  expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
 
@@ -212,6 +214,7 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await settingsButton(page, 'Sync ›').click();
   await expect(dialog(page, 'Sync')).toBeVisible();
   await fits(page, 'Sync');
+  await syncSteps(page, screen => fits(page, screen));
   await page.keyboard.press('Escape');
   await settingsButton(page, 'Dictionaries ›').click();
   await expect(dialog(page, 'Dictionaries')).toBeVisible();
