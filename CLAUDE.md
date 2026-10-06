@@ -901,15 +901,19 @@ platform's. In the Android app the App plugin's `backButton` reaches
 it (bridge's `listen_back_button`, `RBackButton`), and at the root the
 app goes to the background (`app_minimize`, `minimizeApp`: what Android
 12+ does itself at a root activity; `exitApp` would finish it). In a
-browser `src/back.bats` keeps exactly one history entry (the guard,
-`#r`) above the page's own while there is anything to go back from (a
-dialog, an overlay, the reader: `back_dialog_set`, `back_overlays_set`,
-`back_view_set`), so Back takes it (`popstate`, `back_popped`) and the
-app goes one step back; when the last thing closes another way the
-guard is taken back (bridge's `history_back`, the pop counted as its
-own), once the click's handling has ended (a menu item closes its menu
-and then opens its screen, and `history.back()` is asynchronous), so
-at the library Back leaves the page at once. `e2e/back.spec.js`
+browser `src/back.bats` pushes one history entry (the guard, at the
+page's own address) above the page's own once there is anything to go
+back from (a dialog, an overlay, the reader: `back_dialog_set`,
+`back_overlays_set`, `back_view_set`), so Back takes it (`popstate`,
+`back_popped`) and the app goes one step back, pushing it again if
+something is still open. The app never takes a guard back on its own
+(`history.back()` is asynchronous, and raced pushes and reloads): one
+left after something closed another way is taken by the next Back, and
+with nothing to go back from that Back is the platform's, so the app
+goes on back past its own entry (`back_leave`, bridge's
+`history_back`) and the page is left at once. The page restores its own
+scroll (`history_scroll_restoration`, `ScrollManual`), so going back
+over a guard never moves the library. `e2e/back.spec.js`
 walks every screen of the layout's walk (`e2e/walk.js`, which
 `e2e/layout.spec.js` walks too, so a screen added there is covered) and
 checks Back goes exactly one step from each, in a browser and in the

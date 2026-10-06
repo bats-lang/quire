@@ -2521,16 +2521,17 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
       val () = $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
           if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
     in 0 end)
-  (* the browser's Back: it took the guard back.bats keeps while there
+  (* the browser's Back: it took the guard back.bats pushes once there
      is something to go back from, so the app goes one step back, and
-     the guard is pushed again if there is still something (at the
-     library with nothing open there is no guard, and Back leaves the
-     page) *)
+     the guard is pushed again if there is still something; with nothing
+     to go back from, it is the platform's Back, and the page is left *)
+  (* the address itself is not needed: back.bats keeps what Back
+     went back over *)
   val () = $NAV.set_popstate_callback(llam(url) => let
-      val () = (case+ back_popped(url) of
-        | PoppedByBack() => (case+ _go_back() of WentBack() => () | AtRoot() => ())
-        | PoppedOwn() => ()
-        | PoppedForward() => ())
+      val () = (case+ url of ~$R.some(bytes) => $BD.blob_free(bytes) | ~$R.none() => ())
+      val () = (case+ back_popped() of
+        | PoppedByBack() => (case+ _go_back() of WentBack() => () | AtRoot() => back_leave())
+        | PoppedElsewhere() => ())
       val () = back_sync()
     in 0 end)
 in listeners end
@@ -2713,7 +2714,8 @@ fn _external_start (reading: library_reading): void =
 
 implement main0 () = let
   val () = app_build()
-  (* an address left at Back's guard by a reload, put back (back.bats) *)
+  (* the page restores its own scroll when Back goes over a guard
+     (back.bats) *)
   val () = back_start()
   (* the sync screen keeps its own elements *)
   val () = sync_screen_make()
