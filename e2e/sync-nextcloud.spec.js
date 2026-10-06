@@ -68,11 +68,14 @@ function nextcloud({ pollsBeforeGrant = 1, startStatus = 200 } = {}) {
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 
+/** The Sync screen, and on it the Nextcloud row's own step (#331) */
 async function openSync(page, server) {
   await page.context().route(`${SERVER}/**`, server.handle);
   await librarySettings(page);
   await settingsButton(page, 'Sync ›').click();
   await expect(panel(page)).toBeVisible();
+  await panel(page).getByRole('button', { name: 'Nextcloud ›' }).click();
+  await expect(panel(page).getByLabel('Nextcloud server')).toBeVisible();
 }
 
 /** The browser's own logs of the 404s the flow and a first sync expect */

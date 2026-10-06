@@ -11,7 +11,7 @@ import {
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 
@@ -30,12 +30,29 @@ async function outside(page, locators) {
   return bad;
 }
 
+/** Each service the Sync screen lists, its own sign-in step opened
+    (#331) and checked, then left with Escape */
+async function syncSteps(page, checked) {
+  const sync = dialog(page, 'Sync');
+  const rows = await sync.getByRole('group', { name: 'Sync with' }).getByRole('button').allTextContents();
+  expect(rows.length, 'the services listed').toBeGreaterThan(0);
+  for (const row of rows) {
+    await sync.getByRole('button', { name: row, exact: true }).click();
+    await expect(sync.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+    await checked(`Sync, ${row.replace(' ›', '')}'s step`);
+    await page.keyboard.press('Escape');
+    await expect(sync.getByRole('button', { name: row, exact: true })).toBeVisible();
+  }
+}
+
 /** Expects nothing cut off on the screen shown (controls-shown.js), no
-    toggle whose state shows only in aria-pressed, and nothing wider than
-    the window, naming the screen when something is */
+    toggle whose state shows only in aria-pressed, no control nearer its
+    container's edge than the spacing scale allows (#331), and nothing
+    wider than the window, naming the screen when something is */
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
+  expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
 
@@ -211,6 +228,7 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await settingsButton(page, 'Sync ›').click();
   await expect(dialog(page, 'Sync')).toBeVisible();
   await fits(page, 'Sync');
+  await syncSteps(page, screen => fits(page, screen));
   await page.keyboard.press('Escape');
   await settingsButton(page, 'Dictionaries ›').click();
   await expect(dialog(page, 'Dictionaries')).toBeVisible();
@@ -492,6 +510,7 @@ test('in the app, every screen shows each control\'s whole text and each toggle\
     await settingsButton(page, row).click();
     await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
     await check(row);
+    if (row === 'Sync ›') await syncSteps(page, check);
     await page.keyboard.press('Escape');
   }
   await page.keyboard.press('Escape');

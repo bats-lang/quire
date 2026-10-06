@@ -37,6 +37,11 @@ const unexpected = d => d.errors.filter(e => !/status of (401|404)/.test(e));
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 const useAndroid = page => panel(page).getByRole('button', { name: 'Use Android' });
+/** The Google Drive row's own step (#331), then its Use Android */
+async function chooseAndroid(page) {
+  await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
+  await useAndroid(page).click();
+}
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 
 async function openSync(page) {
@@ -55,7 +60,7 @@ async function closeSync(page) {
 /** Use Android, from the library: synced */
 async function joinAndroid(page) {
   await openSync(page);
-  await useAndroid(page).click();
+  await chooseAndroid(page);
   await expect(status(page)).toHaveText(/^Last synced on /);
   await closeSync(page);
 }
@@ -233,15 +238,15 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   const server = drive();
   const a = await device(browser, server, { mode: 'cancel' });
   await openSync(a.page);
-  await useAndroid(a.page).click();
+  await chooseAndroid(a.page);
   await expect(status(a.page)).toHaveText('Google sign-in was canceled.');
   a.google.mode = 'fail';
-  await useAndroid(a.page).click();
+  await chooseAndroid(a.page);
   await expect(status(a.page)).toHaveText("Google refused: this build of Quire isn't registered with it.");
   expect(server.requests).toEqual([]);
   // granted: Use Android syncs
   a.google.mode = 'consent';
-  await useAndroid(a.page).click();
+  await chooseAndroid(a.page);
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   // Turn off: Undo puts it back, token and all, with nothing asked
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
@@ -280,7 +285,7 @@ test('an authorization that names no account takes Drive\'s address, and with no
   const a = await device(browser, server);
   a.google.account = null;
   await openSync(a.page);
-  await useAndroid(a.page).click();
+  await chooseAndroid(a.page);
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   expect(server.requests).toContain('GET /drive/v3/about?fields=user%2FemailAddress');
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
@@ -296,7 +301,7 @@ test('an authorization that names no account takes Drive\'s address, and with no
   const b = await device(browser, other);
   b.google.account = null;
   await openSync(b.page);
-  await useAndroid(b.page).click();
+  await chooseAndroid(b.page);
   await expect(status(b.page)).toHaveText(/^Last synced on /);
   await panel(b.page).getByRole('button', { name: 'Turn off' }).click();
   await expect.poll(() => other.revoked, { timeout: 15000 }).toEqual(['token-1']);
@@ -371,7 +376,9 @@ test('in a browser, Google Drive syncs through the same app data folder, an hour
   await importFiles(web.page, [file], 1);
   await openSync(web.page);
   await expect(useAndroid(web.page)).toBeHidden();
+  // (its row, then its step's Sign in to Google Drive: one name holds both)
   const googleDrive = panel(web.page).getByRole('button', { name: 'Google Drive' });
+  await googleDrive.click();
   await expect(panel(web.page)).toContainText('Google signs you in for an hour at a time');
   // the reader closes Google's window: nothing is asked of Drive
   await web.page.evaluate(() => { window.__gis.closed = true; });
@@ -380,6 +387,7 @@ test('in a browser, Google Drive syncs through the same app data folder, an hour
   await expect(status(web.page)).toHaveText('Google sign-in was canceled.');
   expect(server.requests.length).toBe(asked);
   await web.page.evaluate(() => { window.__gis.closed = false; });
+  await googleDrive.click();
   await googleDrive.click();
   await expect(status(web.page)).toHaveText(/^Last synced on /);
   expect(await web.page.evaluate(() => window.__gis.clients[0])).toEqual({ client_id: CLIENT, scope: 'https://www.googleapis.com/auth/drive.appdata' });
@@ -411,7 +419,8 @@ test('in a browser opened again, Google Drive syncs with the token it kept; once
   const web = await browserDevice(browser, server);
   await importFiles(web.page, [epubFile(book)], 1);
   await openSync(web.page);
-  await panel(web.page).getByRole('button', { name: 'Google Drive' }).click();
+  await panel(web.page).getByRole('button', { name: 'Google Drive ›' }).click();
+  await panel(web.page).getByRole('button', { name: 'Sign in to Google Drive' }).click();
   await expect(status(web.page)).toHaveText(/^Last synced on /);
   await closeSync(web.page);
   // opened again: the sync made as it opens has the token, and opens

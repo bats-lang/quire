@@ -771,6 +771,152 @@ in
   end
 end
 
+(* Counts sign-ins: a poll an earlier one started (or one Turn off
+   ended) stops *)
+val _sign_in_generation = ref<int>(0)
+
+(* A service the Sync screen lists (#331): Google Drive (in the app,
+   the Google account on the phone: Use Android), Dropbox, Fastmail,
+   Nextcloud and any WebDAV folder. Each is a row of the screen, and
+   each row opens the service's own sign-in step *)
+#pub datatype sync_service =
+  | ServiceGoogle
+  | ServiceDropbox
+  | ServiceFastmail
+  | ServiceNextcloud
+  | ServiceWebDav
+
+(* A service's row's button, and its state beside it *)
+fn _row_id (service: sync_service): [id_len:pos | id_len < 256] string id_len =
+  case+ service of
+  | ServiceGoogle() => "sync-row-google"
+  | ServiceDropbox() => "sync-row-dropbox"
+  | ServiceFastmail() => "sync-row-fastmail"
+  | ServiceNextcloud() => "sync-row-nextcloud"
+  | ServiceWebDav() => "sync-row-webdav"
+
+fn _row_state_id (service: sync_service): [id_len:pos | id_len < 256] string id_len =
+  case+ service of
+  | ServiceGoogle() => "sync-google-state"
+  | ServiceDropbox() => "sync-dropbox-state"
+  | ServiceFastmail() => "sync-fastmail-state"
+  | ServiceNextcloud() => "sync-nextcloud-state"
+  | ServiceWebDav() => "sync-webdav-state"
+
+(* A service's part of the sign-in step: what it does and asks for,
+   and its own button *)
+fn _step_part_id (service: sync_service): [id_len:pos | id_len < 256] string id_len =
+  case+ service of
+  | ServiceGoogle() => "sync-step-google"
+  | ServiceDropbox() => "sync-step-dropbox"
+  | ServiceFastmail() => "fastmail-form"
+  | ServiceNextcloud() => "nextcloud-box"
+  | ServiceWebDav() => "sync-step-webdav"
+
+(* A service's name, as its row and its step's title say it *)
+fn _service_name (service: sync_service): [name_len:pos | name_len < 64] string name_len =
+  case+ service of
+  | ServiceGoogle() => "Google Drive"
+  | ServiceDropbox() => "Dropbox"
+  | ServiceFastmail() => "Fastmail"
+  | ServiceNextcloud() => "Nextcloud"
+  | ServiceWebDav() => "WebDAV"
+
+(* Whether a folder's URL is a Nextcloud user's files folder, as its
+   sign-in makes it (nextcloud_folder: <server>/remote.php/dav/files/<id>) *)
+fun _holds {l:agz}{n:nat}{text_len:nat | text_len <= n}{part_len:pos}{at:nat | at <= text_len} .<text_len - at>.
+  (text: !$A.arr(byte, l, n), text_len: int text_len, part: string part_len, part_len: int part_len, at: int at): bool = let
+  fun same {j:nat | j <= part_len} .<part_len - j>. (text: !$A.arr(byte, l, n), j: int j): bool =
+    if j >= part_len then true
+    else if at + j >= text_len then false
+    else if byte2int0($A.get<byte>(text, at + j)) <> char2int0(string_get_at(part, j)) then false
+    else same(text, j + 1)
+in
+  if at + part_len > text_len then false
+  else if same(text, 0) then true
+  else _holds(text, text_len, part, part_len, at + 1)
+end
+
+(* The service the store chosen is, if one is: a WebDAV folder a
+   Nextcloud sign-in made is Nextcloud's *)
+fn _store_is (service: sync_service): bool = let
+  val held = _store_swap(_store, NoStore())
+  val nextcloud = (case+ held of
+    | WebDav(url, url_len, _, _, _, _) => _holds(url, url_len, "/remote.php/dav/files/", 22, 0)
+    | Android(_, _) => false | Dropbox(_, _) => false | Fastmail(_, _, _, _) => false | NoStore() => false): bool
+  val webdav = (case+ held of
+    | WebDav(_, _, _, _, _, _) => true
+    | Android(_, _) => false | Dropbox(_, _) => false | Fastmail(_, _, _, _) => false | NoStore() => false): bool
+  val () = _store_free(_store_swap(_store, held))
+in
+  case+ service of
+  | ServiceGoogle() => _is_android()
+  | ServiceDropbox() => _store_kind_is_dropbox()
+  | ServiceFastmail() => _store_kind_is_fastmail()
+  | ServiceNextcloud() => nextcloud
+  | ServiceWebDav() => if webdav then ~nextcloud else false
+end
+
+(* A row's state, in a word or two (Android's settings show a setting's
+   state, not a description of it): the store's own row says whether it
+   syncs, is paused for a sign-in, or does not sync; the others say
+   nothing *)
+fn _row_show (service: sync_service): void =
+  if ~_store_is(service) then ui_show(_row_state_id(service), false)
+  else let
+    val () = (case+ !_last_result of
+      | Synced() => ui_text(_row_state_id(service), "Connected")
+      | Syncing() => ui_text(_row_state_id(service), "Connected")
+      | NotSyncedYet() => ui_text(_row_state_id(service), "Connected")
+      | SignInAgain() => ui_text(_row_state_id(service), "Paused")
+      | Unreachable() => ui_text(_row_state_id(service), "Not syncing")
+      | WrongCredentials() => ui_text(_row_state_id(service), "Not syncing")
+      | FolderNotFound() => ui_text(_row_state_id(service), "Not syncing")
+      | KeptChanging() => ui_text(_row_state_id(service), "Not syncing")
+      | ServerError() => ui_text(_row_state_id(service), "Not syncing")
+      | TooLarge() => ui_text(_row_state_id(service), "Not syncing")
+      | Damaged() => ui_text(_row_state_id(service), "Not syncing")
+      | NoMemory() => ui_text(_row_state_id(service), "Not syncing")
+      | Blocked() => ui_text(_row_state_id(service), "Not syncing")
+      | NoAddress() => ui_text(_row_state_id(service), "Not syncing")
+      | NoGoogleAccount() => ui_text(_row_state_id(service), "Not syncing")
+      | NotSetUp() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleRefused() => ui_text(_row_state_id(service), "Not syncing")
+      | SignInCanceled() => ui_text(_row_state_id(service), "Not syncing")
+      | DropboxSignInAgain() => ui_text(_row_state_id(service), "Not syncing")
+      | DropboxNotSetUp() => ui_text(_row_state_id(service), "Not syncing")
+      | DropboxSignInRefused() => ui_text(_row_state_id(service), "Not syncing")
+      | DropboxSignInCanceled() => ui_text(_row_state_id(service), "Not syncing")
+      | FastmailRefused() => ui_text(_row_state_id(service), "Not syncing"))
+  in ui_show(_row_state_id(service), true) end
+
+(* The status card's head: where sync is kept, when it is on *)
+fn _where_show (): void =
+  if ~_store_on() then ui_show("sync-where", false)
+  else let
+    val () = (if _store_is(ServiceNextcloud()) then ui_text("sync-where", "Nextcloud")
+      else if _store_kind_is_dropbox() then ui_text("sync-where", "Dropbox")
+      else if _store_kind_is_fastmail() then ui_text("sync-where", "Fastmail")
+      else if ~_is_android() then ui_text("sync-where", "WebDAV")
+      else ui_text("sync-where", "Google Drive"))
+  in ui_show("sync-where", true) end
+
+(* The screen's rows and its status card's head, as the store and the
+   last sync are *)
+fn _rows_show (): void = let
+  val () = _row_show(ServiceGoogle())
+  val () = _row_show(ServiceDropbox())
+  val () = _row_show(ServiceFastmail())
+  val () = _row_show(ServiceNextcloud())
+  val () = _row_show(ServiceWebDav())
+in _where_show() end
+
+(* Sync now and Turn off: in the status card, while a store is chosen *)
+fn _actions_show (on: bool): void = let
+  val () = ui_show("sync-off", on)
+in ui_show("sync-now", on) end
+
+
 (* The Settings screen's Sync row's state, as it is now *)
 #pub fn sync_summary_show (): void
 implement sync_summary_show () = let
@@ -783,6 +929,7 @@ fn _status_show (): void = let
   val out = $A.alloc<byte>(512)
   val stop = _status_text(out)
   val () = ui_text_buf("sync-status", out, stop)
+  val () = _rows_show()
 in sync_summary_show() end
 
 (* ============================================================
@@ -2755,61 +2902,114 @@ fn _fastmail_fields_make (): void = let
   val () = ui_field("fastmail-fields", "fastmail-user", FUser, "mname", "Fastmail address")
 in ui_field("fastmail-fields", "fastmail-password", FPassword, "mname", "Fastmail app password") end
 
-(* The sync screen: what sync keeps the same, the WebDAV folder's URL,
-   user name and password (kept on this device only), how the last sync
-   went, and Turn off, Sync now and Done; and the offer of the place
-   another device read in the open book *)
+(* A service's row: its name, a button that opens its step, and its
+   state beside it *)
+fn _row_make {row_len,button_len,state_len,label_len:pos | row_len < 256; button_len < 256; state_len < 256; label_len < 256}
+  (row: string row_len, button: string button_len, state: string state_len, label: string label_len): void = let
+  val () = ui_el("sync-services", row, TDiv, "srow")
+  val () = ui_text_btn(row, button, "btn rowbtn", label)
+  val () = ui_add(row, state, TSpan)
+in ui_show(state, false) end
+
+(* The sync screen (#331, from Material's settings and Android's own
+   Backup and Add account screens, written on the issue): a status card
+   at its top (where sync is kept, how the last sync went or what it
+   needs, and Sync now and Turn off while it is on), then the services
+   that can be used here, a row each with its name and, for the one
+   chosen, its state, then a line on what sync keeps; and Done. A row
+   opens its service's own sign-in step in the screen's place (LSyncStep,
+   whose element comes first, so the stylesheet hides what follows it
+   while it is shown): what the service does and asks for, its fields,
+   its own button, and Cancel. Also the offer of the place another
+   device read in the open book *)
 #pub fn sync_screen_make (): void
 implement sync_screen_make () = let
   val () = ui_el("bats-root", "sync-screen", TDiv, "info")
   val () = ui_labelled("sync-screen", NDialog, "sync-title")
   val () = ui_el("sync-screen", "sync-box", TDiv, "info-in")
-  val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
-  val () = ui_text("sync-title", "Sync")
-  val () = ui_el("sync-box", "sync-about", TDiv, "sabout")
-  val () = ui_el("sync-box", "sync-android-row", TDiv, "sfields")
-  val () = ui_text_btn("sync-android-row", "sync-android", "btn", "Use Android")
-  val () = ui_text_btn("sync-android-row", "sync-google", "btn", "Google Drive")
-  val () = ui_el("sync-android-row", "sync-android-about", TDiv, "sabout")
-  val () = ui_show("sync-android-row", false)
+  (* the sign-in step, one service's part of it shown at a time *)
+  val () = ui_el("sync-box", "sync-step", TDiv, "sstep")
+  val () = ui_el("sync-step", "sync-step-title", TDiv, "mtitle")
+  (* Google Drive: the Google account on the phone in the app, Google's
+     window in a browser *)
+  val () = ui_el("sync-step", "sync-step-google", TDiv, "sfields")
+  val () = ui_el("sync-step-google", "sync-android-about", TDiv, "stext")
+  val () = ui_el("sync-step", "sync-step-dropbox", TDiv, "sfields")
+  val () = ui_el("sync-step-dropbox", "sync-dropbox-about", TDiv, "stext")
   (* Fastmail, in the app only: its files over WebDAV, with its address
      and an app password, which Fastmail's settings make (the link and
      the steps). Fastmail's WebDAV sends no CORS headers (checked
      2026-10-01 and 2026-10-04: its preflight answers 401 with none), so
      a browser page can't reach it, and a browser lists no Fastmail; the
      app's requests are native, and can *)
-  val () = ui_el("sync-box", "sync-fastmail-row", TDiv, "sfields")
-  val () = ui_el("sync-fastmail-row", "sync-fastmail-about", TDiv, "sabout")
+  val () = ui_el("sync-step", "fastmail-form", TDiv, "sfields")
+  val () = ui_el("fastmail-form", "sync-fastmail-about", TDiv, "stext")
   val () = ui_text_long("sync-fastmail-about", "Syncs through Fastmail's Files, in a folder named quire, with your Fastmail address and an app password.")
-  val () = ui_el("sync-fastmail-row", "fastmail-form", TDiv, "sfields")
   val () = ui_el("fastmail-form", "fastmail-fields", TDiv, "sfields")
   val () = _fastmail_fields_make()
-  val () = ui_el("fastmail-form", "fastmail-steps", TDiv, "sabout")
+  val () = ui_el("fastmail-form", "fastmail-steps", TDiv, "stext")
   val () = ui_text_long("fastmail-steps", "Make an app password in Fastmail's Settings, under Privacy & Security: choose Manage app passwords, give the new one access to Files (WebDAV), then copy it here.")
   val () = ui_link_out_https("fastmail-form", "fastmail-app-password", "btn linkout", "Make an app password", "app.fastmail.com/settings/security")
-  val () = ui_text_btn("fastmail-form", "sync-fastmail", "btn", "Sync with Fastmail")
-  val () = ui_show("sync-fastmail-row", false)
-  val () = ui_el("sync-box", "sync-dropbox-row", TDiv, "sfields")
-  val () = ui_text_btn("sync-dropbox-row", "sync-dropbox", "btn", "Dropbox")
-  val () = ui_el("sync-dropbox-row", "sync-dropbox-about", TDiv, "sabout")
-  val () = ui_show("sync-dropbox-row", false)
   (* Nextcloud: its address, then its own sign-in page (Login Flow v2),
      which gives an app password *)
-  val () = ui_el("sync-box", "nextcloud-box", TDiv, "sfields")
+  val () = ui_el("sync-step", "nextcloud-box", TDiv, "sfields")
+  val () = ui_el("nextcloud-box", "nextcloud-about", TDiv, "stext")
+  val () = ui_text_long("nextcloud-about", "Your Nextcloud's address. Its own sign-in page then gives Quire an app password.")
   val () = ui_field("nextcloud-box", "nextcloud-server", FUrl, "mname", "Nextcloud server")
-  val () = ui_text_btn("nextcloud-box", "nextcloud-sign-in", "btn", "Sign in with Nextcloud")
   val () = ui_link_out("nextcloud-box", "nextcloud-page", "btn linkout", "Open Nextcloud's sign-in page")
   val () = ui_show("nextcloud-page", false)
-  val () = ui_el("sync-box", "sync-webdav-title", TDiv, "sabout")
-  val () = ui_text("sync-webdav-title", "Or any WebDAV folder (ownCloud, a NAS): its address, user name and an app password.")
-  val () = ui_el("sync-box", "sync-fields", TDiv, "sfields")
+  (* any WebDAV folder *)
+  val () = ui_el("sync-step", "sync-step-webdav", TDiv, "sfields")
+  val () = ui_el("sync-step-webdav", "sync-webdav-about", TDiv, "stext")
+  val () = ui_text("sync-webdav-about", "Any WebDAV folder (ownCloud, a NAS): its address, a user name and an app password.")
+  val () = ui_el("sync-step-webdav", "sync-fields", TDiv, "sfields")
   val () = _fields_make()
-  val () = ui_el("sync-box", "sync-status", TDiv, "cnone")
+  (* what the step says of itself: a field left empty, a sign-in's
+     progress *)
+  val () = ui_el("sync-step", "sync-step-status", TDiv, "sstatus")
+  val () = ui_role("sync-step-status", RStatus)
+  (* Cancel, then the service's own button (Material's dialog: the
+     confirming action last, at the end) *)
+  val () = ui_el("sync-step", "sync-step-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", "Cancel")
+  val () = ui_text_btn("sync-step-buttons", "sync-android", "btn btn-p", "Use Android")
+  val () = ui_text_btn("sync-step-buttons", "sync-google", "btn btn-p", "Sign in to Google Drive")
+  val () = ui_text_btn("sync-step-buttons", "sync-dropbox", "btn btn-p", "Sign in to Dropbox")
+  val () = ui_text_btn("sync-step-buttons", "sync-fastmail", "btn btn-p", "Sync with Fastmail")
+  val () = ui_text_btn("sync-step-buttons", "nextcloud-sign-in", "btn btn-p", "Sign in with Nextcloud")
+  val () = ui_text_btn("sync-step-buttons", "sync-webdav", "btn btn-p", "Sync with this folder")
+  val () = ui_show("sync-step", false)
+  (* the screen *)
+  val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
+  val () = ui_text("sync-title", "Sync")
+  (* its status: where, how it went, and the actions while it is on *)
+  val () = ui_el("sync-box", "sync-card", TDiv, "scard")
+  val () = ui_el("sync-card", "sync-where", TDiv, "swhere")
+  val () = ui_show("sync-where", false)
+  val () = ui_el("sync-card", "sync-status", TDiv, "sstatus")
   val () = ui_role("sync-status", RStatus)
-  val () = ui_el("sync-box", "sync-buttons", TDiv, "mbtns")
+  val () = ui_el("sync-card", "sync-buttons", TDiv, "mbtns")
   val () = ui_text_btn("sync-buttons", "sync-off", "btn", "Turn off")
   val () = ui_text_btn("sync-buttons", "sync-now", "btn btn-p", "Sync now")
-  val () = ui_text_btn("sync-buttons", "sync-done", "btn", "Done")
+  val () = _actions_show(false)
+  (* the services, each shown only where it can be used *)
+  val () = ui_el("sync-box", "sync-services-title", TDiv, "a11yg")
+  val () = ui_text("sync-services-title", "Sync with")
+  val () = ui_el("sync-box", "sync-services", TDiv, "sgroup")
+  val () = ui_named("sync-services", NGroup, "Sync with")
+  val () = _row_make("sync-google-row", "sync-row-google", "sync-google-state", "Google Drive \xE2\x80\xBA")
+  val () = _row_make("sync-dropbox-row", "sync-row-dropbox", "sync-dropbox-state", "Dropbox \xE2\x80\xBA")
+  val () = _row_make("sync-fastmail-row", "sync-row-fastmail", "sync-fastmail-state", "Fastmail \xE2\x80\xBA")
+  val () = _row_make("sync-nextcloud-row", "sync-row-nextcloud", "sync-nextcloud-state", "Nextcloud \xE2\x80\xBA")
+  val () = _row_make("sync-webdav-row", "sync-row-webdav", "sync-webdav-state", "WebDAV \xE2\x80\xBA")
+  val () = ui_show("sync-google-row", false)
+  val () = ui_show("sync-dropbox-row", false)
+  val () = ui_show("sync-fastmail-row", false)
+  (* what sync keeps, in a line (the services' own steps say the rest) *)
+  val () = ui_el("sync-box", "sync-about", TDiv, "snote")
+  val () = ui_text_long("sync-about", "Keeps places, shelves, collections, highlights, notes and reading time the same on your devices. Books' files are not synced, and sign-ins stay on this device.")
+  val () = ui_el("sync-box", "sync-done-row", TDiv, "mbtns")
+  val () = ui_text_btn("sync-done-row", "sync-done", "btn", "Done")
   val () = ui_show("sync-screen", false)
   (* the offer of the place another device read: a row of the reader's
      bottom bar, over its progress, so it covers no text the bars do
@@ -2853,47 +3053,101 @@ in
     in _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len))) end
 end
 
-(* Opens the sync screen *)
+(* The step left (Cancel, Escape, its sign-in begun, or the screen
+   opened again): the link to a Nextcloud sign-in page goes, and the
+   list is shown again *)
+fn _step_close (): void = let
+  val () = (if layer_is_open(LSyncStep()) then layer_close(LSyncStep()) else ())
+in ui_show("nextcloud-page", false) end
+
+(* Opens the sync screen: its rows, each only where its service can be
+   used here, and its status *)
 #pub fn sync_screen_open (): void
 implement sync_screen_open () = let
-  (* Use Android in the app, Google Drive in a browser, and what it
-     does; a build with no client to sign in with lists neither *)
-  val app = $BAPP.is_native_platform()
+  val () = _step_close()
+  (* Google Drive: a build with no client to sign in with lists it
+     neither in the app nor in a browser, and Google's script is loaded
+     only when there is one *)
   val client = $A.alloc<byte>(256)
   val client_len = sync_clients_google(client)
   val () = $A.free<byte>(client)
-  (* in a browser, a build with no client lists no Google Drive, and
-     Google's script is loaded only when there is one *)
-  val android = (if client_len <= 0 then false
+  val google = (if client_len <= 0 then false
     else case+ _google_way() of AppAuthorization() => true | BrowserIdentity() => true | NoGoogleWay() => false): bool
-  val () = ui_show("sync-android-row", android)
-  val () = ui_show("sync-android", app)
-  val () = ui_show("sync-google", ~app)
-  val () = (if ~android then ()
-    else if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees. The WebDAV folder below is the other way.")
-    else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again. The WebDAV folder below is the other way."))
+  val () = ui_show("sync-google-row", google)
   (* Dropbox: in a browser, its page signs the reader in in place of
      this one; in the app, in the system's browser over it (an app
-     without that browser does not list it), and what it does; a build
-     with no key to sign in with does not list it *)
+     without that browser does not list it); a build with no key to
+     sign in with does not list it *)
+  val app = $BAPP.is_native_platform()
   val key = $A.alloc<byte>(256)
   val key_len = sync_clients_dropbox(key)
   val () = $A.free<byte>(key)
   val dropbox = (if key_len <= 0 then false else if app then _round_trip_available() else true): bool
   val () = ui_show("sync-dropbox-row", dropbox)
-  val () = (if ~dropbox then ()
-    else if app then ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page opens in your browser to sign you in, then brings you back here.")
-    else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
   (* Fastmail: in the app only *)
   val () = ui_show("sync-fastmail-row", app)
-  (* what sync keeps the same, and where: Fastmail only where it is listed *)
-  val () = (if app then ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Fastmail or Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced.")
-    else ui_text_long("sync-about", "Keeps your places, shelves, collections, highlights, notes and reading time the same on your devices, through a file on your Nextcloud, or in any WebDAV folder (ownCloud, a NAS). What you sign in with is kept on this device only, never in a backup. Your books' files are not synced."))
   val () = _fields_show()
   val () = _status_show()
-  val () = ui_show("sync-off", _store_on())
+  val () = _actions_show(_store_on())
   val () = layer_open(LSync())
-in ui_focus("sync-url") end
+in ui_focus("sync-done") end
+
+(* A service's own sign-in step, opened from its row over the list:
+   only its part, its button and Cancel shown, its fields as kept *)
+#pub fn sync_step_open (service: sync_service): void
+implement sync_step_open (service) = let
+  val app = $BAPP.is_native_platform()
+  val () = ui_text("sync-step-title", _service_name(service))
+  val () = ui_text("sync-step-status", " ")
+  val () = ui_show("sync-step-google", false)
+  val () = ui_show("sync-step-dropbox", false)
+  val () = ui_show("fastmail-form", false)
+  val () = ui_show("nextcloud-box", false)
+  val () = ui_show("sync-step-webdav", false)
+  val () = ui_show(_step_part_id(service), true)
+  val () = ui_show("sync-android", false)
+  val () = ui_show("sync-google", false)
+  val () = ui_show("sync-dropbox", false)
+  val () = ui_show("sync-fastmail", false)
+  val () = ui_show("nextcloud-sign-in", false)
+  val () = ui_show("sync-webdav", false)
+  val () = _fields_show()
+  val () = layer_open(LSyncStep())
+in
+  case+ service of
+  | ServiceGoogle() => let
+      val () = (if app then ui_text_long("sync-android-about", "Syncs through the Google account on this phone, in a folder of its Google Drive that only Quire sees.")
+        else ui_text_long("sync-android-about", "Syncs through your Google account, in a folder of its Google Drive that only Quire sees. Google signs you in for an hour at a time: after that, Sync now asks again."))
+      val () = ui_show("sync-android", app)
+      val () = ui_show("sync-google", ~app)
+    in if app then ui_focus("sync-android") else ui_focus("sync-google") end
+  | ServiceDropbox() => let
+      val () = (if app then ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page opens in your browser to sign you in, then brings you back here.")
+        else ui_text_long("sync-dropbox-about", "Syncs through your Dropbox account, in a folder of its own (Apps, then Quire) that only Quire sees. Dropbox's page signs you in, then brings you back here."))
+      val () = ui_show("sync-dropbox", true)
+    in ui_focus("sync-dropbox") end
+  | ServiceFastmail() => let
+      val () = ui_show("sync-fastmail", true)
+    in ui_focus("fastmail-user") end
+  | ServiceNextcloud() => let
+      val () = ui_show("nextcloud-sign-in", true)
+    in ui_focus("nextcloud-server") end
+  | ServiceWebDav() => let
+      val () = ui_show("sync-webdav", true)
+    in ui_focus("sync-url") end
+end
+
+(* Cancel, or Escape: the step closed, a sign-in under way stopped, and
+   the focus back on the list *)
+#pub fn sync_step_cancel (): void
+implement sync_step_cancel () = let
+  val () = !_sign_in_generation := !_sign_in_generation + 1
+  val () = _step_close()
+in ui_focus("sync-done") end
+
+(* What the step says: a field left empty *)
+fn _step_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-step-status", text)
+
 
 (* The field id's value, at most most bytes of it, in an array of most *)
 fn _field_value {id_len:pos | id_len < 256}{most:pos | most <= 1024} (id: string id_len, most: int most)
@@ -3027,18 +3281,23 @@ fn _android_chosen {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX} (accoun
   val () = !_last_result := NotSyncedYet()
   val () = (if layer_is_open(LSync()) then let
       val () = _fields_show()
-    in ui_show("sync-off", true) end else ())
+    in _actions_show(true) end else ())
 in sync_run() end
 
 (* Use Android (the screen's button, in the app; Google Drive in a
    browser): Google's consent for the account on the device the first
    time (its window, in a browser), then sync through its Drive *)
 #pub fn sync_android (): void
-implement sync_android () =
+implement sync_android () = let
+  (* the step's part is done: Google's own sheet (or window) asks the
+     rest, and the status card says how it went *)
+  val () = _step_close()
+in
   $P.finish<asked>(_token_ask(), llam(answer) =>
     case+ answer of
     | ~Asked(account, account_len) => _android_chosen(account, account_len)
     | ~AskFailed(result) => _ask_failed(result))
+end
 
 (* Sync now with the Android store: with the token kept, or one asked
    for (Google's consent, when access was taken back; Google's window,
@@ -3055,9 +3314,22 @@ in
     | ~AskFailed(result) => _ask_failed(result))
 end
 
-(* Sync now (the screen's button): the fields kept, then a sync *)
+(* Sync now (the status card's button, while a store is chosen): the
+   Android store's with its token (or one asked for), any other's at
+   once *)
 #pub fn sync_now (): void
-implement sync_now () = let
+implement sync_now () =
+  if _is_android() then _android_now()
+  else if _store_on() then sync_run()
+  else let
+    val () = !_last_result := NoAddress()
+  in _status_show() end
+
+(* Sync with this folder (the WebDAV step's button): the folder's
+   address, user name and password kept, then a sync; an address that is
+   not a web one is asked for again *)
+#pub fn sync_webdav (): void
+implement sync_webdav () = let
   val @(url, url_len) = _field_value("sync-url", URL_MAX)
   val @(user, user_len) = _field_value("sync-user", USER_MAX)
   val @(password, password_len) = _field_value("sync-password", PASSWORD_MAX)
@@ -3067,31 +3339,24 @@ in
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-  in
-    (* no folder given: the Android store's sync, when it is the one *)
-    if _is_android() then _android_now()
-    else if _store_kind_is_dropbox() then sync_run()
-    else if _store_kind_is_fastmail() then sync_run()
-    else let
-      val () = !_last_result := NoAddress()
-    in _status_show() end
-  end
+  in _step_says("Enter the folder's address, starting with https://.") end
   else if ~web then let
     val () = $A.free<byte>(url)
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-    val () = !_last_result := NoAddress()
-  in _status_show() end
+  in _step_says("Enter the folder's address, starting with https://.") end
   else let
+    val () = _step_close()
     val () = _store_free(_store_swap(_store, WebDav(url, url_len, user, user_len, password, password_len)))
     val () = _store_save()
-    val () = ui_show("sync-off", true)
+    val () = _actions_show(true)
     (* not synced to it yet, while a sync of the backed-up file's ends *)
     val () = (if !_busy then !_last_result := NotSyncedYet() else ())
+    val () = _status_show()
   in sync_run() end
 end
 
-(* Sync with Fastmail (its row's button): its address and app password
+(* Sync with Fastmail (its step's button): its address and app password
    kept, then a sync *)
 #pub fn sync_fastmail (): void
 implement sync_fastmail () = let
@@ -3101,18 +3366,20 @@ in
   if user_len <= 0 then let
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-  in ui_text_long("sync-status", "Enter your Fastmail address and an app password.") end
+  in _step_says("Enter your Fastmail address and an app password.") end
   else if password_len <= 0 then let
     val () = $A.free<byte>(user)
     val () = $A.free<byte>(password)
-  in ui_text_long("sync-status", "Enter your Fastmail address and an app password.") end
+  in _step_says("Enter your Fastmail address and an app password.") end
   else let
+    val () = _step_close()
     val () = _store_free(_store_swap(_store, Fastmail(user, user_len, password, password_len)))
     val () = _store_save()
     val () = _fields_show()
-    val () = ui_show("sync-off", true)
+    val () = _actions_show(true)
     (* not synced to it yet, while a sync of the backed-up file's ends *)
     val () = (if !_busy then !_last_result := NotSyncedYet() else ())
+    val () = _status_show()
   in sync_run() end
 end
 
@@ -3147,9 +3414,6 @@ end
    name and an app password
    ============================================================ *)
 
-(* Counts sign-ins: a poll an earlier one started (or one Turn off
-   ended) stops *)
-val _sign_in_generation = ref<int>(0)
 
 (* The polls a sign-in makes, a few seconds apart: the flow's token
    lasts 20 minutes *)
@@ -3157,7 +3421,7 @@ val _sign_in_generation = ref<int>(0)
 #define POLL_MILLISECONDS 3000
 
 (* A sign-in's progress, in the screen's status line *)
-fn _sign_in_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-status", text)
+fn _sign_in_says {text_len:pos | text_len < 65536} (text: string text_len): void = _step_says(text)
 
 (* What a failed step says *)
 fn _sign_in_failed (failure: nextcloud_failure): void = let
@@ -3237,10 +3501,11 @@ fn _sign_in_granted {server_loc,name_loc,password_loc:agz}{server_len,name_len,p
             val () = $A.free<byte>(folder)
             val () = _store_free(_store_swap(_store, WebDav(url, folder_len, user, name_len, secret, password_len)))
             val () = _store_save()
-            val () = ui_show("nextcloud-page", false)
-            val () = _sign_in_says("Signed in to Nextcloud. Its app password is kept on this device only.")
+            (* signed in: the step is done, and the status card says
+               how the sync goes *)
+            val () = _step_close()
             val () = _fields_show()
-            val () = ui_show("sync-off", true)
+            val () = _actions_show(true)
           in sync_run() end
         end)
   end
@@ -3378,7 +3643,7 @@ in
         in NoToken() end): token_cell
       val () = _fields_show()
       val () = _status_show()
-      val () = ui_show("sync-off", false)
+      val () = _actions_show(false)
     in
       $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
         case+ how of
@@ -3389,7 +3654,7 @@ in
           in
             if layer_is_open(LSync()) then let
               val () = _fields_show()
-              val () = ui_show("sync-off", true)
+              val () = _actions_show(true)
             in _status_show() end else ()
           end
         (* made final: in the app, the grant taken back from Google *)
@@ -3409,7 +3674,7 @@ in
       val () = _token_free(_token_swap(NoToken()))
       val () = _fields_show()
       val () = _status_show()
-      val () = ui_show("sync-off", false)
+      val () = _actions_show(false)
     in
       $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
         case+ how of
@@ -3419,7 +3684,7 @@ in
           in
             if layer_is_open(LSync()) then let
               val () = _fields_show()
-              val () = ui_show("sync-off", true)
+              val () = _actions_show(true)
             in _status_show() end else ()
           end
         (* made final: Dropbox's grant given back *)
@@ -3432,7 +3697,7 @@ in
       val () = _store_forget()
       val () = _fields_show()
       val () = _status_show()
-      val () = ui_show("sync-off", false)
+      val () = _actions_show(false)
     in
       $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
         case+ how of
@@ -3442,7 +3707,7 @@ in
           in
             if layer_is_open(LSync()) then let
               val () = _fields_show()
-              val () = ui_show("sync-off", true)
+              val () = _actions_show(true)
             in _status_show() end else ()
           end
         | Final() => _store_free(_store_swap(_store_off, NoStore())))
@@ -3452,7 +3717,7 @@ in
       val () = _store_forget()
       val () = _fields_show()
       val () = _status_show()
-      val () = ui_show("sync-off", false)
+      val () = _actions_show(false)
     in
       $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
         case+ how of
@@ -3462,7 +3727,7 @@ in
           in
             if layer_is_open(LSync()) then let
               val () = _fields_show()
-              val () = ui_show("sync-off", true)
+              val () = _actions_show(true)
             in _status_show() end else ()
           end
         | Final() => _store_free(_store_swap(_store_off, NoStore())))
@@ -3796,7 +4061,7 @@ fn _dropbox_chosen {refresh_loc,access_loc:agz}{refresh_len:pos | refresh_len <=
   val () = !_last_result := NotSyncedYet()
   val () = !_last_status := 0
   val () = (if layer_is_open(LSync()) then () else sync_screen_open())
-  val () = ui_show("sync-off", true)
+  val () = _actions_show(true)
 in sync_run() end
 
 (* Whether a[0, n) and b[0, n) hold the same bytes *)
@@ -3943,6 +4208,9 @@ end
    the app, to the app) with a code (PKCE: no secret in the app) *)
 #pub fn sync_dropbox (): void
 implement sync_dropbox () = let
+  (* Dropbox's own page asks the rest, and the status card says how it
+     went *)
+  val () = _step_close()
   val key = $A.alloc<byte>(256)
   val key_len = sync_clients_dropbox(key)
 in

@@ -97,7 +97,7 @@ test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({
   const server = fastmail({ cors: false });
   await page.context().route(`${SERVER}/**`, server.handle);
   await openSync(page);
-  await expect(panel(page).getByLabel('Folder URL')).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'WebDAV ›' })).toBeVisible();
   await expect(fastmailButton(page)).toBeHidden();
   await expect(panel(page).getByLabel('Fastmail address')).toBeHidden();
   await expect(panel(page).getByRole('link', { name: 'Make an app password' })).toBeHidden();
@@ -117,6 +117,7 @@ test("in the app, the first sync makes Fastmail's folder, then syncs there; the 
   const server = fastmail();
   const { context, page, errors } = await app(browser, server);
   await openSync(page);
+  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await expect(panel(page)).toContainText('Syncs through Fastmail');
   // the app password is made in Fastmail's settings, in a tab of its own
@@ -158,6 +159,7 @@ test('in the app, an address or app password Fastmail refuses is said so, and em
   const server = fastmail();
   const { context, page } = await app(browser, server);
   await openSync(page);
+  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await fastmailButton(page).click();
   await expect(status(page)).toHaveText('Enter your Fastmail address and an app password.');
@@ -175,6 +177,7 @@ test('in the app, Fastmail is listed with no question to it first', async ({ bro
   const server = fastmail({ cors: false });
   const { context, page } = await app(browser, server);
   await openSync(page);
+  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await expect(panel(page).getByLabel('Fastmail address')).toBeVisible();
   await expect(panel(page)).toContainText('Syncs through Fastmail');
