@@ -6,9 +6,9 @@
 // (a sync included) has ended, and the two captures must be the same.
 
 import { test, expect, onAndroid } from './fixtures.js';
-import { launch, chapterShown, nextChapter, previousChapter, pagesOn, unchanged } from './relaunch.js';
+import { launch, chapterShown, nextChapter, previousChapter, pagesOn, unchanged, capture, relaunch, sameState } from './relaunch.js';
 import {
-  epubFile, importFiles, openBook, toLibrary, librarySearch, cards, chapters, japaneseChapters, dialog, openReadingSettings, readingSettings, selectText, selectionButton, fixedLayoutBook, readFixed, indicator,
+  epubFile, importFiles, openBook, toLibrary, librarySearch, cards, chapters, japaneseChapters, dialog, openReadingSettings, readingSettings, selectText, selectionButton, fixedLayoutBook, readFixed, indicator, bookPage,
 } from './helpers.js';
 
 const book = { title: 'Kept Book', author: 'Relaunch Tests', chapters: 4, rawChapters: chapters(4, 40) };
@@ -203,4 +203,72 @@ test('with settings changed, annotations made and a search done, all is as it wa
   await bar.getByRole('button', { name: 'Close search' }).click();
   await expect(bar).toBeHidden();
   await unchanged(page);
+});
+
+// ---- the reading face, still loading as the app opens again ----
+
+/** How many pixels of the page's text are inked, on the screen as it
+    is: those of the first paragraph's box that the screen shows and no
+    bar covers, darker than any colour the page has but its text's */
+async function inked(page) {
+  const region = await page.evaluate(() => {
+    const box = document.querySelector('#page p').getBoundingClientRect();
+    let top = Math.max(box.top, 0);
+    let bottom = Math.min(box.bottom, innerHeight);
+    for (const bar of document.querySelectorAll('#reader-top-bar, #reader-bottom-bar')) {
+      const r = bar.getBoundingClientRect();
+      if (!r.height) continue;
+      if (r.top <= top && r.bottom > top) top = r.bottom;
+      if (r.top < bottom && r.bottom >= bottom) bottom = r.top;
+    }
+    const left = Math.max(box.left, 0);
+    return { x: left, y: top, width: Math.min(box.right, innerWidth) - left, height: bottom - top };
+  });
+  expect(region.width * region.height, 'some of the page\'s text on the screen').toBeGreaterThan(0);
+  // the screen as it is, taken by DevTools (Playwright's own screenshot
+  // waits for the page's fonts to load first), whole (a clip would set
+  // the screen's metrics for the moment), the region cut from it
+  const session = await page.context().newCDPSession(page);
+  const { data: shot } = await session.send('Page.captureScreenshot', { format: 'png' });
+  await session.detach();
+  return page.evaluate(async ([base64, { x, y, width, height }]) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${base64}`)).blob());
+    const scale = bitmap.width / innerWidth;
+    const canvas = new OffscreenCanvas(Math.round(width * scale), Math.round(height * scale));
+    const context = canvas.getContext('2d');
+    context.drawImage(bitmap, -Math.round(x * scale), -Math.round(y * scale));
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    let dark = 0;
+    for (let k = 0; k < data.length; k += 4) if (data[k] < 96 && data[k + 1] < 96 && data[k + 2] < 96) dark++;
+    return dark;
+  }, [shot, region]);
+}
+
+// A page laid out and painted in a fallback face, then again in its own
+// as the face came in, is not what the reader left, and the renderer
+// could leave a few pixels of the fallback's glyphs at the column's
+// edges where the face's text did not repaint them (#328). The page's
+// text is shown only in the face it is set in: until the face has come
+// in (held back here), none of it is painted
+test('opened again while its reading face is still loading, the page shows no text in another face, and then all is as it was', async ({ context, page }) => {
+  await launch(context, page);
+  await importFiles(page, [epubFile(book)], 1);
+  await openBook(page, 'Kept Book');
+  const before = await capture(page);
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  let asked;
+  const requested = new Promise(resolve => { asked = resolve; });
+  await context.route('**/literata-latin.woff2', async route => { asked(); await held; await route.continue(); });
+  const next = await relaunch(page);
+  await requested;
+  await expect(bookPage(next).locator('p').first()).toBeAttached();
+  const ink = await inked(next);
+  release();
+  expect(ink, 'the page\'s text painted while its face loads').toBe(0);
+  await expect.poll(() => next.evaluate(() => document.fonts.check('18px Literata'))).toBe(true);
+  // and painted once its face is in
+  await expect.poll(() => inked(next)).toBeGreaterThan(0);
+  const after = await capture(next);
+  await sameState(next, before, after);
 });

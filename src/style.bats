@@ -1400,15 +1400,23 @@ in sheet end
    The stylesheet
    ============================================================ *)
 
+(* The faces a page can be set in (Literata, Inter, Atkinson
+   Hyperlegible; Inter is the interface's too) are block, not swap
+   (#328): a page painted in a fallback and then again in its face as it
+   comes in is laid out twice (its page count and place move with it),
+   and the renderer could leave a few pixels of the fallback's glyphs at
+   the column's edges. Its text shows only in its own face: invisible
+   while the face loads (from the app's own files, a moment; at most the
+   block period, about 3 s, before a fallback is shown after all) *)
 fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1170] sheet(after, false, false) = let
-  val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-latin.woff2) format('woff2');font-style:normal;font-weight:200 900;font-display:swap}")
-  val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-italic-latin.woff2) format('woff2');font-style:italic;font-weight:200 900;font-display:swap}")
-  val () = raw(sheet, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:swap}")
+  val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-latin.woff2) format('woff2');font-style:normal;font-weight:200 900;font-display:block}")
+  val () = raw(sheet, "@font-face{font-family:Literata;src:url(literata-italic-latin.woff2) format('woff2');font-style:italic;font-weight:200 900;font-display:block}")
+  val () = raw(sheet, "@font-face{font-family:Inter;src:url(inter-latin.woff2) format('woff2');font-style:normal;font-weight:100 900;font-display:block}")
   (* fetched only when chosen: a face is loaded once text uses it *)
-  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-normal.woff2) format('woff2');font-style:normal;font-weight:400;font-display:swap}")
-  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-normal.woff2) format('woff2');font-style:normal;font-weight:700;font-display:swap}")
-  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-italic.woff2) format('woff2');font-style:italic;font-weight:400;font-display:swap}")
-  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:swap}")
+  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-normal.woff2) format('woff2');font-style:normal;font-weight:400;font-display:block}")
+  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-normal.woff2) format('woff2');font-style:normal;font-weight:700;font-display:block}")
+  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-400-italic.woff2) format('woff2');font-style:italic;font-weight:400;font-display:block}")
+  val () = raw(sheet, "@font-face{font-family:'Atkinson Hyperlegible';src:url(atkinson-700-italic.woff2) format('woff2');font-style:italic;font-weight:700;font-display:block}")
   (* the icons (ui.bats's _glyph): a subset of Material Symbols, its
      glyphs in the Private Use Area; block, so an icon never shows as a
      fallback's box while the face loads *)
