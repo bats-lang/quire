@@ -12,6 +12,7 @@ staload "book.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload "mem.sats"
+staload "back.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 
 (* The questions that lose nothing *)
@@ -119,6 +120,7 @@ fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len)
   val () = ui_show("dialog-name-box", false)
   val () = ui_show("dialog", true)
   val () = ui_focus("dialog-button1")
+  val () = back_dialog_set(Shown())
 in answered end
 
 (* Opens the dialog asking the question asked, with its title: the
@@ -202,6 +204,7 @@ fn _answer (second: bool): void =
   | ~Pending(asked, resolver) => let
       val () = _ask_free(asked)
       val () = ui_show("dialog", false)
+      val () = back_dialog_set(NotShown())
     in $P.resolve<reply>(resolver, (if second then Accepted() else Declined()): reply) end
 
 (* Closes the dialog as Escape does: its first answer (no), never its

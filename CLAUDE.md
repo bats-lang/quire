@@ -667,7 +667,9 @@ only where its platform has it, by its own `data-hide`.
   (`install_prompt`); the Home Screen hint shows on iOS Safari only
   (`is_ios_browser`, `src/library.bats`). The storage is asked to be
   kept (`storage_persist`) once, after the first book is imported, and
-  the library menu says whether it is (`storage_persisted` at startup).
+  in a browser a line of Settings, under Backup (`settings-storage`),
+  says whether it is (`storage_persisted` at startup); the Android
+  app's storage is its own, and there nothing is said (#333).
 * **The local time** (`src/local_time.bats`): its offset from UTC
   (`timezone_offset_minutes`) and whether it is night (22:00 to 07:00,
   from `epoch_millis`), for the auto theme (checked each minute while a
@@ -916,6 +918,33 @@ otherwise closes the top of that stack (`layer_escape`), whatever
 opened it: from Sync, Escape goes back to Settings, and another closes
 Settings.
 
+Back, Android's and the browser's, is one model (#333, `_go_back` in
+`src/bin/quire.bats`): the dialog is answered No, else the top of the
+stack closes as Escape closes it (Sync to Settings, Settings to what
+was under it), else the in-book search's results end, else the book
+goes back to the library; at the library with nothing open it is the
+platform's. In the Android app the App plugin's `backButton` reaches
+it (bridge's `listen_back_button`, `RBackButton`), and at the root the
+app goes to the background (`app_minimize`, `minimizeApp`: what Android
+12+ does itself at a root activity; `exitApp` would finish it). In a
+browser `src/back.bats` pushes one history entry (the guard, at the
+page's own address) above the page's own once there is anything to go
+back from (a dialog, an overlay, the reader: `back_dialog_set`,
+`back_overlays_set`, `back_view_set`), so Back takes it (`popstate`,
+`back_popped`) and the app goes one step back, pushing it again if
+something is still open. The app never takes a guard back on its own
+(`history.back()` is asynchronous, and raced pushes and reloads): one
+left after something closed another way is taken by the next Back, and
+with nothing to go back from that Back is the platform's, so the app
+goes on back past its own entry (`back_leave`, bridge's
+`history_back`) and the page is left at once. The page restores its own
+scroll (`history_scroll_restoration`, `ScrollManual`), so going back
+over a guard never moves the library. `e2e/back.spec.js`
+walks every screen of the layout's walk (`e2e/walk.js`, which
+`e2e/layout.spec.js` walks too, so a screen added there is covered) and
+checks Back goes exactly one step from each, in a browser and in the
+android project, and leaves at the root.
+
 The Settings screen (`LSettings`, `settings-screen`, made by `app.bats`
 and wired by `_wire_settings_screen` in `src/bin/quire.bats`) follows
 Android's settings pattern: one screen of groups, each complex area a
@@ -947,10 +976,12 @@ it neither answers nor keeps them (`e2e/about.spec.js`). The privacy
 policy states what the code does: change it with any change to what is
 stored, what leaves the device, or the Google scopes asked for.
 
-The library menu keeps Install, the storage notes, Settings, About
-Quire (the same About screen, so the library reaches it without
-Settings), Reading statistics, Catalogues, Empty Trash (the red harm
-item) and Close. While Settings is open over the reader, keys are its own, not
+The library bar's More options (Material's overflow, ⋮, #333: a gear
+would say it goes straight to Settings) opens the library menu:
+Settings, About Quire (the same About screen, so the library reaches
+it without Settings), Catalogues, Reading statistics, Install Quire
+(while the browser offers it), Empty Trash (the red harm item) and
+Close. While Settings is open over the reader, keys are its own, not
 page turns.
 
 The page turns by a horizontal drag, recognized by the gestures package

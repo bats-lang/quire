@@ -37,6 +37,7 @@ staload "screen_controls.sats"
 staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
+staload "back.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -54,6 +55,7 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BE = "wasm.bats-packages.dev/bridge/src/external.sats"
 staload BW = "wasm.bats-packages.dev/bridge/src/build_watch.sats"
 staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
+staload BB = "wasm.bats-packages.dev/bridge/src/back_button.sats"
 
 (* ============================================================
    State
@@ -473,6 +475,7 @@ fn _show_library (): void = let
      no place of another device's is offered *)
   val () = annot_close()
   val () = sync_book_closed()
+  val () = back_view_set(AtLibrary())
 in lib_render() end
 
 (* The reader's bars: shown, and hidden again after 5 seconds, unless a
@@ -558,13 +561,8 @@ fn _show_reader (cause: opening_cause): void = let
   (* A reader does not touch the screen for a page's length: it stays
      awake while the book is open *)
   val () = $WN.keep_awake(true)
-  (* The browser's (and Android's) back button leaves the reader *)
-  val hash = $A.alloc<byte>(2)
-  val () = $A.write_byte(hash, 0, 35)
-  val () = $A.write_byte(hash, 1, 114)
-  val @(hash_frozen, hash_bytes) = $A.freeze<byte>(hash)
-  val () = $NAV.push_state(hash_bytes, 2)
-  val () = release_bytes(hash_frozen, hash_bytes)
+  (* Back leaves the reader (back.bats) *)
+  val () = back_view_set(InReader())
   val () = _chrome_set(true)
 in
   case+ cause of
@@ -1424,14 +1422,6 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
         | ~$R.some(MenuInstall()) => let
           val () = layer_close(LLibraryMenu())
         in platform_install() end
-        | ~$R.some(MenuStorageKept()) => let
-          val () = layer_close(LLibraryMenu())
-          val () = modal_inform("Your books are kept")
-        in modal_text_lit("This browser keeps the books you import until you remove them.") end
-        | ~$R.some(MenuStorageAtRisk()) => let
-          val () = layer_close(LLibraryMenu())
-          val () = modal_inform("Your books may be cleared")
-        in modal_text_lit("This browser may clear what Quire keeps when it runs short of space. Installing Quire, or reading it more often, makes the browser more likely to keep it. Keep your EPUB files: a backup holds your places, notes and settings, not the books.") end
         | ~$R.some(MenuStats()) => let
           val () = layer_close(LLibraryMenu())
           val () = stats_show()
@@ -2019,6 +2009,25 @@ fn _escape_overlay (): bool =
     in true end
   | ~Escaped(_) => true
 
+(* Back, Android's and the browser's (quire#333), one step, as Android's
+   back stack goes: the dialog is answered, or else the overlay opened
+   last closes (as Escape does: Sync goes back to Settings, Settings to
+   what was under it); else the reader leaves the in-book search's
+   results, or else the book for the library. At the library with
+   nothing open Back is the platform's: the app is moved to the
+   background, the browser leaves the page *)
+datatype went_back = WentBack | AtRoot
+
+fn _go_back (): went_back =
+  if _escape_overlay() then WentBack()
+  else if ~_in_reader() then AtRoot()
+  else if _shown("search-nav") then let
+    val () = _search_end()
+  in WentBack() end
+  else let
+    val () = _show_library()
+  in WentBack() end
+
 (* A key while the search panel is open: Enter goes to the next hit
    (Shift+Enter the one before), Escape closes the panel *)
 fn _search_key (pressed: key, held: modifiers): void =
@@ -2525,11 +2534,18 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
       val () = $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
           if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
     in 0 end)
-  (* the browser's back button: out of the reader *)
-  (* the URL itself is not needed: the view is the library's *)
+  (* the browser's Back: it took the guard back.bats pushes once there
+     is something to go back from, so the app goes one step back, and
+     the guard is pushed again if there is still something; with nothing
+     to go back from, it is the platform's Back, and the page is left *)
+  (* the address itself is not needed: back.bats keeps what Back
+     went back over *)
   val () = $NAV.set_popstate_callback(llam(url) => let
       val () = (case+ url of ~$R.some(bytes) => $BD.blob_free(bytes) | ~$R.none() => ())
-      val () = (if _in_reader() then _show_library() else ())
+      val () = (case+ back_popped() of
+        | PoppedByBack() => (case+ _go_back() of WentBack() => () | AtRoot() => back_leave())
+        | PoppedElsewhere() => ())
+      val () = back_sync()
     in 0 end)
 in listeners end
 
@@ -2538,7 +2554,7 @@ in listeners end
    screen's controls (the brightness, and full screen entered or left),
    the browser's offer to install the app, and the addresses the app is
    opened at (Dropbox's sign-in coming back) *)
-fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 11) = let
+fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
   val listeners = RCons(listeners, OnEl("read-aloud"), "click", llam(_) => let
       val () = aloud_toggle()
     in 0 end)
@@ -2561,6 +2577,13 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 11) = let
   val listeners = RSystemBars(listeners, llam(bars) => screen_system_bars_changed(bars))
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
   val listeners = RAppLink(listeners, llam(link) => sync_app_link(link))
+  (* Android's Back in the app: one step back, and at the library with
+     nothing open, the app to the background, as Android does at an
+     app's root *)
+  val listeners = RBackButton(listeners, llam() =>
+      case+ _go_back() of
+      | WentBack() => ()
+      | AtRoot() => $BB.app_minimize())
   (* a face that arrives after the chapter was laid out with a fallback
      changes its pages: they are counted again, the place kept. Whether
      others are still loading or not, what has arrived has changed the
@@ -2704,6 +2727,9 @@ fn _external_start (reading: library_reading): void =
 
 implement main0 () = let
   val () = app_build()
+  (* the page restores its own scroll when Back goes over a guard
+     (back.bats) *)
+  val () = back_start()
   (* the sync screen keeps its own elements *)
   val () = sync_screen_make()
   val () = _gestures_start()

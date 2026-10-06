@@ -6,6 +6,7 @@
 #include "share/atspre_staload.hats"
 
 staload "ui.sats"
+staload "back.sats"
 
 (* The overlays. Each is one element, whose id only this module knows,
    so an overlay is shown or hidden only here, and the stack below is
@@ -122,10 +123,13 @@ fn _open_put {count:nat} (overlays: layers(count)): void = let
   val () = ref_exch_elt<[count:nat] layers(count)>(_open, previous)
 in _layers_free(previous) end
 
-(* The open overlays changed: the scrim and the reader follow *)
+(* The open overlays changed: the scrim and the reader follow, and what
+   Back has to go back from (back.bats) *)
 fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = _modality_show(overlays)
-in _open_put(overlays) end
+  val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
+  val () = _open_put(overlays)
+in back_overlays_set(any) end
 
 (* overlays without overlay, and where the focus went back to from it *)
 fun _without {count:nat} .<count>. (overlays: layers(count), overlay: layer, back: focus_return): [left:nat | left <= count] @(layers(left), focus_return) =
