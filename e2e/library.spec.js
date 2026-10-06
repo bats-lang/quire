@@ -6,7 +6,7 @@ import {
   start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
-  librarySettings, settingsButton, continueReading,
+  librarySettings, settingsButton, settingsScreen, continueReading,
 } from './helpers.js';
 
 // The shelf button is named by the shelf it shows
@@ -873,24 +873,25 @@ const storageOf = page => page.addInitScript(() => {
   Object.defineProperty(Navigator.prototype, 'storage', { get: () => storage, configurable: true });
 });
 
-test('the library menu says whether the browser keeps the books, and more when asked', async ({ page }, testInfo) => {
+/** Settings' line saying whether the browser keeps the books */
+const storageLine = page => settingsScreen(page).getByText(/^This browser (keeps|may clear) your books/);
+
+// In a browser the line under Backup says whether it keeps the books,
+// as navigator.storage says (quire#333: a status, not a menu item)
+test('Settings says whether the browser keeps the books, and the library menu does not', async ({ page }, testInfo) => {
   test.skip(onAndroid(testInfo), "a browser's storage, which may be cleared: the Android app's own storage is always kept (the Android test below)");
   await storageOf(page);
   const errors = await start(page);
-  const kept = menuItem(page, 'Your books are kept');
-  const atRisk = menuItem(page, 'Your books may be cleared');
   // as the browser says: here, at risk
   await libraryMenu(page);
-  await expect(kept).toBeHidden();
-  await atRisk.click();
-  await expect(dialog(page, 'Your books may be cleared')).toContainText('Keep your EPUB files');
-  await dialog(page, 'Your books may be cleared').getByRole('button', { name: 'OK' }).click();
+  await expect(page.getByRole('menuitem', { name: /books/ })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await librarySettings(page);
+  await expect(storageLine(page)).toHaveText(/^This browser may clear your books when it runs short of space\..*Keep your EPUB files/);
   await page.evaluate(() => localStorage.setItem('test-kept', 'y'));
   await reload(page);
-  await libraryMenu(page);
-  await expect(atRisk).toBeHidden();
-  await kept.click();
-  await expect(dialog(page, 'Your books are kept')).toContainText('until you remove them');
+  await librarySettings(page);
+  await expect(storageLine(page)).toHaveText('This browser keeps your books until you remove them.');
   expect(errors).toEqual([]);
 });
 
@@ -928,22 +929,21 @@ test('the storage is asked to be kept once, after the first book is imported', a
   await expect(card(page, 'Second Kept')).toBeVisible({ timeout: 30000 });
   await page.waitForTimeout(300);
   expect(await page.evaluate(() => window.persistCalls)).toBe(1);
-  await libraryMenu(page);
-  await expect(menuItem(page, 'Your books may be cleared')).toBeVisible();
-  await expect(menuItem(page, 'Your books are kept')).toBeHidden();
+  await librarySettings(page);
+  await expect(storageLine(page)).toHaveText(/^This browser may clear your books/);
   expect(errors).toEqual([]);
 });
 
-// The Android app's storage is its own, always kept: the menu says so,
-// and the browser is never asked to keep it
-test('in the Android app, the library menu says the books are kept, and nothing is asked', async ({ page }, testInfo) => {
+// The Android app's storage is its own, always kept: nothing says
+// otherwise, and the browser is never asked to keep it
+test('in the Android app, nothing is said about keeping the books, and nothing is asked', async ({ page }, testInfo) => {
   test.skip(!onAndroid(testInfo), "the Android app's storage (Capacitor, played by fixtures.js's androidApp)");
   await storageOf(page);
   const errors = await start(page);
   await importFiles(page, [epubFile({ title: 'Kept In The App', author: 'Storage Test', chapters: 1 })], 1);
-  await libraryMenu(page);
-  await expect(menuItem(page, 'Your books are kept')).toBeVisible();
-  await expect(menuItem(page, 'Your books may be cleared')).toBeHidden();
+  await librarySettings(page);
+  await expect(settingsScreen(page).getByText(/This browser/)).toHaveCount(0);
+  await expect(page.getByRole('menuitem', { name: /books/ })).toHaveCount(0);
   expect(await page.evaluate(() => window.persistCalls)).toBe(0);
   expect(errors).toEqual([]);
 });

@@ -130,9 +130,9 @@ export async function reload(page) {
   await page.reload();
 }
 
-/** Opens the library menu (the gear) */
+/** Opens the library menu (the bar's More options) */
 export async function libraryMenu(page) {
-  await page.getByRole('button', { name: 'Library menu' }).click();
+  await page.getByRole('button', { name: 'More options' }).click();
   await expect(page.getByRole('menu')).toBeVisible();
 }
 

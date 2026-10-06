@@ -56,9 +56,15 @@ export async function androidInsets(page) {
     starts with them shown). The device's Google account has granted
     Quire nothing, and the reader backs out of Google's consent screen
     (GoogleAuthorize: a spec that plays an account makes its own device,
-    as sync-android.spec.js does) */
+    as sync-android.spec.js does). Android's Back is pressed by
+    window.__android.back(), which calls the App plugin's backButton
+    listeners as Android does; minimizeApp is kept with the calls */
 export function androidApp() {
-  const asked = window.__android = { calls: [], files: new Map(), brightness: -1, hidden: { status: false, navigation: false } };
+  const asked = window.__android = { calls: [], files: new Map(), brightness: -1, hidden: { status: false, navigation: false }, listeners: {} };
+  // Android's Back, as the App plugin hands it to the page once a
+  // backButton listener is set (AppPlugin.java: then it no longer goes
+  // back in the WebView's history itself)
+  asked.back = () => (asked.listeners.backButton || []).forEach(f => f({ canGoBack: window.history.length > 1 }));
   const bars = o => (o && o.bar === 'StatusBar') ? ['status'] : (o && o.bar === 'NavigationBar') ? ['navigation'] : ['status', 'navigation'];
   const call = (plugin, method, answer = () => ({})) => (options = {}) => {
     asked.calls.push({ plugin, method, options });
@@ -92,7 +98,14 @@ export function androidApp() {
         readFile: call('Filesystem', 'readFile', o => asked.files.has(o.path) ? { data: asked.files.get(o.path) } : missing('File')),
       },
       Browser: { open: call('Browser', 'open'), close: call('Browser', 'close') },
-      App: { addListener: call('App', 'addListener', () => ({ remove: () => Promise.resolve() })) },
+      App: {
+        addListener: (name, listener) => {
+          asked.calls.push({ plugin: 'App', method: 'addListener', options: name });
+          (asked.listeners[name] = asked.listeners[name] || []).push(listener);
+          return Promise.resolve({ remove: () => Promise.resolve() });
+        },
+        minimizeApp: call('App', 'minimizeApp'),
+      },
       GoogleAuthorize: {
         authorizationForScopes: call('GoogleAuthorize', 'authorizationForScopes', () => ({ authorization: null })),
         authorizeScopes: call('GoogleAuthorize', 'authorizeScopes', () => { throw Object.assign(new Error('CANCELED'), { code: 'CANCELED' }); }),

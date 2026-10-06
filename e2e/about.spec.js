@@ -88,12 +88,12 @@ test('the library menu opens About, next to Settings, and Escape goes back to th
   await page.keyboard.press('Escape');
   await expect(about(page)).toBeHidden();
   await expect(librarySearch(page)).toBeVisible();
-  // and Done, back at the library menu's button
+  // and Done, back at the library menu's button (More options)
   await libraryMenu(page);
   await menuItem(page, 'About Quire').click();
   await about(page).getByRole('button', { name: 'Done' }).click();
   await expect(about(page)).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Library menu' })).toBeFocused();
+  await expect(page.getByRole('button', { name: 'More options' })).toBeFocused();
   expect(errors).toEqual([]);
 });
 

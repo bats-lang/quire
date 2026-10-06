@@ -20,6 +20,7 @@ staload SCR = "wasm.bats-packages.dev/bridge/src/screen.sats"
 staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload AL = "wasm.bats-packages.dev/bridge/src/app_link.sats"
+staload BB = "wasm.bats-packages.dev/bridge/src/back_button.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
 #use result as R
@@ -1147,7 +1148,8 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
    (RAppLink: a sign-in in the system's browser coming back), a load
    of the page's fonts ending (RFonts), and the app's system bars as its
    native side reports them (RSystemBars: a swipe from the screen's edge
-   brings hidden ones back). *)
+   brings hidden ones back), and Android's Back in the native app
+   (RBackButton). *)
 #pub datavtype regs(int) =
   | RNil(0)
   | {count:nat}{event_len:pos | event_len < 256} RCons(count + 1) of
@@ -1158,6 +1160,7 @@ in _set_attr(id, $D.Aria("labelledby"), by) end
   | {count:nat} RAppLink(count + 1) of (regs(count), ([k:pos] $BD.dblob(k)) -<lincloptr1> void)
   | {count:nat} RFonts(count + 1) of (regs(count), ($ME.fonts_status) -<lincloptr1> void)
   | {count:nat} RSystemBars(count + 1) of (regs(count), ($SCR.system_bars) -<lincloptr1> void)
+  | {count:nat} RBackButton(count + 1) of (regs(count), () -<lincloptr1> void)
 
 fn _listen_one {event_len:pos | event_len < 256}
   (target: on, event: string event_len, listener: $EV.listener_id, callback: ($EV.event_payload) -<lincloptr1> int): void = let
@@ -1210,6 +1213,10 @@ fun _listen_all {count:nat | count <= 127} .<count>. (listeners: regs(count)): i
   | ~RFonts(rest, callback) => let
       val position = _listen_all(rest)
       val () = $ME.listen_fonts_loaded(position, callback)
+    in position + 1 end
+  | ~RBackButton(rest, callback) => let
+      val position = _listen_all(rest)
+      val () = $BB.listen_back_button(position, callback)
     in position + 1 end
 
 (* The media query listener's slot (settings' system dark mode): the
@@ -1668,8 +1675,6 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
   | MenuSettings
   | MenuAbout
   | MenuInstall
-  | MenuStorageKept
-  | MenuStorageAtRisk
   | MenuStats
   | MenuCatalogues
   | MenuClose
@@ -1681,8 +1686,6 @@ implement library_menu_control_id (control) =
   | MenuSettings() => "menu-settings"
   | MenuAbout() => "menu-about"
   | MenuInstall() => "menu-install"
-  | MenuStorageKept() => "menu-storage-kept"
-  | MenuStorageAtRisk() => "menu-storage-at-risk"
   | MenuStats() => "menu-stats"
   | MenuCatalogues() => "menu-catalogues"
   | MenuClose() => "menu-close"
@@ -1693,9 +1696,7 @@ fn _library_menu_control_after (control: library_menu_control): $R.option(librar
   case+ control of
   | MenuSettings() => $R.some(MenuAbout())
   | MenuAbout() => $R.some(MenuInstall())
-  | MenuInstall() => $R.some(MenuStorageKept())
-  | MenuStorageKept() => $R.some(MenuStorageAtRisk())
-  | MenuStorageAtRisk() => $R.some(MenuStats())
+  | MenuInstall() => $R.some(MenuStats())
   | MenuStats() => $R.some(MenuCatalogues())
   | MenuCatalogues() => $R.some(MenuClose())
   | MenuClose() => $R.some(LibraryMenu())
@@ -1715,7 +1716,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 9)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 7)
 
 (* The reading statistics' goals, done, and its backdrop, each by its element's id (stats_control_id) *)
 #pub datatype stats_control =

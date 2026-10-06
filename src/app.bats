@@ -72,7 +72,10 @@ fn _library (): void = let
   val () = ui_text_btn("library-bar", "sort-button", "btn", "Sort: Last opened")
   val () = ui_el("library-bar", "import-button", TDiv, "btn btn-p")
   val () = app_import_input()
-  val () = ui_icon_btn("library-bar", "library-menu-button", "ibtn", IcGear, "Library menu")
+  (* the library's other actions, Settings first: Material's overflow
+     menu, not a gear, which would say it goes straight to Settings
+     (quire#333) *)
+  val () = ui_icon_btn("library-bar", "library-menu-button", "ibtn", IcMore, "More options")
   val () = ui_el("library-bar", "library-search-box", TDiv, "sfield")
   val () = app_library_search()
   (* on iOS Safari (the stylesheet shows it only there), once the
@@ -260,25 +263,22 @@ fn _catalogue (): void = let
   val () = ui_text_btn("catalogue-pages", "catalogue-next", "btn", "Next")
 in _hide("catalogue-panel") end
 
-(* The library menu (the gear) *)
+(* The library menu (the bar's overflow, More options, quire#333):
+   Settings first, About Quire beside it, then the library's other
+   screens *)
 fn _library_menu (): void = let
   val () = ui_el("bats-root", "library-menu", TDiv, "ovl")
   val () = ui_el("library-menu", "library-menu-box", TDiv, "menu")
   val () = ui_named("library-menu-box", NMenu, "Library menu")
+  val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
+  (* next to Settings, as About is under Settings' own *)
+  val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
+  val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
+  val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
   (* shown only while the browser offers to install the app, whose
      offer a click asks for (platform.bats) *)
   val () = ui_menuitem("library-menu-box", "menu-install", "Install Quire")
   val () = _hide("menu-install")
-  (* whether the browser keeps the books, once it is known
-     (platform.bats), each saying more when clicked *)
-  val () = ui_menuitem("library-menu-box", "menu-storage-kept", "Your books are kept")
-  val () = _hide("menu-storage-kept")
-  val () = ui_menuitem("library-menu-box", "menu-storage-at-risk", "Your books may be cleared")
-  val () = _hide("menu-storage-at-risk")
-  val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
-  val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
-  val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
-  val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_harm_item("library-menu-box", HEmptyTrash())
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
 in _hide("library-menu") end
@@ -320,6 +320,10 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-backup", "settings-export-backup", "btn", "Export backup")
   val () = ui_el("settings-backup", "settings-restore", TDiv, "btn")
   val () = app_backup_input()
+  (* in a browser, whether it keeps the books, once that is known
+     (platform.bats): a backup does not hold them (quire#333) *)
+  val () = ui_el("settings-box", "settings-storage", TDiv, "sabout")
+  val () = _hide("settings-storage")
   (* the daily reading goal *)
   val () = ui_el("settings-box", "settings-goal-title", TDiv, "a11yg")
   val () = ui_text("settings-goal-title", "Reading goal")

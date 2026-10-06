@@ -44,7 +44,8 @@
     ],
     "relaunch": [
       "relaunch.spec.js",
-      "relaunch-sync.spec.js"
+      "relaunch-sync.spec.js",
+      "back.spec.js"
     ]
   },
   "static": {

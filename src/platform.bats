@@ -65,17 +65,22 @@ datatype kept =
   | KeptPersisted   (* kept until the reader removes it *)
   | KeptAtRisk      (* the browser may clear it *)
 
+(* Settings' line under Backup says it, in a browser: the Android app's
+   storage is its own, kept until the app is removed, so there it says
+   nothing (quire#333) *)
 fn _kept_show (state: kept): void =
   case+ state of
-  | KeptUnknown() => let
-      val () = ui_show("menu-storage-kept", false)
-    in ui_show("menu-storage-at-risk", false) end
-  | KeptPersisted() => let
-      val () = ui_show("menu-storage-kept", true)
-    in ui_show("menu-storage-at-risk", false) end
-  | KeptAtRisk() => let
-      val () = ui_show("menu-storage-kept", false)
-    in ui_show("menu-storage-at-risk", true) end
+  | KeptUnknown() => ui_show("settings-storage", false)
+  | KeptPersisted() =>
+    if $BAPP.is_native_platform() then ui_show("settings-storage", false)
+    else let
+      val () = ui_text("settings-storage", "This browser keeps your books until you remove them.")
+    in ui_show("settings-storage", true) end
+  | KeptAtRisk() =>
+    if $BAPP.is_native_platform() then ui_show("settings-storage", false)
+    else let
+      val () = ui_text_long("settings-storage", "This browser may clear your books when it runs short of space. Installing Quire makes that less likely. Keep your EPUB files: a backup holds your places, notes and settings, not the books.")
+    in ui_show("settings-storage", true) end
 
 fn _kept_of (outcome: $STORE.persist_outcome): kept =
   case+ outcome of
