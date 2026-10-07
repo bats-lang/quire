@@ -1417,7 +1417,6 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsFactoryReset
   | SettingsAbout
   | SettingsDone
-  | SettingsReading
 
 #pub fn settings_control_id (control: settings_control): [id_len:pos | id_len < 256] string id_len
 implement settings_control_id (control) =
@@ -1434,7 +1433,6 @@ implement settings_control_id (control) =
   | SettingsFactoryReset() => "settings-factory-reset"
   | SettingsAbout() => "settings-about"
   | SettingsDone() => "settings-done"
-  | SettingsReading() => "settings-reading"
 
 (* The control after control, in the order the decoder tries them *)
 fn _settings_control_after (control: settings_control): $R.option(settings_control) =
@@ -1450,8 +1448,7 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
   | SettingsFactoryReset() => $R.some(SettingsAbout())
   | SettingsAbout() => $R.some(SettingsDone())
-  | SettingsDone() => $R.some(SettingsReading())
-  | SettingsReading() => $R.none()
+  | SettingsDone() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -1467,7 +1464,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_settings_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(settings_control)
-implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 13)
+implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, at, SettingsGoalOff(), 12)
 
 (* The library view's filters, layouts and collections' buttons, each by its element's id (library_view_control_id) *)
 #pub datatype library_view_control =
@@ -1906,87 +1903,6 @@ end
 #pub fn ui_sync_offer_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sync_offer_control)
 implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes, n, at, SyncGo(), 2)
 
-(* Where the reading behaviour set once is offered (#289): the reading
-   settings sheet's Turning and Read aloud tabs, or the Settings
-   screen's Reading screen. Its rows are made by one function for both
-   places (app.bats's _turning_rows and _aloud_rows), each element with
-   its place's own id (reading_part_id), so a control has an element in
-   each place, and a click on either decodes to the one
-   typography_control *)
-#pub datatype reading_place = InSheet | InSettings
-
-(* The elements of those rows: where taps turn pages (each choice its
-   button, a drawing of the page's zones, back and forward, and what it
-   does), the volume keys' switch, and reading aloud's speed and
-   voice *)
-#pub datatype reading_part =
-  | TapsRow | TapsLabel | TapsChoice
-  | TapsSidesButton | TapsSidesMap | TapsSidesBack | TapsSidesForward | TapsSidesAbout
-  | TapsForwardButton | TapsForwardMap | TapsForwardBack | TapsForwardForward | TapsForwardAbout
-  | TapsOneHandButton | TapsOneHandMap | TapsOneHandBack | TapsOneHandForward | TapsOneHandAbout
-  | VolumeRow | VolumeChoice | VolumeKeysButton
-  | SpeechRow | SpeechLabel | SpeechRate | SpeechVoice
-
-(* A part's id in a place: the sheet's as they were made before the
-   Reading screen had them, the Reading screen's each "reading-" and
-   the sheet's (tests/static/ids.py reads these cases: each id made at
-   the one call that makes its part) *)
-#pub fn reading_part_id (place: reading_place, part: reading_part): [id_len:pos | id_len < 256] string id_len
-implement reading_part_id (place, part) =
-  case+ place of
-  | InSheet() => (case+ part of
-    | TapsRow() => "taps-row"
-    | TapsLabel() => "taps-label"
-    | TapsChoice() => "taps-choice"
-    | TapsSidesButton() => "taps-sides"
-    | TapsSidesMap() => "taps-sides-map"
-    | TapsSidesBack() => "taps-sides-back"
-    | TapsSidesForward() => "taps-sides-forward"
-    | TapsSidesAbout() => "taps-sides-about"
-    | TapsForwardButton() => "taps-forward"
-    | TapsForwardMap() => "taps-forward-map"
-    | TapsForwardBack() => "taps-forward-back"
-    | TapsForwardForward() => "taps-forward-forward"
-    | TapsForwardAbout() => "taps-forward-about"
-    | TapsOneHandButton() => "taps-one-hand"
-    | TapsOneHandMap() => "taps-one-hand-map"
-    | TapsOneHandBack() => "taps-one-hand-back"
-    | TapsOneHandForward() => "taps-one-hand-forward"
-    | TapsOneHandAbout() => "taps-one-hand-about"
-    | VolumeRow() => "volume-row"
-    | VolumeChoice() => "volume-choice"
-    | VolumeKeysButton() => "volume-keys-turn"
-    | SpeechRow() => "speech-row"
-    | SpeechLabel() => "speech-label"
-    | SpeechRate() => "speech-rate"
-    | SpeechVoice() => "speech-voice")
-  | InSettings() => (case+ part of
-    | TapsRow() => "reading-taps-row"
-    | TapsLabel() => "reading-taps-label"
-    | TapsChoice() => "reading-taps-choice"
-    | TapsSidesButton() => "reading-taps-sides"
-    | TapsSidesMap() => "reading-taps-sides-map"
-    | TapsSidesBack() => "reading-taps-sides-back"
-    | TapsSidesForward() => "reading-taps-sides-forward"
-    | TapsSidesAbout() => "reading-taps-sides-about"
-    | TapsForwardButton() => "reading-taps-forward"
-    | TapsForwardMap() => "reading-taps-forward-map"
-    | TapsForwardBack() => "reading-taps-forward-back"
-    | TapsForwardForward() => "reading-taps-forward-forward"
-    | TapsForwardAbout() => "reading-taps-forward-about"
-    | TapsOneHandButton() => "reading-taps-one-hand"
-    | TapsOneHandMap() => "reading-taps-one-hand-map"
-    | TapsOneHandBack() => "reading-taps-one-hand-back"
-    | TapsOneHandForward() => "reading-taps-one-hand-forward"
-    | TapsOneHandAbout() => "reading-taps-one-hand-about"
-    | VolumeRow() => "reading-volume-row"
-    | VolumeChoice() => "reading-volume-choice"
-    | VolumeKeysButton() => "reading-volume-keys-turn"
-    | SpeechRow() => "reading-speech-row"
-    | SpeechLabel() => "reading-speech-label"
-    | SpeechRate() => "reading-speech-rate"
-    | SpeechVoice() => "reading-speech-voice")
-
 (* The reading settings sheet's choices and buttons, each by its
    element's id (typography_control_id) *)
 #pub datatype typography_control =
@@ -2050,10 +1966,10 @@ implement typography_control_id (control) =
   | RubyHide() => "ruby-hide"
   | DimOff() => "dim-off"
   | DimOn() => "dim-on"
-  | TapsSides() => reading_part_id(InSheet(), TapsSidesButton())
-  | TapsForward() => reading_part_id(InSheet(), TapsForwardButton())
-  | TapsOneHand() => reading_part_id(InSheet(), TapsOneHandButton())
-  | VolumeKeysTurn() => reading_part_id(InSheet(), VolumeKeysButton())
+  | TapsSides() => "taps-sides"
+  | TapsForward() => "taps-forward"
+  | TapsOneHand() => "taps-one-hand"
+  | VolumeKeysTurn() => "volume-keys-turn"
   | NarrationSkip() => "narration-skip"
   | NarrationRead() => "narration-read"
   | TypographyReset() => "typography-reset"
@@ -2100,44 +2016,15 @@ fn _typography_control_after (control: typography_control): $R.option(typography
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
-(* The part a control is on the Settings screen's Reading screen too,
-   for those it has there *)
-fn _typography_control_part (control: typography_control): $R.option(reading_part) =
-  case+ control of
-  | TapsSides() => $R.some(TapsSidesButton())
-  | TapsForward() => $R.some(TapsForwardButton())
-  | TapsOneHand() => $R.some(TapsOneHandButton())
-  | VolumeKeysTurn() => $R.some(VolumeKeysButton())
-  | FontLiterata() => $R.none() | FontInter() => $R.none() | FontBook() => $R.none()
-  | FontAtkinson() => $R.none() | ThemeAuto() => $R.none() | ThemeLight() => $R.none()
-  | ThemeSepia() => $R.none() | ThemeDark() => $R.none() | ThemeNight() => $R.none()
-  | ThemeGrey() => $R.none() | LayoutPages() => $R.none() | LayoutScroll() => $R.none()
-  | ColumnsAuto() => $R.none() | ColumnsOne() => $R.none() | ColumnsTwo() => $R.none()
-  | AlignRagged() => $R.none() | AlignJustified() => $R.none() | HyphensOff() => $R.none()
-  | HyphensOn() => $R.none() | RubyShow() => $R.none() | RubyHide() => $R.none()
-  | DimOff() => $R.none() | DimOn() => $R.none() | NarrationSkip() => $R.none()
-  | NarrationRead() => $R.none() | TypographyReset() => $R.none() | TypographyClose() => $R.none()
-  | ScreenFullscreen() => $R.none() | ScreenLock() => $R.none()
-
-(* Whether bytes[at, n) is control's id, in the sheet or on the Reading
-   screen *)
-fn _typography_control_is {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: typography_control): bool = let
+fun _typography_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: typography_control, fuel: int fuel): $R.option(typography_control) = let
   val id = typography_control_id(control)
 in
-  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then true
-  else case+ _typography_control_part(control) of
-    | ~$R.none() => false
-    | ~$R.some(part) => let
-        val elsewhere = reading_part_id(InSettings(), part)
-      in _id_is(bytes, n, at, elsewhere, g1u2i(string1_length(elsewhere)), 0) end
-end
-
-fun _typography_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: typography_control, fuel: int fuel): $R.option(typography_control) =
-  if _typography_control_is(bytes, n, at, control) then $R.some(control)
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
   else if fuel <= 0 then $R.none()
   else case+ _typography_control_after(control) of
     | ~$R.some(next) => _typography_control_from(bytes, n, at, next, fuel - 1)
     | ~$R.none() => $R.none()
+end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
