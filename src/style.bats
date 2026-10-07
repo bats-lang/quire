@@ -1473,7 +1473,7 @@ fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:n
   val () = raw(sheet, "@font-face{font-family:'Material Symbols';src:url(material-symbols-subset.woff2) format('woff2');font-weight:400;font-display:block}")
 in sheet end
 
-fn _shell {left:nat | left >= 6750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6750] sheet(after, false, false) = let
+fn _shell {left:nat | left >= 6900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6900] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -1490,7 +1490,7 @@ fn _shell {left:nat | left >= 6750} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, MaxWidth(), "800px")
   val sheet = lay(sheet, Margin(), "0 auto")
-  val sheet = lay(sheet, Padding(), "max(12px,env(safe-area-inset-top)) 16px 24px")
+  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(24px,var(--safe-bottom)) max(16px,var(--safe-left))")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MinHeight(), "100vh")
   val sheet = close(sheet)
@@ -1568,11 +1568,11 @@ fn _shell {left:nat | left >= 6750} (sheet: sheet(left, false, false)): [after:n
      the reader (and over the overlays and toasts) until dismissed *)
   val sheet = rule(sheet, ".banner")
   val sheet = lay(sheet, Position(), "fixed")
-  val sheet = lay(sheet, Top(), "max(8px,env(safe-area-inset-top))")
+  val sheet = lay(sheet, Top(), "max(8px,var(--safe-top))")
   val sheet = lay(sheet, Left(), "50%")
   val sheet = centre_x(sheet)
   val sheet = lay(sheet, ZIndex(), "22")
-  val sheet = lay(sheet, Width(), "calc(100% - 32px)")
+  val sheet = lay(sheet, Width(), "calc(100% - 2*max(16px,var(--safe-left),var(--safe-right)))")
   val sheet = lay(sheet, MaxWidth(), "640px")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, Display(), "flex")
@@ -1790,7 +1790,7 @@ fn _shell {left:nat | left >= 6750} (sheet: sheet(left, false, false)): [after:n
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [after:nat | after >= left - 4860] sheet(after, false, false) = let
+fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5100] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1818,8 +1818,8 @@ fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imclose")
   val sheet = lay(sheet, Position(), "absolute")
-  val sheet = lay(sheet, Top(), "max(8px,env(safe-area-inset-top))")
-  val sheet = lay(sheet, Right(), "8px")
+  val sheet = lay(sheet, Top(), "max(8px,var(--safe-top))")
+  val sheet = lay(sheet, Right(), "max(8px,var(--safe-right))")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, BorderRadius(), "50%")
   val sheet = close(sheet)
@@ -1840,7 +1840,7 @@ fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [afte
   val sheet = spaced(sheet, PaddingLeft(), SpaceLarge())
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = lay(sheet, Width(), "max-content")
-  val sheet = lay(sheet, MaxWidth(), "min(92vw,420px)")
+  val sheet = lay(sheet, MaxWidth(), "min(420px,100vw - 2*max(16px,var(--safe-left),var(--safe-right)))")
   val sheet = close(sheet)
   (* the copy status, above the Undo toast: text alone, with no button *)
   val sheet = rule(sheet, ".toast.tcopy")
@@ -1869,6 +1869,8 @@ fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [afte
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
+  val sheet = lay(sheet, Padding(), "var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left)")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = veil(sheet)
   val sheet = lay(sheet, ZIndex(), "20")
   val sheet = lay(sheet, Display(), "flex")
@@ -1974,7 +1976,7 @@ fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, ZIndex(), "15")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, Overflow(), "auto")
-  val sheet = lay(sheet, Padding(), "max(12px,env(safe-area-inset-top)) 16px 24px")
+  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(24px,var(--safe-bottom)) max(16px,var(--safe-left))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in")
   val sheet = lay(sheet, MaxWidth(), "600px")
@@ -2024,7 +2026,7 @@ fn _overlays {left:nat | left >= 4860} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9260] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9450] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2055,7 +2057,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Gap(), "4px")
-  val sheet = lay(sheet, Padding(), "2px 6px")
+  val sheet = lay(sheet, Padding(), "2px max(6px,var(--safe-right)) 2px max(6px,var(--safe-left))")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
   val sheet = lay(sheet, ZIndex(), "3")
   val sheet = close(sheet)
@@ -2064,7 +2066,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Left(), "0")
   val sheet = lay(sheet, Right(), "0")
-  val sheet = lay(sheet, PaddingTop(), "max(2px,env(safe-area-inset-top))")
+  val sheet = lay(sheet, PaddingTop(), "max(2px,var(--safe-top))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".bot")
   val sheet = lay(sheet, Position(), "absolute")
@@ -2072,7 +2074,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Left(), "0")
   val sheet = lay(sheet, Right(), "0")
   val sheet = lay(sheet, FlexWrap(), "wrap")
-  val sheet = lay(sheet, PaddingBottom(), "max(2px,env(safe-area-inset-bottom))")
+  val sheet = lay(sheet, PaddingBottom(), "max(2px,var(--safe-bottom))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".top .ibtn,.bot .ibtn,.snavf .ibtn")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
@@ -2446,7 +2448,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".pback")
   val sheet = lay(sheet, Position(), "absolute")
-  val sheet = lay(sheet, Left(), "12px")
+  val sheet = lay(sheet, Left(), "max(12px,var(--safe-left))")
   val sheet = lay(sheet, Bottom(), "106px")
   val sheet = lay(sheet, ZIndex(), "4")
   val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
@@ -2459,8 +2461,8 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   (* the hint on turning pages, over the page's middle *)
   val sheet = rule(sheet, ".hint")
   val sheet = lay(sheet, Position(), "absolute")
-  val sheet = lay(sheet, Left(), "16px")
-  val sheet = lay(sheet, Right(), "16px")
+  val sheet = lay(sheet, Left(), "max(16px,var(--safe-left))")
+  val sheet = lay(sheet, Right(), "max(16px,var(--safe-right))")
   val sheet = lay(sheet, Top(), "45%")
   val sheet = lay(sheet, Width(), "fit-content")
   val sheet = lay(sheet, Margin(), "0 auto")
@@ -2473,7 +2475,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".nextch")
   val sheet = lay(sheet, Left(), "auto")
-  val sheet = lay(sheet, Right(), "12px")
+  val sheet = lay(sheet, Right(), "max(12px,var(--safe-right))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seltb")
   val sheet = lay(sheet, Position(), "absolute")
@@ -2489,7 +2491,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
   (* no wider than the screen: its items go on a second row instead *)
   val sheet = lay(sheet, Width(), "max-content")
-  val sheet = lay(sheet, MaxWidth(), "calc(100vw - 16px)")
+  val sheet = lay(sheet, MaxWidth(), "calc(100vw - 2*max(8px,var(--safe-left),var(--safe-right)))")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = close(sheet)
@@ -2523,7 +2525,7 @@ fn _reader {left:nat | left >= 9260} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6160] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6500] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2538,11 +2540,14 @@ fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, BoxShadow(), "2px 0 16px rgba(0,0,0,.3)")
-  val sheet = lay(sheet, PaddingTop(), "env(safe-area-inset-top)")
+  val sheet = lay(sheet, Padding(), "var(--safe-top) 0 var(--safe-bottom) var(--safe-left)")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".panel-r")
   val sheet = lay(sheet, Left(), "auto")
   val sheet = lay(sheet, Right(), "0")
+  val sheet = lay(sheet, PaddingLeft(), "0")
+  val sheet = lay(sheet, PaddingRight(), "var(--safe-right)")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph")
   val sheet = lay(sheet, Display(), "flex")
@@ -2686,7 +2691,7 @@ fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, ZIndex(), "12")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
-  val sheet = lay(sheet, Padding(), "12px 16px max(16px,env(safe-area-inset-bottom))")
+  val sheet = lay(sheet, Padding(), "12px max(16px,var(--safe-right)) 0 max(16px,var(--safe-left))")
   val sheet = lay(sheet, BoxShadow(), "0 -2px 16px rgba(0,0,0,.3)")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -2721,6 +2726,16 @@ fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:
   (* its rows keep their height, and the sheet scrolls instead *)
   val sheet = rule(sheet, ".sheet>*")
   val sheet = lay(sheet, Flex(), "none")
+  val sheet = close(sheet)
+  (* its foot pads the sheet's bottom and is held there as the rest
+     scrolls, on the sheet's ground, so nothing scrolls under the
+     navigation bar (#341) *)
+  val sheet = rule(sheet, ".sheet>.sfoot")
+  val sheet = lay(sheet, Position(), "sticky")
+  val sheet = lay(sheet, Bottom(), "0")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, PaddingBottom(), "max(16px,var(--safe-bottom))")
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
   (* a note's text, over the page: a long one scrolls *)
   val sheet = rule(sheet, ".fntext")
@@ -2817,7 +2832,7 @@ fn _panels {left:nat | left >= 6160} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, JustifyContent(), "center")
   val sheet = lay(sheet, Gap(), "8px")
-  val sheet = lay(sheet, Padding(), "6px")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = line(sheet, TopSide(), 1, RoleLine())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
@@ -2933,11 +2948,19 @@ in sheet end
    its content. And the Sync screen's parts: its status card (where,
    how it went, its actions), its footer note, and its sign-in step,
    which hides the screen's list while it is shown *)
-fn _spacing {left:nat | left >= 1200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1200] sheet(after, false, false) = let
+fn _spacing {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false) = let
   val sheet = rule(sheet, ":root")
   val () = raw(sheet, "--space-inset:")
   val () = raw(sheet, _space_length(space_inset()))
   val () = raw(sheet, ";")
+  (* each side's safe area (the system's bars and a cutout over the
+     page, #341) and the least inset beyond it, or nothing where the
+     side has none: what a screen, panel, sheet or bar pads that side
+     by, so nothing of it comes near a bar *)
+  val () = raw(sheet, "--safe-top:min(env(safe-area-inset-top)*1000,env(safe-area-inset-top) + var(--space-inset));")
+  val () = raw(sheet, "--safe-right:min(env(safe-area-inset-right)*1000,env(safe-area-inset-right) + var(--space-inset));")
+  val () = raw(sheet, "--safe-bottom:min(env(safe-area-inset-bottom)*1000,env(safe-area-inset-bottom) + var(--space-inset));")
+  val () = raw(sheet, "--safe-left:min(env(safe-area-inset-left)*1000,env(safe-area-inset-left) + var(--space-inset));")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".menu[role=dialog]")
   val sheet = spaced(sheet, Padding(), SpaceLarge())
@@ -2981,11 +3004,11 @@ fn _spacing {left:nat | left >= 1200} (sheet: sheet(left, false, false)): [after
   val sheet = close(sheet)
 in sheet end
 
-fn _under_480px {left:nat | left >= 430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 430] sheet(after, false, false) = let
+fn _under_480px {left:nat | left >= 480} (sheet: sheet(left, false, false)): [after:nat | after >= left - 480] sheet(after, false, false) = let
   val sheet = media(sheet, "(max-width:480px)")
   val sheet = rule(sheet, ".lib")
-  val sheet = lay(sheet, PaddingLeft(), "10px")
-  val sheet = lay(sheet, PaddingRight(), "10px")
+  val sheet = lay(sheet, PaddingLeft(), "max(10px,var(--safe-left))")
+  val sheet = lay(sheet, PaddingRight(), "max(10px,var(--safe-right))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ttl")
   val sheet = lay(sheet, FontSize(), "20px")

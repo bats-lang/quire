@@ -14,6 +14,9 @@
  *   differ between on and off.
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
+ * - inSafeArea: no control or text comes within the spacing scale's
+ *   least inset of the screen's safe-area insets, where the system's
+ *   bars are drawn over the page (#341).
  */
 
 /** What is cut off on the screen shown: each visible control whose
@@ -181,4 +184,91 @@ export async function insetsShort(page) {
     }
     return bad;
   });
+}
+
+/** The visible controls and text on the screen shown that reach into
+    the screen's insets (the system's bars: insets, in CSS px, as given
+    to the page's env(safe-area-inset-*)) or within the spacing scale's
+    least inset (--space-inset) of them (#341). Each is measured as far
+    as it shows: cut to every box between it and the window that clips
+    it, and only where it is on top (a veil or a panel over it hides
+    it). The book's own page is left out: checkPageMargins measures its
+    text. Each is named, with the sides it reaches */
+export async function inSafeArea(page, insets) {
+  return page.evaluate(insets => {
+    const least = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-inset'));
+    if (!(least > 0)) return ['the page gives no --space-inset'];
+    const controls = 'button, a[href], select, textarea, input:not([type=hidden]):not([type=file]), [role=button], [role=menuitem], [role=tab], [role=switch], [role=slider]';
+    const book = document.querySelector('[role=document]');
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const named = e => (e.getAttribute('aria-label') || e.textContent || e.id || e.tagName).trim().slice(0, 40);
+    const clear = {
+      top: insets.top + least, left: insets.left + least,
+      right: innerWidth - insets.right - least, bottom: innerHeight - insets.bottom - least,
+    };
+    // the part of a box that shows: cut to each ancestor that clips
+    const seen = (r, e) => {
+      let box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+      const cut = c => { box = { left: Math.max(box.left, c.left), top: Math.max(box.top, c.top), right: Math.min(box.right, c.right), bottom: Math.min(box.bottom, c.bottom) }; };
+      for (let a = e; a && a !== document.documentElement; a = a.parentElement) {
+        const s = getComputedStyle(a);
+        if (s.overflowX !== 'visible' || s.overflowY !== 'visible') cut(a.getBoundingClientRect());
+      }
+      cut({ left: 0, top: 0, right: innerWidth, bottom: innerHeight });
+      const width = box.right - box.left, height = box.bottom - box.top;
+      // (read out, not shown: 1 px and clipped)
+      return width > 0.5 && height > 0.5 && (width > 1 || height > 1) ? box : null;
+    };
+    // the sides of the clear area a shown box reaches past, each where
+    // the thing measured is on top
+    const reaches = (box, owner) => {
+      const bands = {
+        top: { ...box, bottom: Math.min(box.bottom, clear.top) },
+        bottom: { ...box, top: Math.max(box.top, clear.bottom) },
+        left: { ...box, right: Math.min(box.right, clear.left) },
+        right: { ...box, left: Math.max(box.left, clear.right) },
+      };
+      return Object.entries(bands).filter(([, b]) => {
+        if (b.right - b.left <= 0.5 || b.bottom - b.top <= 0.5) return false;
+        const hit = document.elementFromPoint((b.left + b.right) / 2, (b.top + b.bottom) / 2);
+        return hit && owner.contains(hit);
+      }).map(([side]) => side);
+    };
+    // what is drawn through (pointer-events: none) is hit too
+    const through = document.createElement('style');
+    through.textContent = '*{pointer-events:auto !important}';
+    document.head.append(through);
+    const bad = [];
+    try {
+      for (const control of document.querySelectorAll(controls)) {
+        if (book && book.contains(control)) continue;
+        if (control.closest('[inert]') || !shown(control)) continue;
+        const r = control.getBoundingClientRect();
+        if (r.width <= 1 && r.height <= 1) continue;
+        const box = seen(r, control.parentElement);
+        if (!box) continue;
+        const sides = reaches(box, control);
+        if (sides.length) bad.push(`${named(control)}: ${sides.join(', ')}`);
+      }
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        const owner = text.parentElement;
+        if (!owner || !text.textContent.trim()) continue;
+        if (book && book.contains(owner)) continue;
+        if (owner.closest('[inert]') || owner.closest(controls) || !shown(owner)) continue;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        for (const r of range.getClientRects()) {
+          if (r.width <= 1 && r.height <= 1) continue;
+          const box = seen(r, owner);
+          if (!box) continue;
+          const sides = reaches(box, owner);
+          if (sides.length) { bad.push(`"${text.textContent.trim().slice(0, 40)}": ${sides.join(', ')}`); break; }
+        }
+      }
+    } finally {
+      through.remove();
+    }
+    return bad;
+  }, insets);
 }
