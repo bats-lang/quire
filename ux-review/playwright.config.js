@@ -3,7 +3,7 @@
 import { defineConfig } from '@playwright/test';
 
 const args = ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-software-rasterizer'];
-const base = { browserName: 'chromium', launchOptions: { args } };
+const base = { browserName: 'chromium', launchOptions: { args, executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' } };
 
 export default defineConfig({
   testDir: '.',

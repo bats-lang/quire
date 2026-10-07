@@ -99,6 +99,14 @@ test('reading', async ({ page }, info) => {
   const shot = shooter(page, 'reading', info.project.name);
   const made = createStardict({ name: 'Pocket English', entries: [{ word: 'lorem', article: 'placeholder text' }] });
   await start(page);
+  await attempt(page, async () => {
+    await librarySettings(page);
+    await settingsButton(page, 'Dictionaries ›').click();
+    await page.getByLabel('Import dictionary').setInputFiles([rawFile('p.ifo', made.ifo), rawFile('p.idx', made.idx), rawFile('p.dict', made.dict)]);
+    await expect(dialog(page, 'Dictionaries').getByRole('status')).toHaveText('Dictionary added.', { timeout: 30000 });
+    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+    await expect(settingsScreen(page)).toBeHidden();
+  });
   await readBook(page, {
     title: 'A Rather Long Title, Read', author: 'L',
     rawChapters: [...chapters(2), { body: '<h1>Part 3</h1><p>ephemeral claims<a epub:type="noteref" href="#n1">1</a>.</p><p><img src="images/map.png" alt="the map"/></p><aside epub:type="footnote" id="n1"><p>The note.</p></aside>' }],
@@ -121,15 +129,6 @@ test('reading', async ({ page }, info) => {
   await shot('bookmark', async () => { await showChrome(page); await page.getByRole('button', { name: 'Bookmark this page' }).click(); });
   await shot('annotations', async () => { await clickControl(page, 'Annotations'); await expect(dialog(page, 'Annotations')).toBeVisible(); });
   await attempt(page, async () => { await page.keyboard.press('Escape'); });
-  await attempt(page, async () => {
-    await toLibrary(page);
-    await librarySettings(page);
-    await settingsButton(page, 'Dictionaries ›').click();
-    await page.getByLabel('Import dictionary').setInputFiles([rawFile('p.ifo', made.ifo), rawFile('p.idx', made.idx), rawFile('p.dict', made.dict)]);
-    await expect(dialog(page, 'Dictionaries').getByRole('status')).toHaveText('Dictionary added.', { timeout: 30000 });
-    await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
-    await openBook(page, 'A Rather Long Title, Read');
-  });
   await shot('look-up', async () => {
     await selectText(page, 0, 4);
     await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Look up', exact: true }).click();
