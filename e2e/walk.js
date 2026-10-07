@@ -48,11 +48,13 @@ export async function syncSteps(page, checked, back = () => page.keyboard.press(
     (named), and back() closes the one on top, one step back (given
     what it is when it is a step within a screen, not a screen) */
 export async function walkEveryScreen(page, { look, back }) {
-  // Project Gutenberg's catalogue, played: one page holding one book
+  // Project Gutenberg's catalogue, played: one page holding one book,
+  // with a next page, so its footer shows
   await page.route('https://www.gutenberg.org/**', route => route.fulfill({
     status: 200, headers: { 'Access-Control-Allow-Origin': '*' }, contentType: 'application/atom+xml',
     body: '<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom"><id>urn:walk</id>' +
       '<title>A Catalogue With A Rather Long Name</title><updated>2026-10-01T00:00:00Z</updated>' +
+      '<link rel="next" href="/walk-2.xml" type="application/atom+xml;profile=opds-catalog;kind=acquisition"/>' +
       '<entry><title>A Book With A Rather Long Title</title><id>walked</id><author><name>Someone</name></author>' +
       '<link rel="http://opds-spec.org/acquisition" href="/walked.epub" type="application/epub+zip"/></entry></feed>',
   }));
@@ -99,6 +101,7 @@ export async function walkEveryScreen(page, { look, back }) {
   await dialog(page, 'Catalogues').getByRole('group', { name: 'Project Gutenberg' }).getByRole('button', { name: 'Project Gutenberg' }).click();
   const browsed = page.getByRole('dialog').filter({ has: page.getByRole('button', { name: 'Close catalogue' }) });
   await expect(browsed.getByRole('group', { name: 'A Book With A Rather Long Title' })).toBeVisible();
+  await expect(browsed.getByRole('button', { name: 'Next', exact: true })).toBeVisible();
   await check('a catalogue\'s page');
   await browsed.getByRole('button', { name: 'Close catalogue' }).click();
   await expect(browsed).toBeHidden();
@@ -122,6 +125,8 @@ export async function walkEveryScreen(page, { look, back }) {
   await expect(settingsScreen(page)).toBeHidden();
   await bookMenu(page, 'Short');
   await menuItem(page, 'Move to Trash').click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
+  await check('the Undo toast');
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
