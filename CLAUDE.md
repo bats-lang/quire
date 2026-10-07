@@ -8,7 +8,14 @@ cannot see). Every other question, design choices included (which
 layout, which wording, which default), is settled by research (what
 other apps do, what their users and reviewers say, what studies and
 guidelines say) and best judgement, written down where it is decided
-(the issue or the PR), and then done. The quality rules below (the
+(the issue or the PR), and then done. Judgement is what is left after
+the research, never a substitute for it: a value or a design chosen
+with no look at what comparable software does (the libraries,
+frameworks and apps that face the same question, and what they chose
+and why) is not decided. "The platform documents no value" is where
+the research goes on, to what others do, not where it stops; if
+nothing comparable can be found, say so where it is decided, with what
+was searched. The quality rules below (the
 proofs, the static tests, the e2e suite) still hold: when a choice
 would break one, choose another that keeps it.
 
@@ -818,6 +825,36 @@ Sync screen:
   handles (`e2e/sync-android-outcomes.spec.js` for google_authorize);
   an answer bridge's JS never gives is passed through by bridge's own
   dynamic test.
+* A call that never answers is an outcome too (#340): no call to Google
+  is left pending with nothing shown. A call that shows nothing
+  (`authorizationForScopes`, `clearAuthorizationToken`, `revokeAccess`)
+  is ended after 30 s (`GOOGLE_ANSWER_MS`: Play services documents no
+  timeout, so it is chosen from what comparable software does: OkHttp
+  ends a request at 10 s each for connect, read and write; Firebase
+  Auth's own 3 minutes is the length developers call too long, and
+  Flutter developers who bound a hanging `signIn()` themselves use
+  about 30 s; Google's Tasks guide says to bound a wait and gives no
+  value, only a 500 ms example; and Nielsen's 10 s is the limit of a
+  reader's attention, a sync saying "Syncing..." meanwhile) as `GoogleNoAnswer`: "Google didn't
+  answer. Check the connection, then try again." (a revoke's, in the
+  banner, with where to take the grant back by hand). The consent screen
+  (`authorizeScopes`) is the reader's to take as long as they like, so
+  no timer ends it: while it is awaited (`GoogleAsking`) the status card
+  says "Waiting for Google's consent screen. Finish it there, or stop
+  waiting." and shows Stop waiting (`sync-stop`, `sync_stop`) in place
+  of Sync now and Turn off; it ends the ask as the reader's cancel, as
+  backing out of Google's screen does, and a second ask meanwhile is
+  said as the consent screen already open. Each such call is the
+  promise of a resolver kept in a cell with the call's number
+  (`answer_wait`, `consent_wait` in `src/sync.bats`): the plugin's
+  answer and the timer or Stop waiting each settle that number, the
+  first resolves it, and what comes after (the answer of a call already
+  ended) is dropped, so it changes nothing, keeps no token and asks
+  Google nothing more (`_authorization_late`: a late answer that logged
+  the reader in after they were told Google did not answer is what
+  Flutter developers who time out Firebase's sign-in found).
+  `e2e/sync-android-hang.spec.js` leaves each call pending (`hold` in
+  `e2e/sync-stores.js`) and settles it late.
 
 ## What the types guarantee about the interface
 

@@ -158,10 +158,11 @@ datatype sync_result =
   | DropboxSignInAgain | DropboxNotSetUp | DropboxSignInRefused | DropboxSignInCanceled
   | FastmailRefused
   | GoogleSignInFailed | GoogleAccountNeeded | GoogleUnreachable | GoogleConsentShowing | GoogleUnexpected
+  | GoogleNoAnswer | GoogleAsking
 
 (* A result as "sync-state" stores it, and back: decoded once, as it is
    read (an unknown number is not synced yet) *)
-fn _result_code (result: sync_result): [code:nat | code <= 27] int code =
+fn _result_code (result: sync_result): [code:nat | code <= 29] int code =
   case+ result of
   | NotSyncedYet() => 0
   | Synced() => 1
@@ -191,6 +192,8 @@ fn _result_code (result: sync_result): [code:nat | code <= 27] int code =
   | GoogleUnreachable() => 25
   | GoogleConsentShowing() => 26
   | GoogleUnexpected() => 27
+  | GoogleNoAnswer() => 28
+  | GoogleAsking() => 29
 
 fn _result_of_code (code: int): sync_result =
   if code = 1 then Synced()
@@ -220,6 +223,8 @@ fn _result_of_code (code: int): sync_result =
   else if code = 25 then GoogleUnreachable()
   else if code = 26 then GoogleConsentShowing()
   else if code = 27 then GoogleUnexpected()
+  else if code = 28 then GoogleNoAnswer()
+  else if code = 29 then GoogleAsking()
   else NotSyncedYet()
 
 (* How the last sync ended *)
@@ -606,6 +611,8 @@ fn _result_text {l:agz}{position:nat | position + 200 <= 512} (out: !$A.arr(byte
   | GoogleUnreachable() => _put_literal(out, position, "Can't reach Google. Check the connection, then try again.")
   | GoogleConsentShowing() => _put_literal(out, position, "Google's consent screen is already open: finish it, then try again.")
   | GoogleUnexpected() => _put_literal(out, position, "An unexpected error occurred while signing in to Google.")
+  | GoogleNoAnswer() => _put_literal(out, position, "Google didn't answer. Check the connection, then try again.")
+  | GoogleAsking() => _put_literal(out, position, "Waiting for Google's consent screen. Finish it there, or stop waiting.")
   | DropboxSignInAgain() => _put_literal(out, position, "Dropbox no longer lets Quire in. Tap Dropbox to sign in again.")
   | DropboxNotSetUp() => _put_literal(out, position, "Dropbox sync isn't set up in this build of Quire.")
   | DropboxSignInRefused() => _put_literal(out, position, "Dropbox didn't sign Quire in. Try again.")
@@ -662,6 +669,8 @@ fn _said_when_off (result: sync_result): bool =
   | GoogleUnreachable() => true
   | GoogleConsentShowing() => true
   | GoogleUnexpected() => true
+  | GoogleNoAnswer() => true
+  | GoogleAsking() => true
   | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true
   | DropboxSignInCanceled() => true
@@ -682,6 +691,8 @@ fn _google_refusal (result: sync_result): bool =
   | GoogleUnreachable() => true
   | GoogleConsentShowing() => true
   | GoogleUnexpected() => true
+  | GoogleNoAnswer() => false
+  | GoogleAsking() => false
   | SignInCanceled() => false
   | NotSyncedYet() => false | Synced() => false | Unreachable() => false | WrongCredentials() => false
   | FolderNotFound() => false | KeptChanging() => false | ServerError() => false | TooLarge() => false
@@ -697,6 +708,8 @@ fn _told_in_banner (result: sync_result): bool =
   | SignInCanceled() => false
   | DropboxSignInCanceled() => false
   | GoogleUnexpected() => false
+  | GoogleAsking() => false
+  | GoogleNoAnswer() => true
   | Unreachable() => true | WrongCredentials() => true | FolderNotFound() => true | KeptChanging() => true
   | ServerError() => true | TooLarge() => true | Damaged() => true | NoMemory() => true | Blocked() => true
   | NoAddress() => true | SignInAgain() => true | NoGoogleAccount() => true | NotSetUp() => true
@@ -787,6 +800,8 @@ in
     | GoogleUnreachable() => _tried(out, result)
     | GoogleConsentShowing() => _tried(out, result)
     | GoogleUnexpected() => _tried(out, result)
+    | GoogleNoAnswer() => _tried(out, result)
+    | GoogleAsking() => _result_text(out, 0, result, 0)
     | DropboxSignInAgain() => _tried(out, result)
     | DropboxNotSetUp() => _tried(out, result)
     | DropboxSignInRefused() => _tried(out, result)
@@ -815,6 +830,8 @@ fn _result_short {l:agz}{position:nat | position + 64 <= 512} (out: !$A.arr(byte
   | GoogleUnreachable() => _put_literal(out, position, "Can't reach Google")
   | GoogleConsentShowing() => _put_literal(out, position, "Google's consent screen is open")
   | GoogleUnexpected() => _put_literal(out, position, "Google sign-in failed")
+  | GoogleNoAnswer() => _put_literal(out, position, "Google didn't answer")
+  | GoogleAsking() => _put_literal(out, position, "waiting for Google")
   | NoGoogleAccount() => _put_literal(out, position, "No Google account")
   | NotSetUp() => _put_literal(out, position, "Not set up in this build")
   | SignInCanceled() => _put_literal(out, position, "Sign-in canceled")
@@ -888,6 +905,8 @@ in
     | GoogleUnreachable() => _result_short(out, 0, result, !_last_status)
     | GoogleConsentShowing() => _result_short(out, 0, result, !_last_status)
     | GoogleUnexpected() => _result_short(out, 0, result, !_last_status)
+    | GoogleNoAnswer() => _result_short(out, 0, result, !_last_status)
+    | GoogleAsking() => _result_short(out, after, result, !_last_status)
     | DropboxSignInAgain() => _result_short(out, 0, result, !_last_status)
     | DropboxNotSetUp() => _result_short(out, 0, result, !_last_status)
     | DropboxSignInRefused() => _result_short(out, 0, result, !_last_status)
@@ -1017,7 +1036,9 @@ fn _row_show (service: sync_service): void =
       | GoogleAccountNeeded() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleUnreachable() => ui_text(_row_state_id(service), "Not syncing")
       | GoogleConsentShowing() => ui_text(_row_state_id(service), "Not syncing")
-      | GoogleUnexpected() => ui_text(_row_state_id(service), "Not syncing"))
+      | GoogleUnexpected() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleNoAnswer() => ui_text(_row_state_id(service), "Not syncing")
+      | GoogleAsking() => ui_text(_row_state_id(service), "Connected"))
   in ui_show(_row_state_id(service), true) end
 
 (* The status card's head: where sync is kept, when it is on *)
@@ -1041,11 +1062,17 @@ fn _rows_show (): void = let
   val () = _row_show(ServiceWebDav())
 in _where_show() end
 
-(* Sync now and Turn off: in the status card, while a store is chosen *)
-fn _actions_show (on: bool): void = let
-  val () = ui_show("sync-off", on)
-in ui_show("sync-now", on) end
+(* Whether Google's consent screen is awaited (see consent_wait) *)
+val _consent_open = ref<bool>(false)
 
+(* Sync now and Turn off: in the status card, while a store is chosen;
+   while Google's consent screen is awaited, Stop waiting in their place
+   (#340) *)
+fn _actions_show (on: bool): void = let
+  val asking = !_consent_open
+  val () = ui_show("sync-off", if asking then false else on)
+  val () = ui_show("sync-now", if asking then false else on)
+in ui_show("sync-stop", asking) end
 
 (* The Settings screen's Sync row's state, as it is now *)
 #pub fn sync_summary_show (): void
@@ -1868,40 +1895,124 @@ fn _not_a_scope {doing_len:pos | doing_len < 128} (doing: string doing_len): syn
   val () = notice_unexpected(doing, "google_scope_of", CaseNamed("NotAScope"), NoAnswer())
 in GoogleUnexpected() end
 
+(* A call to Google that may never answer (#340). The plugin's promise
+   ends the call only when it settles, and a plugin that never settles it
+   would leave the reader with nothing shown and nothing that ends. A call
+   that shows nothing (authorizationForScopes, clearAuthorizationToken)
+   is answered, at the latest, by a timer: GOOGLE_ANSWER_MS, and said
+   as GoogleNoAnswer. Play services documents no timeout for these
+   calls, so the 30 s is chosen from what comparable software does:
+   OkHttp ends a request at 10 s each for connect, read and write,
+   Firebase Auth's 3 minutes is called too long, Flutter developers
+   who bound a hanging signIn() use about 30 s, and Nielsen's 10 s is
+   about the limit of a reader's attention (a sync says "Syncing..."
+   meanwhile). An answer after the call ended keeps nothing
+   (_authorization_late). The consent screen
+   (authorizeScopes) is the reader's to take as long as they like, so no
+   timer ends it: while it is pending the status card says so and has
+   Stop waiting (sync_stop). Each call's outcome is the promise of a
+   resolver kept in a cell with the call's number: the plugin's answer and
+   the timer (or Stop waiting) each settle that number, the first
+   resolves it, and whatever comes after finds another number and is
+   dropped *)
+#define GOOGLE_ANSWER_MS 30000
+
+(* An answer that came after its call ended (the timer, or Stop waiting):
+   nothing is kept from it, no token and no sign-in, so what the reader
+   was told (that Google did not answer, or that they stopped waiting)
+   stays true. One that is unexpected is still said, as every outcome is *)
+fn _authorization_late {w:$GA.asking} (answer: $GA.google_authorization(w)): void =
+  case+ answer of
+  | ~$GA.Authorized(token, granted, account, said) => let
+      val () = $GA.google_text_free(token)
+      val () = $GA.google_granted_free(granted)
+      val () = $GA.google_said_free(said)
+    in (case+ account of ~$R.some(named) => $GA.google_text_free(named) | ~$R.none() => ()) end
+  | ~$GA.NotAuthorized(said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeCanceled(said) => $GA.google_said_free(said)
+  | ~$GA.ConsentShowing(said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeRefused(_, said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeUnavailable(said) => _said_free(said)
+  | ~$GA.AuthorizeUnexpected(unexpected) =>
+    _unexpected_said("a call to Google that had ended", "a late answer", unexpected)
+
+datavtype answer_wait =
+  | NoAnswerWait of ()
+  | AnswerWait of $P.resolver(token_access)
+
+val _silent_wait = ref<answer_wait>(NoAnswerWait())
+val _silent_number = ref<int>(0)
+val _renewal_wait = ref<answer_wait>(NoAnswerWait())
+val _renewal_number = ref<int>(0)
+
+fn _wait_swap (cell: ref(answer_wait), next: answer_wait): answer_wait = let
+  var previous: answer_wait = next
+  val () = ref_exch_elt<answer_wait>(cell, previous)
+in previous end
+
+(* A call begins: its number, its outcome the promise returned *)
+fn _wait_begin (cell: ref(answer_wait), number: ref(int), resolver: $P.resolver(token_access)): int = let
+  val () = !number := !number + 1
+  (* a call still waiting when another begins (none does: each caller
+     waits for its call) is told it was not answered *)
+  val () = (case+ _wait_swap(cell, AnswerWait(resolver)) of
+    | ~NoAnswerWait() => ()
+    | ~AnswerWait(old) => $P.resolve<token_access>(old, AccessFailed(GoogleNoAnswer())))
+in !number end
+
+(* The call numbered number ends as access, when it is the one waiting:
+   the first to settle it resolves it, a later one is dropped *)
+fn _wait_settle (cell: ref(answer_wait), number: ref(int), which: int, access: token_access): void =
+  if which <> !number then $P.dispose<token_access>(access)
+  else let
+    val () = !number := !number + 1
+  in case+ _wait_swap(cell, NoAnswerWait()) of
+    | ~NoAnswerWait() => $P.dispose<token_access>(access)
+    | ~AnswerWait(resolver) => $P.resolve<token_access>(resolver, access)
+  end
+
 (* An access token for drive.appdata, in the app, given with nothing
    shown (bridge's google_authorization_for_scopes, Play services'
    AuthorizationClient) once the reader has granted it: kept, here and
    on the device. None when the reader must consent first (the grant
-   taken back in the Google account): sync pauses until Sync now *)
+   taken back in the Google account): sync pauses until Sync now. Not
+   answered within GOOGLE_ANSWER_MS is GoogleNoAnswer *)
+fn _silent_access (answer: $GA.google_authorization($GA.Silently)): token_access =
+  case+ answer of
+  | ~$GA.Authorized(token, granted, account, said) => let
+      val () = $GA.google_granted_free(granted)
+      val () = $GA.google_said_free(said)
+      val () = (case+ account of ~$R.some(named) => $GA.google_text_free(named) | ~$R.none() => ())
+    in
+      if _text_token_keep(token) then AccessHeld()
+      else AccessFailed(GoogleRefused())
+    end
+  | ~$GA.NotAuthorized(said) => let
+      val () = $GA.google_said_free(said)
+    in AccessFailed(SignInAgain()) end
+  | ~$GA.AuthorizeRefused(status, said) =>
+    AccessFailed(_authorize_refused("authorizationForScopes", status, said))
+  (* asked only where google_authorize_available: a plugin gone is
+     one this build is not set up with *)
+  | ~$GA.AuthorizeUnavailable(said) => let
+      val () = _said_free(said)
+    in AccessFailed(NotSetUp()) end
+  | ~$GA.AuthorizeUnexpected(unexpected) =>
+    AccessFailed(_authorize_unexpected("syncing with Google", "authorizationForScopes", unexpected))
+
 fn _google_silently (): $P.promise(token_access, $P.Chained) =
   case+ _drive_scopes() of
   | ~$R.none() => $P.ret<token_access>(AccessFailed(_not_a_scope("syncing with Google")))
   | ~$R.some(scopes) => let
   val pending = $GA.google_authorization_for_scopes(scopes)
-in
-  $P.and_then<$GA.google_authorization($GA.Silently)><token_access>(pending, llam(answer) =>
-    case+ answer of
-    | ~$GA.Authorized(token, granted, account, said) => let
-        val () = $GA.google_granted_free(granted)
-        val () = $GA.google_said_free(said)
-        val () = (case+ account of ~$R.some(named) => $GA.google_text_free(named) | ~$R.none() => ())
-      in
-        if _text_token_keep(token) then $P.ret<token_access>(AccessHeld())
-        else $P.ret<token_access>(AccessFailed(GoogleRefused()))
-      end
-    | ~$GA.NotAuthorized(said) => let
-        val () = $GA.google_said_free(said)
-      in $P.ret<token_access>(AccessFailed(SignInAgain())) end
-    | ~$GA.AuthorizeRefused(status, said) =>
-      $P.ret<token_access>(AccessFailed(_authorize_refused("authorizationForScopes", status, said)))
-    (* asked only where google_authorize_available: a plugin gone is
-       one this build is not set up with *)
-    | ~$GA.AuthorizeUnavailable(said) => let
-        val () = _said_free(said)
-      in $P.ret<token_access>(AccessFailed(NotSetUp())) end
-    | ~$GA.AuthorizeUnexpected(unexpected) =>
-      $P.ret<token_access>(AccessFailed(_authorize_unexpected("syncing with Google", "authorizationForScopes", unexpected))))
-end
+  val @(outcome, resolver) = $P.create<token_access>()
+  val number = _wait_begin(_silent_wait, _silent_number, resolver)
+  val () = $P.finish<$GA.google_authorization($GA.Silently)>(pending, llam(answer) =>
+    if number <> !_silent_number then _authorization_late(answer)
+    else _wait_settle(_silent_wait, _silent_number, number, _silent_access(answer)))
+  val () = $P.finish<Int>($P.vow($TM.timer_set(GOOGLE_ANSWER_MS)), llam(_) =>
+    _wait_settle(_silent_wait, _silent_number, number, AccessFailed(GoogleNoAnswer())))
+in $P.vow(outcome) end
 
 (* The Google store's access token: the one held; else, in the app, one
    given with nothing shown. In a browser none is asked for here: Google
@@ -1960,11 +2071,23 @@ in
            there is nothing to clear, and one is asked for *)
         | ~$R.none() => _google_silently()
         | ~$R.some(token) =>
-          $P.and_then<$GA.google_authorization_change><token_access>($GA.google_clear_token(token), llam(change) => let
-            (* cleared or not, one is asked for: should Play services give
-               the refused one again, Drive's second 401 pauses sync *)
-            val () = _cleared(change)
-          in _google_silently() end)
+          let
+            val pending = $GA.google_clear_token(token)
+            val @(outcome, resolver) = $P.create<token_access>()
+            val number = _wait_begin(_renewal_wait, _renewal_number, resolver)
+            val () = $P.finish<$GA.google_authorization_change>(pending, llam(change) => let
+              (* cleared or not, one is asked for: should Play services give
+                 the refused one again, Drive's second 401 pauses sync; but
+                 not when the clear's answer comes after its timer (#340) *)
+              val () = _cleared(change)
+            in
+              if number <> !_renewal_number then ()
+              else $P.finish<token_access>(_google_silently(), llam(access) =>
+                _wait_settle(_renewal_wait, _renewal_number, number, access))
+            end)
+            val () = $P.finish<Int>($P.vow($TM.timer_set(GOOGLE_ANSWER_MS)), llam(_) =>
+              _wait_settle(_renewal_wait, _renewal_number, number, AccessFailed(GoogleNoAnswer())))
+          in $P.vow(outcome) end
       end
 end
 
@@ -3254,6 +3377,7 @@ fn _paused (): bool =
     | DropboxSignInCanceled() => false | FastmailRefused() => false
     | GoogleSignInFailed() => false | GoogleAccountNeeded() => false | GoogleUnreachable() => false
     | GoogleConsentShowing() => false | GoogleUnexpected() => false
+    | GoogleNoAnswer() => false | GoogleAsking() => false
 
 (* Syncs, when sync is on: at once, or once the sync under way ends; not
    while it is paused for a sign-in *)
@@ -3406,6 +3530,7 @@ implement sync_screen_make () = let
   val () = ui_el("sync-card", "sync-buttons", TDiv, "mbtns")
   val () = ui_text_btn("sync-buttons", "sync-off", "btn", "Turn off")
   val () = ui_text_btn("sync-buttons", "sync-now", "btn btn-p", "Sync now")
+  val () = ui_text_btn("sync-buttons", "sync-stop", "btn btn-p", "Stop waiting")
   val () = _actions_show(false)
   (* the services, each shown only where it can be used *)
   val () = ui_el("sync-box", "sync-services-title", TDiv, "a11yg")
@@ -3611,47 +3736,106 @@ fn _drive_address (): $P.promise(asked, $P.Chained) =
         | ~DriveNoAddress() => $P.ret<asked>(Asked($A.alloc<byte>(ACCOUNT_MAX), 0)))
     end
 
+(* The consent screen is the reader's to take as long as they like, so
+   nothing ends a wait for it but its answer or the reader's Stop waiting
+   (#340): while it is pending the status card says so and shows Stop
+   waiting, which ends the ask as a cancel, and the answer that comes
+   after it is dropped. The ask's outcome is the promise of the resolver
+   kept here (see answer_wait) *)
+datavtype consent_wait =
+  | NoConsentWait of ()
+  | ConsentWait of $P.resolver(asked)
+
+val _consent_wait = ref<consent_wait>(NoConsentWait())
+val _consent_number = ref<int>(0)
+
+fn _consent_swap (next: consent_wait): consent_wait = let
+  var previous: consent_wait = next
+  val () = ref_exch_elt<consent_wait>(_consent_wait, previous)
+in previous end
+
+(* The ask begins: the card says Google's screen is awaited, with Stop
+   waiting in place of the actions; the number of the ask is returned *)
+fn _consent_begin (resolver: $P.resolver(asked)): int = let
+  val () = !_consent_number := !_consent_number + 1
+  val () = !_consent_open := true
+  val () = (case+ _consent_swap(ConsentWait(resolver)) of
+    | ~NoConsentWait() => ()
+    | ~ConsentWait(old) => $P.resolve<asked>(old, AskFailed(SignInCanceled())))
+  val () = !_last_result := GoogleAsking()
+  val () = _status_show()
+  val () = _actions_show(_store_on())
+in !_consent_number end
+
+(* The ask numbered number ends as answer, when it is the one awaited:
+   the first to settle it resolves it, a later answer is dropped *)
+fn _consent_settle (which: int, answer: asked): void =
+  if which <> !_consent_number then $P.dispose<asked>(answer)
+  else let
+    val () = !_consent_number := !_consent_number + 1
+    val () = !_consent_open := false
+    val () = _actions_show(_store_on())
+  in case+ _consent_swap(NoConsentWait()) of
+    | ~NoConsentWait() => $P.dispose<asked>(answer)
+    | ~ConsentWait(resolver) => $P.resolve<asked>(resolver, answer)
+  end
+
+(* Stop waiting (the status card's button): the ask ends as the reader's
+   cancel, said quietly on the status line as a cancel is *)
+#pub fn sync_stop (): void
+implement sync_stop () =
+  if ~(!_consent_open) then ()
+  else _consent_settle(!_consent_number, AskFailed(SignInCanceled()))
+
+(* What Google's answer to the consent screen makes of the ask *)
+fn _consent_answer (answer: $GA.google_authorization($GA.MayAsk)): $P.promise(asked, $P.Chained) =
+  case+ answer of
+  | ~$GA.Authorized(token, granted, account, said) => let
+      val () = $GA.google_granted_free(granted)
+      val () = $GA.google_said_free(said)
+      val kept = _text_token_keep(token)
+      val @(address, address_len) = _text_address_of(account)
+    in
+      if ~kept then let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
+      else if address_len > 0 then $P.ret<asked>(Asked(address, address_len))
+      else let val () = $A.free<byte>(address) in _drive_address() end
+    end
+  (* the reader backed out (or Play services said CANCELED before any
+     screen, which nothing tells apart, bats-lang/capacitor-plugins#8):
+     noted on the screen's status line, quietly; its message is
+     Google's wording, not the reader's to read *)
+  | ~$GA.AuthorizeCanceled(said) => let
+      val () = $GA.google_said_free(said)
+    in $P.ret<asked>(AskFailed(SignInCanceled())) end
+  | ~$GA.ConsentShowing(said) => let
+      val () = $GA.google_said_free(said)
+    in $P.ret<asked>(AskFailed(GoogleConsentShowing())) end
+  | ~$GA.AuthorizeRefused(status, said) =>
+    $P.ret<asked>(AskFailed(_authorize_refused("authorizeScopes", status, said)))
+  | ~$GA.AuthorizeUnavailable(said) => let
+      val () = _said_free(said)
+    in $P.ret<asked>(AskFailed(NotSetUp())) end
+  | ~$GA.AuthorizeUnexpected(unexpected) =>
+    $P.ret<asked>(AskFailed(_authorize_unexpected("signing in to Google", "authorizeScopes", unexpected)))
+
 (* In the app: a token for drive.appdata, Google's consent screen shown
    when the reader has not granted it (bridge's google_authorize_scopes),
    and the account's address: the one the authorization names, else
    Drive's (about.get), else none (Turn off then takes the grant back
    with the token) *)
 fn _authorized_ask (): $P.promise(asked, $P.Chained) =
-  case+ _drive_scopes() of
+  (* a second ask while the screen is awaited: it is the one open *)
+  if !_consent_open then $P.ret<asked>(AskFailed(GoogleConsentShowing()))
+  else case+ _drive_scopes() of
   | ~$R.none() => $P.ret<asked>(AskFailed(_not_a_scope("signing in to Google")))
   | ~$R.some(scopes) => let
-  val pending = $GA.google_authorize_scopes(scopes)
-in
-  $P.and_then<$GA.google_authorization($GA.MayAsk)><asked>(pending, llam(answer) =>
-    case+ answer of
-    | ~$GA.Authorized(token, granted, account, said) => let
-        val () = $GA.google_granted_free(granted)
-        val () = $GA.google_said_free(said)
-        val kept = _text_token_keep(token)
-        val @(address, address_len) = _text_address_of(account)
-      in
-        if ~kept then let val () = $A.free<byte>(address) in $P.ret<asked>(AskFailed(GoogleRefused())) end
-        else if address_len > 0 then $P.ret<asked>(Asked(address, address_len))
-        else let val () = $A.free<byte>(address) in _drive_address() end
-      end
-    (* the reader backed out (or Play services said CANCELED before any
-       screen, which nothing tells apart, bats-lang/capacitor-plugins#8):
-       noted on the screen's status line, quietly; its message is
-       Google's wording, not the reader's to read *)
-    | ~$GA.AuthorizeCanceled(said) => let
-        val () = $GA.google_said_free(said)
-      in $P.ret<asked>(AskFailed(SignInCanceled())) end
-    | ~$GA.ConsentShowing(said) => let
-        val () = $GA.google_said_free(said)
-      in $P.ret<asked>(AskFailed(GoogleConsentShowing())) end
-    | ~$GA.AuthorizeRefused(status, said) =>
-      $P.ret<asked>(AskFailed(_authorize_refused("authorizeScopes", status, said)))
-    | ~$GA.AuthorizeUnavailable(said) => let
-        val () = _said_free(said)
-      in $P.ret<asked>(AskFailed(NotSetUp())) end
-    | ~$GA.AuthorizeUnexpected(unexpected) =>
-      $P.ret<asked>(AskFailed(_authorize_unexpected("signing in to Google", "authorizeScopes", unexpected))))
-end
+    val pending = $GA.google_authorize_scopes(scopes)
+    val @(outcome, resolver) = $P.create<asked>()
+    val number = _consent_begin(resolver)
+    val () = $P.finish<$GA.google_authorization($GA.MayAsk)>(pending, llam(answer) =>
+      if number <> !_consent_number then _authorization_late(answer)
+      else $P.finish<asked>(_consent_answer(answer), llam(done) => _consent_settle(number, done)))
+  in $P.vow(outcome) end
 
 (* In a browser: a token for drive.appdata from Google Identity
    Services, its window opened at the reader's tap *)
@@ -4021,6 +4205,8 @@ fn _token_restored (held: token_cell): void =
       val () = _google_token_save(token, token_len)
     in _token_free(_token_swap(Token(token, token_len))) end
 
+val _revoke_number = ref<int>(0)
+
 (* Turn off, made final, in the app: the reader's grant taken back from
    Google, so the next Use Android asks for consent again. By the
    account (google_revoke_access, Play services' revokeAccess), else
@@ -4041,8 +4227,20 @@ fn _google_revoke {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
             val () = $GA.google_text_free(text)
             val _ = _not_a_scope("taking back Quire's access to Google Drive")
           in () end
-        | ~$R.some(scopes) =>
-          $P.finish<$GA.google_authorization_change>($GA.google_revoke_access(text, scopes), llam(change) => _revoked(change))))
+        | ~$R.some(scopes) => let
+            val () = !_revoke_number := !_revoke_number + 1
+            val number = !_revoke_number
+            val () = $P.finish<$GA.google_authorization_change>($GA.google_revoke_access(text, scopes), llam(change) => let
+              (* said whenever it comes, after the timer's word too *)
+              val () = !_revoke_number := !_revoke_number + 1
+            in _revoked(change) end)
+          in
+            $P.finish<Int>($P.vow($TM.timer_set(GOOGLE_ANSWER_MS)), llam(_) =>
+              if number <> !_revoke_number then ()
+              else let
+                val () = !_revoke_number := !_revoke_number + 1
+              in notice_error("Google didn't answer when Quire took back its access to Drive: remove it in your Google account, under Security, Your connections to third-party apps.") end)
+          end))
     val account_bytes = $A.borrow_join<byte>(account_frozen, used, rest)
   in release_bytes(account_frozen, account_bytes) end
   else let
@@ -4771,6 +4969,7 @@ implement sync_start () = let
           (* a sync the last run left under way did not end *)
           val () = !_last_result := (case+ _result_of_code(g0ofg1(_i32_at(record, 12))) of
             | Syncing() => NotSyncedYet()
+            | GoogleAsking() => NotSyncedYet()
             | result => result)
           val () = !_last_status := _i32_at(record, 16)
           val () = $A.free<byte>(record)
