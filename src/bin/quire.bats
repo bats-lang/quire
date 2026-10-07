@@ -1244,7 +1244,7 @@ fn _stats_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_show() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 24) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1395,6 +1395,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 23) = let
     end)
   (* the error banner *)
   val listeners = RCons(listeners, OnEl("error-dismiss"), "click", llam(_) => let val () = notice_dismiss() in 0 end)
+  val listeners = RCons(listeners, OnEl("error-copy"), "click", llam(_) => let val () = notice_details_copy() in 0 end)
   val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", llam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
   val listeners = RCons(listeners, OnEl("library-menu-button"), "click", llam(_) => let
