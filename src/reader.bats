@@ -2387,9 +2387,7 @@ fn _narration_offered (narrated: bool): void = let
   val speaks = (if narrated then false else $SP.speech_available()): bool
   val () = ui_show("read-aloud", speaks)
   val () = ui_show("selection-read", speaks)
-  (* the sheet's speed and voice; the Reading screen's are for every
-     book, and stay where the platform speaks (aloud_offer) *)
-  val () = ui_show(reading_part_id(InSheet(), SpeechRow()), speaks)
+  val () = ui_show("speech-row", speaks)
   val () = ui_show("narration-speed-row", narrated)
   val () = ui_show("narration-skip-row", narrated)
   (* the reading settings' Read aloud tab, for either *)

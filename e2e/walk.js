@@ -111,7 +111,7 @@ export async function walkEveryScreen(page, { look, back }) {
     rawFile('walk.ifo', made.ifo), rawFile('walk.idx', made.idx), rawFile('walk.dict', made.dict)]);
   await expect(dialog(page, 'Dictionaries').getByRole('status')).toHaveText('Dictionary added.', { timeout: 30000 });
   await back();
-  for (const row of ['Reading ›', 'Sync ›', 'Dictionaries ›', 'About Quire ›']) {
+  for (const row of ['Sync ›', 'Dictionaries ›', 'About Quire ›']) {
     await settingsButton(page, row).click();
     await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
     await check(row);
@@ -161,10 +161,6 @@ export async function walkEveryScreen(page, { look, back }) {
   await topBar(page).getByRole('button', { name: 'Search in book' }).click();
   await expect(dialog(page, 'Search in book')).toBeVisible();
   await check('Search in book');
-  await back();
-  await showChrome(page);
-  await topBar(page).getByRole('button', { name: 'Settings' }).click();
-  await check('Settings over the reader');
   await back();
   // the note, the picture and a word looked up, in the second chapter
   const map = bookPage(page).getByRole('img', { name: 'the map' });
