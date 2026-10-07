@@ -85,10 +85,10 @@ implement book_of_vals {vals}{kv} (vals) =
   | BR_newer(br_newer())
   | BR_damaged(br_damaged())
 
-#pub fun book_write {x:bookx}{ver,minver:int}{e:extras} (record: !bookrecord(x, ver, minver, e))
+#pub fun book_record_write {x:bookx}{ver,minver:int}{e:extras} (record: !bookrecord(x, ver, minver, e))
   : [bs:bytes][m:nat] (BOOKENC(x, ver, minver, e, bs) | blist(bs, m))
 
-implement book_write {x}{ver,minver}{e} (record) =
+implement book_record_write {x}{ver,minver}{e} (record) =
   case+ record of
   | BookRecord(ver, minver, book, extras) => let
       val specs = book_specs()
@@ -98,9 +98,9 @@ implement book_write {x}{ver,minver}{e} (record) =
       val () = specsv_free(specs)
     in (BOOKENC_mk(fields, written) | out) end
 
-#pub fun book_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:bookres] (BOOKDEC(bs, res) | bookread(res))
+#pub fun book_record_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:bookres] (BOOKDEC(bs, res) | bookread(res))
 
-implement book_read {bs}{n} (list) = let
+implement book_record_read {bs}{n} (list) = let
   val specs = book_specs()
   val (read | out) = record_read(specs, 1, list)
   val () = specsv_free(specs)

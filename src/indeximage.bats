@@ -40,6 +40,87 @@ in
   if a_len = b_len then go(a, b, a_len, 0) else false
 end
 
+(* The numbers of a stored index, by name *)
+#pub typedef index_numbers = @{legacy_crc_high = Int, legacy_crc_low = Int, name_count = Int}
+
+(* An image of numbers and strings (each in an array one longer than the string, which it takes) *)
+#pub fun index_image_make {name0_loc,name1_loc,name2_loc,name3_loc,name4_loc,name5_loc,name6_loc,name7_loc:agz}{name0_len,name1_len,name2_len,name3_len,name4_len,name5_len,name6_len,name7_len:nat | name0_len < 256; name1_len < 256; name2_len < 256; name3_len < 256; name4_len < 256; name5_len < 256; name6_len < 256; name7_len < 256}
+  (numbers: index_numbers, name0: $A.arr(byte, name0_loc, name0_len + 1), name0_len: int name0_len, name1: $A.arr(byte, name1_loc, name1_len + 1), name1_len: int name1_len, name2: $A.arr(byte, name2_loc, name2_len + 1), name2_len: int name2_len, name3: $A.arr(byte, name3_loc, name3_len + 1), name3_len: int name3_len, name4: $A.arr(byte, name4_loc, name4_len + 1), name4_len: int name4_len, name5: $A.arr(byte, name5_loc, name5_len + 1), name5_len: int name5_len, name6: $A.arr(byte, name6_loc, name6_len + 1), name6_len: int name6_len, name7: $A.arr(byte, name7_loc, name7_len + 1), name7_len: int name7_len): index_image
+
+implement index_image_make (numbers, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) = IndexImage(numbers.legacy_crc_high, numbers.legacy_crc_low, numbers.name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len)
+
+(* The numbers of an image *)
+#pub fun index_image_numbers (image: !index_image): index_numbers
+
+implement index_image_numbers (image) =
+  case+ image of
+  | IndexImage(legacy_crc_high, legacy_crc_low, name_count, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => @{legacy_crc_high = legacy_crc_high, legacy_crc_low = legacy_crc_low, name_count = name_count}
+
+(* A string of an image: its length, and a copy of its bytes in an array one longer *)
+#pub fun index_image_name0 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name0 (image) =
+  case+ image of
+  | IndexImage(_, _, _, s_array, s_len, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name1 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name1 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, s_array, s_len, _, _, _, _, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name2 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name2 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, s_array, s_len, _, _, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name3 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name3 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, _, _, s_array, s_len, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name4 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name4 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, _, _, _, _, s_array, s_len, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name5 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name5 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, _, _, _, _, _, _, s_array, s_len, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name6 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name6 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, s_array, s_len, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun index_image_name7 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement index_image_name7 (image) =
+  case+ image of
+  | IndexImage(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, s_array, s_len) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
 #pub fun index_image_free (image: index_image): void
 
 implement index_image_free (image) =

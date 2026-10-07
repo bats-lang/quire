@@ -50,11 +50,11 @@ implement index_of_vals {vals}{kv} (vals) =
 
 (* what reading a stored index comes to *)
 #pub datasort indexres =
-  | br_ok of (indexx, int, int, extras)
-  | br_loss of (indexx, int, int, extras, lost)
-  | br_notquire of ()
-  | br_newer of ()
-  | br_damaged of ()
+  | ir_ok of (indexx, int, int, extras)
+  | ir_loss of (indexx, int, int, extras, lost)
+  | ir_notquire of ()
+  | ir_newer of ()
+  | ir_damaged of ()
 
 (* INDEXENC(x, ver, minver, e, bs): bs is the index x, written in the format ver,
    readable from minver, with the chunks e kept *)
@@ -65,12 +65,12 @@ implement index_of_vals {vals}{kv} (vals) =
 (* INDEXDEC(bs, res): reading bs as a index comes to res *)
 #pub dataprop INDEXDEC(bytes, indexres) =
   | {x:indexx}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    INDEXDEC_ok(bs, br_ok(x, ver, minver, e)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
+    INDEXDEC_ok(bs, ir_ok(x, ver, minver, e)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
   | {x:indexx}{ver,minver:int}{e:extras}{t:lost}{vals:gvals}{bs:bytes}
-    INDEXDEC_loss(bs, br_loss(x, ver, minver, e, t)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
-  | {bs:bytes} INDEXDEC_notquire(bs, br_notquire()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_notquire())
-  | {bs:bytes} INDEXDEC_newer(bs, br_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_newer())
-  | {bs:bytes} INDEXDEC_damaged(bs, br_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_damaged())
+    INDEXDEC_loss(bs, ir_loss(x, ver, minver, e, t)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
+  | {bs:bytes} INDEXDEC_notquire(bs, ir_notquire()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_notquire())
+  | {bs:bytes} INDEXDEC_newer(bs, ir_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_newer())
+  | {bs:bytes} INDEXDEC_damaged(bs, ir_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_damaged())
 
 (* a index record at run time: its format version, the least version that reads it, the index,
    and the chunks kept *)
@@ -79,16 +79,16 @@ implement index_of_vals {vals}{kv} (vals) =
     IndexRecord(x, ver, minver, e) of (int ver, int minver, indexv(x), extrasv(e, ke))
 
 #pub datavtype indexread(indexres) =
-  | {x:indexx}{ver,minver:int}{e:extras} BR_ok(br_ok(x, ver, minver, e)) of indexrecord(x, ver, minver, e)
-  | {x:indexx}{ver,minver:int}{e:extras}{t:lost}{kl:nat} BR_loss(br_loss(x, ver, minver, e, t)) of (indexrecord(x, ver, minver, e), lostv(t, kl))
-  | BR_notquire(br_notquire())
-  | BR_newer(br_newer())
-  | BR_damaged(br_damaged())
+  | {x:indexx}{ver,minver:int}{e:extras} IR_ok(ir_ok(x, ver, minver, e)) of indexrecord(x, ver, minver, e)
+  | {x:indexx}{ver,minver:int}{e:extras}{t:lost}{kl:nat} IR_loss(ir_loss(x, ver, minver, e, t)) of (indexrecord(x, ver, minver, e), lostv(t, kl))
+  | IR_notquire(ir_notquire())
+  | IR_newer(ir_newer())
+  | IR_damaged(ir_damaged())
 
-#pub fun index_write {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e))
+#pub fun index_record_write {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e))
   : [bs:bytes][m:nat] (INDEXENC(x, ver, minver, e, bs) | blist(bs, m))
 
-implement index_write {x}{ver,minver}{e} (record) =
+implement index_record_write {x}{ver,minver}{e} (record) =
   case+ record of
   | IndexRecord(ver, minver, index, extras) => let
       val specs = index_specs()
@@ -98,9 +98,9 @@ implement index_write {x}{ver,minver}{e} (record) =
       val () = specsv_free(specs)
     in (INDEXENC_mk(fields, written) | out) end
 
-#pub fun index_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:indexres] (INDEXDEC(bs, res) | indexread(res))
+#pub fun index_record_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:indexres] (INDEXDEC(bs, res) | indexread(res))
 
-implement index_read {bs}{n} (list) = let
+implement index_record_read {bs}{n} (list) = let
   val specs = index_specs()
   val (read | out) = record_read(specs, 2, list)
   val () = specsv_free(specs)
@@ -108,13 +108,13 @@ in
   case+ out of
   | ~RR_ok(ver, minver, vals, extras) => let
       val (fields | index) = index_of_vals(vals)
-    in (INDEXDEC_ok(fields, read) | BR_ok(IndexRecord(ver, minver, index, extras))) end
+    in (INDEXDEC_ok(fields, read) | IR_ok(IndexRecord(ver, minver, index, extras))) end
   | ~RR_loss(ver, minver, vals, extras, lost) => let
       val (fields | index) = index_of_vals(vals)
-    in (INDEXDEC_loss(fields, read) | BR_loss(IndexRecord(ver, minver, index, extras), lost)) end
-  | ~RR_notquire() => (INDEXDEC_notquire(read) | BR_notquire())
-  | ~RR_newer() => (INDEXDEC_newer(read) | BR_newer())
-  | ~RR_damaged() => (INDEXDEC_damaged(read) | BR_damaged())
+    in (INDEXDEC_loss(fields, read) | IR_loss(IndexRecord(ver, minver, index, extras), lost)) end
+  | ~RR_notquire() => (INDEXDEC_notquire(read) | IR_notquire())
+  | ~RR_newer() => (INDEXDEC_newer(read) | IR_newer())
+  | ~RR_damaged() => (INDEXDEC_damaged(read) | IR_damaged())
 end
 
 end

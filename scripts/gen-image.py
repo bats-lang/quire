@@ -48,6 +48,23 @@ in
   if a_len = b_len then go(a, b, a_len, 0) else false
 end
 """)
+numbers_fields = ", ".join(f"{n} = Int" for n in ints)
+w(f"(* The numbers of a stored {P}, by name *)\n#pub typedef {P}_numbers = @{{{numbers_fields}}}\n")
+strs_decl = ", ".join(f"{n}: $A.arr(byte, {n}_loc, {n}_len + 1), {n}_len: int {n}_len" for n in strs)
+w(f"(* An image of numbers and strings (each in an array one longer than the string, which it takes) *)")
+w(f"#pub fun {P}_image_make {{{quant_loc}:agz}}{{{quant_len}:nat | {lencon}}}\n  (numbers: {P}_numbers, {strs_decl}): {P}_image\n")
+make_args = ", ".join(f"numbers.{n}" if k == "i" else f"{n}, {n}_len" for n, k in fields)
+w(f"implement {P}_image_make (numbers, {', '.join(n + ', ' + n + '_len' for n in strs)}) = {C}Image({make_args})\n")
+w(f"(* The numbers of an image *)\n#pub fun {P}_image_numbers (image: !{P}_image): {P}_numbers\n")
+pat_all = ", ".join(n if k == "i" else f"_, _" for n, k in fields)
+num_rec = ", ".join(f"{n} = {n}" for n in ints)
+w(f"implement {P}_image_numbers (image) =\n  case+ image of\n  | {C}Image({pat_all}) => @{{{num_rec}}}\n")
+w(f"(* A string of an image: its length, and a copy of its bytes in an array one longer *)")
+for n in strs:
+    w(f"#pub fun {P}_image_{n} (image: !{P}_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)\n")
+    pat_one = ", ".join((f"{m}_loc, {m}_len" if m == n else "_, _") if kk == "s" else "_" for m, kk in fields)
+    pat_one = ", ".join((f"s_array, s_len" if m == n else "_, _") if kk == "s" else "_" for m, kk in fields)
+    w(f"implement {P}_image_{n} (image) =\n  case+ image of\n  | {C}Image({pat_one}) => let\n      val copy = _copy_array(s_array, s_len)\n    in @(copy, s_len) end\n")
 # free
 pat_args = ", ".join(f"~{n}" if False else (n if k == "i" else f"{n}, {n}_len") for n, k in fields)
 w(f"#pub fun {P}_image_free (image: {P}_image): void\n")

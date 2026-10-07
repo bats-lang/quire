@@ -127,11 +127,11 @@ w("  | " + gpat + " => (@U@V_mk() | @C@V(" + ", ".join(n for n,_ in fields) + ")
 w("""
 (* what reading a stored @p@ comes to *)
 #pub datasort @p@res =
-  | br_ok of (@p@x, int, int, extras)
-  | br_loss of (@p@x, int, int, extras, lost)
-  | br_notquire of ()
-  | br_newer of ()
-  | br_damaged of ()
+  | @ql@_ok of (@p@x, int, int, extras)
+  | @ql@_loss of (@p@x, int, int, extras, lost)
+  | @ql@_notquire of ()
+  | @ql@_newer of ()
+  | @ql@_damaged of ()
 
 (* @U@ENC(x, ver, minver, e, bs): bs is the @p@ x, written in the format ver,
    readable from minver, with the chunks e kept *)
@@ -142,12 +142,12 @@ w("""
 (* @U@DEC(bs, res): reading bs as a @p@ comes to res *)
 #pub dataprop @U@DEC(bytes, @p@res) =
   | {x:@p@x}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    @U@DEC_ok(bs, br_ok(x, ver, minver, e)) of (@U@V(x, vals), DECODES(@U@_SPECS, @U@_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
+    @U@DEC_ok(bs, @ql@_ok(x, ver, minver, e)) of (@U@V(x, vals), DECODES(@U@_SPECS, @U@_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
   | {x:@p@x}{ver,minver:int}{e:extras}{t:lost}{vals:gvals}{bs:bytes}
-    @U@DEC_loss(bs, br_loss(x, ver, minver, e, t)) of (@U@V(x, vals), DECODES(@U@_SPECS, @U@_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
-  | {bs:bytes} @U@DEC_notquire(bs, br_notquire()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_notquire())
-  | {bs:bytes} @U@DEC_newer(bs, br_newer()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_newer())
-  | {bs:bytes} @U@DEC_damaged(bs, br_damaged()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_damaged())
+    @U@DEC_loss(bs, @ql@_loss(x, ver, minver, e, t)) of (@U@V(x, vals), DECODES(@U@_SPECS, @U@_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
+  | {bs:bytes} @U@DEC_notquire(bs, @ql@_notquire()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_notquire())
+  | {bs:bytes} @U@DEC_newer(bs, @ql@_newer()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_newer())
+  | {bs:bytes} @U@DEC_damaged(bs, @ql@_damaged()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_damaged())
 
 (* a @p@ record at run time: its format version, the least version that reads it, the @p@,
    and the chunks kept *)
@@ -156,16 +156,16 @@ w("""
     @C@Record(x, ver, minver, e) of (int ver, int minver, @p@v(x), extrasv(e, ke))
 
 #pub datavtype @p@read(@p@res) =
-  | {x:@p@x}{ver,minver:int}{e:extras} BR_ok(br_ok(x, ver, minver, e)) of @p@record(x, ver, minver, e)
-  | {x:@p@x}{ver,minver:int}{e:extras}{t:lost}{kl:nat} BR_loss(br_loss(x, ver, minver, e, t)) of (@p@record(x, ver, minver, e), lostv(t, kl))
-  | BR_notquire(br_notquire())
-  | BR_newer(br_newer())
-  | BR_damaged(br_damaged())
+  | {x:@p@x}{ver,minver:int}{e:extras} @QU@_ok(@ql@_ok(x, ver, minver, e)) of @p@record(x, ver, minver, e)
+  | {x:@p@x}{ver,minver:int}{e:extras}{t:lost}{kl:nat} @QU@_loss(@ql@_loss(x, ver, minver, e, t)) of (@p@record(x, ver, minver, e), lostv(t, kl))
+  | @QU@_notquire(@ql@_notquire())
+  | @QU@_newer(@ql@_newer())
+  | @QU@_damaged(@ql@_damaged())
 
-#pub fun @p@_write {x:@p@x}{ver,minver:int}{e:extras} (record: !@p@record(x, ver, minver, e))
+#pub fun @p@_record_write {x:@p@x}{ver,minver:int}{e:extras} (record: !@p@record(x, ver, minver, e))
   : [bs:bytes][m:nat] (@U@ENC(x, ver, minver, e, bs) | blist(bs, m))
 
-implement @p@_write {x}{ver,minver}{e} (record) =
+implement @p@_record_write {x}{ver,minver}{e} (record) =
   case+ record of
   | @C@Record(ver, minver, @p@, extras) => let
       val specs = @p@_specs()
@@ -175,9 +175,9 @@ implement @p@_write {x}{ver,minver}{e} (record) =
       val () = specsv_free(specs)
     in (@U@ENC_mk(fields, written) | out) end
 
-#pub fun @p@_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:@p@res] (@U@DEC(bs, res) | @p@read(res))
+#pub fun @p@_record_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:@p@res] (@U@DEC(bs, res) | @p@read(res))
 
-implement @p@_read {bs}{n} (list) = let
+implement @p@_record_read {bs}{n} (list) = let
   val specs = @p@_specs()
   val (read | out) = record_read(specs, @K@, list)
   val () = specsv_free(specs)
@@ -185,16 +185,17 @@ in
   case+ out of
   | ~RR_ok(ver, minver, vals, extras) => let
       val (fields | @p@) = @p@_of_vals(vals)
-    in (@U@DEC_ok(fields, read) | BR_ok(@C@Record(ver, minver, @p@, extras))) end
+    in (@U@DEC_ok(fields, read) | @QU@_ok(@C@Record(ver, minver, @p@, extras))) end
   | ~RR_loss(ver, minver, vals, extras, lost) => let
       val (fields | @p@) = @p@_of_vals(vals)
-    in (@U@DEC_loss(fields, read) | BR_loss(@C@Record(ver, minver, @p@, extras), lost)) end
-  | ~RR_notquire() => (@U@DEC_notquire(read) | BR_notquire())
-  | ~RR_newer() => (@U@DEC_newer(read) | BR_newer())
-  | ~RR_damaged() => (@U@DEC_damaged(read) | BR_damaged())
+    in (@U@DEC_loss(fields, read) | @QU@_loss(@C@Record(ver, minver, @p@, extras), lost)) end
+  | ~RR_notquire() => (@U@DEC_notquire(read) | @QU@_notquire())
+  | ~RR_newer() => (@U@DEC_newer(read) | @QU@_newer())
+  | ~RR_damaged() => (@U@DEC_damaged(read) | @QU@_damaged())
 end
 """)
 w("end")
 text = "\n".join(o) + "\n"
-text = text.replace("@K@", str(KIND)).replace("@U@", U).replace("@C@", C).replace("@p@", P)
+QU = "BR" if NAME == "book" else "IR"
+text = text.replace("@QU@", QU).replace("@ql@", QU.lower()).replace("@K@", str(KIND)).replace("@U@", U).replace("@C@", C).replace("@p@", P)
 open(f"src/{P}rec.bats", "w").write(text)

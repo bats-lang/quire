@@ -40,4 +40,20 @@ implement blist_to_array {bs}{n} (list) = let
   val () = fill(array, list, 0)
 in array end
 
+
+(* The bytes of a list in an array exactly as long as the list *)
+#pub fun blist_to_buffer {bs:bytes}{n:pos | n <= 1048576} (list: !blist(bs, n), count: int n): [l:agz] $A.arr(byte, l, n)
+
+implement blist_to_buffer {bs}{n} (list, count) = let
+  val array = $A.alloc<byte>(count)
+  fun fill {l:agz}{bs:bytes}{k,j:nat | j + k <= n} .<k>.
+    (array: !$A.arr(byte, l, n), list: !blist(bs, k), j: int j): void =
+    case+ list of
+    | blist_nil() => ()
+    | blist_cons(b, rest) => let
+        val () = $A.set<byte>(array, j, $A.int2byte(b))
+      in fill(array, rest, j + 1) end
+  val () = fill(array, list, 0)
+in array end
+
 end

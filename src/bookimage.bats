@@ -40,6 +40,47 @@ in
   if a_len = b_len then go(a, b, a_len, 0) else false
 end
 
+(* The numbers of a stored book, by name *)
+#pub typedef book_numbers = @{id_high = Int, id_low = Int, collections = Int, collections_modified = Int, minutes_elsewhere = Int, pages_elsewhere = Int, finished_at = Int, finished_modified = Int, chapter = Int, chapters = Int, page = Int, pages = Int, anchor = Int, place_modified = Int, place_declined = Int, series_number = Int, shelf = Int, added = Int, opened = Int, shelf_modified = Int, file_size = Int, cover = Int, done = Int, minutes_read = Int, pages_read = Int}
+
+(* An image of numbers and strings (each in an array one longer than the string, which it takes) *)
+#pub fun book_image_make {author_loc,series_loc,title_loc:agz}{author_len,series_len,title_len:nat | author_len < 256; series_len < 256; title_len < 256}
+  (numbers: book_numbers, author: $A.arr(byte, author_loc, author_len + 1), author_len: int author_len, series: $A.arr(byte, series_loc, series_len + 1), series_len: int series_len, title: $A.arr(byte, title_loc, title_len + 1), title_len: int title_len): book_image
+
+implement book_image_make (numbers, author, author_len, series, series_len, title, title_len) = BookImage(author, author_len, numbers.id_high, numbers.id_low, numbers.collections, numbers.collections_modified, numbers.minutes_elsewhere, numbers.pages_elsewhere, numbers.finished_at, numbers.finished_modified, numbers.chapter, numbers.chapters, numbers.page, numbers.pages, numbers.anchor, numbers.place_modified, numbers.place_declined, series, series_len, numbers.series_number, numbers.shelf, numbers.added, numbers.opened, numbers.shelf_modified, numbers.file_size, numbers.cover, numbers.done, numbers.minutes_read, numbers.pages_read, title, title_len)
+
+(* The numbers of an image *)
+#pub fun book_image_numbers (image: !book_image): book_numbers
+
+implement book_image_numbers (image) =
+  case+ image of
+  | BookImage(_, _, id_high, id_low, collections, collections_modified, minutes_elsewhere, pages_elsewhere, finished_at, finished_modified, chapter, chapters, page, pages, anchor, place_modified, place_declined, _, _, series_number, shelf, added, opened, shelf_modified, file_size, cover, done, minutes_read, pages_read, _, _) => @{id_high = id_high, id_low = id_low, collections = collections, collections_modified = collections_modified, minutes_elsewhere = minutes_elsewhere, pages_elsewhere = pages_elsewhere, finished_at = finished_at, finished_modified = finished_modified, chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor, place_modified = place_modified, place_declined = place_declined, series_number = series_number, shelf = shelf, added = added, opened = opened, shelf_modified = shelf_modified, file_size = file_size, cover = cover, done = done, minutes_read = minutes_read, pages_read = pages_read}
+
+(* A string of an image: its length, and a copy of its bytes in an array one longer *)
+#pub fun book_image_author (image: !book_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement book_image_author (image) =
+  case+ image of
+  | BookImage(s_array, s_len, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun book_image_series (image: !book_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement book_image_series (image) =
+  case+ image of
+  | BookImage(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, s_array, s_len, _, _, _, _, _, _, _, _, _, _, _, _) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
+#pub fun book_image_title (image: !book_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+
+implement book_image_title (image) =
+  case+ image of
+  | BookImage(_, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, s_array, s_len) => let
+      val copy = _copy_array(s_array, s_len)
+    in @(copy, s_len) end
+
 #pub fun book_image_free (image: book_image): void
 
 implement book_image_free (image) =
