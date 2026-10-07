@@ -45,6 +45,30 @@ async function openSync(page) {
   await expect(panel(page)).toBeVisible();
 }
 
+/** Whether a token is kept on the device ("sync-google-token"), once
+    every write the app has started has reached IndexedDB */
+async function tokenKept(page) {
+  return page.evaluate(async () => {
+    if (!(await indexedDB.databases()).some(d => d.name === 'bats')) return false;
+    return new Promise((resolve, reject) => {
+      const opened = indexedDB.open('bats');
+      opened.onerror = () => reject(opened.error);
+      opened.onsuccess = () => {
+        const db = opened.result;
+        if (!db.objectStoreNames.contains('kv')) { db.close(); resolve(false); return; }
+        // a read-write transaction completes after every earlier one
+        const flush = db.transaction('kv', 'readwrite');
+        flush.oncomplete = () => {
+          const read = db.transaction('kv').objectStore('kv').get('sync-google-token');
+          read.onsuccess = () => { db.close(); resolve(read.result !== undefined); };
+          read.onerror = () => { db.close(); reject(read.error); };
+        };
+        flush.onerror = () => { db.close(); reject(flush.error); };
+      };
+    });
+  });
+}
+
 const book = { title: 'Hanging', author: 'Sync Tests', chapters: 2, rawChapters: chapters(2) };
 const WAITING = "Waiting for Google's consent screen. Finish it there, or stop waiting.";
 const NO_ANSWER = "Google didn't answer. Check the connection, then try again.";
@@ -106,6 +130,8 @@ test('a consent screen that never answers is said, and Stop waiting ends it; an 
   await expect(status(a.page)).toHaveText('Google sign-in was canceled.');
   await expect(banner(a.page)).toBeHidden();
   expect(server.requests).toEqual([]);
+  // nothing kept from it: no token, so what the reader was told stays true
+  expect(await tokenKept(a.page)).toBe(false);
   await a.page.keyboard.press('Escape');
   await expect(row(a.page)).toHaveText('Off');
   await settingsButton(a.page, 'Sync ›').click();
@@ -131,6 +157,8 @@ test('a consent screen answered while it is awaited ends the wait', async ({ bro
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   await expect(stop(a.page)).toBeHidden();
   await expect(syncNow(a.page)).toBeVisible();
+  // answered in time, its token is kept
+  expect(await tokenKept(a.page)).toBe(true);
   expect(a.errors).toEqual([]);
   await a.context.close();
 });
@@ -156,10 +184,12 @@ test('a call that shows nothing and never answers is ended after 30 s and said',
   // not a sync the reader started: the status line says it, no banner
   await expect(banner(a.page)).toBeHidden();
 
-  // its answer, late, is dropped
-  a.google.held.shift()({ authorization: null });
+  // its answer, late, is dropped, and no token is kept from it
+  expect(await tokenKept(a.page)).toBe(false);
+  a.google.held.shift()({ authorization: { ...GRANTED.authorization, accessToken: 'token-2' } });
   await a.page.clock.fastForward('00:05');
   await expect(status(a.page)).toContainText(NO_ANSWER);
+  expect(await tokenKept(a.page)).toBe(false);
 
   // Sync now asks again, and a sync the reader started says it in the banner
   a.google.outcomes.authorizeScopes = [{ hold: true }];

@@ -1901,11 +1901,13 @@ in GoogleUnexpected() end
    that shows nothing (authorizationForScopes, clearAuthorizationToken)
    is answered, at the latest, by a timer: GOOGLE_ANSWER_MS, and said
    as GoogleNoAnswer. Play services documents no timeout for these
-   calls, so the 30 s is chosen here: OkHttp, the usual Android HTTP
-   client, ends a request whose connect, read and write each take over
-   its default 10 s, and Nielsen's 10 s is about the limit of a
-   reader's attention, past which they need to know the app is still
-   working (a sync says "Syncing..." meanwhile). The consent screen
+   calls, so the 30 s is chosen from what comparable software does:
+   OkHttp ends a request at 10 s each for connect, read and write,
+   Firebase Auth's 3 minutes is called too long, Flutter developers
+   who bound a hanging signIn() use about 30 s, and Nielsen's 10 s is
+   about the limit of a reader's attention (a sync says "Syncing..."
+   meanwhile). An answer after the call ended keeps nothing
+   (_authorization_late). The consent screen
    (authorizeScopes) is the reader's to take as long as they like, so no
    timer ends it: while it is pending the status card says so and has
    Stop waiting (sync_stop). Each call's outcome is the promise of a
@@ -1914,6 +1916,25 @@ in GoogleUnexpected() end
    resolves it, and whatever comes after finds another number and is
    dropped *)
 #define GOOGLE_ANSWER_MS 30000
+
+(* An answer that came after its call ended (the timer, or Stop waiting):
+   nothing is kept from it, no token and no sign-in, so what the reader
+   was told (that Google did not answer, or that they stopped waiting)
+   stays true. One that is unexpected is still said, as every outcome is *)
+fn _authorization_late {w:$GA.asking} (answer: $GA.google_authorization(w)): void =
+  case+ answer of
+  | ~$GA.Authorized(token, granted, account, said) => let
+      val () = $GA.google_text_free(token)
+      val () = $GA.google_granted_free(granted)
+      val () = $GA.google_said_free(said)
+    in (case+ account of ~$R.some(named) => $GA.google_text_free(named) | ~$R.none() => ()) end
+  | ~$GA.NotAuthorized(said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeCanceled(said) => $GA.google_said_free(said)
+  | ~$GA.ConsentShowing(said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeRefused(_, said) => $GA.google_said_free(said)
+  | ~$GA.AuthorizeUnavailable(said) => _said_free(said)
+  | ~$GA.AuthorizeUnexpected(unexpected) =>
+    _unexpected_said("a call to Google that had ended", "a late answer", unexpected)
 
 datavtype answer_wait =
   | NoAnswerWait of ()
@@ -1987,7 +2008,8 @@ fn _google_silently (): $P.promise(token_access, $P.Chained) =
   val @(outcome, resolver) = $P.create<token_access>()
   val number = _wait_begin(_silent_wait, _silent_number, resolver)
   val () = $P.finish<$GA.google_authorization($GA.Silently)>(pending, llam(answer) =>
-    _wait_settle(_silent_wait, _silent_number, number, _silent_access(answer)))
+    if number <> !_silent_number then _authorization_late(answer)
+    else _wait_settle(_silent_wait, _silent_number, number, _silent_access(answer)))
   val () = $P.finish<Int>($P.vow($TM.timer_set(GOOGLE_ANSWER_MS)), llam(_) =>
     _wait_settle(_silent_wait, _silent_number, number, AccessFailed(GoogleNoAnswer())))
 in $P.vow(outcome) end
@@ -3811,7 +3833,8 @@ fn _authorized_ask (): $P.promise(asked, $P.Chained) =
     val @(outcome, resolver) = $P.create<asked>()
     val number = _consent_begin(resolver)
     val () = $P.finish<$GA.google_authorization($GA.MayAsk)>(pending, llam(answer) =>
-      $P.finish<asked>(_consent_answer(answer), llam(done) => _consent_settle(number, done)))
+      if number <> !_consent_number then _authorization_late(answer)
+      else $P.finish<asked>(_consent_answer(answer), llam(done) => _consent_settle(number, done)))
   in $P.vow(outcome) end
 
 (* In a browser: a token for drive.appdata from Google Identity
