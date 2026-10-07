@@ -1,0 +1,293 @@
+{
+ "the empty library": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": []
+ },
+ "the library": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": []
+ },
+ "the book menu": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": []
+ },
+ "the collections panel": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "collections-box: 30% of the height, 23% of the width"
+  ]
+ },
+ "the new collection dialog": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "collections-box: 30% of the height, 23% of the width",
+   "dialog-box: 25% of the height, 26% of the width"
+  ]
+ },
+ "book info": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Book info: 100% of the height, 100% of the width"
+  ]
+ },
+ "the library menu": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": []
+ },
+ "Reading statistics": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "stats-box: 50% of the height, 31% of the width"
+  ]
+ },
+ "Catalogues": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "catalogues-box: 47% of the height, 26% of the width"
+  ]
+ },
+ "About Quire": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "about-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "a catalogue's page": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "catalogue-panel: 100% of the height, 41% of the width"
+  ]
+ },
+ "Settings": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "Sync ›": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "sync-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "Sync, Fastmail's step": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "sync-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "Sync, Nextcloud's step": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "sync-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "Sync, WebDAV's step": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "sync-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "Dictionaries ›": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "dictionaries-box: 42% of the height, 31% of the width"
+  ]
+ },
+ "About Quire ›": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "settings-screen: 100% of the height, 100% of the width",
+   "about-screen: 100% of the height, 100% of the width"
+  ]
+ },
+ "the Undo toast": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": []
+ },
+ "the Empty the Trash dialog": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "dialog-box: 25% of the height, 46% of the width"
+  ]
+ },
+ "the reader with its bars": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width"
+  ]
+ },
+ "Contents": {
+  "text": [],
+  "state": [
+   "\"Contents\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Contents: 100% of the height, 41% of the width"
+  ]
+ },
+ "Annotations": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Annotations: 100% of the height, 41% of the width"
+  ]
+ },
+ "Reading settings, Look": {
+  "text": [],
+  "state": [
+   "\"Look\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [
+   "On: 50% shown at the edge of typography-panel",
+   "Off: 50% shown at the edge of typography-panel",
+   "Word spacing: 58% shown, the rest covered or cut"
+  ],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Reading settings: 87% of the height, 54% of the width"
+  ]
+ },
+ "Reading settings, Page": {
+  "text": [],
+  "state": [
+   "\"Page\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [
+   "Full screen: 8% shown, the rest covered or cut",
+   "Lock rotation: 17% shown, the rest covered or cut"
+  ],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Reading settings: 87% of the height, 54% of the width"
+  ]
+ },
+ "Reading settings, Turning": {
+  "text": [],
+  "state": [
+   "\"Turning\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Reading settings: 87% of the height, 54% of the width"
+  ]
+ },
+ "Reading settings, Read aloud": {
+  "text": [],
+  "state": [
+   "\"Read aloud\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Reading settings: 87% of the height, 54% of the width"
+  ]
+ },
+ "Reading settings, Page, its switches on": {
+  "text": [],
+  "state": [
+   "\"Page\": chosen look 1.36:1 against its row, nothing else sets it apart"
+  ],
+  "cut": [
+   "Margins: 58% shown, the rest covered or cut",
+   "Brightness while reading: 67% shown, the rest covered or cut"
+  ],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Reading settings: 87% of the height, 54% of the width"
+  ]
+ },
+ "Search in book": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Page controls: 17% of the height, 100% of the width",
+   "Search in book: 100% of the height, 41% of the width"
+  ]
+ },
+ "a footnote": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Footnote: 15% of the height, 54% of the width"
+  ]
+ },
+ "the picture viewer": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Image: 100% of the height, 100% of the width"
+  ]
+ },
+ "the selection's toolbar": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Selection: 8% of the height, 74% of the width"
+  ]
+ },
+ "a word looked up": {
+  "text": [],
+  "state": [],
+  "cut": [],
+  "panels": [
+   "Dictionary: 23% of the height, 54% of the width"
+  ]
+ }
+}
