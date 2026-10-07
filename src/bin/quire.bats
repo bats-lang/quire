@@ -1535,7 +1535,9 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(SyncRowNextcloud()) => sync_step_open(ServiceNextcloud())
         | ~$R.some(SyncRowWebDav()) => sync_step_open(ServiceWebDav())
         | ~$R.some(SyncWebDav()) => sync_webdav()
-        | ~$R.some(SyncStepCancel()) => sync_step_cancel())
+        | ~$R.some(SyncStepCancel()) => sync_step_cancel()
+        (* the consent screen no longer awaited (#340) *)
+        | ~$R.some(SyncStop()) => sync_stop())
     in 0 end)
   val listeners = RCons(listeners, OnEl("sync-offer"), "click", llam(h) => let
       val clicked = _target(h)

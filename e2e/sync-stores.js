@@ -245,7 +245,7 @@ function capacitor() {
     'cancel' is the reader backing out of the consent screen, 'fail'
     rejects it with failure (a CommonStatusCodes name) */
 function googleAccount({ token, mode }) {
-  const google = { token, mode, failure: 'DEVELOPER_ERROR', granted: false, cached: null, account: 'reader@example.com', calls: [], outcomes: {} };
+  const google = { token, mode, failure: 'DEVELOPER_ERROR', granted: false, cached: null, account: 'reader@example.com', calls: [], outcomes: {}, held: [] };
   const authorization = scopes => {
     if (!google.cached) google.cached = google.token;
     return { accessToken: google.cached, grantedScopes: scopes, account: google.account };
@@ -253,7 +253,14 @@ function googleAccount({ token, mode }) {
   google.answer = (method, options) => {
     google.calls.push({ method, options });
     const queued = google.outcomes[method];
-    if (queued && queued.length) return queued.shift();
+    if (queued && queued.length) {
+      const next = queued.shift();
+      // a call the plugin never settles, or settles when the test says
+      // (google.held, each a function that settles one call with its
+      // argument: a plugin answer, as any other outcome is)
+      if (next && next.hold) return new Promise(settle => google.held.push(settle));
+      return next;
+    }
     if (method === 'authorizationForScopes') return { authorization: google.granted ? authorization(options.scopes) : null };
     if (method === 'authorizeScopes') {
       if (google.mode === 'cancel') return { error: 'CANCELED' };
