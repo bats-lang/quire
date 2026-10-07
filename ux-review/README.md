@@ -12,3 +12,5 @@ Screenshots and measurements of Quire's screens for the UX review on issue #293.
   share of the window each panel takes. Writes `shots/measures-<project>-<theme>.json`.
 * A CJK font must be installed for the vertical (Japanese) book: without one the kanji fall back to a font with no
   vertical metrics and overlap. (Noto Sans JP, as a file in `~/.fonts`, with fontconfig preferring it for `ja`.)
+
+* `fetch-rendered.mjs <name> <url> [wait-ms]`: renders a script-built page in Chromium and writes its text to `<name>.txt` (used to read m3.material.io, Amazon and Kobo help).
