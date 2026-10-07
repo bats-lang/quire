@@ -25,27 +25,27 @@ implement index_specs () = SPV_cons(TAGNOT_mk() | blist_cons(76, blist_cons(69, 
 
 (* INDEXV(x, vals): the values of the groups are the fields of the index x *)
 #pub dataprop INDEXV(indexx, gvals) =
-  | {legacy_crc_high,legacy_crc_low,name_count:int}{name0,name1,name2,name3,name4,name5,name6,name7:bytes}
-    INDEXV_mk(indexx_mk(legacy_crc_high, legacy_crc_low, name_count, name0, name1, name2, name3, name4, name5, name6, name7), gv_cons(fv_i32(legacy_crc_high, fv_i32(legacy_crc_low, fv_nil())), gv_cons(fv_i32(name_count, fv_str(name0, fv_str(name1, fv_str(name2, fv_str(name3, fv_str(name4, fv_str(name5, fv_str(name6, fv_str(name7, fv_nil()))))))))), gv_nil())))
+  | {legacy_size,legacy_sum,name_count:int}{name0,name1,name2,name3,name4,name5,name6,name7:bytes}
+    INDEXV_mk(indexx_mk(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7), gv_cons(fv_i32(legacy_size, fv_i32(legacy_sum, fv_nil())), gv_cons(fv_i32(name_count, fv_str(name0, fv_str(name1, fv_str(name2, fv_str(name3, fv_str(name4, fv_str(name5, fv_str(name6, fv_str(name7, fv_nil()))))))))), gv_nil())))
 
 #pub datavtype indexv(indexx) =
-  | {legacy_crc_high,legacy_crc_low,name_count:int}{name0,name1,name2,name3,name4,name5,name6,name7:bytes}{name0_len,name1_len,name2_len,name3_len,name4_len,name5_len,name6_len,name7_len:nat | name0_len < 256; name1_len < 256; name2_len < 256; name3_len < 256; name4_len < 256; name5_len < 256; name6_len < 256; name7_len < 256}
-    IndexV(indexx_mk(legacy_crc_high, legacy_crc_low, name_count, name0, name1, name2, name3, name4, name5, name6, name7)) of (int32v(legacy_crc_high), int32v(legacy_crc_low), int32v(name_count), blist(name0, name0_len), blist(name1, name1_len), blist(name2, name2_len), blist(name3, name3_len), blist(name4, name4_len), blist(name5, name5_len), blist(name6, name6_len), blist(name7, name7_len))
+  | {legacy_size,legacy_sum,name_count:int}{name0,name1,name2,name3,name4,name5,name6,name7:bytes}{name0_len,name1_len,name2_len,name3_len,name4_len,name5_len,name6_len,name7_len:nat | name0_len < 256; name1_len < 256; name2_len < 256; name3_len < 256; name4_len < 256; name5_len < 256; name6_len < 256; name7_len < 256}
+    IndexV(indexx_mk(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7)) of (int32v(legacy_size), int32v(legacy_sum), int32v(name_count), blist(name0, name0_len), blist(name1, name1_len), blist(name2, name2_len), blist(name3, name3_len), blist(name4, name4_len), blist(name5, name5_len), blist(name6, name6_len), blist(name7, name7_len))
 
 (* The record as the values of its groups, with the proof that they are its fields *)
 #pub fun index_to_vals {x:indexx} (index: !indexv(x)): [vals:gvals] (INDEXV(x, vals) | gvalsv(INDEX_SPECS, vals, 2))
 
 implement index_to_vals {x} (index) =
   case+ index of
-  | IndexV(legacy_crc_high, legacy_crc_low, name_count, name0, name1, name2, name3, name4, name5, name6, name7) => (INDEXV_mk() | 
-    GVV_cons(FVV_i32(int32_copy(legacy_crc_high), FVV_i32(int32_copy(legacy_crc_low), FVV_nil())), GVV_cons(FVV_i32(int32_copy(name_count), FVV_str(blist_copy(name0), FVV_str(blist_copy(name1), FVV_str(blist_copy(name2), FVV_str(blist_copy(name3), FVV_str(blist_copy(name4), FVV_str(blist_copy(name5), FVV_str(blist_copy(name6), FVV_str(blist_copy(name7), FVV_nil()))))))))), GVV_nil())))
+  | IndexV(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7) => (INDEXV_mk() | 
+    GVV_cons(FVV_i32(int32_copy(legacy_size), FVV_i32(int32_copy(legacy_sum), FVV_nil())), GVV_cons(FVV_i32(int32_copy(name_count), FVV_str(blist_copy(name0), FVV_str(blist_copy(name1), FVV_str(blist_copy(name2), FVV_str(blist_copy(name3), FVV_str(blist_copy(name4), FVV_str(blist_copy(name5), FVV_str(blist_copy(name6), FVV_str(blist_copy(name7), FVV_nil()))))))))), GVV_nil())))
 
 (* The record made of the values of its groups, with the proof that they are its fields *)
 #pub fun index_of_vals {vals:gvals}{kv:nat} (vals: gvalsv(INDEX_SPECS, vals, kv)): [x:indexx] (INDEXV(x, vals) | indexv(x))
 
 implement index_of_vals {vals}{kv} (vals) =
   case+ vals of
-  | ~GVV_cons(~FVV_i32(legacy_crc_high, ~FVV_i32(legacy_crc_low, ~FVV_nil())), ~GVV_cons(~FVV_i32(name_count, ~FVV_str(name0, ~FVV_str(name1, ~FVV_str(name2, ~FVV_str(name3, ~FVV_str(name4, ~FVV_str(name5, ~FVV_str(name6, ~FVV_str(name7, ~FVV_nil()))))))))), ~GVV_nil())) => (INDEXV_mk() | IndexV(legacy_crc_high, legacy_crc_low, name_count, name0, name1, name2, name3, name4, name5, name6, name7))
+  | ~GVV_cons(~FVV_i32(legacy_size, ~FVV_i32(legacy_sum, ~FVV_nil())), ~GVV_cons(~FVV_i32(name_count, ~FVV_str(name0, ~FVV_str(name1, ~FVV_str(name2, ~FVV_str(name3, ~FVV_str(name4, ~FVV_str(name5, ~FVV_str(name6, ~FVV_str(name7, ~FVV_nil()))))))))), ~GVV_nil())) => (INDEXV_mk() | IndexV(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7))
 
 
 (* what reading a stored index comes to *)

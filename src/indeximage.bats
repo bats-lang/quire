@@ -41,20 +41,20 @@ in
 end
 
 (* The numbers of a stored index, by name *)
-#pub typedef index_numbers = @{legacy_crc_high = Int, legacy_crc_low = Int, name_count = Int}
+#pub typedef index_numbers = @{legacy_size = Int, legacy_sum = Int, name_count = Int}
 
 (* An image of numbers and strings (each in an array one longer than the string, which it takes) *)
 #pub fun index_image_make {name0_loc,name1_loc,name2_loc,name3_loc,name4_loc,name5_loc,name6_loc,name7_loc:agz}{name0_len,name1_len,name2_len,name3_len,name4_len,name5_len,name6_len,name7_len:nat | name0_len < 256; name1_len < 256; name2_len < 256; name3_len < 256; name4_len < 256; name5_len < 256; name6_len < 256; name7_len < 256}
   (numbers: index_numbers, name0: $A.arr(byte, name0_loc, name0_len + 1), name0_len: int name0_len, name1: $A.arr(byte, name1_loc, name1_len + 1), name1_len: int name1_len, name2: $A.arr(byte, name2_loc, name2_len + 1), name2_len: int name2_len, name3: $A.arr(byte, name3_loc, name3_len + 1), name3_len: int name3_len, name4: $A.arr(byte, name4_loc, name4_len + 1), name4_len: int name4_len, name5: $A.arr(byte, name5_loc, name5_len + 1), name5_len: int name5_len, name6: $A.arr(byte, name6_loc, name6_len + 1), name6_len: int name6_len, name7: $A.arr(byte, name7_loc, name7_len + 1), name7_len: int name7_len): index_image
 
-implement index_image_make (numbers, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) = IndexImage(numbers.legacy_crc_high, numbers.legacy_crc_low, numbers.name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len)
+implement index_image_make (numbers, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) = IndexImage(numbers.legacy_size, numbers.legacy_sum, numbers.name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len)
 
 (* The numbers of an image *)
 #pub fun index_image_numbers (image: !index_image): index_numbers
 
 implement index_image_numbers (image) =
   case+ image of
-  | IndexImage(legacy_crc_high, legacy_crc_low, name_count, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => @{legacy_crc_high = legacy_crc_high, legacy_crc_low = legacy_crc_low, name_count = name_count}
+  | IndexImage(legacy_size, legacy_sum, name_count, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _) => @{legacy_size = legacy_size, legacy_sum = legacy_sum, name_count = name_count}
 
 (* A string of an image: its length, and a copy of its bytes in an array one longer *)
 #pub fun index_image_name0 (image: !index_image): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
@@ -125,7 +125,7 @@ implement index_image_name7 (image) =
 
 implement index_image_free (image) =
   case+ image of
-  | ~IndexImage(legacy_crc_high, legacy_crc_low, name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) => let
+  | ~IndexImage(legacy_size, legacy_sum, name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) => let
       val () = $A.free<byte>(name0)
       val () = $A.free<byte>(name1)
       val () = $A.free<byte>(name2)
@@ -140,7 +140,7 @@ implement index_image_free (image) =
 
 implement index_image_copy (image) =
   case+ image of
-  | IndexImage(legacy_crc_high, legacy_crc_low, name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) => let
+  | IndexImage(legacy_size, legacy_sum, name_count, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) => let
       val copy_name0 = _copy_array(name0, name0_len)
       val copy_name1 = _copy_array(name1, name1_len)
       val copy_name2 = _copy_array(name2, name2_len)
@@ -149,7 +149,7 @@ implement index_image_copy (image) =
       val copy_name5 = _copy_array(name5, name5_len)
       val copy_name6 = _copy_array(name6, name6_len)
       val copy_name7 = _copy_array(name7, name7_len)
-    in IndexImage(legacy_crc_high, legacy_crc_low, name_count, copy_name0, name0_len, copy_name1, name1_len, copy_name2, name2_len, copy_name3, name3_len, copy_name4, name4_len, copy_name5, name5_len, copy_name6, name6_len, copy_name7, name7_len) end
+    in IndexImage(legacy_size, legacy_sum, name_count, copy_name0, name0_len, copy_name1, name1_len, copy_name2, name2_len, copy_name3, name3_len, copy_name4, name4_len, copy_name5, name5_len, copy_name6, name6_len, copy_name7, name7_len) end
 
 (* the bit of the group LEGA in a mask of groups *)
 #pub fn index_group_lega (): int
@@ -166,15 +166,20 @@ implement index_group_nams () = 2
 
 implement index_group_all () = 3
 
+(* The numbers of kept in the groups of keep_mask, and the others' of other *)
+#pub fun index_numbers_merge (kept: index_numbers, other: index_numbers, keep_mask: int): index_numbers
+
+implement index_numbers_merge (kept, other, keep_mask) = @{legacy_size = (if $AR.band_int_int(keep_mask, 1) <> 0 then kept.legacy_size else other.legacy_size), legacy_sum = (if $AR.band_int_int(keep_mask, 1) <> 0 then kept.legacy_sum else other.legacy_sum), name_count = (if $AR.band_int_int(keep_mask, 2) <> 0 then kept.name_count else other.name_count)}
+
 (* The groups whose fields differ in two images, as a mask *)
 #pub fun index_image_diff (first: !index_image, second: !index_image): int
 
 implement index_image_diff (first, second) =
   case+ first of
-  | IndexImage(a_legacy_crc_high, a_legacy_crc_low, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) =>
+  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) =>
     (case+ second of
-     | IndexImage(b_legacy_crc_high, b_legacy_crc_low, b_name_count, b_name0, b_name0_len, b_name1, b_name1_len, b_name2, b_name2_len, b_name3, b_name3_len, b_name4, b_name4_len, b_name5, b_name5_len, b_name6, b_name6_len, b_name7, b_name7_len) => let
-         val m_lega = (if (a_legacy_crc_high <> b_legacy_crc_high) || (a_legacy_crc_low <> b_legacy_crc_low) then 1 else 0): int
+     | IndexImage(b_legacy_size, b_legacy_sum, b_name_count, b_name0, b_name0_len, b_name1, b_name1_len, b_name2, b_name2_len, b_name3, b_name3_len, b_name4, b_name4_len, b_name5, b_name5_len, b_name6, b_name6_len, b_name7, b_name7_len) => let
+         val m_lega = (if (a_legacy_size <> b_legacy_size) || (a_legacy_sum <> b_legacy_sum) then 1 else 0): int
          val m_nams = (if (a_name_count <> b_name_count) || (~_arrays_equal(a_name0, a_name0_len, b_name0, b_name0_len)) || (~_arrays_equal(a_name1, a_name1_len, b_name1, b_name1_len)) || (~_arrays_equal(a_name2, a_name2_len, b_name2, b_name2_len)) || (~_arrays_equal(a_name3, a_name3_len, b_name3, b_name3_len)) || (~_arrays_equal(a_name4, a_name4_len, b_name4, b_name4_len)) || (~_arrays_equal(a_name5, a_name5_len, b_name5, b_name5_len)) || (~_arrays_equal(a_name6, a_name6_len, b_name6, b_name6_len)) || (~_arrays_equal(a_name7, a_name7_len, b_name7, b_name7_len)) then 2 else 0): int
        in $AR.add_int_int($AR.add_int_int(0, m_lega), m_nams) end)
 
@@ -183,9 +188,9 @@ implement index_image_diff (first, second) =
 
 implement index_image_of {x} (index) =
   case+ index of
-  | IndexV(b_legacy_crc_high, b_legacy_crc_low, b_name_count, b_name0, b_name1, b_name2, b_name3, b_name4, b_name5, b_name6, b_name7) => let
-      val v_legacy_crc_high = int32_value(b_legacy_crc_high)
-      val v_legacy_crc_low = int32_value(b_legacy_crc_low)
+  | IndexV(b_legacy_size, b_legacy_sum, b_name_count, b_name0, b_name1, b_name2, b_name3, b_name4, b_name5, b_name6, b_name7) => let
+      val v_legacy_size = int32_value(b_legacy_size)
+      val v_legacy_sum = int32_value(b_legacy_sum)
       val v_name_count = int32_value(b_name_count)
       val (_ | len_name0) = blist_len(b_name0)
       val v_name0 = blist_to_array(b_name0)
@@ -203,16 +208,16 @@ implement index_image_of {x} (index) =
       val v_name6 = blist_to_array(b_name6)
       val (_ | len_name7) = blist_len(b_name7)
       val v_name7 = blist_to_array(b_name7)
-    in IndexImage(v_legacy_crc_high, v_legacy_crc_low, v_name_count, v_name0, len_name0, v_name1, len_name1, v_name2, len_name2, v_name3, len_name3, v_name4, len_name4, v_name5, len_name5, v_name6, len_name6, v_name7, len_name7) end
+    in IndexImage(v_legacy_size, v_legacy_sum, v_name_count, v_name0, len_name0, v_name1, len_name1, v_name2, len_name2, v_name3, len_name3, v_name4, len_name4, v_name5, len_name5, v_name6, len_name6, v_name7, len_name7) end
 
 (* The index an image holds *)
 #pub fun index_of_image (image: !index_image): [x:indexx] indexv(x)
 
 implement index_of_image (image) =
   case+ image of
-  | IndexImage(a_legacy_crc_high, a_legacy_crc_low, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) => let
-      val n_legacy_crc_high = int32_make(a_legacy_crc_high)
-      val n_legacy_crc_low = int32_make(a_legacy_crc_low)
+  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) => let
+      val n_legacy_size = int32_make(a_legacy_size)
+      val n_legacy_sum = int32_make(a_legacy_sum)
       val n_name_count = int32_make(a_name_count)
       val l_name0 = blist_of_array(a_name0, 0, a_name0_len)
       val l_name1 = blist_of_array(a_name1, 0, a_name1_len)
@@ -222,7 +227,7 @@ implement index_of_image (image) =
       val l_name5 = blist_of_array(a_name5, 0, a_name5_len)
       val l_name6 = blist_of_array(a_name6, 0, a_name6_len)
       val l_name7 = blist_of_array(a_name7, 0, a_name7_len)
-    in IndexV(n_legacy_crc_high, n_legacy_crc_low, n_name_count, l_name0, l_name1, l_name2, l_name3, l_name4, l_name5, l_name6, l_name7) end
+    in IndexV(n_legacy_size, n_legacy_sum, n_name_count, l_name0, l_name1, l_name2, l_name3, l_name4, l_name5, l_name6, l_name7) end
 
 (* The image of a stored index, as read *)
 #pub fun index_record_image {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e)): index_image
@@ -237,9 +242,9 @@ implement index_record_new (image) = IndexRecord(1, 1, index_of_image(image), EX
 
 fn index_free_book {x:indexx} (index: indexv(x)): void =
   case+ index of
-  | ~IndexV(f_legacy_crc_high, f_legacy_crc_low, f_name_count, f_name0, f_name1, f_name2, f_name3, f_name4, f_name5, f_name6, f_name7) => let
-      val () = int32_free(f_legacy_crc_high)
-      val () = int32_free(f_legacy_crc_low)
+  | ~IndexV(f_legacy_size, f_legacy_sum, f_name_count, f_name0, f_name1, f_name2, f_name3, f_name4, f_name5, f_name6, f_name7) => let
+      val () = int32_free(f_legacy_size)
+      val () = int32_free(f_legacy_sum)
       val () = int32_free(f_name_count)
       val () = blist_free(f_name0)
       val () = blist_free(f_name1)
@@ -280,13 +285,13 @@ implement index_record_patch {x}{ver,minver}{e} (record, image, mask) =
       val () = index_free_book(index)
     in
       case+ previous of
-      | ~IndexImage(a_legacy_crc_high, a_legacy_crc_low, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) =>
+      | ~IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name0_len, a_name1, a_name1_len, a_name2, a_name2_len, a_name3, a_name3_len, a_name4, a_name4_len, a_name5, a_name5_len, a_name6, a_name6_len, a_name7, a_name7_len) =>
         (case+ image of
-         | IndexImage(b_legacy_crc_high, b_legacy_crc_low, b_name_count, b_name0, b_name0_len, b_name1, b_name1_len, b_name2, b_name2_len, b_name3, b_name3_len, b_name4, b_name4_len, b_name5, b_name5_len, b_name6, b_name6_len, b_name7, b_name7_len) => let
+         | IndexImage(b_legacy_size, b_legacy_sum, b_name_count, b_name0, b_name0_len, b_name1, b_name1_len, b_name2, b_name2_len, b_name3, b_name3_len, b_name4, b_name4_len, b_name5, b_name5_len, b_name6, b_name6_len, b_name7, b_name7_len) => let
              val take_lega = $AR.band_int_int(mask, 1) <> 0
              val take_nams = $AR.band_int_int(mask, 2) <> 0
-             val c_legacy_crc_high = (if take_lega then b_legacy_crc_high else a_legacy_crc_high): Int
-             val c_legacy_crc_low = (if take_lega then b_legacy_crc_low else a_legacy_crc_low): Int
+             val c_legacy_size = (if take_lega then b_legacy_size else a_legacy_size): Int
+             val c_legacy_sum = (if take_lega then b_legacy_sum else a_legacy_sum): Int
              val c_name_count = (if take_nams then b_name_count else a_name_count): Int
              val @(c_name0, c_name0_len) = _choose(take_nams, a_name0, a_name0_len, b_name0, b_name0_len)
              val @(c_name1, c_name1_len) = _choose(take_nams, a_name1, a_name1_len, b_name1, b_name1_len)
@@ -296,7 +301,7 @@ implement index_record_patch {x}{ver,minver}{e} (record, image, mask) =
              val @(c_name5, c_name5_len) = _choose(take_nams, a_name5, a_name5_len, b_name5, b_name5_len)
              val @(c_name6, c_name6_len) = _choose(take_nams, a_name6, a_name6_len, b_name6, b_name6_len)
              val @(c_name7, c_name7_len) = _choose(take_nams, a_name7, a_name7_len, b_name7, b_name7_len)
-             val changed = IndexImage(c_legacy_crc_high, c_legacy_crc_low, c_name_count, c_name0, c_name0_len, c_name1, c_name1_len, c_name2, c_name2_len, c_name3, c_name3_len, c_name4, c_name4_len, c_name5, c_name5_len, c_name6, c_name6_len, c_name7, c_name7_len)
+             val changed = IndexImage(c_legacy_size, c_legacy_sum, c_name_count, c_name0, c_name0_len, c_name1, c_name1_len, c_name2, c_name2_len, c_name3, c_name3_len, c_name4, c_name4_len, c_name5, c_name5_len, c_name6, c_name6_len, c_name7, c_name7_len)
              val book = index_of_image(changed)
              val () = index_image_free(changed)
            in IndexRecord(ver, minver, book, extras) end)

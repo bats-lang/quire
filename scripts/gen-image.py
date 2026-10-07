@@ -83,9 +83,19 @@ w(f"    in {C}Image({args}) end\n")
 bits = {}
 for gi, g in enumerate(GROUPS):
     bits[g[0]] = 1 << gi
+bits_of = bits
 for g in GROUPS:
     w(f"(* the bit of the group {g[0]} in a mask of groups *)\n#pub fn {P}_group_{g[0].lower()} (): int\n\nimplement {P}_group_{g[0].lower()} () = {bits[g[0]]}\n")
 w(f"(* every group *)\n#pub fn {P}_group_all (): int\n\nimplement {P}_group_all () = {(1 << len(GROUPS)) - 1}\n")
+# merge
+def group_of(name):
+    for g in GROUPS:
+        for n, k in g[2]:
+            if n == name:
+                return g
+merge_fields = ", ".join(f"{n} = (if $AR.band_int_int(keep_mask, {bits_of[group_of(n)[0]]}) <> 0 then kept.{n} else other.{n})" for n in ints)
+w(f"(* The numbers of kept in the groups of keep_mask, and the others' of other *)\n#pub fun {P}_numbers_merge (kept: {P}_numbers, other: {P}_numbers, keep_mask: int): {P}_numbers\n")
+w(f"implement {P}_numbers_merge (kept, other, keep_mask) = @{{{merge_fields}}}\n")
 # diff
 def differs(g, a, b):
     parts = []

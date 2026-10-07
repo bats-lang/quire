@@ -16,7 +16,7 @@ BOOK_GROUPS = [
 ]
 BOOK_KIND = 1
 INDEX_GROUPS = [
-  ("LEGA", "opt", [("legacy_crc_high", "i"), ("legacy_crc_low", "i")]),
+  ("LEGA", "opt", [("legacy_size", "i"), ("legacy_sum", "i")]),
   ("NAMS", "req", [("name_count", "i")] + [(f"name{k}", "s") for k in range(8)]),
 ]
 INDEX_KIND = 2
