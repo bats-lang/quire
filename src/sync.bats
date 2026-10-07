@@ -1899,9 +1899,13 @@ in GoogleUnexpected() end
    ends the call only when it settles, and a plugin that never settles it
    would leave the reader with nothing shown and nothing that ends. A call
    that shows nothing (authorizationForScopes, clearAuthorizationToken)
-   is answered, at the latest, by a timer: GOOGLE_ANSWER_MS, a wait
-   chosen here (nothing is shown meanwhile, so it is short of the point
-   where a reader gives up), and said as GoogleNoAnswer. The consent screen
+   is answered, at the latest, by a timer: GOOGLE_ANSWER_MS, and said
+   as GoogleNoAnswer. Play services documents no timeout for these
+   calls, so the 30 s is chosen here: OkHttp, the usual Android HTTP
+   client, ends a request whose connect, read and write each take over
+   its default 10 s, and Nielsen's 10 s is about the limit of a
+   reader's attention, past which they need to know the app is still
+   working (a sync says "Syncing..." meanwhile). The consent screen
    (authorizeScopes) is the reader's to take as long as they like, so no
    timer ends it: while it is pending the status card says so and has
    Stop waiting (sync_stop). Each call's outcome is the promise of a

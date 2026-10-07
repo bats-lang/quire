@@ -821,8 +821,10 @@ Sync screen:
 * A call that never answers is an outcome too (#340): no call to Google
   is left pending with nothing shown. A call that shows nothing
   (`authorizationForScopes`, `clearAuthorizationToken`, `revokeAccess`)
-  is ended after 30 s (`GOOGLE_ANSWER_MS`, a wait chosen here, not one
-  Play services documents) as `GoogleNoAnswer`: "Google didn't
+  is ended after 30 s (`GOOGLE_ANSWER_MS`: Play services documents no
+  timeout, so it is chosen from OkHttp's default of 10 s each for
+  connect, read and write, and Nielsen's 10 s limit of a reader's
+  attention, a sync saying "Syncing..." meanwhile) as `GoogleNoAnswer`: "Google didn't
   answer. Check the connection, then try again." (a revoke's, in the
   banner, with where to take the grant back by hand). The consent screen
   (`authorizeScopes`) is the reader's to take as long as they like, so
