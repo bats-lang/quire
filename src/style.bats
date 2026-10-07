@@ -3165,7 +3165,7 @@ fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)
   val sheet = lay(sheet, Visibility(), "hidden")
   val sheet = close(sheet)
   (* a Settings row's button keeps its name on one line, and the state
-     beside it (the Reading row's, #289) wraps instead *)
+     beside it (the Sync row's) wraps instead *)
   val sheet = rule(sheet, ".srow>.rowbtn")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)

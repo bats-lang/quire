@@ -1225,19 +1225,57 @@ in ui_focus("about-done") end
 fn _settings_open (): void = let
   val () = stats_goal_show()
   val () = sync_summary_show()
-  val () = set_reading_show()
   val () = layer_open(LSettings())
-in ui_focus("settings-reading") end
+in ui_focus("settings-sync") end
 
-(* The Settings screen: opened from the reader's bar (the library
-   menu's item is wired with the menu), its rows, and a backup picked to
-   restore. A restore or a factory reset changes the library, so the
-   reader goes back to it first, as it does for files handed to the app *)
 (* A daily goal chosen on the Settings screen *)
 fn _settings_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_goal_show() end
 
+(* The Settings screen's rows (the library menu's item is wired with
+   the menu), and a backup picked to restore. A restore or a factory
+   reset changes the library, so the reader goes back to it first, as it
+   does for files handed to the app *)
+fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) = let
+  val listeners = RCons(listeners, OnEl("settings-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val control = _settings_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.none() => ()
+        | ~$R.some(SettingsGoalOff()) => _settings_goal(0)
+        | ~$R.some(SettingsGoalTen()) => _settings_goal(10)
+        | ~$R.some(SettingsGoalTwenty()) => _settings_goal(20)
+        | ~$R.some(SettingsGoalThirty()) => _settings_goal(30)
+        | ~$R.some(SettingsGoalSixty()) => _settings_goal(60)
+        | ~$R.some(SettingsSync()) => sync_screen_open()
+        | ~$R.some(SettingsDictionaries()) => let
+          val @(code, code_len) = reader_lang_code()
+          val () = dict_panel_open(code, code_len)
+        in $A.free<byte>(code) end
+        | ~$R.some(SettingsExportBackup()) => backup_export()
+        | ~$R.some(SettingsResetSettings()) => _settings_reset()
+        | ~$R.some(SettingsFactoryReset()) => let
+          val () = layer_close(LSettings())
+          val () = (if _in_reader() then _show_library() else ())
+        in _factory_reset() end
+        | ~$R.some(SettingsAbout()) => _about_open()
+        | ~$R.some(SettingsDone()) => layer_close(LSettings()))
+    in 0 end)
+  (* the About screen: its links leave the app by themselves; Done
+     goes back to Settings *)
+  val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
+      val () = layer_close(LAbout())
+      (* back where it was opened: Settings' row, or the library menu's button *)
+      val () = (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button"))
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
+      val () = layer_close(LSettings())
+      val () = (if _in_reader() then _show_library() else ())
+      val () = backup_import()
+    in 0 end)
+in listeners end
 
 (* A daily goal chosen in the reading statistics *)
 fn _stats_goal (goal: int): void = let
@@ -1519,43 +1557,20 @@ fn _shown {id_len:pos | id_len < 256} (id: string id_len): bool = let
   val () = ui_measure(id)
 in $DR.get_measure_w() > 0 end
 
-(* What each choice of where taps turn pages does in place, for the
-   book open: read right to left, its back is on the right
-   (_zone_click), and the drawings are mirrored (.taps.rtl); from the
-   library, as a book read left to right has them *)
-fn _taps_describe_in (place: reading_place): void =
-  if (if _in_reader() then reader_rtl() else false) then let
-    val () = ui_attr(reading_part_id(place, TapsChoice()), AClass, "seg taps rtl")
-    val () = ui_text(reading_part_id(place, TapsSidesAbout()), "Right side back, left side forward, middle shows the controls")
-    val () = ui_text(reading_part_id(place, TapsForwardAbout()), "Anywhere forward, right side back, top shows the controls")
-  in ui_text(reading_part_id(place, TapsOneHandAbout()), "Top back, bottom forward, middle shows the controls") end
+(* What each choice of where taps turn pages does, for the book open:
+   read right to left, its back is on the right (_zone_click), and the
+   drawings are mirrored (.taps.rtl) *)
+fn _taps_describe (): void =
+  if reader_rtl() then let
+    val () = ui_attr("taps-choice", AClass, "seg taps rtl")
+    val () = ui_text("taps-sides-about", "Right side back, left side forward, middle shows the controls")
+    val () = ui_text("taps-forward-about", "Anywhere forward, right side back, top shows the controls")
+  in ui_text("taps-one-hand-about", "Top back, bottom forward, middle shows the controls") end
   else let
-    val () = ui_attr(reading_part_id(place, TapsChoice()), AClass, "seg taps")
-    val () = ui_text(reading_part_id(place, TapsSidesAbout()), "Left side back, right side forward, middle shows the controls")
-    val () = ui_text(reading_part_id(place, TapsForwardAbout()), "Anywhere forward, left side back, top shows the controls")
-  in ui_text(reading_part_id(place, TapsOneHandAbout()), "Top back, bottom forward, middle shows the controls") end
-
-(* The reading behaviour's controls as the platform and the book open
-   have them, in both places they are offered (the sheet's Turning and
-   Read aloud tabs, the Settings screen's Reading screen): the taps said
-   for the book, the volume keys offered in the app, where a page is
-   given them (pwa's MainActivity), the speeds and the book's voices,
-   and which are chosen *)
-fn _reading_controls_show (): void = let
-  val native = $BAPP.is_native_platform()
-  val () = ui_show(reading_part_id(InSheet(), VolumeRow()), native)
-  val () = ui_show(reading_part_id(InSettings(), VolumeRow()), native)
-  val () = _taps_describe_in(InSheet())
-  val () = _taps_describe_in(InSettings())
-  val () = aloud_choices_show()
-in set_reading_show() end
-
-(* The Reading screen (#289), opened from Settings' Reading row: its
-   controls as they are now, the first in focus *)
-fn _reading_open (): void = let
-  val () = _reading_controls_show()
-  val () = layer_open(LReading())
-in ui_focus(reading_part_id(InSettings(), TapsSidesButton())) end
+    val () = ui_attr("taps-choice", AClass, "seg taps")
+    val () = ui_text("taps-sides-about", "Left side back, right side forward, middle shows the controls")
+    val () = ui_text("taps-forward-about", "Anywhere forward, left side back, top shows the controls")
+  in ui_text("taps-one-hand-about", "Top back, bottom forward, middle shows the controls") end
 
 (* The reading settings' tab shown. The sheet opens on Look, which holds
    what is changed while reading (the theme, the size); the other tabs
@@ -1631,11 +1646,15 @@ in
 end
 
 (* The reading settings' sheet opened: the screen's controls as the
-   platform has them now, the reading behaviour's (_reading_controls_show),
-   and its first tab, Look *)
+   platform has them now, the speeds and the book's voices to read
+   aloud, the volume keys offered in the app, where a page is given
+   them (pwa's MainActivity), the taps said for the book open, and its
+   first tab, Look *)
 fn _sheet_open (): void = let
   val () = screen_controls_show()
-  val () = _reading_controls_show()
+  val () = aloud_choices_show()
+  val () = ui_show("volume-row", $BAPP.is_native_platform())
+  val () = _taps_describe()
   val () = layer_open(LTypography())
   val () = _sheet_tab_choose(LookTab())
 in ui_focus("typography-close") end
@@ -1681,66 +1700,6 @@ fn _typography_chosen (control: typography_control): bool =
   | TypographyClose() => let val () = layer_close(LTypography()) in false end
   | ScreenFullscreen() => let val () = screen_fullscreen_toggle() in false end
   | ScreenLock() => let val () = screen_lock_toggle() in false end
-
-fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 5) = let
-  val listeners = RCons(listeners, OnEl("reader-settings"), "click", llam(_) => let
-      val () = _settings_open()
-    in 0 end)
-  val listeners = RCons(listeners, OnEl("settings-screen"), "click", llam(h) => let
-      val clicked = _target(h)
-      val control = _settings_control(clicked)
-      val () = _target_free(clicked)
-      val () = (case+ control of
-        | ~$R.none() => ()
-        | ~$R.some(SettingsGoalOff()) => _settings_goal(0)
-        | ~$R.some(SettingsGoalTen()) => _settings_goal(10)
-        | ~$R.some(SettingsGoalTwenty()) => _settings_goal(20)
-        | ~$R.some(SettingsGoalThirty()) => _settings_goal(30)
-        | ~$R.some(SettingsGoalSixty()) => _settings_goal(60)
-        | ~$R.some(SettingsReading()) => _reading_open()
-        | ~$R.some(SettingsSync()) => sync_screen_open()
-        | ~$R.some(SettingsDictionaries()) => let
-          val @(code, code_len) = reader_lang_code()
-          val () = dict_panel_open(code, code_len)
-        in $A.free<byte>(code) end
-        | ~$R.some(SettingsExportBackup()) => backup_export()
-        | ~$R.some(SettingsResetSettings()) => _settings_reset()
-        | ~$R.some(SettingsFactoryReset()) => let
-          val () = layer_close(LSettings())
-          val () = (if _in_reader() then _show_library() else ())
-        in _factory_reset() end
-        | ~$R.some(SettingsAbout()) => _about_open()
-        | ~$R.some(SettingsDone()) => layer_close(LSettings()))
-    in 0 end)
-  (* the About screen: its links leave the app by themselves; Done
-     goes back to Settings *)
-  val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
-      val () = layer_close(LAbout())
-      (* back where it was opened: Settings' row, or the library menu's button *)
-      val () = (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button"))
-    in 0 end)
-  (* the Reading screen: its controls are the reading settings sheet's
-     (ui.bats decodes either place's to the one typography_control);
-     Done goes back to Settings, to its Reading row *)
-  val listeners = RCons(listeners, OnEl("reading-screen"), "click", llam(h) => let
-      val clicked = _target(h)
-      val control = _typography_control(clicked)
-      val done = _is(clicked, "reading-done")
-      val () = _target_free(clicked)
-      val () = (if done then let
-          val () = layer_close(LReading())
-        in ui_focus("settings-reading") end
-        else ())
-      val changed = (case+ control of
-        | ~$R.none() => false
-        | ~$R.some(chosen) => _typography_chosen(chosen)): bool
-    in if changed then let val () = _settings_changed() in 0 end else 0 end)
-  val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
-      val () = layer_close(LSettings())
-      val () = (if _in_reader() then _show_library() else ())
-      val () = backup_import()
-    in 0 end)
-in listeners end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
@@ -1997,10 +1956,6 @@ fn _escape_overlay (): bool =
   | ~NothingOpen() => false
   | ~Escaped(LSearch()) => let
       val () = (if _shown("search-nav") then ui_focus("page") else _search_clear())
-    in true end
-  (* back to Settings, to the row that opened it, as Done goes *)
-  | ~Escaped(LReading()) => let
-      val () = ui_focus("settings-reading")
     in true end
   (* a sync service's step: its sign-in under way stops, and the list
      is back *)
@@ -2561,13 +2516,11 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
   val listeners = RCons(listeners, OnWindow(), "pagehide", llam(_) => let
       val () = aloud_stop()
     in 0 end)
-  (* a speed or a voice chosen, in the sheet or on the Reading screen:
-     a change does not say which select, so its row's are both read *)
-  val listeners = RCons(listeners, OnEl(reading_part_id(InSheet(), SpeechRow())), "change", llam(_) => let
-      val () = aloud_speech_chosen(InSheet())
+  val listeners = RCons(listeners, OnEl("speech-rate"), "change", llam(_) => let
+      val () = aloud_rate_chosen()
     in 0 end)
-  val listeners = RCons(listeners, OnEl(reading_part_id(InSettings(), SpeechRow())), "change", llam(_) => let
-      val () = aloud_speech_chosen(InSettings())
+  val listeners = RCons(listeners, OnEl("speech-voice"), "change", llam(_) => let
+      val () = aloud_voice_chosen()
     in 0 end)
   val listeners = RSpeech(listeners, llam(event) => aloud_event(event))
   val listeners = RCons(listeners, OnEl("screen-brightness"), "change", llam(_) => let
