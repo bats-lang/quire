@@ -46,6 +46,7 @@ const attempt = async (page, step) => { try { await step(); } catch (e) { append
 const long = { title: 'A Rather Long Title For A Book That Goes On And On', author: 'Someone With A Rather Long Name' };
 
 test.beforeEach(async ({ page }) => { await theme(page); });
+test.use({ actionTimeout: 10000 });
 
 test('first-run-library', async ({ page }, info) => {
   const shot = shooter(page, 'first-run-library', info.project.name);
@@ -130,8 +131,8 @@ test('reading', async ({ page }, info) => {
   await shot('annotations', async () => { await clickControl(page, 'Annotations'); await expect(dialog(page, 'Annotations')).toBeVisible(); });
   await attempt(page, async () => { await page.keyboard.press('Escape'); });
   await shot('look-up', async () => {
-    await selectText(page, 0, 4);
-    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Look up', exact: true }).click();
+    await selectText(page, 9, 14);
+    await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Look up', exact: true }).click({ timeout: 8000 });
     await expect(dialog(page, 'Dictionary')).toBeVisible();
   });
   await attempt(page, async () => { await page.keyboard.press('Escape'); });
