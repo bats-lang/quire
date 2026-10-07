@@ -1700,7 +1700,7 @@ fn _refusal_result (status: $GA.google_status): sync_result =
 fun _unregistered_same {l,p:agz}{size:pos}{n:nat | n <= size}{at,j:nat | j <= UNREGISTERED_LEN; at + UNREGISTERED_LEN <= n} .<UNREGISTERED_LEN - j>.
   (bytes: !$A.arr(byte, l, size), pattern: !$A.arr(byte, p, UNREGISTERED_LEN), n: int n, at: int at, j: int j): bool =
   if j >= UNREGISTERED_LEN then true
-  else if $A.get<byte>(bytes, at + j) = $A.get<byte>(pattern, j) then _unregistered_same(bytes, pattern, n, at, j + 1)
+  else if byte2int0($A.get<byte>(bytes, at + j)) = byte2int0($A.get<byte>(pattern, j)) then _unregistered_same(bytes, pattern, n, at, j + 1)
   else false
 
 fun _unregistered_from {l,p:agz}{size:pos}{n:nat | n <= size}{at:nat | at <= n} .<n - at>.
@@ -1711,21 +1711,28 @@ fun _unregistered_from {l,p:agz}{size:pos}{n:nat | n <= size}{at:nat | at <= n} 
 
 (* Whether Play services' answer says this build is not registered with
    Google, in the answer as the reader's report shows it *)
-fn _answer_unregistered (answer: !answer_shown): bool = let
-  val pattern = $A.alloc<byte>(UNREGISTERED_LEN)
-  val () = $A.write_text(pattern, 0, $A.text_lit("UNREGISTERED_ON_API_CONSOLE"), UNREGISTERED_LEN)
-  val found = (case+ answer of
-    | @NoAnswer() => let prval () = fold@(answer) in false end
-    | @AnswerShown(_, bytes, n) => let
-        val found = _unregistered_from(bytes, pattern, n, 0)
-        prval () = fold@(answer)
-      in found end
-    | @AnswerCut(_, bytes, n, _) => let
-        val found = _unregistered_from(bytes, pattern, n, 0)
-        prval () = fold@(answer)
-      in found end): bool
+fn _unregistered_name (): [l:agz] $A.arr(byte, l, UNREGISTERED_LEN) = let
+  val name = $A.alloc<byte>(UNREGISTERED_LEN)
+  val () = $A.write_text(name, 0, $A.text_lit("UNREGISTERED_ON_API_CONSOLE"), UNREGISTERED_LEN)
+in name end
+
+fn _bytes_unregistered {l:agz}{size:pos}{n:nat | n <= size} (bytes: !$A.arr(byte, l, size), n: int n): bool = let
+  val pattern = _unregistered_name()
+  val found = _unregistered_from(bytes, pattern, n, 0)
   val () = $A.free<byte>(pattern)
 in found end
+
+fn _answer_unregistered (answer: !answer_shown): bool =
+  case+ answer of
+  | @NoAnswer() => let prval () = fold@(answer) in false end
+  | @AnswerShown(_, bytes, n) => let
+      val found = _bytes_unregistered(bytes, n)
+      prval () = fold@(answer)
+    in found end
+  | @AnswerCut(_, bytes, n, _) => let
+      val found = _bytes_unregistered(bytes, n)
+      prval () = fold@(answer)
+    in found end
 
 (* What a refusal means: a status that is a code for any failure
    (INTERNAL_ERROR, ERROR) is the build's registration when Play
