@@ -1692,10 +1692,50 @@ fn _refusal_result (status: $GA.google_status): sync_result =
   | $GA.StatusReconnectionTimedOutDuringUpdate() => GoogleSignInFailed()
   | $GA.StatusReconnectionTimedOut() => GoogleSignInFailed()
 
+(* Whether bytes[at, n) holds the registration status's name from at on:
+   Play services names it in its message (`[8] Unknown error
+   [status=UNREGISTERED_ON_API_CONSOLE]`) under a code (INTERNAL_ERROR)
+   that says only that something failed *)
+#define UNREGISTERED_LEN 27
+fun _unregistered_same {l,p:agz}{size:pos}{n:nat | n <= size}{at,j:nat | j <= UNREGISTERED_LEN; at + UNREGISTERED_LEN <= n} .<UNREGISTERED_LEN - j>.
+  (bytes: !$A.arr(byte, l, size), pattern: !$A.arr(byte, p, UNREGISTERED_LEN), n: int n, at: int at, j: int j): bool =
+  if j >= UNREGISTERED_LEN then true
+  else if $A.get<byte>(bytes, at + j) = $A.get<byte>(pattern, j) then _unregistered_same(bytes, pattern, n, at, j + 1)
+  else false
+
+fun _unregistered_from {l,p:agz}{size:pos}{n:nat | n <= size}{at:nat | at <= n} .<n - at>.
+  (bytes: !$A.arr(byte, l, size), pattern: !$A.arr(byte, p, UNREGISTERED_LEN), n: int n, at: int at): bool =
+  if at + UNREGISTERED_LEN > n then false
+  else if _unregistered_same(bytes, pattern, n, at, 0) then true
+  else _unregistered_from(bytes, pattern, n, at + 1)
+
+(* Whether Play services' answer says this build is not registered with
+   Google, in the answer as the reader's report shows it *)
+fn _answer_unregistered (answer: !answer_shown): bool = let
+  val pattern = $A.alloc<byte>(UNREGISTERED_LEN)
+  val () = $A.write_text(pattern, 0, $A.text_lit("UNREGISTERED_ON_API_CONSOLE"), UNREGISTERED_LEN)
+  val found = (case+ answer of
+    | @NoAnswer() => let prval () = fold@(answer) in false end
+    | @AnswerShown(_, bytes, n) => let
+        val found = _unregistered_from(bytes, pattern, n, 0)
+        prval () = fold@(answer)
+      in found end
+    | @AnswerCut(_, bytes, n, _) => let
+        val found = _unregistered_from(bytes, pattern, n, 0)
+        prval () = fold@(answer)
+      in found end): bool
+  val () = $A.free<byte>(pattern)
+in found end
+
+(* What a refusal means: a status that is a code for any failure
+   (INTERNAL_ERROR, ERROR) is the build's registration when Play
+   services' message names it, and no try again helps with that *)
 fn _authorize_refused {call_len:pos | call_len < 64}
   (call: string call_len, status: $GA.google_status, said: $GA.google_said): sync_result = let
-  val () = _refusal_free(_refusal_swap(RefusalKept(status, call, _said_shown(said))))
-in _refusal_result(status) end
+  val answer = _said_shown(said)
+  val result = (if _answer_unregistered(answer) then GoogleRefused() else _refusal_result(status)): sync_result
+  val () = _refusal_free(_refusal_swap(RefusalKept(status, call, answer)))
+in result end
 
 fn _unparsed {n:pos | n < 64} (name: string n, error: $J.parse_error): unexpected_case =
   case+ error of
