@@ -55,6 +55,23 @@ breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
 workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
 `android.yml` pin as not moved; move it in a PR of its own.
 
+## Check locally before every push
+
+A session sets up the compiler in its own environment and runs `bats
+check` before it pushes, so a push that does not type-check never
+reaches CI (#350's first push failed on a comparison and a free that
+`bats check` rejects in a few minutes; CI took 15 to learn it). Setup is
+what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
+tarball it names), `lld`, the compiler built from the commit in
+`.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
+clone of bats-lang/repository-prototype; then `scripts/version.sh` and
+`bats check --repository <the clone>`. A check takes about 10 minutes
+on a cold build: run it in the background and wait for it, never push on
+the hope that it passes. A change to a spec or a static fixture runs
+that group too where the machine can (`tests/static/run.sh`, `npx
+playwright test <spec>`), and what it cannot run is left to CI and said
+in the PR. A fix pushed after a red CI is checked the same way first.
+
 ## The version is the commit's
 
 Quire's version is the date of the commit it is built from, never of the
