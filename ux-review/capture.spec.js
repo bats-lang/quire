@@ -24,8 +24,8 @@ async function theme(page) {
   await page.clock.setFixedTime(new Date(THEME === 'dark' ? '2026-10-07T23:00:00' : '2026-10-07T12:00:00'));
 }
 
-function shooter(page, path, viewport) {
-  let n = 0;
+function shooter(page, path, viewport, first = 0) {
+  let n = first;
   return async (name, step) => {
     const label = `${String(++n).padStart(2, '0')}-${name}`;
     try {
@@ -206,7 +206,7 @@ test('trash-errors', async ({ page }, info) => {
   ], 2);
   await shot('move-to-trash-undo-toast', async () => { await bookMenu(page, 'Remove Me'); await menuItem(page, 'Move to Trash').click(); await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible(); });
   await attempt(page, async () => { await page.waitForTimeout(6000); });
-  await shot('trash-shelf', async () => { await page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ }).click(); await page.getByRole('menuitem', { name: 'Trash' }).click(); });
+  await shot('trash-shelf', async () => { const shelf = page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ }); for (let i = 0; i < 3; i++) await shelf.click(); });
   await shot('trash-book-menu', async () => { await bookMenu(page, 'Remove Me'); });
   await attempt(page, async () => { await page.keyboard.press('Escape'); });
   await shot('empty-trash-dialog', async () => { await libraryMenu(page); await menuItem(page, 'Empty Trash').click(); await expect(dialog(page, 'Empty the Trash?')).toBeVisible(); });
@@ -216,7 +216,7 @@ test('trash-errors', async ({ page }, info) => {
 });
 
 test('errors', async ({ page }, info) => {
-  const shot = shooter(page, 'trash-errors', info.project.name);
+  const shot = shooter(page, 'trash-errors', info.project.name, 20);
   await start(page);
   await readBook(page, {
     title: 'Damaged Book', author: 'Notice Tests',
