@@ -136,12 +136,12 @@ test('every icon of the library, its search, its menu, Settings and a catalogue 
   await iconsDrawn(page, 'a catalogue');
 });
 
-test("every icon of the reader's bars, its sheets, search and Settings is drawn by the icon face", async ({ page }) => {
+test("every icon of the reader's bars, its sheets and search is drawn by the icon face", async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Icons', author: 'L', rawChapters: chapters(3) });
   await showChrome(page);
   const bars = await iconsDrawn(page, "the reader's bars");
-  for (const name of ['Back to library', 'Bookmark this page', 'Search in book', 'Settings', 'Previous page', 'Next page', 'Contents', 'Reading settings', 'Annotations']) {
+  for (const name of ['Back to library', 'Bookmark this page', 'Search in book', 'Previous page', 'Next page', 'Contents', 'Reading settings', 'Annotations']) {
     expect(bars.some(f => f.name === name), `${name} is an icon`).toBe(true);
   }
   // the bookmark's other icon (ui_icon_set)
@@ -163,11 +163,6 @@ test("every icon of the reader's bars, its sheets, search and Settings is drawn 
   await topBar(page).getByRole('button', { name: 'Search in book' }).click();
   await expect(dialog(page, 'Search in book')).toBeVisible();
   await iconsDrawn(page, 'Search in book');
-  await page.keyboard.press('Escape');
-  await showChrome(page);
-  await topBar(page).getByRole('button', { name: 'Settings' }).click();
-  await expect(settingsScreen(page)).toBeVisible();
-  await iconsDrawn(page, 'Settings over the reader');
   await page.keyboard.press('Escape');
   await toLibrary(page);
 });

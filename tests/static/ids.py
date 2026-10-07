@@ -17,17 +17,6 @@ number and an optional suffix (nid_make, nid_make2), so each prefix is a
 family of ids, and neither a literal id nor another family may be one
 of its members.
 
-An element offered in more than one place (ui.bats's reading_part_id:
-the reading settings sheet and the Settings screen's Reading screen)
-has its id given by a *_part_id function of a place and a part, whose
-cases name each place's id for each part. A call of it with a part's
-constructor, f(place, Part()), where an id is made, makes Part's id in
-every place, at that call; a helper that passes f(place, p) on, for
-its parameter p, makes the parts handed to it there. So each part, and
-each of its places' ids, is made at one place in the code, as a
-literal id is; and where such a call names an id, every place's id of
-that part must be made.
-
 Ids are named (for a text, a class, a listener, a comparison with an
 event's target) by the functions in NAMERS, and by helpers that pass a
 parameter on to one; each named literal must be a made id, one of a
@@ -74,12 +63,6 @@ NUMBERED = {'nid_make': [(0, None)], 'nid_make2': [(0, 2)], 'nid_pad3': [(0, Non
 # read after them)
 PREFIX_NAMERS = {'_row_of': 1}
 PAGE_IDS = {'bats-root'}
-# function -> {position: part function} of the parameters a helper makes
-# a part's id from (f(place, parameter) in a maker's id position)
-PART_MAKERS = {}
-# part function (*_part_id) -> {part constructor: [its id in each place]}
-PARTS = {}
-PART_CALL = re.compile(r'(\w+_part_id)\s*\(')
 
 STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
 DEFN = re.compile(r'^(?:#pub\s+)?(?:fn|fun)\s+(\w+)\s*((?:\{[^}]*\}\s*)*)\(', re.M)
@@ -155,34 +138,6 @@ def definitions(text):
         yield m.group(1), params, text[after:end]
 
 
-def part_functions(sources):
-    """Each *_part_id function's ids, by part: its cases Part() => "id",
-    one for each place."""
-    for _, text in sources:
-        for name, _, body in definitions(text):
-            if name.endswith('_part_id'):
-                parts = PARTS.setdefault(name, {})
-                for m in re.finditer(r'(\w+)\(\)\s*=>\s*"([^"]+)"', body):
-                    parts.setdefault(m.group(1), []).append(m.group(2))
-
-
-def part_call(arg):
-    """(function, part argument) when arg is a call of a *_part_id
-    function, f(place, part); else None."""
-    m = PART_CALL.match(arg)
-    if not m or m.group(1) not in PARTS:
-        return None
-    args, after = args_at(arg, m.end() - 1)
-    if after != len(arg) or len(args) != 2:
-        return None
-    return m.group(1), args[1]
-
-
-def constructor(arg):
-    m = re.fullmatch(r'(\w+)\(\)', arg)
-    return m.group(1) if m else None
-
-
 def find_helpers(sources):
     """Adds to MAKERS, NAMERS and NUMBERED the helpers that pass a
     parameter on to one of them, until nothing changes."""
@@ -194,7 +149,6 @@ def find_helpers(sources):
                 if name.startswith('ui_') or name in ('nid_make', 'nid_make2', 'nid_pad3'):
                     continue
                 made, named, numbered = set(), set(), set()
-                parts_made = {}
 
                 def param_at(args, pos):
                     if pos is not None and len(args) > pos and args[pos] in params:
@@ -203,18 +157,6 @@ def find_helpers(sources):
                 for fn, poss in list(MAKERS.items()):
                     for _, args in calls(body, fn):
                         made |= {param_at(args, pos) for pos in poss} - {None}
-                        for pos in poss:
-                            call = part_call(args[pos]) if len(args) > pos else None
-                            if call and call[1] in params:
-                                parts_made[params.index(call[1])] = call[0]
-                for fn, poss in list(PART_MAKERS.items()):
-                    for _, args in calls(body, fn):
-                        for pos, part_fn in poss.items():
-                            if len(args) > pos and args[pos] in params:
-                                parts_made[params.index(args[pos])] = part_fn
-                if parts_made and PART_MAKERS.get(name) != parts_made:
-                    PART_MAKERS[name] = parts_made
-                    changed = True
                 for fn, poss in list(NAMERS.items()):
                     for _, args in calls(body, fn):
                         named |= {param_at(args, pos) for pos in poss} - {None}
@@ -265,35 +207,16 @@ def family_regex(prefix, suffix):
 def main(dirs):
     files = [p for d in dirs for p in sorted(Path(d).rglob('*.bats'))]
     sources = [(p, strip_comments(p.read_text())) for p in files]
-    part_functions(sources)
     find_helpers(sources)
     problems = []
 
     made = {}  # id -> [where]
-
-    def make_part(part_fn, arg, where):
-        part = constructor(arg)
-        if part is None:
-            return
-        if part not in PARTS[part_fn]:
-            problems.append(f'{where}: {part_fn} has no part {part}')
-            return
-        for ident in PARTS[part_fn][part]:
-            made.setdefault(ident, []).append(where)
     for path, text in sources:
         for fn, poss in MAKERS.items():
             for line, args in calls(text, fn):
                 for pos in poss:
                     if len(args) > pos and literal(args[pos]) is not None:
                         made.setdefault(literal(args[pos]), []).append(f'{path}:{line}')
-                    call = part_call(args[pos]) if len(args) > pos else None
-                    if call:
-                        make_part(call[0], call[1], f'{path}:{line}')
-        for fn, poss in PART_MAKERS.items():
-            for line, args in calls(text, fn):
-                for pos, part_fn in poss.items():
-                    if len(args) > pos:
-                        make_part(part_fn, args[pos], f'{path}:{line}')
     for h in harm_ids(sources):
         made.setdefault(h, []).append('ui_harm_id')
 
@@ -343,22 +266,12 @@ def main(dirs):
         if not known(ident):
             problems.append(f'{fn} decodes "{ident}", which no element has')
 
-    for part_fn, parts in PARTS.items():
-        for part, idents in parts.items():
-            for ident in idents:
-                if ident not in made:
-                    problems.append(f'{part_fn}\'s part {part} ("{ident}") is never made')
-
     for path, text in sources:
         for fn, poss in NAMERS.items():
             for line, args in calls(text, fn):
                 for pos in poss:
                     if len(args) > pos and literal(args[pos]) is not None and not known(literal(args[pos])):
                         problems.append(f'{path}:{line}: {fn} names "{literal(args[pos])}", which no element has')
-                    call = part_call(args[pos]) if len(args) > pos else None
-                    part = constructor(call[1]) if call else None
-                    if part is not None and part not in PARTS[call[0]]:
-                        problems.append(f'{path}:{line}: {fn} names {call[0]} part {part}, which it has not')
         for fn, pos in PREFIX_NAMERS.items():
             for line, args in calls(text, fn):
                 if len(args) > pos and literal(args[pos]) is not None:

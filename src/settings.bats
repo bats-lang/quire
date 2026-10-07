@@ -21,8 +21,6 @@ staload "storage.sats"
 staload "style.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
-staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
-staload SP = "wasm.bats-packages.dev/bridge/src/speech.sats"
 
 implement $P.dispose<settled>(_) = ()
 
@@ -844,83 +842,6 @@ in
   else ui_text("narration-speed-value", "2\xC3\x97")
 end
 
-(* The reading behaviour set once, as place's controls show it: which
-   taps turn pages, and whether the volume keys do *)
-fn _reading_pressed (place: reading_place): void = let
-  val current = !_set
-  val taps = taps_code(current.tap_zones)
-  val () = _pressed(reading_part_id(place, TapsSidesButton()), taps = taps_code(SideZones()))
-  val () = _pressed(reading_part_id(place, TapsForwardButton()), taps = taps_code(ForwardZones()))
-  val () = _pressed(reading_part_id(place, TapsOneHandButton()), taps = taps_code(OneHandZones()))
-in _pressed(reading_part_id(place, VolumeKeysButton()), vol_code(current.volume_keys) = vol_code(KeysTurnPages())) end
-
-(* Two bytes, first and second, at buf[position, position + 2): a
-   character of two bytes in UTF-8 *)
-fn _put_pair {l:agz}{n:pos}{position:nat | position + 2 <= n}
-  (buf: !$A.arr(byte, l, n), position: int position, first: int, second: int): int(position + 2) = let
-  val () = $A.set<byte>(buf, position, $A.int2byte($AR.low_byte(first)))
-  val () = $A.set<byte>(buf, position + 1, $A.int2byte($AR.low_byte(second)))
-in position + 2 end
-
-(* " · ", between the Reading row's parts (U+00B7) *)
-fn _put_dot {l:agz}{position:nat | position + 4 <= 128} (buf: !$A.arr(byte, l, 128), position: int position): int(position + 4) = let
-  val next = _put_text(buf, position, " ")
-  val next = _put_pair(buf, next, 194, 183)
-in _put_text(buf, next, " ") end
-
-(* A speed as the Reading row says it: its number and a multiplication
-   sign (U+00D7) *)
-fn _put_rate {l:agz}{position:nat | position + 6 <= 128}
-  (buf: !$A.arr(byte, l, 128), position: int position, rate: speech_rate): [stop:nat | stop <= position + 6] int stop = let
-  val next = (case+ rate of
-    | RateThreeQuarters() => _put_text(buf, position, "0.75")
-    | RateNormal() => _put_text(buf, position, "1")
-    | RateOneAndAQuarter() => _put_text(buf, position, "1.25")
-    | RateOneAndAHalf() => _put_text(buf, position, "1.5")
-    | RateOneAndThreeQuarters() => _put_text(buf, position, "1.75")
-    | RateDouble() => _put_text(buf, position, "2")): [stop:nat | stop <= position + 4] int stop
-in _put_pair(buf, next, 195, 151) end
-
-(* The Settings screen's Reading row's state, in short (#289): where
-   taps turn pages, the volume keys (in the app, which has them), and
-   the speed read aloud at (where the platform speaks): "Taps: sides ·
-   read aloud 1×" *)
-fn _put_reading_summary {l:agz} (buf: !$A.arr(byte, l, 128)): [stop:nat | stop <= 54] int stop = let
-  val current = !_set
-  val next = (case+ current.tap_zones of
-    | SideZones() => _put_text(buf, 0, "Taps: sides")
-    | ForwardZones() => _put_text(buf, 0, "Taps: forward")
-    | OneHandZones() => _put_text(buf, 0, "Taps: one hand")): [stop:nat | stop <= 14] int stop
-  val next = (if $BAPP.is_native_platform() then let
-      val next = _put_dot(buf, next)
-    in
-      case+ current.volume_keys of
-      | KeysTurnPages() => _put_text(buf, next, "volume keys on")
-      | KeysForVolume() => _put_text(buf, next, "volume keys off")
-    end
-    else next): [stop:nat | stop <= 33] int stop
-  val next = (if $SP.speech_available() then let
-      val next = _put_dot(buf, next)
-      val next = _put_text(buf, next, "read aloud ")
-    in _put_rate(buf, next, set_speech_rate_get()) end
-    else next): [stop:nat | stop <= 54] int stop
-in next end
-
-fn _reading_summary (): void = let
-  val buf = $A.alloc<byte>(128)
-  val next = _put_reading_summary(buf)
-in ui_text_buf("settings-reading-state", buf, next) end
-
-(* The reading behaviour set once, shown in both places it is offered
-   (the sheet's Turning tab and the Reading screen), and said in short
-   on the Settings screen's Reading row: whichever place changed it,
-   the other shows it too *)
-#pub fn set_reading_show (): void
-implement set_reading_show () = let
-  val () = _reading_pressed(InSheet())
-  val () = _reading_pressed(InSettings())
-in _reading_summary() end
-
 (* The settings panel's controls, showing the settings *)
 fn _show_controls (): void = let
   val current = !_set
@@ -962,7 +883,11 @@ fn _show_controls (): void = let
   val () = _pressed("hyphens-off", hyph_code(current.hyphens) = hyph_code(NoHyphens()))
   val () = _pressed("dim-on", dim_code(current.dim_images) = dim_code(ImagesDimmed()))
   val () = _pressed("dim-off", dim_code(current.dim_images) = dim_code(ImagesAsTheyAre()))
-  val () = set_reading_show()
+  val taps = taps_code(current.tap_zones)
+  val () = _pressed("taps-sides", taps = taps_code(SideZones()))
+  val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
+  val () = _pressed("taps-one-hand", taps = taps_code(OneHandZones()))
+  val () = _pressed("volume-keys-turn", vol_code(current.volume_keys) = vol_code(KeysTurnPages()))
   val () = _pressed("ruby-show", ruby_code(set_ruby_get()) = ruby_code(RubyShown()))
   val () = _pressed("ruby-hide", ruby_code(set_ruby_get()) = ruby_code(RubyHidden()))
   val () = (case+ set_narration_notes_get() of
