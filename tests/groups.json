@@ -7,6 +7,7 @@
       "notices.spec.js",
       "smoke.spec.js",
       "catalogue.spec.js",
+      "safe-area.spec.js",
       "stats.spec.js",
       "stall-capture.spec.js"
     ],
