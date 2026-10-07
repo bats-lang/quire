@@ -84,6 +84,13 @@ const STATUSES = [
   ['RECONNECTION_TIMED_OUT_DURING_UPDATE', 21, FAILED],
   ['RECONNECTION_TIMED_OUT', 22, FAILED],
 ];
+const UNREGISTERED = "Google refused: this build of Quire isn't registered with it. Copy the details and post them in a report.";
+// Play services says the build is not registered in its message, under a code that says only that something failed
+const REGISTRATION = [
+  ['INTERNAL_ERROR', 8, UNREGISTERED, '[8] Unknown error [status=UNREGISTERED_ON_API_CONSOLE]'],
+  ['ERROR', 13, UNREGISTERED, '[13] Unknown error [status=UNREGISTERED_ON_API_CONSOLE]'],
+  ['DEVELOPER_ERROR', 10, UNREGISTERED, '[10] [status=UNREGISTERED_ON_API_CONSOLE]'],
+];
 const SHORT = {
   [FAILED]: 'Google sign-in failed',
   "Can't reach Google. Check the connection, then try again.": "Can't reach Google",
@@ -100,13 +107,14 @@ test('Use Android: each answer of Google\'s consent is said where the reader is'
   await importFiles(a.page, [epubFile({ title: 'Outcomes', author: 'Sync Tests', chapters: 2, rawChapters: chapters(2) })], 1);
   await openSync(a.page);
 
-  for (const [name, number, said] of STATUSES) {
-    a.google.outcomes.authorizeScopes = [{ error: name, message: `${number}: from Play services` }];
+  for (const [name, number, said, named] of [...STATUSES, ...REGISTRATION]) {
+    const message = named || `${number}: from Play services`;
+    a.google.outcomes.authorizeScopes = [{ error: name, message }];
     await chooseAndroid(a.page);
     const text = `${said} Details: ${name} (${number})`;
     await saidWithDetails(a.page, text,
       `Platform: Android app\nWhile: signing in to Google\nCall: authorizeScopes\nCode: ${name}`,
-      { json: rejection(`${number}: from Play services`, name) });
+      { json: rejection(message, name) });
     await expect(status(a.page)).toHaveText(text);
     await dismiss(a.page);
     await a.page.keyboard.press('Escape');
