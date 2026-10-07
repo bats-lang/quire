@@ -140,17 +140,81 @@ export const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 function capacitor() {
   const google = method => async (options = {}) => {
     const answer = await window.__google(method, options);
-    if (answer && answer.error) throw Object.assign(new Error(answer.error), { code: answer.error });
+    if (answer && 'reject' in answer) throw answer.reject;
+    if (answer && 'resolveMade' in answer) return made[answer.resolveMade]();
+    if (answer && 'rejectMade' in answer) throw made[answer.rejectMade]();
+    if (answer && 'error' in answer) {
+      const failure = new Error(answer.message ?? (answer.error || 'failed'));
+      Object.defineProperty(failure, 'stack', { value: 'the plugin', writable: true, configurable: true });
+      if (answer.error != null) failure.code = answer.error;
+      throw failure;
+    }
     return answer;
+  };
+  const made = {
+    cycle: () => { const o = { name: 'cycle' }; o.self = o; return o; },
+    unwritable: () => ({
+      toJSON() { throw new Error('toJSON threw'); },
+      toString() { throw new Error('toString threw'); },
+    }),
+    huge: () => ({ pad: 'x'.repeat(1048577) }),
+    deep: () => { let v = []; for (let i = 1; i < 513; i++) v = [v]; return v; },
+    undefined: () => undefined,
+    null: () => null,
+    true: () => true,
+    number: () => 42,
+    text: () => 'text',
+    array: () => [],
+    error: () => {
+      const thrown = new Error('it threw');
+      Object.defineProperty(thrown, 'stack', { value: 'the plugin', writable: true, configurable: true });
+      return thrown;
+    },
+  };
+  const within = name => new Error().stack.includes(name);
+  const throwing = (at, name) => {
+    const arms = window.__googleThrows || [];
+    const armed = arms.find(arm => arm.at === at);
+    if (!armed || !within(name)) return;
+    if (!armed.count || --armed.count === 0) window.__googleThrows = arms.filter(arm => arm !== armed);
+    throw made[armed.value]();
+  };
+  const decode = TextDecoder.prototype.decode;
+  TextDecoder.prototype.decode = function (...a) {
+    throwing('arguments', 'googleCall');
+    return decode.apply(this, a);
+  };
+  const encode = TextEncoder.prototype.encode;
+  TextEncoder.prototype.encode = function (...a) {
+    throwing('keep', 'googleKeep');
+    return encode.apply(this, a);
+  };
+  const method = name => {
+    const call = google(name);
+    return options => {
+      throwing('method', '');
+      const arms = window.__googleThrows || [];
+      const returned = arms.find(arm => arm.at === 'returns');
+      if (returned) {
+        window.__googleThrows = arms.filter(arm => arm !== returned);
+        return made[returned.value]();
+      }
+      return call(options);
+    };
+  };
+  const googleAuthorize = {
+    authorizationForScopes: method('authorizationForScopes'),
+    authorizeScopes: method('authorizeScopes'),
+    clearAuthorizationToken: method('clearAuthorizationToken'),
+    revokeAccess: method('revokeAccess'),
   };
   window.Capacitor = {
     isNativePlatform: () => true,
     Plugins: {
-      GoogleAuthorize: {
-        authorizationForScopes: google('authorizationForScopes'),
-        authorizeScopes: google('authorizeScopes'),
-        clearAuthorizationToken: google('clearAuthorizationToken'),
-        revokeAccess: google('revokeAccess'),
+      get GoogleAuthorize() {
+        throwing('lookup', 'googleCall');
+        throwing('presence', 'batsJsGoogleAuthorizeAvailable');
+        return googleAuthorize;
       },
       Filesystem: {
         writeFile: async o => { await window.__fileWrite(o.path, o.data); return { uri: 'file:///' + o.path }; },
@@ -181,13 +245,15 @@ function capacitor() {
     'cancel' is the reader backing out of the consent screen, 'fail'
     rejects it with failure (a CommonStatusCodes name) */
 function googleAccount({ token, mode }) {
-  const google = { token, mode, failure: 'DEVELOPER_ERROR', granted: false, cached: null, account: 'reader@example.com', calls: [] };
+  const google = { token, mode, failure: 'DEVELOPER_ERROR', granted: false, cached: null, account: 'reader@example.com', calls: [], outcomes: {} };
   const authorization = scopes => {
     if (!google.cached) google.cached = google.token;
     return { accessToken: google.cached, grantedScopes: scopes, account: google.account };
   };
   google.answer = (method, options) => {
     google.calls.push({ method, options });
+    const queued = google.outcomes[method];
+    if (queued && queued.length) return queued.shift();
     if (method === 'authorizationForScopes') return { authorization: google.granted ? authorization(options.scopes) : null };
     if (method === 'authorizeScopes') {
       if (google.mode === 'cancel') return { error: 'CANCELED' };
@@ -197,12 +263,12 @@ function googleAccount({ token, mode }) {
     }
     if (method === 'clearAuthorizationToken') {
       if (options.accessToken === google.cached) google.cached = null;
-      return {};
+      return undefined;
     }
     if (method === 'revokeAccess') {
       google.granted = false;
       google.cached = null;
-      return {};
+      return undefined;
     }
     return { error: 'UNIMPLEMENTED' };
   };

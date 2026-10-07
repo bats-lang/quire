@@ -40,7 +40,8 @@
       "settings-screen.spec.js",
       "a11y.spec.js",
       "about.spec.js",
-      "layout.spec.js"
+      "layout.spec.js",
+      "sync-android-outcomes.spec.js"
     ],
     "relaunch": [
       "relaunch.spec.js",
