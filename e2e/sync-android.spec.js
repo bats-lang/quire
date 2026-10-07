@@ -242,7 +242,10 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   await expect(status(a.page)).toHaveText('Google sign-in was canceled.');
   a.google.mode = 'fail';
   await chooseAndroid(a.page);
-  await expect(status(a.page)).toHaveText("Google refused: this build of Quire isn't registered with it.");
+  await expect(status(a.page)).toHaveText("Google refused: this build of Quire isn't registered with it. Copy the details and post them in a report. Details: DEVELOPER_ERROR (10)");
+  // said in the banner too, over whatever the reader is on (#334)
+  await expect(a.page.getByRole('alert')).toContainText('Details: DEVELOPER_ERROR (10)');
+  await a.page.getByRole('alert').getByRole('button', { name: 'Dismiss' }).click();
   expect(server.requests).toEqual([]);
   // granted: Use Android syncs
   a.google.mode = 'consent';

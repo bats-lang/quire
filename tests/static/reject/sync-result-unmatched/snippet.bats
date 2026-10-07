@@ -10,4 +10,5 @@ fn _static_failed (result: sync_result): bool =
   | GoogleRefused() => true | SignInCanceled() => true
   | DropboxSignInAgain() => true | DropboxNotSetUp() => true
   | DropboxSignInRefused() => true | DropboxSignInCanceled() => true
-  | FastmailRefused() => true
+  | FastmailRefused() => true | GoogleSignInFailed() => true | GoogleAccountNeeded() => true
+  | GoogleUnreachable() => true | GoogleConsentShowing() => true | GoogleUnexpected() => true

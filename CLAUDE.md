@@ -773,6 +773,35 @@ a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
+## Every outcome is said, and the unexpected as such
+
+After #334, where a Google error that ended the consent screen reached
+quire as the reader backing out, and was said only on a line of the
+Sync screen:
+
+* The plugin and bridge report every error and unexpected condition as
+  an outcome of its own, never folded into another. What they do not
+  recognise is an explicit `...Unexpected` constructor, carrying which
+  case it was as a datatype (bridge's `google_unexpected`) and the
+  answer as bridge's JS wrote it.
+* quire matches every answer with `case+` and handles every
+  constructor visibly: google_authorize's `AuthorizeRefused` by each
+  `google_status` (`_refusal_result` in `src/sync.bats`), a cancel the
+  reader made noted on the Sync screen, every other end of a sign-in
+  or sync the reader started said in the error banner (`_reader_told`).
+* An `...Unexpected` outcome goes through `notice_unexpected`
+  (`src/notice.bats`): the error banner says an unexpected error
+  occurred while doing what it was doing, with Copy details (Quire's
+  version, the platform, what was being done, the call, the case, and
+  the answer as the atom kept it, an access token's value written as
+  its length) and a Report link to Quire's GitHub issues. A refusal
+  with a code is said the same way (`notice_failure`), the code in its
+  text ("Details: DEVELOPER_ERROR (10)").
+* An e2e test passes through every constructor of every answer quire
+  handles (`e2e/sync-android-outcomes.spec.js` for google_authorize);
+  an answer bridge's JS never gives is passed through by bridge's own
+  dynamic test.
+
 ## What the types guarantee about the interface
 
 The stylesheet is built in `src/style.bats`, not written as CSS:
