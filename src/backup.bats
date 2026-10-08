@@ -26,12 +26,15 @@ staload "stats.sats"
 staload "app.sats"
 staload "dictionary.sats"
 staload "clock.sats"
+staload "undo.sats"
 staload "catalogues.sats"
 staload "screen_controls.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload BL = "wasm.bats-packages.dev/bridge/src/blob.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
+staload SH = "wasm.bats-packages.dev/bridge/src/share.sats"
+staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 
 (* A backup's most bytes *)
 #define BACKUP_MAX_BYTES 268435456
@@ -543,11 +546,74 @@ fn _book_chunk {book_index:int} (book_index: int book_index, nums: bnums, first:
   val () = $A.free<Int>(numbers)
 in chunk end
 
-(* Downloads the chunks as one file *)
-fn _export_finish (): void =
-  case+ jfile_join(_file_take()) of
-  | ~JNoWhole() => _say("The backup could not be made: there is not enough memory.")
-  | ~JWhole(owner, out, total) => let
+(* How making the backup file for the reader ended: handed to the
+   browser to download, shared from the app, or why nothing was made *)
+datatype export_outcome =
+  | ExportedByDownload
+  | ExportedByShare
+  | ExportCancelled
+  | ExportNotShared
+  | ExportNoMemory
+  | ExportNotesUnread
+  | ExportBusy
+
+implement $P.dispose<export_outcome>(_) = ()
+
+(* The state kept before a restore, as a backup file in memory (the
+   same file Export makes): linear, so a restore that took one must
+   hand it to its Undo offer or let it go (backup_snapshot_free) *)
+datavtype backup_snapshot =
+  | {owner,l:agz}{n:pos | n <= 268435456} Snapshot of (piece_owner(n, owner), $A.arrx(byte, l, n, owner), int n)
+
+fn backup_snapshot_free (snapshot: backup_snapshot): void =
+  case+ snapshot of
+  | ~Snapshot(owner, bytes, _) => piece_free(owner, bytes)
+
+datavtype snapshot_result =
+  | SnapshotMade of (backup_snapshot)
+  | SnapshotNotMade of (export_outcome)
+
+implement $P.dispose<snapshot_result>(made) =
+  case+ made of
+  | ~SnapshotMade(snapshot) => backup_snapshot_free(snapshot)
+  | ~SnapshotNotMade(_) => ()
+
+(* Where a backup being made goes: to the reader (downloaded or
+   shared), or kept as a snapshot. The resolver is resolved exactly
+   once, on whichever path the making ends *)
+datavtype export_sink =
+  | IntoReader of ($P.resolver(export_outcome))
+  | IntoSnapshot of ($P.resolver(snapshot_result))
+
+(* Whether a backup is being made: the file is made in one cell, a
+   chunk at a time, so two are not made at once *)
+val _making = ref<bool>(false)
+
+fn _sink_resolve (sink: export_sink, outcome: export_outcome): void =
+  case+ sink of
+  | ~IntoReader(resolver) => $P.resolve<export_outcome>(resolver, outcome)
+  | ~IntoSnapshot(resolver) => $P.resolve<snapshot_result>(resolver, SnapshotNotMade(outcome))
+
+(* The making is over, and did not make the backup *)
+fn _export_ended (sink: export_sink, outcome: export_outcome): void = let
+  val () = !_making := false
+in _sink_resolve(sink, outcome) end
+
+(* Whether the app hands the file to Android's share sheet: a blob
+   download does nothing in the app's WebView, and the sheet is how a
+   file leaves an app (the annotations' file goes the same way) *)
+fn _shares_file (): bool = $BAPP.is_native_platform() && $SH.share_file_available()
+
+(* The whole file out[0, total): kept as a snapshot, or given to the
+   reader as quire-backup.json *)
+fn _deliver {owner,l:agz}{n:pos | n <= 268435456}
+  (owner: piece_owner(n, owner), out: $A.arrx(byte, l, n, owner), total: int n, sink: export_sink): void = let
+  val () = !_making := false
+in
+  case+ sink of
+  | ~IntoSnapshot(resolver) =>
+    $P.resolve<snapshot_result>(resolver, SnapshotMade(Snapshot(owner, out, total)))
+  | ~IntoReader(resolver) => let
       val @(file_frozen, file_bytes) = $A.freeze<byte>(out)
       val mime = $A.alloc<byte>(16)
       val () = $A.write_text(mime, 0, $A.text_lit("application/json"), 16)
@@ -555,21 +621,40 @@ fn _export_finish (): void =
       val file_name = $A.alloc<byte>(17)
       val () = $A.write_text(file_name, 0, $A.text_lit("quire-backup.json"), 17)
       val @(name_frozen, name_bytes) = $A.freeze<byte>(file_name)
-      val () = $BL.download_blob(file_bytes, total, mime_bytes, 16, name_bytes, 17)
+      val () = (if _shares_file() then let
+          (* the sheet takes the bytes as it is called *)
+          val sharing = $SH.share_file(name_bytes, 17, file_bytes, total, mime_bytes, 16)
+        in
+          $P.finish<$SH.file_share_outcome>(sharing, llam(outcome) =>
+            $P.resolve<export_outcome>(resolver, (case+ outcome of
+              | $SH.FileShared() => ExportedByShare()
+              | $SH.FileShareCancelled() => ExportCancelled()
+              | $SH.FileShareFailed() => ExportNotShared()
+              | $SH.FilesNotShareable() => ExportNotShared())))
+        end else let
+          val () = $BL.download_blob(file_bytes, total, mime_bytes, 16, name_bytes, 17)
+        in $P.resolve<export_outcome>(resolver, ExportedByDownload()) end)
       val () = release_bytes(name_frozen, name_bytes)
       val () = release_bytes(mime_frozen, mime_bytes)
       val () = $A.drop<byte>(file_frozen, file_bytes)
     in piece_free(owner, $A.thaw<byte>(file_frozen)) end
+end
+
+(* The chunks joined: delivered *)
+fn _export_finish (sink: export_sink): void =
+  case+ jfile_join(_file_take()) of
+  | ~JNoWhole() => _export_ended(sink, ExportNoMemory())
+  | ~JWhole(owner, out, total) => _deliver(owner, out, total, sink)
 
 (* Books book_index to count - 1, one after another (each one's
-   annotations are read from storage); then the file is downloaded *)
+   annotations are read from storage); then the file is delivered *)
 fun _export_books {book_index,count:nat | book_index <= count} .<count - book_index>.
-  (book_index: int book_index, count: int count, first: bool): void =
+  (book_index: int book_index, count: int count, first: bool, sink: export_sink): void =
   if book_index >= count then let
     val () = (if first then _push(_text_chunk("]}")) else _push(_text_chunk("}]}")))
-  in _export_finish() end
+  in _export_finish(sink) end
   else (case+ lib_nums(book_index) of
-    | ~$R.none() => _export_books(book_index + 1, count, first)
+    | ~$R.none() => _export_books(book_index + 1, count, first, sink)
     | ~$R.some(numbers) => let
         val () = _push(_book_chunk(book_index, numbers, first))
         val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(97, numbers.id_high, numbers.id_low))
@@ -580,12 +665,12 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
           case+ lookup_content(found) of
           | ~NoStoredContent() => let
               val () = _push(_text_chunk("[]"))
-            in _export_books(book_index + 1, count, false) end
+            in _export_books(book_index + 1, count, false, sink) end
           (* a backup that looks whole but lost a book's notes is worse
              than none: it is not made (#174) *)
           | ~ContentUnreadable() => let
               val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
-            in _say("The backup could not be made: a book's notes could not be read. Try again.") end
+            in _export_ended(sink, ExportNotesUnread()) end
           | ~StoredContent(content_owner, content, content_len) => let
               val annotations = annot_json(content, content_len)
               val () = piece_free(content_owner, content)
@@ -593,20 +678,51 @@ fun _export_books {book_index,count:nat | book_index <= count} .<count - book_in
                 | ~JNone() => _push(_text_chunk("[]"))
                 | ~JChunk(annotations_owner, annotations_bytes, annotations_len) =>
                   _push(JChunk(annotations_owner, annotations_bytes, annotations_len)))
-            in _export_books(book_index + 1, count, false) end)
+            in _export_books(book_index + 1, count, false, sink) end)
       end)
 
-(* Downloads the backup, quire-backup.json *)
+(* Starts making the backup, into sink *)
+fn _export_run (sink: export_sink): void =
+  if !_making then _sink_resolve(sink, ExportBusy())
+  else let
+    val () = !_making := true
+    val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
+    val () = _push(_settings_chunk())
+    val () = _push(_log_chunk())
+    val () = _push(dict_backup_json())
+    val () = _push(catalogue_backup_json())
+    val () = _push(_collections_chunk())
+  in _export_books(0, lib_count(), true, sink) end
+
+(* What the reader is told of how making the backup ended *)
+fn _export_said (outcome: export_outcome): void =
+  case+ outcome of
+  | ExportedByDownload() => let
+      val () = modal_inform("Backup saved")
+    in modal_text_lit("quire-backup.json is in your downloads. Your settings, places, shelves, collections, notes and reading log are in it, not the books' files: keep your EPUB files.") end
+  | ExportedByShare() => let
+      val () = modal_inform("Backup saved")
+    in modal_text_lit("quire-backup.json was shared. Keep it somewhere safe: your settings, places, shelves, collections, notes and reading log are in it, not the books' files.") end
+  | ExportCancelled() => _say("The backup was not saved: the share sheet was closed.")
+  | ExportNotShared() => _say("The backup could not be shared, so it was not saved. Try again.")
+  | ExportNoMemory() => _say("The backup could not be made: there is not enough memory.")
+  | ExportNotesUnread() => _say("The backup could not be made: a book's notes could not be read. Try again.")
+  | ExportBusy() => _say("A backup is already being made. Wait for it, then try again.")
+
+(* Makes the backup, quire-backup.json: downloaded, or shared in the
+   app, and says how it ended *)
 #pub fn backup_export (): void
 
 implement backup_export () = let
-  val () = _file_put(jfile_new{BACKUP_MAX_BYTES}())
-  val () = _push(_settings_chunk())
-  val () = _push(_log_chunk())
-  val () = _push(dict_backup_json())
-  val () = _push(catalogue_backup_json())
-  val () = _push(_collections_chunk())
-in _export_books(0, lib_count(), true) end
+  val @(pending, resolver) = $P.create<export_outcome>()
+  val () = _export_run(IntoReader(resolver))
+in $P.finish<export_outcome>(pending, llam(outcome) => _export_said(outcome)) end
+
+(* Makes the backup into memory, to keep what a restore replaces *)
+fn _snapshot_make (): $P.promise(snapshot_result, $P.Pending) = let
+  val @(pending, resolver) = $P.create<snapshot_result>()
+  val () = _export_run(IntoSnapshot(resolver))
+in pending end
 
 (* ============================================================
    A book's record kept for later: "o" and its id
@@ -1037,6 +1153,46 @@ fn _place_restored {book_index:int}{numbers_loc:agz} (book_index: int book_index
       val () = _place_kept(numbers, own)
     in $A.free<Int>(own) end
 
+(* What a restore did, for the dialog that says so *)
+typedef restore_report = @{ books = int, files_missing = int, notes = int, settings = bool, days = int }
+
+fn _report_none (): restore_report = @{ books = 0, files_missing = 0, notes = 0, settings = false, days = 0 }
+
+val _report = ref<restore_report>(_report_none())
+
+(* Where a restore comes from: the reader's file (merged by the rules
+   below: the later place, no book in the Trash, days the log has none
+   for) or the snapshot taken before it (put back exactly, so the Undo
+   returns what the restore replaced) *)
+datatype restore_mode =
+  | FromFile
+  | PutBack
+
+val _mode = ref<restore_mode>(FromFile())
+
+fn _report_book (in_library: bool): void = let
+  val before = !_report
+in !_report := @{
+  books = (if in_library then before.books + 1 else before.books),
+  files_missing = (if in_library then before.files_missing else before.files_missing + 1),
+  notes = before.notes, settings = before.settings, days = before.days } end
+
+fn _report_notes (count: int): void = let
+  val before = !_report
+in !_report := @{
+  books = before.books, files_missing = before.files_missing,
+  notes = (if count > 0 then before.notes + count else before.notes), settings = before.settings, days = before.days } end
+
+fn _report_settings (): void = let
+  val before = !_report
+in !_report := @{
+  books = before.books, files_missing = before.files_missing, notes = before.notes, settings = true, days = before.days } end
+
+fn _report_day (): void = let
+  val before = !_report
+in !_report := @{
+  books = before.books, files_missing = before.files_missing, notes = before.notes, settings = before.settings, days = before.days + 1 } end
+
 (* Puts a book's state back from numbers: into the library when the
    book is there, else kept under its "o" key; its annotations from the
    array at annotations *)
@@ -1050,11 +1206,18 @@ fn _restore_book {l,numbers_loc,map_loc:agz}{owner:addr}{n:nat}{annotations_star
     val () = backup_map_collections(numbers, map)
     val () = _dated(numbers)
     val book_index = lib_find(id_high, id_low)
-    val () = (if book_index >= 0 then _place_restored(book_index, numbers) else ())
-    val () = (if book_index >= 0 then backup_apply_numbers(book_index, numbers, false) else backup_orphan_put(id_high, id_low, numbers))
+    val mode = !_mode
+    (* the snapshot's place and shelf are put back as they were *)
+    val () = (case+ mode of
+      | FromFile() => (if book_index >= 0 then _place_restored(book_index, numbers) else ())
+      | PutBack() => ())
+    val () = (if book_index >= 0
+      then backup_apply_numbers(book_index, numbers, (case+ mode of FromFile() => false | PutBack() => true))
+      else backup_orphan_put(id_high, id_low, numbers))
+    val () = _report_book(book_index >= 0)
     val () = (if annotations >= 0 then let
-        val _ = annot_json_store(buf, n, annotations, id_high, id_low)
-      in () end else ())
+        val count = annot_json_store(buf, n, annotations, id_high, id_low)
+      in _report_notes(count) end else ())
   in true end
 
 (* The books of the array's items from position, to its closing
@@ -1273,6 +1436,7 @@ in
       else if ~jr_is(buf, n, close, 93) then @(false, close)
       else let
         val () = stats_restore_day(day, minutes)
+        val () = _report_day()
       in _log_at(buf, n, close + 1) end
     end
   end
@@ -1304,6 +1468,7 @@ in
     else if jr_key_is(key, key_len, "settings") then
       (if jr_is(buf, n, value_start, 123) then let
          val @(closed, new_sort, stop) = _settings_members(buf, n, value_start + 1, key, sort)
+         val () = (if closed then _report_settings() else ())
        in
          if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, new_sort)
          else @(false, books, sort)
@@ -1311,6 +1476,8 @@ in
        else _top_members(buf, n, jr_skip(buf, n, value_start), key, numbers, map, quire, books, sort))
     else if jr_key_is(key, key_len, "readingLog") then
       (if jr_is(buf, n, value_start, 91) then let
+         (* the snapshot's days are the log, not days to add to it *)
+         val () = (case+ !_mode of PutBack() => stats_days_clear() | FromFile() => ())
          val @(closed, stop) = _log_at(buf, n, value_start + 1)
          val () = stats_restored()
        in if closed then _top_members(buf, n, stop, key, numbers, map, quire, books, sort) else @(false, books, sort) end
@@ -1332,20 +1499,75 @@ in
   end
 end
 
-fn _restored (count: int): void = let
+(* text at out[at, ...), when it fits in the dialog's text *)
+fn _text_at {l:agz}{at:nat | at <= 512}{text_len:nat}
+  (out: !$A.arr(byte, l, 512), at: int at, text: string text_len): [stop:nat | at <= stop; stop <= 512] int stop = let
+  val text_len = g1u2i(string1_length(text))
+in
+  if at + text_len > 512 then at
+  else let
+    val () = $A.write_text(out, at, $A.text_lit(text), text_len)
+  in at + text_len end
+end
+
+(* count and its noun: "1 book", "3 books" *)
+fn _count_at {l:agz}{at:nat | at <= 512}{one_len,many_len:nat}
+  (out: !$A.arr(byte, l, 512), at: int at, count: int, one: string one_len, many: string many_len): [stop:nat | at <= stop; stop <= 512] int stop =
+  if at + 11 > 512 then at
+  else let
+    val stop = jw_int(out, at, count)
+    val gap = _text_at(out, stop, " ")
+  in if count = 1 then _text_at(out, gap, one) else _text_at(out, gap, many) end
+
+(* ", " between the clauses of a list, after the first *)
+fn _comma_at {l:agz}{at:nat | at <= 512}
+  (out: !$A.arr(byte, l, 512), at: int at, started: bool): [stop:nat | at <= stop; stop <= 512] int stop =
+  if started then _text_at(out, at, ", ") else at
+
+(* What was restored, in words, one clause for each thing there was
+   (the books in the library, their highlights and bookmarks, the
+   settings, the reading log), then the books the backup knew that this
+   library does not have *)
+fn _report_text {l:agz}{at:nat | at <= 512}
+  (out: !$A.arr(byte, l, 512), at: int at, report: restore_report): [stop:nat | stop <= 512] int stop = let
+  val has_books = report.books > 0
+  val has_notes = report.notes > 0
+  val has_settings = report.settings
+  val has_days = report.days > 0
+  val at = (if has_books || has_notes || has_settings || has_days then _text_at(out, at, "Restored ")
+    else _text_at(out, at, "The backup held nothing to put back here")): [s:nat | s <= 512] int s
+  val at = (if has_books then _count_at(out, at, report.books, "book", "books") else at): [s:nat | s <= 512] int s
+  val at = (if has_notes then _count_at(out, _comma_at(out, at, has_books), report.notes, "highlight or bookmark", "highlights and bookmarks") else at): [s:nat | s <= 512] int s
+  val at = (if has_settings then _text_at(out, _comma_at(out, at, has_books || has_notes), "your settings") else at): [s:nat | s <= 512] int s
+  val at = (if has_days then _count_at(out, _comma_at(out, at, has_books || has_notes || has_settings), report.days, "day of reading", "days of reading") else at): [s:nat | s <= 512] int s
+  val at = _text_at(out, at, ".")
+  val at = (if report.files_missing > 0 then _count_at(out, _text_at(out, at, " "), report.files_missing, "book in the backup is", "books in the backup are") else at): [s:nat | s <= 512] int s
+in (if report.files_missing > 0 then _text_at(out, at, " not in your library: import its file and it takes its place and shelf.") else at): [s:nat | s <= 512] int s end
+
+(* Says what a restore did *)
+fn _restored (report: restore_report): void = let
   val () = modal_inform("Backup restored")
-  val buf = $A.alloc<byte>(64)
-  val () = $A.write_text(buf, 0, $A.text_lit("Books restored: "), 16)
-  val stop = jw_int(buf, 16, count)
+  val buf = $A.alloc<byte>(512)
+  val stop = _report_text(buf, 0, report)
 in modal_text(buf, stop) end
 
-(* Puts back the backup in buf[0, n) *)
-fn _restore {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n): void = let
+(* Whether the file was one: its text taken as a backup, whole or in
+   part, or not one *)
+datatype restore_end =
+  | NotABackup
+  | PartlyABackup
+  | RestoredWhole
+
+(* Puts back the backup in buf[0, n), as mode says, and what was done
+   is in _report *)
+fn _apply {l:agz}{owner:addr}{n:nat} (buf: !$A.arrx(byte, l, n, owner), n: int n, mode: restore_mode): restore_end = let
   val start = jr_ws(buf, n, 0)
 in
-  if start >= n then _say("This file is not a Quire backup.")
-  else if ~jr_is(buf, n, start, 123) then _say("This file is not a Quire backup.")
+  if start >= n then NotABackup()
+  else if ~jr_is(buf, n, start, 123) then NotABackup()
   else let
+    val () = !_report := _report_none()
+    val () = !_mode := mode
     val key = $A.alloc<byte>(16)
     val numbers = backup_numbers_new()
     val map = backup_map_new()
@@ -1353,6 +1575,7 @@ in
     val () = $A.free<byte>(key)
     val () = $A.free<Int>(numbers)
     val () = $A.free<Int>(map)
+    val () = !_mode := FromFile()
     val () = lib_sort(sort)
     val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())
@@ -1362,10 +1585,66 @@ in
     val () = lib_save()
     val () = lib_render()
   in
-    if complete then _restored(restored)
-    else if restored > 0 then _restored(restored)
-    else _say("This file is not a Quire backup, or it is damaged.")
+    if complete then RestoredWhole()
+    else if restored > 0 then RestoredWhole()
+    else PartlyABackup()
   end
+end
+
+(* The snapshot put back: what the restore replaced, as it was *)
+fn _put_back (snapshot: backup_snapshot): void =
+  case+ snapshot of
+  | ~Snapshot(owner, bytes, total) => let
+      val _ = _apply(bytes, total, PutBack())
+    in piece_free(owner, bytes) end
+
+(* A file read as a backup: what is in the library now is kept first
+   (a snapshot), then the file is put back, the report said, and an
+   Undo offered that puts the snapshot back. When the snapshot cannot
+   be made, nothing is restored: a restore that cannot be undone is
+   not made. Frees the file piece *)
+fn _restore_offering {l,owner:agz}{n:pos | n <= 268435456}
+  (owner: piece_owner(n, owner), out: $A.arrx(byte, l, n, owner), n: int n): void = let
+  val start = jr_ws(out, n, 0)
+in
+  if start >= n then let val () = piece_free(owner, out) in _say("This file is not a Quire backup.") end
+  else if ~jr_is(out, n, start, 123) then let val () = piece_free(owner, out) in _say("This file is not a Quire backup.") end
+  else
+    $P.finish<snapshot_result>(_snapshot_make(), llam(made) =>
+      case+ made of
+      | ~SnapshotNotMade(why) => let
+          val () = piece_free(owner, out)
+        in (case+ why of
+          | ExportNoMemory() => _say("The backup was not restored: there is not enough memory to keep what you have, so that the restore can be undone.")
+          | ExportNotesUnread() => _say("The backup was not restored: a book's notes could not be read, so what you have could not be kept for an Undo. Try again.")
+          | ExportBusy() => _say("A backup is being made. Wait for it, then restore.")
+          | ExportedByDownload() => _say("The backup was not restored.")
+          | ExportedByShare() => _say("The backup was not restored.")
+          | ExportCancelled() => _say("The backup was not restored.")
+          | ExportNotShared() => _say("The backup was not restored.")) end
+      | ~SnapshotMade(snapshot) => let
+          val ended = _apply(out, n, FromFile())
+          val () = piece_free(owner, out)
+        in
+          case+ ended of
+          (* a file that was not a backup, or that was damaged, changes
+             nothing: what it did before it was found out is put back *)
+          | NotABackup() => let
+              val () = _put_back(snapshot)
+            in _say("This file is not a Quire backup.") end
+          | PartlyABackup() => let
+              val () = _put_back(snapshot)
+            in _say("This file is not a Quire backup, or it is damaged.") end
+          | RestoredWhole() => let
+              val () = _restored(!_report)
+              val how = undo_offer(BackupRestored())
+            in
+              $P.finish<settled>(how, llam(settling) =>
+                case+ settling of
+                | Undone() => _put_back(snapshot)
+                | Final() => backup_snapshot_free(snapshot))
+            end
+        end)
 end
 
 (* The file input backup-file's file count, or the open promise of its first *)
@@ -1415,8 +1694,7 @@ implement backup_import () =
           | ~Piece(owner, out) => let
               val () = $BF.file_read(file, 0, out, file_size)
               val () = $BF.file_close(file)
-              val () = _restore(out, file_size)
-            in piece_free(owner, out) end)
+            in _restore_offering(owner, out, file_size) end)
       end
   end)
 
