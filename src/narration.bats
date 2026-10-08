@@ -493,7 +493,7 @@ in _pressed(false) end
    played *)
 fn _failed (): void = let
   val () = _stop()
-in notice_error("This narration cannot be played") end
+in notice_say(NarrationNotPlayable()) end
 
 (* Where clip generation ends: at a time in its audio, at the audio's
    end, or nowhere (it is not the clip playing) *)

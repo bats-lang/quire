@@ -1840,9 +1840,9 @@ fn _record_refused (why: unusable): void =
     val () = !_save_told := true
   in
     case+ why of
-    | UnusableNewer() => notice_error("A book's stored record was written by a newer Quire, so changes to it are not saved. Update Quire.")
-    | UnusableDamaged() => notice_error("A book's stored record is damaged, so changes to it are not saved. Your other books are saved.")
-    | UnusableNotQuire() => notice_error("A book's stored record is not one Quire wrote, so changes to it are not saved.")
+    | UnusableNewer() => notice_say(RecordFromNewerQuire())
+    | UnusableDamaged() => notice_say(RecordDamaged())
+    | UnusableNotQuire() => notice_say(RecordNotQuires())
   end
 
 (* A book's save came back *)
@@ -2262,9 +2262,9 @@ fn _adopt_index (index: stored_index): bool =
 
 (* What reading the records lost is said once, apart from what is kept *)
 fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
-  if unusable > 0 then notice_error("Some books in your library could not be read. They are left as they are and are not shown.")
-  else if lossy > 0 then notice_error("Some details of your library were damaged and show as defaults. The rest of it is intact.")
-  else if index_damaged then notice_error("Your collections could not be read. They are left as they are and are not shown.")
+  if unusable > 0 then notice_say(BooksNotRead())
+  else if lossy > 0 then notice_say(DetailsDamaged())
+  else if index_damaged then notice_say(CollectionsNotRead())
   else ()
 
 (* Reads the library: its records, or the old "lib" converted to them. The

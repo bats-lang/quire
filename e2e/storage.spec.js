@@ -55,7 +55,7 @@ async function stubReads(page) {
   });
 }
 
-const libraryUnread = 'Quire could not read your library. Nothing will be saved until you reopen Quire, so your books and places are kept.';
+const libraryUnread = 'Quire could not read your library, so nothing will be saved until it is reopened and your books and places are kept. Reopen Quire to try again.';
 
 test('a library that cannot be read is said, takes no book, and is not saved over', async ({ page }) => {
   await stubReads(page);
@@ -89,7 +89,7 @@ test('a book\'s annotations that cannot be read are said, none is made, and none
   await failReads(page, 'annotations');
   await reload(page);
   await openBook(page, 'Marked Once');
-  await expect(alert(page)).toContainText('This book\'s highlights and notes could not be read. New ones cannot be made until you reopen Quire, so the old ones are kept.');
+  await expect(alert(page)).toContainText('This book\'s highlights and notes could not be read, so new ones cannot be made and the old ones are kept. Reopen Quire to try again.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   // a highlight made now is not made (it could only be kept by saving
   // over the ones that could not be read)
@@ -119,7 +119,7 @@ test('settings that cannot be read are said, the defaults used, and not saved ov
   await toLibrary(page);
   await failReads(page, 'set');
   await reload(page);
-  await expect(alert(page)).toContainText('Quire could not read your settings. It is using the defaults, and changes will not be saved until you reopen Quire.');
+  await expect(alert(page)).toContainText('Quire could not read your settings, so it is using the defaults and changes will not be saved. Reopen Quire to try again.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Set Once');
   await expect.poll(fontSize).toBe('18px');
@@ -176,7 +176,7 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await toLibrary(page);
   await failReads(page, 'set');
   await reload(page);
-  await expect(alert(page)).toContainText('Quire could not read your settings.');
+  await expect(alert(page)).toContainText('Quire could not read your settings');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Spoken Once');
   await openReadingSettings(page, 'Read aloud');

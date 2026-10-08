@@ -2,15 +2,21 @@
 // made: the error banner (an alert) in both views, a failed save said
 // once a session, a chapter that cannot be read, and the copy status.
 
-import { test, expect } from './fixtures.js';
+import { test, expect, onAndroid } from './fixtures.js';
 import {
-  start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
+  expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
   librarySearch, selectText, selectionButton, bookPage, chapters,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
-const unreadable = 'This part of the book could not be read. Its file may be damaged: import the book again.';
-const storageFull = 'Quire could not save your changes. The browser\'s storage may be full: free some space and try again.';
+const unreadable = /(Chapter \d+|The contents) of this book could not be read\. Choose another chapter in the contents, or import the book again and choose Replace\./;
+// the banners' words by where Quire runs: none says "browser" in the app
+const storageFull = testInfo => onAndroid(testInfo)
+  ? 'Quire could not save your changes: the device\'s storage may be full. Free some space on the device and try again.'
+  : 'Quire could not save your changes: the browser\'s storage may be full. Free some space in the browser and try again.';
+const notStored = (testInfo, title) =>
+  `${title} is open, but its file could not be stored, so it will not open next time. Free some space ${onAndroid(testInfo) ? 'on the device' : 'in the browser'} and try again.`;
+const notCopied = testInfo => `The text could not be copied: the ${onAndroid(testInfo) ? 'device' : 'browser'} did not allow it.`;
 
 /** Every IndexedDB put fails from now on, as when storage is full: its
     transaction aborts (the one failure event the bridge listens for).
@@ -28,7 +34,7 @@ async function failPuts(page) {
 
 const putsFailed = page => page.evaluate(() => window.putsFailed);
 
-test('a chapter that cannot be read leaves the reader on its page, with the banner', async ({ page }) => {
+test('a chapter that cannot be read leaves the reader on its page, with the banner', async ({ page }, testInfo) => {
   const errors = await start(page);
   // chapter 1 is one page long, so the next page is chapter 2's
   await readBook(page, {
@@ -42,6 +48,7 @@ test('a chapter that cannot be read leaves the reader on its page, with the bann
   await page.keyboard.press('ArrowRight');
   await expect(alert(page)).toBeVisible();
   await expect(alert(page)).toContainText(unreadable);
+  await expectBannerSaysWhatToDo(page, testInfo);
   // the banner is shown over the reader, which stays on the page it was on
   await expect(bookPage(page)).toBeVisible();
   await expect(bookPage(page)).toContainText('Para 1.0 short');
@@ -54,6 +61,7 @@ test('a chapter that cannot be read leaves the reader on its page, with the bann
   const contents = dialog(page, 'Contents');
   await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 2' }).click();
   await expect(alert(page)).toContainText(unreadable);
+  await expectBannerSaysWhatToDo(page, testInfo);
   await expect(bookPage(page)).toContainText('Para 1.0 short');
   await expect(chapterTitle(page)).toHaveText('Chapter 1');
   // the chapter after it still opens
@@ -66,22 +74,24 @@ test('a chapter that cannot be read leaves the reader on its page, with the bann
   expect(errors).toEqual([]);
 });
 
-test('a book whose saved place cannot be read goes back to the library, with the banner', async ({ page }) => {
+test('a book whose saved place cannot be read goes back to the library, with the banner', async ({ page }, testInfo) => {
   await start(page);
   await importFiles(page, [epubFile({ title: 'Unopenable', author: 'Notice Tests', rawChapters: chapters(2), damagedChapters: [1] })], 1);
   await card(page, 'Unopenable').click();
   await expect(alert(page)).toContainText(unreadable);
+  await expectBannerSaysWhatToDo(page, testInfo);
   await expect(librarySearch(page)).toBeVisible();
 });
 
-test('a failed save shows the storage message once a session', async ({ page }) => {
+test('a failed save shows the storage message once a session', async ({ page }, testInfo) => {
   await start(page);
   await readBook(page, { title: 'Full Disk', author: 'Notice Tests', rawChapters: chapters(2) });
   await failPuts(page);
   // the place is saved at each page turn
   await page.keyboard.press('ArrowRight');
   await expect(alert(page)).toBeVisible();
-  await expect(alert(page)).toContainText(storageFull);
+  await expect(alert(page)).toContainText(storageFull(testInfo));
+  await expectBannerSaysWhatToDo(page, testInfo);
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await expect(alert(page)).toBeHidden();
   // later saves fail too, and are not said again
@@ -95,14 +105,15 @@ test('a failed save shows the storage message once a session', async ({ page }) 
   await expect(alert(page)).toBeHidden();
 });
 
-test('a book whose file cannot be stored is named in the banner', async ({ page }) => {
+test('a book whose file cannot be stored is named in the banner', async ({ page }, testInfo) => {
   await start(page);
   await failPuts(page);
   await importFiles(page, [epubFile({ title: 'Never Kept', author: 'Notice Tests', rawChapters: chapters(1) })], 1);
-  await expect(alert(page)).toContainText('Never Kept is open, but could not be stored, so it will not open next time. Free some space and import it again.');
+  await expect(alert(page)).toContainText(notStored(testInfo, 'Never Kept'));
+  await expectBannerSaysWhatToDo(page, testInfo);
 });
 
-test('Copy says "Copied" for a moment, and a copy the browser refuses is said in the banner', async ({ page, context }) => {
+test('Copy says "Copied" for a moment, and a copy the browser refuses is said in the banner', async ({ page, context }, testInfo) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await start(page);
   await readBook(page, { title: 'Copied Book', author: 'Notice Tests', rawChapters: chapters(1) });
@@ -119,6 +130,7 @@ test('Copy says "Copied" for a moment, and a copy the browser refuses is said in
   await page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new Error('denied')); });
   await selectText(page, 0, 8);
   await selectionButton(page, 'Copy').click();
-  await expect(alert(page)).toContainText('The text could not be copied: the browser did not allow it.');
+  await expect(alert(page)).toContainText(notCopied(testInfo));
+  await expectBannerSaysWhatToDo(page, testInfo);
   await expect(copied).toBeHidden();
 });

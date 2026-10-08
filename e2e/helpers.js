@@ -490,3 +490,17 @@ export async function expectBarFollows(page, rightToLeft) {
   expect(previous.middle > next.middle, 'Previous is ' + (rightToLeft ? 'right' : 'left') + ' of Next').toBe(rightToLeft);
   expect(track.middle > Math.max(previous.middle, next.middle) || track.middle < Math.min(previous.middle, next.middle), 'the scrubber between the page turns').toBe(false);
 }
+
+/** The error banner on screen says what to do next (quire#360): a
+    button besides Dismiss (Reopen Quire), or words that name the step;
+    and in the Android app it does not say "browser". Call it where a
+    spec has the banner up */
+const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|Open the book again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
+export async function expectBannerSaysWhatToDo(page, testInfo) {
+  const banner = page.getByRole('alert');
+  await expect(banner).toBeVisible();
+  const text = await banner.innerText();
+  const reopen = await banner.getByRole('button', { name: 'Reopen Quire' }).isVisible();
+  expect(reopen || NEXT_STEP.test(text), `the banner says what to do: ${text}`).toBe(true);
+  if (testInfo.project.name === 'android') expect(text, 'no "browser" in the app').not.toMatch(/browser/i);
+}

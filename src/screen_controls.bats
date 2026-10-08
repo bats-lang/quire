@@ -201,7 +201,7 @@ fn _lock (): void =
         val () = set_save(lib_state_get())
         val () = _pressed("screen-lock", false)
         val () = screen_controls_show()
-      in notice_error("This device does not let Quire lock the rotation, so Lock rotation is no longer offered. Turn the device's own rotation lock on instead.") end)
+      in notice_say(RotationNotLockable()) end)
 
 (* Lock rotation clicked: locked, or let go, and kept *)
 #pub fn screen_lock_toggle (): void

@@ -3526,7 +3526,16 @@ fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_in
 
 (* Loads chapter chapter_index: first the book's chapters, from its OPF,
    when they are not found yet *)
+(* The chapter (from 1) the last load asked for: the one a failed load
+   names in the banner *)
+val _chapter_asked = ref<int>(0)
+
+#pub fn reader_chapter_asked (): int
+
+implement reader_chapter_asked () = !_chapter_asked
+
 fn _load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(load_outcome, $P.Chained) = let
+  val () = !_chapter_asked := chapter_index + 1
   val serial = book_serial()
   val () = !_load_generation := !_load_generation + 1
   val generation = !_load_generation
@@ -3690,7 +3699,7 @@ in
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, chapter_count) =>
           if chapter > 0 then _show_page(page, page_count, chapter, chapter_count) else ())
-    in notice_part_unread() end)
+    in notice_say_part(!_chapter_asked) end)
 end
 
 (* A turn (number) into another chapter, as _jump_checked ends a jump:
@@ -3705,7 +3714,7 @@ fn _turn_jump (number: int, jumping: $P.promise(load_outcome, $P.Chained)): void
       val () = (case+ reading_get() of
         | @(page, page_count, chapter, chapter_count) =>
           if chapter > 0 then _show_page(page, page_count, chapter, chapter_count) else ())
-    in notice_part_unread() end)
+    in notice_say_part(!_chapter_asked) end)
 
 (* The positions jumped away from (a contents entry, a link, a search
    result), the latest first: the back button returns to them *)
@@ -5001,7 +5010,7 @@ in
           val () = (case+ reading_get() of
             | @(page_now, page_count_now, chapter_now, chapter_count_now) =>
               if chapter_now > 0 then _show_page(page_now, page_count_now, chapter_now, chapter_count_now) else ())
-          val () = notice_part_unread()
+          val () = notice_say_part(!_chapter_asked)
         in $P.ret<turned>(NotTurned()) end)
     end
     else $P.ret<turned>(NotTurned())
