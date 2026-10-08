@@ -141,20 +141,21 @@ for (const kept of ['on', 'off']) {
     }
     await page.keyboard.press('Escape');
     await expect(readingSettings(page)).toBeHidden();
-    const hidden = kept === 'on';
-    await expect.poll(() => page.evaluate(() => window.__android.hidden)).toEqual({ status: hidden, navigation: hidden });
     for (const how of ['quit', 'killed']) {
-      page = await unchanged(page, how);
-      expect(await page.evaluate(() => window.__android.hidden)).toEqual({ status: hidden, navigation: hidden });
-      // set as kept from the start: never shown and then hidden (a page
-      // shown in full screen hides them again, which changes nothing)
-      const asked = await page.evaluate(() => window.__android.calls.filter(c => c.plugin === 'SystemBars').map(c => c.method));
-      expect(asked.length).toBeGreaterThan(0);
-      expect(asked.filter(method => method !== (hidden ? 'hide' : 'show'))).toEqual([]);
+      // the setting is kept; the system's bars are the reader's to hide
+      // (quire#348), so the app opens again with them shown (the library,
+      // or the reader with its own bars up) and hides them when it is read
+      // with its own bars away
+      page = await relaunch(page, how);
+      await expect.poll(() => page.evaluate(() => window.__android.hidden)).toEqual({ status: false, navigation: false });
       await openReadingSettings(page, 'Page');
-      await expect(full(page)).toHaveAttribute('aria-pressed', String(hidden));
+      await expect(full(page)).toHaveAttribute('aria-pressed', String(kept === 'on'));
       await page.keyboard.press('Escape');
       await expect(readingSettings(page)).toBeHidden();
+      await page.keyboard.press('t');
+      const hidden = kept === 'on';
+      await expect.poll(() => page.evaluate(() => window.__android.hidden)).toEqual({ status: hidden, navigation: hidden });
+      await page.keyboard.press('t');
     }
   });
 }

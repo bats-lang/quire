@@ -449,6 +449,8 @@ fn _night_watch_stop (): void = !_night_watch_number := !_night_watch_number + 1
 
 fn _show_library (): void = let
   val () = !_view := LibraryView()
+  (* the library is not the immersive screen: the system bars are there *)
+  val () = screen_immersive_set(false)
   val () = _night_watch_stop()
   val () = ui_show("reader", false)
   (* the screen may sleep again, as it does outside the reader *)
@@ -486,7 +488,8 @@ in lib_render() end
    closes (they go with the next turn or tap) *)
 fn _chrome_set_off (): void = let
   val () = !_chrome := false
-in ui_attr("reader", AClass, "rv chrome-off") end
+  val () = ui_attr("reader", AClass, "rv chrome-off")
+in screen_immersive_set(_in_reader()) end
 
 fn _chrome_set (shown: bool): void = let
   (* bringing the bars up leaves the place a jump landed on: the back
@@ -496,6 +499,9 @@ fn _chrome_set (shown: bool): void = let
   val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
   val () = !_chrome_generation := !_chrome_generation + 1
   val generation = !_chrome_generation
+  (* the system bars follow: away with the reader's own bars (the
+     immersive reading screen, quire#348), there with them *)
+  val () = screen_immersive_set(~shown && _in_reader())
 in
   if shown then $P.finish<Int>($P.vow($TM.timer_set(5000)), llam(_) =>
       if !_chrome_generation = generation then (if layer_reader_blocked() then () else _chrome_set_off()) else ())
