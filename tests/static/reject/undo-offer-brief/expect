@@ -1,0 +1,5 @@
+function _static_brief_offer
+line 4
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(offered); S2Eapp(S2Ecst(UntilDismissed); ))].
+mismatch of static terms (equal):
+mismatch of static terms (tyleq):

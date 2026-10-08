@@ -1838,8 +1838,10 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = spaced(sheet, PaddingLeft(), SpaceLarge())
+  val sheet = spaced(sheet, PaddingRight(), SpaceMedium())
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = lay(sheet, Width(), "max-content")
+  val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MaxWidth(), "min(420px,100vw - 2*max(16px,var(--safe-left),var(--safe-right)))")
   val sheet = close(sheet)
   (* a toast's words wrap, its buttons keep their width (the Undo toast
