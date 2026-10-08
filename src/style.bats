@@ -1346,6 +1346,18 @@ fn accent {left:nat | left >= 40}{media:bool}{edge,ground:colour_role}
   val () = raw(sheet, ";")
 in sheet end
 
+(* A chosen state's underline (a selected tab's) in role edge on ground:
+   a 3px inset line along the foot, 3:1 against the ground (EDGEP, as an
+   accent), so a chosen state is told apart by more than a tint
+   (quire#358, WCAG 1.4.11; Material 3: an underline and a colour change
+   on the active tab) *)
+fn underline {left:nat | left >= 48}{media:bool}{edge,ground:colour_role}
+  (visible: EDGEP(edge, ground) | sheet: sheet(left, media, true), edge: role_value(edge), ground: role_value(ground)): [after:nat | after >= left - 48] sheet(after, media, true) = let
+  val () = raw(sheet, "box-shadow:inset 0 -3px 0 ")
+  val () = _role_variable(sheet, edge)
+  val () = raw(sheet, ";")
+in sheet end
+
 (* translateX(-50%): the only transform, which moves and never scales *)
 fn centre_x {left:nat | left >= 32}{media:bool}
   (sheet: sheet(left, media, true)): [after:nat | after >= left - 32] sheet(after, media, true) =
@@ -2590,8 +2602,11 @@ fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
+  (* the chosen tab keeps the card and is told apart by an underline in
+     the accent, proven 3:1 on the card (quire#358) *)
   val sheet = rule(sheet, ".tab[aria-selected=true]")
-  val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = underline(E_accent_card | sheet, RoleAccent(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".plist")
   val sheet = lay(sheet, Flex(), "1")
