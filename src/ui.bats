@@ -1943,6 +1943,7 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | TypographyClose
   | ScreenFullscreen
   | ScreenLock
+  | ScreenBrightnessSystem
 
 #pub fn typography_control_id (control: typography_control): [id_len:pos | id_len < 256] string id_len
 implement typography_control_id (control) =
@@ -1980,6 +1981,7 @@ implement typography_control_id (control) =
   | TypographyClose() => "typography-close"
   | ScreenFullscreen() => "screen-fullscreen"
   | ScreenLock() => "screen-lock"
+  | ScreenBrightnessSystem() => "screen-brightness-system"
 
 (* The control after control, in the order the decoder tries them *)
 fn _typography_control_after (control: typography_control): $R.option(typography_control) =
@@ -2016,7 +2018,8 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | TypographyReset() => $R.some(TypographyClose())
   | TypographyClose() => $R.some(ScreenFullscreen())
   | ScreenFullscreen() => $R.some(ScreenLock())
-  | ScreenLock() => $R.none()
+  | ScreenLock() => $R.some(ScreenBrightnessSystem())
+  | ScreenBrightnessSystem() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)

@@ -1737,6 +1737,7 @@ fn _typography_chosen (control: typography_control): bool =
   | TypographyClose() => let val () = layer_close(LTypography()) in false end
   | ScreenFullscreen() => let val () = screen_fullscreen_toggle() in false end
   | ScreenLock() => let val () = screen_lock_toggle() in false end
+  | ScreenBrightnessSystem() => let val () = screen_brightness_system_toggle() in false end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
@@ -2573,8 +2574,9 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
       val () = aloud_voice_chosen()
     in 0 end)
   val listeners = RSpeech(listeners, llam(event) => aloud_event(event))
-  val listeners = RCons(listeners, OnEl("screen-brightness"), "change", llam(_) => let
-      val () = screen_brightness_chosen()
+  (* the brightness slider: the screen follows it as it moves *)
+  val listeners = RCons(listeners, OnEl("screen-brightness-slider"), "input", llam(h) => let
+      val () = screen_brightness_moved(_input_number(h))
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
   (* the app is drawn edge to edge, so bars shown or hidden change the

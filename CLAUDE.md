@@ -704,9 +704,17 @@ only where its platform has it, by its own `data-hide`.
   `listen_system_bars`, `RSystemBars`), and the switch is on only while
   no bar is shown (`_fullscreen_shown`; a tap on it while it reads off
   hides them). Brightness while reading
-  (`brightness_*`, the app only: a `brightness_choice`, the device's own
-  ("Same as device") or 10 to 100%, kept with the settings and set again
-  as the app starts) is a select under its own label, the whole width.
+  (`brightness_*`, the app only, quire#392: a `brightness_choice`, the
+  device's own or `BrightnessOwn`, with a level of 10 to 100 kept apart
+  as the narration's speed is, `set_brightness_level`; kept with the
+  settings, in the one byte of the "S2" record that held the five levels
+  of the old select (1 to 5 still read as 10, 25, 50, 75, 100), and set
+  again as the app starts) is a slider that changes the screen as it
+  moves (`screen_brightness_moved`, on each `input` event, so the reader
+  sees the brightness they choose and no percentage is shown), and a
+  "Same as device" switch (`screen_brightness_system_toggle`) that gives
+  the screen back to the system and, pressed again, to the level the
+  slider shows.
   `e2e/controls-shown.js` checks, on every screen the layout spec walks,
   that no control's text is cut (a select's chosen option too) and that
   every toggle looks different on and off.

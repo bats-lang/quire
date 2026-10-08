@@ -264,36 +264,28 @@ implement speech_rate_of_hundredths (hundredths) =
   else if hundredths = 200 then RateDouble() else RateNormal()
 
 (* The screen's brightness while the app is shown: the system's own, or
-   a level (the app only: a web page cannot set it) *)
-#pub datatype brightness_choice =
-  | BrightnessSystem | BrightnessTenth | BrightnessQuarter
-  | BrightnessHalf | BrightnessThreeQuarters | BrightnessFull
+   a level of its own (the app only: a web page cannot set it). The level
+   is a quantity, 10 to 100 (a screen at 0 shows nothing), kept apart from
+   the choice, as the narration's speed is: it is what the slider shows,
+   also while the system's own is chosen *)
+#pub datatype brightness_choice = BrightnessSystem | BrightnessOwn
 
-fn _brightness_code (choice: brightness_choice): [code:nat | code <= 5] int code =
+#pub typedef set_brightness_level = [v:int | 10 <= v; v <= 100] int v
+
+(* The stored byte: 0 for the system's own, else the level (10 to 100).
+   The five levels the first select offered were stored as 1 to 5 *)
+fn _brightness_code (choice: brightness_choice, level: set_brightness_level): [code:nat | code <= 100] int code =
   case+ choice of
-  | BrightnessSystem() => 0 | BrightnessTenth() => 1 | BrightnessQuarter() => 2
-  | BrightnessHalf() => 3 | BrightnessThreeQuarters() => 4 | BrightnessFull() => 5
+  | BrightnessSystem() => 0
+  | BrightnessOwn() => level
 
-(* A level's percent, as a backup has it; none (0) for the system's
-   own *)
-#pub fn brightness_percent (choice: brightness_choice): [percent:nat | percent <= 100] int percent
-implement brightness_percent (choice) =
-  case+ choice of
-  | BrightnessSystem() => 0 | BrightnessTenth() => 10 | BrightnessQuarter() => 25
-  | BrightnessHalf() => 50 | BrightnessThreeQuarters() => 75 | BrightnessFull() => 100
-
-(* The level of a percent (a backup's): checked here, once; the
-   system's own when it is not one of them *)
-#pub fn brightness_of_percent (percent: int): brightness_choice
-implement brightness_of_percent (percent) =
-  if percent = 10 then BrightnessTenth() else if percent = 25 then BrightnessQuarter()
-  else if percent = 50 then BrightnessHalf() else if percent = 75 then BrightnessThreeQuarters()
-  else if percent = 100 then BrightnessFull() else BrightnessSystem()
-
-fn _brightness_of_code (code: int): brightness_choice =
-  if code = 1 then BrightnessTenth() else if code = 2 then BrightnessQuarter()
-  else if code = 3 then BrightnessHalf() else if code = 4 then BrightnessThreeQuarters()
-  else if code = 5 then BrightnessFull() else BrightnessSystem()
+(* The level a stored byte names, or none for the system's own *)
+fn _level_of_code (code: int): $R.option(set_brightness_level) =
+  if code = 1 then $R.some(10) else if code = 2 then $R.some(25)
+  else if code = 3 then $R.some(50) else if code = 4 then $R.some(75)
+  else if code = 5 then $R.some(100)
+  else if code >= 10 then (if code <= 100 then $R.some(g1ofg0(code)) else $R.none())
+  else $R.none()
 
 (* Whether the screen's rotation is locked (to the one it had then) *)
 #pub datatype rotation = RotationFree | RotationLocked
@@ -318,6 +310,7 @@ fn _fullscreen_of_code (code: int): fullscreen_choice =
 
 val _speech_rate = ref<speech_rate>(RateNormal())
 val _brightness = ref<brightness_choice>(BrightnessSystem())
+val _brightness_level = ref<int>(50)
 val _rotation = ref<rotation>(RotationFree())
 val _fullscreen = ref<fullscreen_choice>(FullscreenOff())
 
@@ -329,6 +322,12 @@ implement set_speech_rate_set (rate) = !_speech_rate := rate
 implement set_brightness_get () = !_brightness
 #pub fn set_brightness_set (choice: brightness_choice): void
 implement set_brightness_set (choice) = !_brightness := choice
+#pub fn set_brightness_level_get (): set_brightness_level
+implement set_brightness_level_get () = let
+  val level = g1ofg0(!_brightness_level)
+in if level < 10 then 50 else if level > 100 then 50 else level end
+#pub fn set_brightness_level_set (level: set_brightness_level): void
+implement set_brightness_level_set (level) = !_brightness_level := level
 #pub fn set_rotation_get (): rotation
 implement set_rotation_get () = !_rotation
 #pub fn set_rotation_set (turn: rotation): void
@@ -932,7 +931,7 @@ fn _save (sort: int): void = let
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
-  val () = $A.write_byte(record, 21, _brightness_code(!_brightness))
+  val () = $A.write_byte(record, 21, _brightness_code(!_brightness, set_brightness_level_get()))
   val () = $A.write_byte(record, 22, _rotation_code(!_rotation))
   val () = $A.write_byte(record, 0, 83)
   val () = $A.write_byte(record, 1, 50)
@@ -1178,6 +1177,7 @@ fn _reset (): void = let
   val () = set_theme_set(Auto())
   val () = !_speech_rate := RateNormal()
   val () = !_brightness := BrightnessSystem()
+  val () = !_brightness_level := 50
   val () = !_rotation := RotationFree()
   val () = !_fullscreen := FullscreenOff()
   val () = !_narration_speed := 4
@@ -1198,6 +1198,7 @@ implement set_reset_undoable (how) = let
   val theme_before = set_theme_get()
   val rate_before = !_speech_rate
   val brightness_before = !_brightness
+  val brightness_level_before = !_brightness_level
   val rotation_before = !_rotation
   val fullscreen_before = !_fullscreen
   val speed_before = !_narration_speed
@@ -1212,6 +1213,7 @@ in
         val () = set_theme_set(theme_before)
         val () = !_speech_rate := rate_before
         val () = !_brightness := brightness_before
+        val () = !_brightness_level := brightness_level_before
         val () = !_rotation := rotation_before
         val () = !_fullscreen := fullscreen_before
         val () = !_narration_speed := speed_before
@@ -1321,8 +1323,13 @@ in
         (* the device's own, after the settings *)
         val () = !_speech_rate := (if n >= 21 then (if second_version then
           _rate_of_code(byte2int0($A.get<byte>(record, 20))) else RateNormal()) else RateNormal())
-        val () = !_brightness := (if n >= 22 then (if second_version then
-          _brightness_of_code(byte2int0($A.get<byte>(record, 21))) else BrightnessSystem()) else BrightnessSystem())
+        val brightness_stored = (if n >= 22 then (if second_version then
+          _level_of_code(byte2int0($A.get<byte>(record, 21))) else $R.none()) else $R.none())
+        val () = (case+ brightness_stored of
+          | ~$R.some(level) => let
+              val () = !_brightness := BrightnessOwn()
+            in !_brightness_level := level end
+          | ~$R.none() => !_brightness := BrightnessSystem())
         val () = !_rotation := (if n >= 23 then (if second_version then
           _rotation_of_code(byte2int0($A.get<byte>(record, 22))) else RotationFree()) else RotationFree())
         val stored_voices = (if n >= 24 then (if second_version then byte2int0($A.get<byte>(record, 23)) else 0) else 0): int

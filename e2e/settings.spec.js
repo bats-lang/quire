@@ -377,9 +377,11 @@ test('in the Android app, the screen: full screen hides both bars, the rotation 
   await openReadingSettings(page, 'Page');
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
-  const brightness = more(page).getByRole('combobox', { name: 'Brightness while reading', exact: true });
+  const brightness = more(page).getByRole('slider', { name: 'Brightness while reading', exact: true });
+  const device = more(page).getByRole('button', { name: 'Same as device', exact: true });
   await expect(more(page).getByText('Brightness while reading', { exact: true })).toBeVisible();
-  await expect(brightness.locator('option:checked')).toHaveText('Same as device');
+  await expect(device).toHaveAccessibleDescription('Uses the brightness the device is set to');
+  expect(await switchOn(device)).toBe('on');
   await expect(full).toHaveAccessibleDescription('Hides the status and navigation bars');
   expect(await switchOn(full)).toBe('off');
   await full.click();
@@ -393,8 +395,21 @@ test('in the Android app, the screen: full screen hides both bars, the rotation 
   await expect(lock).toBeEnabled();
   await lock.click();
   await expect.poll(() => switchOn(lock)).toBe('on');
-  await brightness.selectOption({ label: '25%' });
+  await brightness.fill('25');
   await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['show', 'hide', 'show', 'lock', 'brightness']);
+  // the slider is the brightness as it moves (#392): each step reaches the
+  // screen at once, and its own brightness is then chosen
+  await brightness.fill('90');
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-2))).toEqual(['brightness {"brightness":0.25}', 'brightness {"brightness":0.9}']);
+  expect(await switchOn(device)).toBe('off');
+  // Same as device gives the screen back to the system, and again the level the slider shows
+  await device.click();
+  await expect.poll(() => switchOn(device)).toBe('on');
+  await expect.poll(() => page.evaluate(() => window.calls.at(-1))).toBe('brightness {"brightness":-1}');
+  await expect(brightness).toHaveValue('90');
+  await device.click();
+  await expect.poll(() => switchOn(device)).toBe('off');
+  await expect.poll(() => page.evaluate(() => window.calls.at(-1))).toBe('brightness {"brightness":0.9}');
 });
 
 // quire#300: the switch says what the screen shows. Android shows the
@@ -542,7 +557,8 @@ test('in a browser tab, the screen offers only what it can: no rotation lock or 
   await readBook(page, { title: 'Tabbed', author: 'Settings Tests', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
   await expect(more(page).getByRole('button', { name: 'Lock rotation', exact: true })).toBeHidden();
-  await expect(more(page).getByRole('combobox', { name: 'Brightness' })).toBeHidden();
+  await expect(more(page).getByRole('slider', { name: 'Brightness while reading' })).toBeHidden();
+  await expect(more(page).getByRole('button', { name: 'Same as device', exact: true })).toBeHidden();
 });
 
 // The night's edges, exactly, in another zone: New York in June is
@@ -621,16 +637,18 @@ test('reset puts reading aloud\'s speed and voice, the brightness and the rotati
   await openReadingSettings(page, 'Read aloud');
   const speed = more(page).getByRole('combobox', { name: 'Reading speed' });
   const voice = more(page).getByRole('combobox', { name: 'Voice' });
-  const brightness = more(page).getByRole('combobox', { name: 'Brightness' });
+  const brightness = more(page).getByRole('slider', { name: 'Brightness while reading' });
+  const device = more(page).getByRole('button', { name: 'Same as device', exact: true });
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   await speed.selectOption('1.5');
   await voice.selectOption({ label: 'Narrator' });
   await openReadingSettings(page, 'Page');
-  await brightness.selectOption({ label: '25%' });
+  await brightness.fill('25');
   await lock.click();
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
   await more(page).getByRole('button', { name: 'Reset to defaults', exact: true }).click();
-  await expect(brightness).toHaveValue('system');
+  await expect(device).toHaveAttribute('aria-pressed', 'true');
+  await expect(brightness).toHaveValue('50');
   await expect(lock).toHaveAttribute('aria-pressed', 'false');
   await openReadingSettings(page, 'Read aloud');
   await expect(speed).toHaveValue('1');
@@ -641,6 +659,7 @@ test('reset puts reading aloud\'s speed and voice, the brightness and the rotati
   await expect(voice.locator('option:checked')).toHaveText('Narrator');
   await openReadingSettings(page, 'Page');
   await expect(brightness).toHaveValue('25');
+  await expect(device).toHaveAttribute('aria-pressed', 'false');
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => page.evaluate(() => window.calls.slice(-2).map(c => c.split(' ')[0]))).toEqual(['brightness', 'lock']);
   expect(await page.evaluate(() => window.calls.slice(-2)[0])).toBe('brightness {"brightness":0.25}');
