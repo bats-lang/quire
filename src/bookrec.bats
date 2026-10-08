@@ -23,7 +23,7 @@ staload "record.sats"
 
 implement book_specs () = SPV_cons(TAGNOT_mk() | blist_cons(65, blist_cons(85, blist_cons(84, blist_cons(72, blist_nil())))), LYV_str(LYV_nil()), ModeReq(), FVV_str(blist_nil(), FVV_nil()), SPV_cons(TAGNOT_mk() | blist_cons(66, blist_cons(79, blist_cons(79, blist_cons(75, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeReq(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(67, blist_cons(79, blist_cons(76, blist_cons(76, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(69, blist_cons(76, blist_cons(83, blist_cons(69, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(70, blist_cons(78, blist_cons(83, blist_cons(72, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(79, blist_cons(82, blist_cons(68, blist_cons(82, blist_nil())))), LYV_i32(LYV_nil()), ModeOpt(), FVV_i32(int32_zero(), FVV_nil()), SPV_cons(TAGNOT_mk() | blist_cons(80, blist_cons(76, blist_cons(67, blist_cons(69, blist_nil())))), LYV_i32(LYV_i32(LYV_i32(LYV_i32(LYV_i32(LYV_i32(LYV_i32(LYV_nil()))))))), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil()))))))), SPV_cons(TAGNOT_mk() | blist_cons(83, blist_cons(69, blist_cons(82, blist_cons(73, blist_nil())))), LYV_str(LYV_i32(LYV_nil())), ModeOpt(), FVV_str(blist_nil(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(83, blist_cons(72, blist_cons(76, blist_cons(70, blist_nil())))), LYV_i32(LYV_i32(LYV_i32(LYV_i32(LYV_nil())))), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())))), SPV_cons(TAGNOT_mk() | blist_cons(83, blist_cons(73, blist_cons(90, blist_cons(69, blist_nil())))), LYV_i32(LYV_i32(LYV_i32(LYV_nil()))), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil()))), SPV_cons(TAGNOT_mk() | blist_cons(84, blist_cons(73, blist_cons(77, blist_cons(69, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(84, blist_cons(73, blist_cons(84, blist_cons(76, blist_nil())))), LYV_str(LYV_nil()), ModeReq(), FVV_str(blist_nil(), FVV_nil()), SPV_nil()))))))))))))
 
-(* BOOKV(x, vals): the values of the groups are the fields of the book x *)
+(* BOOKV(book_value, vals): the values of the groups are the fields of the book book_value *)
 #pub dataprop BOOKV(bookx, gvals) =
   | {id_high,id_low,collections,collections_modified,minutes_elsewhere,pages_elsewhere,finished_at,finished_modified,position,chapter,chapters,page,pages,anchor,place_modified,place_declined,series_number,shelf,added,opened,shelf_modified,file_size,cover,done,minutes_read,pages_read:int}{author,series,title:bytes}
     BOOKV_mk(bookx_mk(author, id_high, id_low, collections, collections_modified, minutes_elsewhere, pages_elsewhere, finished_at, finished_modified, position, chapter, chapters, page, pages, anchor, place_modified, place_declined, series, series_number, shelf, added, opened, shelf_modified, file_size, cover, done, minutes_read, pages_read, title), gv_cons(fv_str(author, fv_nil()), gv_cons(fv_i32(id_high, fv_i32(id_low, fv_nil())), gv_cons(fv_i32(collections, fv_i32(collections_modified, fv_nil())), gv_cons(fv_i32(minutes_elsewhere, fv_i32(pages_elsewhere, fv_nil())), gv_cons(fv_i32(finished_at, fv_i32(finished_modified, fv_nil())), gv_cons(fv_i32(position, fv_nil()), gv_cons(fv_i32(chapter, fv_i32(chapters, fv_i32(page, fv_i32(pages, fv_i32(anchor, fv_i32(place_modified, fv_i32(place_declined, fv_nil()))))))), gv_cons(fv_str(series, fv_i32(series_number, fv_nil())), gv_cons(fv_i32(shelf, fv_i32(added, fv_i32(opened, fv_i32(shelf_modified, fv_nil())))), gv_cons(fv_i32(file_size, fv_i32(cover, fv_i32(done, fv_nil()))), gv_cons(fv_i32(minutes_read, fv_i32(pages_read, fv_nil())), gv_cons(fv_str(title, fv_nil()), gv_nil())))))))))))))
@@ -33,17 +33,17 @@ implement book_specs () = SPV_cons(TAGNOT_mk() | blist_cons(65, blist_cons(85, b
     BookV(bookx_mk(author, id_high, id_low, collections, collections_modified, minutes_elsewhere, pages_elsewhere, finished_at, finished_modified, position, chapter, chapters, page, pages, anchor, place_modified, place_declined, series, series_number, shelf, added, opened, shelf_modified, file_size, cover, done, minutes_read, pages_read, title)) of (blist(author, author_len), int32v(id_high), int32v(id_low), int32v(collections), int32v(collections_modified), int32v(minutes_elsewhere), int32v(pages_elsewhere), int32v(finished_at), int32v(finished_modified), int32v(position), int32v(chapter), int32v(chapters), int32v(page), int32v(pages), int32v(anchor), int32v(place_modified), int32v(place_declined), blist(series, series_len), int32v(series_number), int32v(shelf), int32v(added), int32v(opened), int32v(shelf_modified), int32v(file_size), int32v(cover), int32v(done), int32v(minutes_read), int32v(pages_read), blist(title, title_len))
 
 (* The record as the values of its groups, with the proof that they are its fields *)
-#pub fun book_to_vals {x:bookx} (book: !bookv(x)): [vals:gvals] (BOOKV(x, vals) | gvalsv(BOOK_SPECS, vals, 12))
+#pub fun book_to_vals {book_value:bookx} (book: !bookv(book_value)): [vals:gvals] (BOOKV(book_value, vals) | gvalsv(BOOK_SPECS, vals, 12))
 
-implement book_to_vals {x} (book) =
+implement book_to_vals {book_value} (book) =
   case+ book of
   | BookV(author, id_high, id_low, collections, collections_modified, minutes_elsewhere, pages_elsewhere, finished_at, finished_modified, position, chapter, chapters, page, pages, anchor, place_modified, place_declined, series, series_number, shelf, added, opened, shelf_modified, file_size, cover, done, minutes_read, pages_read, title) => (BOOKV_mk() | 
     GVV_cons(FVV_str(blist_copy(author), FVV_nil()), GVV_cons(FVV_i32(int32_copy(id_high), FVV_i32(int32_copy(id_low), FVV_nil())), GVV_cons(FVV_i32(int32_copy(collections), FVV_i32(int32_copy(collections_modified), FVV_nil())), GVV_cons(FVV_i32(int32_copy(minutes_elsewhere), FVV_i32(int32_copy(pages_elsewhere), FVV_nil())), GVV_cons(FVV_i32(int32_copy(finished_at), FVV_i32(int32_copy(finished_modified), FVV_nil())), GVV_cons(FVV_i32(int32_copy(position), FVV_nil()), GVV_cons(FVV_i32(int32_copy(chapter), FVV_i32(int32_copy(chapters), FVV_i32(int32_copy(page), FVV_i32(int32_copy(pages), FVV_i32(int32_copy(anchor), FVV_i32(int32_copy(place_modified), FVV_i32(int32_copy(place_declined), FVV_nil()))))))), GVV_cons(FVV_str(blist_copy(series), FVV_i32(int32_copy(series_number), FVV_nil())), GVV_cons(FVV_i32(int32_copy(shelf), FVV_i32(int32_copy(added), FVV_i32(int32_copy(opened), FVV_i32(int32_copy(shelf_modified), FVV_nil())))), GVV_cons(FVV_i32(int32_copy(file_size), FVV_i32(int32_copy(cover), FVV_i32(int32_copy(done), FVV_nil()))), GVV_cons(FVV_i32(int32_copy(minutes_read), FVV_i32(int32_copy(pages_read), FVV_nil())), GVV_cons(FVV_str(blist_copy(title), FVV_nil()), GVV_nil())))))))))))))
 
 (* The record made of the values of its groups, with the proof that they are its fields *)
-#pub fun book_of_vals {vals:gvals}{kv:nat} (vals: gvalsv(BOOK_SPECS, vals, kv)): [x:bookx] (BOOKV(x, vals) | bookv(x))
+#pub fun book_of_vals {vals:gvals}{value_count:nat} (vals: gvalsv(BOOK_SPECS, vals, value_count)): [book_value:bookx] (BOOKV(book_value, vals) | bookv(book_value))
 
-implement book_of_vals {vals}{kv} (vals) =
+implement book_of_vals {vals}{value_count} (vals) =
   case+ vals of
   | ~GVV_cons(~FVV_str(author, ~FVV_nil()), ~GVV_cons(~FVV_i32(id_high, ~FVV_i32(id_low, ~FVV_nil())), ~GVV_cons(~FVV_i32(collections, ~FVV_i32(collections_modified, ~FVV_nil())), ~GVV_cons(~FVV_i32(minutes_elsewhere, ~FVV_i32(pages_elsewhere, ~FVV_nil())), ~GVV_cons(~FVV_i32(finished_at, ~FVV_i32(finished_modified, ~FVV_nil())), ~GVV_cons(~FVV_i32(position, ~FVV_nil()), ~GVV_cons(~FVV_i32(chapter, ~FVV_i32(chapters, ~FVV_i32(page, ~FVV_i32(pages, ~FVV_i32(anchor, ~FVV_i32(place_modified, ~FVV_i32(place_declined, ~FVV_nil()))))))), ~GVV_cons(~FVV_str(series, ~FVV_i32(series_number, ~FVV_nil())), ~GVV_cons(~FVV_i32(shelf, ~FVV_i32(added, ~FVV_i32(opened, ~FVV_i32(shelf_modified, ~FVV_nil())))), ~GVV_cons(~FVV_i32(file_size, ~FVV_i32(cover, ~FVV_i32(done, ~FVV_nil()))), ~GVV_cons(~FVV_i32(minutes_read, ~FVV_i32(pages_read, ~FVV_nil())), ~GVV_cons(~FVV_str(title, ~FVV_nil()), ~GVV_nil())))))))))))) => (BOOKV_mk() | BookV(author, id_high, id_low, collections, collections_modified, minutes_elsewhere, pages_elsewhere, finished_at, finished_modified, position, chapter, chapters, page, pages, anchor, place_modified, place_declined, series, series_number, shelf, added, opened, shelf_modified, file_size, cover, done, minutes_read, pages_read, title))
 
@@ -56,32 +56,32 @@ implement book_of_vals {vals}{kv} (vals) =
   | br_newer of ()
   | br_damaged of ()
 
-(* BOOKENC(x, ver, minver, e, bs): bs is the book x, written in the format ver,
-   readable from minver, with the chunks e kept *)
+(* BOOKENC(book_value, format_version, least_version, kept_extras, octets): octets is the book book_value, written in
+   the format format_version, readable from least_version, with the chunks kept_extras kept *)
 #pub dataprop BOOKENC(bookx, int, int, extras, bytes) =
-  | {x:bookx}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    BOOKENC_mk(x, ver, minver, e, bs) of (BOOKV(x, vals), ENCODES(BOOK_SPECS, BOOK_KIND, rx_mk(ver, minver, vals, e), bs))
+  | {book_value:bookx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
+    BOOKENC_mk(book_value, format_version, least_version, kept_extras, octets) of (BOOKV(book_value, vals), ENCODES(BOOK_SPECS, BOOK_KIND, rx_mk(format_version, least_version, vals, kept_extras), octets))
 
-(* BOOKDEC(bs, res): reading bs as a book comes to res *)
+(* BOOKDEC(octets, outcome): reading octets as a book comes to outcome *)
 #pub dataprop BOOKDEC(bytes, bookres) =
-  | {x:bookx}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    BOOKDEC_ok(bs, br_ok(x, ver, minver, e)) of (BOOKV(x, vals), DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
-  | {x:bookx}{ver,minver:int}{e:extras}{t:lost}{vals:gvals}{bs:bytes}
-    BOOKDEC_loss(bs, br_loss(x, ver, minver, e, t)) of (BOOKV(x, vals), DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
-  | {bs:bytes} BOOKDEC_notquire(bs, br_notquire()) of DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_notquire())
-  | {bs:bytes} BOOKDEC_newer(bs, br_newer()) of DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_newer())
-  | {bs:bytes} BOOKDEC_damaged(bs, br_damaged()) of DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_damaged())
+  | {book_value:bookx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
+    BOOKDEC_ok(octets, br_ok(book_value, format_version, least_version, kept_extras)) of (BOOKV(book_value, vals), DECODES(BOOK_SPECS, BOOK_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras))))
+  | {book_value:bookx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{vals:gvals}{octets:bytes}
+    BOOKDEC_loss(octets, br_loss(book_value, format_version, least_version, kept_extras, lost_groups)) of (BOOKV(book_value, vals), DECODES(BOOK_SPECS, BOOK_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups)))
+  | {octets:bytes} BOOKDEC_notquire(octets, br_notquire()) of DECODES(BOOK_SPECS, BOOK_KIND, octets, rr_notquire())
+  | {octets:bytes} BOOKDEC_newer(octets, br_newer()) of DECODES(BOOK_SPECS, BOOK_KIND, octets, rr_newer())
+  | {octets:bytes} BOOKDEC_damaged(octets, br_damaged()) of DECODES(BOOK_SPECS, BOOK_KIND, octets, rr_damaged())
 
-(* BOOKEQ(x, y): the books are one *)
+(* BOOKEQ(written_value, read_value): the books are one *)
 #pub dataprop BOOKEQ(bookx, bookx) =
-  | {x:bookx} BOOKEQ_refl(x, x)
+  | {book_value:bookx} BOOKEQ_refl(book_value, book_value)
 
 (* A book written and read back is the book written, in the same format *)
-#pub prfun book_roundtrip {x,y:bookx}{ver,minver,ver2,minver2:int}{e,e2:extras}{bs:bytes}{n:nat}
-  (LEN(bs, n), BOOKENC(x, ver, minver, e, bs), BOOKDEC(bs, br_ok(y, ver2, minver2, e2)))
-  : (BOOKEQ(x, y), EQI(ver, ver2), EQI(minver, minver2))
+#pub prfun book_roundtrip {written_value,read_value:bookx}{format_version,least_version,read_format_version,read_least_version:int}{kept_extras,read_extras:extras}{octets:bytes}{byte_count:nat}
+  (LEN(octets, byte_count), BOOKENC(written_value, format_version, least_version, kept_extras, octets), BOOKDEC(octets, br_ok(read_value, read_format_version, read_least_version, read_extras)))
+  : (BOOKEQ(written_value, read_value), EQI(format_version, read_format_version), EQI(least_version, read_least_version))
 
-primplement book_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, written, read) =
+primplement book_roundtrip {written_value,read_value}{format_version,least_version,read_format_version,read_least_version}{kept_extras,read_extras}{octets}{byte_count} (whole, written, read) =
   case+ written of
   | BOOKENC_mk(fields_written, encoded) =>
     (case+ read of
@@ -91,15 +91,15 @@ primplement book_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, w
          prval BOOKV_mk() = fields_read
        in (BOOKEQ_refl(), EQI_refl(), EQI_refl()) end)
 
-(* BOOKRES(a, b): the results of reading are one *)
+(* BOOKRES(first, second): the results of reading are one *)
 #pub dataprop BOOKRES(bookres, bookres) =
-  | {r:bookres} BOOKRES_refl(r, r)
+  | {outcome:bookres} BOOKRES_refl(outcome, outcome)
 
 (* Reading what a book was written as is reading that book *)
-#pub prfun book_enc_dec {x:bookx}{ver,minver:int}{e:extras}{bs:bytes}{n:nat}{res:bookres}
-  (LEN(bs, n), BOOKENC(x, ver, minver, e, bs), BOOKDEC(bs, res)): BOOKRES(res, br_ok(x, ver, minver, e))
+#pub prfun book_enc_dec {book_value:bookx}{format_version,least_version:int}{kept_extras:extras}{octets:bytes}{byte_count:nat}{outcome:bookres}
+  (LEN(octets, byte_count), BOOKENC(book_value, format_version, least_version, kept_extras, octets), BOOKDEC(octets, outcome)): BOOKRES(outcome, br_ok(book_value, format_version, least_version, kept_extras))
 
-primplement book_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
+primplement book_enc_dec {book_value}{format_version,least_version}{kept_extras}{octets}{byte_count}{outcome} (whole, written, read) =
   case+ written of
   | BOOKENC_mk(fields_written, encoded) =>
     (case+ read of
@@ -120,43 +120,43 @@ primplement book_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
 (* a book record at run time: its format version, the least version that reads it, the book,
    and the chunks kept *)
 #pub datavtype bookrecord(bookx, int, int, extras) =
-  | {x:bookx}{ver,minver:int | 0 <= ver; ver < 256; 0 <= minver; minver <= READER}{e:extras}{ke:nat}
-    BookRecord(x, ver, minver, e) of (int ver, int minver, bookv(x), extrasv(e, ke))
+  | {book_value:bookx}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{kept_extras:extras}{extra_count:nat}
+    BookRecord(book_value, format_version, least_version, kept_extras) of (int format_version, int least_version, bookv(book_value), extrasv(kept_extras, extra_count))
 
 #pub datavtype bookread(bookres) =
-  | {x:bookx}{ver,minver:int}{e:extras} BR_ok(br_ok(x, ver, minver, e)) of bookrecord(x, ver, minver, e)
-  | {x:bookx}{ver,minver:int}{e:extras}{t:lost}{kl:nat} BR_loss(br_loss(x, ver, minver, e, t)) of (bookrecord(x, ver, minver, e), lostv(t, kl))
+  | {book_value:bookx}{format_version,least_version:int}{kept_extras:extras} BR_ok(br_ok(book_value, format_version, least_version, kept_extras)) of bookrecord(book_value, format_version, least_version, kept_extras)
+  | {book_value:bookx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{lost_count:nat} BR_loss(br_loss(book_value, format_version, least_version, kept_extras, lost_groups)) of (bookrecord(book_value, format_version, least_version, kept_extras), lostv(lost_groups, lost_count))
   | BR_notquire(br_notquire())
   | BR_newer(br_newer())
   | BR_damaged(br_damaged())
 
-#pub fun book_record_write {x:bookx}{ver,minver:int}{e:extras} (record: !bookrecord(x, ver, minver, e))
-  : [bs:bytes][m:nat] (BOOKENC(x, ver, minver, e, bs) | blist(bs, m))
+#pub fun book_record_write {book_value:bookx}{format_version,least_version:int}{kept_extras:extras} (record: !bookrecord(book_value, format_version, least_version, kept_extras))
+  : [octets:bytes][written_len:nat] (BOOKENC(book_value, format_version, least_version, kept_extras, octets) | blist(octets, written_len))
 
-implement book_record_write {x}{ver,minver}{e} (record) =
+implement book_record_write {book_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of
-  | BookRecord(ver, minver, book, extras) => let
+  | BookRecord(format_version, least_version, book, extras) => let
       val specs = book_specs()
       val (fields | vals) = book_to_vals(book)
-      val (written | out) = record_write(specs, 1, ver, minver, vals, extras)
+      val (written | record_bytes) = record_write(specs, 1, format_version, least_version, vals, extras)
       val () = gvalsv_free(vals)
       val () = specsv_free(specs)
-    in (BOOKENC_mk(fields, written) | out) end
+    in (BOOKENC_mk(fields, written) | record_bytes) end
 
-#pub fun book_record_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:bookres] (BOOKDEC(bs, res) | bookread(res))
+#pub fun book_record_read {octets:bytes}{byte_count:nat} (list: blist(octets, byte_count)): [outcome:bookres] (BOOKDEC(octets, outcome) | bookread(outcome))
 
-implement book_record_read {bs}{n} (list) = let
+implement book_record_read {octets}{byte_count} (list) = let
   val specs = book_specs()
-  val (read | out) = record_read(specs, 1, list)
+  val (read | read_outcome) = record_read(specs, 1, list)
   val () = specsv_free(specs)
 in
-  case+ out of
-  | ~RR_ok(ver, minver, vals, extras) => let
+  case+ read_outcome of
+  | ~RR_ok(format_version, least_version, vals, extras) => let
       val (fields | book) = book_of_vals(vals)
-    in (BOOKDEC_ok(fields, read) | BR_ok(BookRecord(ver, minver, book, extras))) end
-  | ~RR_loss(ver, minver, vals, extras, lost) => let
+    in (BOOKDEC_ok(fields, read) | BR_ok(BookRecord(format_version, least_version, book, extras))) end
+  | ~RR_loss(format_version, least_version, vals, extras, lost) => let
       val (fields | book) = book_of_vals(vals)
-    in (BOOKDEC_loss(fields, read) | BR_loss(BookRecord(ver, minver, book, extras), lost)) end
+    in (BOOKDEC_loss(fields, read) | BR_loss(BookRecord(format_version, least_version, book, extras), lost)) end
   | ~RR_notquire() => (BOOKDEC_notquire(read) | BR_notquire())
   | ~RR_newer() => (BOOKDEC_newer(read) | BR_newer())
   | ~RR_damaged() => (BOOKDEC_damaged(read) | BR_damaged())
@@ -170,9 +170,9 @@ implement book_read_recast {first,second} (same | read) = let
 in read end
 
 (* A decoding as the decoding it is the same as *)
-#pub prfun book_dec_recast {bs:bytes}{first,second:bookres} (BOOKRES(first, second), BOOKDEC(bs, first)): BOOKDEC(bs, second)
+#pub prfun book_dec_recast {octets:bytes}{first,second:bookres} (BOOKRES(first, second), BOOKDEC(octets, first)): BOOKDEC(octets, second)
 
-primplement book_dec_recast {bs}{first,second} (same, dec) = let
+primplement book_dec_recast {octets}{first,second} (same, dec) = let
   prval BOOKRES_refl() = same
 in dec end
 

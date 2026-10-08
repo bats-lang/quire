@@ -23,109 +23,109 @@ staload "bookrec.sats"
 
 (* The image of a book, or none: a string too long for an array *)
 #pub datavtype book_imaged(bookx) =
-  | {x:bookx} BookImaged(x) of book_image(x)
-  | {x:bookx} BookNotImaged(x) of ()
+  | {book_value:bookx} BookImaged(book_value) of book_image(book_value)
+  | {book_value:bookx} BookNotImaged(book_value) of ()
 
 (* The numbers of a stored book, by name *)
 #pub typedef book_numbers = @{id_high = Int, id_low = Int, collections = Int, collections_modified = Int, minutes_elsewhere = Int, pages_elsewhere = Int, finished_at = Int, finished_modified = Int, position = Int, chapter = Int, chapters = Int, page = Int, pages = Int, anchor = Int, place_modified = Int, place_declined = Int, series_number = Int, shelf = Int, added = Int, opened = Int, shelf_modified = Int, file_size = Int, cover = Int, done = Int, minutes_read = Int, pages_read = Int}
 
-#pub fun book_image_free {x:bookx} (image: book_image(x)): void
+#pub fun book_image_free {book_value:bookx} (image: book_image(book_value)): void
 
-implement book_image_free {x} (image) =
+implement book_image_free {book_value} (image) =
   case+ image of
-  | ~BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => let
-      val () = bstr_free(a_author)
-      val () = int32_free(a_id_high)
-      val () = int32_free(a_id_low)
-      val () = int32_free(a_collections)
-      val () = int32_free(a_collections_modified)
-      val () = int32_free(a_minutes_elsewhere)
-      val () = int32_free(a_pages_elsewhere)
-      val () = int32_free(a_finished_at)
-      val () = int32_free(a_finished_modified)
-      val () = int32_free(a_position)
-      val () = int32_free(a_chapter)
-      val () = int32_free(a_chapters)
-      val () = int32_free(a_page)
-      val () = int32_free(a_pages)
-      val () = int32_free(a_anchor)
-      val () = int32_free(a_place_modified)
-      val () = int32_free(a_place_declined)
-      val () = bstr_free(a_series)
-      val () = int32_free(a_series_number)
-      val () = int32_free(a_shelf)
-      val () = int32_free(a_added)
-      val () = int32_free(a_opened)
-      val () = int32_free(a_shelf_modified)
-      val () = int32_free(a_file_size)
-      val () = int32_free(a_cover)
-      val () = int32_free(a_done)
-      val () = int32_free(a_minutes_read)
-      val () = int32_free(a_pages_read)
-      val () = bstr_free(a_title)
+  | ~BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => let
+      val () = bstr_free(image_author)
+      val () = int32_free(image_id_high)
+      val () = int32_free(image_id_low)
+      val () = int32_free(image_collections)
+      val () = int32_free(image_collections_modified)
+      val () = int32_free(image_minutes_elsewhere)
+      val () = int32_free(image_pages_elsewhere)
+      val () = int32_free(image_finished_at)
+      val () = int32_free(image_finished_modified)
+      val () = int32_free(image_position)
+      val () = int32_free(image_chapter)
+      val () = int32_free(image_chapters)
+      val () = int32_free(image_page)
+      val () = int32_free(image_pages)
+      val () = int32_free(image_anchor)
+      val () = int32_free(image_place_modified)
+      val () = int32_free(image_place_declined)
+      val () = bstr_free(image_series)
+      val () = int32_free(image_series_number)
+      val () = int32_free(image_shelf)
+      val () = int32_free(image_added)
+      val () = int32_free(image_opened)
+      val () = int32_free(image_shelf_modified)
+      val () = int32_free(image_file_size)
+      val () = int32_free(image_cover)
+      val () = int32_free(image_done)
+      val () = int32_free(image_minutes_read)
+      val () = int32_free(image_pages_read)
+      val () = bstr_free(image_title)
     in () end
 
-#pub fun book_image_copy {x:bookx} (image: !book_image(x)): book_image(x)
+#pub fun book_image_copy {book_value:bookx} (image: !book_image(book_value)): book_image(book_value)
 
-implement book_image_copy {x} (image) =
+implement book_image_copy {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => let
-      val c_author = bstr_copy(a_author)
-      val c_id_high = int32_copy(a_id_high)
-      val c_id_low = int32_copy(a_id_low)
-      val c_collections = int32_copy(a_collections)
-      val c_collections_modified = int32_copy(a_collections_modified)
-      val c_minutes_elsewhere = int32_copy(a_minutes_elsewhere)
-      val c_pages_elsewhere = int32_copy(a_pages_elsewhere)
-      val c_finished_at = int32_copy(a_finished_at)
-      val c_finished_modified = int32_copy(a_finished_modified)
-      val c_position = int32_copy(a_position)
-      val c_chapter = int32_copy(a_chapter)
-      val c_chapters = int32_copy(a_chapters)
-      val c_page = int32_copy(a_page)
-      val c_pages = int32_copy(a_pages)
-      val c_anchor = int32_copy(a_anchor)
-      val c_place_modified = int32_copy(a_place_modified)
-      val c_place_declined = int32_copy(a_place_declined)
-      val c_series = bstr_copy(a_series)
-      val c_series_number = int32_copy(a_series_number)
-      val c_shelf = int32_copy(a_shelf)
-      val c_added = int32_copy(a_added)
-      val c_opened = int32_copy(a_opened)
-      val c_shelf_modified = int32_copy(a_shelf_modified)
-      val c_file_size = int32_copy(a_file_size)
-      val c_cover = int32_copy(a_cover)
-      val c_done = int32_copy(a_done)
-      val c_minutes_read = int32_copy(a_minutes_read)
-      val c_pages_read = int32_copy(a_pages_read)
-      val c_title = bstr_copy(a_title)
-    in BookImage(c_author, c_id_high, c_id_low, c_collections, c_collections_modified, c_minutes_elsewhere, c_pages_elsewhere, c_finished_at, c_finished_modified, c_position, c_chapter, c_chapters, c_page, c_pages, c_anchor, c_place_modified, c_place_declined, c_series, c_series_number, c_shelf, c_added, c_opened, c_shelf_modified, c_file_size, c_cover, c_done, c_minutes_read, c_pages_read, c_title) end
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => let
+      val copy_author = bstr_copy(image_author)
+      val copy_id_high = int32_copy(image_id_high)
+      val copy_id_low = int32_copy(image_id_low)
+      val copy_collections = int32_copy(image_collections)
+      val copy_collections_modified = int32_copy(image_collections_modified)
+      val copy_minutes_elsewhere = int32_copy(image_minutes_elsewhere)
+      val copy_pages_elsewhere = int32_copy(image_pages_elsewhere)
+      val copy_finished_at = int32_copy(image_finished_at)
+      val copy_finished_modified = int32_copy(image_finished_modified)
+      val copy_position = int32_copy(image_position)
+      val copy_chapter = int32_copy(image_chapter)
+      val copy_chapters = int32_copy(image_chapters)
+      val copy_page = int32_copy(image_page)
+      val copy_pages = int32_copy(image_pages)
+      val copy_anchor = int32_copy(image_anchor)
+      val copy_place_modified = int32_copy(image_place_modified)
+      val copy_place_declined = int32_copy(image_place_declined)
+      val copy_series = bstr_copy(image_series)
+      val copy_series_number = int32_copy(image_series_number)
+      val copy_shelf = int32_copy(image_shelf)
+      val copy_added = int32_copy(image_added)
+      val copy_opened = int32_copy(image_opened)
+      val copy_shelf_modified = int32_copy(image_shelf_modified)
+      val copy_file_size = int32_copy(image_file_size)
+      val copy_cover = int32_copy(image_cover)
+      val copy_done = int32_copy(image_done)
+      val copy_minutes_read = int32_copy(image_minutes_read)
+      val copy_pages_read = int32_copy(image_pages_read)
+      val copy_title = bstr_copy(image_title)
+    in BookImage(copy_author, copy_id_high, copy_id_low, copy_collections, copy_collections_modified, copy_minutes_elsewhere, copy_pages_elsewhere, copy_finished_at, copy_finished_modified, copy_position, copy_chapter, copy_chapters, copy_page, copy_pages, copy_anchor, copy_place_modified, copy_place_declined, copy_series, copy_series_number, copy_shelf, copy_added, copy_opened, copy_shelf_modified, copy_file_size, copy_cover, copy_done, copy_minutes_read, copy_pages_read, copy_title) end
 
 (* The numbers of an image *)
-#pub fun book_image_numbers {x:bookx} (image: !book_image(x)): book_numbers
+#pub fun book_image_numbers {book_value:bookx} (image: !book_image(book_value)): book_numbers
 
-implement book_image_numbers {x} (image) =
+implement book_image_numbers {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => @{id_high = int32_value(a_id_high), id_low = int32_value(a_id_low), collections = int32_value(a_collections), collections_modified = int32_value(a_collections_modified), minutes_elsewhere = int32_value(a_minutes_elsewhere), pages_elsewhere = int32_value(a_pages_elsewhere), finished_at = int32_value(a_finished_at), finished_modified = int32_value(a_finished_modified), position = int32_value(a_position), chapter = int32_value(a_chapter), chapters = int32_value(a_chapters), page = int32_value(a_page), pages = int32_value(a_pages), anchor = int32_value(a_anchor), place_modified = int32_value(a_place_modified), place_declined = int32_value(a_place_declined), series_number = int32_value(a_series_number), shelf = int32_value(a_shelf), added = int32_value(a_added), opened = int32_value(a_opened), shelf_modified = int32_value(a_shelf_modified), file_size = int32_value(a_file_size), cover = int32_value(a_cover), done = int32_value(a_done), minutes_read = int32_value(a_minutes_read), pages_read = int32_value(a_pages_read)}
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => @{id_high = int32_value(image_id_high), id_low = int32_value(image_id_low), collections = int32_value(image_collections), collections_modified = int32_value(image_collections_modified), minutes_elsewhere = int32_value(image_minutes_elsewhere), pages_elsewhere = int32_value(image_pages_elsewhere), finished_at = int32_value(image_finished_at), finished_modified = int32_value(image_finished_modified), position = int32_value(image_position), chapter = int32_value(image_chapter), chapters = int32_value(image_chapters), page = int32_value(image_page), pages = int32_value(image_pages), anchor = int32_value(image_anchor), place_modified = int32_value(image_place_modified), place_declined = int32_value(image_place_declined), series_number = int32_value(image_series_number), shelf = int32_value(image_shelf), added = int32_value(image_added), opened = int32_value(image_opened), shelf_modified = int32_value(image_shelf_modified), file_size = int32_value(image_file_size), cover = int32_value(image_cover), done = int32_value(image_done), minutes_read = int32_value(image_minutes_read), pages_read = int32_value(image_pages_read)}
 
 (* A string of an image: its length, and a copy of its bytes in an array one longer *)
-#pub fun book_image_author {x:bookx} (image: !book_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun book_image_author {book_value:bookx} (image: !book_image(book_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement book_image_author {x} (image) =
+implement book_image_author {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => array_of_bstr(a_author)
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => array_of_bstr(image_author)
 
-#pub fun book_image_series {x:bookx} (image: !book_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun book_image_series {book_value:bookx} (image: !book_image(book_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement book_image_series {x} (image) =
+implement book_image_series {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => array_of_bstr(a_series)
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => array_of_bstr(image_series)
 
-#pub fun book_image_title {x:bookx} (image: !book_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun book_image_title {book_value:bookx} (image: !book_image(book_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement book_image_title {x} (image) =
+implement book_image_title {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => array_of_bstr(a_title)
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => array_of_bstr(image_title)
 
 (* the bit of the group AUTH in a mask of groups *)
 #pub fn book_group_auth (): int
@@ -198,174 +198,174 @@ implement book_group_all () = 4095
 implement book_numbers_merge (kept, other, keep_mask) = @{id_high = (if $AR.band_int_int(keep_mask, 2) <> 0 then kept.id_high else other.id_high), id_low = (if $AR.band_int_int(keep_mask, 2) <> 0 then kept.id_low else other.id_low), collections = (if $AR.band_int_int(keep_mask, 4) <> 0 then kept.collections else other.collections), collections_modified = (if $AR.band_int_int(keep_mask, 4) <> 0 then kept.collections_modified else other.collections_modified), minutes_elsewhere = (if $AR.band_int_int(keep_mask, 8) <> 0 then kept.minutes_elsewhere else other.minutes_elsewhere), pages_elsewhere = (if $AR.band_int_int(keep_mask, 8) <> 0 then kept.pages_elsewhere else other.pages_elsewhere), finished_at = (if $AR.band_int_int(keep_mask, 16) <> 0 then kept.finished_at else other.finished_at), finished_modified = (if $AR.band_int_int(keep_mask, 16) <> 0 then kept.finished_modified else other.finished_modified), position = (if $AR.band_int_int(keep_mask, 32) <> 0 then kept.position else other.position), chapter = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.chapter else other.chapter), chapters = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.chapters else other.chapters), page = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.page else other.page), pages = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.pages else other.pages), anchor = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.anchor else other.anchor), place_modified = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.place_modified else other.place_modified), place_declined = (if $AR.band_int_int(keep_mask, 64) <> 0 then kept.place_declined else other.place_declined), series_number = (if $AR.band_int_int(keep_mask, 128) <> 0 then kept.series_number else other.series_number), shelf = (if $AR.band_int_int(keep_mask, 256) <> 0 then kept.shelf else other.shelf), added = (if $AR.band_int_int(keep_mask, 256) <> 0 then kept.added else other.added), opened = (if $AR.band_int_int(keep_mask, 256) <> 0 then kept.opened else other.opened), shelf_modified = (if $AR.band_int_int(keep_mask, 256) <> 0 then kept.shelf_modified else other.shelf_modified), file_size = (if $AR.band_int_int(keep_mask, 512) <> 0 then kept.file_size else other.file_size), cover = (if $AR.band_int_int(keep_mask, 512) <> 0 then kept.cover else other.cover), done = (if $AR.band_int_int(keep_mask, 512) <> 0 then kept.done else other.done), minutes_read = (if $AR.band_int_int(keep_mask, 1024) <> 0 then kept.minutes_read else other.minutes_read), pages_read = (if $AR.band_int_int(keep_mask, 1024) <> 0 then kept.pages_read else other.pages_read)}
 
 (* The groups whose fields differ in two images, as a mask *)
-#pub fun book_image_diff {x,y:bookx} (first: !book_image(x), second: !book_image(y)): int
+#pub fun book_image_diff {first_value,second_value:bookx} (first: !book_image(first_value), second: !book_image(second_value)): int
 
-implement book_image_diff {x,y} (first, second) =
+implement book_image_diff {first_value,second_value} (first, second) =
   case+ first of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) =>
+  | BookImage(first_author, first_id_high, first_id_low, first_collections, first_collections_modified, first_minutes_elsewhere, first_pages_elsewhere, first_finished_at, first_finished_modified, first_position, first_chapter, first_chapters, first_page, first_pages, first_anchor, first_place_modified, first_place_declined, first_series, first_series_number, first_shelf, first_added, first_opened, first_shelf_modified, first_file_size, first_cover, first_done, first_minutes_read, first_pages_read, first_title) =>
     (case+ second of
-     | BookImage(b_author, b_id_high, b_id_low, b_collections, b_collections_modified, b_minutes_elsewhere, b_pages_elsewhere, b_finished_at, b_finished_modified, b_position, b_chapter, b_chapters, b_page, b_pages, b_anchor, b_place_modified, b_place_declined, b_series, b_series_number, b_shelf, b_added, b_opened, b_shelf_modified, b_file_size, b_cover, b_done, b_minutes_read, b_pages_read, b_title) => let
-         val m_auth = (if (~bstr_equal(a_author, b_author)) then 1 else 0): int
-         val m_book = (if (int32_value(a_id_high) <> int32_value(b_id_high)) || (int32_value(a_id_low) <> int32_value(b_id_low)) then 2 else 0): int
-         val m_coll = (if (int32_value(a_collections) <> int32_value(b_collections)) || (int32_value(a_collections_modified) <> int32_value(b_collections_modified)) then 4 else 0): int
-         val m_else = (if (int32_value(a_minutes_elsewhere) <> int32_value(b_minutes_elsewhere)) || (int32_value(a_pages_elsewhere) <> int32_value(b_pages_elsewhere)) then 8 else 0): int
-         val m_fnsh = (if (int32_value(a_finished_at) <> int32_value(b_finished_at)) || (int32_value(a_finished_modified) <> int32_value(b_finished_modified)) then 16 else 0): int
-         val m_ordr = (if (int32_value(a_position) <> int32_value(b_position)) then 32 else 0): int
-         val m_plce = (if (int32_value(a_chapter) <> int32_value(b_chapter)) || (int32_value(a_chapters) <> int32_value(b_chapters)) || (int32_value(a_page) <> int32_value(b_page)) || (int32_value(a_pages) <> int32_value(b_pages)) || (int32_value(a_anchor) <> int32_value(b_anchor)) || (int32_value(a_place_modified) <> int32_value(b_place_modified)) || (int32_value(a_place_declined) <> int32_value(b_place_declined)) then 64 else 0): int
-         val m_seri = (if (~bstr_equal(a_series, b_series)) || (int32_value(a_series_number) <> int32_value(b_series_number)) then 128 else 0): int
-         val m_shlf = (if (int32_value(a_shelf) <> int32_value(b_shelf)) || (int32_value(a_added) <> int32_value(b_added)) || (int32_value(a_opened) <> int32_value(b_opened)) || (int32_value(a_shelf_modified) <> int32_value(b_shelf_modified)) then 256 else 0): int
-         val m_size = (if (int32_value(a_file_size) <> int32_value(b_file_size)) || (int32_value(a_cover) <> int32_value(b_cover)) || (int32_value(a_done) <> int32_value(b_done)) then 512 else 0): int
-         val m_time = (if (int32_value(a_minutes_read) <> int32_value(b_minutes_read)) || (int32_value(a_pages_read) <> int32_value(b_pages_read)) then 1024 else 0): int
-         val m_titl = (if (~bstr_equal(a_title, b_title)) then 2048 else 0): int
-       in $AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int(0, m_auth), m_book), m_coll), m_else), m_fnsh), m_ordr), m_plce), m_seri), m_shlf), m_size), m_time), m_titl) end)
+     | BookImage(second_author, second_id_high, second_id_low, second_collections, second_collections_modified, second_minutes_elsewhere, second_pages_elsewhere, second_finished_at, second_finished_modified, second_position, second_chapter, second_chapters, second_page, second_pages, second_anchor, second_place_modified, second_place_declined, second_series, second_series_number, second_shelf, second_added, second_opened, second_shelf_modified, second_file_size, second_cover, second_done, second_minutes_read, second_pages_read, second_title) => let
+         val differs_auth = (if (~bstr_equal(first_author, second_author)) then 1 else 0): int
+         val differs_book = (if (int32_value(first_id_high) <> int32_value(second_id_high)) || (int32_value(first_id_low) <> int32_value(second_id_low)) then 2 else 0): int
+         val differs_coll = (if (int32_value(first_collections) <> int32_value(second_collections)) || (int32_value(first_collections_modified) <> int32_value(second_collections_modified)) then 4 else 0): int
+         val differs_else = (if (int32_value(first_minutes_elsewhere) <> int32_value(second_minutes_elsewhere)) || (int32_value(first_pages_elsewhere) <> int32_value(second_pages_elsewhere)) then 8 else 0): int
+         val differs_fnsh = (if (int32_value(first_finished_at) <> int32_value(second_finished_at)) || (int32_value(first_finished_modified) <> int32_value(second_finished_modified)) then 16 else 0): int
+         val differs_ordr = (if (int32_value(first_position) <> int32_value(second_position)) then 32 else 0): int
+         val differs_plce = (if (int32_value(first_chapter) <> int32_value(second_chapter)) || (int32_value(first_chapters) <> int32_value(second_chapters)) || (int32_value(first_page) <> int32_value(second_page)) || (int32_value(first_pages) <> int32_value(second_pages)) || (int32_value(first_anchor) <> int32_value(second_anchor)) || (int32_value(first_place_modified) <> int32_value(second_place_modified)) || (int32_value(first_place_declined) <> int32_value(second_place_declined)) then 64 else 0): int
+         val differs_seri = (if (~bstr_equal(first_series, second_series)) || (int32_value(first_series_number) <> int32_value(second_series_number)) then 128 else 0): int
+         val differs_shlf = (if (int32_value(first_shelf) <> int32_value(second_shelf)) || (int32_value(first_added) <> int32_value(second_added)) || (int32_value(first_opened) <> int32_value(second_opened)) || (int32_value(first_shelf_modified) <> int32_value(second_shelf_modified)) then 256 else 0): int
+         val differs_size = (if (int32_value(first_file_size) <> int32_value(second_file_size)) || (int32_value(first_cover) <> int32_value(second_cover)) || (int32_value(first_done) <> int32_value(second_done)) then 512 else 0): int
+         val differs_time = (if (int32_value(first_minutes_read) <> int32_value(second_minutes_read)) || (int32_value(first_pages_read) <> int32_value(second_pages_read)) then 1024 else 0): int
+         val differs_titl = (if (~bstr_equal(first_title, second_title)) then 2048 else 0): int
+       in $AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int($AR.add_int_int(0, differs_auth), differs_book), differs_coll), differs_else), differs_fnsh), differs_ordr), differs_plce), differs_seri), differs_shlf), differs_size), differs_time), differs_titl) end)
 
 (* The image of a book: the very book *)
-#pub fun book_image_of {x:bookx} (book: !bookv(x)): book_image(x)
+#pub fun book_image_of {book_value:bookx} (book: !bookv(book_value)): book_image(book_value)
 
-implement book_image_of {x} (book) =
+implement book_image_of {book_value} (book) =
   case+ book of
-  | BookV(b_author, b_id_high, b_id_low, b_collections, b_collections_modified, b_minutes_elsewhere, b_pages_elsewhere, b_finished_at, b_finished_modified, b_position, b_chapter, b_chapters, b_page, b_pages, b_anchor, b_place_modified, b_place_declined, b_series, b_series_number, b_shelf, b_added, b_opened, b_shelf_modified, b_file_size, b_cover, b_done, b_minutes_read, b_pages_read, b_title) => let
-      val s_author = bstr_of_blist(b_author)
-      val n_id_high = int32_copy(b_id_high)
-      val n_id_low = int32_copy(b_id_low)
-      val n_collections = int32_copy(b_collections)
-      val n_collections_modified = int32_copy(b_collections_modified)
-      val n_minutes_elsewhere = int32_copy(b_minutes_elsewhere)
-      val n_pages_elsewhere = int32_copy(b_pages_elsewhere)
-      val n_finished_at = int32_copy(b_finished_at)
-      val n_finished_modified = int32_copy(b_finished_modified)
-      val n_position = int32_copy(b_position)
-      val n_chapter = int32_copy(b_chapter)
-      val n_chapters = int32_copy(b_chapters)
-      val n_page = int32_copy(b_page)
-      val n_pages = int32_copy(b_pages)
-      val n_anchor = int32_copy(b_anchor)
-      val n_place_modified = int32_copy(b_place_modified)
-      val n_place_declined = int32_copy(b_place_declined)
-      val s_series = bstr_of_blist(b_series)
-      val n_series_number = int32_copy(b_series_number)
-      val n_shelf = int32_copy(b_shelf)
-      val n_added = int32_copy(b_added)
-      val n_opened = int32_copy(b_opened)
-      val n_shelf_modified = int32_copy(b_shelf_modified)
-      val n_file_size = int32_copy(b_file_size)
-      val n_cover = int32_copy(b_cover)
-      val n_done = int32_copy(b_done)
-      val n_minutes_read = int32_copy(b_minutes_read)
-      val n_pages_read = int32_copy(b_pages_read)
-      val s_title = bstr_of_blist(b_title)
-    in BookImage(s_author, n_id_high, n_id_low, n_collections, n_collections_modified, n_minutes_elsewhere, n_pages_elsewhere, n_finished_at, n_finished_modified, n_position, n_chapter, n_chapters, n_page, n_pages, n_anchor, n_place_modified, n_place_declined, s_series, n_series_number, n_shelf, n_added, n_opened, n_shelf_modified, n_file_size, n_cover, n_done, n_minutes_read, n_pages_read, s_title) end
+  | BookV(field_author, field_id_high, field_id_low, field_collections, field_collections_modified, field_minutes_elsewhere, field_pages_elsewhere, field_finished_at, field_finished_modified, field_position, field_chapter, field_chapters, field_page, field_pages, field_anchor, field_place_modified, field_place_declined, field_series, field_series_number, field_shelf, field_added, field_opened, field_shelf_modified, field_file_size, field_cover, field_done, field_minutes_read, field_pages_read, field_title) => let
+      val text_author = bstr_of_blist(field_author)
+      val number_id_high = int32_copy(field_id_high)
+      val number_id_low = int32_copy(field_id_low)
+      val number_collections = int32_copy(field_collections)
+      val number_collections_modified = int32_copy(field_collections_modified)
+      val number_minutes_elsewhere = int32_copy(field_minutes_elsewhere)
+      val number_pages_elsewhere = int32_copy(field_pages_elsewhere)
+      val number_finished_at = int32_copy(field_finished_at)
+      val number_finished_modified = int32_copy(field_finished_modified)
+      val number_position = int32_copy(field_position)
+      val number_chapter = int32_copy(field_chapter)
+      val number_chapters = int32_copy(field_chapters)
+      val number_page = int32_copy(field_page)
+      val number_pages = int32_copy(field_pages)
+      val number_anchor = int32_copy(field_anchor)
+      val number_place_modified = int32_copy(field_place_modified)
+      val number_place_declined = int32_copy(field_place_declined)
+      val text_series = bstr_of_blist(field_series)
+      val number_series_number = int32_copy(field_series_number)
+      val number_shelf = int32_copy(field_shelf)
+      val number_added = int32_copy(field_added)
+      val number_opened = int32_copy(field_opened)
+      val number_shelf_modified = int32_copy(field_shelf_modified)
+      val number_file_size = int32_copy(field_file_size)
+      val number_cover = int32_copy(field_cover)
+      val number_done = int32_copy(field_done)
+      val number_minutes_read = int32_copy(field_minutes_read)
+      val number_pages_read = int32_copy(field_pages_read)
+      val text_title = bstr_of_blist(field_title)
+    in BookImage(text_author, number_id_high, number_id_low, number_collections, number_collections_modified, number_minutes_elsewhere, number_pages_elsewhere, number_finished_at, number_finished_modified, number_position, number_chapter, number_chapters, number_page, number_pages, number_anchor, number_place_modified, number_place_declined, text_series, number_series_number, number_shelf, number_added, number_opened, number_shelf_modified, number_file_size, number_cover, number_done, number_minutes_read, number_pages_read, text_title) end
 
 (* The book an image holds *)
-#pub fun book_of_image {x:bookx} (image: !book_image(x)): bookv(x)
+#pub fun book_of_image {book_value:bookx} (image: !book_image(book_value)): bookv(book_value)
 
-implement book_of_image {x} (image) =
+implement book_of_image {book_value} (image) =
   case+ image of
-  | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => let
-      val l_author = blist_of_bstr(a_author)
-      val n_id_high = int32_copy(a_id_high)
-      val n_id_low = int32_copy(a_id_low)
-      val n_collections = int32_copy(a_collections)
-      val n_collections_modified = int32_copy(a_collections_modified)
-      val n_minutes_elsewhere = int32_copy(a_minutes_elsewhere)
-      val n_pages_elsewhere = int32_copy(a_pages_elsewhere)
-      val n_finished_at = int32_copy(a_finished_at)
-      val n_finished_modified = int32_copy(a_finished_modified)
-      val n_position = int32_copy(a_position)
-      val n_chapter = int32_copy(a_chapter)
-      val n_chapters = int32_copy(a_chapters)
-      val n_page = int32_copy(a_page)
-      val n_pages = int32_copy(a_pages)
-      val n_anchor = int32_copy(a_anchor)
-      val n_place_modified = int32_copy(a_place_modified)
-      val n_place_declined = int32_copy(a_place_declined)
-      val l_series = blist_of_bstr(a_series)
-      val n_series_number = int32_copy(a_series_number)
-      val n_shelf = int32_copy(a_shelf)
-      val n_added = int32_copy(a_added)
-      val n_opened = int32_copy(a_opened)
-      val n_shelf_modified = int32_copy(a_shelf_modified)
-      val n_file_size = int32_copy(a_file_size)
-      val n_cover = int32_copy(a_cover)
-      val n_done = int32_copy(a_done)
-      val n_minutes_read = int32_copy(a_minutes_read)
-      val n_pages_read = int32_copy(a_pages_read)
-      val l_title = blist_of_bstr(a_title)
-    in BookV(l_author, n_id_high, n_id_low, n_collections, n_collections_modified, n_minutes_elsewhere, n_pages_elsewhere, n_finished_at, n_finished_modified, n_position, n_chapter, n_chapters, n_page, n_pages, n_anchor, n_place_modified, n_place_declined, l_series, n_series_number, n_shelf, n_added, n_opened, n_shelf_modified, n_file_size, n_cover, n_done, n_minutes_read, n_pages_read, l_title) end
+  | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => let
+      val list_author = blist_of_bstr(image_author)
+      val number_id_high = int32_copy(image_id_high)
+      val number_id_low = int32_copy(image_id_low)
+      val number_collections = int32_copy(image_collections)
+      val number_collections_modified = int32_copy(image_collections_modified)
+      val number_minutes_elsewhere = int32_copy(image_minutes_elsewhere)
+      val number_pages_elsewhere = int32_copy(image_pages_elsewhere)
+      val number_finished_at = int32_copy(image_finished_at)
+      val number_finished_modified = int32_copy(image_finished_modified)
+      val number_position = int32_copy(image_position)
+      val number_chapter = int32_copy(image_chapter)
+      val number_chapters = int32_copy(image_chapters)
+      val number_page = int32_copy(image_page)
+      val number_pages = int32_copy(image_pages)
+      val number_anchor = int32_copy(image_anchor)
+      val number_place_modified = int32_copy(image_place_modified)
+      val number_place_declined = int32_copy(image_place_declined)
+      val list_series = blist_of_bstr(image_series)
+      val number_series_number = int32_copy(image_series_number)
+      val number_shelf = int32_copy(image_shelf)
+      val number_added = int32_copy(image_added)
+      val number_opened = int32_copy(image_opened)
+      val number_shelf_modified = int32_copy(image_shelf_modified)
+      val number_file_size = int32_copy(image_file_size)
+      val number_cover = int32_copy(image_cover)
+      val number_done = int32_copy(image_done)
+      val number_minutes_read = int32_copy(image_minutes_read)
+      val number_pages_read = int32_copy(image_pages_read)
+      val list_title = blist_of_bstr(image_title)
+    in BookV(list_author, number_id_high, number_id_low, number_collections, number_collections_modified, number_minutes_elsewhere, number_pages_elsewhere, number_finished_at, number_finished_modified, number_position, number_chapter, number_chapters, number_page, number_pages, number_anchor, number_place_modified, number_place_declined, list_series, number_series_number, number_shelf, number_added, number_opened, number_shelf_modified, number_file_size, number_cover, number_done, number_minutes_read, number_pages_read, list_title) end
 
 (* The image of a stored book, as read *)
-#pub fun book_record_image {x:bookx}{ver,minver:int}{e:extras} (record: !bookrecord(x, ver, minver, e)): book_image(x)
+#pub fun book_record_image {book_value:bookx}{format_version,least_version:int}{kept_extras:extras} (record: !bookrecord(book_value, format_version, least_version, kept_extras)): book_image(book_value)
 
-implement book_record_image {x}{ver,minver}{e} (record) =
+implement book_record_image {book_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of BookRecord(_, _, book, _) => book_image_of(book)
 
 (* A new record of an image: the format version this Quire writes, and no chunks kept. It holds the very book the image does. *)
-#pub fun book_record_new {x:bookx} (image: !book_image(x)): bookrecord(x, 1, 1, ex_nil())
+#pub fun book_record_new {book_value:bookx} (image: !book_image(book_value)): bookrecord(book_value, 1, 1, ex_nil())
 
-implement book_record_new {x} (image) = BookRecord(1, 1, book_of_image(image), EXV_nil())
+implement book_record_new {book_value} (image) = BookRecord(1, 1, book_of_image(image), EXV_nil())
 
-fn book_free_book {x:bookx} (book: bookv(x)): void =
+fn book_free_book {book_value:bookx} (book: bookv(book_value)): void =
   case+ book of
-  | ~BookV(f_author, f_id_high, f_id_low, f_collections, f_collections_modified, f_minutes_elsewhere, f_pages_elsewhere, f_finished_at, f_finished_modified, f_position, f_chapter, f_chapters, f_page, f_pages, f_anchor, f_place_modified, f_place_declined, f_series, f_series_number, f_shelf, f_added, f_opened, f_shelf_modified, f_file_size, f_cover, f_done, f_minutes_read, f_pages_read, f_title) => let
-      val () = blist_free(f_author)
-      val () = int32_free(f_id_high)
-      val () = int32_free(f_id_low)
-      val () = int32_free(f_collections)
-      val () = int32_free(f_collections_modified)
-      val () = int32_free(f_minutes_elsewhere)
-      val () = int32_free(f_pages_elsewhere)
-      val () = int32_free(f_finished_at)
-      val () = int32_free(f_finished_modified)
-      val () = int32_free(f_position)
-      val () = int32_free(f_chapter)
-      val () = int32_free(f_chapters)
-      val () = int32_free(f_page)
-      val () = int32_free(f_pages)
-      val () = int32_free(f_anchor)
-      val () = int32_free(f_place_modified)
-      val () = int32_free(f_place_declined)
-      val () = blist_free(f_series)
-      val () = int32_free(f_series_number)
-      val () = int32_free(f_shelf)
-      val () = int32_free(f_added)
-      val () = int32_free(f_opened)
-      val () = int32_free(f_shelf_modified)
-      val () = int32_free(f_file_size)
-      val () = int32_free(f_cover)
-      val () = int32_free(f_done)
-      val () = int32_free(f_minutes_read)
-      val () = int32_free(f_pages_read)
-      val () = blist_free(f_title)
+  | ~BookV(field_author, field_id_high, field_id_low, field_collections, field_collections_modified, field_minutes_elsewhere, field_pages_elsewhere, field_finished_at, field_finished_modified, field_position, field_chapter, field_chapters, field_page, field_pages, field_anchor, field_place_modified, field_place_declined, field_series, field_series_number, field_shelf, field_added, field_opened, field_shelf_modified, field_file_size, field_cover, field_done, field_minutes_read, field_pages_read, field_title) => let
+      val () = blist_free(field_author)
+      val () = int32_free(field_id_high)
+      val () = int32_free(field_id_low)
+      val () = int32_free(field_collections)
+      val () = int32_free(field_collections_modified)
+      val () = int32_free(field_minutes_elsewhere)
+      val () = int32_free(field_pages_elsewhere)
+      val () = int32_free(field_finished_at)
+      val () = int32_free(field_finished_modified)
+      val () = int32_free(field_position)
+      val () = int32_free(field_chapter)
+      val () = int32_free(field_chapters)
+      val () = int32_free(field_page)
+      val () = int32_free(field_pages)
+      val () = int32_free(field_anchor)
+      val () = int32_free(field_place_modified)
+      val () = int32_free(field_place_declined)
+      val () = blist_free(field_series)
+      val () = int32_free(field_series_number)
+      val () = int32_free(field_shelf)
+      val () = int32_free(field_added)
+      val () = int32_free(field_opened)
+      val () = int32_free(field_shelf_modified)
+      val () = int32_free(field_file_size)
+      val () = int32_free(field_cover)
+      val () = int32_free(field_done)
+      val () = int32_free(field_minutes_read)
+      val () = int32_free(field_pages_read)
+      val () = blist_free(field_title)
     in () end
 
 (* A record freed *)
-#pub fun book_record_free {x:bookx}{ver,minver:int}{e:extras} (record: bookrecord(x, ver, minver, e)): void
+#pub fun book_record_free {book_value:bookx}{format_version,least_version:int}{kept_extras:extras} (record: bookrecord(book_value, format_version, least_version, kept_extras)): void
 
-implement book_record_free {x}{ver,minver}{e} (record) =
+implement book_record_free {book_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of
   | ~BookRecord(_, _, book, extras) => let
       val () = book_free_book(book)
     in extrasv_free(extras) end
 
 (* The number of the record, or the image's *)
-fn _pick_number {a,b:int} (take: bool, kept: int32v(a), other: !int32v(b)): [v:int] int32v(v) =
+fn _pick_number {kept_number,other_number:int} (take: bool, kept: int32v(kept_number), other: !int32v(other_number)): [picked_number:int] int32v(picked_number) =
   if take then let val () = int32_free(kept) in int32_copy(other) end else kept
 
 (* The bytes of the record, or those the image's array holds *)
-fn _pick_text {first,second:bytes}{n:nat | n < 256} (take: bool, kept: blist(first, n), other: !bstr(second)): [bs:bytes][len:nat | len < 256] blist(bs, len) =
+fn _pick_text {kept_octets,other_octets:bytes}{kept_len:nat | kept_len < 256} (take: bool, kept: blist(kept_octets, kept_len), other: !bstr(other_octets)): [picked_octets:bytes][picked_len:nat | picked_len < 256] blist(picked_octets, picked_len) =
   if take then let val () = blist_free(kept) in blist_of_bstr(other) end else kept
 
 (* The record with the groups in the mask taken from the image, and the others as they are *)
-#pub fun book_record_patch {x,y:bookx}{ver,minver:int}{e:extras} (record: bookrecord(x, ver, minver, e), image: !book_image(y), mask: int)
-  : [z:bookx] bookrecord(z, ver, minver, e)
+#pub fun book_record_patch {record_value,image_value:bookx}{format_version,least_version:int}{kept_extras:extras} (record: bookrecord(record_value, format_version, least_version, kept_extras), image: !book_image(image_value), mask: int)
+  : [patched_value:bookx] bookrecord(patched_value, format_version, least_version, kept_extras)
 
-implement book_record_patch {x,y}{ver,minver}{e} (record, image, mask) =
+implement book_record_patch {record_value,image_value}{format_version,least_version}{kept_extras} (record, image, mask) =
   case+ record of
-  | ~BookRecord(ver, minver, book, extras) =>
+  | ~BookRecord(format_version, least_version, book, extras) =>
     (case+ book of
-     | ~BookV(f_author, f_id_high, f_id_low, f_collections, f_collections_modified, f_minutes_elsewhere, f_pages_elsewhere, f_finished_at, f_finished_modified, f_position, f_chapter, f_chapters, f_page, f_pages, f_anchor, f_place_modified, f_place_declined, f_series, f_series_number, f_shelf, f_added, f_opened, f_shelf_modified, f_file_size, f_cover, f_done, f_minutes_read, f_pages_read, f_title) =>
+     | ~BookV(field_author, field_id_high, field_id_low, field_collections, field_collections_modified, field_minutes_elsewhere, field_pages_elsewhere, field_finished_at, field_finished_modified, field_position, field_chapter, field_chapters, field_page, field_pages, field_anchor, field_place_modified, field_place_declined, field_series, field_series_number, field_shelf, field_added, field_opened, field_shelf_modified, field_file_size, field_cover, field_done, field_minutes_read, field_pages_read, field_title) =>
        (case+ image of
-        | BookImage(a_author, a_id_high, a_id_low, a_collections, a_collections_modified, a_minutes_elsewhere, a_pages_elsewhere, a_finished_at, a_finished_modified, a_position, a_chapter, a_chapters, a_page, a_pages, a_anchor, a_place_modified, a_place_declined, a_series, a_series_number, a_shelf, a_added, a_opened, a_shelf_modified, a_file_size, a_cover, a_done, a_minutes_read, a_pages_read, a_title) => let
+        | BookImage(image_author, image_id_high, image_id_low, image_collections, image_collections_modified, image_minutes_elsewhere, image_pages_elsewhere, image_finished_at, image_finished_modified, image_position, image_chapter, image_chapters, image_page, image_pages, image_anchor, image_place_modified, image_place_declined, image_series, image_series_number, image_shelf, image_added, image_opened, image_shelf_modified, image_file_size, image_cover, image_done, image_minutes_read, image_pages_read, image_title) => let
             val take_auth = $AR.band_int_int(mask, 1) <> 0
             val take_book = $AR.band_int_int(mask, 2) <> 0
             val take_coll = $AR.band_int_int(mask, 4) <> 0
@@ -378,43 +378,42 @@ implement book_record_patch {x,y}{ver,minver}{e} (record, image, mask) =
             val take_size = $AR.band_int_int(mask, 512) <> 0
             val take_time = $AR.band_int_int(mask, 1024) <> 0
             val take_titl = $AR.band_int_int(mask, 2048) <> 0
-            val c_author = _pick_text(take_auth, f_author, a_author)
-            val c_id_high = _pick_number(take_book, f_id_high, a_id_high)
-            val c_id_low = _pick_number(take_book, f_id_low, a_id_low)
-            val c_collections = _pick_number(take_coll, f_collections, a_collections)
-            val c_collections_modified = _pick_number(take_coll, f_collections_modified, a_collections_modified)
-            val c_minutes_elsewhere = _pick_number(take_else, f_minutes_elsewhere, a_minutes_elsewhere)
-            val c_pages_elsewhere = _pick_number(take_else, f_pages_elsewhere, a_pages_elsewhere)
-            val c_finished_at = _pick_number(take_fnsh, f_finished_at, a_finished_at)
-            val c_finished_modified = _pick_number(take_fnsh, f_finished_modified, a_finished_modified)
-            val c_position = _pick_number(take_ordr, f_position, a_position)
-            val c_chapter = _pick_number(take_plce, f_chapter, a_chapter)
-            val c_chapters = _pick_number(take_plce, f_chapters, a_chapters)
-            val c_page = _pick_number(take_plce, f_page, a_page)
-            val c_pages = _pick_number(take_plce, f_pages, a_pages)
-            val c_anchor = _pick_number(take_plce, f_anchor, a_anchor)
-            val c_place_modified = _pick_number(take_plce, f_place_modified, a_place_modified)
-            val c_place_declined = _pick_number(take_plce, f_place_declined, a_place_declined)
-            val c_series = _pick_text(take_seri, f_series, a_series)
-            val c_series_number = _pick_number(take_seri, f_series_number, a_series_number)
-            val c_shelf = _pick_number(take_shlf, f_shelf, a_shelf)
-            val c_added = _pick_number(take_shlf, f_added, a_added)
-            val c_opened = _pick_number(take_shlf, f_opened, a_opened)
-            val c_shelf_modified = _pick_number(take_shlf, f_shelf_modified, a_shelf_modified)
-            val c_file_size = _pick_number(take_size, f_file_size, a_file_size)
-            val c_cover = _pick_number(take_size, f_cover, a_cover)
-            val c_done = _pick_number(take_size, f_done, a_done)
-            val c_minutes_read = _pick_number(take_time, f_minutes_read, a_minutes_read)
-            val c_pages_read = _pick_number(take_time, f_pages_read, a_pages_read)
-            val c_title = _pick_text(take_titl, f_title, a_title)
-          in BookRecord(ver, minver, BookV(c_author, c_id_high, c_id_low, c_collections, c_collections_modified, c_minutes_elsewhere, c_pages_elsewhere, c_finished_at, c_finished_modified, c_position, c_chapter, c_chapters, c_page, c_pages, c_anchor, c_place_modified, c_place_declined, c_series, c_series_number, c_shelf, c_added, c_opened, c_shelf_modified, c_file_size, c_cover, c_done, c_minutes_read, c_pages_read, c_title), extras) end))
+            val chosen_author = _pick_text(take_auth, field_author, image_author)
+            val chosen_id_high = _pick_number(take_book, field_id_high, image_id_high)
+            val chosen_id_low = _pick_number(take_book, field_id_low, image_id_low)
+            val chosen_collections = _pick_number(take_coll, field_collections, image_collections)
+            val chosen_collections_modified = _pick_number(take_coll, field_collections_modified, image_collections_modified)
+            val chosen_minutes_elsewhere = _pick_number(take_else, field_minutes_elsewhere, image_minutes_elsewhere)
+            val chosen_pages_elsewhere = _pick_number(take_else, field_pages_elsewhere, image_pages_elsewhere)
+            val chosen_finished_at = _pick_number(take_fnsh, field_finished_at, image_finished_at)
+            val chosen_finished_modified = _pick_number(take_fnsh, field_finished_modified, image_finished_modified)
+            val chosen_position = _pick_number(take_ordr, field_position, image_position)
+            val chosen_chapter = _pick_number(take_plce, field_chapter, image_chapter)
+            val chosen_chapters = _pick_number(take_plce, field_chapters, image_chapters)
+            val chosen_page = _pick_number(take_plce, field_page, image_page)
+            val chosen_pages = _pick_number(take_plce, field_pages, image_pages)
+            val chosen_anchor = _pick_number(take_plce, field_anchor, image_anchor)
+            val chosen_place_modified = _pick_number(take_plce, field_place_modified, image_place_modified)
+            val chosen_place_declined = _pick_number(take_plce, field_place_declined, image_place_declined)
+            val chosen_series = _pick_text(take_seri, field_series, image_series)
+            val chosen_series_number = _pick_number(take_seri, field_series_number, image_series_number)
+            val chosen_shelf = _pick_number(take_shlf, field_shelf, image_shelf)
+            val chosen_added = _pick_number(take_shlf, field_added, image_added)
+            val chosen_opened = _pick_number(take_shlf, field_opened, image_opened)
+            val chosen_shelf_modified = _pick_number(take_shlf, field_shelf_modified, image_shelf_modified)
+            val chosen_file_size = _pick_number(take_size, field_file_size, image_file_size)
+            val chosen_cover = _pick_number(take_size, field_cover, image_cover)
+            val chosen_done = _pick_number(take_size, field_done, image_done)
+            val chosen_minutes_read = _pick_number(take_time, field_minutes_read, image_minutes_read)
+            val chosen_pages_read = _pick_number(take_time, field_pages_read, image_pages_read)
+            val chosen_title = _pick_text(take_titl, field_title, image_title)
+          in BookRecord(format_version, least_version, BookV(chosen_author, chosen_id_high, chosen_id_low, chosen_collections, chosen_collections_modified, chosen_minutes_elsewhere, chosen_pages_elsewhere, chosen_finished_at, chosen_finished_modified, chosen_position, chosen_chapter, chosen_chapters, chosen_page, chosen_pages, chosen_anchor, chosen_place_modified, chosen_place_declined, chosen_series, chosen_series_number, chosen_shelf, chosen_added, chosen_opened, chosen_shelf_modified, chosen_file_size, chosen_cover, chosen_done, chosen_minutes_read, chosen_pages_read, chosen_title), extras) end))
 
 (* An image of numbers and strings (each in an array one longer than the string, which it takes), or none when a number is not one of 32 bits *)
 #pub fun book_image_make {author_loc,series_loc,title_loc:agz}{author_len,series_len,title_len:nat | author_len < 256; series_len < 256; title_len < 256}
-  (numbers: book_numbers, author: $A.arr(byte, author_loc, author_len + 1), author_len: int author_len, series: $A.arr(byte, series_loc, series_len + 1), series_len: int series_len, title: $A.arr(byte, title_loc, title_len + 1), title_len: int title_len): [x:bookx] book_imaged(x)
+  (numbers: book_numbers, author: $A.arr(byte, author_loc, author_len + 1), author_len: int author_len, series: $A.arr(byte, series_loc, series_len + 1), series_len: int series_len, title: $A.arr(byte, title_loc, title_len + 1), title_len: int title_len): [book_value:bookx] book_imaged(book_value)
 
 implement book_image_make (numbers, author, author_len, series, series_len, title, title_len) = let
-  fn release {l:agz}{len:nat | len < 256} (array: $A.arr(byte, l, len + 1)): void = $A.free<byte>(array)
 in
   case+ int32_make(numbers.id_high) of
   | ~I32_unrepresentable() => let
@@ -422,527 +421,527 @@ in
       val () = $A.free<byte>(series)
       val () = $A.free<byte>(title)
     in BookNotImaged() end
-  | ~I32_made(n_id_high) =>
+  | ~I32_made(number_id_high) =>
     case+ int32_make(numbers.id_low) of
     | ~I32_unrepresentable() => let
-        val () = int32_free(n_id_high)
+        val () = int32_free(number_id_high)
         val () = $A.free<byte>(author)
         val () = $A.free<byte>(series)
         val () = $A.free<byte>(title)
       in BookNotImaged() end
-    | ~I32_made(n_id_low) =>
+    | ~I32_made(number_id_low) =>
       case+ int32_make(numbers.collections) of
       | ~I32_unrepresentable() => let
-          val () = int32_free(n_id_high)
-          val () = int32_free(n_id_low)
+          val () = int32_free(number_id_high)
+          val () = int32_free(number_id_low)
           val () = $A.free<byte>(author)
           val () = $A.free<byte>(series)
           val () = $A.free<byte>(title)
         in BookNotImaged() end
-      | ~I32_made(n_collections) =>
+      | ~I32_made(number_collections) =>
         case+ int32_make(numbers.collections_modified) of
         | ~I32_unrepresentable() => let
-            val () = int32_free(n_id_high)
-            val () = int32_free(n_id_low)
-            val () = int32_free(n_collections)
+            val () = int32_free(number_id_high)
+            val () = int32_free(number_id_low)
+            val () = int32_free(number_collections)
             val () = $A.free<byte>(author)
             val () = $A.free<byte>(series)
             val () = $A.free<byte>(title)
           in BookNotImaged() end
-        | ~I32_made(n_collections_modified) =>
+        | ~I32_made(number_collections_modified) =>
           case+ int32_make(numbers.minutes_elsewhere) of
           | ~I32_unrepresentable() => let
-              val () = int32_free(n_id_high)
-              val () = int32_free(n_id_low)
-              val () = int32_free(n_collections)
-              val () = int32_free(n_collections_modified)
+              val () = int32_free(number_id_high)
+              val () = int32_free(number_id_low)
+              val () = int32_free(number_collections)
+              val () = int32_free(number_collections_modified)
               val () = $A.free<byte>(author)
               val () = $A.free<byte>(series)
               val () = $A.free<byte>(title)
             in BookNotImaged() end
-          | ~I32_made(n_minutes_elsewhere) =>
+          | ~I32_made(number_minutes_elsewhere) =>
             case+ int32_make(numbers.pages_elsewhere) of
             | ~I32_unrepresentable() => let
-                val () = int32_free(n_id_high)
-                val () = int32_free(n_id_low)
-                val () = int32_free(n_collections)
-                val () = int32_free(n_collections_modified)
-                val () = int32_free(n_minutes_elsewhere)
+                val () = int32_free(number_id_high)
+                val () = int32_free(number_id_low)
+                val () = int32_free(number_collections)
+                val () = int32_free(number_collections_modified)
+                val () = int32_free(number_minutes_elsewhere)
                 val () = $A.free<byte>(author)
                 val () = $A.free<byte>(series)
                 val () = $A.free<byte>(title)
               in BookNotImaged() end
-            | ~I32_made(n_pages_elsewhere) =>
+            | ~I32_made(number_pages_elsewhere) =>
               case+ int32_make(numbers.finished_at) of
               | ~I32_unrepresentable() => let
-                  val () = int32_free(n_id_high)
-                  val () = int32_free(n_id_low)
-                  val () = int32_free(n_collections)
-                  val () = int32_free(n_collections_modified)
-                  val () = int32_free(n_minutes_elsewhere)
-                  val () = int32_free(n_pages_elsewhere)
+                  val () = int32_free(number_id_high)
+                  val () = int32_free(number_id_low)
+                  val () = int32_free(number_collections)
+                  val () = int32_free(number_collections_modified)
+                  val () = int32_free(number_minutes_elsewhere)
+                  val () = int32_free(number_pages_elsewhere)
                   val () = $A.free<byte>(author)
                   val () = $A.free<byte>(series)
                   val () = $A.free<byte>(title)
                 in BookNotImaged() end
-              | ~I32_made(n_finished_at) =>
+              | ~I32_made(number_finished_at) =>
                 case+ int32_make(numbers.finished_modified) of
                 | ~I32_unrepresentable() => let
-                    val () = int32_free(n_id_high)
-                    val () = int32_free(n_id_low)
-                    val () = int32_free(n_collections)
-                    val () = int32_free(n_collections_modified)
-                    val () = int32_free(n_minutes_elsewhere)
-                    val () = int32_free(n_pages_elsewhere)
-                    val () = int32_free(n_finished_at)
+                    val () = int32_free(number_id_high)
+                    val () = int32_free(number_id_low)
+                    val () = int32_free(number_collections)
+                    val () = int32_free(number_collections_modified)
+                    val () = int32_free(number_minutes_elsewhere)
+                    val () = int32_free(number_pages_elsewhere)
+                    val () = int32_free(number_finished_at)
                     val () = $A.free<byte>(author)
                     val () = $A.free<byte>(series)
                     val () = $A.free<byte>(title)
                   in BookNotImaged() end
-                | ~I32_made(n_finished_modified) =>
+                | ~I32_made(number_finished_modified) =>
                   case+ int32_make(numbers.position) of
                   | ~I32_unrepresentable() => let
-                      val () = int32_free(n_id_high)
-                      val () = int32_free(n_id_low)
-                      val () = int32_free(n_collections)
-                      val () = int32_free(n_collections_modified)
-                      val () = int32_free(n_minutes_elsewhere)
-                      val () = int32_free(n_pages_elsewhere)
-                      val () = int32_free(n_finished_at)
-                      val () = int32_free(n_finished_modified)
+                      val () = int32_free(number_id_high)
+                      val () = int32_free(number_id_low)
+                      val () = int32_free(number_collections)
+                      val () = int32_free(number_collections_modified)
+                      val () = int32_free(number_minutes_elsewhere)
+                      val () = int32_free(number_pages_elsewhere)
+                      val () = int32_free(number_finished_at)
+                      val () = int32_free(number_finished_modified)
                       val () = $A.free<byte>(author)
                       val () = $A.free<byte>(series)
                       val () = $A.free<byte>(title)
                     in BookNotImaged() end
-                  | ~I32_made(n_position) =>
+                  | ~I32_made(number_position) =>
                     case+ int32_make(numbers.chapter) of
                     | ~I32_unrepresentable() => let
-                        val () = int32_free(n_id_high)
-                        val () = int32_free(n_id_low)
-                        val () = int32_free(n_collections)
-                        val () = int32_free(n_collections_modified)
-                        val () = int32_free(n_minutes_elsewhere)
-                        val () = int32_free(n_pages_elsewhere)
-                        val () = int32_free(n_finished_at)
-                        val () = int32_free(n_finished_modified)
-                        val () = int32_free(n_position)
+                        val () = int32_free(number_id_high)
+                        val () = int32_free(number_id_low)
+                        val () = int32_free(number_collections)
+                        val () = int32_free(number_collections_modified)
+                        val () = int32_free(number_minutes_elsewhere)
+                        val () = int32_free(number_pages_elsewhere)
+                        val () = int32_free(number_finished_at)
+                        val () = int32_free(number_finished_modified)
+                        val () = int32_free(number_position)
                         val () = $A.free<byte>(author)
                         val () = $A.free<byte>(series)
                         val () = $A.free<byte>(title)
                       in BookNotImaged() end
-                    | ~I32_made(n_chapter) =>
+                    | ~I32_made(number_chapter) =>
                       case+ int32_make(numbers.chapters) of
                       | ~I32_unrepresentable() => let
-                          val () = int32_free(n_id_high)
-                          val () = int32_free(n_id_low)
-                          val () = int32_free(n_collections)
-                          val () = int32_free(n_collections_modified)
-                          val () = int32_free(n_minutes_elsewhere)
-                          val () = int32_free(n_pages_elsewhere)
-                          val () = int32_free(n_finished_at)
-                          val () = int32_free(n_finished_modified)
-                          val () = int32_free(n_position)
-                          val () = int32_free(n_chapter)
+                          val () = int32_free(number_id_high)
+                          val () = int32_free(number_id_low)
+                          val () = int32_free(number_collections)
+                          val () = int32_free(number_collections_modified)
+                          val () = int32_free(number_minutes_elsewhere)
+                          val () = int32_free(number_pages_elsewhere)
+                          val () = int32_free(number_finished_at)
+                          val () = int32_free(number_finished_modified)
+                          val () = int32_free(number_position)
+                          val () = int32_free(number_chapter)
                           val () = $A.free<byte>(author)
                           val () = $A.free<byte>(series)
                           val () = $A.free<byte>(title)
                         in BookNotImaged() end
-                      | ~I32_made(n_chapters) =>
+                      | ~I32_made(number_chapters) =>
                         case+ int32_make(numbers.page) of
                         | ~I32_unrepresentable() => let
-                            val () = int32_free(n_id_high)
-                            val () = int32_free(n_id_low)
-                            val () = int32_free(n_collections)
-                            val () = int32_free(n_collections_modified)
-                            val () = int32_free(n_minutes_elsewhere)
-                            val () = int32_free(n_pages_elsewhere)
-                            val () = int32_free(n_finished_at)
-                            val () = int32_free(n_finished_modified)
-                            val () = int32_free(n_position)
-                            val () = int32_free(n_chapter)
-                            val () = int32_free(n_chapters)
+                            val () = int32_free(number_id_high)
+                            val () = int32_free(number_id_low)
+                            val () = int32_free(number_collections)
+                            val () = int32_free(number_collections_modified)
+                            val () = int32_free(number_minutes_elsewhere)
+                            val () = int32_free(number_pages_elsewhere)
+                            val () = int32_free(number_finished_at)
+                            val () = int32_free(number_finished_modified)
+                            val () = int32_free(number_position)
+                            val () = int32_free(number_chapter)
+                            val () = int32_free(number_chapters)
                             val () = $A.free<byte>(author)
                             val () = $A.free<byte>(series)
                             val () = $A.free<byte>(title)
                           in BookNotImaged() end
-                        | ~I32_made(n_page) =>
+                        | ~I32_made(number_page) =>
                           case+ int32_make(numbers.pages) of
                           | ~I32_unrepresentable() => let
-                              val () = int32_free(n_id_high)
-                              val () = int32_free(n_id_low)
-                              val () = int32_free(n_collections)
-                              val () = int32_free(n_collections_modified)
-                              val () = int32_free(n_minutes_elsewhere)
-                              val () = int32_free(n_pages_elsewhere)
-                              val () = int32_free(n_finished_at)
-                              val () = int32_free(n_finished_modified)
-                              val () = int32_free(n_position)
-                              val () = int32_free(n_chapter)
-                              val () = int32_free(n_chapters)
-                              val () = int32_free(n_page)
+                              val () = int32_free(number_id_high)
+                              val () = int32_free(number_id_low)
+                              val () = int32_free(number_collections)
+                              val () = int32_free(number_collections_modified)
+                              val () = int32_free(number_minutes_elsewhere)
+                              val () = int32_free(number_pages_elsewhere)
+                              val () = int32_free(number_finished_at)
+                              val () = int32_free(number_finished_modified)
+                              val () = int32_free(number_position)
+                              val () = int32_free(number_chapter)
+                              val () = int32_free(number_chapters)
+                              val () = int32_free(number_page)
                               val () = $A.free<byte>(author)
                               val () = $A.free<byte>(series)
                               val () = $A.free<byte>(title)
                             in BookNotImaged() end
-                          | ~I32_made(n_pages) =>
+                          | ~I32_made(number_pages) =>
                             case+ int32_make(numbers.anchor) of
                             | ~I32_unrepresentable() => let
-                                val () = int32_free(n_id_high)
-                                val () = int32_free(n_id_low)
-                                val () = int32_free(n_collections)
-                                val () = int32_free(n_collections_modified)
-                                val () = int32_free(n_minutes_elsewhere)
-                                val () = int32_free(n_pages_elsewhere)
-                                val () = int32_free(n_finished_at)
-                                val () = int32_free(n_finished_modified)
-                                val () = int32_free(n_position)
-                                val () = int32_free(n_chapter)
-                                val () = int32_free(n_chapters)
-                                val () = int32_free(n_page)
-                                val () = int32_free(n_pages)
+                                val () = int32_free(number_id_high)
+                                val () = int32_free(number_id_low)
+                                val () = int32_free(number_collections)
+                                val () = int32_free(number_collections_modified)
+                                val () = int32_free(number_minutes_elsewhere)
+                                val () = int32_free(number_pages_elsewhere)
+                                val () = int32_free(number_finished_at)
+                                val () = int32_free(number_finished_modified)
+                                val () = int32_free(number_position)
+                                val () = int32_free(number_chapter)
+                                val () = int32_free(number_chapters)
+                                val () = int32_free(number_page)
+                                val () = int32_free(number_pages)
                                 val () = $A.free<byte>(author)
                                 val () = $A.free<byte>(series)
                                 val () = $A.free<byte>(title)
                               in BookNotImaged() end
-                            | ~I32_made(n_anchor) =>
+                            | ~I32_made(number_anchor) =>
                               case+ int32_make(numbers.place_modified) of
                               | ~I32_unrepresentable() => let
-                                  val () = int32_free(n_id_high)
-                                  val () = int32_free(n_id_low)
-                                  val () = int32_free(n_collections)
-                                  val () = int32_free(n_collections_modified)
-                                  val () = int32_free(n_minutes_elsewhere)
-                                  val () = int32_free(n_pages_elsewhere)
-                                  val () = int32_free(n_finished_at)
-                                  val () = int32_free(n_finished_modified)
-                                  val () = int32_free(n_position)
-                                  val () = int32_free(n_chapter)
-                                  val () = int32_free(n_chapters)
-                                  val () = int32_free(n_page)
-                                  val () = int32_free(n_pages)
-                                  val () = int32_free(n_anchor)
+                                  val () = int32_free(number_id_high)
+                                  val () = int32_free(number_id_low)
+                                  val () = int32_free(number_collections)
+                                  val () = int32_free(number_collections_modified)
+                                  val () = int32_free(number_minutes_elsewhere)
+                                  val () = int32_free(number_pages_elsewhere)
+                                  val () = int32_free(number_finished_at)
+                                  val () = int32_free(number_finished_modified)
+                                  val () = int32_free(number_position)
+                                  val () = int32_free(number_chapter)
+                                  val () = int32_free(number_chapters)
+                                  val () = int32_free(number_page)
+                                  val () = int32_free(number_pages)
+                                  val () = int32_free(number_anchor)
                                   val () = $A.free<byte>(author)
                                   val () = $A.free<byte>(series)
                                   val () = $A.free<byte>(title)
                                 in BookNotImaged() end
-                              | ~I32_made(n_place_modified) =>
+                              | ~I32_made(number_place_modified) =>
                                 case+ int32_make(numbers.place_declined) of
                                 | ~I32_unrepresentable() => let
-                                    val () = int32_free(n_id_high)
-                                    val () = int32_free(n_id_low)
-                                    val () = int32_free(n_collections)
-                                    val () = int32_free(n_collections_modified)
-                                    val () = int32_free(n_minutes_elsewhere)
-                                    val () = int32_free(n_pages_elsewhere)
-                                    val () = int32_free(n_finished_at)
-                                    val () = int32_free(n_finished_modified)
-                                    val () = int32_free(n_position)
-                                    val () = int32_free(n_chapter)
-                                    val () = int32_free(n_chapters)
-                                    val () = int32_free(n_page)
-                                    val () = int32_free(n_pages)
-                                    val () = int32_free(n_anchor)
-                                    val () = int32_free(n_place_modified)
+                                    val () = int32_free(number_id_high)
+                                    val () = int32_free(number_id_low)
+                                    val () = int32_free(number_collections)
+                                    val () = int32_free(number_collections_modified)
+                                    val () = int32_free(number_minutes_elsewhere)
+                                    val () = int32_free(number_pages_elsewhere)
+                                    val () = int32_free(number_finished_at)
+                                    val () = int32_free(number_finished_modified)
+                                    val () = int32_free(number_position)
+                                    val () = int32_free(number_chapter)
+                                    val () = int32_free(number_chapters)
+                                    val () = int32_free(number_page)
+                                    val () = int32_free(number_pages)
+                                    val () = int32_free(number_anchor)
+                                    val () = int32_free(number_place_modified)
                                     val () = $A.free<byte>(author)
                                     val () = $A.free<byte>(series)
                                     val () = $A.free<byte>(title)
                                   in BookNotImaged() end
-                                | ~I32_made(n_place_declined) =>
+                                | ~I32_made(number_place_declined) =>
                                   case+ int32_make(numbers.series_number) of
                                   | ~I32_unrepresentable() => let
-                                      val () = int32_free(n_id_high)
-                                      val () = int32_free(n_id_low)
-                                      val () = int32_free(n_collections)
-                                      val () = int32_free(n_collections_modified)
-                                      val () = int32_free(n_minutes_elsewhere)
-                                      val () = int32_free(n_pages_elsewhere)
-                                      val () = int32_free(n_finished_at)
-                                      val () = int32_free(n_finished_modified)
-                                      val () = int32_free(n_position)
-                                      val () = int32_free(n_chapter)
-                                      val () = int32_free(n_chapters)
-                                      val () = int32_free(n_page)
-                                      val () = int32_free(n_pages)
-                                      val () = int32_free(n_anchor)
-                                      val () = int32_free(n_place_modified)
-                                      val () = int32_free(n_place_declined)
+                                      val () = int32_free(number_id_high)
+                                      val () = int32_free(number_id_low)
+                                      val () = int32_free(number_collections)
+                                      val () = int32_free(number_collections_modified)
+                                      val () = int32_free(number_minutes_elsewhere)
+                                      val () = int32_free(number_pages_elsewhere)
+                                      val () = int32_free(number_finished_at)
+                                      val () = int32_free(number_finished_modified)
+                                      val () = int32_free(number_position)
+                                      val () = int32_free(number_chapter)
+                                      val () = int32_free(number_chapters)
+                                      val () = int32_free(number_page)
+                                      val () = int32_free(number_pages)
+                                      val () = int32_free(number_anchor)
+                                      val () = int32_free(number_place_modified)
+                                      val () = int32_free(number_place_declined)
                                       val () = $A.free<byte>(author)
                                       val () = $A.free<byte>(series)
                                       val () = $A.free<byte>(title)
                                     in BookNotImaged() end
-                                  | ~I32_made(n_series_number) =>
+                                  | ~I32_made(number_series_number) =>
                                     case+ int32_make(numbers.shelf) of
                                     | ~I32_unrepresentable() => let
-                                        val () = int32_free(n_id_high)
-                                        val () = int32_free(n_id_low)
-                                        val () = int32_free(n_collections)
-                                        val () = int32_free(n_collections_modified)
-                                        val () = int32_free(n_minutes_elsewhere)
-                                        val () = int32_free(n_pages_elsewhere)
-                                        val () = int32_free(n_finished_at)
-                                        val () = int32_free(n_finished_modified)
-                                        val () = int32_free(n_position)
-                                        val () = int32_free(n_chapter)
-                                        val () = int32_free(n_chapters)
-                                        val () = int32_free(n_page)
-                                        val () = int32_free(n_pages)
-                                        val () = int32_free(n_anchor)
-                                        val () = int32_free(n_place_modified)
-                                        val () = int32_free(n_place_declined)
-                                        val () = int32_free(n_series_number)
+                                        val () = int32_free(number_id_high)
+                                        val () = int32_free(number_id_low)
+                                        val () = int32_free(number_collections)
+                                        val () = int32_free(number_collections_modified)
+                                        val () = int32_free(number_minutes_elsewhere)
+                                        val () = int32_free(number_pages_elsewhere)
+                                        val () = int32_free(number_finished_at)
+                                        val () = int32_free(number_finished_modified)
+                                        val () = int32_free(number_position)
+                                        val () = int32_free(number_chapter)
+                                        val () = int32_free(number_chapters)
+                                        val () = int32_free(number_page)
+                                        val () = int32_free(number_pages)
+                                        val () = int32_free(number_anchor)
+                                        val () = int32_free(number_place_modified)
+                                        val () = int32_free(number_place_declined)
+                                        val () = int32_free(number_series_number)
                                         val () = $A.free<byte>(author)
                                         val () = $A.free<byte>(series)
                                         val () = $A.free<byte>(title)
                                       in BookNotImaged() end
-                                    | ~I32_made(n_shelf) =>
+                                    | ~I32_made(number_shelf) =>
                                       case+ int32_make(numbers.added) of
                                       | ~I32_unrepresentable() => let
-                                          val () = int32_free(n_id_high)
-                                          val () = int32_free(n_id_low)
-                                          val () = int32_free(n_collections)
-                                          val () = int32_free(n_collections_modified)
-                                          val () = int32_free(n_minutes_elsewhere)
-                                          val () = int32_free(n_pages_elsewhere)
-                                          val () = int32_free(n_finished_at)
-                                          val () = int32_free(n_finished_modified)
-                                          val () = int32_free(n_position)
-                                          val () = int32_free(n_chapter)
-                                          val () = int32_free(n_chapters)
-                                          val () = int32_free(n_page)
-                                          val () = int32_free(n_pages)
-                                          val () = int32_free(n_anchor)
-                                          val () = int32_free(n_place_modified)
-                                          val () = int32_free(n_place_declined)
-                                          val () = int32_free(n_series_number)
-                                          val () = int32_free(n_shelf)
+                                          val () = int32_free(number_id_high)
+                                          val () = int32_free(number_id_low)
+                                          val () = int32_free(number_collections)
+                                          val () = int32_free(number_collections_modified)
+                                          val () = int32_free(number_minutes_elsewhere)
+                                          val () = int32_free(number_pages_elsewhere)
+                                          val () = int32_free(number_finished_at)
+                                          val () = int32_free(number_finished_modified)
+                                          val () = int32_free(number_position)
+                                          val () = int32_free(number_chapter)
+                                          val () = int32_free(number_chapters)
+                                          val () = int32_free(number_page)
+                                          val () = int32_free(number_pages)
+                                          val () = int32_free(number_anchor)
+                                          val () = int32_free(number_place_modified)
+                                          val () = int32_free(number_place_declined)
+                                          val () = int32_free(number_series_number)
+                                          val () = int32_free(number_shelf)
                                           val () = $A.free<byte>(author)
                                           val () = $A.free<byte>(series)
                                           val () = $A.free<byte>(title)
                                         in BookNotImaged() end
-                                      | ~I32_made(n_added) =>
+                                      | ~I32_made(number_added) =>
                                         case+ int32_make(numbers.opened) of
                                         | ~I32_unrepresentable() => let
-                                            val () = int32_free(n_id_high)
-                                            val () = int32_free(n_id_low)
-                                            val () = int32_free(n_collections)
-                                            val () = int32_free(n_collections_modified)
-                                            val () = int32_free(n_minutes_elsewhere)
-                                            val () = int32_free(n_pages_elsewhere)
-                                            val () = int32_free(n_finished_at)
-                                            val () = int32_free(n_finished_modified)
-                                            val () = int32_free(n_position)
-                                            val () = int32_free(n_chapter)
-                                            val () = int32_free(n_chapters)
-                                            val () = int32_free(n_page)
-                                            val () = int32_free(n_pages)
-                                            val () = int32_free(n_anchor)
-                                            val () = int32_free(n_place_modified)
-                                            val () = int32_free(n_place_declined)
-                                            val () = int32_free(n_series_number)
-                                            val () = int32_free(n_shelf)
-                                            val () = int32_free(n_added)
+                                            val () = int32_free(number_id_high)
+                                            val () = int32_free(number_id_low)
+                                            val () = int32_free(number_collections)
+                                            val () = int32_free(number_collections_modified)
+                                            val () = int32_free(number_minutes_elsewhere)
+                                            val () = int32_free(number_pages_elsewhere)
+                                            val () = int32_free(number_finished_at)
+                                            val () = int32_free(number_finished_modified)
+                                            val () = int32_free(number_position)
+                                            val () = int32_free(number_chapter)
+                                            val () = int32_free(number_chapters)
+                                            val () = int32_free(number_page)
+                                            val () = int32_free(number_pages)
+                                            val () = int32_free(number_anchor)
+                                            val () = int32_free(number_place_modified)
+                                            val () = int32_free(number_place_declined)
+                                            val () = int32_free(number_series_number)
+                                            val () = int32_free(number_shelf)
+                                            val () = int32_free(number_added)
                                             val () = $A.free<byte>(author)
                                             val () = $A.free<byte>(series)
                                             val () = $A.free<byte>(title)
                                           in BookNotImaged() end
-                                        | ~I32_made(n_opened) =>
+                                        | ~I32_made(number_opened) =>
                                           case+ int32_make(numbers.shelf_modified) of
                                           | ~I32_unrepresentable() => let
-                                              val () = int32_free(n_id_high)
-                                              val () = int32_free(n_id_low)
-                                              val () = int32_free(n_collections)
-                                              val () = int32_free(n_collections_modified)
-                                              val () = int32_free(n_minutes_elsewhere)
-                                              val () = int32_free(n_pages_elsewhere)
-                                              val () = int32_free(n_finished_at)
-                                              val () = int32_free(n_finished_modified)
-                                              val () = int32_free(n_position)
-                                              val () = int32_free(n_chapter)
-                                              val () = int32_free(n_chapters)
-                                              val () = int32_free(n_page)
-                                              val () = int32_free(n_pages)
-                                              val () = int32_free(n_anchor)
-                                              val () = int32_free(n_place_modified)
-                                              val () = int32_free(n_place_declined)
-                                              val () = int32_free(n_series_number)
-                                              val () = int32_free(n_shelf)
-                                              val () = int32_free(n_added)
-                                              val () = int32_free(n_opened)
+                                              val () = int32_free(number_id_high)
+                                              val () = int32_free(number_id_low)
+                                              val () = int32_free(number_collections)
+                                              val () = int32_free(number_collections_modified)
+                                              val () = int32_free(number_minutes_elsewhere)
+                                              val () = int32_free(number_pages_elsewhere)
+                                              val () = int32_free(number_finished_at)
+                                              val () = int32_free(number_finished_modified)
+                                              val () = int32_free(number_position)
+                                              val () = int32_free(number_chapter)
+                                              val () = int32_free(number_chapters)
+                                              val () = int32_free(number_page)
+                                              val () = int32_free(number_pages)
+                                              val () = int32_free(number_anchor)
+                                              val () = int32_free(number_place_modified)
+                                              val () = int32_free(number_place_declined)
+                                              val () = int32_free(number_series_number)
+                                              val () = int32_free(number_shelf)
+                                              val () = int32_free(number_added)
+                                              val () = int32_free(number_opened)
                                               val () = $A.free<byte>(author)
                                               val () = $A.free<byte>(series)
                                               val () = $A.free<byte>(title)
                                             in BookNotImaged() end
-                                          | ~I32_made(n_shelf_modified) =>
+                                          | ~I32_made(number_shelf_modified) =>
                                             case+ int32_make(numbers.file_size) of
                                             | ~I32_unrepresentable() => let
-                                                val () = int32_free(n_id_high)
-                                                val () = int32_free(n_id_low)
-                                                val () = int32_free(n_collections)
-                                                val () = int32_free(n_collections_modified)
-                                                val () = int32_free(n_minutes_elsewhere)
-                                                val () = int32_free(n_pages_elsewhere)
-                                                val () = int32_free(n_finished_at)
-                                                val () = int32_free(n_finished_modified)
-                                                val () = int32_free(n_position)
-                                                val () = int32_free(n_chapter)
-                                                val () = int32_free(n_chapters)
-                                                val () = int32_free(n_page)
-                                                val () = int32_free(n_pages)
-                                                val () = int32_free(n_anchor)
-                                                val () = int32_free(n_place_modified)
-                                                val () = int32_free(n_place_declined)
-                                                val () = int32_free(n_series_number)
-                                                val () = int32_free(n_shelf)
-                                                val () = int32_free(n_added)
-                                                val () = int32_free(n_opened)
-                                                val () = int32_free(n_shelf_modified)
+                                                val () = int32_free(number_id_high)
+                                                val () = int32_free(number_id_low)
+                                                val () = int32_free(number_collections)
+                                                val () = int32_free(number_collections_modified)
+                                                val () = int32_free(number_minutes_elsewhere)
+                                                val () = int32_free(number_pages_elsewhere)
+                                                val () = int32_free(number_finished_at)
+                                                val () = int32_free(number_finished_modified)
+                                                val () = int32_free(number_position)
+                                                val () = int32_free(number_chapter)
+                                                val () = int32_free(number_chapters)
+                                                val () = int32_free(number_page)
+                                                val () = int32_free(number_pages)
+                                                val () = int32_free(number_anchor)
+                                                val () = int32_free(number_place_modified)
+                                                val () = int32_free(number_place_declined)
+                                                val () = int32_free(number_series_number)
+                                                val () = int32_free(number_shelf)
+                                                val () = int32_free(number_added)
+                                                val () = int32_free(number_opened)
+                                                val () = int32_free(number_shelf_modified)
                                                 val () = $A.free<byte>(author)
                                                 val () = $A.free<byte>(series)
                                                 val () = $A.free<byte>(title)
                                               in BookNotImaged() end
-                                            | ~I32_made(n_file_size) =>
+                                            | ~I32_made(number_file_size) =>
                                               case+ int32_make(numbers.cover) of
                                               | ~I32_unrepresentable() => let
-                                                  val () = int32_free(n_id_high)
-                                                  val () = int32_free(n_id_low)
-                                                  val () = int32_free(n_collections)
-                                                  val () = int32_free(n_collections_modified)
-                                                  val () = int32_free(n_minutes_elsewhere)
-                                                  val () = int32_free(n_pages_elsewhere)
-                                                  val () = int32_free(n_finished_at)
-                                                  val () = int32_free(n_finished_modified)
-                                                  val () = int32_free(n_position)
-                                                  val () = int32_free(n_chapter)
-                                                  val () = int32_free(n_chapters)
-                                                  val () = int32_free(n_page)
-                                                  val () = int32_free(n_pages)
-                                                  val () = int32_free(n_anchor)
-                                                  val () = int32_free(n_place_modified)
-                                                  val () = int32_free(n_place_declined)
-                                                  val () = int32_free(n_series_number)
-                                                  val () = int32_free(n_shelf)
-                                                  val () = int32_free(n_added)
-                                                  val () = int32_free(n_opened)
-                                                  val () = int32_free(n_shelf_modified)
-                                                  val () = int32_free(n_file_size)
+                                                  val () = int32_free(number_id_high)
+                                                  val () = int32_free(number_id_low)
+                                                  val () = int32_free(number_collections)
+                                                  val () = int32_free(number_collections_modified)
+                                                  val () = int32_free(number_minutes_elsewhere)
+                                                  val () = int32_free(number_pages_elsewhere)
+                                                  val () = int32_free(number_finished_at)
+                                                  val () = int32_free(number_finished_modified)
+                                                  val () = int32_free(number_position)
+                                                  val () = int32_free(number_chapter)
+                                                  val () = int32_free(number_chapters)
+                                                  val () = int32_free(number_page)
+                                                  val () = int32_free(number_pages)
+                                                  val () = int32_free(number_anchor)
+                                                  val () = int32_free(number_place_modified)
+                                                  val () = int32_free(number_place_declined)
+                                                  val () = int32_free(number_series_number)
+                                                  val () = int32_free(number_shelf)
+                                                  val () = int32_free(number_added)
+                                                  val () = int32_free(number_opened)
+                                                  val () = int32_free(number_shelf_modified)
+                                                  val () = int32_free(number_file_size)
                                                   val () = $A.free<byte>(author)
                                                   val () = $A.free<byte>(series)
                                                   val () = $A.free<byte>(title)
                                                 in BookNotImaged() end
-                                              | ~I32_made(n_cover) =>
+                                              | ~I32_made(number_cover) =>
                                                 case+ int32_make(numbers.done) of
                                                 | ~I32_unrepresentable() => let
-                                                    val () = int32_free(n_id_high)
-                                                    val () = int32_free(n_id_low)
-                                                    val () = int32_free(n_collections)
-                                                    val () = int32_free(n_collections_modified)
-                                                    val () = int32_free(n_minutes_elsewhere)
-                                                    val () = int32_free(n_pages_elsewhere)
-                                                    val () = int32_free(n_finished_at)
-                                                    val () = int32_free(n_finished_modified)
-                                                    val () = int32_free(n_position)
-                                                    val () = int32_free(n_chapter)
-                                                    val () = int32_free(n_chapters)
-                                                    val () = int32_free(n_page)
-                                                    val () = int32_free(n_pages)
-                                                    val () = int32_free(n_anchor)
-                                                    val () = int32_free(n_place_modified)
-                                                    val () = int32_free(n_place_declined)
-                                                    val () = int32_free(n_series_number)
-                                                    val () = int32_free(n_shelf)
-                                                    val () = int32_free(n_added)
-                                                    val () = int32_free(n_opened)
-                                                    val () = int32_free(n_shelf_modified)
-                                                    val () = int32_free(n_file_size)
-                                                    val () = int32_free(n_cover)
+                                                    val () = int32_free(number_id_high)
+                                                    val () = int32_free(number_id_low)
+                                                    val () = int32_free(number_collections)
+                                                    val () = int32_free(number_collections_modified)
+                                                    val () = int32_free(number_minutes_elsewhere)
+                                                    val () = int32_free(number_pages_elsewhere)
+                                                    val () = int32_free(number_finished_at)
+                                                    val () = int32_free(number_finished_modified)
+                                                    val () = int32_free(number_position)
+                                                    val () = int32_free(number_chapter)
+                                                    val () = int32_free(number_chapters)
+                                                    val () = int32_free(number_page)
+                                                    val () = int32_free(number_pages)
+                                                    val () = int32_free(number_anchor)
+                                                    val () = int32_free(number_place_modified)
+                                                    val () = int32_free(number_place_declined)
+                                                    val () = int32_free(number_series_number)
+                                                    val () = int32_free(number_shelf)
+                                                    val () = int32_free(number_added)
+                                                    val () = int32_free(number_opened)
+                                                    val () = int32_free(number_shelf_modified)
+                                                    val () = int32_free(number_file_size)
+                                                    val () = int32_free(number_cover)
                                                     val () = $A.free<byte>(author)
                                                     val () = $A.free<byte>(series)
                                                     val () = $A.free<byte>(title)
                                                   in BookNotImaged() end
-                                                | ~I32_made(n_done) =>
+                                                | ~I32_made(number_done) =>
                                                   case+ int32_make(numbers.minutes_read) of
                                                   | ~I32_unrepresentable() => let
-                                                      val () = int32_free(n_id_high)
-                                                      val () = int32_free(n_id_low)
-                                                      val () = int32_free(n_collections)
-                                                      val () = int32_free(n_collections_modified)
-                                                      val () = int32_free(n_minutes_elsewhere)
-                                                      val () = int32_free(n_pages_elsewhere)
-                                                      val () = int32_free(n_finished_at)
-                                                      val () = int32_free(n_finished_modified)
-                                                      val () = int32_free(n_position)
-                                                      val () = int32_free(n_chapter)
-                                                      val () = int32_free(n_chapters)
-                                                      val () = int32_free(n_page)
-                                                      val () = int32_free(n_pages)
-                                                      val () = int32_free(n_anchor)
-                                                      val () = int32_free(n_place_modified)
-                                                      val () = int32_free(n_place_declined)
-                                                      val () = int32_free(n_series_number)
-                                                      val () = int32_free(n_shelf)
-                                                      val () = int32_free(n_added)
-                                                      val () = int32_free(n_opened)
-                                                      val () = int32_free(n_shelf_modified)
-                                                      val () = int32_free(n_file_size)
-                                                      val () = int32_free(n_cover)
-                                                      val () = int32_free(n_done)
+                                                      val () = int32_free(number_id_high)
+                                                      val () = int32_free(number_id_low)
+                                                      val () = int32_free(number_collections)
+                                                      val () = int32_free(number_collections_modified)
+                                                      val () = int32_free(number_minutes_elsewhere)
+                                                      val () = int32_free(number_pages_elsewhere)
+                                                      val () = int32_free(number_finished_at)
+                                                      val () = int32_free(number_finished_modified)
+                                                      val () = int32_free(number_position)
+                                                      val () = int32_free(number_chapter)
+                                                      val () = int32_free(number_chapters)
+                                                      val () = int32_free(number_page)
+                                                      val () = int32_free(number_pages)
+                                                      val () = int32_free(number_anchor)
+                                                      val () = int32_free(number_place_modified)
+                                                      val () = int32_free(number_place_declined)
+                                                      val () = int32_free(number_series_number)
+                                                      val () = int32_free(number_shelf)
+                                                      val () = int32_free(number_added)
+                                                      val () = int32_free(number_opened)
+                                                      val () = int32_free(number_shelf_modified)
+                                                      val () = int32_free(number_file_size)
+                                                      val () = int32_free(number_cover)
+                                                      val () = int32_free(number_done)
                                                       val () = $A.free<byte>(author)
                                                       val () = $A.free<byte>(series)
                                                       val () = $A.free<byte>(title)
                                                     in BookNotImaged() end
-                                                  | ~I32_made(n_minutes_read) =>
+                                                  | ~I32_made(number_minutes_read) =>
                                                     case+ int32_make(numbers.pages_read) of
                                                     | ~I32_unrepresentable() => let
-                                                        val () = int32_free(n_id_high)
-                                                        val () = int32_free(n_id_low)
-                                                        val () = int32_free(n_collections)
-                                                        val () = int32_free(n_collections_modified)
-                                                        val () = int32_free(n_minutes_elsewhere)
-                                                        val () = int32_free(n_pages_elsewhere)
-                                                        val () = int32_free(n_finished_at)
-                                                        val () = int32_free(n_finished_modified)
-                                                        val () = int32_free(n_position)
-                                                        val () = int32_free(n_chapter)
-                                                        val () = int32_free(n_chapters)
-                                                        val () = int32_free(n_page)
-                                                        val () = int32_free(n_pages)
-                                                        val () = int32_free(n_anchor)
-                                                        val () = int32_free(n_place_modified)
-                                                        val () = int32_free(n_place_declined)
-                                                        val () = int32_free(n_series_number)
-                                                        val () = int32_free(n_shelf)
-                                                        val () = int32_free(n_added)
-                                                        val () = int32_free(n_opened)
-                                                        val () = int32_free(n_shelf_modified)
-                                                        val () = int32_free(n_file_size)
-                                                        val () = int32_free(n_cover)
-                                                        val () = int32_free(n_done)
-                                                        val () = int32_free(n_minutes_read)
+                                                        val () = int32_free(number_id_high)
+                                                        val () = int32_free(number_id_low)
+                                                        val () = int32_free(number_collections)
+                                                        val () = int32_free(number_collections_modified)
+                                                        val () = int32_free(number_minutes_elsewhere)
+                                                        val () = int32_free(number_pages_elsewhere)
+                                                        val () = int32_free(number_finished_at)
+                                                        val () = int32_free(number_finished_modified)
+                                                        val () = int32_free(number_position)
+                                                        val () = int32_free(number_chapter)
+                                                        val () = int32_free(number_chapters)
+                                                        val () = int32_free(number_page)
+                                                        val () = int32_free(number_pages)
+                                                        val () = int32_free(number_anchor)
+                                                        val () = int32_free(number_place_modified)
+                                                        val () = int32_free(number_place_declined)
+                                                        val () = int32_free(number_series_number)
+                                                        val () = int32_free(number_shelf)
+                                                        val () = int32_free(number_added)
+                                                        val () = int32_free(number_opened)
+                                                        val () = int32_free(number_shelf_modified)
+                                                        val () = int32_free(number_file_size)
+                                                        val () = int32_free(number_cover)
+                                                        val () = int32_free(number_done)
+                                                        val () = int32_free(number_minutes_read)
                                                         val () = $A.free<byte>(author)
                                                         val () = $A.free<byte>(series)
                                                         val () = $A.free<byte>(title)
                                                       in BookNotImaged() end
-                                                    | ~I32_made(n_pages_read) =>
+                                                    | ~I32_made(number_pages_read) =>
                                                       let
-                                                        val s_author = bstr_of_array(author, author_len)
+                                                        val text_author = bstr_of_array(author, author_len)
                                                         val () = $A.free<byte>(author)
-                                                        val s_series = bstr_of_array(series, series_len)
+                                                        val text_series = bstr_of_array(series, series_len)
                                                         val () = $A.free<byte>(series)
-                                                        val s_title = bstr_of_array(title, title_len)
+                                                        val text_title = bstr_of_array(title, title_len)
                                                         val () = $A.free<byte>(title)
-                                                      in BookImaged(BookImage(s_author, n_id_high, n_id_low, n_collections, n_collections_modified, n_minutes_elsewhere, n_pages_elsewhere, n_finished_at, n_finished_modified, n_position, n_chapter, n_chapters, n_page, n_pages, n_anchor, n_place_modified, n_place_declined, s_series, n_series_number, n_shelf, n_added, n_opened, n_shelf_modified, n_file_size, n_cover, n_done, n_minutes_read, n_pages_read, s_title)) end
+                                                      in BookImaged(BookImage(text_author, number_id_high, number_id_low, number_collections, number_collections_modified, number_minutes_elsewhere, number_pages_elsewhere, number_finished_at, number_finished_modified, number_position, number_chapter, number_chapters, number_page, number_pages, number_anchor, number_place_modified, number_place_declined, text_series, number_series_number, number_shelf, number_added, number_opened, number_shelf_modified, number_file_size, number_cover, number_done, number_minutes_read, number_pages_read, text_title)) end
 end
 
 (* An image written as a record and read back: an image of the very book. That the bytes read are
    those written is the checked part (a book written is read back, whatever bytes they are);
    the image comes out of the record read, not out of the one written. *)
-#pub fun book_image_roundtrip {x:bookx} (image: !book_image(x)): book_image(x)
+#pub fun book_image_roundtrip {book_value:bookx} (image: !book_image(book_value)): book_image(book_value)
 
-implement book_image_roundtrip {x} (image) = let
+implement book_image_roundtrip {book_value} (image) = let
   val record = book_record_new(image)
   val (written | list) = book_record_write(record)
   val () = book_record_free(record)
-  val (whole | count) = blist_len(list)
+  val (whole | byte_count) = blist_len(list)
   val (read_proof | read) = book_record_read(list)
   prval same = book_enc_dec(whole, written, read_proof)
   val checked = book_read_recast(same | read)

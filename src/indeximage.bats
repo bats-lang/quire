@@ -23,103 +23,103 @@ staload "indexrec.sats"
 
 (* The image of a index, or none: a string too long for an array *)
 #pub datavtype index_imaged(indexx) =
-  | {x:indexx} IndexImaged(x) of index_image(x)
-  | {x:indexx} IndexNotImaged(x) of ()
+  | {index_value:indexx} IndexImaged(index_value) of index_image(index_value)
+  | {index_value:indexx} IndexNotImaged(index_value) of ()
 
 (* The numbers of a stored index, by name *)
 #pub typedef index_numbers = @{legacy_size = Int, legacy_sum = Int, name_count = Int}
 
-#pub fun index_image_free {x:indexx} (image: index_image(x)): void
+#pub fun index_image_free {index_value:indexx} (image: index_image(index_value)): void
 
-implement index_image_free {x} (image) =
+implement index_image_free {index_value} (image) =
   case+ image of
-  | ~IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => let
-      val () = int32_free(a_legacy_size)
-      val () = int32_free(a_legacy_sum)
-      val () = int32_free(a_name_count)
-      val () = bstr_free(a_name0)
-      val () = bstr_free(a_name1)
-      val () = bstr_free(a_name2)
-      val () = bstr_free(a_name3)
-      val () = bstr_free(a_name4)
-      val () = bstr_free(a_name5)
-      val () = bstr_free(a_name6)
-      val () = bstr_free(a_name7)
+  | ~IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => let
+      val () = int32_free(image_legacy_size)
+      val () = int32_free(image_legacy_sum)
+      val () = int32_free(image_name_count)
+      val () = bstr_free(image_name0)
+      val () = bstr_free(image_name1)
+      val () = bstr_free(image_name2)
+      val () = bstr_free(image_name3)
+      val () = bstr_free(image_name4)
+      val () = bstr_free(image_name5)
+      val () = bstr_free(image_name6)
+      val () = bstr_free(image_name7)
     in () end
 
-#pub fun index_image_copy {x:indexx} (image: !index_image(x)): index_image(x)
+#pub fun index_image_copy {index_value:indexx} (image: !index_image(index_value)): index_image(index_value)
 
-implement index_image_copy {x} (image) =
+implement index_image_copy {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => let
-      val c_legacy_size = int32_copy(a_legacy_size)
-      val c_legacy_sum = int32_copy(a_legacy_sum)
-      val c_name_count = int32_copy(a_name_count)
-      val c_name0 = bstr_copy(a_name0)
-      val c_name1 = bstr_copy(a_name1)
-      val c_name2 = bstr_copy(a_name2)
-      val c_name3 = bstr_copy(a_name3)
-      val c_name4 = bstr_copy(a_name4)
-      val c_name5 = bstr_copy(a_name5)
-      val c_name6 = bstr_copy(a_name6)
-      val c_name7 = bstr_copy(a_name7)
-    in IndexImage(c_legacy_size, c_legacy_sum, c_name_count, c_name0, c_name1, c_name2, c_name3, c_name4, c_name5, c_name6, c_name7) end
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => let
+      val copy_legacy_size = int32_copy(image_legacy_size)
+      val copy_legacy_sum = int32_copy(image_legacy_sum)
+      val copy_name_count = int32_copy(image_name_count)
+      val copy_name0 = bstr_copy(image_name0)
+      val copy_name1 = bstr_copy(image_name1)
+      val copy_name2 = bstr_copy(image_name2)
+      val copy_name3 = bstr_copy(image_name3)
+      val copy_name4 = bstr_copy(image_name4)
+      val copy_name5 = bstr_copy(image_name5)
+      val copy_name6 = bstr_copy(image_name6)
+      val copy_name7 = bstr_copy(image_name7)
+    in IndexImage(copy_legacy_size, copy_legacy_sum, copy_name_count, copy_name0, copy_name1, copy_name2, copy_name3, copy_name4, copy_name5, copy_name6, copy_name7) end
 
 (* The numbers of an image *)
-#pub fun index_image_numbers {x:indexx} (image: !index_image(x)): index_numbers
+#pub fun index_image_numbers {index_value:indexx} (image: !index_image(index_value)): index_numbers
 
-implement index_image_numbers {x} (image) =
+implement index_image_numbers {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => @{legacy_size = int32_value(a_legacy_size), legacy_sum = int32_value(a_legacy_sum), name_count = int32_value(a_name_count)}
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => @{legacy_size = int32_value(image_legacy_size), legacy_sum = int32_value(image_legacy_sum), name_count = int32_value(image_name_count)}
 
 (* A string of an image: its length, and a copy of its bytes in an array one longer *)
-#pub fun index_image_name0 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name0 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name0 {x} (image) =
+implement index_image_name0 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name0)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name0)
 
-#pub fun index_image_name1 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name1 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name1 {x} (image) =
+implement index_image_name1 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name1)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name1)
 
-#pub fun index_image_name2 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name2 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name2 {x} (image) =
+implement index_image_name2 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name2)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name2)
 
-#pub fun index_image_name3 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name3 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name3 {x} (image) =
+implement index_image_name3 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name3)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name3)
 
-#pub fun index_image_name4 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name4 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name4 {x} (image) =
+implement index_image_name4 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name4)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name4)
 
-#pub fun index_image_name5 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name5 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name5 {x} (image) =
+implement index_image_name5 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name5)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name5)
 
-#pub fun index_image_name6 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name6 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name6 {x} (image) =
+implement index_image_name6 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name6)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name6)
 
-#pub fun index_image_name7 {x:indexx} (image: !index_image(x)): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len)
+#pub fun index_image_name7 {index_value:indexx} (image: !index_image(index_value)): [text_loc:agz][text_len:nat | text_len < 256] @($A.arr(byte, text_loc, text_len + 1), int text_len)
 
-implement index_image_name7 {x} (image) =
+implement index_image_name7 {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => array_of_bstr(a_name7)
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => array_of_bstr(image_name7)
 
 (* the bit of the group LEGA in a mask of groups *)
 #pub fn index_group_lega (): int
@@ -142,131 +142,130 @@ implement index_group_all () = 3
 implement index_numbers_merge (kept, other, keep_mask) = @{legacy_size = (if $AR.band_int_int(keep_mask, 1) <> 0 then kept.legacy_size else other.legacy_size), legacy_sum = (if $AR.band_int_int(keep_mask, 1) <> 0 then kept.legacy_sum else other.legacy_sum), name_count = (if $AR.band_int_int(keep_mask, 2) <> 0 then kept.name_count else other.name_count)}
 
 (* The groups whose fields differ in two images, as a mask *)
-#pub fun index_image_diff {x,y:indexx} (first: !index_image(x), second: !index_image(y)): int
+#pub fun index_image_diff {first_value,second_value:indexx} (first: !index_image(first_value), second: !index_image(second_value)): int
 
-implement index_image_diff {x,y} (first, second) =
+implement index_image_diff {first_value,second_value} (first, second) =
   case+ first of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) =>
+  | IndexImage(first_legacy_size, first_legacy_sum, first_name_count, first_name0, first_name1, first_name2, first_name3, first_name4, first_name5, first_name6, first_name7) =>
     (case+ second of
-     | IndexImage(b_legacy_size, b_legacy_sum, b_name_count, b_name0, b_name1, b_name2, b_name3, b_name4, b_name5, b_name6, b_name7) => let
-         val m_lega = (if (int32_value(a_legacy_size) <> int32_value(b_legacy_size)) || (int32_value(a_legacy_sum) <> int32_value(b_legacy_sum)) then 1 else 0): int
-         val m_nams = (if (int32_value(a_name_count) <> int32_value(b_name_count)) || (~bstr_equal(a_name0, b_name0)) || (~bstr_equal(a_name1, b_name1)) || (~bstr_equal(a_name2, b_name2)) || (~bstr_equal(a_name3, b_name3)) || (~bstr_equal(a_name4, b_name4)) || (~bstr_equal(a_name5, b_name5)) || (~bstr_equal(a_name6, b_name6)) || (~bstr_equal(a_name7, b_name7)) then 2 else 0): int
-       in $AR.add_int_int($AR.add_int_int(0, m_lega), m_nams) end)
+     | IndexImage(second_legacy_size, second_legacy_sum, second_name_count, second_name0, second_name1, second_name2, second_name3, second_name4, second_name5, second_name6, second_name7) => let
+         val differs_lega = (if (int32_value(first_legacy_size) <> int32_value(second_legacy_size)) || (int32_value(first_legacy_sum) <> int32_value(second_legacy_sum)) then 1 else 0): int
+         val differs_nams = (if (int32_value(first_name_count) <> int32_value(second_name_count)) || (~bstr_equal(first_name0, second_name0)) || (~bstr_equal(first_name1, second_name1)) || (~bstr_equal(first_name2, second_name2)) || (~bstr_equal(first_name3, second_name3)) || (~bstr_equal(first_name4, second_name4)) || (~bstr_equal(first_name5, second_name5)) || (~bstr_equal(first_name6, second_name6)) || (~bstr_equal(first_name7, second_name7)) then 2 else 0): int
+       in $AR.add_int_int($AR.add_int_int(0, differs_lega), differs_nams) end)
 
 (* The image of a index: the very index *)
-#pub fun index_image_of {x:indexx} (index: !indexv(x)): index_image(x)
+#pub fun index_image_of {index_value:indexx} (index: !indexv(index_value)): index_image(index_value)
 
-implement index_image_of {x} (index) =
+implement index_image_of {index_value} (index) =
   case+ index of
-  | IndexV(b_legacy_size, b_legacy_sum, b_name_count, b_name0, b_name1, b_name2, b_name3, b_name4, b_name5, b_name6, b_name7) => let
-      val n_legacy_size = int32_copy(b_legacy_size)
-      val n_legacy_sum = int32_copy(b_legacy_sum)
-      val n_name_count = int32_copy(b_name_count)
-      val s_name0 = bstr_of_blist(b_name0)
-      val s_name1 = bstr_of_blist(b_name1)
-      val s_name2 = bstr_of_blist(b_name2)
-      val s_name3 = bstr_of_blist(b_name3)
-      val s_name4 = bstr_of_blist(b_name4)
-      val s_name5 = bstr_of_blist(b_name5)
-      val s_name6 = bstr_of_blist(b_name6)
-      val s_name7 = bstr_of_blist(b_name7)
-    in IndexImage(n_legacy_size, n_legacy_sum, n_name_count, s_name0, s_name1, s_name2, s_name3, s_name4, s_name5, s_name6, s_name7) end
+  | IndexV(field_legacy_size, field_legacy_sum, field_name_count, field_name0, field_name1, field_name2, field_name3, field_name4, field_name5, field_name6, field_name7) => let
+      val number_legacy_size = int32_copy(field_legacy_size)
+      val number_legacy_sum = int32_copy(field_legacy_sum)
+      val number_name_count = int32_copy(field_name_count)
+      val text_name0 = bstr_of_blist(field_name0)
+      val text_name1 = bstr_of_blist(field_name1)
+      val text_name2 = bstr_of_blist(field_name2)
+      val text_name3 = bstr_of_blist(field_name3)
+      val text_name4 = bstr_of_blist(field_name4)
+      val text_name5 = bstr_of_blist(field_name5)
+      val text_name6 = bstr_of_blist(field_name6)
+      val text_name7 = bstr_of_blist(field_name7)
+    in IndexImage(number_legacy_size, number_legacy_sum, number_name_count, text_name0, text_name1, text_name2, text_name3, text_name4, text_name5, text_name6, text_name7) end
 
 (* The index an image holds *)
-#pub fun index_of_image {x:indexx} (image: !index_image(x)): indexv(x)
+#pub fun index_of_image {index_value:indexx} (image: !index_image(index_value)): indexv(index_value)
 
-implement index_of_image {x} (image) =
+implement index_of_image {index_value} (image) =
   case+ image of
-  | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => let
-      val n_legacy_size = int32_copy(a_legacy_size)
-      val n_legacy_sum = int32_copy(a_legacy_sum)
-      val n_name_count = int32_copy(a_name_count)
-      val l_name0 = blist_of_bstr(a_name0)
-      val l_name1 = blist_of_bstr(a_name1)
-      val l_name2 = blist_of_bstr(a_name2)
-      val l_name3 = blist_of_bstr(a_name3)
-      val l_name4 = blist_of_bstr(a_name4)
-      val l_name5 = blist_of_bstr(a_name5)
-      val l_name6 = blist_of_bstr(a_name6)
-      val l_name7 = blist_of_bstr(a_name7)
-    in IndexV(n_legacy_size, n_legacy_sum, n_name_count, l_name0, l_name1, l_name2, l_name3, l_name4, l_name5, l_name6, l_name7) end
+  | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => let
+      val number_legacy_size = int32_copy(image_legacy_size)
+      val number_legacy_sum = int32_copy(image_legacy_sum)
+      val number_name_count = int32_copy(image_name_count)
+      val list_name0 = blist_of_bstr(image_name0)
+      val list_name1 = blist_of_bstr(image_name1)
+      val list_name2 = blist_of_bstr(image_name2)
+      val list_name3 = blist_of_bstr(image_name3)
+      val list_name4 = blist_of_bstr(image_name4)
+      val list_name5 = blist_of_bstr(image_name5)
+      val list_name6 = blist_of_bstr(image_name6)
+      val list_name7 = blist_of_bstr(image_name7)
+    in IndexV(number_legacy_size, number_legacy_sum, number_name_count, list_name0, list_name1, list_name2, list_name3, list_name4, list_name5, list_name6, list_name7) end
 
 (* The image of a stored index, as read *)
-#pub fun index_record_image {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e)): index_image(x)
+#pub fun index_record_image {index_value:indexx}{format_version,least_version:int}{kept_extras:extras} (record: !indexrecord(index_value, format_version, least_version, kept_extras)): index_image(index_value)
 
-implement index_record_image {x}{ver,minver}{e} (record) =
+implement index_record_image {index_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of IndexRecord(_, _, index, _) => index_image_of(index)
 
 (* A new record of an image: the format version this Quire writes, and no chunks kept. It holds the very index the image does. *)
-#pub fun index_record_new {x:indexx} (image: !index_image(x)): indexrecord(x, 1, 1, ex_nil())
+#pub fun index_record_new {index_value:indexx} (image: !index_image(index_value)): indexrecord(index_value, 1, 1, ex_nil())
 
-implement index_record_new {x} (image) = IndexRecord(1, 1, index_of_image(image), EXV_nil())
+implement index_record_new {index_value} (image) = IndexRecord(1, 1, index_of_image(image), EXV_nil())
 
-fn index_free_book {x:indexx} (index: indexv(x)): void =
+fn index_free_book {index_value:indexx} (index: indexv(index_value)): void =
   case+ index of
-  | ~IndexV(f_legacy_size, f_legacy_sum, f_name_count, f_name0, f_name1, f_name2, f_name3, f_name4, f_name5, f_name6, f_name7) => let
-      val () = int32_free(f_legacy_size)
-      val () = int32_free(f_legacy_sum)
-      val () = int32_free(f_name_count)
-      val () = blist_free(f_name0)
-      val () = blist_free(f_name1)
-      val () = blist_free(f_name2)
-      val () = blist_free(f_name3)
-      val () = blist_free(f_name4)
-      val () = blist_free(f_name5)
-      val () = blist_free(f_name6)
-      val () = blist_free(f_name7)
+  | ~IndexV(field_legacy_size, field_legacy_sum, field_name_count, field_name0, field_name1, field_name2, field_name3, field_name4, field_name5, field_name6, field_name7) => let
+      val () = int32_free(field_legacy_size)
+      val () = int32_free(field_legacy_sum)
+      val () = int32_free(field_name_count)
+      val () = blist_free(field_name0)
+      val () = blist_free(field_name1)
+      val () = blist_free(field_name2)
+      val () = blist_free(field_name3)
+      val () = blist_free(field_name4)
+      val () = blist_free(field_name5)
+      val () = blist_free(field_name6)
+      val () = blist_free(field_name7)
     in () end
 
 (* A record freed *)
-#pub fun index_record_free {x:indexx}{ver,minver:int}{e:extras} (record: indexrecord(x, ver, minver, e)): void
+#pub fun index_record_free {index_value:indexx}{format_version,least_version:int}{kept_extras:extras} (record: indexrecord(index_value, format_version, least_version, kept_extras)): void
 
-implement index_record_free {x}{ver,minver}{e} (record) =
+implement index_record_free {index_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of
   | ~IndexRecord(_, _, index, extras) => let
       val () = index_free_book(index)
     in extrasv_free(extras) end
 
 (* The number of the record, or the image's *)
-fn _pick_number {a,b:int} (take: bool, kept: int32v(a), other: !int32v(b)): [v:int] int32v(v) =
+fn _pick_number {kept_number,other_number:int} (take: bool, kept: int32v(kept_number), other: !int32v(other_number)): [picked_number:int] int32v(picked_number) =
   if take then let val () = int32_free(kept) in int32_copy(other) end else kept
 
 (* The bytes of the record, or those the image's array holds *)
-fn _pick_text {first,second:bytes}{n:nat | n < 256} (take: bool, kept: blist(first, n), other: !bstr(second)): [bs:bytes][len:nat | len < 256] blist(bs, len) =
+fn _pick_text {kept_octets,other_octets:bytes}{kept_len:nat | kept_len < 256} (take: bool, kept: blist(kept_octets, kept_len), other: !bstr(other_octets)): [picked_octets:bytes][picked_len:nat | picked_len < 256] blist(picked_octets, picked_len) =
   if take then let val () = blist_free(kept) in blist_of_bstr(other) end else kept
 
 (* The record with the groups in the mask taken from the image, and the others as they are *)
-#pub fun index_record_patch {x,y:indexx}{ver,minver:int}{e:extras} (record: indexrecord(x, ver, minver, e), image: !index_image(y), mask: int)
-  : [z:indexx] indexrecord(z, ver, minver, e)
+#pub fun index_record_patch {record_value,image_value:indexx}{format_version,least_version:int}{kept_extras:extras} (record: indexrecord(record_value, format_version, least_version, kept_extras), image: !index_image(image_value), mask: int)
+  : [patched_value:indexx] indexrecord(patched_value, format_version, least_version, kept_extras)
 
-implement index_record_patch {x,y}{ver,minver}{e} (record, image, mask) =
+implement index_record_patch {record_value,image_value}{format_version,least_version}{kept_extras} (record, image, mask) =
   case+ record of
-  | ~IndexRecord(ver, minver, index, extras) =>
+  | ~IndexRecord(format_version, least_version, index, extras) =>
     (case+ index of
-     | ~IndexV(f_legacy_size, f_legacy_sum, f_name_count, f_name0, f_name1, f_name2, f_name3, f_name4, f_name5, f_name6, f_name7) =>
+     | ~IndexV(field_legacy_size, field_legacy_sum, field_name_count, field_name0, field_name1, field_name2, field_name3, field_name4, field_name5, field_name6, field_name7) =>
        (case+ image of
-        | IndexImage(a_legacy_size, a_legacy_sum, a_name_count, a_name0, a_name1, a_name2, a_name3, a_name4, a_name5, a_name6, a_name7) => let
+        | IndexImage(image_legacy_size, image_legacy_sum, image_name_count, image_name0, image_name1, image_name2, image_name3, image_name4, image_name5, image_name6, image_name7) => let
             val take_lega = $AR.band_int_int(mask, 1) <> 0
             val take_nams = $AR.band_int_int(mask, 2) <> 0
-            val c_legacy_size = _pick_number(take_lega, f_legacy_size, a_legacy_size)
-            val c_legacy_sum = _pick_number(take_lega, f_legacy_sum, a_legacy_sum)
-            val c_name_count = _pick_number(take_nams, f_name_count, a_name_count)
-            val c_name0 = _pick_text(take_nams, f_name0, a_name0)
-            val c_name1 = _pick_text(take_nams, f_name1, a_name1)
-            val c_name2 = _pick_text(take_nams, f_name2, a_name2)
-            val c_name3 = _pick_text(take_nams, f_name3, a_name3)
-            val c_name4 = _pick_text(take_nams, f_name4, a_name4)
-            val c_name5 = _pick_text(take_nams, f_name5, a_name5)
-            val c_name6 = _pick_text(take_nams, f_name6, a_name6)
-            val c_name7 = _pick_text(take_nams, f_name7, a_name7)
-          in IndexRecord(ver, minver, IndexV(c_legacy_size, c_legacy_sum, c_name_count, c_name0, c_name1, c_name2, c_name3, c_name4, c_name5, c_name6, c_name7), extras) end))
+            val chosen_legacy_size = _pick_number(take_lega, field_legacy_size, image_legacy_size)
+            val chosen_legacy_sum = _pick_number(take_lega, field_legacy_sum, image_legacy_sum)
+            val chosen_name_count = _pick_number(take_nams, field_name_count, image_name_count)
+            val chosen_name0 = _pick_text(take_nams, field_name0, image_name0)
+            val chosen_name1 = _pick_text(take_nams, field_name1, image_name1)
+            val chosen_name2 = _pick_text(take_nams, field_name2, image_name2)
+            val chosen_name3 = _pick_text(take_nams, field_name3, image_name3)
+            val chosen_name4 = _pick_text(take_nams, field_name4, image_name4)
+            val chosen_name5 = _pick_text(take_nams, field_name5, image_name5)
+            val chosen_name6 = _pick_text(take_nams, field_name6, image_name6)
+            val chosen_name7 = _pick_text(take_nams, field_name7, image_name7)
+          in IndexRecord(format_version, least_version, IndexV(chosen_legacy_size, chosen_legacy_sum, chosen_name_count, chosen_name0, chosen_name1, chosen_name2, chosen_name3, chosen_name4, chosen_name5, chosen_name6, chosen_name7), extras) end))
 
 (* An image of numbers and strings (each in an array one longer than the string, which it takes), or none when a number is not one of 32 bits *)
 #pub fun index_image_make {name0_loc,name1_loc,name2_loc,name3_loc,name4_loc,name5_loc,name6_loc,name7_loc:agz}{name0_len,name1_len,name2_len,name3_len,name4_len,name5_len,name6_len,name7_len:nat | name0_len < 256; name1_len < 256; name2_len < 256; name3_len < 256; name4_len < 256; name5_len < 256; name6_len < 256; name7_len < 256}
-  (numbers: index_numbers, name0: $A.arr(byte, name0_loc, name0_len + 1), name0_len: int name0_len, name1: $A.arr(byte, name1_loc, name1_len + 1), name1_len: int name1_len, name2: $A.arr(byte, name2_loc, name2_len + 1), name2_len: int name2_len, name3: $A.arr(byte, name3_loc, name3_len + 1), name3_len: int name3_len, name4: $A.arr(byte, name4_loc, name4_len + 1), name4_len: int name4_len, name5: $A.arr(byte, name5_loc, name5_len + 1), name5_len: int name5_len, name6: $A.arr(byte, name6_loc, name6_len + 1), name6_len: int name6_len, name7: $A.arr(byte, name7_loc, name7_len + 1), name7_len: int name7_len): [x:indexx] index_imaged(x)
+  (numbers: index_numbers, name0: $A.arr(byte, name0_loc, name0_len + 1), name0_len: int name0_len, name1: $A.arr(byte, name1_loc, name1_len + 1), name1_len: int name1_len, name2: $A.arr(byte, name2_loc, name2_len + 1), name2_len: int name2_len, name3: $A.arr(byte, name3_loc, name3_len + 1), name3_len: int name3_len, name4: $A.arr(byte, name4_loc, name4_len + 1), name4_len: int name4_len, name5: $A.arr(byte, name5_loc, name5_len + 1), name5_len: int name5_len, name6: $A.arr(byte, name6_loc, name6_len + 1), name6_len: int name6_len, name7: $A.arr(byte, name7_loc, name7_len + 1), name7_len: int name7_len): [index_value:indexx] index_imaged(index_value)
 
 implement index_image_make (numbers, name0, name0_len, name1, name1_len, name2, name2_len, name3, name3_len, name4, name4_len, name5, name5_len, name6, name6_len, name7, name7_len) = let
-  fn release {l:agz}{len:nat | len < 256} (array: $A.arr(byte, l, len + 1)): void = $A.free<byte>(array)
 in
   case+ int32_make(numbers.legacy_size) of
   | ~I32_unrepresentable() => let
@@ -279,10 +278,10 @@ in
       val () = $A.free<byte>(name6)
       val () = $A.free<byte>(name7)
     in IndexNotImaged() end
-  | ~I32_made(n_legacy_size) =>
+  | ~I32_made(number_legacy_size) =>
     case+ int32_make(numbers.legacy_sum) of
     | ~I32_unrepresentable() => let
-        val () = int32_free(n_legacy_size)
+        val () = int32_free(number_legacy_size)
         val () = $A.free<byte>(name0)
         val () = $A.free<byte>(name1)
         val () = $A.free<byte>(name2)
@@ -292,11 +291,11 @@ in
         val () = $A.free<byte>(name6)
         val () = $A.free<byte>(name7)
       in IndexNotImaged() end
-    | ~I32_made(n_legacy_sum) =>
+    | ~I32_made(number_legacy_sum) =>
       case+ int32_make(numbers.name_count) of
       | ~I32_unrepresentable() => let
-          val () = int32_free(n_legacy_size)
-          val () = int32_free(n_legacy_sum)
+          val () = int32_free(number_legacy_size)
+          val () = int32_free(number_legacy_sum)
           val () = $A.free<byte>(name0)
           val () = $A.free<byte>(name1)
           val () = $A.free<byte>(name2)
@@ -306,37 +305,37 @@ in
           val () = $A.free<byte>(name6)
           val () = $A.free<byte>(name7)
         in IndexNotImaged() end
-      | ~I32_made(n_name_count) =>
+      | ~I32_made(number_name_count) =>
         let
-          val s_name0 = bstr_of_array(name0, name0_len)
+          val text_name0 = bstr_of_array(name0, name0_len)
           val () = $A.free<byte>(name0)
-          val s_name1 = bstr_of_array(name1, name1_len)
+          val text_name1 = bstr_of_array(name1, name1_len)
           val () = $A.free<byte>(name1)
-          val s_name2 = bstr_of_array(name2, name2_len)
+          val text_name2 = bstr_of_array(name2, name2_len)
           val () = $A.free<byte>(name2)
-          val s_name3 = bstr_of_array(name3, name3_len)
+          val text_name3 = bstr_of_array(name3, name3_len)
           val () = $A.free<byte>(name3)
-          val s_name4 = bstr_of_array(name4, name4_len)
+          val text_name4 = bstr_of_array(name4, name4_len)
           val () = $A.free<byte>(name4)
-          val s_name5 = bstr_of_array(name5, name5_len)
+          val text_name5 = bstr_of_array(name5, name5_len)
           val () = $A.free<byte>(name5)
-          val s_name6 = bstr_of_array(name6, name6_len)
+          val text_name6 = bstr_of_array(name6, name6_len)
           val () = $A.free<byte>(name6)
-          val s_name7 = bstr_of_array(name7, name7_len)
+          val text_name7 = bstr_of_array(name7, name7_len)
           val () = $A.free<byte>(name7)
-        in IndexImaged(IndexImage(n_legacy_size, n_legacy_sum, n_name_count, s_name0, s_name1, s_name2, s_name3, s_name4, s_name5, s_name6, s_name7)) end
+        in IndexImaged(IndexImage(number_legacy_size, number_legacy_sum, number_name_count, text_name0, text_name1, text_name2, text_name3, text_name4, text_name5, text_name6, text_name7)) end
 end
 
 (* An image written as a record and read back: an image of the very index. That the bytes read are
    those written is the checked part (a index written is read back, whatever bytes they are);
    the image comes out of the record read, not out of the one written. *)
-#pub fun index_image_roundtrip {x:indexx} (image: !index_image(x)): index_image(x)
+#pub fun index_image_roundtrip {index_value:indexx} (image: !index_image(index_value)): index_image(index_value)
 
-implement index_image_roundtrip {x} (image) = let
+implement index_image_roundtrip {index_value} (image) = let
   val record = index_record_new(image)
   val (written | list) = index_record_write(record)
   val () = index_record_free(record)
-  val (whole | count) = blist_len(list)
+  val (whole | byte_count) = blist_len(list)
   val (read_proof | read) = index_record_read(list)
   prval same = index_enc_dec(whole, written, read_proof)
   val checked = index_read_recast(same | read)

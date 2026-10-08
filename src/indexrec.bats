@@ -23,7 +23,7 @@ staload "record.sats"
 
 implement index_specs () = SPV_cons(TAGNOT_mk() | blist_cons(76, blist_cons(69, blist_cons(71, blist_cons(65, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(78, blist_cons(65, blist_cons(77, blist_cons(83, blist_nil())))), LYV_i32(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_nil()))))))))), ModeReq(), FVV_i32(int32_zero(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_nil()))))))))), SPV_nil()))
 
-(* INDEXV(x, vals): the values of the groups are the fields of the index x *)
+(* INDEXV(index_value, vals): the values of the groups are the fields of the index index_value *)
 #pub dataprop INDEXV(indexx, gvals) =
   | {legacy_size,legacy_sum,name_count:int}{name0,name1,name2,name3,name4,name5,name6,name7:bytes}
     INDEXV_mk(indexx_mk(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7), gv_cons(fv_i32(legacy_size, fv_i32(legacy_sum, fv_nil())), gv_cons(fv_i32(name_count, fv_str(name0, fv_str(name1, fv_str(name2, fv_str(name3, fv_str(name4, fv_str(name5, fv_str(name6, fv_str(name7, fv_nil()))))))))), gv_nil())))
@@ -33,17 +33,17 @@ implement index_specs () = SPV_cons(TAGNOT_mk() | blist_cons(76, blist_cons(69, 
     IndexV(indexx_mk(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7)) of (int32v(legacy_size), int32v(legacy_sum), int32v(name_count), blist(name0, name0_len), blist(name1, name1_len), blist(name2, name2_len), blist(name3, name3_len), blist(name4, name4_len), blist(name5, name5_len), blist(name6, name6_len), blist(name7, name7_len))
 
 (* The record as the values of its groups, with the proof that they are its fields *)
-#pub fun index_to_vals {x:indexx} (index: !indexv(x)): [vals:gvals] (INDEXV(x, vals) | gvalsv(INDEX_SPECS, vals, 2))
+#pub fun index_to_vals {index_value:indexx} (index: !indexv(index_value)): [vals:gvals] (INDEXV(index_value, vals) | gvalsv(INDEX_SPECS, vals, 2))
 
-implement index_to_vals {x} (index) =
+implement index_to_vals {index_value} (index) =
   case+ index of
   | IndexV(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7) => (INDEXV_mk() | 
     GVV_cons(FVV_i32(int32_copy(legacy_size), FVV_i32(int32_copy(legacy_sum), FVV_nil())), GVV_cons(FVV_i32(int32_copy(name_count), FVV_str(blist_copy(name0), FVV_str(blist_copy(name1), FVV_str(blist_copy(name2), FVV_str(blist_copy(name3), FVV_str(blist_copy(name4), FVV_str(blist_copy(name5), FVV_str(blist_copy(name6), FVV_str(blist_copy(name7), FVV_nil()))))))))), GVV_nil())))
 
 (* The record made of the values of its groups, with the proof that they are its fields *)
-#pub fun index_of_vals {vals:gvals}{kv:nat} (vals: gvalsv(INDEX_SPECS, vals, kv)): [x:indexx] (INDEXV(x, vals) | indexv(x))
+#pub fun index_of_vals {vals:gvals}{value_count:nat} (vals: gvalsv(INDEX_SPECS, vals, value_count)): [index_value:indexx] (INDEXV(index_value, vals) | indexv(index_value))
 
-implement index_of_vals {vals}{kv} (vals) =
+implement index_of_vals {vals}{value_count} (vals) =
   case+ vals of
   | ~GVV_cons(~FVV_i32(legacy_size, ~FVV_i32(legacy_sum, ~FVV_nil())), ~GVV_cons(~FVV_i32(name_count, ~FVV_str(name0, ~FVV_str(name1, ~FVV_str(name2, ~FVV_str(name3, ~FVV_str(name4, ~FVV_str(name5, ~FVV_str(name6, ~FVV_str(name7, ~FVV_nil()))))))))), ~GVV_nil())) => (INDEXV_mk() | IndexV(legacy_size, legacy_sum, name_count, name0, name1, name2, name3, name4, name5, name6, name7))
 
@@ -56,32 +56,32 @@ implement index_of_vals {vals}{kv} (vals) =
   | ir_newer of ()
   | ir_damaged of ()
 
-(* INDEXENC(x, ver, minver, e, bs): bs is the index x, written in the format ver,
-   readable from minver, with the chunks e kept *)
+(* INDEXENC(index_value, format_version, least_version, kept_extras, octets): octets is the index index_value, written in
+   the format format_version, readable from least_version, with the chunks kept_extras kept *)
 #pub dataprop INDEXENC(indexx, int, int, extras, bytes) =
-  | {x:indexx}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    INDEXENC_mk(x, ver, minver, e, bs) of (INDEXV(x, vals), ENCODES(INDEX_SPECS, INDEX_KIND, rx_mk(ver, minver, vals, e), bs))
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
+    INDEXENC_mk(index_value, format_version, least_version, kept_extras, octets) of (INDEXV(index_value, vals), ENCODES(INDEX_SPECS, INDEX_KIND, rx_mk(format_version, least_version, vals, kept_extras), octets))
 
-(* INDEXDEC(bs, res): reading bs as a index comes to res *)
+(* INDEXDEC(octets, outcome): reading octets as a index comes to outcome *)
 #pub dataprop INDEXDEC(bytes, indexres) =
-  | {x:indexx}{ver,minver:int}{e:extras}{vals:gvals}{bs:bytes}
-    INDEXDEC_ok(bs, ir_ok(x, ver, minver, e)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_ok(rx_mk(ver, minver, vals, e))))
-  | {x:indexx}{ver,minver:int}{e:extras}{t:lost}{vals:gvals}{bs:bytes}
-    INDEXDEC_loss(bs, ir_loss(x, ver, minver, e, t)) of (INDEXV(x, vals), DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_loss(rx_mk(ver, minver, vals, e), t)))
-  | {bs:bytes} INDEXDEC_notquire(bs, ir_notquire()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_notquire())
-  | {bs:bytes} INDEXDEC_newer(bs, ir_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_newer())
-  | {bs:bytes} INDEXDEC_damaged(bs, ir_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_damaged())
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
+    INDEXDEC_ok(octets, ir_ok(index_value, format_version, least_version, kept_extras)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras))))
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{vals:gvals}{octets:bytes}
+    INDEXDEC_loss(octets, ir_loss(index_value, format_version, least_version, kept_extras, lost_groups)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups)))
+  | {octets:bytes} INDEXDEC_notquire(octets, ir_notquire()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_notquire())
+  | {octets:bytes} INDEXDEC_newer(octets, ir_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_newer())
+  | {octets:bytes} INDEXDEC_damaged(octets, ir_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_damaged())
 
-(* INDEXEQ(x, y): the indexs are one *)
+(* INDEXEQ(written_value, read_value): the indexs are one *)
 #pub dataprop INDEXEQ(indexx, indexx) =
-  | {x:indexx} INDEXEQ_refl(x, x)
+  | {index_value:indexx} INDEXEQ_refl(index_value, index_value)
 
 (* A index written and read back is the index written, in the same format *)
-#pub prfun index_roundtrip {x,y:indexx}{ver,minver,ver2,minver2:int}{e,e2:extras}{bs:bytes}{n:nat}
-  (LEN(bs, n), INDEXENC(x, ver, minver, e, bs), INDEXDEC(bs, ir_ok(y, ver2, minver2, e2)))
-  : (INDEXEQ(x, y), EQI(ver, ver2), EQI(minver, minver2))
+#pub prfun index_roundtrip {written_value,read_value:indexx}{format_version,least_version,read_format_version,read_least_version:int}{kept_extras,read_extras:extras}{octets:bytes}{byte_count:nat}
+  (LEN(octets, byte_count), INDEXENC(written_value, format_version, least_version, kept_extras, octets), INDEXDEC(octets, ir_ok(read_value, read_format_version, read_least_version, read_extras)))
+  : (INDEXEQ(written_value, read_value), EQI(format_version, read_format_version), EQI(least_version, read_least_version))
 
-primplement index_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, written, read) =
+primplement index_roundtrip {written_value,read_value}{format_version,least_version,read_format_version,read_least_version}{kept_extras,read_extras}{octets}{byte_count} (whole, written, read) =
   case+ written of
   | INDEXENC_mk(fields_written, encoded) =>
     (case+ read of
@@ -91,15 +91,15 @@ primplement index_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, 
          prval INDEXV_mk() = fields_read
        in (INDEXEQ_refl(), EQI_refl(), EQI_refl()) end)
 
-(* INDEXRES(a, b): the results of reading are one *)
+(* INDEXRES(first, second): the results of reading are one *)
 #pub dataprop INDEXRES(indexres, indexres) =
-  | {r:indexres} INDEXRES_refl(r, r)
+  | {outcome:indexres} INDEXRES_refl(outcome, outcome)
 
 (* Reading what a index was written as is reading that index *)
-#pub prfun index_enc_dec {x:indexx}{ver,minver:int}{e:extras}{bs:bytes}{n:nat}{res:indexres}
-  (LEN(bs, n), INDEXENC(x, ver, minver, e, bs), INDEXDEC(bs, res)): INDEXRES(res, ir_ok(x, ver, minver, e))
+#pub prfun index_enc_dec {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{octets:bytes}{byte_count:nat}{outcome:indexres}
+  (LEN(octets, byte_count), INDEXENC(index_value, format_version, least_version, kept_extras, octets), INDEXDEC(octets, outcome)): INDEXRES(outcome, ir_ok(index_value, format_version, least_version, kept_extras))
 
-primplement index_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
+primplement index_enc_dec {index_value}{format_version,least_version}{kept_extras}{octets}{byte_count}{outcome} (whole, written, read) =
   case+ written of
   | INDEXENC_mk(fields_written, encoded) =>
     (case+ read of
@@ -120,43 +120,43 @@ primplement index_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) 
 (* a index record at run time: its format version, the least version that reads it, the index,
    and the chunks kept *)
 #pub datavtype indexrecord(indexx, int, int, extras) =
-  | {x:indexx}{ver,minver:int | 0 <= ver; ver < 256; 0 <= minver; minver <= READER}{e:extras}{ke:nat}
-    IndexRecord(x, ver, minver, e) of (int ver, int minver, indexv(x), extrasv(e, ke))
+  | {index_value:indexx}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{kept_extras:extras}{extra_count:nat}
+    IndexRecord(index_value, format_version, least_version, kept_extras) of (int format_version, int least_version, indexv(index_value), extrasv(kept_extras, extra_count))
 
 #pub datavtype indexread(indexres) =
-  | {x:indexx}{ver,minver:int}{e:extras} IR_ok(ir_ok(x, ver, minver, e)) of indexrecord(x, ver, minver, e)
-  | {x:indexx}{ver,minver:int}{e:extras}{t:lost}{kl:nat} IR_loss(ir_loss(x, ver, minver, e, t)) of (indexrecord(x, ver, minver, e), lostv(t, kl))
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras} IR_ok(ir_ok(index_value, format_version, least_version, kept_extras)) of indexrecord(index_value, format_version, least_version, kept_extras)
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{lost_count:nat} IR_loss(ir_loss(index_value, format_version, least_version, kept_extras, lost_groups)) of (indexrecord(index_value, format_version, least_version, kept_extras), lostv(lost_groups, lost_count))
   | IR_notquire(ir_notquire())
   | IR_newer(ir_newer())
   | IR_damaged(ir_damaged())
 
-#pub fun index_record_write {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e))
-  : [bs:bytes][m:nat] (INDEXENC(x, ver, minver, e, bs) | blist(bs, m))
+#pub fun index_record_write {index_value:indexx}{format_version,least_version:int}{kept_extras:extras} (record: !indexrecord(index_value, format_version, least_version, kept_extras))
+  : [octets:bytes][written_len:nat] (INDEXENC(index_value, format_version, least_version, kept_extras, octets) | blist(octets, written_len))
 
-implement index_record_write {x}{ver,minver}{e} (record) =
+implement index_record_write {index_value}{format_version,least_version}{kept_extras} (record) =
   case+ record of
-  | IndexRecord(ver, minver, index, extras) => let
+  | IndexRecord(format_version, least_version, index, extras) => let
       val specs = index_specs()
       val (fields | vals) = index_to_vals(index)
-      val (written | out) = record_write(specs, 2, ver, minver, vals, extras)
+      val (written | record_bytes) = record_write(specs, 2, format_version, least_version, vals, extras)
       val () = gvalsv_free(vals)
       val () = specsv_free(specs)
-    in (INDEXENC_mk(fields, written) | out) end
+    in (INDEXENC_mk(fields, written) | record_bytes) end
 
-#pub fun index_record_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:indexres] (INDEXDEC(bs, res) | indexread(res))
+#pub fun index_record_read {octets:bytes}{byte_count:nat} (list: blist(octets, byte_count)): [outcome:indexres] (INDEXDEC(octets, outcome) | indexread(outcome))
 
-implement index_record_read {bs}{n} (list) = let
+implement index_record_read {octets}{byte_count} (list) = let
   val specs = index_specs()
-  val (read | out) = record_read(specs, 2, list)
+  val (read | read_outcome) = record_read(specs, 2, list)
   val () = specsv_free(specs)
 in
-  case+ out of
-  | ~RR_ok(ver, minver, vals, extras) => let
+  case+ read_outcome of
+  | ~RR_ok(format_version, least_version, vals, extras) => let
       val (fields | index) = index_of_vals(vals)
-    in (INDEXDEC_ok(fields, read) | IR_ok(IndexRecord(ver, minver, index, extras))) end
-  | ~RR_loss(ver, minver, vals, extras, lost) => let
+    in (INDEXDEC_ok(fields, read) | IR_ok(IndexRecord(format_version, least_version, index, extras))) end
+  | ~RR_loss(format_version, least_version, vals, extras, lost) => let
       val (fields | index) = index_of_vals(vals)
-    in (INDEXDEC_loss(fields, read) | IR_loss(IndexRecord(ver, minver, index, extras), lost)) end
+    in (INDEXDEC_loss(fields, read) | IR_loss(IndexRecord(format_version, least_version, index, extras), lost)) end
   | ~RR_notquire() => (INDEXDEC_notquire(read) | IR_notquire())
   | ~RR_newer() => (INDEXDEC_newer(read) | IR_newer())
   | ~RR_damaged() => (INDEXDEC_damaged(read) | IR_damaged())
@@ -170,9 +170,9 @@ implement index_read_recast {first,second} (same | read) = let
 in read end
 
 (* A decoding as the decoding it is the same as *)
-#pub prfun index_dec_recast {bs:bytes}{first,second:indexres} (INDEXRES(first, second), INDEXDEC(bs, first)): INDEXDEC(bs, second)
+#pub prfun index_dec_recast {octets:bytes}{first,second:indexres} (INDEXRES(first, second), INDEXDEC(octets, first)): INDEXDEC(octets, second)
 
-primplement index_dec_recast {bs}{first,second} (same, dec) = let
+primplement index_dec_recast {octets}{first,second} (same, dec) = let
   prval INDEXRES_refl() = same
 in dec end
 
