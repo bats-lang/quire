@@ -1338,6 +1338,24 @@ node until the reader moves, never the node at the top of the page it
 then shows, which can begin before it, so layouts one after another do
 not move the place back (quire#305).
 
+The place also survives the app's bars shown or hidden (quire#356). The
+app is drawn edge to edge, so full screen changes the reading area
+only through `env(safe-area-inset-*)` (the page's paddings): the window
+does not resize and no `resize` came, so the chapter was not laid out
+again and the page, scrolled by whole pages of the old area, showed text
+two paragraphs on. The activity reports the bars at each window insets
+dispatch (`batsNative.systemBars`, `RSystemBars`), and when what is
+shown changes (`screen_system_bars_changed` answers whether) the
+chapter is laid out again once the area settles (`_relayout_for_bars`,
+`reader_relayout_for_bars`, which does not hide bars the system brought
+back: that is a page turned, not an area changed). What a place is: a
+content node and the page that holds it, as an EPUB CFI (Kobo, Apple
+Books, Calibre) or a Readium locator names a text position and not a
+page, so the paragraph the reader was at stays on the page shown
+whichever way the area changes (`e2e/layout.spec.js`, "the place stays
+when the reading area changes"); where the page breaks fall is the
+layout's, as in Kindle and Books.
+
 ## A page that stops answering in e2e explains itself (#244)
 
 Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js`

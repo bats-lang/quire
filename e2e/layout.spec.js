@@ -8,7 +8,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile,
+  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
 import { cutOff, statesUnseen, insetsShort } from './controls-shown.js';
@@ -532,6 +532,39 @@ for (const insets of [
 // but nothing in them can be focused or is read out (WAI-ARIA's tabs
 // pattern: only the shown panel is reachable), and nothing is cut off
 // on any tab
+// quire#356: the place survives a layout made anew. Going into and out
+// of full screen changes the reading area (the system bars' insets), so
+// the pages are laid out again and their breaks fall elsewhere; the
+// place is kept by a content node (`_anchor_kept`, quire#305), as a
+// CFI or a Readium locator names a node and not a page, so the text the
+// reader was at stays on the page shown, whichever way the area changes
+// and however many times, and the indicator follows the new layout
+test('the place stays when the reading area changes, into full screen and out of it', async ({ page }, testInfo) => {
+  test.skip(!onAndroid(testInfo), 'the system bars are drawn over the page in the Android app, so hiding them changes the reading area with no resize; a browser resizes');
+  await start(page);
+  await readBook(page, { title: 'Moving', author: 'X', rawChapters: chapters(1, 400) });
+  const devtools = await page.context().newCDPSession(page);
+  const bars = { top: 45, left: 0, right: 0, bottom: 24 };
+  const hidden = { top: 0, left: 0, right: 0, bottom: 0 };
+  await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets: bars });
+  // settle the fonts and the count before the place is chosen
+  await expect.poll(async () => (await place(page)).t).toBeGreaterThan(10);
+  await page.waitForTimeout(3500);
+  for (let i = 0; i < 14; i++) await page.keyboard.press('ArrowRight');
+  const first = (await startsOnPage(page))[0];
+  expect(first, 'a paragraph at the page\'s head').toMatch(/^Para 1\./);
+  const anchor = first;
+  for (const insets of [hidden, bars, hidden, bars]) {
+    await devtools.send('Emulation.setSafeAreaInsetsOverride', { insets });
+    // as pwa's activity reports the bars at the window insets dispatch
+    // that follows (bridge's batsNative.systemBars), no resize with it
+    const shown = insets.top > 0;
+    await page.evaluate(shown => globalThis.batsNative.systemBars(shown, shown), shown);
+    await page.waitForTimeout(1500);
+    expect(await onPage(page, anchor), `"${anchor}" is on the page after the area changed`).toBe(true);
+  }
+});
+
 test('the reading settings sheet keeps its box and its tabs in place on every tab', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Steady Sheet', author: 'L', rawChapters: chapters(1) });

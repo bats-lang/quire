@@ -1791,6 +1791,9 @@ fn _place_shown {page_count:pos}{page:nat | page < page_count}{chapter,chapter_c
   val () = _record_position()
 in _page_waiter_resolve() end
 
+(* Whether a layout made anew for the bars (reader_relayout_for_bars) is under way: it does not hide them *)
+val _bars_left_alone = ref<bool>(false)
+
 (* In the app's full screen, the system bars hidden again: Android
    brings them back for a while at a swipe from the screen's edge
    (immersive mode's own way out), and full screen stays on, so a page
@@ -1800,7 +1803,8 @@ in _page_waiter_resolve() end
    full screen is left only by the reader (Escape), never brought back
    unasked *)
 fn _bars_hidden_again (): void =
-  if $BAPP.is_native_platform() then (if $SCR.fullscreen_active() then $SCR.fullscreen_enter() else ())
+  if !_bars_left_alone then ()
+  else if $BAPP.is_native_platform() then (if $SCR.fullscreen_active() then $SCR.fullscreen_enter() else ())
   else ()
 
 (* Shows a page of page_count, scrolled down by top when scrolled (the page's
@@ -4888,6 +4892,15 @@ in if jumped then _pop_position() else () end
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()
+
+(* Laid out anew because the app's bars were shown or hidden (the area's
+   insets changed, quire#356): not a page turned, so bars the system
+   brought back are not hidden again by it *)
+#pub fun reader_relayout_for_bars (): void
+implement reader_relayout_for_bars () = let
+  val () = !_bars_left_alone := true
+  val () = _relayout()
+in !_bars_left_alone := false end
 
 (* Shows a page of the chapter shown (clamped to its pages) *)
 #pub fun reader_page (page: Int): void
