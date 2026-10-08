@@ -7,7 +7,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog,
   place, indicator, chapters, japaneseChapters,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, expectBarFollows,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
@@ -26,11 +26,27 @@ const visibleText = page => bookPage(page).evaluate(doc => {
     .map(e => e.textContent.slice(0, 12)).join('\n');
 });
 
+// quire#359: a precondition, not a skip: this spec's shots of a
+// vertical book are of empty boxes where no CJK font is installed (the
+// canvas draws a Han character and a code point no font has the same
+// width), so a machine without one fails here, naming the cause
+test('a font with Japanese characters is installed, or the vertical book is drawn as empty boxes', async ({ page }) => {
+  await start(page);
+  const drawn = await page.evaluate(() => {
+    const context = document.createElement('canvas').getContext('2d');
+    context.font = '32px sans-serif';
+    return { han: context.measureText('日本語').width, missing: context.measureText('\uFFFF\uFFFF\uFFFF').width };
+  });
+  expect(drawn.han, 'a Han character has a glyph of its own, not the missing-glyph box').not.toBe(drawn.missing);
+});
+
 test('a Japanese book read right to left is set vertically, its pages going down', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, verticalBook('縦書き'));
   const style = await bookPage(page).evaluate(e => ({ mode: getComputedStyle(e).writingMode, direction: getComputedStyle(e).direction }));
   expect(style).toEqual({ mode: 'vertical-rl', direction: 'ltr' });
+  // the bottom bar follows its reading axis, from the right (quire#359)
+  await expectBarFollows(page, true);
   const at = await place(page);
   expect(at.p).toBe(1);
   expect(at.t).toBeGreaterThan(1);

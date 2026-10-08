@@ -9,7 +9,7 @@ import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, expectBarFollows,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -478,6 +478,15 @@ test('a book read right to left turns the other way', async ({ page }) => {
   await expect.poll(async () => (await place(page)).p).toBe(2);
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(1);
+  // the bottom bar follows: the scrubber from the right, Previous on the right
+  await expectBarFollows(page, true);
+});
+
+// A book read left to right keeps its bar as it was (quire#359)
+test('a book read left to right has its scrubber from the left and Previous on the left', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Left To Right', 2));
+  await expectBarFollows(page, false);
 });
 
 // A right-to-left book that does not say so in its spine: a Hebrew
@@ -505,6 +514,8 @@ test('a Hebrew book whose spine does not say reads right to left: its text, its 
   await expect.poll(async () => (await place(page)).p).toBe(3);
   await page.keyboard.press('ArrowRight');
   await expect.poll(async () => (await place(page)).p).toBe(2);
+  // the bottom bar follows the book: the thumb moved to the left of the track's start
+  await expectBarFollows(page, true);
   // the paragraphs run right to left, their lines ending on the left
   const p = bookPage(page).locator('p').nth(3);
   expect(await p.evaluate(e => getComputedStyle(e).direction)).toBe('rtl');
