@@ -1421,7 +1421,7 @@ fn theme {theme_number:palette}{left:nat | left >= 740}
 in close(sheet) end
 
 (* The rules the guarantees rest on; the only !important in the sheet *)
-fn _base {left:nat | left >= 1400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1400] sheet(after, false, false) = let
+fn _base {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1700] sheet(after, false, false) = let
   val () = raw(sheet, "[data-hide='1'],[hidden]{display:none!important}")
   (* 44 x 44 targets: every button and field, everything given a
      control's role, and the app's links out (ui_link_out); links in a
@@ -1438,6 +1438,13 @@ fn _base {left:nat | left >= 1400} (sheet: sheet(left, false, false)): [after:na
   prval _ = E_edge_card
   val () = raw(sheet, "input:not([type=range]):not([type=file]),textarea,select")
   val () = raw(sheet, "{color:var(--fg)!important;background-color:var(--card)!important;border:1px solid var(--edge)!important}")
+  (* a placeholder is text like any other (quire#357): muted on the
+     field's own card, proven in every theme (SURF), and drawn in full,
+     where a browser's default fades it below the proof *)
+  val sheet = rule(sheet, "input::placeholder,textarea::placeholder")
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
+  val () = raw(sheet, "opacity:1;")
+  val sheet = close(sheet)
   (* a search field's own clear button is too small a target *)
   val () = raw(sheet, "input[type=search]::-webkit-search-cancel-button{display:none}")
   (* a button is a surface like any other: fg on card until a rule

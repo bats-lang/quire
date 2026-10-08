@@ -12,6 +12,9 @@
  * - statesUnseen: every toggle shows whether it is on in how it looks,
  *   not only in aria-pressed (WCAG 1.4.1): its look, and its parts',
  *   differ between on and off.
+ * - textContrastShort: a placeholder reads at 4.5:1 against its field
+ *   (WCAG 1.4.3), in whatever theme is shown (quire#357). Every other
+ *   text colour is written through the stylesheet's proven pairs.
  * - onOffPairs: a setting with two states is a switch (Material 3: a
  *   switch makes a binary selection, its effect immediate), never a
  *   segmented On | Off, nor a lone button pressed on and off (quire#363).
@@ -95,6 +98,49 @@ export async function statesUnseen(page) {
       const after = look(e);
       e.setAttribute('aria-pressed', was);
       if (before === after) bad.push((e.getAttribute('aria-label') || e.textContent || e.id).trim().slice(0, 40));
+    }
+    return bad;
+  });
+}
+
+/** The visible fields on the screen shown whose placeholder is under
+    4.5:1 against the field's ground, as the page draws it (the colour
+    with its opacity over the field's background). Each is named, with
+    the ratio */
+export async function textContrastShort(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const parse = css => {
+      const m = css.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const [r, g, b, a = 1] = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number);
+      return { r, g, b, a };
+    };
+    const over = (top, under) => ({
+      r: top.r * top.a + under.r * (1 - top.a), g: top.g * top.a + under.g * (1 - top.a), b: top.b * top.a + under.b * (1 - top.a), a: 1,
+    });
+    const light = c => {
+      const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    const ground = e => {
+      let under = { r: 255, g: 255, b: 255, a: 1 };
+      const chain = [];
+      for (let a = e; a; a = a.parentElement) chain.push(parse(getComputedStyle(a).backgroundColor));
+      for (const c of chain.reverse()) if (c && c.a > 0) under = over(c, under);
+      return under;
+    };
+    const bad = [];
+    for (const e of document.querySelectorAll('input[placeholder],textarea[placeholder]')) {
+      if (!shown(e) || e.value) continue;
+      const style = getComputedStyle(e, '::placeholder');
+      const text = parse(style.color);
+      if (!text) continue;
+      const back = ground(e);
+      const drawn = over({ ...text, a: text.a * parseFloat(style.opacity || '1') }, back);
+      const [hi, lo] = [light(drawn), light(back)].sort((x, y) => y - x);
+      const ratio = (hi + 0.05) / (lo + 0.05);
+      if (ratio < 4.5) bad.push(`${e.getAttribute('aria-label') || e.id || e.placeholder}: ${ratio.toFixed(2)}:1`);
     }
     return bad;
   });
