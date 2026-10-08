@@ -274,7 +274,7 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await sheet.getByRole('combobox', { name: 'Reading speed' }).selectOption('1.5');
   await sheet.getByRole('combobox', { name: 'Voice' }).selectOption({ label: 'Narrator' });
   await openReadingSettings(page, 'Page');
-  await sheet.getByRole('combobox', { name: 'Brightness' }).selectOption({ label: '25%' });
+  await sheet.getByRole('slider', { name: 'Brightness while reading' }).fill('37');
   await sheet.getByRole('button', { name: 'Lock rotation', exact: true }).click();
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   // full screen, kept by the app (#313)
@@ -284,7 +284,7 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await toLibrary(page);
   const json = await exportBackup(page);
   const b = JSON.parse(json);
-  expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 25, rotationLocked: true, fullScreen: true, voices: { en: 'Narrator' } });
+  expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 37, rotationLocked: true, fullScreen: true, voices: { en: 'Narrator' } });
   // reset: out of full screen; its Undo: back in it (the system's bars
   // are shown in the library whatever is set, and hidden when a book is
   // read with its own bars away: quire#348)
@@ -308,13 +308,14 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await restoreBackup(page, path);
   await expect(restored(page)).toBeVisible();
   await restored(page).getByRole('button', { name: 'OK' }).click();
-  await expect.poll(() => page.evaluate(() => window.calls.slice(-3))).toContain('brightness {"brightness":0.25}');
+  await expect.poll(() => page.evaluate(() => window.calls.slice(-3))).toContain('brightness {"brightness":0.37}');
   await openBook(page, 'Device Backup');
   await openReadingSettings(page, 'Read aloud');
   await expect(sheet.getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
   await expect(sheet.getByRole('combobox', { name: 'Voice' }).locator('option:checked')).toHaveText('Narrator');
   await openReadingSettings(page, 'Page');
-  await expect(sheet.getByRole('combobox', { name: 'Brightness' })).toHaveValue('25');
+  await expect(sheet.getByRole('slider', { name: 'Brightness while reading' })).toHaveValue('37');
+  await expect(sheet.getByRole('button', { name: 'Same as device', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
   // the restored setting hides the bars when the book is read with its own away

@@ -789,22 +789,24 @@ fn _settings (): void = let
      be had (screen_controls.bats). Full screen and the lock are each a
      switch, its name and a drawn track whose knob moves when it is on
      (aria-pressed), with a line saying what it does; the brightness, a
-     select under its own label, the whole width *)
+     slider and a switch *)
   val () = ui_el("typography-page", "screen-row", TDiv, "sgroup")
   val () = _switch_row("screen-row", "screen-fullscreen-row", "screen-fullscreen", "screen-fullscreen-track",
     "screen-fullscreen-knob", "screen-fullscreen-about", "Full screen", "Hides the status and navigation bars")
   val () = _switch_row("screen-row", "screen-lock-row", "screen-lock", "screen-lock-track",
     "screen-lock-knob", "screen-lock-about", "Lock rotation", "Keeps the page in its current orientation when the device turns")
-  (* named by what it does, as Kindle's "Use system brightness" and Play
-     Books' Lighting are: its own brightness while Quire is shown, or the
-     device's, never the device's setting changed *)
+  (* a slider that dims or brightens the screen as it moves (quire#392:
+     a select of percentages could not be seen before it was chosen), and
+     a switch for the device's own, as Kindle's "Use system brightness"
+     and Moon+ Reader's brightness slider with its system checkbox have:
+     its own brightness while Quire is shown, or the device's, never the
+     device's setting changed *)
   val () = ui_el("screen-row", "screen-brightness-row", TDiv, "srow stack")
-  val () = ui_el("screen-brightness-row", "screen-brightness-label", TSpan, "slabel")
-  val () = ui_text("screen-brightness-label", "Brightness while reading")
-  val () = ui_field("screen-brightness-row", "screen-brightness", FChoice, "ssel", "Brightness while reading")
+  val () = ui_el("screen-brightness-row", "screen-brightness-slider", TDiv, "srow")
   val () = ui_el("screen-brightness-row", "screen-brightness-about", TSpan, "sabout")
   val () = ui_text("screen-brightness-about", "Changes the screen only while Quire is open")
-  val () = ui_attr("screen-brightness", ADescribedBy, "screen-brightness-about")
+  val () = _switch_row("screen-row", "screen-brightness-system-row", "screen-brightness-system", "screen-brightness-system-track",
+    "screen-brightness-system-knob", "screen-brightness-system-about", "Same as device", "Uses the brightness the device is set to")
   val () = _hide("screen-row")
   (* Turning: by taps where (each zone drawn, mirrored for a book read
      right to left), and by the volume keys, where the app has them
