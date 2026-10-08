@@ -166,7 +166,7 @@ fn _placement (node: Int, offset: Int): placement =
     else if reader_scrolls() then
       (if y >= page_y + page_height then After() else if y < page_y then Before() else OnPage())
     (* right to left, the pages go on to the left *)
-    else if reader_rtl() then
+    else if (case+ reader_direction() of RightToLeft() => true | LeftToRight() => false) then
       (if x < page_x then After() else if x >= page_x + page_width then Before() else OnPage())
     else if x >= page_x + page_width then After()
     else if x < page_x then Before()

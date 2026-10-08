@@ -15,6 +15,7 @@
 
 #include "share/atspre_staload.hats"
 #use array as A
+#use str as S
 #use arith as AR
 #use promise as P
 #use result as R
@@ -24,8 +25,6 @@ staload "settings.sats"
 staload "library.sats"
 staload SCR = "wasm.bats-packages.dev/bridge/src/screen.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
-staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
-staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload "mem.sats"
 staload "notice.sats"
 
@@ -74,6 +73,7 @@ fn _follow (): void =
 
 (* The brightness last set on the screen *)
 val _brightness_on_screen = ref<brightness_choice>(BrightnessSystem())
+val _level_on_screen = ref<int>(0)
 
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
   if on then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
@@ -88,6 +88,7 @@ implement screen_controls_show () = let
   val () = ui_show("screen-fullscreen-row", full)
   val () = ui_show("screen-lock-row", lock)
   val () = ui_show("screen-brightness-row", brightness)
+  val () = ui_show("screen-brightness-system-row", brightness)
   val () = ui_show("screen-row", (if full then true else if lock then true else brightness))
   val () = _pressed("screen-fullscreen", _fullscreen_shown())
 in
@@ -220,120 +221,64 @@ implement screen_lock_toggle () =
    The brightness
    ============================================================ *)
 
-(* What bridge's brightness_set takes for a choice *)
+(* What bridge's brightness_set takes for the settings' brightness *)
 fn _setting_of (choice: brightness_choice): $SCR.brightness_setting =
   case+ choice of
   | BrightnessSystem() => $SCR.FollowSystem()
-  | BrightnessTenth() => $SCR.Level(10)
-  | BrightnessQuarter() => $SCR.Level(25)
-  | BrightnessHalf() => $SCR.Level(50)
-  | BrightnessThreeQuarters() => $SCR.Level(75)
-  | BrightnessFull() => $SCR.Level(100)
-
-(* A choice's option: its value and what it shows *)
-fn _option_of (choice: brightness_choice): @([value_len:pos | value_len < 8] string value_len, [label_len:pos | label_len < 16] string label_len) =
-  case+ choice of
-  | BrightnessSystem() => @("system", "Same as device")
-  | BrightnessTenth() => @("10", "10%")
-  | BrightnessQuarter() => @("25", "25%")
-  | BrightnessHalf() => @("50", "50%")
-  | BrightnessThreeQuarters() => @("75", "75%")
-  | BrightnessFull() => @("100", "100%")
+  | BrightnessOwn() => $SCR.Level(set_brightness_level_get())
 
 fn _same (one: brightness_choice, other: brightness_choice): bool =
   case+ (one, other) of
   | (BrightnessSystem(), BrightnessSystem()) => true
-  | (BrightnessTenth(), BrightnessTenth()) => true
-  | (BrightnessQuarter(), BrightnessQuarter()) => true
-  | (BrightnessHalf(), BrightnessHalf()) => true
-  | (BrightnessThreeQuarters(), BrightnessThreeQuarters()) => true
-  | (BrightnessFull(), BrightnessFull()) => true
+  | (BrightnessOwn(), BrightnessOwn()) => true
   | (_, _) => false
 
-(* A string's bytes in a new array *)
-fn _bytes_of {text_len:pos | text_len < 16} (text: string text_len): [l:agz] @($A.arr(byte, l, text_len), int text_len) = let
-  val text_len = g1u2i(string1_length(text))
-  val bytes = $A.alloc<byte>(text_len)
-  fun put {l:agz}{i:nat | i <= text_len} .<text_len - i>. (bytes: !$A.arr(byte, l, text_len), i: int i): void =
-    if i >= text_len then ()
-    else let
-      val () = $A.set<byte>(bytes, i, $A.int2byte($AR.byte_of_char(string_get_at(text, i))))
-    in put(bytes, i + 1) end
-  val () = put(bytes, 0)
-in @(bytes, text_len) end
-
-(* The option for choice, numbered number, the last of the select *)
-fn _option {number:nat} (choice: brightness_choice, number: int number, chosen: brightness_choice): void = let
-  val @(value, label) = _option_of(choice)
-  val @(id, id_len) = nid_make("brightness-level", number)
-  val @(value_bytes, value_len) = _bytes_of(value)
-  val @(label_bytes, label_len) = _bytes_of(label)
-in ui_option("screen-brightness", id, id_len, value_bytes, value_len, label_bytes, label_len, _same(choice, chosen)) end
-
-(* The brightness select's levels, the one kept chosen *)
-fn _brightness_options (): void = let
-  val chosen = set_brightness_get()
-  val () = ui_clear("screen-brightness")
-  val () = _option(BrightnessSystem(), 0, chosen)
-  val () = _option(BrightnessTenth(), 1, chosen)
-  val () = _option(BrightnessQuarter(), 2, chosen)
-  val () = _option(BrightnessHalf(), 3, chosen)
-  val () = _option(BrightnessThreeQuarters(), 4, chosen)
-in _option(BrightnessFull(), 5, chosen) end
-
-(* Whether bytes[0, n) is text *)
-fun _bytes_are {l:agz}{n:nat}{text_len:nat}{i:nat | i <= text_len} .<text_len - i>.
-  (bytes: !$A.arr(byte, l, n), n: int n, text: string text_len, text_len: int text_len, i: int i): bool =
-  if n <> text_len then false
-  else if i >= text_len then true
-  else if i >= n then false
-  else if byte2int0($A.get<byte>(bytes, i)) <> char2int0(string_get_at(text, i)) then false
-  else _bytes_are(bytes, n, text, text_len, i + 1)
-
-fn _is {l:agz}{n:nat}{text_len:pos} (bytes: !$A.arr(byte, l, n), n: int n, text: string text_len): bool =
-  _bytes_are(bytes, n, text, g1u2i(string1_length(text)), 0)
-
-(* The choice whose option's value is value[0, n): checked here, once;
-   the system's own for any other *)
-fn _choice_of {l:agz}{n:nat} (value: !$A.arr(byte, l, n), n: int n): brightness_choice =
-  if _is(value, n, "10") then BrightnessTenth()
-  else if _is(value, n, "25") then BrightnessQuarter()
-  else if _is(value, n, "50") then BrightnessHalf()
-  else if _is(value, n, "75") then BrightnessThreeQuarters()
-  else if _is(value, n, "100") then BrightnessFull()
-  else BrightnessSystem()
-
-(* A brightness chosen in the select: set, and kept *)
-#pub fn screen_brightness_chosen (): void
-
-implement screen_brightness_chosen () = let
-  val id = $A.alloc<byte>(17)
-  val () = $A.write_text(id, 0, $A.text_lit("screen-brightness"), 17)
-  val @(id_frozen, id_bytes) = $A.freeze<byte>(id)
-  val value = $DR.read_input_value(id_bytes, 17)
-  val () = release_bytes(id_frozen, id_bytes)
+(* The slider, made again at the level kept (after the settings are
+   loaded, reset or restored; not while it is being moved), and the
+   switch for the system's own *)
+fn _brightness_controls (): void = let
+  val value_text = $A.alloc<byte>(16)
+  val value_len = $S.int_to_str(value_text, 0, 16, set_brightness_level_get())
+  val () = ui_range("screen-brightness-slider", "screen-brightness-label", "Brightness while reading",
+    "screen-brightness", "10", "100", "screen-brightness-value", value_text, value_len)
 in
-  case+ value of
-  | ~$R.none() => ()
-  | ~$R.some(blob) => let
-      val n = $BD.blob_len(blob)
-    in
-      if n <= 0 then $BD.blob_free(blob)
-      else if n > 16 then $BD.blob_free(blob)
-      else let
-        val bytes = $A.alloc<byte>(n)
-        val () = $BD.blob_read(blob, 0, bytes, n)
-        val () = $BD.blob_free(blob)
-        val choice = _choice_of(bytes, n)
-        val () = $A.free<byte>(bytes)
-        val () = set_brightness_set(choice)
-        val () = !_brightness_on_screen := choice
-        val () = set_save(lib_state_get())
-      in
-        if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(choice)) else ()
-      end
-    end
+  case+ set_brightness_get() of
+  | BrightnessSystem() => _pressed("screen-brightness-system", true)
+  | BrightnessOwn() => _pressed("screen-brightness-system", false)
 end
+
+(* The brightness the settings keep, put on the screen and saved *)
+fn _brightness_put (): void = let
+  val () = !_brightness_on_screen := set_brightness_get()
+  val () = !_level_on_screen := set_brightness_level_get()
+  val () = set_save(lib_state_get())
+in if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(set_brightness_get())) else () end
+
+(* The slider moved to level (an input event: while it is dragged, each
+   step), so the screen is that bright at once and the reader sees the
+   brightness they are choosing; its own brightness is then chosen *)
+#pub fn screen_brightness_moved (moved_to: int): void
+
+implement screen_brightness_moved (moved_to) = let
+  val level = g1ofg0(moved_to)
+  val level = (if level < 10 then 10 else if level > 100 then 100 else level): set_brightness_level
+  val () = set_brightness_level_set(level)
+  val () = set_brightness_set(BrightnessOwn())
+  val () = _pressed("screen-brightness-system", false)
+in _brightness_put() end
+
+(* Same as device clicked: the system's own brightness, or the level
+   the slider shows *)
+#pub fn screen_brightness_system_toggle (): void
+
+implement screen_brightness_system_toggle () = let
+  val () = (case+ set_brightness_get() of
+    | BrightnessSystem() => set_brightness_set(BrightnessOwn())
+    | BrightnessOwn() => set_brightness_set(BrightnessSystem()))
+  val () = (case+ set_brightness_get() of
+    | BrightnessSystem() => _pressed("screen-brightness-system", true)
+    | BrightnessOwn() => _pressed("screen-brightness-system", false))
+in _brightness_put() end
 
 (* ============================================================
    The settings, set again
@@ -341,18 +286,20 @@ end
 
 (* The settings' brightness, rotation lock and (in the app) full screen
    set on the screen, where they differ from what is set (a reset of the
-   settings, its Undo, a backup restored): the select and the toggles
+   settings, its Undo, a backup restored): the slider and the switches
    follow *)
 #pub fn screen_controls_apply (): void
 
 implement screen_controls_apply () = let
   val () = _fullscreen_apply()
   val chosen = set_brightness_get()
-  val () = _brightness_options()
-  val () = (if _same(chosen, !_brightness_on_screen) then ()
+  val () = _brightness_controls()
+  val () = (if _same(chosen, !_brightness_on_screen) then (if set_brightness_level_get() = !_level_on_screen then () else
+      (if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(chosen)) else ()))
     else let
       val () = !_brightness_on_screen := chosen
     in if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(chosen)) else () end)
+  val () = !_level_on_screen := set_brightness_level_get()
 in
   case+ set_rotation_get() of
   | RotationFree() => let
@@ -373,14 +320,14 @@ end
    ============================================================ *)
 
 (* Once the settings are read, before the first view is shown: the rows
-   as the platform has them, the brightness select's levels, and what
+   as the platform has them, the brightness slider, and what
    was kept put back: in the app, full screen, a brightness other than
    the system's, and (where nothing else asks for it) the rotation
    lock *)
 #pub fn screen_controls_start (): void
 
 implement screen_controls_start () = let
-  val () = _brightness_options()
+  val () = _brightness_controls()
   (* the app starts in the library, where the system bars are shown
      whatever full screen was kept (quire#348, quire#313): they are set so,
      whatever an earlier page left (quire#300), and hidden when the reader
@@ -400,8 +347,9 @@ implement screen_controls_start () = let
     else ())
   val () = (if $SCR.brightness_available() then (case+ set_brightness_get() of
       | BrightnessSystem() => ()
-      | _ => let
+      | BrightnessOwn() => let
           val () = !_brightness_on_screen := set_brightness_get()
+          val () = !_level_on_screen := set_brightness_level_get()
         in $SCR.brightness_set(_setting_of(set_brightness_get())) end)
     else ())
 in

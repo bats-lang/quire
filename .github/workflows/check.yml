@@ -164,6 +164,11 @@ jobs:
       - name: Install Playwright
         run: npx playwright install chromium
 
+      # A font with Japanese characters: the vertical book's shots are
+      # empty boxes without one (quire#359; vertical.spec.js checks it)
+      - name: Install a CJK font
+        run: sudo apt-get install -y -q fonts-noto-cjk
+
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
       - name: Run e2e tests

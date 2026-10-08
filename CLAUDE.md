@@ -710,9 +710,17 @@ only where its platform has it, by its own `data-hide`.
   visibility at each window insets dispatch (`batsNative.systemBars`,
   bridge's `listen_system_bars`, `RSystemBars`), which lays the chapter
   out again when it changes (quire#356). Brightness while reading
-  (`brightness_*`, the app only: a `brightness_choice`, the device's own
-  ("Same as device") or 10 to 100%, kept with the settings and set again
-  as the app starts) is a select under its own label, the whole width.
+  (`brightness_*`, the app only, quire#392: a `brightness_choice`, the
+  device's own or `BrightnessOwn`, with a level of 10 to 100 kept apart
+  as the narration's speed is, `set_brightness_level`; kept with the
+  settings, in the one byte of the "S2" record that held the five levels
+  of the old select (1 to 5 still read as 10, 25, 50, 75, 100), and set
+  again as the app starts) is a slider that changes the screen as it
+  moves (`screen_brightness_moved`, on each `input` event, so the reader
+  sees the brightness they choose and no percentage is shown), and a
+  "Same as device" switch (`screen_brightness_system_toggle`) that gives
+  the screen back to the system and, pressed again, to the level the
+  slider shows.
   `e2e/controls-shown.js` checks, on every screen the layout spec walks,
   that no control's text is cut (a select's chosen option too) and that
   every toggle looks different on and off.
@@ -1494,6 +1502,22 @@ of every test in the phone-sized projects (`MARGIN_PROJECTS`), full
 screen too, whenever the reader shows a reflowed page, paged or
 scrolled, with the bars down, so a spec that leaves the reader open
 checks them; each line counts as drawn, cut to the page's scrollport.
+
+The reader's bottom bar follows the reading direction (quire#359; Apple's
+HIG flips progress and the next and previous buttons in a right-to-left
+context, Material runs a progress bar from the right): the book's
+`reading_direction` (`LeftToRight | RightToLeft`, from its spine, matched
+with `case+`) is kept by `_direction_set` in `src/reader.bats`, which gives
+the bar (`.bot.rtl`) and the scrubber (`.trk.rtl`) their class and swaps
+the page-turn buttons' arrows, and every drawing along the reading axis
+takes `_drawn_at`: the thumb, the chapters' ticks and the tip are placed
+from the right and the fill grows from it, and a drag's x on the track is
+turned back into the book's thousandth (`_track_at`). Previous is right
+of Next. `expectBarFollows` in `e2e/helpers.js` checks it for a book
+whose spine reads right to left, a Hebrew one whose spine does not say so,
+a vertical Japanese one, and a left to right one; `vertical.spec.js`
+fails first, naming the cause, where no font has Japanese characters
+(CI installs `fonts-noto-cjk`).
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
