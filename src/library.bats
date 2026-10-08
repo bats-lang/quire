@@ -1814,13 +1814,10 @@ fun _plan {count,shadow_count,planned:nat} .<count>.
 
 val _save_told = ref<bool>(false)
 
-(* A save that could not be kept is said once a session; the changes stay in
-   memory and are sent again at the next save *)
-fn _save_failed (): void =
-  if !_save_told then ()
-  else let
-    val () = !_save_told := true
-  in notice_error("Quire could not save your library. Your changes are kept while Quire is open; check that the device has room, then try again.") end
+(* A save that could not be kept is said as every failed save is, once a
+   session and never over a message still up (the changes stay in memory and
+   are sent again at the next save) *)
+fn _save_failed (): void = save_failed()
 
 fn _record_refused (why: unusable): void =
   if !_save_told then ()
