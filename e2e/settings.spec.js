@@ -388,6 +388,9 @@ test('in the Android app, the screen: full screen hides both bars, the rotation 
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('off');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  // the lock is offered, and works: shown and enabled (quire#355)
+  await expect(lock).toBeVisible();
+  await expect(lock).toBeEnabled();
   await lock.click();
   await expect.poll(() => switchOn(lock)).toBe('on');
   await brightness.selectOption({ label: '25%' });
@@ -508,6 +511,29 @@ test('in the Android app, bars the system brought back show on the switch at onc
   await full.click();
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
   await expect.poll(() => switchOn(full)).toBe('on');
+});
+
+// quire#355: a control that cannot work is not shown. Where the device
+// refuses the lock, the switch does not stay on the screen springing
+// back: it goes, and the banner says why
+test('a rotation lock the device refuses takes Lock rotation away and says so', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.calls = [];
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      SystemBars: { hide: () => Promise.resolve(), show: () => Promise.resolve() },
+      ScreenOrientation: { lock: () => { window.calls.push('lock'); return Promise.reject(new Error('not allowed')); }, unlock: () => Promise.resolve() },
+      ScreenBrightness: { setBrightness: () => Promise.resolve() },
+    } };
+  });
+  await start(page);
+  await readBook(page, { title: 'Refused', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Page');
+  const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  await expect(lock).toBeVisible();
+  await lock.click();
+  await expect.poll(() => page.evaluate(() => window.calls)).toEqual(['lock']);
+  await expect(lock).toBeHidden();
+  await expect(page.getByRole('alert')).toContainText('does not let Quire lock the rotation');
 });
 
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {

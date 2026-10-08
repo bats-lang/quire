@@ -679,7 +679,11 @@ only where its platform has it, by its own `data-hide`.
   from the first frame (`screen_controls_start`). A browser keeps none:
   the Fullscreen API enters only at a click (the user's activation), so
   a page opened again starts out of it, its switch off, and a click
-  there does not change what is kept. While full screen is on, a page shown hides the
+  there does not change what is kept.
+  Where the device refuses the rotation lock (bridge's `LockRefused`),
+  Lock rotation is not offered again that session (`_lock_refused` in
+  `src/screen_controls.bats`) and the banner says so (quire#355): a
+  control that cannot work is not shown. While full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge. Meanwhile the switch shows
   them (quire#314): pwa's activity reports each bar's visibility at each
