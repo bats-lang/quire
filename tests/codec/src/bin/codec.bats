@@ -29,11 +29,11 @@ fn expect (ok: bool, what: string): void = if ok then () else fail(what)
 
 (* ---------------- a sixteen bit generator ---------------- *)
 
-val _state = ref<[s:nat | s < 65536] int s>(12345)
+val _state = ref<[seed:nat | seed < 65536] int seed>(12345)
 
 (* the next number under 65536 (the generator with multiplier 25173 and
    increment 13849 visits every one of them) *)
-fn next_number (): [v:nat | v < 65536] int v = let
+fn next_number (): [value:nat | value < 65536] int value = let
   val state = !_state
   val product = $AR.mul_g1(state, 25173)
   val next = $AR.band_g1($AR.add_g1(product, 13849), 65535)
@@ -62,10 +62,10 @@ in text end
 
 (* An image of some book *)
 datavtype tested =
-  | {x:bookx} Tested of book_image(x)
+  | {contents:bookx} Tested of book_image(contents)
   | NoTested of ()
 
-fn image_of {t,a,s:nat | t < 256; a < 256; s < 256} (value: Int, title_len: int t, author_len: int a, series_len: int s): tested =
+fn image_of {title_n,author_n,series_n:nat | title_n < 256; author_n < 256; series_n < 256} (value: Int, title_len: int title_n, author_len: int author_n, series_len: int series_n): tested =
   case+ book_image_make(numbers_of(value), text_of(author_len, 1), author_len, text_of(series_len, 2), series_len, text_of(title_len, 3), title_len) of
   | ~BookImaged(image) => Tested(image)
   | ~BookNotImaged() => let val () = fail("an image of a number of 32 bits") in NoTested() end
@@ -73,7 +73,7 @@ fn image_of {t,a,s:nat | t < 256; a < 256; s < 256} (value: Int, title_len: int 
 (* ---------------- bytes in arrays ---------------- *)
 
 (* the record of an image, written: its bytes and their count *)
-fn encode {x:bookx} (image: !book_image(x)): [l:agz][n:pos | n <= 1048576] @($A.arr(byte, l, n), int n) = let
+fn encode {contents:bookx} (image: !book_image(contents)): [l:agz][n:pos | n <= 1048576] @($A.arr(byte, l, n), int n) = let
   val record = book_record_new(image)
   val (_ | list) = book_record_write(record)
   val () = book_record_free(record)
@@ -88,26 +88,26 @@ in
   else let val () = blist_free(list) val one = $A.alloc<byte>(1) in @(one, 1) end
 end
 
-fn copy_of {l:agz}{n:pos | n <= 1048576} (bytes: !$A.arr(byte, l, n), n: int n): [m:agz] $A.arr(byte, m, n) = let
+fn copy_of {l:agz}{n:pos | n <= 1048576} (bytes: !$A.arr(byte, l, n), n: int n): [copy_l:agz] $A.arr(byte, copy_l, n) = let
   val copy = $A.alloc<byte>(n)
-  fun go {m:agz}{i:nat | i <= n} .<n - i>. (bytes: !$A.arr(byte, l, n), copy: !$A.arr(byte, m, n), i: int i): void =
+  fun copy_byte {copy_l:agz}{i:nat | i <= n} .<n - i>. (bytes: !$A.arr(byte, l, n), copy: !$A.arr(byte, copy_l, n), i: int i): void =
     if i >= n then ()
-    else let val () = $A.set<byte>(copy, i, $A.get<byte>(bytes, i)) in go(bytes, copy, i + 1) end
-  val () = go(bytes, copy, 0)
+    else let val () = $A.set<byte>(copy, i, $A.get<byte>(bytes, i)) in copy_byte(bytes, copy, i + 1) end
+  val () = copy_byte(bytes, copy, 0)
 in copy end
 
-fun equal_prefix {l1,l2:agz}{n1,n2:pos}{i:nat | i <= n1; n1 == n2} .<n1 - i>.
-  (a: !$A.arr(byte, l1, n1), b: !$A.arr(byte, l2, n2), n: int n1, i: int i): bool =
+fun equal_prefix {first_l,second_l:agz}{first_n,second_n:pos}{i:nat | i <= first_n; first_n == second_n} .<first_n - i>.
+  (first: !$A.arr(byte, first_l, first_n), second: !$A.arr(byte, second_l, second_n), n: int first_n, i: int i): bool =
   if i >= n then true
-  else if byte2int0($A.get<byte>(a, i)) <> byte2int0($A.get<byte>(b, i)) then false
-  else equal_prefix(a, b, n, i + 1)
+  else if byte2int0($A.get<byte>(first, i)) <> byte2int0($A.get<byte>(second, i)) then false
+  else equal_prefix(first, second, n, i + 1)
 
 (* ---------------- reading, and what the reading comes to ---------------- *)
 
 (* 0 whole and the same image, 1 whole but another image, 2 lost a group,
    3 not a record, 4 newer, 5 damaged; and, for a whole record, whether it
    is written again as the bytes it was read from *)
-fn classify {l:agz}{n:pos | n <= 1048576}{x:bookx} (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x)): @(int, bool) = let
+fn classify {l:agz}{n:pos | n <= 1048576}{contents:bookx} (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(contents)): @(int, bool) = let
   val list = blist_of_array(bytes, 0, n)
   val (_ | read) = book_record_read(list)
 in
@@ -197,11 +197,11 @@ fun check_edges {i:nat | i <= 20} .<20 - i>. (i: int i): void =
 (* ---------------- strings of every length that matters ---------------- *)
 
 fn check_strings (): void = let
-  fun go {t:nat | t <= 256} .<256 - t>. (t: int t): void =
-    if t >= 256 then ()
-    else if t <> 0 && t <> 1 && t <> 2 && t <> 127 && t <> 128 && t <> 254 && t <> 255 then go(t + 1)
+  fun each_length {length:nat | length <= 256} .<256 - length>. (length: int length): void =
+    if length >= 256 then ()
+    else if length <> 0 && length <> 1 && length <> 2 && length <> 127 && length <> 128 && length <> 254 && length <> 255 then each_length(length + 1)
     else let
-      val () = (case+ image_of(t + 1000, t, 255 - t, t) of
+      val () = (case+ image_of(length + 1000, length, 255 - length, length) of
         | ~NoTested() => ()
         | ~Tested(image) => let
             val @(bytes, n) = encode(image)
@@ -210,50 +210,50 @@ fn check_strings (): void = let
             val () = expect(written, "strings of any length are written again as they were read")
             val () = $A.free<byte>(bytes)
           in book_image_free(image) end)
-    in go(t + 1) end
-in go(0) end
+    in each_length(length + 1) end
+in each_length(0) end
 
 (* ---------------- damage ---------------- *)
 
 (* every byte of a record changed to each of a few other values, and every
    shortened of it: nothing is read as another record *)
-fn damage_with {x0:bookx} (image: book_image(x0)): void = let
+fn damage_with {image_contents:bookx} (image: book_image(image_contents)): void = let
   val @(bytes, n) = encode(image)
-  fun flip {l:agz}{n:pos | n <= 1048576}{x:bookx}{i:nat | i <= n} .<n - i>.
-    (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), i: int i): void =
+  fun flip {l:agz}{n:pos | n <= 1048576}{contents:bookx}{i:nat | i <= n} .<n - i>.
+    (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(contents), i: int i): void =
     if i >= n then ()
     else let
       val copy = copy_of(bytes, n)
-      val old = $A.get<byte>(copy, i)
-      fun values {m:agz}{x:bookx}{k:nat | k <= 3} .<3 - k>. (copy: !$A.arr(byte, m, n), original: !book_image(x), i: int i, old: byte, k: int k): void =
-        if k >= 3 then ()
+      val kept = $A.get<byte>(copy, i)
+      fun values {copy_l:agz}{contents:bookx}{step:nat | step <= 3} .<3 - step>. (copy: !$A.arr(byte, copy_l, n), original: !book_image(contents), i: int i, kept: byte, step: int step): void =
+        if step >= 3 then ()
         else let
-          val change = (if k = 0 then 1 else if k = 1 then 128 else 255): [change:nat | change < 256] int change
-          val flipped = $AR.band_g1($AR.add_g1($AR.low_byte(byte2int0(old)), change), 255)
+          val change = (if step = 0 then 1 else if step = 1 then 128 else 255): [change:nat | change < 256] int change
+          val flipped = $AR.band_g1($AR.add_g1($AR.low_byte(byte2int0(kept)), change), 255)
           val () = $A.set<byte>(copy, i, $A.int2byte(flipped))
           val @(code, written) = classify(copy, n, original)
           val () = expect(code <> 1, "damage to a byte gave another record")
           val () = expect(written, "a damaged record that was read is not written as it was read")
-          val () = $A.set<byte>(copy, i, old)
-        in values(copy, original, i, old, k + 1) end
-      val () = values(copy, original, i, old, 0)
+          val () = $A.set<byte>(copy, i, kept)
+        in values(copy, original, i, kept, step + 1) end
+      val () = values(copy, original, i, kept, 0)
       val () = $A.free<byte>(copy)
     in flip(bytes, n, original, i + 1) end
   val () = flip(bytes, n, image, 0)
   (* the bytes cut off anywhere *)
-  fun cut {l:agz}{n:pos | n <= 1048576}{x:bookx}{m:nat | m <= n} .<n - m>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), m: int m): void =
-    if m >= n then ()
-    else if m <= 0 then cut(bytes, n, original, m + 1)
+  fun cut {l:agz}{n:pos | n <= 1048576}{contents:bookx}{length:nat | length <= n} .<n - length>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(contents), length: int length): void =
+    if length >= n then ()
+    else if length <= 0 then cut(bytes, n, original, length + 1)
     else let
-      val shortened = $A.alloc<byte>(m)
-      fun go {p:agz}{i:nat | i <= m} .<m - i>. (bytes: !$A.arr(byte, l, n), shortened: !$A.arr(byte, p, m), i: int i): void =
-        if i >= m then ()
-        else let val () = $A.set<byte>(shortened, i, $A.get<byte>(bytes, i)) in go(bytes, shortened, i + 1) end
-      val () = go(bytes, shortened, 0)
-      val @(code, _) = classify(shortened, m, original)
+      val shortened = $A.alloc<byte>(length)
+      fun copy_prefix {shortened_l:agz}{i:nat | i <= length} .<length - i>. (bytes: !$A.arr(byte, l, n), shortened: !$A.arr(byte, shortened_l, length), i: int i): void =
+        if i >= length then ()
+        else let val () = $A.set<byte>(shortened, i, $A.get<byte>(bytes, i)) in copy_prefix(bytes, shortened, i + 1) end
+      val () = copy_prefix(bytes, shortened, 0)
+      val @(code, _) = classify(shortened, length, original)
       val () = expect(code >= 3, "a record cut short is not a record")
       val () = $A.free<byte>(shortened)
-    in cut(bytes, n, original, m + 1) end
+    in cut(bytes, n, original, length + 1) end
   val () = cut(bytes, n, image, 0)
   val () = $A.free<byte>(bytes)
   val () = book_image_free(image)
@@ -267,20 +267,20 @@ fn check_damage (): void =
 (* ---------------- fuzz ---------------- *)
 
 (* a record changed in a few places, many times; and bytes of no record *)
-fn fuzz_with {x0,x1:bookx}{rounds:nat} (image: book_image(x0), other: book_image(x1), rounds: int rounds): void = let
+fn fuzz_with {image_contents,other_contents:bookx}{rounds:nat} (image: book_image(image_contents), other: book_image(other_contents), rounds: int rounds): void = let
   val @(bytes, n) = encode(image)
-  fun round {l:agz}{n:pos | n <= 1048576}{x:bookx}{left:nat} .<left>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), left: int left): void =
+  fun round {l:agz}{n:pos | n <= 1048576}{contents:bookx}{left:nat} .<left>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(contents), left: int left): void =
     if left <= 0 then ()
     else let
       val copy = copy_of(bytes, n)
       val changes = $AR.add_g1(1, $AR.band_g1(next_number(), 3))
-      fun change {m:agz}{k:nat} .<k>. (copy: !$A.arr(byte, m, n), k: int k): void =
-        if k <= 0 then ()
+      fun change {copy_l:agz}{remaining:nat} .<remaining>. (copy: !$A.arr(byte, copy_l, n), remaining: int remaining): void =
+        if remaining <= 0 then ()
         else let
           val raw = next_number()
           val at = (if $AR.lt_g1(raw, n) then raw else 0): [at:nat | at < n] int at
           val () = $A.set<byte>(copy, at, $A.int2byte($AR.band_g1(next_number(), 255)))
-        in change(copy, k - 1) end
+        in change(copy, remaining - 1) end
       val () = change(copy, changes)
       val @(code, written) = classify(copy, n, original)
       val () = expect(code <> 1, "fuzz: damage gave another record")
@@ -291,9 +291,9 @@ fn fuzz_with {x0,x1:bookx}{rounds:nat} (image: book_image(x0), other: book_image
   val () = $A.free<byte>(bytes)
   val () = book_image_free(image)
   (* bytes of no record *)
-  fn junk_read {len:pos | len <= 64}{x:bookx} (original: !book_image(x), length: int len): void = let
+  fn junk_read {len:pos | len <= 64}{contents:bookx} (original: !book_image(contents), length: int len): void = let
     val junk = $A.alloc<byte>(length)
-    fun fill {j:agz}{i:nat | i <= 64} .<64 - i>. (junk: !$A.arr(byte, j, len), i: int i): void =
+    fun fill {junk_l:agz}{i:nat | i <= 64} .<64 - i>. (junk: !$A.arr(byte, junk_l, len), i: int i): void =
       if i >= length then ()
       else if i >= 64 then ()
       else let val () = $A.set<byte>(junk, i, $A.int2byte($AR.band_g1(next_number(), 255))) in fill(junk, i + 1) end
@@ -303,12 +303,12 @@ fn fuzz_with {x0,x1:bookx}{rounds:nat} (image: book_image(x0), other: book_image
     val () = expect(written, "fuzz: noise that was read is not written as it was read")
     val () = $A.free<byte>(junk)
   in () end
-  fun noise {k:nat}{x:bookx} .<k>. (original: !book_image(x), k: int k): void =
-    if k <= 0 then ()
+  fun noise {remaining:nat}{contents:bookx} .<remaining>. (original: !book_image(contents), remaining: int remaining): void =
+    if remaining <= 0 then ()
     else let
       val length = $AR.add_g1(1, $AR.band_g1(next_number(), 63)): [length:pos | length <= 64] int length
       val () = junk_read(original, length)
-    in noise(original, k - 1) end
+    in noise(original, remaining - 1) end
   val () = noise(other, rounds)
   val () = book_image_free(other)
 in () end

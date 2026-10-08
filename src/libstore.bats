@@ -41,28 +41,28 @@ implement $P.dispose<$IDB.stored>(_) = ()
 fn _hex_digit {value:nat | value < 16} (value: int value): [digit:nat | digit < 256] int digit =
   if value < 10 then 48 + value else 87 + value
 
-(* The 7 hex digits of half (its low 28 bits) at buf[offset, offset + 7) *)
+(* The 7 hex digits of half (its low 28 bits) at target[offset, offset + 7) *)
 fn _put_seven_hex {l:agz}{owner:addr}{n:nat}{offset:nat | offset + 7 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), offset: int offset, half: int): void = let
+  (target: !$A.arrx(byte, l, n, owner), offset: int offset, half: int): void = let
   fn digit_at {i:nat | i < 7} (half: int, i: int i): [digit:nat | digit < 256] int digit =
     _hex_digit($AR.band_g1($AR.low_byte($AR.bsr_int_int(half, 4 * (6 - i))), 15))
-  val () = $A.write_byte(buf, offset, digit_at(half, 0))
-  val () = $A.write_byte(buf, offset + 1, digit_at(half, 1))
-  val () = $A.write_byte(buf, offset + 2, digit_at(half, 2))
-  val () = $A.write_byte(buf, offset + 3, digit_at(half, 3))
-  val () = $A.write_byte(buf, offset + 4, digit_at(half, 4))
-  val () = $A.write_byte(buf, offset + 5, digit_at(half, 5))
-in $A.write_byte(buf, offset + 6, digit_at(half, 6)) end
+  val () = $A.write_byte(target, offset, digit_at(half, 0))
+  val () = $A.write_byte(target, offset + 1, digit_at(half, 1))
+  val () = $A.write_byte(target, offset + 2, digit_at(half, 2))
+  val () = $A.write_byte(target, offset + 3, digit_at(half, 3))
+  val () = $A.write_byte(target, offset + 4, digit_at(half, 4))
+  val () = $A.write_byte(target, offset + 5, digit_at(half, 5))
+in $A.write_byte(target, offset + 6, digit_at(half, 6)) end
 
-(* The 4 hex digits of half (its low 16 bits) at buf[offset, offset + 4) *)
+(* The 4 hex digits of half (its low 16 bits) at target[offset, offset + 4) *)
 fn _put_four_hex {l:agz}{owner:addr}{n:nat}{offset:nat | offset + 4 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), offset: int offset, half: int): void = let
+  (target: !$A.arrx(byte, l, n, owner), offset: int offset, half: int): void = let
   fn digit_at {i:nat | i < 4} (half: int, i: int i): [digit:nat | digit < 256] int digit =
     _hex_digit($AR.band_g1($AR.low_byte($AR.bsr_int_int(half, 4 * (3 - i))), 15))
-  val () = $A.write_byte(buf, offset, digit_at(half, 0))
-  val () = $A.write_byte(buf, offset + 1, digit_at(half, 1))
-  val () = $A.write_byte(buf, offset + 2, digit_at(half, 2))
-in $A.write_byte(buf, offset + 3, digit_at(half, 3)) end
+  val () = $A.write_byte(target, offset, digit_at(half, 0))
+  val () = $A.write_byte(target, offset + 1, digit_at(half, 1))
+  val () = $A.write_byte(target, offset + 2, digit_at(half, 2))
+in $A.write_byte(target, offset + 3, digit_at(half, 3)) end
 
 (* The key of a book's record: "library/book/" and its 14 hex digits *)
 #pub fn libstore_book_key (id_high: int, id_low: int): [l:agz] $A.arr(byte, l, 27)
@@ -108,8 +108,8 @@ in key end
 
 (* A book of the library as stored: its id and what it holds *)
 #pub datavtype stored_book =
-  | {x:bookx} WholeBook of (Int, Int, book_image(x))
-  | {x:bookx} LossyBook of (Int, Int, book_image(x))    (* a group that may be lost was: the defaults stand in for it until the book is next saved *)
+  | {contents:bookx} WholeBook of (Int, Int, book_image(contents))
+  | {contents:bookx} LossyBook of (Int, Int, book_image(contents))    (* a group that may be lost was: the defaults stand in for it until the book is next saved *)
   | UnusableBook of (Int, Int, unusable)
 
 #pub datavtype stored_books(int) =
@@ -119,8 +119,8 @@ in key end
 (* The collections' record as stored *)
 #pub datavtype stored_index =
   | IndexNone of ()                         (* none yet: the library is new, or it is not converted *)
-  | {x:indexx} WholeIndex of (index_image(x))
-  | {x:indexx} LossyIndex of (index_image(x))
+  | {collections:indexx} WholeIndex of (index_image(collections))
+  | {collections:indexx} LossyIndex of (index_image(collections))
   | UnusableIndex of (unusable)
 
 (* What reading the library came to *)
@@ -140,11 +140,11 @@ implement stored_book_free (book) =
 #pub fun stored_books_free {count:nat} (books: stored_books(count)): void
 
 implement stored_books_free {count} (books) = let
-  fun go {count:nat} .<count>. (books: stored_books(count)): void =
+  fun free_each {count:nat} .<count>. (books: stored_books(count)): void =
     case+ books of
     | ~StoredNone() => ()
-    | ~StoredSome(book, rest) => let val () = stored_book_free(book) in go(rest) end
-in go(books) end
+    | ~StoredSome(book, rest) => let val () = stored_book_free(book) in free_each(rest) end
+in free_each(books) end
 
 #pub fun stored_index_free (index: stored_index): void
 
@@ -173,77 +173,77 @@ fn _hex_value {byte_value:nat | byte_value < 256} (byte_value: int byte_value): 
     else if byte_value >= 97 then (if byte_value <= 102 then byte_value - 87 else ~1) else ~1)
   else ~1
 
-(* The 7 hex digits at buf[at, at + 7) as a number, or -1 when one is not a digit *)
+(* The 7 hex digits at source[at, at + 7) as a number, or -1 when one is not a digit *)
 fn _seven_hex_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 7 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), at: int at): [v:int | ~1 <= v] int v = let
-  fun go {i:nat | i <= 7}{total:nat} .<7 - i>. (buf: !$A.arrx(byte, l, n, owner), i: int i, total: int total): [v:int | ~1 <= v] int v =
+  (source: !$A.arrx(byte, l, n, owner), at: int at): [value:int | ~1 <= value] int value = let
+  fun accumulate {i:nat | i <= 7}{total:nat} .<7 - i>. (source: !$A.arrx(byte, l, n, owner), i: int i, total: int total): [value:int | ~1 <= value] int value =
     if i >= 7 then total
     else let
-      val digit = _hex_value($AR.low_byte(byte2int0($A.get<byte>(buf, at + i))))
+      val digit = _hex_value($AR.low_byte(byte2int0($A.get<byte>(source, at + i))))
     in
-      if digit < 0 then ~1 else go(buf, i + 1, total * 16 + digit)
+      if digit < 0 then ~1 else accumulate(source, i + 1, total * 16 + digit)
     end
-in go(buf, 0, 0) end
+in accumulate(source, 0, 0) end
 
-(* The little-endian u16 at buf[at, at + 2) *)
+(* The little-endian u16 at source[at, at + 2) *)
 fn _u16_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 2 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), at: int at): [v:nat | v < 65536] int v =
-  $AR.low_byte(byte2int0($A.get<byte>(buf, at))) + 256 * $AR.low_byte(byte2int0($A.get<byte>(buf, at + 1)))
+  (source: !$A.arrx(byte, l, n, owner), at: int at): [value:nat | value < 65536] int value =
+  $AR.low_byte(byte2int0($A.get<byte>(source, at))) + 256 * $AR.low_byte(byte2int0($A.get<byte>(source, at + 1)))
 
-(* The little-endian u32 at buf[at, at + 4), or -1 when it is 2 to the 28 or more *)
+(* The little-endian u32 at source[at, at + 4), or -1 when it is 2 to the 28 or more *)
 fn _u32_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 4 <= n}
-  (buf: !$A.arrx(byte, l, n, owner), at: int at): [v:int | ~1 <= v; v < 268435456] int v = let
-  val b0 = $AR.low_byte(byte2int0($A.get<byte>(buf, at)))
-  val b1 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 1)))
-  val b2 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 2)))
-  val b3 = $AR.low_byte(byte2int0($A.get<byte>(buf, at + 3)))
+  (source: !$A.arrx(byte, l, n, owner), at: int at): [value:int | ~1 <= value; value < 268435456] int value = let
+  val first_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at)))
+  val second_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 1)))
+  val third_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 2)))
+  val fourth_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 3)))
 in
-  if b3 >= 16 then ~1 else b0 + 256 * (b1 + 256 * (b2 + 256 * b3))
+  if fourth_byte >= 16 then ~1 else first_byte + 256 * (second_byte + 256 * (third_byte + 256 * fourth_byte))
 end
 
-(* Whether byte buf[at] is value *)
+(* Whether byte source[at] is value *)
 fn _byte_is {l:agz}{owner:addr}{n:nat}{at:nat | at < n}
-  (buf: !$A.arrx(byte, l, n, owner), at: int at, value: int): bool =
-  byte2int0($A.get<byte>(buf, at)) = value
+  (source: !$A.arrx(byte, l, n, owner), at: int at, value: int): bool =
+  byte2int0($A.get<byte>(source, at)) = value
 
-(* What a key in storage is, by its bytes buf[at, at + len) *)
+(* What a key in storage is, by its bytes source[at, at + len) *)
 datavtype key_kind =
   | KeyBook of (Int, Int)      (* a book's record: its id *)
   | KeyIndex of ()             (* the collections' record *)
   | KeyOther of ()             (* anything else (a damaged record kept, ...) *)
 
 fn _key_kind {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
-  (buf: !$A.arrx(byte, l, n, owner), at: int at, len: int len): key_kind =
+  (source: !$A.arrx(byte, l, n, owner), at: int at, len: int len): key_kind =
   (* "library/" *)
   if len < 13 then KeyOther()
-  else if ~_byte_is(buf, at, 108) then KeyOther()
-  else if ~_byte_is(buf, at + 1, 105) then KeyOther()
-  else if ~_byte_is(buf, at + 2, 98) then KeyOther()
-  else if ~_byte_is(buf, at + 3, 114) then KeyOther()
-  else if ~_byte_is(buf, at + 4, 97) then KeyOther()
-  else if ~_byte_is(buf, at + 5, 114) then KeyOther()
-  else if ~_byte_is(buf, at + 6, 121) then KeyOther()
-  else if ~_byte_is(buf, at + 7, 47) then KeyOther()
+  else if ~_byte_is(source, at, 108) then KeyOther()
+  else if ~_byte_is(source, at + 1, 105) then KeyOther()
+  else if ~_byte_is(source, at + 2, 98) then KeyOther()
+  else if ~_byte_is(source, at + 3, 114) then KeyOther()
+  else if ~_byte_is(source, at + 4, 97) then KeyOther()
+  else if ~_byte_is(source, at + 5, 114) then KeyOther()
+  else if ~_byte_is(source, at + 6, 121) then KeyOther()
+  else if ~_byte_is(source, at + 7, 47) then KeyOther()
   (* "index" *)
-  else if _byte_is(buf, at + 8, 105) then
+  else if _byte_is(source, at + 8, 105) then
     (if len = 13 then
-       (if _byte_is(buf, at + 9, 110) then
-          (if _byte_is(buf, at + 10, 100) then
-             (if _byte_is(buf, at + 11, 101) then
-                (if _byte_is(buf, at + 12, 120) then KeyIndex() else KeyOther())
+       (if _byte_is(source, at + 9, 110) then
+          (if _byte_is(source, at + 10, 100) then
+             (if _byte_is(source, at + 11, 101) then
+                (if _byte_is(source, at + 12, 120) then KeyIndex() else KeyOther())
               else KeyOther())
            else KeyOther())
         else KeyOther())
      else KeyOther())
   (* "book/" and 14 hex digits *)
-  else if _byte_is(buf, at + 8, 98) then
+  else if _byte_is(source, at + 8, 98) then
     (if len = 27 then
-       (if _byte_is(buf, at + 9, 111) then
-          (if _byte_is(buf, at + 10, 111) then
-             (if _byte_is(buf, at + 11, 107) then
-                (if _byte_is(buf, at + 12, 47) then let
-                   val id_high = _seven_hex_at(buf, at + 13)
-                   val id_low = _seven_hex_at(buf, at + 20)
+       (if _byte_is(source, at + 9, 111) then
+          (if _byte_is(source, at + 10, 111) then
+             (if _byte_is(source, at + 11, 107) then
+                (if _byte_is(source, at + 12, 47) then let
+                   val id_high = _seven_hex_at(source, at + 13)
+                   val id_low = _seven_hex_at(source, at + 20)
                  in
                    if id_high < 0 then KeyOther()
                    else if id_low < 0 then KeyOther()
@@ -407,19 +407,19 @@ fn _put_u32 {l:agz}{owner:addr}{n:nat}{at:nat | at + 4 <= n}
   val () = _put_u16(out, at, value)
 in _put_u16(out, at + 2, $AR.bsr_int_int(value, 16)) end
 
-(* The bytes of src[0, count) at out[at, at + count) *)
-fn _put_bytes {sl,ol:agz}{oo:addr}{sn,on:nat}{count,at:nat | count <= sn; at + count <= on}
-  (out: !$A.arrx(byte, ol, on, oo), at: int at, src: !$A.arr(byte, sl, sn), count: int count): void = let
-  fun go {i:nat | i <= count} .<count - i>. (out: !$A.arrx(byte, ol, on, oo), src: !$A.arr(byte, sl, sn), i: int i): void =
+(* The bytes of source[0, count) at out[at, at + count) *)
+fn _put_bytes {source_l,out_l:agz}{out_owner:addr}{source_n,out_n:nat}{count,at:nat | count <= source_n; at + count <= out_n}
+  (out: !$A.arrx(byte, out_l, out_n, out_owner), at: int at, source: !$A.arr(byte, source_l, source_n), count: int count): void = let
+  fun copy_from {i:nat | i <= count} .<count - i>. (out: !$A.arrx(byte, out_l, out_n, out_owner), source: !$A.arr(byte, source_l, source_n), i: int i): void =
     if i >= count then ()
     else let
-      val () = $A.set<byte>(out, at + i, $A.get<byte>(src, i))
-    in go(out, src, i + 1) end
-in go(out, src, 0) end
+      val () = $A.set<byte>(out, at + i, $A.get<byte>(source, i))
+    in copy_from(out, source, i + 1) end
+in copy_from(out, source, 0) end
 
 (* One put of a batch: op 1, the key, the value *)
-fn _put_operation {ol,kl,vl:agz}{oo:addr}{on,kn,vn:nat}{at:nat | at + 7 + kn + vn <= on}
-  (out: !$A.arrx(byte, ol, on, oo), at: int at, key: !$A.arr(byte, kl, kn), key_len: int kn, value: !$A.arr(byte, vl, vn), value_len: int vn): void = let
+fn _put_operation {out_l,key_l,value_l:agz}{out_owner:addr}{out_n,key_n,value_n:nat}{at:nat | at + 7 + key_n + value_n <= out_n}
+  (out: !$A.arrx(byte, out_l, out_n, out_owner), at: int at, key: !$A.arr(byte, key_l, key_n), key_len: int key_n, value: !$A.arr(byte, value_l, value_n), value_len: int value_n): void = let
   val () = $A.write_byte(out, at, 1)
   val () = _put_u16(out, at + 1, key_len)
   val () = _put_bytes(out, at + 3, key, key_len)
@@ -432,7 +432,7 @@ datavtype record_bytes =
   | {l:agz}{n:pos | n <= 65536} RecordBytes of ($A.arr(byte, l, n), int n)
   | NoRecordBytes of ()
 
-fn _bytes_of_record {x:bookx}{ver,minver:int}{e:extras} (record: !bookrecord(x, ver, minver, e)): record_bytes = let
+fn _bytes_of_record {contents:bookx}{version,least_version:int}{chunks:extras} (record: !bookrecord(contents, version, least_version, chunks)): record_bytes = let
   val (_ | list) = book_record_write(record)
   val (_ | count) = blist_len(list)
 in
@@ -454,7 +454,7 @@ in @(65535 - high, 65535 - low) end
 (* What an update of a book's record decides, from what it read.
    Closed over the image to put in, the groups of it to take, and the
    resolver of the answer *)
-fn _decide_book {x:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image: book_image(x), answer: $P.resolver(book_saved)): $IDB.writeback =
+fn _decide_book {contents:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image: book_image(contents), answer: $P.resolver(book_saved)): $IDB.writeback =
   case+ found of
   | ~$IDB.Unreadable(cause) => let
       val () = $IDB.unreadable_cause_free(cause)
@@ -489,17 +489,17 @@ fn _decide_book {x:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: 
         val () = $P.resolve<book_saved>(answer, BookRefused(UnusableDamaged()))
       in $IDB.Keep() end
       else let
-        val old = $A.alloc<byte>(size)
-        val () = $BD.blob_read(blob, 0, old, size)
+        val previous = $A.alloc<byte>(size)
+        val () = $BD.blob_read(blob, 0, previous, size)
         val () = $BD.blob_free(blob)
-        val list = blist_of_array(old, 0, size)
+        val list = blist_of_array(previous, 0, size)
         val (_ | read) = book_record_read(list)
       in
         case+ read of
         | ~BR_ok(record) => let
             val patched = book_record_patch(record, image, mask)
             val () = book_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
           in
             case+ _bytes_of_record(patched) of
             | ~RecordBytes(bytes, count) => let
@@ -512,7 +512,7 @@ fn _decide_book {x:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: 
               in $IDB.Keep() end
           end
         | ~BR_loss(record, lost) => let
-            (* a group was lost: the old bytes are kept under another key,
+            (* a group was lost: the previous bytes are kept under another key,
                in the same transaction as the repaired record *)
             val () = lostv_free(lost)
             val patched = book_record_patch(record, image, mask)
@@ -521,38 +521,38 @@ fn _decide_book {x:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: 
             case+ _bytes_of_record(patched) of
             | ~RecordBytes(bytes, count) => let
                 val () = book_record_free(patched)
-                val @(sum_high, sum_low) = _crc_of(old, size)
+                val @(sum_high, sum_low) = _crc_of(previous, size)
                 val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
                 val key = libstore_book_key(id_high, id_low)
                 val batch_size = 7 + 39 + size + 7 + 27 + count
                 val batch = $A.alloc<byte>(batch_size)
-                val () = _put_operation(batch, 0, damaged_key, 39, old, size)
+                val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
                 val () = _put_operation(batch, 7 + 39 + size, key, 27, bytes, count)
                 val () = $A.free<byte>(damaged_key)
                 val () = $A.free<byte>(key)
-                val () = $A.free<byte>(old)
+                val () = $A.free<byte>(previous)
                 val () = $A.free<byte>(bytes)
                 val () = $P.resolve<book_saved>(answer, BookSaved())
               in $IDB.WriteBatch(batch, batch_size) end
             | ~NoRecordBytes() => let
                 val () = book_record_free(patched)
-                val () = $A.free<byte>(old)
+                val () = $A.free<byte>(previous)
                 val () = $P.resolve<book_saved>(answer, BookNotSaved())
               in $IDB.Keep() end
           end
         | ~BR_notquire() => let
             val () = book_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<book_saved>(answer, BookRefused(UnusableNotQuire()))
           in $IDB.Keep() end
         | ~BR_newer() => let
             val () = book_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<book_saved>(answer, BookRefused(UnusableNewer()))
           in $IDB.Keep() end
         | ~BR_damaged() => let
             val () = book_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<book_saved>(answer, BookRefused(UnusableDamaged()))
           in $IDB.Keep() end
       end
@@ -569,9 +569,9 @@ fn _unsaved (answer: $P.promise(book_saved, $P.Pending)): $P.promise(book_saved,
    rest left as it is, with the chunks a newer Quire added. A book with no
    record is made. A record that cannot be read, or is not one Quire can
    change, is not written over *)
-#pub fun libstore_save_book {x:bookx} (id_high: Int, id_low: Int, mask: int, image: !book_image(x)): $P.promise(book_saved, $P.Chained)
+#pub fun libstore_save_book {contents:bookx} (id_high: Int, id_low: Int, mask: int, image: !book_image(contents)): $P.promise(book_saved, $P.Chained)
 
-implement libstore_save_book {x} (id_high, id_low, mask, image) = let
+implement libstore_save_book {contents} (id_high, id_low, mask, image) = let
   val key = libstore_book_key(id_high, id_low)
   val copy = book_image_copy(image)
   val @(answer, resolver) = $P.create<book_saved>()
@@ -646,7 +646,7 @@ implement index_saved_free (saved) =
 
 implement $P.dispose<index_saved>(saved) = index_saved_free(saved)
 
-fn _index_bytes_of {x:indexx}{ver,minver:int}{e:extras} (record: !indexrecord(x, ver, minver, e)): record_bytes = let
+fn _index_bytes_of {collections:indexx}{version,least_version:int}{chunks:extras} (record: !indexrecord(collections, version, least_version, chunks)): record_bytes = let
   val (_ | list) = index_record_write(record)
   val (_ | count) = blist_len(list)
 in
@@ -658,7 +658,7 @@ in
   in RecordBytes(bytes, count) end
 end
 
-fn _decide_index {x:indexx} (found: $IDB.lookup, mask: int, image: index_image(x), answer: $P.resolver(index_saved)): $IDB.writeback =
+fn _decide_index {collections:indexx} (found: $IDB.lookup, mask: int, image: index_image(collections), answer: $P.resolver(index_saved)): $IDB.writeback =
   case+ found of
   | ~$IDB.Unreadable(cause) => let
       val () = $IDB.unreadable_cause_free(cause)
@@ -693,17 +693,17 @@ fn _decide_index {x:indexx} (found: $IDB.lookup, mask: int, image: index_image(x
         val () = $P.resolve<index_saved>(answer, IndexRefused(UnusableDamaged()))
       in $IDB.Keep() end
       else let
-        val old = $A.alloc<byte>(size)
-        val () = $BD.blob_read(blob, 0, old, size)
+        val previous = $A.alloc<byte>(size)
+        val () = $BD.blob_read(blob, 0, previous, size)
         val () = $BD.blob_free(blob)
-        val list = blist_of_array(old, 0, size)
+        val list = blist_of_array(previous, 0, size)
         val (_ | read) = index_record_read(list)
       in
         case+ read of
         | ~IR_ok(record) => let
             val patched = index_record_patch(record, image, mask)
             val () = index_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
           in
             case+ _index_bytes_of(patched) of
             | ~RecordBytes(bytes, count) => let
@@ -723,38 +723,38 @@ fn _decide_index {x:indexx} (found: $IDB.lookup, mask: int, image: index_image(x
             case+ _index_bytes_of(patched) of
             | ~RecordBytes(bytes, count) => let
                 val () = index_record_free(patched)
-                val @(sum_high, sum_low) = _crc_of(old, size)
+                val @(sum_high, sum_low) = _crc_of(previous, size)
                 val damaged_key = _damaged_key(0, 0, sum_high, sum_low)
                 val key = libstore_index_key()
                 val batch_size = 7 + 39 + size + 7 + 13 + count
                 val batch = $A.alloc<byte>(batch_size)
-                val () = _put_operation(batch, 0, damaged_key, 39, old, size)
+                val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
                 val () = _put_operation(batch, 7 + 39 + size, key, 13, bytes, count)
                 val () = $A.free<byte>(damaged_key)
                 val () = $A.free<byte>(key)
-                val () = $A.free<byte>(old)
+                val () = $A.free<byte>(previous)
                 val () = $A.free<byte>(bytes)
                 val () = $P.resolve<index_saved>(answer, IndexSaved())
               in $IDB.WriteBatch(batch, batch_size) end
             | ~NoRecordBytes() => let
                 val () = index_record_free(patched)
-                val () = $A.free<byte>(old)
+                val () = $A.free<byte>(previous)
                 val () = $P.resolve<index_saved>(answer, IndexNotSaved())
               in $IDB.Keep() end
           end
         | ~IR_notquire() => let
             val () = index_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<index_saved>(answer, IndexRefused(UnusableNotQuire()))
           in $IDB.Keep() end
         | ~IR_newer() => let
             val () = index_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<index_saved>(answer, IndexRefused(UnusableNewer()))
           in $IDB.Keep() end
         | ~IR_damaged() => let
             val () = index_image_free(image)
-            val () = $A.free<byte>(old)
+            val () = $A.free<byte>(previous)
             val () = $P.resolve<index_saved>(answer, IndexRefused(UnusableDamaged()))
           in $IDB.Keep() end
       end
@@ -767,9 +767,9 @@ fn _index_unsaved (answer: $P.promise(index_saved, $P.Pending)): $P.promise(inde
 
 (* The groups of image in mask (see index_group_all) saved into the collections'
    record, as a book's are *)
-#pub fun libstore_save_index {x:indexx} (mask: int, image: !index_image(x)): $P.promise(index_saved, $P.Chained)
+#pub fun libstore_save_index {collections:indexx} (mask: int, image: !index_image(collections)): $P.promise(index_saved, $P.Chained)
 
-implement libstore_save_index {x} (mask, image) = let
+implement libstore_save_index {collections} (mask, image) = let
   val key = libstore_index_key()
   val copy = index_image_copy(image)
   val @(answer, resolver) = $P.create<index_saved>()
@@ -793,15 +793,15 @@ end
 (* The puts of a batch, to be written all or none *)
 #pub datavtype batch(int) =
   | BatchNone(0) of ()
-  | {kl,vl:agz}{kn:pos | kn < 65536}{vn:pos | vn <= 65536}{count:nat}
-    BatchSome(count + 1) of ($A.arr(byte, kl, kn), int kn, $A.arr(byte, vl, vn), int vn, batch(count))
+  | {key_l,value_l:agz}{key_n:pos | key_n < 65536}{value_n:pos | value_n <= 65536}{count:nat}
+    BatchSome(count + 1) of ($A.arr(byte, key_l, key_n), int key_n, $A.arr(byte, value_l, value_n), int value_n, batch(count))
 
 (* A put of the book's record added to a batch; the batch as it was when the
    record would not fit *)
-#pub fun batch_add_book {count:nat}{x:bookx} (batch: batch(count), id_high: Int, id_low: Int, image: !book_image(x))
+#pub fun batch_add_book {count:nat}{contents:bookx} (batch: batch(count), id_high: Int, id_low: Int, image: !book_image(contents))
   : [more:nat] batch(more)
 
-implement batch_add_book {count}{x} (batch, id_high, id_low, image) = let
+implement batch_add_book {count}{contents} (batch, id_high, id_low, image) = let
   val record = book_record_new(image)
 in
   case+ _bytes_of_record(record) of
@@ -813,9 +813,9 @@ in
 end
 
 (* The same for the collections' record *)
-#pub fun batch_add_index {count:nat}{x:indexx} (batch: batch(count), image: !index_image(x)): [more:nat] batch(more)
+#pub fun batch_add_index {count:nat}{collections:indexx} (batch: batch(count), image: !index_image(collections)): [more:nat] batch(more)
 
-implement batch_add_index {count}{x} (batch, image) = let
+implement batch_add_index {count}{collections} (batch, image) = let
   val record = index_record_new(image)
 in
   case+ _index_bytes_of(record) of
@@ -845,14 +845,14 @@ fun _batch_fill {l:agz}{owner:addr}{n:nat}{count:nat}{at:nat | at <= n} .<count>
 #pub fun batch_free {count:nat} (batch: batch(count)): void
 
 implement batch_free {count} (batch) = let
-  fun go {count:nat} .<count>. (batch: batch(count)): void =
+  fun free_each {count:nat} .<count>. (batch: batch(count)): void =
     case+ batch of
     | ~BatchNone() => ()
     | ~BatchSome(key, _, value, _, rest) => let
         val () = $A.free<byte>(key)
         val () = $A.free<byte>(value)
-      in go(rest) end
-in go(batch) end
+      in free_each(rest) end
+in free_each(batch) end
 
 (* A batch written in one transaction: all of it or none *)
 #pub fun batch_commit {count:nat} (batch: batch(count)): $P.promise($IDB.stored, $P.Chained)
