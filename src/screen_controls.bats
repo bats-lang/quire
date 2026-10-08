@@ -239,7 +239,7 @@ in if $SCR.brightness_available() then $SCR.brightness_set(_setting_of(set_brigh
 
 implement screen_brightness_moved (moved_to) = let
   val level = g1ofg0(moved_to)
-  val level = (if level < 10 then 10 else if level > 100 then 100 else level)
+  val level = (if level < 10 then 10 else if level > 100 then 100 else level): set_brightness_level
   val () = set_brightness_level_set(level)
   val () = set_brightness_set(BrightnessOwn())
   val () = _pressed("screen-brightness-system", false)

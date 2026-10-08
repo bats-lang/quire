@@ -325,7 +325,7 @@ implement set_brightness_set (choice) = !_brightness := choice
 #pub fn set_brightness_level_get (): set_brightness_level
 implement set_brightness_level_get () = let
   val level = g1ofg0(!_brightness_level)
-in if level < 10 then 50 else if level > 100 then 50 else level end
+in (if level < 10 then 50 else if level > 100 then 50 else level): set_brightness_level end
 #pub fn set_brightness_level_set (level: set_brightness_level): void
 implement set_brightness_level_set (level) = !_brightness_level := level
 #pub fn set_rotation_get (): rotation
