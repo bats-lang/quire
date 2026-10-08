@@ -366,8 +366,10 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await readBook(page, { title: 'Sheet', author: 'L', rawChapters: chapters(1) });
   await openReadingSettings(page, 'Page');
   await readingSettings(page).getByRole('button', { name: 'Full screen', exact: true }).click();
-  // (in the Android app, full screen is the system bars hidden)
-  if (onAndroid(testInfo)) await expect.poll(() => page.evaluate(() => window.__android.calls.some(c => c.plugin === 'SystemBars' && c.method === 'hide'))).toBe(true);
+  // (in the Android app, full screen is a setting the system bars follow only
+  // while a book is read with its own bars away: the sheet is open with them
+  // up, so the switch is on and nothing is hidden yet; quire#348)
+  if (onAndroid(testInfo)) await expect(readingSettings(page).getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
   else await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
   await openReadingSettings(page, 'Look');
   const panel = dialog(page, 'Reading settings');

@@ -372,7 +372,7 @@ async function switchOn(toggle) {
 // which, by its knob, not only aria-pressed; the rotation lock and the
 // brightness each have a row of their own, the brightness named by what
 // it does
-test('in the Android app, the screen: full screen hides both bars, the rotation locked and the brightness', async ({ page }) => {
+test('in the Android app, the screen: full screen hides both bars while reading, the rotation locked and the brightness', async ({ page }) => {
   await page.addInitScript(barsPlayed);
   await start(page);
   await readBook(page, { title: 'Screened', author: 'Settings Tests', rawChapters: chapters(3) });
@@ -382,63 +382,81 @@ test('in the Android app, the screen: full screen hides both bars, the rotation 
   const brightness = more(page).getByRole('combobox', { name: 'Brightness while reading', exact: true });
   await expect(more(page).getByText('Brightness while reading', { exact: true })).toBeVisible();
   await expect(brightness.locator('option:checked')).toHaveText('Same as device');
-  await expect(full).toHaveAccessibleDescription('Hides the status and navigation bars');
+  await expect(full).toHaveAccessibleDescription('Hides the status and navigation bars while you read; the menus and the library show them');
   expect(await switchOn(full)).toBe('off');
+  // turned on in the in-book menu: the switch is on, the bars stay (quire#348)
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('on');
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  // the menu put away, the reader's own bars gone: the page is immersive and the system's bars go
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  // the in-book menu back: they are there again
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  // turned off: immersive reading no longer hides them
+  await openReadingSettings(page, 'Page');
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('off');
-  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
+  await openReadingSettings(page, 'Page');
   // the lock is offered, and works: shown and enabled (quire#355)
   await expect(lock).toBeVisible();
   await expect(lock).toBeEnabled();
   await lock.click();
   await expect.poll(() => switchOn(lock)).toBe('on');
   await brightness.selectOption({ label: '25%' });
-  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]))).toEqual(['show', 'hide', 'show', 'lock', 'brightness']);
+  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]).filter(c => c === 'lock' || c === 'brightness'))).toEqual(['lock', 'brightness']);
 });
 
-// quire#300: the switch says what the screen shows. Android shows the
-// hidden bars again at a swipe from the edge (immersive mode's way out)
-// and full screen stays on: the next page turned hides them again.
-// quire#313: full screen is kept, so the app reopened starts as it was
-// left, whatever the bars were then: hidden and the switch on, or, once
-// turned off, shown and the switch off
-test('in the Android app, full screen holds: bars the system brought back are hidden at the next page, and a reopened app starts as it was left', async ({ page }) => {
+// quire#300: Android shows the hidden bars again at a swipe from the
+// edge (immersive mode's way out) and full screen stays on: the next
+// page turned hides them again. quire#348: full screen is the setting,
+// kept, and only the immersive reading screen hides the bars: the app
+// opened again is in the library with them shown, and hides them when a
+// book is read with the reader's own bars away
+test('in the Android app, full screen holds: bars the system brought back are hidden at the next page, and a reopened app starts in the library with them shown', async ({ page }) => {
   await page.addInitScript(barsPlayed);
   await start(page);
   await readBook(page, { title: 'Held', author: 'Settings Tests', rawChapters: chapters(3, 60) });
   await openReadingSettings(page, 'Page');
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   await full.click();
-  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
   await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
   // the system brings the bars back (a swipe from the edge)
   await page.evaluate(() => { window.hidden = { status: false, navigation: false }; });
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await page.keyboard.press('t');
   await openReadingSettings(page, 'Page');
   expect(await switchOn(full)).toBe('on');
   await page.keyboard.press('Escape');
-  // reopened with the bars brought back: they are hidden again, and the
-  // switch is on
+  // reopened: in the library, where the system's bars are shown, and the
+  // setting kept
   await page.addInitScript(() => { const kept = sessionStorage.getItem('bars'); if (kept) window.hidden = JSON.parse(kept); });
-  await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify({ status: false, navigation: false })));
-  await reload(page);
-  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
-  await expect.poll(() => page.evaluate(() => window.calls.map(c => c.split(' ')[0]).filter(c => c === 'show'))).toEqual([]);
-  await openReadingSettings(page, 'Page');
-  expect(await switchOn(full)).toBe('on');
-  // turned off, and reopened with the bars still hidden: they are shown
-  await full.click();
-  await expect.poll(() => switchOn(full)).toBe('off');
-  await page.keyboard.press('Escape');
   await page.evaluate(() => sessionStorage.setItem('bars', JSON.stringify({ status: true, navigation: true })));
   await reload(page);
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
   await openReadingSettings(page, 'Page');
-  expect(await switchOn(full)).toBe('off');
+  expect(await switchOn(full)).toBe('on');
+  // read again with its own bars away, they go; turned off, they stay
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await page.keyboard.press('t');
+  await openReadingSettings(page, 'Page');
+  await full.click();
+  await expect.poll(() => switchOn(full)).toBe('off');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
 });
 
 // quire#313: a browser enters full screen only at a click (the
@@ -484,13 +502,11 @@ test('in a browser, full screen is not kept: the page opened again starts out of
   expect(await page.evaluate(() => !!document.fullscreenElement)).toBe(false);
 });
 
-// quire#314: Android brings the hidden bars back at a swipe from the
-// screen's edge, and the activity reports them: the switch shows them at
-// once (off). They stay while the page does, and the next page shown
-// hides them again, the switch on (Android's immersive mode for reading,
-// a swipe the reader's own way out); the switch tapped while they are
-// shown hides them
-test('in the Android app, bars the system brought back show on the switch at once, and go at the next page or a tap', async ({ page }) => {
+// quire#314, quire#348: bars the system brought back by a swipe from the
+// screen's edge stay while the page does (the swipe is the reader's own
+// way out of immersive mode), and the next page shown hides them again;
+// the Full screen switch says the setting, not what the bars show
+test('in the Android app, bars the system brought back stay until the next page, and the switch says the setting', async ({ page }) => {
   await page.addInitScript(barsPlayed);
   await start(page);
   await readBook(page, { title: 'Swiped', author: 'Settings Tests', rawChapters: chapters(3, 60) });
@@ -498,21 +514,20 @@ test('in the Android app, bars the system brought back show on the switch at onc
   const full = more(page).getByRole('button', { name: 'Full screen', exact: true });
   await full.click();
   await expect.poll(() => switchOn(full)).toBe('on');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
   await page.evaluate(() => window.systemShows());
-  await expect.poll(() => switchOn(full), { timeout: 1000 }).toBe('off');
   await page.waitForTimeout(500);
   expect(await page.evaluate(() => window.hidden)).toEqual({ status: false, navigation: false });
-  expect(await switchOn(full)).toBe('off');
-  await page.keyboard.press('Escape');
   await page.keyboard.press('ArrowRight');
   await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
+  await page.keyboard.press('t');
   await openReadingSettings(page, 'Page');
-  await expect.poll(() => switchOn(full)).toBe('on');
+  expect(await switchOn(full)).toBe('on');
   await page.evaluate(() => window.systemShows());
-  await expect.poll(() => switchOn(full), { timeout: 1000 }).toBe('off');
-  await full.click();
-  await expect.poll(() => page.evaluate(() => window.hidden)).toEqual({ status: true, navigation: true });
-  await expect.poll(() => switchOn(full)).toBe('on');
+  await page.waitForTimeout(300);
+  expect(await switchOn(full)).toBe('on');
 });
 
 // quire#355: a control that cannot work is not shown. Where the device

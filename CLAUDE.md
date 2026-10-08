@@ -686,24 +686,30 @@ only where its platform has it, by its own `data-hide`.
   it is pressed (`_switch_row` in `src/app.bats`), and a line saying
   what it does (`aria-describedby`). In the app full screen is kept
   (quire#313): a `fullscreen_choice` (`FullscreenOff | FullscreenOn`),
-  the device's own, after an "F" at the end of the "S2" record, set as
-  the screen shows it (`screen_fullscreen_changed`) and set again as
-  the app starts, before the first view is shown, the switch saying so
-  from the first frame (`screen_controls_start`). A browser keeps none:
+  the device's own, after an "F" at the end of the "S2" record, turned
+  and kept by the switch (`screen_fullscreen_toggle`) and by nothing
+  else, the switch saying it from the first frame
+  (`screen_controls_start`). It is the setting for the immersive reading
+  screen only (quire#348): the system's bars are hidden when the setting
+  is on and the reader is shown with its own bars away (`_immersive`,
+  set by quire.bats' `_chrome_set` and `_show_library` through
+  `screen_immersive_set`), and shown in the library, in the in-book menu
+  and its panels, and as the app starts; the setting is not changed by
+  what the bars show, nor by the menu coming up. A browser keeps none:
   the Fullscreen API enters only at a click (the user's activation), so
   a page opened again starts out of it, its switch off, and a click
-  there does not change what is kept.
+  there does not change what is kept, and the page is in full screen or
+  not as that click left it.
   Where the device refuses the rotation lock (bridge's `LockRefused`),
   Lock rotation is not offered again that session (`_lock_refused` in
   `src/screen_controls.bats`) and the banner says so (quire#355): a
-  control that cannot work is not shown. While full screen is on, a page shown hides the
+  control that cannot work is not shown. While the reader is immersive and full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
-  brings them back at a swipe from the edge. Meanwhile the switch shows
-  them (quire#314): pwa's activity reports each bar's visibility at each
-  window insets dispatch (`batsNative.systemBars`, bridge's
-  `listen_system_bars`, `RSystemBars`), and the switch is on only while
-  no bar is shown (`_fullscreen_shown`; a tap on it while it reads off
-  hides them). Brightness while reading
+  brings them back at a swipe from the edge, the reader's own way out of
+  immersive mode (quire#314). pwa's activity reports each bar's
+  visibility at each window insets dispatch (`batsNative.systemBars`,
+  bridge's `listen_system_bars`, `RSystemBars`), which lays the chapter
+  out again when it changes (quire#356). Brightness while reading
   (`brightness_*`, the app only: a `brightness_choice`, the device's own
   ("Same as device") or 10 to 100%, kept with the settings and set again
   as the app starts) is a select under its own label, the whole width.
