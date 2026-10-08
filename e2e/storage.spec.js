@@ -34,11 +34,22 @@ async function stubReads(page) {
       if (which === 'annotations') return key.length === 15 && key[0] === 'a';
       return key === which;
     };
-    const get = IDBObjectStore.prototype.get;
-    IDBObjectStore.prototype.get = function (key) {
-      if (!failing(key)) return get.call(this, key);
+    const erring = () => {
       const request = { result: undefined, error: new DOMException('read failed', 'UnknownError') };
       setTimeout(() => { if (request.onerror) request.onerror(new Event('error')); });
+      return request;
+    };
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (key) {
+      return failing(key) ? erring() : get.call(this, key);
+    };
+    // the library's records are read together, by their prefix (#354)
+    const getAll = IDBObjectStore.prototype.getAll;
+    IDBObjectStore.prototype.getAll = function (range, ...rest) {
+      const lower = range && typeof range.lower === 'string' ? range.lower : '';
+      const request = getAll.call(this, range, ...rest);
+      // the transaction that reads the records is lost, as when storage is failing
+      if (lower.startsWith('library/') && localStorage.getItem('failReads') === 'lib') this.transaction.abort();
       return request;
     };
   });

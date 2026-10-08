@@ -1,0 +1,4 @@
+function _static_view_unmatched
+line 2
+pattern match is nonexhaustive:
+ViewUnreadable()

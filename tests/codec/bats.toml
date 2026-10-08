@@ -1,0 +1,8 @@
+[package]
+name = "codec-test"
+kind = "bin"
+unsafe = false
+
+[dependencies]
+"array" = ""
+"arith" = ""

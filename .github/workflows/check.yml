@@ -99,6 +99,11 @@ jobs:
       - name: Run WASM smoke tests
         run: npx vitest run
 
+      # The record codec, natively: the checksum's check value, the edge of
+      # 32 bits, damage to every byte, fuzz (#354)
+      - name: Codec tests
+        run: tests/codec/run.sh $HOME/repository
+
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
   # each checks only its module again; in groups side by side, each

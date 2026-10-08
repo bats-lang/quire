@@ -585,7 +585,7 @@ implement lookup_bytes (found) =
          saved over *)
       | ~NoBlobBytes() => StoredUnreadable())
   | ~$IDB.Absent() => NothingStored()
-  | ~$IDB.Unreadable() => StoredUnreadable()
+  | ~$IDB.Unreadable(cause) => let val () = $IDB.unreadable_cause_free(cause) in StoredUnreadable() end
 
 implement piece_new (piece_size) =
   case+ page_lend(piece_size) of
@@ -632,7 +632,7 @@ implement lookup_content (found) =
       (* no piece could be had for it: it could not be read *)
       | ~NoContentBytes() => ContentUnreadable())
   | ~$IDB.Absent() => NoStoredContent()
-  | ~$IDB.Unreadable() => ContentUnreadable()
+  | ~$IDB.Unreadable(cause) => let val () = $IDB.unreadable_cause_free(cause) in ContentUnreadable() end
 
 implement zip_compression (method) =
   case+ method of

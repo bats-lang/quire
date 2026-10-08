@@ -1,0 +1,4 @@
+function _static_newer_unmatched
+line 2
+pattern match is nonexhaustive:
+RR_newer()
