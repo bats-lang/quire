@@ -284,13 +284,14 @@ implement chunk_read {bs}{n} (list) =
                | ~TakeOk(t3 | data, after_data) =>
                  (case+ blist_take(4, after_data) of
                   | ~TakeShort(s | ) => let val () = blist_free(tag) val () = blist_free(data) in (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_short(s)))) | CKR_trunc()) end
-                  | ~TakeOk(t4 | crc_bytes, rest) => let
+                  | ~TakeOk(t4 | crc_bytes, rest) =>
+                    (case+ crc_bytes of
+                     | ~blist_cons(c0, ~blist_cons(c1, ~blist_cons(c2, ~blist_cons(c3, ~blist_nil())))) => let
                       prval (_, tag_len) = take_append(t2)
                       prval (_, data_len) = take_append(t3)
                       val (first | h0, l0) = crcfrom(65535, 65535, tag)
                       val (second | h1, l1) = crcfrom(h0, l0, data)
                       prval crc = CRCP_mk(tag_len, data_len, first, second)
-                      val ~blist_cons(c0, ~blist_cons(c1, ~blist_cons(c2, ~blist_cons(c3, ~blist_nil())))) = crc_bytes
                       val stored_lo = c0 + 256 * c1
                       val stored_hi = c2 + 256 * c3
                       prval stored = CRCB_mk(LE_cons(LE_cons(LE_nil())), LE_cons(LE_cons(LE_nil())))
@@ -302,7 +303,7 @@ implement chunk_read {bs}{n} (list) =
                            (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_bad(t4, stored, crc)))) | CKR_bad(tag, data, rest)))
                       else
                         (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_bad(t4, stored, crc)))) | CKR_bad(tag, data, rest))
-                    end))
+                    end)))
           end
           else let
             val () = blist_free(after_length)

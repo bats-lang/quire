@@ -1631,6 +1631,48 @@ fn _shadow_add (id_high: Int, id_low: Int, image: book_image): void = let
   val+ ~ShadowCell(list) = shadow_take()
 in shadow_put(ShadowCell(shadows_cons(id_high, id_low, image, list))) end
 
+(* A shadow taken out, if there was one *)
+datavtype taken =
+  | NoShadow of ()
+  | HadShadow of (book_image)
+
+fun _shadow_swap_in {count:nat} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image)
+  : [more:nat] @(taken, shadows(more)) =
+  case+ list of
+  | ~shadows_nil() => @(NoShadow(), shadows_cons(id_high, id_low, image, shadows_nil()))
+  | ~shadows_cons(other_high, other_low, other, rest) =>
+    if other_high = id_high then (if other_low = id_low then @(HadShadow(other), shadows_cons(id_high, id_low, image, rest))
+      else let
+        val @(was, more) = _shadow_swap_in(rest, id_high, id_low, image)
+      in @(was, shadows_cons(other_high, other_low, other, more)) end)
+    else let
+      val @(was, more) = _shadow_swap_in(rest, id_high, id_low, image)
+    in @(was, shadows_cons(other_high, other_low, other, more)) end
+
+(* The shadow of the book with this id set to image, and the one it was.
+   A book's shadow is set as its groups are sent, not when they are kept: a
+   change sent and changed back before the first is kept is a change
+   still. *)
+fn _shadow_swap (id_high: Int, id_low: Int, image: book_image): taken = let
+  val+ ~ShadowCell(list) = shadow_take()
+  val @(was, more) = _shadow_swap_in(list, id_high, id_low, image)
+  val () = shadow_put(ShadowCell(more))
+in was end
+
+(* What was sent was not kept: if the shadow is still what was sent, it is
+   what it was before, so that the groups are sent again *)
+fn _shadow_unsend (id_high: Int, id_low: Int, sent: book_image, previous: taken): void = let
+  val cell = shadow_take()
+  val+ ShadowCell(list) = cell
+  val unchanged = (_shadow_mask(list, id_high, id_low, sent) = 0)
+  val () = shadow_put(cell)
+  val () = book_image_free(sent)
+in
+  case+ previous of
+  | ~NoShadow() => if unchanged then _shadow_forget(id_high, id_low) else ()
+  | ~HadShadow(image) => if unchanged then _shadow_set(id_high, id_low, image) else book_image_free(image)
+end
+
 (* What the collections' record held when it was last read or saved *)
 datavtype index_shadow =
   | NoIndexShadow of ()
@@ -1648,14 +1690,15 @@ fn index_shadow_take (): index_shadow = let
   val () = ref_exch_elt<index_shadow>(_index_shadow, cell)
 in cell end
 
+fn index_shadow_free (shadow: index_shadow): void =
+  case+ shadow of
+  | ~NoIndexShadow() => ()
+  | ~IndexShadow(image) => index_image_free(image)
+
 fn index_shadow_put (shadow: index_shadow): void = let
   var current: index_shadow = shadow
   val () = ref_exch_elt<index_shadow>(_index_shadow, current)
-in
-  case+ current of
-  | ~NoIndexShadow() => ()
-  | ~IndexShadow(image) => index_image_free(image)
-end
+in index_shadow_free(current) end
 
 (* The name of the collection at position as a copy, or an empty one *)
 fun _index_name_at {count:nat} .<count>. (collections: !colls(count), position: int)
@@ -1775,24 +1818,26 @@ fn _record_refused (why: unusable): void =
   end
 
 (* A book's save came back *)
-fn _book_saved (id_high: Int, id_low: Int, sent: book_image, saved: book_saved): void =
+fn _book_saved (id_high: Int, id_low: Int, sent: book_image, previous: taken, saved: book_saved): void =
   case+ saved of
   | ~BookSaved(stored) => let
       val () = book_image_free(stored)
-    in _shadow_set(id_high, id_low, sent) end
-  | ~BookRefused(why) => let
       val () = book_image_free(sent)
+    in (case+ previous of ~NoShadow() => () | ~HadShadow(image) => book_image_free(image)) end
+  | ~BookRefused(why) => let
+      val () = _shadow_unsend(id_high, id_low, sent, previous)
     in _record_refused(why) end
   | ~BookNotSaved() => let
-      val () = book_image_free(sent)
+      val () = _shadow_unsend(id_high, id_low, sent, previous)
     in _save_failed() end
 
 fun _send_all {count:nat} .<count>. (planned: pending(count)): void =
   case+ planned of
   | ~pending_nil() => ()
   | ~pending_cons(id_high, id_low, mask, image, rest) => let
+      val previous = _shadow_swap(id_high, id_low, book_image_copy(image))
       val saving = libstore_save_book(id_high, id_low, mask, image)
-      val () = $P.finish<book_saved>(saving, llam(saved) => _book_saved(id_high, id_low, image, saved))
+      val () = $P.finish<book_saved>(saving, llam(saved) => _book_saved(id_high, id_low, image, previous, saved))
     in _send_all(rest) end
 
 fun _delete_all {count:nat} .<count>. (gone: ids(count)): void =
@@ -1806,27 +1851,47 @@ fun _delete_all {count:nat} .<count>. (gone: ids(count)): void =
         | BookNotDeleted() => _save_failed())
     in _delete_all(rest) end
 
+(* What was sent was not kept: if the shadow is still what was sent, it is
+   what it was before, so that the groups are sent again *)
+fn _index_unsend (sent: index_image, previous: index_shadow): void = let
+  val current = index_shadow_take()
+  val unchanged = (case+ current of
+    | NoIndexShadow() => false
+    | IndexShadow(kept) => index_image_diff(sent, kept) = 0): bool
+  val () = index_image_free(sent)
+in
+  if unchanged then let
+    val () = index_shadow_put(previous)
+  in index_shadow_free(current) end
+  else let
+    val () = index_shadow_put(current)
+  in index_shadow_free(previous) end
+end
+
 fn _send_index (): void = let
   val image = _image_of_collections()
-  val shadow = index_shadow_take()
-  val mask = (case+ shadow of
+  val previous = index_shadow_take()
+  val mask = (case+ previous of
     | NoIndexShadow() => index_group_all()
     | IndexShadow(other) => index_image_diff(image, other)): int
-  val () = index_shadow_put(shadow)
 in
-  if mask = 0 then index_image_free(image)
+  if mask = 0 then let
+    val () = index_shadow_put(previous)
+  in index_image_free(image) end
   else let
+    val () = index_shadow_put(IndexShadow(index_image_copy(image)))
     val saving = libstore_save_index(mask, image)
   in $P.finish<index_saved>(saving, llam(saved) =>
     case+ saved of
     | ~IndexSaved(stored) => let
         val () = index_image_free(stored)
-      in index_shadow_put(IndexShadow(image)) end
-    | ~IndexRefused(why) => let
         val () = index_image_free(image)
+      in index_shadow_free(previous) end
+    | ~IndexRefused(why) => let
+        val () = _index_unsend(image, previous)
       in _record_refused(why) end
     | ~IndexNotSaved() => let
-        val () = index_image_free(image)
+        val () = _index_unsend(image, previous)
       in _save_failed() end) end
 end
 
