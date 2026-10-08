@@ -285,12 +285,15 @@ fn _code_is_level (code: int): bool =
   else false
 
 (* The level a stored byte names (50 for any other) *)
-fn _level_of_code (code: int): set_brightness_level =
+fn _level_of_code (code: int): set_brightness_level = let
+  val code = g1ofg0(code)
+in
   if code = 1 then 10 else if code = 2 then 25
   else if code = 3 then 50 else if code = 4 then 75
   else if code = 5 then 100
-  else if code >= 10 then (if code <= 100 then g1ofg0(code) else 50)
+  else if code >= 10 then (if code <= 100 then code else 50)
   else 50
+end
 
 (* Whether the screen's rotation is locked (to the one it had then) *)
 #pub datatype rotation = RotationFree | RotationLocked
