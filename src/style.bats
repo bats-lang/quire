@@ -1596,29 +1596,34 @@ fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, Gap(), "8px")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, Padding(), "10px 12px")
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
   val sheet = close(sheet)
-  (* over the library the banner goes to the foot of the screen, so it
-     never covers the library's header (#374): a banner at the top hid
-     the title, Import and the menu while the reader needed them. Over
-     the reader the top is kept (its bars hide). Material puts a
-     message that needs an answer below the app bar, not over it; here
-     the foot, where the library has nothing fixed, since the app bar
-     wraps to five rows at 320px and a banner under it would have no
-     fixed place *)
+  (* over the library the banner is part of the page, above the header,
+     and pushes it down (#374): Material 3 puts a banner under the top app
+     bar and moves the content, so nothing is under it. A fixed banner at
+     the top hid the title, Import and the menu; one at the foot hid Try
+     again on a short phone, because the library's own height is not
+     known to it (the app bar wraps to five rows at 320px). The base
+     rule's left 50% and translateX(-50%) still centre it when it is
+     relative instead of fixed. Over the reader it stays fixed at the top
+     (its bars hide) *)
   val sheet = rule(sheet, "#bats-root:has(#library:not([data-hide='1'])) .banner")
+  val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Top(), "auto")
-  val sheet = lay(sheet, Bottom(), "max(8px,var(--safe-bottom))")
+  val sheet = lay(sheet, Margin(), "8px 0 0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
   val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
   val sheet = close(sheet)
+  (* the message takes the row and the buttons wrap under it on a narrow
+     window, rather than Report being squeezed until its text is cut *)
   val sheet = rule(sheet, ".banner span")
-  val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, Flex(), "1 1 12em")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imp")
   val sheet = lay(sheet, Margin(), "8px 0")

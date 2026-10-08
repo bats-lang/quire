@@ -9,69 +9,10 @@ import {
   librarySettings, settingsButton,
   readingSettings, openReadingSettings,
 } from './helpers.js';
+import { coveredByBanner } from './controls-shown.js';
+import { failReads, healReads, failLibrary, stubReads } from './storage-stub.js';
 
 const alert = page => page.getByRole('alert');
-
-/** From the next load on, every IndexedDB read of a key that which
-    names fails, as a read does when storage is failing: its request
-    fires error. which is 'lib', 'set', or 'annotations' (a book's "a"
-    record). The keys are kept in localStorage, so a reload keeps them
-    failing until healReads */
-async function failReads(page, which) {
-  await page.evaluate(which => localStorage.setItem('failReads', which), which);
-}
-
-async function healReads(page) {
-  await page.evaluate(() => localStorage.removeItem('failReads'));
-}
-
-/** The library's records are read together, by their prefix (#354).
-    From the next load on, that read fails with a DOMException named
-    name, as a browser's does (bridge reads the name, #374): for the next
-    times reads (every one when times is -1). The count is kept in
-    localStorage, so a reload carries it on */
-async function failLibrary(page, name, times = -1) {
-  await page.evaluate(([name, times]) => {
-    localStorage.setItem('failReads', 'lib');
-    localStorage.setItem('failName', name);
-    localStorage.setItem('failLeft', String(times));
-  }, [name, times]);
-}
-
-/** Installed before every load: a read of a failing key errs */
-async function stubReads(page) {
-  await page.addInitScript(() => {
-    const failing = key => {
-      const which = localStorage.getItem('failReads');
-      if (!which || typeof key !== 'string') return false;
-      if (which === 'annotations') return key.length === 15 && key[0] === 'a';
-      return key === which;
-    };
-    const erring = () => {
-      const request = { result: undefined, error: new DOMException('read failed', 'UnknownError') };
-      setTimeout(() => { if (request.onerror) request.onerror(new Event('error')); });
-      return request;
-    };
-    const get = IDBObjectStore.prototype.get;
-    IDBObjectStore.prototype.get = function (key) {
-      return failing(key) ? erring() : get.call(this, key);
-    };
-    // the library's records are read together, by their prefix (#354)
-    const getAll = IDBObjectStore.prototype.getAll;
-    IDBObjectStore.prototype.getAll = function (range, ...rest) {
-      const lower = range && typeof range.lower === 'string' ? range.lower : '';
-      if (lower.startsWith('library/') && localStorage.getItem('failReads') === 'lib') {
-        const left = Number(localStorage.getItem('failLeft') ?? '-1');
-        if (left !== 0) {
-          if (left > 0) localStorage.setItem('failLeft', String(left - 1));
-          // the browser's own error, named as the specification names it
-          throw new DOMException('the library could not be read', localStorage.getItem('failName') ?? 'UnknownError');
-        }
-      }
-      return getAll.call(this, range, ...rest);
-    };
-  });
-}
 
 const libraryScreen = page => page.locator('#library-empty');
 const tryAgain = page => page.getByRole('button', { name: 'Try again' });
@@ -93,11 +34,10 @@ test('a library that cannot be read is said, takes no book, and is not saved ove
   await importFiles(page, [epubFile({ title: 'Kept Safe', author: 'Storage Tests', rawChapters: chapters(1) })], 1);
   await failLibrary(page, 'SecurityError');
   await reload(page);
-  await expect(alert(page)).toContainText('Quire could not read your library.');
   await expectUnreadable(page, 'Your browser is not letting Quire use its storage');
+  await expect(alert(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(0);
   // a book is not added: the library it would be saved in is not the one stored
-  await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await page.getByLabel('Import EPUB').setInputFiles([epubFile({ title: 'Not Added', author: 'Storage Tests', rawChapters: chapters(1) })]);
   await expect(alert(page)).toContainText('Books cannot be added until Quire can read your library.');
   await expect(cards(page)).toHaveCount(0);
@@ -126,9 +66,11 @@ for (const [name, text, hope] of WHY) {
     await failLibrary(page, name);
     await reload(page);
     await expectUnreadable(page, text);
-    await expect(alert(page)).toContainText('Quire could not read your library.');
-    await expect(alert(page).getByRole('button', { name: 'Copy details' })).toBeVisible();
-    await expect(alert(page).getByRole('link', { name: 'Report' })).toBeVisible();
+    // the screen says it all, with the browser's name for it, and no
+    // banner can cover Try again
+    await expect(libraryScreen(page)).toContainText(`Details: ${name}.`);
+    await expect(alert(page)).toBeHidden();
+    expect(await coveredByBanner(page)).toEqual([]);
     if (hope) await expect(tryAgain(page)).toBeVisible();
     else await expect(tryAgain(page)).toBeHidden();
   });
@@ -182,7 +124,7 @@ test('Try again is one retry: when it fails too, the button is gone for the sess
   await tryAgain(page).click();
   await expectUnreadable(page, 'Quire still could not read your library after trying again.');
   await expect(tryAgain(page)).toBeHidden();
-  await expect(alert(page)).toContainText('Quire could not read your library.');
+  await expect(alert(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(0);
   // nothing was saved over it: it is all there once it can be read
   await healReads(page);

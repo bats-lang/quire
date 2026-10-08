@@ -10,6 +10,7 @@ import {
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch,
 } from './helpers.js';
+import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { checkPageMargins } from './page-margins.js';
 import { cutOff, statesUnseen, insetsShort, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
@@ -683,6 +684,31 @@ test('the error banner does not cover the library\'s header or its controls', as
   await expect(page.getByRole('alert')).toBeVisible();
   const header = await page.locator('#library-bar').boundingBox();
   const banner = await page.getByRole('alert').boundingBox();
-  expect(banner.y, 'the banner is below the header').toBeGreaterThanOrEqual(header.y + header.height - 1);
+  // it pushes the library down: above the header, over none of it
+  expect(banner.y + banner.height, 'the banner is above the header').toBeLessThanOrEqual(header.y + 1);
   await fits(page, 'the library with the error banner up');
 });
+
+// #374: an unreadable library's screen is never under the error banner,
+// on any window: its text, and Try again where it has one (CI found a
+// foot banner over Try again on mobile-portrait)
+for (const [name, text, button, banner] of [
+  ['UnknownError', 'Quire could not read your library this time.', true, false],
+  ['SecurityError', 'Your browser is not letting Quire use its storage', false, false],
+  ['WeirdBrowserError', 'An unexpected error stopped Quire from reading your library.', false, true],
+]) {
+  test(`the library that cannot be read (${name}) is not under the banner`, async ({ page }) => {
+    await stubReads(page);
+    await start(page);
+    await importFiles(page, [epubFile({ title: 'Kept Safe', author: 'Layout Tests' })], 1);
+    await failLibrary(page, name);
+    await page.reload();
+    await expect(page.locator('#library-empty')).toContainText(text);
+    if (button) await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    if (banner) await expect(page.getByRole('alert')).toBeVisible();
+    else await expect(page.getByRole('alert')).toBeHidden();
+    await fits(page, `the library that cannot be read (${name})`);
+    if (button) await page.getByRole('button', { name: 'Try again' }).click({ trial: true });
+    await healReads(page);
+  });
+}

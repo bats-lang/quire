@@ -944,14 +944,24 @@ read of storage changed: each still folds, as #174 says.
   new records, so nothing is lost, and it is offered only where nothing
   else can be done: never for Transient, StorageBlocked or NewerVersion);
   the screen says only what is true now.
-* **The banner** says "Quire could not read your library." for every
-  kind with Copy details and Report (`notice_failure`, the browser's name
-  as the code), and an unexpected one with `notice_unexpected` (the name
-  and message as the answer). Over the library it is drawn at the foot of
-  the screen, not over the header (the title, Import and the menu), which
-  `coveredByBanner` in `e2e/controls-shown.js` checks on the walk's
-  screens and on a library with the banner up (`e2e/layout.spec.js`).
-  Over the reader it is still at the top.
+* **The banner.** A kind the screen says completely has no banner: the
+  screen gives what happened, what Quire did, what to do and the
+  browser's name for it ("Details: UnknownError."), which is what a
+  report needs. Only an unexpected failure raises one
+  (`notice_unexpected`: the name and message as the answer, Copy details,
+  Report), since it carries what the screen cannot and its screen has no
+  button for it to cover. A banner shown first at the foot of the library
+  covered Try again on a short phone (CI, mobile-portrait), and one at
+  the top covered the header; over the library the banner is now part of
+  the page, above the header, and pushes it down (Material 3: a banner
+  sits under the top app bar and moves the content; position relative
+  with the base rule's centring), so it is over nothing. `coveredByBanner`
+  (`e2e/controls-shown.js`, run by `fits`) reports the header's controls,
+  `library-empty` and `library-try-again` under the banner, and Try again
+  under anything at its centre, whether a banner is up or not; the layout
+  spec runs it on an unreadable library of each sort in every project. A
+  banner wraps its buttons under its message on a narrow window instead
+  of squeezing Report. Over the reader it is still fixed at the top.
 * **One honest retry.** Try again repeats the read start-up makes
   (`lib_load`) through `_library_read`, so the `LIBRARY_READ` proof is
   still only made there. `lib_retry_begin` spends the retry when it

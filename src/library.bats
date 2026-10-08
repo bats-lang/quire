@@ -2126,14 +2126,6 @@ val _read_kind = ref<failure_kind>(KindNoReasonGiven())
    rest of the session, so Try again is one honest retry and no loop *)
 val _retry_spent = ref<bool>(false)
 
-(* The banner for a failure that is known: what happened, with Copy
-   details and Report. code is the browser's name for it *)
-fn _banner_known {code_len:pos | code_len < 64}{call_len:pos | call_len < 64}
-  (code: string code_len, call: string call_len): void = let
-  val said = $A.alloc<byte>(34)
-  val () = $A.write_text(said, 0, $A.text_lit("Quire could not read your library."), 34)
-in notice_failure(said, 34, "reading your library", call, code, NoAnswer()) end
-
 (* An unexpected failure: the banner says an unexpected error occurred,
    with the name and message as the browser gave them in the details *)
 fn _banner_unexpected {call_len:pos | call_len < 64}
@@ -2147,16 +2139,24 @@ fn _banner_unexpected {call_len:pos | call_len < 64}
     else
       notice_unexpected("reading your library", call, CaseNamed("ReadUnexpected"), AnswerShown("name and message", bytes, count))
 
+(* What a failure is told with. A kind the screen already says
+   completely (what happened, what Quire did, what to do, and the
+   browser's name for it, which is what a report needs) has no banner
+   over the library: a banner is a fixed overlay, and on a short window
+   it covered Try again, the one thing the screen offers (#374, CI on
+   mobile-portrait). Only an unexpected failure has one: it carries what
+   the screen cannot (the name and message, Copy details, Report), and
+   its screen offers no button for it to cover. *)
 fn _failure_told {call_len:pos | call_len < 64}
   (kind: failure_kind, text: unexpected_text, call: string call_len): void =
   case+ kind of
   | KindUnexpected() => _banner_unexpected(text, call)
-  | KindTransient() => let val () = unexpected_text_free(text) in _banner_known("UnknownError", call) end
-  | KindStorageBlocked() => let val () = unexpected_text_free(text) in _banner_known("SecurityError", call) end
-  | KindNewerVersion() => let val () = unexpected_text_free(text) in _banner_known("VersionError", call) end
-  | KindAborted() => let val () = unexpected_text_free(text) in _banner_known("AbortError", call) end
-  | KindNoReasonGiven() => let val () = unexpected_text_free(text) in _banner_known("NoErrorGiven", call) end
-  | KindBytesUnreadable() => let val () = unexpected_text_free(text) in _banner_known("BytesUnreadable", call) end
+  | KindTransient() => unexpected_text_free(text)
+  | KindStorageBlocked() => unexpected_text_free(text)
+  | KindNewerVersion() => unexpected_text_free(text)
+  | KindAborted() => unexpected_text_free(text)
+  | KindNoReasonGiven() => unexpected_text_free(text)
+  | KindBytesUnreadable() => unexpected_text_free(text)
 
 (* The library could not be read, for this reason: it is not saved over
    this session, the screen says why, and the banner has the details *)
@@ -2426,18 +2426,18 @@ fn _view_of (shown: int): library_view =
 fn _unreadable_text (kind: failure_kind, spent: bool): void =
   case+ kind of
   | KindTransient() =>
-    if spent then ui_text_long("library-empty", "Quire still could not read your library after trying again. Reopen Quire to try once more. Quire has not changed anything and will not save until it can read your library.")
-    else ui_text_long("library-empty", "Quire could not read your library this time. Quire has not changed anything and will not save until it can read your library.")
+    if spent then ui_text_long("library-empty", "Quire still could not read your library after trying again. Reopen Quire to try once more. Quire has not changed anything and will not save until it can read your library. Details: UnknownError.")
+    else ui_text_long("library-empty", "Quire could not read your library this time. Quire has not changed anything and will not save until it can read your library. Details: UnknownError.")
   | KindStorageBlocked() =>
-    ui_text_long("library-empty", "Your browser is not letting Quire use its storage (a private window, or site data blocked). Allow site data for this address, or leave the private window, then reopen Quire. Quire has not changed anything and will not save until it can read your library.")
+    ui_text_long("library-empty", "Your browser is not letting Quire use its storage (a private window, or site data blocked). Allow site data for this address, or leave the private window, then reopen Quire. Quire has not changed anything and will not save until it can read your library. Details: SecurityError.")
   | KindNewerVersion() =>
-    ui_text_long("library-empty", "This device holds data from a newer version of Quire. Update Quire. Quire has not changed anything and will not save until it can read your library.")
+    ui_text_long("library-empty", "This device holds data from a newer version of Quire. Update Quire. Quire has not changed anything and will not save until it can read your library. Details: VersionError.")
   | KindAborted() =>
-    ui_text_long("library-empty", "The browser stopped Quire's read of your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library.")
+    ui_text_long("library-empty", "The browser stopped Quire's read of your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: AbortError.")
   | KindNoReasonGiven() =>
-    ui_text_long("library-empty", "The browser did not say why Quire could not read your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library.")
+    ui_text_long("library-empty", "The browser did not say why Quire could not read your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: NoErrorGiven.")
   | KindBytesUnreadable() =>
-    ui_text_long("library-empty", "Quire could not read what is stored for your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library.")
+    ui_text_long("library-empty", "Quire could not read what is stored for your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: BytesUnreadable.")
   | KindUnexpected() =>
     ui_text_long("library-empty", "An unexpected error stopped Quire from reading your library. The details are in the message above. Quire has not changed anything and will not save until it can read your library.")
 
