@@ -7,28 +7,28 @@
 staload "bytes.sats"
 staload "crc.sats"
 
-(* CRCP(tag, data, hi, lo): the checksum of the tag followed by the
+(* CRCP(tag, data, high, low): the checksum of the tag followed by the
    data, as two 16-bit halves *)
 #pub dataprop CRCP(bytes, bytes, int, int) =
-  | {nt,nd:nat}{tag,data:bytes}{h0,l0,h1,l1:nat | h1 < 65536; l1 < 65536}
-    CRCP_mk(tag, data, 65535 - h1, 65535 - l1)
-    of (LEN(tag, nt), LEN(data, nd), CRCFROM(65535, 65535, tag, h0, l0), CRCFROM(h0, l0, data, h1, l1))
+  | {tag_size,data_size:nat}{tag,data:bytes}{tag_high,tag_low,data_high,data_low:nat | data_high < 65536; data_low < 65536}
+    CRCP_mk(tag, data, 65535 - data_high, 65535 - data_low)
+    of (LEN(tag, tag_size), LEN(data, data_size), CRCFROM(65535, 65535, tag, tag_high, tag_low), CRCFROM(tag_high, tag_low, data, data_high, data_low))
 
-#pub prfun crcp_functional {tag,data:bytes}{h1,l1,h2,l2:int} (CRCP(tag, data, h1, l1), CRCP(tag, data, h2, l2))
-  : [h1 == h2 && l1 == l2] void
+#pub prfun crcp_functional {tag,data:bytes}{first_high,first_low,second_high,second_low:int} (CRCP(tag, data, first_high, first_low), CRCP(tag, data, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void
 
-prfn _crcp_functional {tag,data:bytes}{h1,l1,h2,l2:int} (p: CRCP(tag, data, h1, l1), q: CRCP(tag, data, h2, l2))
-  : [h1 == h2 && l1 == l2] void =
-  case+ p of
-  | CRCP_mk(pt, pd, pa, pb) =>
-    (case+ q of
-     | CRCP_mk(qt, qd, qa, qb) => let
-         prval EQI_refl() = len_functional(pt, qt)
-         prval EQI_refl() = len_functional(pd, qd)
-         prval () = crcfrom_functional(pt, pa, qa)
-       in crcfrom_functional(pd, pb, qb) end)
+prfn _crcp_functional {tag,data:bytes}{first_high,first_low,second_high,second_low:int} (first: CRCP(tag, data, first_high, first_low), second: CRCP(tag, data, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void =
+  case+ first of
+  | CRCP_mk(first_tag_size, first_data_size, first_tag_crc, first_data_crc) =>
+    (case+ second of
+     | CRCP_mk(second_tag_size, second_data_size, second_tag_crc, second_data_crc) => let
+         prval EQI_refl() = len_functional(first_tag_size, second_tag_size)
+         prval EQI_refl() = len_functional(first_data_size, second_data_size)
+         prval () = crcfrom_functional(first_tag_size, first_tag_crc, second_tag_crc)
+       in crcfrom_functional(first_data_size, first_data_crc, second_data_crc) end)
 
-primplement crcp_functional {tag,data}{h1,l1,h2,l2} (p, q) = _crcp_functional(p, q)
+primplement crcp_functional {tag,data}{first_high,first_low,second_high,second_low} (first, second) = _crcp_functional(first, second)
 
 
 (* What a chunk read from some bytes comes to *)
@@ -39,354 +39,354 @@ primplement crcp_functional {tag,data}{h1,l1,h2,l2} (p, q) = _crcp_functional(p,
   | ck_bad of (bytes, bytes, bytes)    (* the checksum is wrong *)
 
 #pub dataprop EQCK(ckres, ckres) =
-  | {r:ckres} EQCK_refl(r, r)
+  | {result:ckres} EQCK_refl(result, result)
 
-(* LENOK(lenb, n): the 4 length bytes say n, under 2 to the 20 *)
+(* LENOK(lenb, size): the 4 length bytes say size, under 2 to the 20 *)
 #pub dataprop LENOK(bytes, int) =
-  | {b0,b1,b2:int | 0 <= b0; b0 < 256; 0 <= b1; b1 < 256; 0 <= b2; b2 < 16}{n:nat}
-    LENOK_mk(bcons(b0, bcons(b1, bcons(b2, bcons(0, bnil())))), n)
-    of LE(3, n, bcons(b0, bcons(b1, bcons(b2, bnil()))))
+  | {length_low,length_middle,length_high:int | 0 <= length_low; length_low < 256; 0 <= length_middle; length_middle < 256; 0 <= length_high; length_high < 16}{size:nat}
+    LENOK_mk(bcons(length_low, bcons(length_middle, bcons(length_high, bcons(0, bnil())))), size)
+    of LE(3, size, bcons(length_low, bcons(length_middle, bcons(length_high, bnil()))))
 
 (* LENBIG(lenb): the 4 length bytes say 2 to the 20 or more *)
 #pub dataprop LENBIG(bytes) =
-  | {b0,b1,b2,b3:int | 0 <= b0; b0 < 256; 0 <= b1; b1 < 256; 0 <= b2; b2 < 256; 0 <= b3; b3 < 256; b3 > 0 || b2 >= 16}
-    LENBIG_mk(bcons(b0, bcons(b1, bcons(b2, bcons(b3, bnil())))))
+  | {length_low,length_middle,length_high,length_top:int | 0 <= length_low; length_low < 256; 0 <= length_middle; length_middle < 256; 0 <= length_high; length_high < 256; 0 <= length_top; length_top < 256; length_top > 0 || length_high >= 16}
+    LENBIG_mk(bcons(length_low, bcons(length_middle, bcons(length_high, bcons(length_top, bnil())))))
 
-(* CRCB(crcb, hi, lo): the 4 bytes of a checksum *)
+(* CRCB(crcb, crc_high, crc_low): the 4 bytes of a checksum *)
 #pub dataprop CRCB(bytes, int, int) =
-  | {c0,c1,c2,c3:int | 0 <= c0; c0 < 256; 0 <= c1; c1 < 256; 0 <= c2; c2 < 256; 0 <= c3; c3 < 256}{hi,lo:nat}
-    CRCB_mk(bcons(c0, bcons(c1, bcons(c2, bcons(c3, bnil())))), hi, lo)
-    of (LE(2, lo, bcons(c0, bcons(c1, bnil()))), LE(2, hi, bcons(c2, bcons(c3, bnil()))))
+  | {crc_low_byte,crc_low_upper,crc_high_byte,crc_high_upper:int | 0 <= crc_low_byte; crc_low_byte < 256; 0 <= crc_low_upper; crc_low_upper < 256; 0 <= crc_high_byte; crc_high_byte < 256; 0 <= crc_high_upper; crc_high_upper < 256}{crc_high,crc_low:nat}
+    CRCB_mk(bcons(crc_low_byte, bcons(crc_low_upper, bcons(crc_high_byte, bcons(crc_high_upper, bnil())))), crc_high, crc_low)
+    of (LE(2, crc_low, bcons(crc_low_byte, bcons(crc_low_upper, bnil()))), LE(2, crc_high, bcons(crc_high_byte, bcons(crc_high_upper, bnil()))))
 
-(* CKD(tag, data, r, res): the checksum is read from r *)
+(* CKD(tag, data, from_crc, result): the checksum is read from from_crc *)
 #pub dataprop CKD(bytes, bytes, bytes, ckres) =
-  | {tag,data,r:bytes} CKD_short(tag, data, r, ck_trunc()) of SHORT(4, r)
-  | {tag,data,r,crcb,rest:bytes}{hi,lo:nat}
-    CKD_ok(tag, data, r, ck_ok(tag, data, rest)) of (TAKE(4, r, crcb, rest), CRCB(crcb, hi, lo), CRCP(tag, data, hi, lo))
-  | {tag,data,r,crcb,rest:bytes}{hi,lo,h,l:nat | hi != h || lo != l}
-    CKD_bad(tag, data, r, ck_bad(tag, data, rest)) of (TAKE(4, r, crcb, rest), CRCB(crcb, hi, lo), CRCP(tag, data, h, l))
+  | {tag,data,from_crc:bytes} CKD_short(tag, data, from_crc, ck_trunc()) of SHORT(4, from_crc)
+  | {tag,data,from_crc,crcb,rest:bytes}{stored_high,stored_low:nat}
+    CKD_ok(tag, data, from_crc, ck_ok(tag, data, rest)) of (TAKE(4, from_crc, crcb, rest), CRCB(crcb, stored_high, stored_low), CRCP(tag, data, stored_high, stored_low))
+  | {tag,data,from_crc,crcb,rest:bytes}{stored_high,stored_low,computed_high,computed_low:nat | stored_high != computed_high || stored_low != computed_low}
+    CKD_bad(tag, data, from_crc, ck_bad(tag, data, rest)) of (TAKE(4, from_crc, crcb, rest), CRCB(crcb, stored_high, stored_low), CRCP(tag, data, computed_high, computed_low))
 
-#pub prfun falsep_eqck {a,b:ckres} (FALSEP()): EQCK(a, b)
+#pub prfun falsep_eqck {first_result,second_result:ckres} (FALSEP()): EQCK(first_result, second_result)
 
-primplement falsep_eqck {a,b} (f) = case+ f of FALSEP_mk() =/=> ()
+primplement falsep_eqck {first_result,second_result} (falsity) = case+ falsity of FALSEP_mk() =/=> ()
 
-#pub prfun ckd_functional {tag,data,r:bytes}{a,b:ckres} (CKD(tag, data, r, a), CKD(tag, data, r, b)): EQCK(a, b)
+#pub prfun ckd_functional {tag,data,from_crc:bytes}{first_result,second_result:ckres} (CKD(tag, data, from_crc, first_result), CKD(tag, data, from_crc, second_result)): EQCK(first_result, second_result)
 
-prfn _ckd_functional {tag,data,r:bytes}{a,b:ckres} (p: CKD(tag, data, r, a), q: CKD(tag, data, r, b)): EQCK(a, b) =
-  case+ p of
-  | CKD_short(ps) =>
-    (case+ q of
+prfn _ckd_functional {tag,data,from_crc:bytes}{first_result,second_result:ckres} (first: CKD(tag, data, from_crc, first_result), second: CKD(tag, data, from_crc, second_result)): EQCK(first_result, second_result) =
+  case+ first of
+  | CKD_short(first_short) =>
+    (case+ second of
      | CKD_short(_) => EQCK_refl()
-     | CKD_ok(qt, _, _) => falsep_eqck(take_not_short(qt, ps))
-     | CKD_bad(qt, _, _) => falsep_eqck(take_not_short(qt, ps)))
-  | CKD_ok(pt, pc, pk) =>
-    (case+ q of
-     | CKD_short(qs) => falsep_eqck(take_not_short(pt, qs))
-     | CKD_ok(qt, qc, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
+     | CKD_ok(second_take, _, _) => falsep_eqck(take_not_short(second_take, first_short))
+     | CKD_bad(second_take, _, _) => falsep_eqck(take_not_short(second_take, first_short)))
+  | CKD_ok(first_take, first_crcb, first_crcp) =>
+    (case+ second of
+     | CKD_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
+     | CKD_ok(second_take, second_crcb, second_crcp) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
        in EQCK_refl() end
-     | CKD_bad(qt, qc, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-         prval CRCB_mk(pl, ph) = pc
-         prval CRCB_mk(ql, qh) = qc
-         prval EQI_refl() = le_number_functional(pl, ql)
-         prval EQI_refl() = le_number_functional(ph, qh)
-         prval () = crcp_functional(pk, qk)
+     | CKD_bad(second_take, second_crcb, second_crcp) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+         prval CRCB_mk(first_low_le, first_high_le) = first_crcb
+         prval CRCB_mk(second_low_le, second_high_le) = second_crcb
+         prval EQI_refl() = le_number_functional(first_low_le, second_low_le)
+         prval EQI_refl() = le_number_functional(first_high_le, second_high_le)
+         prval () = crcp_functional(first_crcp, second_crcp)
        in falsep_eqck(contradiction{0}()) end)
-  | CKD_bad(pt, pc, pk) =>
-    (case+ q of
-     | CKD_short(qs) => falsep_eqck(take_not_short(pt, qs))
-     | CKD_ok(qt, qc, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-         prval CRCB_mk(pl, ph) = pc
-         prval CRCB_mk(ql, qh) = qc
-         prval EQI_refl() = le_number_functional(pl, ql)
-         prval EQI_refl() = le_number_functional(ph, qh)
-         prval () = crcp_functional(pk, qk)
+  | CKD_bad(first_take, first_crcb, first_crcp) =>
+    (case+ second of
+     | CKD_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
+     | CKD_ok(second_take, second_crcb, second_crcp) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+         prval CRCB_mk(first_low_le, first_high_le) = first_crcb
+         prval CRCB_mk(second_low_le, second_high_le) = second_crcb
+         prval EQI_refl() = le_number_functional(first_low_le, second_low_le)
+         prval EQI_refl() = le_number_functional(first_high_le, second_high_le)
+         prval () = crcp_functional(first_crcp, second_crcp)
        in falsep_eqck(contradiction{0}()) end
-     | CKD_bad(qt, _, _) => let
-         prval SAME2_refl() = take_functional(pt, qt)
+     | CKD_bad(second_take, _, _) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
        in EQCK_refl() end)
 
-primplement ckd_functional {tag,data,r}{a,b} (p, q) = _ckd_functional(p, q)
+primplement ckd_functional {tag,data,from_crc}{first_result,second_result} (first, second) = _ckd_functional(first, second)
 
 
-(* CKC(n, tag, r, res): the n bytes of data are read from r *)
+(* CKC(data_size, tag, from_data, result): the data_size bytes of data are read from from_data *)
 #pub dataprop CKC(int, bytes, bytes, ckres) =
-  | {n:nat}{tag,r:bytes} CKC_short(n, tag, r, ck_trunc()) of SHORT(n, r)
-  | {n:nat}{tag,r,data,r3:bytes}{res:ckres} CKC_data(n, tag, r, res) of (TAKE(n, r, data, r3), CKD(tag, data, r3, res))
+  | {data_size:nat}{tag,from_data:bytes} CKC_short(data_size, tag, from_data, ck_trunc()) of SHORT(data_size, from_data)
+  | {data_size:nat}{tag,from_data,data,after_data:bytes}{result:ckres} CKC_data(data_size, tag, from_data, result) of (TAKE(data_size, from_data, data, after_data), CKD(tag, data, after_data, result))
 
-#pub prfun ckc_functional {n:nat}{tag,r:bytes}{a,b:ckres} (CKC(n, tag, r, a), CKC(n, tag, r, b)): EQCK(a, b)
+#pub prfun ckc_functional {data_size:nat}{tag,from_data:bytes}{first_result,second_result:ckres} (CKC(data_size, tag, from_data, first_result), CKC(data_size, tag, from_data, second_result)): EQCK(first_result, second_result)
 
-prfn _ckc_functional {n:nat}{tag,r:bytes}{a,b:ckres} (p: CKC(n, tag, r, a), q: CKC(n, tag, r, b)): EQCK(a, b) =
-  case+ p of
-  | CKC_short(ps) =>
-    (case+ q of
+prfn _ckc_functional {data_size:nat}{tag,from_data:bytes}{first_result,second_result:ckres} (first: CKC(data_size, tag, from_data, first_result), second: CKC(data_size, tag, from_data, second_result)): EQCK(first_result, second_result) =
+  case+ first of
+  | CKC_short(first_short) =>
+    (case+ second of
      | CKC_short(_) => EQCK_refl()
-     | CKC_data(qt, _) => falsep_eqck(take_not_short(qt, ps)))
-  | CKC_data(pt, pk) =>
-    (case+ q of
-     | CKC_short(qs) => falsep_eqck(take_not_short(pt, qs))
-     | CKC_data(qt, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-       in ckd_functional(pk, qk) end)
+     | CKC_data(second_take, _) => falsep_eqck(take_not_short(second_take, first_short)))
+  | CKC_data(first_take, first_checksum) =>
+    (case+ second of
+     | CKC_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
+     | CKC_data(second_take, second_checksum) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+       in ckd_functional(first_checksum, second_checksum) end)
 
-primplement ckc_functional {n}{tag,r}{a,b} (p, q) = _ckc_functional(p, q)
+primplement ckc_functional {data_size}{tag,from_data}{first_result,second_result} (first, second) = _ckc_functional(first, second)
 
-(* CKB(n, r, res): the tag is read from r, for a chunk of n bytes of data *)
+(* CKB(data_size, from_tag, result): the tag is read from from_tag, for a chunk of data_size bytes of data *)
 #pub dataprop CKB(int, bytes, ckres) =
-  | {n:nat}{r:bytes} CKB_short(n, r, ck_trunc()) of SHORT(4, r)
-  | {n:nat}{r,tag,r2:bytes}{res:ckres} CKB_tag(n, r, res) of (TAKE(4, r, tag, r2), CKC(n, tag, r2, res))
+  | {data_size:nat}{from_tag:bytes} CKB_short(data_size, from_tag, ck_trunc()) of SHORT(4, from_tag)
+  | {data_size:nat}{from_tag,tag,after_tag:bytes}{result:ckres} CKB_tag(data_size, from_tag, result) of (TAKE(4, from_tag, tag, after_tag), CKC(data_size, tag, after_tag, result))
 
-#pub prfun ckb_functional {n:nat}{r:bytes}{a,b:ckres} (CKB(n, r, a), CKB(n, r, b)): EQCK(a, b)
+#pub prfun ckb_functional {data_size:nat}{from_tag:bytes}{first_result,second_result:ckres} (CKB(data_size, from_tag, first_result), CKB(data_size, from_tag, second_result)): EQCK(first_result, second_result)
 
-prfn _ckb_functional {n:nat}{r:bytes}{a,b:ckres} (p: CKB(n, r, a), q: CKB(n, r, b)): EQCK(a, b) =
-  case+ p of
-  | CKB_short(ps) =>
-    (case+ q of
+prfn _ckb_functional {data_size:nat}{from_tag:bytes}{first_result,second_result:ckres} (first: CKB(data_size, from_tag, first_result), second: CKB(data_size, from_tag, second_result)): EQCK(first_result, second_result) =
+  case+ first of
+  | CKB_short(first_short) =>
+    (case+ second of
      | CKB_short(_) => EQCK_refl()
-     | CKB_tag(qt, _) => falsep_eqck(take_not_short(qt, ps)))
-  | CKB_tag(pt, pk) =>
-    (case+ q of
-     | CKB_short(qs) => falsep_eqck(take_not_short(pt, qs))
-     | CKB_tag(qt, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-       in ckc_functional(pk, qk) end)
+     | CKB_tag(second_take, _) => falsep_eqck(take_not_short(second_take, first_short)))
+  | CKB_tag(first_take, first_body) =>
+    (case+ second of
+     | CKB_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
+     | CKB_tag(second_take, second_body) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+       in ckc_functional(first_body, second_body) end)
 
-primplement ckb_functional {n}{r}{a,b} (p, q) = _ckb_functional(p, q)
+primplement ckb_functional {data_size}{from_tag}{first_result,second_result} (first, second) = _ckb_functional(first, second)
 
 (* a length is not both small and big *)
-#pub prfun lenok_not_big {lenb:bytes}{n:nat} (LENOK(lenb, n), LENBIG(lenb)): FALSEP()
+#pub prfun lenok_not_big {lenb:bytes}{size:nat} (LENOK(lenb, size), LENBIG(lenb)): FALSEP()
 
-primplement lenok_not_big {lenb}{n} (p, q) =
-  case+ p of
-  | LENOK_mk(_) => (case+ q of LENBIG_mk() =/=> ())
+primplement lenok_not_big {lenb}{size} (small, big) =
+  case+ small of
+  | LENOK_mk(_) => (case+ big of LENBIG_mk() =/=> ())
 
-(* CK(bs, res): the chunk at the start of bs comes to res *)
+(* CK(octets, result): the chunk at the start of octets comes to result *)
 #pub dataprop CK(bytes, ckres) =
-  | {bs:bytes} CK_short(bs, ck_trunc()) of SHORT(4, bs)
-  | {bs,lenb,r1:bytes} CK_big(bs, ck_big()) of (TAKE(4, bs, lenb, r1), LENBIG(lenb))
-  | {bs,lenb,r1:bytes}{n:nat}{res:ckres} CK_len(bs, res) of (TAKE(4, bs, lenb, r1), LENOK(lenb, n), CKB(n, r1, res))
+  | {octets:bytes} CK_short(octets, ck_trunc()) of SHORT(4, octets)
+  | {octets,lenb,after_length:bytes} CK_big(octets, ck_big()) of (TAKE(4, octets, lenb, after_length), LENBIG(lenb))
+  | {octets,lenb,after_length:bytes}{size:nat}{result:ckres} CK_len(octets, result) of (TAKE(4, octets, lenb, after_length), LENOK(lenb, size), CKB(size, after_length, result))
 
-#pub prfun ck_functional {bs:bytes}{a,b:ckres} (CK(bs, a), CK(bs, b)): EQCK(a, b)
+#pub prfun ck_functional {octets:bytes}{first_result,second_result:ckres} (CK(octets, first_result), CK(octets, second_result)): EQCK(first_result, second_result)
 
-prfn _ck_functional {bs:bytes}{a,b:ckres} (p: CK(bs, a), q: CK(bs, b)): EQCK(a, b) =
-  case+ p of
-  | CK_short(ps) =>
-    (case+ q of
+prfn _ck_functional {octets:bytes}{first_result,second_result:ckres} (first: CK(octets, first_result), second: CK(octets, second_result)): EQCK(first_result, second_result) =
+  case+ first of
+  | CK_short(first_short) =>
+    (case+ second of
      | CK_short(_) => EQCK_refl()
-     | CK_big(qt, _) => falsep_eqck(take_not_short(qt, ps))
-     | CK_len(qt, _, _) => falsep_eqck(take_not_short(qt, ps)))
-  | CK_big(pt, pl) =>
-    (case+ q of
-     | CK_short(qs) => falsep_eqck(take_not_short(pt, qs))
+     | CK_big(second_take, _) => falsep_eqck(take_not_short(second_take, first_short))
+     | CK_len(second_take, _, _) => falsep_eqck(take_not_short(second_take, first_short)))
+  | CK_big(first_take, first_length) =>
+    (case+ second of
+     | CK_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
      | CK_big(_, _) => EQCK_refl()
-     | CK_len(qt, ql, _) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-       in falsep_eqck(lenok_not_big(ql, pl)) end)
-  | CK_len(pt, pl, pk) =>
-    (case+ q of
-     | CK_short(qs) => falsep_eqck(take_not_short(pt, qs))
-     | CK_big(qt, ql) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-       in falsep_eqck(lenok_not_big(pl, ql)) end
-     | CK_len(qt, ql, qk) => let
-         prval SAME2_refl() = take_functional(pt, qt)
-         prval LENOK_mk(pn) = pl
-         prval LENOK_mk(qn) = ql
-         prval EQI_refl() = le_number_functional(pn, qn)
-       in ckb_functional(pk, qk) end)
+     | CK_len(second_take, second_length, _) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+       in falsep_eqck(lenok_not_big(second_length, first_length)) end)
+  | CK_len(first_take, first_length, first_tag_read) =>
+    (case+ second of
+     | CK_short(second_short) => falsep_eqck(take_not_short(first_take, second_short))
+     | CK_big(second_take, second_length) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+       in falsep_eqck(lenok_not_big(first_length, second_length)) end
+     | CK_len(second_take, second_length, second_tag_read) => let
+         prval SAME2_refl() = take_functional(first_take, second_take)
+         prval LENOK_mk(first_size_le) = first_length
+         prval LENOK_mk(second_size_le) = second_length
+         prval EQI_refl() = le_number_functional(first_size_le, second_size_le)
+       in ckb_functional(first_tag_read, second_tag_read) end)
 
-primplement ck_functional {bs}{a,b} (p, q) = _ck_functional(p, q)
+primplement ck_functional {octets}{first_result,second_result} (first, second) = _ck_functional(first, second)
 
 
 (* the 4 length bytes are 4 long *)
-#pub prfun lenok_len {lenb:bytes}{n:nat} (LENOK(lenb, n)): LEN(lenb, 4)
+#pub prfun lenok_len {lenb:bytes}{size:nat} (LENOK(lenb, size)): LEN(lenb, 4)
 
-primplement lenok_len {lenb}{n} (p) =
-  case+ p of LENOK_mk(_) => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
+primplement lenok_len {lenb}{size} (lenok) =
+  case+ lenok of LENOK_mk(_) => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
 
 (* and so are the 4 checksum bytes *)
-#pub prfun crcb_len {crcb:bytes}{hi,lo:nat} (CRCB(crcb, hi, lo)): LEN(crcb, 4)
+#pub prfun crcb_len {crcb:bytes}{crc_high,crc_low:nat} (CRCB(crcb, crc_high, crc_low)): LEN(crcb, 4)
 
-primplement crcb_len {crcb}{hi,lo} (p) =
-  case+ p of CRCB_mk(_, _) => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
+primplement crcb_len {crcb}{crc_high,crc_low} (crcb_form) =
+  case+ crcb_form of CRCB_mk(_, _) => LEN_cons(LEN_cons(LEN_cons(LEN_cons(LEN_nil()))))
 
 (* CKENC(tag, data, out): out is the chunk of the tag and the data: the
    length of the data, the tag, the data, their checksum *)
 #pub dataprop CKENC(bytes, bytes, bytes) =
-  | {n:nat}{tag,data,lenb,crcb,x2,x3,out:bytes}{hi,lo:nat}
+  | {data_size:nat}{tag,data,lenb,crcb,data_crc,tag_data_crc,out:bytes}{crc_high,crc_low:nat}
     CKENC_mk(tag, data, out)
-    of (LEN(tag, 4), LEN(data, n), LENOK(lenb, n), CRCB(crcb, hi, lo), CRCP(tag, data, hi, lo),
-        APPEND(data, crcb, x2), APPEND(tag, x2, x3), APPEND(lenb, x3, out))
+    of (LEN(tag, 4), LEN(data, data_size), LENOK(lenb, data_size), CRCB(crcb, crc_high, crc_low), CRCP(tag, data, crc_high, crc_low),
+        APPEND(data, crcb, data_crc), APPEND(tag, data_crc, tag_data_crc), APPEND(lenb, tag_data_crc, out))
 
 (* a chunk written, followed by anything, is read back as it was *)
-#pub prfun ckenc_ck {tag,data,c,rest,bs:bytes} (CKENC(tag, data, c), APPEND(c, rest, bs))
-  : CK(bs, ck_ok(tag, data, rest))
+#pub prfun ckenc_ck {tag,data,chunk,rest,octets:bytes} (CKENC(tag, data, chunk), APPEND(chunk, rest, octets))
+  : CK(octets, ck_ok(tag, data, rest))
 
-primplement ckenc_ck {tag,data,c,rest,bs} (e, whole) =
-  case+ e of
-  | CKENC_mk(lt, ld, lo, cb, cp, a1, a2, a3) => let
-      prval (a3r, a3b) = append_assoc(a3, whole)
-      prval (a2r, a2b) = append_assoc(a2, a3r)
-      prval (a1r, a1b) = append_assoc(a1, a2r)
-      prval t1 = append_take(a3b, lenok_len(lo))
-      prval t2 = append_take(a2b, lt)
-      prval t3 = append_take(a1b, ld)
-      prval t4 = append_take(a1r, crcb_len(cb))
-    in CK_len(t1, lo, CKB_tag(t2, CKC_data(t3, CKD_ok(t4, cb, cp)))) end
+primplement ckenc_ck {tag,data,chunk,rest,octets} (encoded, whole) =
+  case+ encoded of
+  | CKENC_mk(tag_len, data_len, length_ok, crc_form, crc_proof, data_crc_app, tag_data_app, length_app) => let
+      prval (tail_after_length, whole_length) = append_assoc(length_app, whole)
+      prval (tail_after_tag, whole_tag) = append_assoc(tag_data_app, tail_after_length)
+      prval (tail_after_data, whole_data) = append_assoc(data_crc_app, tail_after_tag)
+      prval length_take = append_take(whole_length, lenok_len(length_ok))
+      prval tag_take = append_take(whole_tag, tag_len)
+      prval data_take = append_take(whole_data, data_len)
+      prval crc_take = append_take(tail_after_data, crcb_len(crc_form))
+    in CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_ok(crc_take, crc_form, crc_proof)))) end
 
 (* and a chunk read is a chunk written *)
-#pub prfun ck_ckenc {tag,data,rest,bs:bytes} (CK(bs, ck_ok(tag, data, rest)))
-  : [c:bytes] (CKENC(tag, data, c), APPEND(c, rest, bs))
+#pub prfun ck_ckenc {tag,data,rest,octets:bytes} (CK(octets, ck_ok(tag, data, rest)))
+  : [chunk:bytes] (CKENC(tag, data, chunk), APPEND(chunk, rest, octets))
 
-primplement ck_ckenc {tag,data,rest,bs} (k) =
-  case+ k of
-  | CK_len(t1, lo, CKB_tag(t2, CKC_data(t3, CKD_ok(t4, cb, cp)))) => let
-      prval (b1, lb) = take_append(t1)
-      prval (b2, lt) = take_append(t2)
-      prval (b3, ld) = take_append(t3)
-      prval (b4, lc) = take_append(t4)
-      prval (e1, e2) = append_assoc_rev(b4, b3)
-      prval (f1, f2) = append_assoc_rev(e2, b2)
-      prval (g1, g2) = append_assoc_rev(f2, b1)
-    in (CKENC_mk(lt, ld, lo, cb, cp, e1, f1, g1), g2) end
+primplement ck_ckenc {tag,data,rest,octets} (read_proof) =
+  case+ read_proof of
+  | CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_ok(crc_take, crc_form, crc_proof)))) => let
+      prval (length_app, length_len) = take_append(length_take)
+      prval (tag_app, tag_len) = take_append(tag_take)
+      prval (data_app, data_len) = take_append(data_take)
+      prval (crc_app, crc_len) = take_append(crc_take)
+      prval (data_crc_app, data_crc_rest) = append_assoc_rev(crc_app, data_app)
+      prval (tag_data_app, tag_data_rest) = append_assoc_rev(data_crc_rest, tag_app)
+      prval (chunk_app, whole_app) = append_assoc_rev(tag_data_rest, length_app)
+    in (CKENC_mk(tag_len, data_len, length_ok, crc_form, crc_proof, data_crc_app, tag_data_app, chunk_app), whole_app) end
 
 
 (* A chunk read, with what it holds *)
 #pub datavtype ckread(ckres, int) =
-  | {n:nat} CKR_trunc(ck_trunc(), n)
-  | {n:nat} CKR_big(ck_big(), n)
-  | {n:nat}{tag,data,rest:bytes}{nd,nr:nat | nr < n; nd < 1048576}
-    CKR_ok(ck_ok(tag, data, rest), n) of (blist(tag, 4), blist(data, nd), blist(rest, nr))
-  | {n:nat}{tag,data,rest:bytes}{nd,nr:nat | nr < n; nd < 1048576}
-    CKR_bad(ck_bad(tag, data, rest), n) of (blist(tag, 4), blist(data, nd), blist(rest, nr))
+  | {list_len:nat} CKR_trunc(ck_trunc(), list_len)
+  | {list_len:nat} CKR_big(ck_big(), list_len)
+  | {list_len:nat}{tag,data,rest:bytes}{data_size,rest_size:nat | rest_size < list_len; data_size < 1048576}
+    CKR_ok(ck_ok(tag, data, rest), list_len) of (blist(tag, 4), blist(data, data_size), blist(rest, rest_size))
+  | {list_len:nat}{tag,data,rest:bytes}{data_size,rest_size:nat | rest_size < list_len; data_size < 1048576}
+    CKR_bad(ck_bad(tag, data, rest), list_len) of (blist(tag, 4), blist(data, data_size), blist(rest, rest_size))
 
 (* The chunk at the start of a list, with the proof of what it comes to *)
-#pub fun chunk_read {bs:bytes}{n:nat} (list: blist(bs, n)): [res:ckres] (CK(bs, res) | ckread(res, n))
+#pub fun chunk_read {octets:bytes}{list_len:nat} (list: blist(octets, list_len)): [result:ckres] (CK(octets, result) | ckread(result, list_len))
 
-implement chunk_read {bs}{n} (list) =
+implement chunk_read {octets}{list_len} (list) =
   case+ blist_take(4, list) of
-  | ~TakeShort(s | ) => (CK_short(s) | CKR_trunc())
-  | ~TakeOk(t1 | length_bytes, after_length) =>
+  | ~TakeShort(short | ) => (CK_short(short) | CKR_trunc())
+  | ~TakeOk(length_take | length_bytes, after_length) =>
     (case+ length_bytes of
-     | ~blist_cons(b0, ~blist_cons(b1, ~blist_cons(b2, ~blist_cons(b3, ~blist_nil())))) =>
-       if b3 = 0 then
-         (if b2 < 16 then let
-            val size = b0 + 256 * (b1 + 256 * b2)
-            prval ok = LENOK_mk(LE_cons(LE_cons(LE_cons(LE_nil()))))
+     | ~blist_cons(length_low, ~blist_cons(length_middle, ~blist_cons(length_high, ~blist_cons(length_top, ~blist_nil())))) =>
+       if length_top = 0 then
+         (if length_high < 16 then let
+            val size = length_low + 256 * (length_middle + 256 * length_high)
+            prval length_ok = LENOK_mk(LE_cons(LE_cons(LE_cons(LE_nil()))))
           in
             case+ blist_take(4, after_length) of
-            | ~TakeShort(s | ) => (CK_len(t1, ok, CKB_short(s)) | CKR_trunc())
-            | ~TakeOk(t2 | tag, after_tag) =>
+            | ~TakeShort(short | ) => (CK_len(length_take, length_ok, CKB_short(short)) | CKR_trunc())
+            | ~TakeOk(tag_take | tag, after_tag) =>
               (case+ blist_take(size, after_tag) of
-               | ~TakeShort(s | ) => let val () = blist_free(tag) in (CK_len(t1, ok, CKB_tag(t2, CKC_short(s))) | CKR_trunc()) end
-               | ~TakeOk(t3 | data, after_data) =>
+               | ~TakeShort(short | ) => let val () = blist_free(tag) in (CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_short(short))) | CKR_trunc()) end
+               | ~TakeOk(data_take | data, after_data) =>
                  (case+ blist_take(4, after_data) of
-                  | ~TakeShort(s | ) => let val () = blist_free(tag) val () = blist_free(data) in (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_short(s)))) | CKR_trunc()) end
-                  | ~TakeOk(t4 | crc_bytes, rest) =>
+                  | ~TakeShort(short | ) => let val () = blist_free(tag) val () = blist_free(data) in (CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_short(short)))) | CKR_trunc()) end
+                  | ~TakeOk(crc_take | crc_bytes, rest) =>
                     (case+ crc_bytes of
-                     | ~blist_cons(c0, ~blist_cons(c1, ~blist_cons(c2, ~blist_cons(c3, ~blist_nil())))) => let
-                      prval (_, tag_len) = take_append(t2)
-                      prval (_, data_len) = take_append(t3)
-                      val (first | h0, l0) = crcfrom(65535, 65535, tag)
-                      val (second | h1, l1) = crcfrom(h0, l0, data)
-                      prval crc = CRCP_mk(tag_len, data_len, first, second)
-                      val stored_lo = c0 + 256 * c1
-                      val stored_hi = c2 + 256 * c3
+                     | ~blist_cons(crc_low_byte, ~blist_cons(crc_low_upper, ~blist_cons(crc_high_byte, ~blist_cons(crc_high_upper, ~blist_nil())))) => let
+                      prval (_, tag_len) = take_append(tag_take)
+                      prval (_, data_len) = take_append(data_take)
+                      val (first | tag_high, tag_low) = crcfrom(65535, 65535, tag)
+                      val (second | data_high, data_low) = crcfrom(tag_high, tag_low, data)
+                      prval crc_proof = CRCP_mk(tag_len, data_len, first, second)
+                      val stored_low = crc_low_byte + 256 * crc_low_upper
+                      val stored_high = crc_high_byte + 256 * crc_high_upper
                       prval stored = CRCB_mk(LE_cons(LE_cons(LE_nil())), LE_cons(LE_cons(LE_nil())))
                     in
-                      if stored_hi = 65535 - h1 then
-                        (if stored_lo = 65535 - l1 then
-                           (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_ok(t4, stored, crc)))) | CKR_ok(tag, data, rest))
+                      if stored_high = 65535 - data_high then
+                        (if stored_low = 65535 - data_low then
+                           (CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_ok(crc_take, stored, crc_proof)))) | CKR_ok(tag, data, rest))
                          else
-                           (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_bad(t4, stored, crc)))) | CKR_bad(tag, data, rest)))
+                           (CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_bad(crc_take, stored, crc_proof)))) | CKR_bad(tag, data, rest)))
                       else
-                        (CK_len(t1, ok, CKB_tag(t2, CKC_data(t3, CKD_bad(t4, stored, crc)))) | CKR_bad(tag, data, rest))
+                        (CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_bad(crc_take, stored, crc_proof)))) | CKR_bad(tag, data, rest))
                     end)))
           end
           else let
             val () = blist_free(after_length)
-          in (CK_big(t1, LENBIG_mk()) | CKR_big()) end)
+          in (CK_big(length_take, LENBIG_mk()) | CKR_big()) end)
        else let
          val () = blist_free(after_length)
-       in (CK_big(t1, LENBIG_mk()) | CKR_big()) end)
+       in (CK_big(length_take, LENBIG_mk()) | CKR_big()) end)
 
 
 (* The chunk of a tag and some data, with the proof that it is the one *)
-#pub fun chunk_write {tag,data:bytes}{nd:nat | nd < 1048576} (tag: !blist(tag, 4), data: !blist(data, nd))
-  : [out:bytes] (CKENC(tag, data, out) | blist(out, nd + 12))
+#pub fun chunk_write {tag,data:bytes}{data_size:nat | data_size < 1048576} (tag: !blist(tag, 4), data: !blist(data, data_size))
+  : [out:bytes] (CKENC(tag, data, out) | blist(out, data_size + 12))
 
-implement chunk_write {tag,data}{nd} (tag, data) = let
+implement chunk_write {tag,data}{data_size} (tag, data) = let
   val (tag_len | _) = blist_len(tag)
   val (data_len | size) = blist_len(data)
-  val q0 = size / 256
-  val b0 = size - 256 * q0
-  val q1 = q0 / 256
-  val b1 = q0 - 256 * q1
-  val b2 = q1
-  val length_bytes = blist_cons(b0, blist_cons(b1, blist_cons(b2, blist_cons(0, blist_nil()))))
-  prval ok = LENOK_mk(LE_cons(LE_cons(LE_cons(LE_nil()))))
-  val (first | h0, l0) = crcfrom(65535, 65535, tag)
-  val (second | h1, l1) = crcfrom(h0, l0, data)
-  prval crc = CRCP_mk(tag_len, data_len, first, second)
-  val hi = 65535 - h1
-  val lo = 65535 - l1
-  val r0 = lo / 256
-  val c0 = lo - 256 * r0
-  val r1 = hi / 256
-  val c2 = hi - 256 * r1
-  val crc_bytes = blist_cons(c0, blist_cons(r0, blist_cons(c2, blist_cons(r1, blist_nil()))))
+  val size_upper = size / 256
+  val length_low = size - 256 * size_upper
+  val size_top = size_upper / 256
+  val length_middle = size_upper - 256 * size_top
+  val length_high = size_top
+  val length_bytes = blist_cons(length_low, blist_cons(length_middle, blist_cons(length_high, blist_cons(0, blist_nil()))))
+  prval length_ok = LENOK_mk(LE_cons(LE_cons(LE_cons(LE_nil()))))
+  val (first | tag_high, tag_low) = crcfrom(65535, 65535, tag)
+  val (second | data_high, data_low) = crcfrom(tag_high, tag_low, data)
+  prval crc_proof = CRCP_mk(tag_len, data_len, first, second)
+  val crc_high = 65535 - data_high
+  val crc_low = 65535 - data_low
+  val crc_low_upper = crc_low / 256
+  val crc_low_byte = crc_low - 256 * crc_low_upper
+  val crc_high_upper = crc_high / 256
+  val crc_high_byte = crc_high - 256 * crc_high_upper
+  val crc_bytes = blist_cons(crc_low_byte, blist_cons(crc_low_upper, blist_cons(crc_high_byte, blist_cons(crc_high_upper, blist_nil()))))
   prval stored = CRCB_mk(LE_cons(LE_cons(LE_nil())), LE_cons(LE_cons(LE_nil())))
-  val (a1 | after_data) = blist_append(blist_copy(data), crc_bytes)
-  val (a2 | after_tag) = blist_append(blist_copy(tag), after_data)
-  val (a3 | out) = blist_append(length_bytes, after_tag)
-in (CKENC_mk(tag_len, data_len, ok, stored, crc, a1, a2, a3) | out) end
+  val (data_crc_app | after_data) = blist_append(blist_copy(data), crc_bytes)
+  val (tag_data_app | after_tag) = blist_append(blist_copy(tag), after_data)
+  val (length_app | out) = blist_append(length_bytes, after_tag)
+in (CKENC_mk(tag_len, data_len, length_ok, stored, crc_proof, data_crc_app, tag_data_app, length_app) | out) end
 
 
 (* a chunk read, whole or with a wrong checksum, takes at least 12 bytes
    off the front *)
-#pub prfun ck_ok_consumes {tag,data,rest,bs:bytes} (CK(bs, ck_ok(tag, data, rest)))
-  : [c:bytes][k:nat | k >= 12] (APPEND(c, rest, bs), LEN(c, k))
+#pub prfun ck_ok_consumes {tag,data,rest,octets:bytes} (CK(octets, ck_ok(tag, data, rest)))
+  : [chunk:bytes][chunk_size:nat | chunk_size >= 12] (APPEND(chunk, rest, octets), LEN(chunk, chunk_size))
 
-primplement ck_ok_consumes {tag,data,rest,bs} (kk) = let
-  prval (e, whole) = ck_ckenc(kk)
+primplement ck_ok_consumes {tag,data,rest,octets} (read_proof) = let
+  prval (encoded, whole) = ck_ckenc(read_proof)
 in
-  case+ e of
-  | CKENC_mk(lt, ld, lo, cb, _, a1, a2, a3) => let
-      prval l1 = append_len(a1, ld, crcb_len(cb))
-      prval l2 = append_len(a2, lt, l1)
-      prval l3 = append_len(a3, lenok_len(lo), l2)
-    in (whole, l3) end
+  case+ encoded of
+  | CKENC_mk(tag_len, data_len, length_ok, crc_form, _, data_crc_app, tag_data_app, length_app) => let
+      prval data_crc_len = append_len(data_crc_app, data_len, crcb_len(crc_form))
+      prval tag_data_crc_len = append_len(tag_data_app, tag_len, data_crc_len)
+      prval chunk_len = append_len(length_app, lenok_len(length_ok), tag_data_crc_len)
+    in (whole, chunk_len) end
 end
 
-#pub prfun ck_bad_consumes {tag,data,rest,bs:bytes} (CK(bs, ck_bad(tag, data, rest)))
-  : [c:bytes][k:nat | k >= 12] (APPEND(c, rest, bs), LEN(c, k))
+#pub prfun ck_bad_consumes {tag,data,rest,octets:bytes} (CK(octets, ck_bad(tag, data, rest)))
+  : [chunk:bytes][chunk_size:nat | chunk_size >= 12] (APPEND(chunk, rest, octets), LEN(chunk, chunk_size))
 
-primplement ck_bad_consumes {tag,data,rest,bs} (kk) =
-  case+ kk of
-  | CK_len(t1, lo, CKB_tag(t2, CKC_data(t3, CKD_bad(t4, cb, _)))) => let
-      prval (b1, lb) = take_append(t1)
-      prval (b2, lt) = take_append(t2)
-      prval (b3, ld) = take_append(t3)
-      prval (b4, lc) = take_append(t4)
-      prval (e1, e2) = append_assoc_rev(b4, b3)
-      prval (f1, f2) = append_assoc_rev(e2, b2)
-      prval (g1, g2) = append_assoc_rev(f2, b1)
-      prval l1 = append_len(e1, ld, lc)
-      prval l2 = append_len(f1, lt, l1)
-      prval l3 = append_len(g1, lb, l2)
-    in (g2, l3) end
+primplement ck_bad_consumes {tag,data,rest,octets} (read_proof) =
+  case+ read_proof of
+  | CK_len(length_take, length_ok, CKB_tag(tag_take, CKC_data(data_take, CKD_bad(crc_take, crc_form, _)))) => let
+      prval (length_app, length_len) = take_append(length_take)
+      prval (tag_app, tag_len) = take_append(tag_take)
+      prval (data_app, data_len) = take_append(data_take)
+      prval (crc_app, crc_len) = take_append(crc_take)
+      prval (data_crc_app, data_crc_rest) = append_assoc_rev(crc_app, data_app)
+      prval (tag_data_app, tag_data_rest) = append_assoc_rev(data_crc_rest, tag_app)
+      prval (chunk_app, whole_app) = append_assoc_rev(tag_data_rest, length_app)
+      prval data_crc_len = append_len(data_crc_app, data_len, crc_len)
+      prval tag_data_crc_len = append_len(tag_data_app, tag_len, data_crc_len)
+      prval chunk_len = append_len(chunk_app, length_len, tag_data_crc_len)
+    in (whole_app, chunk_len) end
 
 
 (* a chunk written is at least 12 bytes long *)
-#pub prfun ckenc_len {tag,data,c:bytes} (CKENC(tag, data, c)): [k:nat | k >= 12] LEN(c, k)
+#pub prfun ckenc_len {tag,data,chunk:bytes} (CKENC(tag, data, chunk)): [chunk_size:nat | chunk_size >= 12] LEN(chunk, chunk_size)
 
-primplement ckenc_len {tag,data,c} (e) =
-  case+ e of
-  | CKENC_mk(lt, ld, lo, cb, _, a1, a2, a3) => let
-      prval l1 = append_len(a1, ld, crcb_len(cb))
-      prval l2 = append_len(a2, lt, l1)
-    in append_len(a3, lenok_len(lo), l2) end
+primplement ckenc_len {tag,data,chunk} (encoded) =
+  case+ encoded of
+  | CKENC_mk(tag_len, data_len, length_ok, crc_form, _, data_crc_app, tag_data_app, length_app) => let
+      prval data_crc_len = append_len(data_crc_app, data_len, crcb_len(crc_form))
+      prval tag_data_crc_len = append_len(tag_data_app, tag_len, data_crc_len)
+    in append_len(length_app, lenok_len(length_ok), tag_data_crc_len) end
 
 end
