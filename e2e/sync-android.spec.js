@@ -262,6 +262,8 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   // named, and the row says Off
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(a.page)).toHaveText('Sync is off.');
+  // the offer stays until it is dismissed (quire#364); made final, it gives the grant back
+  await a.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => a.google.asked('revokeAccess'), { timeout: 15000 })
     .toEqual([{ account: 'reader@example.com', scopes: [SCOPE] }]);
   expect(server.revoked).toEqual([]);
@@ -292,6 +294,8 @@ test('an authorization that names no account takes Drive\'s address, and with no
   await expect(status(a.page)).toHaveText(/^Last synced on /);
   expect(server.requests).toContain('GET /drive/v3/about?fields=user%2FemailAddress');
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
+  // the offer stays until it is dismissed (quire#364); made final, it gives the grant back
+  await a.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => a.google.asked('revokeAccess'), { timeout: 15000 })
     .toEqual([{ account: 'drive-reader@example.com', scopes: [SCOPE] }]);
   expect(server.revoked).toEqual([]);
@@ -307,6 +311,7 @@ test('an authorization that names no account takes Drive\'s address, and with no
   await chooseAndroid(b.page);
   await expect(status(b.page)).toHaveText(/^Last synced on /);
   await panel(b.page).getByRole('button', { name: 'Turn off' }).click();
+  await b.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => other.revoked, { timeout: 15000 }).toEqual(['token-1']);
   expect(b.google.asked('revokeAccess')).toEqual([]);
   expect(unexpected(b)).toEqual([]);
