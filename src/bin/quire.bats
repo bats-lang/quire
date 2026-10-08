@@ -359,13 +359,15 @@ fn _view_key (): [l:agz] $A.arr(byte, l, 4) = let
 in key end
 
 (* Keeps "view": the open book's key, or -1 for the library *)
-fn _view_save (book_key: int): void = let
-  val value = $A.alloc<byte>(4)
+fn _view_save (book_key: int, id_high: int, id_low: int): void = let
+  val value = $A.alloc<byte>(12)
   val () = $A.write_i32(value, 0, book_key)
+  val () = $A.write_i32(value, 4, id_high)
+  val () = $A.write_i32(value, 8, id_low)
   val @(value_frozen, value_bytes) = $A.freeze<byte>(value)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_view_key())
   (* ignored: a view not stored only opens the library next time *)
-  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 4, value_bytes, 4), llam(_) => ())
+  val () = $P.finish<$IDB.stored>($IDB.idb_put(key_bytes, 4, value_bytes, 12), llam(_) => ())
   val () = release_bytes(key_frozen, key_bytes)
 in release_bytes(value_frozen, value_bytes) end
 
@@ -462,7 +464,7 @@ fn _show_library (): void = let
   val () = aloud_stop()
   val () = ui_show("library", true)
   (* a reload now comes back here *)
-  val () = _view_save(~1)
+  val () = _view_save(~1, 0, 0)
   val () = reader_search_stop()
   val () = reader_stack_clear()
   (* a page turn under way ends with the book *)
@@ -639,7 +641,7 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
       val () = reader_ruby_forget()
       val () = reader_timer_start()
       (* a reload now comes back to this book *)
-      val () = _view_save(book_numbers.key)
+      val () = _view_save(book_numbers.key, book_numbers.id_high, book_numbers.id_low)
       val () = ui_text("chapter-title", "Loading...")
       (* no page is shown until this book's is: the last book's stays out
          of the indicator *)
@@ -685,14 +687,25 @@ fn _view_restore (): $P.promise(int, $P.Chained) = let
   val () = release_bytes(key_frozen, key_bytes)
 in
   $P.and_then<$IDB.lookup><int>(stored, llam(found) => let
-    val key = (case+ lookup_bytes(found) of
+    (* the book is found by its id: its key is only the number it was given
+       this session, and a library read again gives other numbers; a view
+       kept before the id was (4 bytes) is found by its key *)
+    val book = (case+ lookup_bytes(found) of
       | ~NothingStored() => ~1
       (* the library, as when none is kept: only where it opens is lost *)
       | ~StoredUnreadable() => ~1
       | ~StoredBytes(value_bytes, n) =>
         if n < 4 then let val () = $A.free<byte>(value_bytes) in ~1 end
-        else let val stored_key = _int32_at(value_bytes, 0) val () = $A.free<byte>(value_bytes) in stored_key end): Int
-    val book = (if key < 0 then ~1 else lib_index_of_key(key)): [index:int | index >= ~1] int index
+        else let
+          val stored_key = _int32_at(value_bytes, 0)
+          val stored_high = (if n >= 12 then _int32_at(value_bytes, 4) else 0): Int
+          val stored_low = (if n >= 12 then _int32_at(value_bytes, 8) else 0): Int
+          val () = $A.free<byte>(value_bytes)
+        in
+          if stored_key < 0 then ~1
+          else if n >= 12 then lib_index_of_id(stored_high, stored_low)
+          else lib_index_of_key(stored_key)
+        end): [index:int | index >= ~1] int index
     val readable = (if book < 0 then false else (case+ lib_nums(book) of
       | ~$R.none() => false
       | ~$R.some(book_numbers) => (case+ book_numbers.shelf of OnShelf() => true | Hidden() => true | _ => false))): bool

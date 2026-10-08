@@ -302,6 +302,26 @@ fun _find_key {count:nat}{i:nat} .<count>. (books: !books(count), key: int, i: i
       val+ Book(_, _, _, _, _, _, nums) = book
     in if nums.key = key then i else _find_key(rest, key, i + 1) end
 
+fun _find_id {count:nat}{i:nat} .<count>. (books: !books(count), id_high: Int, id_low: Int, i: int i): [found:int | found >= ~1] int found =
+  case+ books of
+  | books_nil() => ~1
+  | books_cons(book, rest) => let
+      val+ Book(_, _, _, _, _, _, nums) = book
+    in if nums.id_high = id_high then (if nums.id_low = id_low then i else _find_id(rest, id_high, id_low, i + 1))
+       else _find_id(rest, id_high, id_low, i + 1) end
+
+(* The index of the book with this id, or -1: a book's id is what it is
+   stored by, where its key is only the number it was given this session *)
+#pub fn lib_index_of_id (id_high: Int, id_low: Int): [found:int | found >= ~1] int found
+
+implement lib_index_of_id (id_high, id_low) = let
+  val cell = lib_take()
+  val+ @LibCell(books, _) = cell
+  val found = _find_id(books, id_high, id_low, 0)
+  prval () = fold@(cell)
+  val () = lib_put(cell)
+in found end
+
 #pub fn lib_index_of_key (key: int): [found:int | found >= ~1] int found
 
 implement lib_index_of_key (key) = let
