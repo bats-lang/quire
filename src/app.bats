@@ -430,6 +430,7 @@ fn _undo_toast (): void = let
   val () = ui_role("undo-toast", RStatus)
   val () = ui_add("undo-toast", "undo-text", TSpan)
   val () = ui_text_btn("undo-toast", "undo-button", "btn", "Undo")
+  val () = ui_icon_btn("undo-toast", "undo-dismiss", "ibtn", IcClose, "Dismiss")
 in _hide("undo-toast") end
 
 (* A labelled row of the book info view *)

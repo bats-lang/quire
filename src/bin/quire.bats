@@ -734,7 +734,7 @@ fn _archive {book:int} (book: int book): void =
       val id_low = book_numbers.id_low
       val () = _set_shelf(book, Archived())
     in
-      $P.finish<settled>(undo_offer("Archived"), llam(how) =>
+      $P.finish<settled>(undo_offer(BookArchived()), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -765,7 +765,7 @@ fn _hide_toggle {book:int} (book: int book): void =
       val was_hidden = same_shelf(was, Hidden())
       val () = _set_shelf(book, (if was_hidden then OnShelf() else Hidden()): shelf)
     in
-      $P.finish<settled>(undo_offer((if was_hidden then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len), llam(how) =>
+      $P.finish<settled>(undo_offer(if was_hidden then BookUnhidden() else BookHidden()), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -1158,7 +1158,7 @@ in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
    their defaults; Undo puts both back *)
 fn _factory_reset (): void = let
   val shelved = lib_trash_all()
-  val how = set_reset_undoable(undo_offer("Library moved to the Trash, settings reset"))
+  val how = set_reset_undoable(undo_offer(LibraryTrashed()))
   val () = _settings_apply()
 in
   $P.finish<settled>(how, llam(settling) =>

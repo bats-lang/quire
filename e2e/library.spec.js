@@ -174,6 +174,40 @@ test('an archived book keeps its record, and is read again by importing it', asy
 const bg = async page => (await colours(page)).bg.join(',');
 const undo = page => page.getByRole('button', { name: 'Undo' });
 
+// quire#364 (Material 3: a snackbar with an action stays until the
+// reader acts on it or dismisses it, or another takes its place; WCAG
+// 2.2.1): the Undo toast does not go by itself, says what it undoes,
+// and an offer taken by another is made final
+test('an Undo offer stays until it is used, dismissed or replaced, and says what it undoes', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-06-01T12:00:00Z') });
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'First', author: 'X' }), epubFile({ title: 'Second', author: 'Y' }), epubFile({ title: 'Third', author: 'Z' })], 3);
+  const toast = page.getByRole('status').filter({ has: undo(page) });
+  await bookMenu(page, 'First');
+  await menuItem(page, 'Move to Trash').click();
+  await expect(toast).toContainText('Book moved to the Trash');
+  await page.clock.runFor(15000);
+  await expect(toast).toBeVisible();
+  await page.clock.runFor(60000);
+  await expect(toast).toBeVisible();
+  // another offer takes its place: the first is final, the second is shown
+  await bookMenu(page, 'Second');
+  await menuItem(page, 'Archive').click();
+  await expect(toast).toContainText('Book archived');
+  await expect(cards(page)).toHaveCount(1);
+  await undo(page).click();
+  await expect(cards(page)).toHaveCount(2);
+  await expect(card(page, 'First')).toHaveCount(0);
+  // dismissed, it goes and stays gone
+  await bookMenu(page, 'Third');
+  await menuItem(page, 'Move to Trash').click();
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(toast).toBeHidden();
+  await page.clock.runFor(15000);
+  await expect(toast).toBeHidden();
+});
+
 test('a book moved to the Trash can be undone, and restored from it', async ({ page }) => {
   await start(page);
   await importFiles(page, [epubFile({ title: 'Doomed', author: 'X' }), epubFile({ title: 'Kept', author: 'Y' })], 2);

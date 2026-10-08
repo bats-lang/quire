@@ -1231,7 +1231,7 @@ end
 
 (* The same, offering Undo *)
 #pub fn set_reset (): $P.promise(settled, $P.Chained)
-implement set_reset () = set_reset_undoable(undo_offer("Settings reset"))
+implement set_reset () = set_reset_undoable(undo_offer(SettingsReset()))
 
 (* A byte stored by an earlier run, as a value in [low, high]: checked
    here, once; fallback when it is out of range *)

@@ -131,6 +131,8 @@ test('Dropbox signs in with PKCE and syncs two browsers through the app folder',
   // Turn off, made final: the grant is given back to Dropbox
   await panel(b.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(b.page)).toHaveText('Sync is off.');
+  // the offer stays until it is dismissed (quire#364); made final, it gives the grant back
+  await b.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => server.revoked.length, { timeout: 15000 }).toBe(1);
   expect(server.refresh.size).toBe(0);
   expect(unexpected(a)).toEqual([]);

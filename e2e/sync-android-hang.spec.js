@@ -230,9 +230,11 @@ test('taking the grant back that Google never answers is said after 30 s', async
   const server = drive();
   const a = await joined(browser, server);
   a.google.outcomes.revokeAccess = [{ hold: true }];
-  // Turn off, made final once its Undo goes
+  // Turn off, made final once its offer is dismissed
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(a.page)).toHaveText('Sync is off.');
+  // the offer stays until it is dismissed (quire#364); made final, it takes the grant back
+  await a.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await a.page.clock.fastForward('00:15');
   await expect.poll(() => a.google.asked('revokeAccess')).toHaveLength(1);
   await expect(banner(a.page)).toBeHidden();

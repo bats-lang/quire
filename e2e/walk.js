@@ -127,6 +127,10 @@ export async function walkEveryScreen(page, { look, back }) {
   await menuItem(page, 'Move to Trash').click();
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await check('the Undo toast');
+  // the offer stays until it is dismissed (quire#364): it would cover the next steps
+  await page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) })
+    .getByRole('button', { name: 'Dismiss' }).click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeHidden();
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await expect(dialog(page, 'Empty the Trash?')).toBeVisible();

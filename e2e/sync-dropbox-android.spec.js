@@ -171,6 +171,8 @@ test('in the app, Dropbox signs in through the system browser and comes back at 
   await openSync(b.page);
   await panel(b.page).getByRole('button', { name: 'Turn off' }).click();
   await expect(status(b.page)).toHaveText('Sync is off.');
+  // the offer stays until it is dismissed (quire#364); made final, it gives the grant back
+  await b.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
   await expect.poll(() => server.revoked.length, { timeout: 15000 }).toBe(1);
   expect(unexpected(a)).toEqual([]);
   expect(unexpected(b)).toEqual([]);

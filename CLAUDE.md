@@ -954,8 +954,13 @@ Nothing is lost at a click, except by emptying the Trash:
   resetting the settings are done at once. Each is offered back by the
   Undo toast (`undo_offer` in `src/undo.bats`), whose undo runs only
   from its own button, whose listener the module registers
-  (`undo_listen`). An earlier offer is made final when another takes
-  its place or the toast goes.
+  (`undo_listen`). An offer stays until it is used, dismissed (the
+  toast's Dismiss) or another takes its place, which makes the earlier
+  one final (quire#364: Material 3's snackbar with an action, WCAG
+  2.2.1): `undo_offer` takes an `offered(UntilDismissed)`, a datatype
+  indexed by its `offer_life`, so an offer with a `Brief` life does not
+  type-check (`tests/static/reject/undo-offer-brief`), and each
+  constructor says what an Undo would undo.
 * A factory reset moves every book to the Trash and resets the
   settings (`lib_trash_all`, `set_reset_undoable`), with one Undo that
   puts back each book's shelf and the settings.
