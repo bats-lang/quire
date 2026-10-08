@@ -9,157 +9,173 @@
 
 staload "bytes.sats"
 
-(* a xor b under 2 to the 16, with its proof (arith's) *)
-#pub fun xor16 {a,b:nat | a < 65536; b < 65536} (a: int a, b: int b)
-  : [c:nat | c < 65536] ($AR.XOR(a, b, c) | int c)
+(* left xor right under 2 to the 16, with its proof (arith's) *)
+#pub fun xor16 {left,right:nat | left < 65536; right < 65536} (left: int left, right: int right)
+  : [xored:nat | xored < 65536] ($AR.XOR(left, right, xored) | int xored)
 
-implement xor16 {a,b} (a, b) = let
-  val (p | c) = $AR.xor_g1(a, b)
+implement xor16 {left,right} (left, right) = let
+  val (xor_proof | xored) = $AR.xor_g1(left, right)
   prval pow16 = $AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ(
     $AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ(
     $AR.POW2_zero()))))))))))))))))
-  prval () = $AR.xor_bound(pow16, p)
-in (p | c) end
+  prval () = $AR.xor_bound(pow16, xor_proof)
+in (xor_proof | xored) end
 
-(* STEP1(hi, lo, hi', lo'): the 32-bit register (hi, lo) shifted right
-   by one bit, and the polynomial 0xEDB88320 xored in when the bit
-   shifted out was set *)
+(* STEP1(high, low, next_high, next_low): the 32-bit register (high, low)
+   shifted right by one bit, and the polynomial 0xEDB88320 xored in when
+   the bit shifted out was set *)
 #pub dataprop STEP1(int, int, int, int) =
-  | {h,t,q:nat | t < 2; 2*h + t < 65536; 2*q < 65536}
-    STEP1_even(2*h + t, 2*q, h, q + 32768*t)
-  | {h,t,q,hx,lx:nat | t < 2; 2*h + t < 65536; 2*q + 1 < 65536; hx < 65536; lx < 65536}
-    STEP1_odd(2*h + t, 2*q + 1, hx, lx) of ($AR.XOR(h, 60856, hx), $AR.XOR(q + 32768*t, 33568, lx))
+  | {high_half,carry_bit,low_half:nat | carry_bit < 2; 2*high_half + carry_bit < 65536; 2*low_half < 65536}
+    STEP1_even(2*high_half + carry_bit, 2*low_half, high_half, low_half + 32768*carry_bit)
+  | {high_half,carry_bit,low_half,high_xored,low_xored:nat | carry_bit < 2; 2*high_half + carry_bit < 65536; 2*low_half + 1 < 65536; high_xored < 65536; low_xored < 65536}
+    STEP1_odd(2*high_half + carry_bit, 2*low_half + 1, high_xored, low_xored)
+      of ($AR.XOR(high_half, 60856, high_xored), $AR.XOR(low_half + 32768*carry_bit, 33568, low_xored))
 
-#pub prfun step1_functional {hi,lo,h1,l1,h2,l2:nat} (STEP1(hi, lo, h1, l1), STEP1(hi, lo, h2, l2))
-  : [h1 == h2 && l1 == l2] void
+#pub prfun step1_functional {high,low,first_high,first_low,second_high,second_low:nat}
+  (STEP1(high, low, first_high, first_low), STEP1(high, low, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void
 
-prfn _step1_functional {hi,lo,h1,l1,h2,l2:nat} (p: STEP1(hi, lo, h1, l1), q: STEP1(hi, lo, h2, l2))
-  : [h1 == h2 && l1 == l2] void =
-  case+ p of
-  | STEP1_even() => (case+ q of STEP1_even() => ())
-  | STEP1_odd(px, py) =>
-    (case+ q of
-     | STEP1_odd(qx, qy) => let
-         prval () = $AR.xor_functional(px, qx)
-         prval () = $AR.xor_functional(py, qy)
+prfn _step1_functional {high,low,first_high,first_low,second_high,second_low:nat}
+  (first_proof: STEP1(high, low, first_high, first_low), second_proof: STEP1(high, low, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void =
+  case+ first_proof of
+  | STEP1_even() => (case+ second_proof of STEP1_even() => ())
+  | STEP1_odd(first_high_xor, first_low_xor) =>
+    (case+ second_proof of
+     | STEP1_odd(second_high_xor, second_low_xor) => let
+         prval () = $AR.xor_functional(first_high_xor, second_high_xor)
+         prval () = $AR.xor_functional(first_low_xor, second_low_xor)
        in () end)
 
-primplement step1_functional {hi,lo,h1,l1,h2,l2} (p, q) = _step1_functional(p, q)
+primplement step1_functional {high,low,first_high,first_low,second_high,second_low} (first_proof, second_proof) =
+  _step1_functional(first_proof, second_proof)
 
 
-(* n halved: n = 2 * q + r *)
-fn halve {n:nat} (n: int n): [q,r:nat | n == 2*q + r; r < 2] (int q, int r) = let val q = n / 2 in (q, n - 2 * q) end
+(* number halved: number = 2 * half + remainder *)
+fn halve {number:nat} (number: int number): [half,remainder:nat | number == 2*half + remainder; remainder < 2] (int half, int remainder) =
+  let val half = number / 2 in (half, number - 2 * half) end
 
 (* the register shifted by one bit, with its proof *)
-#pub fun step1 {hi,lo:nat | hi < 65536; lo < 65536} (hi: int hi, lo: int lo)
-  : [h,l:nat | h < 65536; l < 65536] (STEP1(hi, lo, h, l) | int h, int l)
+#pub fun step1 {high,low:nat | high < 65536; low < 65536} (high: int high, low: int low)
+  : [next_high,next_low:nat | next_high < 65536; next_low < 65536] (STEP1(high, low, next_high, next_low) | int next_high, int next_low)
 
-implement step1 {hi,lo} (hi, lo) = let
-  val [h:int, t:int] (h, t) = halve(hi)
-  val [q:int, r:int] (q, r) = halve(lo)
-  val shifted = q + 32768 * t
+implement step1 {high,low} (high, low) = let
+  val [high_half:int, carry_bit:int] (high_half, carry_bit) = halve(high)
+  val [low_half:int, low_bit:int] (low_half, low_bit) = halve(low)
+  val shifted = low_half + 32768 * carry_bit
 in
-  if r = 0 then (STEP1_even{h,t,q}() | h, shifted)
+  if low_bit = 0 then (STEP1_even{high_half,carry_bit,low_half}() | high_half, shifted)
   else let
-    val [hxs:int] (hp | hx) = xor16(h, 60856)
-    val [lxs:int] (lp | lx) = xor16(shifted, 33568)
-  in (STEP1_odd{h,t,q,hxs,lxs}(hp, lp) | hx, lx) end
+    val [high_xored:int] (high_proof | high_xor) = xor16(high_half, 60856)
+    val [low_xored:int] (low_proof | low_xor) = xor16(shifted, 33568)
+  in (STEP1_odd{high_half,carry_bit,low_half,high_xored,low_xored}(high_proof, low_proof) | high_xor, low_xor) end
 end
 
-(* STEPN(n, hi, lo, hi', lo'): n bits shifted in turn *)
+(* STEPN(count, high, low, end_high, end_low): count bits shifted in turn *)
 #pub dataprop STEPN(int, int, int, int, int) =
-  | {h,l:nat} STEPN_zero(0, h, l, h, l)
-  | {n:nat}{h,l,h1,l1,h2,l2:nat} STEPN_succ(n+1, h, l, h2, l2) of (STEP1(h, l, h1, l1), STEPN(n, h1, l1, h2, l2))
+  | {high,low:nat} STEPN_zero(0, high, low, high, low)
+  | {count:nat}{high,low,mid_high,mid_low,end_high,end_low:nat}
+    STEPN_succ(count+1, high, low, end_high, end_low) of (STEP1(high, low, mid_high, mid_low), STEPN(count, mid_high, mid_low, end_high, end_low))
 
-#pub prfun stepn_functional {n:nat}{hi,lo,h1,l1,h2,l2:nat} (STEPN(n, hi, lo, h1, l1), STEPN(n, hi, lo, h2, l2))
-  : [h1 == h2 && l1 == l2] void
+#pub prfun stepn_functional {count:nat}{high,low,first_high,first_low,second_high,second_low:nat}
+  (STEPN(count, high, low, first_high, first_low), STEPN(count, high, low, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void
 
-prfun _stepn_functional {n:nat}{hi,lo,h1,l1,h2,l2:nat} .<n>. (p: STEPN(n, hi, lo, h1, l1), q: STEPN(n, hi, lo, h2, l2))
-  : [h1 == h2 && l1 == l2] void =
-  case+ p of
-  | STEPN_zero() => (case+ q of STEPN_zero() => ())
-  | STEPN_succ(ps, pr) =>
-    (case+ q of
-     | STEPN_succ(qs, qr) => let
-         prval () = step1_functional(ps, qs)
-       in _stepn_functional(pr, qr) end)
+prfun _stepn_functional {count:nat}{high,low,first_high,first_low,second_high,second_low:nat} .<count>.
+  (first_proof: STEPN(count, high, low, first_high, first_low), second_proof: STEPN(count, high, low, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void =
+  case+ first_proof of
+  | STEPN_zero() => (case+ second_proof of STEPN_zero() => ())
+  | STEPN_succ(first_step, first_rest) =>
+    (case+ second_proof of
+     | STEPN_succ(second_step, second_rest) => let
+         prval () = step1_functional(first_step, second_step)
+       in _stepn_functional(first_rest, second_rest) end)
 
-primplement stepn_functional {n}{hi,lo,h1,l1,h2,l2} (p, q) = _stepn_functional(p, q)
+primplement stepn_functional {count}{high,low,first_high,first_low,second_high,second_low} (first_proof, second_proof) =
+  _stepn_functional(first_proof, second_proof)
 
-#pub fun stepn {n:nat}{hi,lo:nat | hi < 65536; lo < 65536} (n: int n, hi: int hi, lo: int lo)
-  : [h,l:nat | h < 65536; l < 65536] (STEPN(n, hi, lo, h, l) | int h, int l)
+#pub fun stepn {count:nat}{high,low:nat | high < 65536; low < 65536} (count: int count, high: int high, low: int low)
+  : [end_high,end_low:nat | end_high < 65536; end_low < 65536] (STEPN(count, high, low, end_high, end_low) | int end_high, int end_low)
 
-implement stepn {n}{hi,lo} (n, hi, lo) = let
-  fun go {n:nat}{hi,lo:nat | hi < 65536; lo < 65536} .<n>. (n: int n, hi: int hi, lo: int lo)
-    : [h,l:nat | h < 65536; l < 65536] (STEPN(n, hi, lo, h, l) | int h, int l) =
-    if n = 0 then (STEPN_zero() | hi, lo)
+implement stepn {count}{high,low} (count, high, low) = let
+  fun shift_bits {count:nat}{high,low:nat | high < 65536; low < 65536} .<count>. (count: int count, high: int high, low: int low)
+    : [end_high,end_low:nat | end_high < 65536; end_low < 65536] (STEPN(count, high, low, end_high, end_low) | int end_high, int end_low) =
+    if count = 0 then (STEPN_zero() | high, low)
     else let
-      val (sp | h1, l1) = step1(hi, lo)
-      val (rp | h2, l2) = go(n - 1, h1, l1)
-    in (STEPN_succ(sp, rp) | h2, l2) end
-in go(n, hi, lo) end
+      val (step_proof | mid_high, mid_low) = step1(high, low)
+      val (rest_proof | end_high, end_low) = shift_bits(count - 1, mid_high, mid_low)
+    in (STEPN_succ(step_proof, rest_proof) | end_high, end_low) end
+in shift_bits(count, high, low) end
 
-(* BSTEP(hi, lo, b, hi', lo'): the register after the byte b *)
+(* BSTEP(high, low, octet, next_high, next_low): the register after the byte octet *)
 #pub dataprop BSTEP(int, int, int, int, int) =
-  | {h,l,b,l0,h1,l1:nat} BSTEP_mk(h, l, b, h1, l1) of ($AR.XOR(l, b, l0), STEPN(8, h, l0, h1, l1))
+  | {high,low,octet,xored_low,next_high,next_low:nat}
+    BSTEP_mk(high, low, octet, next_high, next_low) of ($AR.XOR(low, octet, xored_low), STEPN(8, high, xored_low, next_high, next_low))
 
-#pub prfun bstep_functional {hi,lo,b,h1,l1,h2,l2:nat} (BSTEP(hi, lo, b, h1, l1), BSTEP(hi, lo, b, h2, l2))
-  : [h1 == h2 && l1 == l2] void
+#pub prfun bstep_functional {high,low,octet,first_high,first_low,second_high,second_low:nat}
+  (BSTEP(high, low, octet, first_high, first_low), BSTEP(high, low, octet, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void
 
-prfn _bstep_functional {hi,lo,b,h1,l1,h2,l2:nat} (p: BSTEP(hi, lo, b, h1, l1), q: BSTEP(hi, lo, b, h2, l2))
-  : [h1 == h2 && l1 == l2] void =
-  case+ p of
-  | BSTEP_mk(px, ps) =>
-    (case+ q of
-     | BSTEP_mk(qx, qs) => let
-         prval () = $AR.xor_functional(px, qx)
-       in stepn_functional(ps, qs) end)
+prfn _bstep_functional {high,low,octet,first_high,first_low,second_high,second_low:nat}
+  (first_proof: BSTEP(high, low, octet, first_high, first_low), second_proof: BSTEP(high, low, octet, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void =
+  case+ first_proof of
+  | BSTEP_mk(first_xor, first_steps) =>
+    (case+ second_proof of
+     | BSTEP_mk(second_xor, second_steps) => let
+         prval () = $AR.xor_functional(first_xor, second_xor)
+       in stepn_functional(first_steps, second_steps) end)
 
-primplement bstep_functional {hi,lo,b,h1,l1,h2,l2} (p, q) = _bstep_functional(p, q)
+primplement bstep_functional {high,low,octet,first_high,first_low,second_high,second_low} (first_proof, second_proof) =
+  _bstep_functional(first_proof, second_proof)
 
-#pub fun bstep {hi,lo,b:nat | hi < 65536; lo < 65536; b < 256} (hi: int hi, lo: int lo, b: int b)
-  : [h,l:nat | h < 65536; l < 65536] (BSTEP(hi, lo, b, h, l) | int h, int l)
+#pub fun bstep {high,low,octet:nat | high < 65536; low < 65536; octet < 256} (high: int high, low: int low, octet: int octet)
+  : [next_high,next_low:nat | next_high < 65536; next_low < 65536] (BSTEP(high, low, octet, next_high, next_low) | int next_high, int next_low)
 
-implement bstep {hi,lo,b} (hi, lo, b) = let
-  val (xp | l0) = xor16(lo, b)
-  val (sp | h1, l1) = stepn(8, hi, l0)
-in (BSTEP_mk(xp, sp) | h1, l1) end
+implement bstep {high,low,octet} (high, low, octet) = let
+  val (xor_proof | xored_low) = xor16(low, octet)
+  val (steps_proof | next_high, next_low) = stepn(8, high, xored_low)
+in (BSTEP_mk(xor_proof, steps_proof) | next_high, next_low) end
 
-(* CRCFROM(hi, lo, bs, hi', lo'): the register after the bytes bs *)
+(* CRCFROM(high, low, octets, end_high, end_low): the register after the bytes octets *)
 #pub dataprop CRCFROM(int, int, bytes, int, int) =
-  | {h,l:nat} CRCFROM_nil(h, l, bnil(), h, l)
-  | {h,l,b,h1,l1,h2,l2:nat}{bs:bytes}
-    CRCFROM_cons(h, l, bcons(b, bs), h2, l2) of (BSTEP(h, l, b, h1, l1), CRCFROM(h1, l1, bs, h2, l2))
+  | {high,low:nat} CRCFROM_nil(high, low, bnil(), high, low)
+  | {high,low,octet,mid_high,mid_low,end_high,end_low:nat}{octets:bytes}
+    CRCFROM_cons(high, low, bcons(octet, octets), end_high, end_low) of (BSTEP(high, low, octet, mid_high, mid_low), CRCFROM(mid_high, mid_low, octets, end_high, end_low))
 
-#pub prfun crcfrom_functional {hi,lo:nat}{bs:bytes}{n:nat}{h1,l1,h2,l2:nat}
-  (LEN(bs, n), CRCFROM(hi, lo, bs, h1, l1), CRCFROM(hi, lo, bs, h2, l2)): [h1 == h2 && l1 == l2] void
+#pub prfun crcfrom_functional {high,low:nat}{octets:bytes}{byte_count:nat}{first_high,first_low,second_high,second_low:nat}
+  (LEN(octets, byte_count), CRCFROM(high, low, octets, first_high, first_low), CRCFROM(high, low, octets, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void
 
-prfun _crcfrom_functional {hi,lo:nat}{bs:bytes}{n:nat}{h1,l1,h2,l2:nat} .<n>. (len: LEN(bs, n), p: CRCFROM(hi, lo, bs, h1, l1), q: CRCFROM(hi, lo, bs, h2, l2))
-  : [h1 == h2 && l1 == l2] void =
-  case+ p of
-  | CRCFROM_nil() => (case+ q of CRCFROM_nil() => ())
-  | CRCFROM_cons(ps, pr) =>
-    (case+ q of
-     | CRCFROM_cons(qs, qr) => let
-         prval () = bstep_functional(ps, qs)
-         prval LEN_cons(len1) = len
-       in _crcfrom_functional(len1, pr, qr) end)
+prfun _crcfrom_functional {high,low:nat}{octets:bytes}{byte_count:nat}{first_high,first_low,second_high,second_low:nat} .<byte_count>.
+  (len_proof: LEN(octets, byte_count), first_proof: CRCFROM(high, low, octets, first_high, first_low), second_proof: CRCFROM(high, low, octets, second_high, second_low))
+  : [first_high == second_high && first_low == second_low] void =
+  case+ first_proof of
+  | CRCFROM_nil() => (case+ second_proof of CRCFROM_nil() => ())
+  | CRCFROM_cons(first_step, first_rest) =>
+    (case+ second_proof of
+     | CRCFROM_cons(second_step, second_rest) => let
+         prval () = bstep_functional(first_step, second_step)
+         prval LEN_cons(rest_len) = len_proof
+       in _crcfrom_functional(rest_len, first_rest, second_rest) end)
 
-primplement crcfrom_functional {hi,lo}{bs}{n}{h1,l1,h2,l2} (len, p, q) = _crcfrom_functional(len, p, q)
+primplement crcfrom_functional {high,low}{octets}{byte_count}{first_high,first_low,second_high,second_low} (len_proof, first_proof, second_proof) =
+  _crcfrom_functional(len_proof, first_proof, second_proof)
 
-#pub fun crcfrom {hi,lo:nat | hi < 65536; lo < 65536}{bs:bytes}{n:nat} (hi: int hi, lo: int lo, bl: !blist(bs, n))
-  : [h,l:nat | h < 65536; l < 65536] (CRCFROM(hi, lo, bs, h, l) | int h, int l)
+#pub fun crcfrom {high,low:nat | high < 65536; low < 65536}{octets:bytes}{byte_count:nat} (high: int high, low: int low, octet_list: !blist(octets, byte_count))
+  : [end_high,end_low:nat | end_high < 65536; end_low < 65536] (CRCFROM(high, low, octets, end_high, end_low) | int end_high, int end_low)
 
-implement crcfrom {hi,lo}{bs}{n} (hi, lo, bl) = let
-  fun go {hi,lo:nat | hi < 65536; lo < 65536}{bs:bytes}{n:nat} .<n>.
-    (hi: int hi, lo: int lo, bl: !blist(bs, n))
-    : [h,l:nat | h < 65536; l < 65536] (CRCFROM(hi, lo, bs, h, l) | int h, int l) =
-    case+ bl of
-    | blist_nil() => (CRCFROM_nil() | hi, lo)
-    | blist_cons(b, rest) => let
-        val (sp | h1, l1) = bstep(hi, lo, b)
-        val (rp | h2, l2) = go(h1, l1, rest)
-      in (CRCFROM_cons(sp, rp) | h2, l2) end
-in go(hi, lo, bl) end
+implement crcfrom {high,low}{octets}{byte_count} (high, low, octet_list) = let
+  fun register_after {high,low:nat | high < 65536; low < 65536}{octets:bytes}{byte_count:nat} .<byte_count>.
+    (high: int high, low: int low, octet_list: !blist(octets, byte_count))
+    : [end_high,end_low:nat | end_high < 65536; end_low < 65536] (CRCFROM(high, low, octets, end_high, end_low) | int end_high, int end_low) =
+    case+ octet_list of
+    | blist_nil() => (CRCFROM_nil() | high, low)
+    | blist_cons(octet, rest) => let
+        val (step_proof | mid_high, mid_low) = bstep(high, low, octet)
+        val (rest_proof | end_high, end_low) = register_after(mid_high, mid_low, rest)
+      in (CRCFROM_cons(step_proof, rest_proof) | end_high, end_low) end
+in register_after(high, low, octet_list) end
 
 end
