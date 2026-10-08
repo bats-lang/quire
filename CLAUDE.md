@@ -1048,7 +1048,13 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   as muted on the field's card (`S_muted_card`, proven in each theme)
   and drawn at full opacity, so a placeholder is under the proof too;
   `textContrastShort` in `e2e/controls-shown.js` measures it in the light
-  and dark themes (`e2e/layout.spec.js`). Grounds without text (`fill`, `tint`)
+  and dark themes (`e2e/layout.spec.js`).
+  A chosen tab is told apart by more than a tint (quire#358, WCAG
+  1.4.11; Material 3: an underline on the active tab): `.tab
+  [aria-selected=true]` keeps the card and draws `underline`, a 3px inset
+  line in the accent whose `EDGEP(accent, card)` is proven 3:1 in each
+  theme; `stateCueShort` in `e2e/controls-shown.js` fails a tab list whose
+  chosen tab has no cue the others lack. Grounds without text (`fill`, `tint`)
   set their font size to 0, and a dialog's veil makes its own text
   transparent.
 * Each theme is written (`theme`) only with a proof (`HARMONY`) that

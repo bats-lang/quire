@@ -15,6 +15,9 @@
  * - textContrastShort: a placeholder reads at 4.5:1 against its field
  *   (WCAG 1.4.3), in whatever theme is shown (quire#357). Every other
  *   text colour is written through the stylesheet's proven pairs.
+ * - stateCueShort: a chosen tab is told apart by more than a tint
+ *   (WCAG 1.4.11): an underline, a border or a bolder weight that the
+ *   others do not have (quire#358).
  * - onOffPairs: a setting with two states is a switch (Material 3: a
  *   switch makes a binary selection, its effect immediate), never a
  *   segmented On | Off, nor a lone button pressed on and off (quire#363).
@@ -146,6 +149,29 @@ export async function textContrastShort(page) {
       const [hi, lo] = [light(drawn), light(back)].sort((x, y) => y - x);
       const ratio = (hi + 0.05) / (lo + 0.05);
       if (ratio < 4.5) bad.push(`${e.getAttribute('aria-label') || e.id || e.placeholder}: ${ratio.toFixed(2)}:1`);
+    }
+    return bad;
+  });
+}
+
+/** The visible tabs on the screen shown whose chosen one has no cue
+    beside its ground: an inset shadow, a border, an underline or a
+    weight the other tabs of its list do not have. Each list is named */
+export async function stateCueShort(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const cue = e => {
+      const style = getComputedStyle(e);
+      return [style.boxShadow, style.textDecorationLine, style.fontWeight, style.borderBottomWidth, style.outlineStyle].join('|');
+    };
+    const bad = [];
+    for (const list of document.querySelectorAll('[role=tablist]')) {
+      if (!shown(list)) continue;
+      const tabs = [...list.querySelectorAll('[role=tab]')].filter(shown);
+      const chosen = tabs.filter(t => t.getAttribute('aria-selected') === 'true');
+      const others = tabs.filter(t => t.getAttribute('aria-selected') !== 'true');
+      if (!chosen.length || !others.length) continue;
+      if (others.every(o => cue(o) === cue(chosen[0]))) bad.push(list.getAttribute('aria-label') || list.id);
     }
     return bad;
   });
