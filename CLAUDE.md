@@ -12,6 +12,19 @@ guidelines say) and best judgement, written down where it is decided
 proofs, the static tests, the e2e suite) still hold: when a choice
 would break one, choose another that keeps it.
 
+## A proof is a proof
+
+When a requirement says proof, it means a static proof, checked by the
+compiler from types and lemmas. It never means a test, a runtime check,
+a read-back, an assertion or a witness that is only believed. A claim
+that is only tested is said to be tested, and the proof is still owed:
+where the proof system cannot reach (the array package had no model of
+an array's contents), the tool is extended (a content-indexed array API
+in the array package), not worked around at runtime. Trusted primitives
+live in the one package that owns the platform, state what they assume,
+and are tested there; nothing in quire uses `praxi`, `assume` or
+`$UNSAFE` to skip a proof.
+
 ## Names are words
 
 Element ids, numbered-id prefixes (up to 16 bytes), variables, static
