@@ -926,6 +926,27 @@ fn _book_action {book:int} (book: int book, action: book_action): void =
 fn _fonts_arrived (): void =
   if _in_reader() then reader_relayout() else ()
 
+(* The chapter laid out again once the area has settled: a resize, or
+   the app's bars shown or hidden (the latest asks, the earlier are
+   dropped) *)
+fn _relayout_settled (): void = let
+  val () = !_resize_generation := !_resize_generation + 1
+  val generation = !_resize_generation
+in
+  $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
+    if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
+end
+
+(* The same, for the app's bars shown or hidden: bars the system brought
+   back stay until a page is turned *)
+fn _relayout_for_bars (): void = let
+  val () = !_resize_generation := !_resize_generation + 1
+  val generation = !_resize_generation
+in
+  $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
+    if !_resize_generation = generation then (if _in_reader() then reader_relayout_for_bars() else ()) else ())
+end
+
 fn _settings_changed (): void = let
   val () = set_apply(lib_state_get())
 in if _in_reader() then reader_relayout() else () end
@@ -2516,10 +2537,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 16) = let
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
-      val () = !_resize_generation := !_resize_generation + 1
-      val generation = !_resize_generation
-      val () = $P.finish<Int>($P.vow($TM.timer_set(200)), llam(_) =>
-          if !_resize_generation = generation then (if _in_reader() then reader_relayout() else ()) else ())
+      val () = _relayout_settled()
     in 0 end)
   (* the browser's Back: it took the guard back.bats pushes once there
      is something to go back from, so the app goes one step back, and
@@ -2559,7 +2577,11 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
       val () = screen_brightness_chosen()
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
-  val listeners = RSystemBars(listeners, llam(bars) => screen_system_bars_changed(bars))
+  (* the app is drawn edge to edge, so bars shown or hidden change the
+     reading area's insets and no resize comes: the chapter is laid out
+     again, keeping its place (quire#356) *)
+  val listeners = RSystemBars(listeners, llam(bars) =>
+    if screen_system_bars_changed(bars) then _relayout_for_bars() else ())
   val listeners = RInstallOffer(listeners, llam(offer) => platform_install_show(offer))
   val listeners = RAppLink(listeners, llam(link) => sync_app_link(link))
   (* Android's Back in the app: one step back, and at the library with

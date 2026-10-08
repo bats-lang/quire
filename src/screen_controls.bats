@@ -130,15 +130,24 @@ in screen_controls_show() end
    back stay until the next page is shown (reader.bats hides them again
    while full screen is on), as a swipe from the edge is the reader's
    own way out of immersive mode (quire#314) *)
-#pub fn screen_system_bars_changed (bars: $SCR.system_bars): void
+#pub fn screen_system_bars_changed (bars: $SCR.system_bars): bool
 
 implement screen_system_bars_changed (bars) = let
-  val () = !_bars := (case+ bars of
+  val seen = (case+ bars of
     | $SCR.BarsHidden() => NoBarShown()
     | $SCR.BarsShown() => SomeBarShown()
     | $SCR.StatusBarShown() => SomeBarShown()
-    | $SCR.NavigationBarShown() => SomeBarShown())
-in _pressed("screen-fullscreen", _fullscreen_shown()) end
+    | $SCR.NavigationBarShown() => SomeBarShown()): bars_seen
+  (* whether the bars shown differ from the last report: the reading
+     area does, for the app is drawn edge to edge and the insets are
+     the bars (quire#356) *)
+  val changed = (case+ (seen, !_bars) of
+    | (NoBarShown(), NoBarShown()) => false
+    | (SomeBarShown(), SomeBarShown()) => false
+    | (_, _) => true): bool
+  val () = !_bars := seen
+  val () = _pressed("screen-fullscreen", _fullscreen_shown())
+in changed end
 
 (* In the app, the screen put in full screen or out of it as the
    settings keep it, where it is not so already *)
