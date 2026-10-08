@@ -4282,7 +4282,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4313,7 +4313,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4336,7 +4336,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4356,7 +4356,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer("Sync turned off"), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))

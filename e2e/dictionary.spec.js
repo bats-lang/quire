@@ -193,7 +193,7 @@ test('an HTML article from a .dict.dz is shown as text, its tags dropped', async
   await expect(entry(page)).toContainText('un animal');
 });
 
-test('a dictionary is removed with Undo, and gone once the Undo is not taken', async ({ page }) => {
+test('a dictionary is removed with Undo, and gone once the offer is dismissed', async ({ page }) => {
   await start(page);
   await importDictionary(page, english, 'en');
   await openDictionaries(page);
@@ -212,12 +212,14 @@ test('a dictionary is removed with Undo, and gone once the Undo is not taken', a
   await readBook(page, book('Words', 'en'));
   await select(page, 'colour');
   await expect(lookUpHere(page)).toBeVisible();
-  // removed, and the toast left to go: gone for good
+  // removed, and the toast dismissed: gone for good (it stays until then, quire#364)
   await toLibrary(page);
   await openDictionaries(page);
   await row.getByRole('button', { name: 'Remove' }).click();
   await expect(row).toBeHidden();
-  await expect(toast).toBeHidden({ timeout: 15000 });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(toast).toBeHidden();
   await reload(page);
   await openDictionaries(page);
   await expect(dictionaries(page).getByText('No dictionaries yet')).toBeVisible();

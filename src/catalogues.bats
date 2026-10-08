@@ -507,7 +507,7 @@ in
   else let
     val () = _render()
     val () = _save()
-  in $P.finish<settled>(undo_offer("Catalogue removed"), llam(how) =>
+  in $P.finish<settled>(undo_offer(CatalogueRemoved()), llam(how) =>
     case+ how of
     | Undone() => _restore(id, index)
     | Final() => _forget(id)) end

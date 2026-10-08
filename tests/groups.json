@@ -73,6 +73,7 @@
       "reject/sync-result-unmatched",
       "reject/theme-unmatched",
       "reject/turn-unmatched",
+   "reject/undo-offer-brief",
       "reject/unreadable-unhandled"
     ],
     "accepts": [

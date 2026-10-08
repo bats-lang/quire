@@ -1316,7 +1316,7 @@ in
   else let
     val () = _unload()
     val () = _render()
-  in $P.finish<settled>(undo_offer("Dictionary removed"), llam(how) =>
+  in $P.finish<settled>(undo_offer(DictionaryRemoved()), llam(how) =>
     case+ how of
     | Undone() => _restore(id, index)
     | Final() => _forget(id)) end
