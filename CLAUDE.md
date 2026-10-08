@@ -741,7 +741,8 @@ only where its platform has it, by its own `data-hide`.
   to the library the read then replaces; until then the bridge keeps
   the files in their order. When the library could not be read, each
   file is kept (`_handed_kept`, linear) and not added, and the banner
-  says so.
+  says so (when Try again is offered, they wait for it: see "A library
+  that cannot be read says why").
 
 ## The library is stored as records (#354)
 
@@ -881,6 +882,88 @@ all or none (`batch_commit`, bridge's `idb_write_all`, the index in it
 too); until it commits nothing is saved. "lib" itself is never changed or
 deleted, so an older Quire still finds it; a "lib" that is not a QLB1 to
 6 record is a library that could not be read.
+
+## A library that cannot be read says why, and offers what fits (#374)
+
+Bridge's IndexedDB read says why it failed: `Unreadable(cause)` carries a
+`browser_reason`, the DOMException's name decoded once there
+(`Transient` = UnknownError, `StorageBlocked` = SecurityError,
+`NewerVersion` = VersionError, `Aborted` = AbortError, `NoErrorGiven`,
+`BrowserUnexpected` with the name, a line feed and the message).
+`src/unreadable.bats` turns that into a `failure_kind` (flat, copied
+freely: `KindTransient`, `KindStorageBlocked`, `KindNewerVersion`,
+`KindAborted`, `KindNoReasonGiven`, `KindBytesUnreadable`,
+`KindUnexpected`), and the library's read keeps it: `library_content`
+(`src/libstore.bats`) matches the lookup itself, where `lookup_content`
+folds every cause into `ContentUnreadable`, and `library_read.ReadFailed`
+carries a `failure_found` (the kind and, for an unexpected one, the
+name and message as text, cut at 4096 bytes, never dropped). No other
+read of storage changed: each still folds, as #174 says.
+
+* **Hope is a proof.** `HOPE(failure)` is a dataprop with a constructor
+  for `FTransient` alone (the sort `failure` and the witness
+  `failure_is(f)` of each kind sit beside the flat `failure_kind`, which
+  a cell can hold). The screen's `remedy` is `TryAgain(HOPE(f) | failure_is(f))`
+  or `NoRemedy`, made only by `remedy_of`, a total `case+` over the
+  kinds, and `ui_try_again_show` needs the `HOPE(f)`: Try again for any
+  other kind does not type-check (`tests/static/reject/try-again-without-hope`;
+  `accept/try-again-transient` shows the transient one does). `retry_hope`
+  (`Hope | NoHope`) is read off `remedy_of`.
+* **Aborted has no hope**, by research (the decision is also next to
+  `HOPE`): the IndexedDB specification defines only UnknownError as
+  transient; AbortError is "a request was aborted", raised when a
+  transaction is aborted (by `abort()`, or after a failed request nothing
+  handled), and Quire's read never aborts, so something else did and
+  nothing says it will not again; Dexie's page on AbortError says only
+  that it happens when the transaction was aborted and gives no advice
+  to retry, and localForage reconnects and retries once, but on
+  InvalidStateError and NotFoundError when a transaction cannot be
+  created, not on AbortError.
+* **What the screen says** (`library-empty`, `_unreadable_text` in
+  `src/library.bats`; every text ends "Quire has not changed anything and
+  will not save until it can read your library.", and none says "Import
+  an EPUB", which is for an empty library): Transient, "Quire could not
+  read your library this time." with Try again (`library-try-again`);
+  StorageBlocked, the private window or site data blocked and to allow
+  site data for this address, or leave the private window, then reopen
+  Quire; NewerVersion, "This device holds data from a newer version of
+  Quire. Update Quire."; Aborted, NoReasonGiven and BytesUnreadable, to
+  reopen Quire to read it again; Unexpected, an unexpected error with the
+  details in the banner. None but Transient has a button. Import is off
+  while the library is unreadable (`inert` on `import-file`; a file
+  handed or dropped is refused with "Books cannot be added until Quire
+  can read your library"). Restore backup as the way to replace an
+  unreadable library is not here yet: the screen says only what is true
+  now.
+* **The banner** says "Quire could not read your library." for every
+  kind with Copy details and Report (`notice_failure`, the browser's name
+  as the code), and an unexpected one with `notice_unexpected` (the name
+  and message as the answer). Over the library it is drawn at the foot of
+  the screen, not over the header (the title, Import and the menu), which
+  `coveredByBanner` in `e2e/controls-shown.js` checks on the walk's
+  screens and on a library with the banner up (`e2e/layout.spec.js`).
+  Over the reader it is still at the top.
+* **One honest retry.** Try again repeats the read start-up makes
+  (`lib_load`) through `_library_read`, so the `LIBRARY_READ` proof is
+  still only made there. `lib_retry_begin` spends the retry when it
+  starts, so a second press does nothing and a failure leaves the screen
+  with no button for the rest of the session (it says it tried again).
+  When the first read fails for a reason with hope, the start-up steps
+  that wait for the read (`_after_read`: files handed to the app, sync, the
+  stored search and view) are held and run once when the retry ends,
+  whichever way (the bridge keeps the files in their order meanwhile); for
+  a reason without hope they run at once, as before (the files are kept,
+  not added). The flag that stops every save of the library
+  (`storage_savable`) is cleared only by `storage_read_again`, given
+  `AttemptRead` by a read that worked (`Readable`); `AttemptFailed`
+  leaves it (`StillUnread`). A read made again starts from nothing
+  failed (`_read_outcome`), the kind it failed with is `_read_kind`, and
+  `library_view` is `ViewBooks | ViewEmpty | ViewUnreadable(failure_kind)`
+  (fixture `library-view-unmatched`).
+* `e2e/storage.spec.js` stubs the library's read to throw a DOMException
+  of each name (`failLibrary`), once or always: each kind's text and
+  button, an unlisted name's details, Try again showing the books and a
+  later import being kept, and a retry that fails.
 
 ## What allocates is linear
 
@@ -1165,7 +1248,7 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it; a book's record that is damaged, newer or not Quire's is
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is damaged, newer or not Quire's is
 shown nowhere, said once and never written over. A backup that could not
 read a book's notes is not made.
 

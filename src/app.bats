@@ -123,6 +123,10 @@ fn _library (): void = let
   val () = ui_el("library", "book-list", TDiv, "list")
   val () = ui_named("book-list", NRegion, "Books")
   val () = ui_el("library", "library-empty", TDiv, "empty")
+  (* when the library could not be read for a reason a second read could
+     change (the failure's HOPE, ui_try_again_show) *)
+  val () = ui_text_btn("library", "library-try-again", "btn btn-p", "Try again")
+  val () = _hide("library-try-again")
 in ui_text("library-empty", "Import an EPUB file to start reading.") end
 
 (* The book menu (its More button, a right-click or a long press on a

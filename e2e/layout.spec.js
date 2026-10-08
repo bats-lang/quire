@@ -11,7 +11,7 @@ import {
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen, insetsShort } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort, coveredByBanner } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -38,6 +38,7 @@ async function outside(page, locators) {
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
+  expect(await coveredByBanner(page), `controls under the error banner on ${screen}`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
@@ -639,4 +640,20 @@ test('the reading settings sheet keeps its box and its tabs in place on every ta
     await expect(tab(name)).toBeFocused();
     await only(name, key);
   }
+});
+
+// #374: the error banner never covers the library's header
+test('the error banner does not cover the library\'s header or its controls', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [
+    epubFile({ title: 'A Rather Long Title For A Book That Goes On', author: 'Someone With A Long Name' }),
+    epubFile({ title: 'Short', author: 'S' }),
+  ], 2);
+  // a file that is no book raises the banner
+  await importInput(page).setInputFiles([{ name: 'bad.epub', mimeType: 'application/epub+zip', buffer: Buffer.from('this is not a zip') }]);
+  await expect(page.getByRole('alert')).toBeVisible();
+  const header = await page.locator('#library-bar').boundingBox();
+  const banner = await page.getByRole('alert').boundingBox();
+  expect(banner.y, 'the banner is below the header').toBeGreaterThanOrEqual(header.y + header.height - 1);
+  await fits(page, 'the library with the error banner up');
 });

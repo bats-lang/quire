@@ -14,6 +14,9 @@
  *   differ between on and off.
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
+ * - coveredByBanner: while the error banner is up, no control outside it
+ *   is under it (#374: the banner hid the library's header, the title,
+ *   Import and the menu, exactly when a reader needs them).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -271,4 +274,44 @@ export async function inSafeArea(page, insets) {
     }
     return bad;
   }, insets);
+}
+
+/** The visible controls of the header (by default the library's bar:
+    its title, shelf, sort, Import and menu) that the error banner (when
+    it is up) is drawn over: any part of a control's box inside the
+    banner's box, and the banner on top there. The banner's own controls
+    are left out. A banner is a fixed overlay and covers whatever is at
+    the foot of a short window (a card, as a toast does); the header is
+    what a reader needs while it is up, and what it must never hide.
+    Each is named. Run on a screen that raises the banner (it finds none
+    otherwise, nor when the header is not shown) */
+export async function coveredByBanner(page, header = '#library-bar') {
+  return page.evaluate(header => {
+    const banner = document.getElementById('error-banner');
+    if (!banner || !banner.checkVisibility() || banner.getClientRects().length === 0) return [];
+    const bar = document.querySelector(header);
+    if (!bar || !bar.checkVisibility() || bar.getClientRects().length === 0) return [];
+    const over = banner.getBoundingClientRect();
+    const controls = 'button, a[href], select, textarea, input:not([type=hidden]):not([type=file]), [role=button], [role=menuitem], [role=tab], [role=switch], [role=slider], #import-button';
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const named = e => (e.getAttribute('aria-label') || e.textContent || e.id || e.tagName).trim().slice(0, 40);
+    const bad = [];
+    const covered = e => {
+      const box = e.getBoundingClientRect();
+      const x = Math.max(box.left, over.left), right = Math.min(box.right, over.right);
+      const y = Math.max(box.top, over.top), bottom = Math.min(box.bottom, over.bottom);
+      if (right - x <= 1 || bottom - y <= 1) return false;
+      // the banner is on top where they meet
+      const top = document.elementFromPoint((x + right) / 2, (y + bottom) / 2);
+      return top !== null && banner.contains(top);
+    };
+    if (covered(bar)) bad.push(`${header} is under the banner`);
+    for (const control of bar.querySelectorAll(controls)) {
+      if (banner.contains(control) || !shown(control)) continue;
+      const box = control.getBoundingClientRect();
+      if (box.width <= 1 && box.height <= 1) continue;
+      if (covered(control)) bad.push(`${named(control)} is under the banner`);
+    }
+    return bad;
+  }, header);
 }

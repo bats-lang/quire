@@ -1473,7 +1473,7 @@ fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:n
   val () = raw(sheet, "@font-face{font-family:'Material Symbols';src:url(material-symbols-subset.woff2) format('woff2');font-weight:400;font-display:block}")
 in sheet end
 
-fn _shell {left:nat | left >= 6900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6900] sheet(after, false, false) = let
+fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7400] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -1582,6 +1582,18 @@ fn _shell {left:nat | left >= 6900} (sheet: sheet(left, false, false)): [after:n
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = lay(sheet, BoxShadow(), "0 2px 12px rgba(0,0,0,.35)")
   val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
+  val sheet = close(sheet)
+  (* over the library the banner goes to the foot of the screen, so it
+     never covers the library's header (#374): a banner at the top hid
+     the title, Import and the menu while the reader needed them. Over
+     the reader the top is kept (its bars hide). Material puts a
+     message that needs an answer below the app bar, not over it; here
+     the foot, where the library has nothing fixed, since the app bar
+     wraps to five rows at 320px and a banner under it would have no
+     fixed place *)
+  val sheet = rule(sheet, "#bats-root:has(#library:not([data-hide='1'])) .banner")
+  val sheet = lay(sheet, Top(), "auto")
+  val sheet = lay(sheet, Bottom(), "max(8px,var(--safe-bottom))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
   val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())
@@ -1779,6 +1791,9 @@ fn _shell {left:nat | left >= 6900} (sheet: sheet(left, false, false)): [after:n
   val sheet = rule(sheet, ".pfill")
   val sheet = lay(sheet, Height(), "100%")
   val sheet = fill(sheet, RoleAccent())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, "#library-try-again")
+  val sheet = lay(sheet, AlignSelf(), "center")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".empty")
   val sheet = lay(sheet, TextAlign(), "center")
