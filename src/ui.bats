@@ -1925,14 +1925,11 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | ColumnsAuto
   | ColumnsOne
   | ColumnsTwo
-  | AlignRagged
-  | AlignJustified
-  | HyphensOff
-  | HyphensOn
+  | JustifySwitch
+  | HyphenationSwitch
   | RubyShow
   | RubyHide
-  | DimOff
-  | DimOn
+  | DimImagesSwitch
   | TapsSides
   | TapsForward
   | TapsOneHand
@@ -1962,14 +1959,11 @@ implement typography_control_id (control) =
   | ColumnsAuto() => "columns-auto"
   | ColumnsOne() => "columns-one"
   | ColumnsTwo() => "columns-two"
-  | AlignRagged() => "align-ragged"
-  | AlignJustified() => "align-justified"
-  | HyphensOff() => "hyphens-off"
-  | HyphensOn() => "hyphens-on"
+  | JustifySwitch() => "justify-switch"
+  | HyphenationSwitch() => "hyphenation-switch"
   | RubyShow() => "ruby-show"
   | RubyHide() => "ruby-hide"
-  | DimOff() => "dim-off"
-  | DimOn() => "dim-on"
+  | DimImagesSwitch() => "dim-images-switch"
   | TapsSides() => "taps-sides"
   | TapsForward() => "taps-forward"
   | TapsOneHand() => "taps-one-hand"
@@ -1998,15 +1992,12 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | LayoutScroll() => $R.some(ColumnsAuto())
   | ColumnsAuto() => $R.some(ColumnsOne())
   | ColumnsOne() => $R.some(ColumnsTwo())
-  | ColumnsTwo() => $R.some(AlignRagged())
-  | AlignRagged() => $R.some(AlignJustified())
-  | AlignJustified() => $R.some(HyphensOff())
-  | HyphensOff() => $R.some(HyphensOn())
-  | HyphensOn() => $R.some(RubyShow())
+  | ColumnsTwo() => $R.some(JustifySwitch())
+  | JustifySwitch() => $R.some(HyphenationSwitch())
+  | HyphenationSwitch() => $R.some(RubyShow())
   | RubyShow() => $R.some(RubyHide())
-  | RubyHide() => $R.some(DimOff())
-  | DimOff() => $R.some(DimOn())
-  | DimOn() => $R.some(TapsSides())
+  | RubyHide() => $R.some(DimImagesSwitch())
+  | DimImagesSwitch() => $R.some(TapsSides())
   | TapsSides() => $R.some(TapsForward())
   | TapsForward() => $R.some(TapsOneHand())
   | TapsOneHand() => $R.some(VolumeKeysTurn())
@@ -2032,7 +2023,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 33)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 30)
 
 (* The reading settings sheet's tabs (#288), each by its tab's id
    (sheet_tab_control_id); sheet_tab_panel_id is the panel it shows *)

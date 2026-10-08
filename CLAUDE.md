@@ -1062,6 +1062,13 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* A setting with two states is a switch (`_switch_row`: Justify text,
+  Hyphenation, Dim images, Turn pages with volume keys, Full screen,
+  Lock rotation), never a segmented On | Off nor a lone pressed button
+  (quire#363, Material 3: a switch makes a binary selection and takes
+  effect at once); a segmented group is for three or more choices, or
+  two that are not on and off (Pages | Scroll). `onOffPairs` in
+  `e2e/controls-shown.js` fails a screen that has one, in `fits`.
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.

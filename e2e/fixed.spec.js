@@ -108,7 +108,7 @@ test('a fixed-layout book is offered only the theme, its spreads and how the rea
   await expect(more.getByRole('slider', { name: 'Margins' })).toBeHidden();
   // its pages on screen are its spreads (spreads.spec.js)
   await expect(more.getByRole('group', { name: 'Pages on screen' })).toBeVisible();
-  await expect(more.getByRole('group', { name: 'Justify text' })).toBeHidden();
+  await expect(more.getByRole('button', { name: 'Justify text', exact: true })).toBeHidden();
   await openReadingSettings(page, 'Turning');
   await expect(more.getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
   await page.keyboard.press('Escape');
