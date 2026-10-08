@@ -932,9 +932,12 @@ read of storage changed: each still folds, as #174 says.
   details in the banner. None but Transient has a button. Import is off
   while the library is unreadable (`inert` on `import-file`; a file
   handed or dropped is refused with "Books cannot be added until Quire
-  can read your library"). Restore backup as the way to replace an
-  unreadable library is not here yet: the screen says only what is true
-  now.
+  can read your library"). Starting a new library over records that
+  cannot be decoded is not here yet (it is not a `harm`: the old bytes
+  are copied to `library/damaged/...` in the same transaction as the
+  new records, so nothing is lost, and it is offered only where nothing
+  else can be done: never for Transient, StorageBlocked or NewerVersion);
+  the screen says only what is true now.
 * **The banner** says "Quire could not read your library." for every
   kind with Copy details and Report (`notice_failure`, the browser's name
   as the code), and an unexpected one with `notice_unexpected` (the name
@@ -1182,7 +1185,15 @@ Elements are made through `src/ui.bats`:
   written from numbers alone, so no inline style can set a colour or
   anything else the stylesheet proves.
 
-Nothing is lost at a click, except by emptying the Trash:
+Nothing is lost at a click, except by emptying the Trash. That is the
+one irreversible action because it is the one with no visible effect: it
+only gives storage back, so nothing a reader needs to do ever requires
+it. Every other action changes what the reader sees, and is offered back
+(Undo), keeps what it replaces, or can be done again (reauthorizing
+sync brings back what turning it off took, with the security boundary
+the revocation is for); an action with a visible effect is never a
+`harm`. Removing a dictionary does not follow this yet: its files are
+deleted when the Undo offer is made final (#396 moves them to the Trash).
 
 * Removing a book moves it to the Trash (the shelf `Trash`), where it can only be
   restored; archiving, hiding, deleting a highlight or bookmark and
