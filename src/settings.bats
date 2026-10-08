@@ -279,13 +279,18 @@ fn _brightness_code (choice: brightness_choice, level: set_brightness_level): [c
   | BrightnessSystem() => 0
   | BrightnessOwn() => level
 
-(* The level a stored byte names, or none for the system's own *)
-fn _level_of_code (code: int): $R.option(set_brightness_level) =
-  if code = 1 then $R.some(10) else if code = 2 then $R.some(25)
-  else if code = 3 then $R.some(50) else if code = 4 then $R.some(75)
-  else if code = 5 then $R.some(100)
-  else if code >= 10 then (if code <= 100 then $R.some(g1ofg0(code)) else $R.none())
-  else $R.none()
+(* Whether a stored byte names a level of its own (not the system's) *)
+fn _code_is_level (code: int): bool =
+  if code >= 1 then (if code <= 5 then true else if code >= 10 then code <= 100 else false)
+  else false
+
+(* The level a stored byte names (50 for any other) *)
+fn _level_of_code (code: int): set_brightness_level =
+  if code = 1 then 10 else if code = 2 then 25
+  else if code = 3 then 50 else if code = 4 then 75
+  else if code = 5 then 100
+  else if code >= 10 then (if code <= 100 then g1ofg0(code) else 50)
+  else 50
 
 (* Whether the screen's rotation is locked (to the one it had then) *)
 #pub datatype rotation = RotationFree | RotationLocked
@@ -1323,13 +1328,12 @@ in
         (* the device's own, after the settings *)
         val () = !_speech_rate := (if n >= 21 then (if second_version then
           _rate_of_code(byte2int0($A.get<byte>(record, 20))) else RateNormal()) else RateNormal())
-        val brightness_stored = (if n >= 22 then (if second_version then
-          _level_of_code(byte2int0($A.get<byte>(record, 21))) else $R.none()) else $R.none())
-        val () = (case+ brightness_stored of
-          | ~$R.some(level) => let
-              val () = !_brightness := BrightnessOwn()
-            in !_brightness_level := level end
-          | ~$R.none() => !_brightness := BrightnessSystem())
+        val brightness_code = (if n >= 22 then (if second_version then
+          byte2int0($A.get<byte>(record, 21)) else 0) else 0): int
+        val () = (if _code_is_level(brightness_code) then let
+            val () = !_brightness := BrightnessOwn()
+          in !_brightness_level := _level_of_code(brightness_code) end
+          else !_brightness := BrightnessSystem())
         val () = !_rotation := (if n >= 23 then (if second_version then
           _rotation_of_code(byte2int0($A.get<byte>(record, 22))) else RotationFree()) else RotationFree())
         val stored_voices = (if n >= 24 then (if second_version then byte2int0($A.get<byte>(record, 23)) else 0) else 0): int
