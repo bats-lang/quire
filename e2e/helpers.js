@@ -467,3 +467,26 @@ export const fixedBoxes = page => bookPage(page).evaluate(doc => {
   const shown = sides.find(side => side.image) || sides[0];
   return { view: rect(doc), sides, page: shown, image: shown && shown.image, loaded: !!(shown && shown.image && shown.image.loaded) };
 });
+
+/** The bottom bar follows the reading axis (quire#359; Apple's HIG and
+    Material both flip progress and the page turns in a right-to-left
+    context): with the bars up, at the book's start the scrubber's thumb
+    is in the track's right half and Previous is right of Next when the
+    book reads right to left (the left half and the other way round when
+    it reads left to right), and the thumb moves the way the book goes
+    as the pages are turned */
+export async function expectBarFollows(page, rightToLeft) {
+  await showChrome(page);
+  const box = async selector => {
+    const b = await page.locator(selector).boundingBox();
+    return { middle: b.x + b.width / 2, left: b.x, right: b.x + b.width };
+  };
+  const track = await box('#scrubber-track');
+  const thumb = await box('#scrubber-thumb');
+  const previous = await box('#previous-page');
+  const next = await box('#next-page');
+  const trackMiddle = track.middle;
+  expect(thumb.middle > trackMiddle, 'the thumb at the start is in the track\'s ' + (rightToLeft ? 'right' : 'left') + ' half').toBe(rightToLeft);
+  expect(previous.middle > next.middle, 'Previous is ' + (rightToLeft ? 'right' : 'left') + ' of Next').toBe(rightToLeft);
+  expect(track.middle > Math.max(previous.middle, next.middle) || track.middle < Math.min(previous.middle, next.middle), 'the scrubber between the page turns').toBe(false);
+}
