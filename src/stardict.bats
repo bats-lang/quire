@@ -68,7 +68,7 @@ fun _find_key {l:agz}{n:pos}{key_len:pos}{at:nat | at <= n} .<n - at>.
 implement ifo_find (ifo, n, key) = _find_key(ifo, n, 0, key, g1u2i(string1_length(key)))
 
 fun _digits {l:agz}{n:pos}{stop:nat | stop <= n}{at:nat | at <= stop} .<stop - at>.
-  (ifo: !$A.arr(byte, l, n), at: int at, stop: int stop, total: [total:nat | total <= 2147483647] int total, seen: bool): [value:int | value >= ~1] int value =
+  (ifo: !$A.arr(byte, l, n), at: int at, stop: int stop, total: [total:nat | total <= 2147483647] int total, seen: bool): [value:int | value >= ~1] int value = (* wide *)
   if at >= stop then (if seen then total else ~1)
   else let val code = _byte_of(ifo, at) in
     if code < 48 then ~1

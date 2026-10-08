@@ -265,7 +265,7 @@ end
    (seconds when no metric is given)
    ============================================================ *)
 
-#define MS_MAX 2147483647
+#define MS_MAX 2147483647 (* wide *)
 
 (* The digit at data[at], or -1 *)
 fn _digit {l:agz}{n:pos}{at:nat | at < n} (data: !$A.borrow(byte, l, n), at: int at): [digit:int | digit >= ~1; digit <= 9] int digit = let

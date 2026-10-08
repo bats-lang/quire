@@ -112,6 +112,12 @@ for d in "$ROOT"/tests/static/ids/reject/*/; do
   else echo "FAIL ids/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/ids-$n.log"; fail=1; fi
 done
 
+# The solver's 32 bits (literals.py) and the library's keys (keys.py)
+if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>&1; then echo "ok   literals: $(tail -1 "$TMP/literals.log")"
+else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi
+if python3 "$ROOT/tests/static/keys.py" "$ROOT/src" > "$TMP/keys.log" 2>&1; then echo "ok   keys: $(tail -1 "$TMP/keys.log")"
+else echo "FAIL keys:"; cat "$TMP/keys.log"; fail=1; fi
+
 # Every match a case+ (case_plus.py): the app's own, and the checker's
 # fixtures, each a src.bats that must fail it with its `expect`
 if python3 "$ROOT/tests/static/case_plus.py" "$ROOT/src" > "$TMP/case.log" 2>&1; then echo "ok   case+: $(tail -1 "$TMP/case.log")"
