@@ -269,10 +269,24 @@ fn _scrolled (): bool =
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
 
-(* Whether the book reads right to left: taps, keys and drags take its
-   next page to be on the left. Its pages go on to the left too, unless
-   it is set vertically (_page_axis) *)
-val _right_to_left = ref<bool>(false)
+(* The way the book reads, from its spine (spine_rtl): taps, keys and
+   drags take the next page of a book read right to left to be on the
+   left, its pages go on to the left too (unless it is set vertically,
+   _page_axis), and the bottom bar follows the reading axis (_direction_apply):
+   the scrubber fills from the right, the page turns change sides
+   (quire#359). A choice is a datatype, not a bool (quire#192) *)
+#pub datatype reading_direction = LeftToRight | RightToLeft
+
+val _direction = ref<reading_direction>(LeftToRight())
+
+fn _is_rtl (): bool = case+ !_direction of RightToLeft() => true | LeftToRight() => false
+
+(* The thousandth of a track a place at thousandth is drawn at: from the
+   left reading left to right, from the right otherwise *)
+fn _drawn_at {thousandth:nat | thousandth <= 1000} (thousandth: int thousandth): [drawn:nat | drawn <= 1000] int drawn =
+  case+ !_direction of
+  | LeftToRight() => thousandth
+  | RightToLeft() => 1000 - thousandth
 
 (* The way the pages of the chapter go on: across to the right, across
    to the left (a book read right to left), or down (scrolled, or a book
@@ -282,7 +296,7 @@ datatype page_axis = Across | AcrossBack | Down
 fn _page_axis (): page_axis =
   if _is_vertical() then Down
   else if _scrolled() then Down
-  else if !_right_to_left then AcrossBack
+  else if _is_rtl() then AcrossBack
   else Across
 
 (* How far a turn scrolls: scrolled, the page's height, which is the
@@ -716,7 +730,7 @@ fn _anchor_now (): [node:int | node >= ~1] int node = let
     | VerticalRightToLeft() => page_left + page_width - 12
     | VerticalLeftToRight() => page_left + 12
     | Horizontal() =>
-      if _spread() then (if !_right_to_left then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
+      if _spread() then (if _is_rtl() then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
   (* a reader panel's scrim and the reader's inertness would hide the
      page from the hit test: it sees through them *)
   val seen = layer_see_through()
@@ -1565,7 +1579,7 @@ end
 
 (* The scrubber at thousandth: its thumb, its fill and the percentage *)
 fn _scrub_at {thousandth:nat | thousandth <= 1000} (thousandth: int thousandth): void = let
-  val () = ui_place("scrubber-thumb", PLeft, thousandth)
+  val () = ui_place("scrubber-thumb", PLeft, _drawn_at(thousandth))
   val () = ui_place("scrubber-fill", PWidth, thousandth)
   val buf = $A.alloc<byte>(16)
   val offset = $S.int_to_str(buf, 0, 16, thousandth / 10)
@@ -1610,7 +1624,7 @@ fun _ticks {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i, chapte
     val () = ui_attr_n(tick_id, tick_id_len, AClass, "tick")
     val thousandth = _thousandth(size_before, book_size)
     val @(tick_id, tick_id_len) = nid_make("scrubber-tick", i)
-    val () = ui_place_n(tick_id, tick_id_len, PLeft, thousandth)
+    val () = ui_place_n(tick_id, tick_id_len, PLeft, _drawn_at(thousandth))
   in _ticks(i + 1, chapter_count) end
 
 fn _ticks_show {chapter_count:nat} (chapter_count: int chapter_count): void = let
@@ -1635,7 +1649,8 @@ fn _track_at (x: Int): [thousandth:nat | thousandth <= 1000] int thousandth = le
   val () = _measure_literal("scrubber-track")
   val track_left = $DR.get_measure_x()
   val track_width = $DR.get_measure_w()
-in if track_width <= 0 then 0 else _clamp1000((x - track_left) * 1000 / track_width) end
+  val along = (if track_width <= 0 then 0 else _clamp1000((x - track_left) * 1000 / track_width)): [along:nat | along <= 1000] int along
+in _drawn_at(along) end
 
 (* Shows page p of the chapter's t pages *)
 (* The print pages' breaks in the chapter shown (epub:type pagebreak, or
@@ -3028,6 +3043,29 @@ fn _rows_set (): void = let
   val () = ui_show("align-row", horizontal)
 in ui_show("hyphens-row", horizontal) end
 
+(* The bottom bar follows the reading axis (quire#359; Apple's HIG:
+   "flip controls that show progress", and next and previous buttons, in
+   the right-to-left context; Material: progress runs from the right, the
+   back and forward buttons are reversed): the scrubber fills from the
+   right, the thumb, the chapters' ticks and the tip are drawn from the
+   right (_drawn_at), and the page turns change sides, their arrows with
+   them *)
+fn _direction_set (direction: reading_direction): void = let
+  val () = !_direction := direction
+in
+  case+ direction of
+  | LeftToRight() => let
+      val () = ui_attr("reader-bottom-bar", AClass, "bot")
+      val () = ui_attr("scrubber-track", AClass, "trk")
+      val () = ui_icon_set("previous-page", IcPrev)
+    in ui_icon_set("next-page", IcNext) end
+  | RightToLeft() => let
+      val () = ui_attr("reader-bottom-bar", AClass, "bot rtl")
+      val () = ui_attr("scrubber-track", AClass, "trk rtl")
+      val () = ui_icon_set("previous-page", IcNext)
+    in ui_icon_set("next-page", IcPrev) end
+end
+
 (* The book is set as vertical says (_vertical) *)
 fn _vertical_set (vertical: writing_mode): void = let
   val () = !_vertical := vertical
@@ -3070,7 +3108,7 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                (* a book with Media Overlays is read aloud by its narration *)
                val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
-               val () = !_right_to_left := spine_rtl(opf_bytes, opf_nodes)
+               val () = _direction_set(if spine_rtl(opf_bytes, opf_nodes) then RightToLeft() else LeftToRight())
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
                (* a new book's fixed pages take no size from another's *)
                val () = _size_put(_page_size, NoViewport())
@@ -3145,7 +3183,7 @@ fn _is_right (slot: page_slot): bool =
 fn _shape_of (serial: int, chapter_index: int): spread_shape =
   if ~_spreads_wanted() then Single()
   else let
-    val right_to_left = !_right_to_left
+    val right_to_left = _is_rtl()
     val @(before, own, after) = book_chapter_slots(serial, chapter_index, right_to_left)
   in
     case+ own of
@@ -3165,8 +3203,8 @@ fn _on_left (shape: spread_shape): bool =
   | AloneLeft() => true
   | AloneRight() => false
   | Single() => true
-  | WithNext() => ~(!_right_to_left)
-  | WithPrevious() => !_right_to_left
+  | WithNext() => ~(_is_rtl())
+  | WithPrevious() => _is_rtl()
 
 (* The boxes of a page of layout and shape: none reflowed; a fixed
    page's box, and in a spread the facing box on its other side, left
@@ -3325,7 +3363,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                     | VerticalLeftToRight() => ui_attr("page", AClass, "caf vertical-lr")
                     | Horizontal() => (case+ layout of
                       | PrePaginated() => ()
-                      | Reflowable() => if !_right_to_left then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf")))
+                      | Reflowable() => if _is_rtl() then ui_attr("page", AClass, "caf rtl") else ui_attr("page", AClass, "caf")))
                   val () = _rows_set()
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
@@ -4394,7 +4432,7 @@ implement reader_timer_stop () = !_speed_last_minute := ~1
 implement reader_scrub_preview (x) = let
   val thousandth = _track_at(x)
   val () = _scrub_at(thousandth)
-  val () = ui_place("scrubber-tip", PLeft, thousandth)
+  val () = ui_place("scrubber-tip", PLeft, _drawn_at(thousandth))
   val () = (case+ reading_get() of
     | @(_, _, _, chapter_count) => let
         val @(chapter, _) = _chapter_at(thousandth, 0, chapter_count)
@@ -4763,8 +4801,8 @@ implement reader_note_go () =
     in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
 
 (* Whether the open book reads right to left *)
-#pub fun reader_rtl (): bool
-implement reader_rtl () = !_right_to_left
+#pub fun reader_direction (): reading_direction
+implement reader_direction () = !_direction
 
 (* A length, at most 200 *)
 fn _query_len_of {length:pos} (length: int length): [query_len:pos | query_len <= 200; query_len <= length] int query_len = if length <= 200 then length else 200

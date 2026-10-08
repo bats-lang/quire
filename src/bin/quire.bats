@@ -68,6 +68,9 @@ val _view = ref<view>(LibraryView())
 
 (* Whether the reader is shown *)
 fn _in_reader (): bool = case+ !_view of ReaderView() => true | LibraryView() => false
+
+(* Whether the book open reads right to left *)
+fn _rtl (): bool = case+ reader_direction() of RightToLeft() => true | LeftToRight() => false
 (* The library book whose menu or info view is open *)
 val _menu_index = ref<Int>(~1)
 (* Whether the reader's bars are shown, and the latest hide timer's *)
@@ -1604,7 +1607,7 @@ in $DR.get_measure_w() > 0 end
    read right to left, its back is on the right (_zone_click), and the
    drawings are mirrored (.taps.rtl) *)
 fn _taps_describe (): void =
-  if reader_rtl() then let
+  if _rtl() then let
     val () = ui_attr("taps-choice", AClass, "seg taps rtl")
     val () = ui_text("taps-sides-about", "Right side back, left side forward, middle shows the controls")
     val () = ui_text("taps-forward-about", "Anywhere forward, right side back, top shows the controls")
@@ -1909,8 +1912,8 @@ in page_prev() end
 
 (* The page to the left and to the right: back and on, or the other way
    in a book read right to left *)
-fn _left (): void = if reader_rtl() then _next() else _previous()
-fn _right (): void = if reader_rtl() then _previous() else _next()
+fn _left (): void = if _rtl() then _next() else _previous()
+fn _right (): void = if _rtl() then _previous() else _next()
 
 (* Whether x is between the sides' zones: in the middle half of the
    page *)
@@ -1944,7 +1947,7 @@ in
     (if (if page_height > 0 then y < page_y + page_height / 8 else false) then _chrome_set(~(!_chrome))
      (* back at the edge the book starts from: the left, or the right
         read right to left; anywhere else forward *)
-     else if (if reader_rtl() then x > page_x + page_width - page_width / 4 else x < page_x + page_width / 4) then _previous()
+     else if (if _rtl() then x > page_x + page_width - page_width / 4 else x < page_x + page_width / 4) then _previous()
      else _next())
   | OneHandZones() =>
     (if page_height <= 0 then _chrome_set(~(!_chrome))
