@@ -835,6 +835,8 @@ fn _settings (): void = let
     "taps-forward-back", "taps-forward-forward", "taps-forward-about")
   val () = _tap_choice("taps-one-hand", "taps-one-hand-map", "tapmap onehand", "One hand",
     "taps-one-hand-back", "taps-one-hand-forward", "taps-one-hand-about")
+  val () = ui_el("typography-turning", "pictures-about", TSpan, "sabout")
+  val () = ui_text("pictures-about", "Double-tap a picture, or press and hold it, to see it full screen.")
   val () = ui_el("typography-turning", "volume-row", TDiv, "srow")
   val () = ui_el("volume-row", "volume-choice", TDiv, "seg")
   val () = ui_text_btn("volume-choice", "volume-keys-turn", "sbtn", "Turn pages with volume keys")
