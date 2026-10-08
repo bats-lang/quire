@@ -45,7 +45,7 @@ in next end
 fn numbers_of (value: Int): book_numbers = @{
   id_high = value, id_low = value, collections = value, collections_modified = value, minutes_elsewhere = value,
   pages_elsewhere = value, finished_at = value, finished_modified = value, chapter = value, chapters = value,
-  page = value, pages = value, anchor = value, place_modified = value, place_declined = value,
+  page = value, pages = value, anchor = value, place_modified = value, place_declined = value, position = value,
   series_number = value, shelf = value, added = value, opened = value, shelf_modified = value, file_size = value,
   cover = value, done = value, minutes_read = value, pages_read = value
 }

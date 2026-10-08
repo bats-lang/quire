@@ -1492,13 +1492,14 @@ fn _copy_plus {l:agz}{size,n:nat | n < 256; n <= size} (source: !$A.arr(byte, l,
   val () = _copy_from(source, 0, len, copy, 0)
 in copy end
 
-(* A book as the values its record holds *)
-fn _image_of_book (book: !book): [x:bookx] book_imaged(x) = let
+(* A book as the values its record holds; position is its place in the
+   library's order, kept so that the order is the same when it is read again *)
+fn _image_of_book (book: !book, position: Int): [x:bookx] book_imaged(x) = let
   val+ Book(title, title_len, author, author_len, series, series_len, nums) = book
   val numbers = @{
     id_high = nums.id_high, id_low = nums.id_low, collections = nums.collections, collections_modified = nums.collections_modified,
     minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere, finished_at = nums.finished_at,
-    finished_modified = nums.finished_modified, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
+    finished_modified = nums.finished_modified, position = position, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
     anchor = nums.anchor, place_modified = nums.place_modified, place_declined = nums.place_declined, series_number = nums.series_number,
     shelf = shelf_code(nums.shelf), added = nums.added, opened = nums.opened, shelf_modified = nums.shelf_modified,
     file_size = nums.file_size, cover = image_code(nums.cover), done = nums.done, minutes_read = nums.minutes_read,
@@ -1675,12 +1676,6 @@ in
   | ~HadShadow(image) => if unchanged then _shadow_set(id_high, id_low, image) else book_image_free(image)
 end
 
-(* The shadow of a book read or converted: what the book is, as its record holds it *)
-fn _book_shadow_of (id_high: Int, id_low: Int, book: !book): void =
-  case+ _image_of_book(book) of
-  | ~BookNotImaged() => ()
-  | ~BookImaged(kept) => _shadow_add(id_high, id_low, kept)
-
 (* What the collections' record held when it was last read or saved *)
 datavtype index_shadow =
   | NoIndexShadow of ()
@@ -1798,18 +1793,18 @@ datavtype pending(int) =
 
 (* The books that differ from their shadows, onto planned *)
 fun _plan {count,shadow_count,planned:nat} .<count>.
-  (books: !books(count), list: !shadows(shadow_count), planned: pending(planned)): [more:nat] pending(more) =
+  (books: !books(count), list: !shadows(shadow_count), position: Int, planned: pending(planned)): [more:nat] pending(more) =
   case+ books of
   | books_nil() => planned
   | books_cons(book, rest) =>
-      (case+ _image_of_book(book) of
-      | ~BookNotImaged() => _plan(rest, list, planned)
+      (case+ _image_of_book(book, position) of
+      | ~BookNotImaged() => _plan(rest, list, position + 1, planned)
       | ~BookImaged(image) => let
           val stored = book_image_numbers(image)
           val mask = _shadow_mask(list, stored.id_high, stored.id_low, image)
         in
-          if mask = 0 then let val () = book_image_free(image) in _plan(rest, list, planned) end
-          else _plan(rest, list, pending_cons(stored.id_high, stored.id_low, mask, image, planned))
+          if mask = 0 then let val () = book_image_free(image) in _plan(rest, list, position + 1, planned) end
+          else _plan(rest, list, position + 1, pending_cons(stored.id_high, stored.id_low, mask, image, planned))
         end)
 
 val _save_told = ref<bool>(false)
@@ -1924,7 +1919,7 @@ implement lib_save () =
     val+ LibCell(books, _) = library
     val shadow_cell = shadow_take()
     val+ ShadowCell(list) = shadow_cell
-    val planned = _plan(books, list, pending_nil())
+    val planned = _plan(books, list, 0, pending_nil())
     val gone = _stale(list, books, ids_nil())
     val () = shadow_put(shadow_cell)
     val () = lib_put(library)
@@ -2140,7 +2135,7 @@ in
         val () = !_legacy_sum := sum
         val sorted = _sort(parsed, books_nil(), !_sort_order)
         val no_shadows = shadows_nil()
-        val planned = _plan(sorted, no_shadows, pending_nil())
+        val planned = _plan(sorted, no_shadows, 0, pending_nil())
         val () = shadows_free(no_shadows)
         val () = lib_put(LibCell(sorted, count))
       in
@@ -2170,23 +2165,40 @@ in
       end)
 end
 
+(* The books read, each with the place its record gives it in the library's
+   order, in that order *)
+datavtype ranked(int) =
+  | ranked_nil(0) of ()
+  | {count:nat} ranked_cons(count + 1) of (Int, book, ranked(count))
+
+fun _rank_insert {count:nat} .<count>. (position: Int, book: book, list: ranked(count)): ranked(count + 1) =
+  case+ list of
+  | ~ranked_nil() => ranked_cons(position, book, ranked_nil())
+  | ~ranked_cons(other_position, other, rest) =>
+    if position < other_position then ranked_cons(position, book, ranked_cons(other_position, other, rest))
+    else ranked_cons(other_position, other, _rank_insert(position, book, rest))
+
+fun _ranked_books {count,more:nat} .<count>. (list: ranked(count), books: books(more)): books(count + more) =
+  case+ list of
+  | ~ranked_nil() => books
+  | ~ranked_cons(_, book, rest) => books_cons(book, _ranked_books(rest, books))
+
 (* A stored book taken into the library: it is the book, and its shadow is
-   what the book holds, so only a change to it is saved *)
-fn _adopt_image {x:bookx}{parsed:nat | parsed <= LIB_MAX} (image: book_image(x), books: books(parsed), parsed: int parsed)
-  : [count:nat | count <= LIB_MAX] @(books(count), int count) =
+   the image its record gave, so only a change to it is saved *)
+fn _adopt_image {x:bookx}{parsed:nat | parsed <= LIB_MAX} (image: book_image(x), books: ranked(parsed), parsed: int parsed)
+  : [count:nat | count <= LIB_MAX] @(ranked(count), int count) =
   if parsed >= 100000 then let val () = book_image_free(image) in @(books, parsed) end
   else let
     val book = _book_of_image(image)
     val stored = book_image_numbers(image)
-    val () = _book_shadow_of(stored.id_high, stored.id_low, book)
-    val () = book_image_free(image)
-  in @(books_cons(book, books), parsed + 1) end
+    val () = _shadow_add(stored.id_high, stored.id_low, image)
+  in @(_rank_insert(stored.position, book, books), parsed + 1) end
 
 (* The books read from their records, onto books: those that could not be
    used, and those that lost a group, are counted *)
 fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
-  (stored: stored_books(stored), books: books(parsed), parsed: int parsed, unusable: int, lossy: int)
-  : [count:nat | count <= LIB_MAX] @(books(count), int count, int, int) =
+  (stored: stored_books(stored), books: ranked(parsed), parsed: int parsed, unusable: int, lossy: int)
+  : [count:nat | count <= LIB_MAX] @(ranked(count), int count, int, int) =
   case+ stored of
   | ~StoredNone() => @(books, parsed, unusable, lossy)
   | ~StoredSome(one, rest) =>
@@ -2254,7 +2266,8 @@ implement lib_load () =
           val () = stored_books_free(stored)
         in _convert_legacy() end
         else let
-          val @(books, count, unusable, lossy) = _adopt_books(stored, books_nil(), 0, 0, 0)
+          val @(ranked_books, count, unusable, lossy) = _adopt_books(stored, ranked_nil(), 0, 0, 0)
+          val books = _ranked_books(ranked_books, books_nil())
           val index_damaged = _adopt_index(index)
           val () = lib_put(LibCell(_sort(books, books_nil(), !_sort_order), count))
           val () = _adopt_told(unusable, lossy, index_damaged)

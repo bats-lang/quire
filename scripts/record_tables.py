@@ -7,6 +7,7 @@ BOOK_GROUPS = [
   ("COLL", "opt", [("collections", "i"), ("collections_modified", "i")]),
   ("ELSE", "opt", [("minutes_elsewhere", "i"), ("pages_elsewhere", "i")]),
   ("FNSH", "opt", [("finished_at", "i"), ("finished_modified", "i")]),
+  ("ORDR", "opt", [("position", "i")]),
   ("PLCE", "opt", [("chapter", "i"), ("chapters", "i"), ("page", "i"), ("pages", "i"), ("anchor", "i"), ("place_modified", "i"), ("place_declined", "i")]),
   ("SERI", "opt", [("series", "s"), ("series_number", "i")]),
   ("SHLF", "opt", [("shelf", "i"), ("added", "i"), ("opened", "i"), ("shelf_modified", "i")]),
