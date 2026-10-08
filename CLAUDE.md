@@ -719,7 +719,7 @@ reader's `READER`), then chunks as PNG has them: a u32le length under
 check value of "123456789" is 0xCBF43926) as its low 16 bits and then
 its high 16 bits, little endian, over the tag and the data; the last
 chunk is `IEND`. A record is a set of groups, one chunk each, in
-ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH PLCE SERI SHLF
+ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
 SIZE TIME TITL`, the index's `LEGA NAMS`); each group is required (its
 loss makes the record `Undecodable`) or optional (its loss gives its
 defaults and `DecodedWithLoss`). A chunk of a tag this version does not
@@ -823,6 +823,14 @@ fails puts the shadow back (`_shadow_unsend`) and says so once. A book
 whose record is no longer in the library has its record deleted; a stale
 tab sends only its own groups, so two tabs changing different parts of a
 book (a shelf, a collection) keep both changes (`e2e/library-records.spec.js`).
+
+**The order and the view.** A book's record holds its place in the
+library's order (`ORDR`, the `position` it had when last saved), and the
+books are read back in it, so a book touched last is first again. The
+view kept for a reload ("view") names its book by id (the key is only
+the number the book was given as the library was read, and records are
+read in id order): `lib_index_of_id`; a view kept before, of a key
+alone, is found by the key.
 
 **The old record** `"lib"` (QLB1 to QLB6) is converted once, by
 `_convert_legacy`: when no record of the library is there, "lib" is read,
