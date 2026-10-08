@@ -8,10 +8,10 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage,
+  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen, insetsShort, onOffPairs } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort, onOffPairs, textContrastShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -38,6 +38,7 @@ async function outside(page, locators) {
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
+  expect(await textContrastShort(page), `placeholders under 4.5:1 on ${screen}`).toEqual([]);
   expect(await onOffPairs(page), `two-state settings on ${screen} that are not switches`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
@@ -161,6 +162,28 @@ test("no bar button's text is an emoji, and the icons' face is there", async ({ 
   const loaded = await page.evaluate(async glyphs => (await document.fonts.load("24px 'Material Symbols'", glyphs)).length, icons.map(t => t.text).join(''));
   expect(loaded, 'the icon face is loaded').toBe(1);
 });
+
+// quire#357: a placeholder is text under the contrast proof, in the
+// dark and the light themes alike (the browser's own grey failed 4.5:1
+// on the dark card)
+for (const scheme of ['light', 'dark']) {
+  test.describe(`placeholders, ${scheme}`, () => {
+    test.use({ colorScheme: scheme });
+    test(`the fields' placeholders read at 4.5:1 on a ${scheme} ground`, async ({ page }) => {
+      await start(page);
+      await importFiles(page, [epubFile({ title: 'Short', author: 'S' })], 1);
+      await bookMenu(page, 'Short');
+      await menuItem(page, 'Collections').click();
+      await dialog(page, 'Collections').getByRole('button', { name: 'New collection' }).click();
+      await expect(dialog(page, 'New collection').getByRole('textbox', { name: 'Name' })).toBeVisible();
+      expect(await textContrastShort(page), 'the new collection dialog').toEqual([]);
+      await page.keyboard.press('Escape');
+      await page.keyboard.press('Escape');
+      await librarySearch(page).click();
+      expect(await textContrastShort(page), 'the library search').toEqual([]);
+    });
+  });
+}
 
 test('nothing is cut off in the library, its menus and its screens', async ({ page }) => {
   await start(page);

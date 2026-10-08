@@ -1043,7 +1043,12 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
-  accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
+  accents need 3:1 (`EDGEP`). A field's placeholder is text like
+  any other (quire#357): `input::placeholder` is written through `surf`
+  as muted on the field's card (`S_muted_card`, proven in each theme)
+  and drawn at full opacity, so a placeholder is under the proof too;
+  `textContrastShort` in `e2e/controls-shown.js` measures it in the light
+  and dark themes (`e2e/layout.spec.js`). Grounds without text (`fill`, `tint`)
   set their font size to 0, and a dialog's veil makes its own text
   transparent.
 * Each theme is written (`theme`) only with a proof (`HARMONY`) that
