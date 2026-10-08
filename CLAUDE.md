@@ -686,24 +686,30 @@ only where its platform has it, by its own `data-hide`.
   it is pressed (`_switch_row` in `src/app.bats`), and a line saying
   what it does (`aria-describedby`). In the app full screen is kept
   (quire#313): a `fullscreen_choice` (`FullscreenOff | FullscreenOn`),
-  the device's own, after an "F" at the end of the "S2" record, set as
-  the screen shows it (`screen_fullscreen_changed`) and set again as
-  the app starts, before the first view is shown, the switch saying so
-  from the first frame (`screen_controls_start`). A browser keeps none:
+  the device's own, after an "F" at the end of the "S2" record, turned
+  and kept by the switch (`screen_fullscreen_toggle`) and by nothing
+  else, the switch saying it from the first frame
+  (`screen_controls_start`). It is the setting for the immersive reading
+  screen only (quire#348): the system's bars are hidden when the setting
+  is on and the reader is shown with its own bars away (`_immersive`,
+  set by quire.bats' `_chrome_set` and `_show_library` through
+  `screen_immersive_set`), and shown in the library, in the in-book menu
+  and its panels, and as the app starts; the setting is not changed by
+  what the bars show, nor by the menu coming up. A browser keeps none:
   the Fullscreen API enters only at a click (the user's activation), so
   a page opened again starts out of it, its switch off, and a click
-  there does not change what is kept.
+  there does not change what is kept, and the page is in full screen or
+  not as that click left it.
   Where the device refuses the rotation lock (bridge's `LockRefused`),
   Lock rotation is not offered again that session (`_lock_refused` in
   `src/screen_controls.bats`) and the banner says so (quire#355): a
-  control that cannot work is not shown. While full screen is on, a page shown hides the
+  control that cannot work is not shown. While the reader is immersive and full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
-  brings them back at a swipe from the edge. Meanwhile the switch shows
-  them (quire#314): pwa's activity reports each bar's visibility at each
-  window insets dispatch (`batsNative.systemBars`, bridge's
-  `listen_system_bars`, `RSystemBars`), and the switch is on only while
-  no bar is shown (`_fullscreen_shown`; a tap on it while it reads off
-  hides them). Brightness while reading
+  brings them back at a swipe from the edge, the reader's own way out of
+  immersive mode (quire#314). pwa's activity reports each bar's
+  visibility at each window insets dispatch (`batsNative.systemBars`,
+  bridge's `listen_system_bars`, `RSystemBars`), which lays the chapter
+  out again when it changes (quire#356). Brightness while reading
   (`brightness_*`, the app only, quire#392: a `brightness_choice`, the
   device's own or `BrightnessOwn`, with a level of 10 to 100 kept apart
   as the narration's speed is, `set_brightness_level`; kept with the
@@ -1045,7 +1051,12 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   number): a table of every sRGB channel's linear light (`LIN`, made by
   css's `scripts/gen-contrast.py`) bounds each colour's luminance, so
   a pair that falls short does not type-check. Control edges and
-  accents need 3:1 (`EDGEP`). Grounds without text (`fill`, `tint`)
+  accents need 3:1 (`EDGEP`). A field's placeholder is text like
+  any other (quire#357): `input::placeholder` is written through `surf`
+  as muted on the field's card (`S_muted_card`, proven in each theme)
+  and drawn at full opacity, so a placeholder is under the proof too;
+  `textContrastShort` in `e2e/controls-shown.js` measures it in the light
+  and dark themes (`e2e/layout.spec.js`). Grounds without text (`fill`, `tint`)
   set their font size to 0, and a dialog's veil makes its own text
   transparent.
 * Each theme is written (`theme`) only with a proof (`HARMONY`) that
@@ -1070,6 +1081,26 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* A setting with two states is a switch (`_switch_row`: Justify text,
+  Hyphenation, Dim images, Turn pages with volume keys, Full screen,
+  Lock rotation), never a segmented On | Off nor a lone pressed button
+  (quire#363, Material 3: a switch makes a binary selection and takes
+  effect at once); a segmented group is for three or more choices, or
+  two that are not on and off (Pages | Scroll). `onOffPairs` in
+  `e2e/controls-shown.js` fails a screen that has one, in `fits`.
+* A sign-in field is named by a visible label (quire#361, WCAG 3.3.2 and
+  1.3.1): `ui_form_field` (`FormUrl`, `FormUser`, `FormPassword`,
+  `FormName`) makes a `<label for>` above the input and shows only an
+  example as the placeholder, so the name does not vanish as the field is
+  typed in; `ui_field` has no such kinds, so a password field made
+  without a label does not type-check (`tests/static/reject/
+  form-field-as-field`). A sync service's step button is `Sign in to
+  <service>` for every service (`sign_in_label`, the title being
+  `service_title`), and a row that opens a screen ends in a chevron
+  drawn by the stylesheet (`.chev::after`, with an empty alternative text),
+  never a character of its words: `tests/static/glyphs.py` rejects U+203A in
+  `ui_text_btn`. `labelsShown` and `labelInName` in
+  `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.

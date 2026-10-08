@@ -35,13 +35,13 @@ const stop = page => panel(page).getByRole('button', { name: 'Stop waiting' });
 const syncNow = page => panel(page).getByRole('button', { name: 'Sync now' });
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 async function chooseAndroid(page) {
-  await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
-  await panel(page).getByRole('button', { name: 'Use Android' }).click();
+  await panel(page).getByRole('button', { name: 'Google Drive', exact: true }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Google Drive' }).click();
 }
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -134,7 +134,7 @@ test('a consent screen that never answers is said, and Stop waiting ends it; an 
   expect(await tokenKept(a.page)).toBe(false);
   await a.page.keyboard.press('Escape');
   await expect(row(a.page)).toHaveText('Off');
-  await settingsButton(a.page, 'Sync ›').click();
+  await settingsButton(a.page, 'Sync').click();
 
   // and a new ask goes through
   await chooseAndroid(a.page);

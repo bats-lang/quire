@@ -980,9 +980,13 @@ implement ui_audio_src (id, url, url_len) =
 (* A search field, a text area, or one line of text (a name) *)
 #pub datatype field = FSearch | FText | FLine
   | FChoice   (* a choice among options (ui_option) *)
-  (* a web address, a user name and a password, as a sign-in form has
-     them: the browser's password manager can fill them *)
-  | FUrl | FUser | FPassword
+
+(* A web address, a user name and a password, as a sign-in form has
+   them: the browser's password manager can fill them. Their fields are
+   made only by ui_form_field, which names each by a visible label, so a
+   name does not vanish as the field is typed in (WCAG 3.3.2, 1.3.1;
+   quire#361) *)
+#pub datatype form_kind = FormUrl | FormUser | FormPassword | FormName
 
 #pub fn ui_field {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
   (parent: string parent_len, id: string id_len, field_kind: field, class_name: string class_len, name: string name_len): void
@@ -998,26 +1002,46 @@ implement ui_field(parent, id, field_kind, class_name, name) = let
         val () = _add_element(parent, id, $D.Input)
         val () = _set_attr(id, $D.Type, "text")
         val () = _set_attr(id, $D.Autocomplete, "off")
-      in _set_attr(id, $D.Enterkeyhint, "done") end
-    | FUrl() => let
+      in _set_attr(id, $D.Enterkeyhint, "done") end)
+  val () = _set_attr(id, $D.Class, class_name)
+  val () = _set_attr(id, $D.Placeholder, name)
+in _set_attr(id, $D.Aria("label"), name) end
+
+(* A sign-in form's field of the kind, named by a visible label above it
+   (a <label for>, label_id its element, saying label), and showing hint
+   while empty: an example, never the name *)
+#pub fn ui_form_field {parent_len,label_id_len,id_len:pos | parent_len < 256; label_id_len < 256; id_len < 256}{class_len,label_len,hint_len:pos | class_len < 256; label_len < 256; hint_len < 256}
+  (parent: string parent_len, label_id: string label_id_len, id: string id_len, form_field: form_kind, class_name: string class_len, label: string label_len, hint: string hint_len): void
+
+implement ui_form_field(parent, label_id, id, form_field, class_name, label, hint) = let
+  val () = _add_element(parent, label_id, $D.Label)
+  val () = _set_attr(label_id, $D.For, id)
+  val () = _set_attr(label_id, $D.Class, "stext")
+  val () = ui_text(label_id, label)
+  val () = (case+ form_field of
+    | FormUrl() => let
         val () = _add_element(parent, id, $D.Input)
         val () = _set_attr(id, $D.Type, "url")
         val () = _set_attr(id, $D.Autocomplete, "url")
         val () = _set_attr(id, $D.Autocapitalize, "none")
       in _set_attr(id, $D.Spellcheck, "false") end
-    | FUser() => let
+    | FormUser() => let
         val () = _add_element(parent, id, $D.Input)
         val () = _set_attr(id, $D.Type, "text")
         val () = _set_attr(id, $D.Autocomplete, "username")
         val () = _set_attr(id, $D.Autocapitalize, "none")
       in _set_attr(id, $D.Spellcheck, "false") end
-    | FPassword() => let
+    | FormPassword() => let
         val () = _add_element(parent, id, $D.Input)
         val () = _set_attr(id, $D.Type, "password")
-      in _set_attr(id, $D.Autocomplete, "current-password") end)
+      in _set_attr(id, $D.Autocomplete, "current-password") end
+    | FormName() => let
+        val () = _add_element(parent, id, $D.Input)
+        val () = _set_attr(id, $D.Type, "text")
+        val () = _set_attr(id, $D.Autocomplete, "off")
+      in _set_attr(id, $D.Enterkeyhint, "done") end)
   val () = _set_attr(id, $D.Class, class_name)
-  val () = _set_attr(id, $D.Placeholder, name)
-in _set_attr(id, $D.Aria("label"), name) end
+in _set_attr(id, $D.Placeholder, hint) end
 
 (* In document: option id_bytes chosen, when selected *)
 fn _document_selected {document_loc,id_loc:agz}{id_len:pos | id_len < 256}
@@ -1925,14 +1949,11 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | ColumnsAuto
   | ColumnsOne
   | ColumnsTwo
-  | AlignRagged
-  | AlignJustified
-  | HyphensOff
-  | HyphensOn
+  | JustifySwitch
+  | HyphenationSwitch
   | RubyShow
   | RubyHide
-  | DimOff
-  | DimOn
+  | DimImagesSwitch
   | TapsSides
   | TapsForward
   | TapsOneHand
@@ -1963,14 +1984,11 @@ implement typography_control_id (control) =
   | ColumnsAuto() => "columns-auto"
   | ColumnsOne() => "columns-one"
   | ColumnsTwo() => "columns-two"
-  | AlignRagged() => "align-ragged"
-  | AlignJustified() => "align-justified"
-  | HyphensOff() => "hyphens-off"
-  | HyphensOn() => "hyphens-on"
+  | JustifySwitch() => "justify-switch"
+  | HyphenationSwitch() => "hyphenation-switch"
   | RubyShow() => "ruby-show"
   | RubyHide() => "ruby-hide"
-  | DimOff() => "dim-off"
-  | DimOn() => "dim-on"
+  | DimImagesSwitch() => "dim-images-switch"
   | TapsSides() => "taps-sides"
   | TapsForward() => "taps-forward"
   | TapsOneHand() => "taps-one-hand"
@@ -2000,15 +2018,12 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | LayoutScroll() => $R.some(ColumnsAuto())
   | ColumnsAuto() => $R.some(ColumnsOne())
   | ColumnsOne() => $R.some(ColumnsTwo())
-  | ColumnsTwo() => $R.some(AlignRagged())
-  | AlignRagged() => $R.some(AlignJustified())
-  | AlignJustified() => $R.some(HyphensOff())
-  | HyphensOff() => $R.some(HyphensOn())
-  | HyphensOn() => $R.some(RubyShow())
+  | ColumnsTwo() => $R.some(JustifySwitch())
+  | JustifySwitch() => $R.some(HyphenationSwitch())
+  | HyphenationSwitch() => $R.some(RubyShow())
   | RubyShow() => $R.some(RubyHide())
-  | RubyHide() => $R.some(DimOff())
-  | DimOff() => $R.some(DimOn())
-  | DimOn() => $R.some(TapsSides())
+  | RubyHide() => $R.some(DimImagesSwitch())
+  | DimImagesSwitch() => $R.some(TapsSides())
   | TapsSides() => $R.some(TapsForward())
   | TapsForward() => $R.some(TapsOneHand())
   | TapsOneHand() => $R.some(VolumeKeysTurn())
@@ -2035,7 +2050,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_typography_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(typography_control)
-implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 33)
+implement ui_typography_control (bytes, n, at) = _typography_control_from(bytes, n, at, FontLiterata(), 30)
 
 (* The reading settings sheet's tabs (#288), each by its tab's id
    (sheet_tab_control_id); sheet_tab_panel_id is the panel it shows *)

@@ -129,6 +129,19 @@ for d in "$ROOT"/tests/static/case/reject/*/; do
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/case-$n.log"; then echo "ok   case/reject/$n"
   else echo "FAIL case/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/case-$n.log"; fail=1; fi
 done
+
+# No button's text holds the chevron (glyphs.py, quire#361): the app's
+# own, and the checker's fixtures, each a src.bats that must fail it
+# with its `expect`
+if python3 "$ROOT/tests/static/glyphs.py" "$ROOT/src" > "$TMP/glyphs.log" 2>&1; then echo "ok   glyphs: $(tail -1 "$TMP/glyphs.log")"
+else echo "FAIL glyphs:"; cat "$TMP/glyphs.log"; fail=1; fi
+for d in "$ROOT"/tests/static/glyphs/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/glyphs.py" "$d" > "$TMP/glyphs-$n.log" 2>&1; then echo "FAIL glyphs/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/glyphs-$n.log"; then echo "ok   glyphs/reject/$n"
+  else echo "FAIL glyphs/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/glyphs-$n.log"; fail=1; fi
+done
 fi
 
 # The fixtures, one after another, each put into the checked copy

@@ -97,7 +97,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   await page.getByRole('button', { name: 'Sepia', exact: true }).click();
   await expect.poll(() => bg(page)).not.toBe(plain);
   await openReadingSettings(page, 'Page');
-  await readingSettings(page).getByRole('group', { name: 'Justify text' }).getByRole('button', { name: 'On', exact: true }).click();
+  await readingSettings(page).getByRole('button', { name: 'Justify text', exact: true }).click();
   await page.keyboard.press('Escape');
   // the place as the book is left: justified text can move a page's
   // first paragraph to the page before
@@ -285,12 +285,14 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   const json = await exportBackup(page);
   const b = JSON.parse(json);
   expect(b.settings).toMatchObject({ readingSpeed: 150, brightness: 37, rotationLocked: true, fullScreen: true, voices: { en: 'Narrator' } });
-  // reset: out of full screen; its Undo: back in it
+  // reset: out of full screen; its Undo: back in it (the system's bars
+  // are shown in the library whatever is set, and hidden when a book is
+  // read with its own bars away: quire#348)
   await librarySettings(page);
   await settingsButton(page, 'Reset settings').click();
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
   await page.getByRole('button', { name: 'Undo' }).click();
-  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
+  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
   await settingsButton(page, 'Done').click();
   const undone = JSON.parse(await exportBackup(page));
   expect(undone.settings).toMatchObject({ rotationLocked: true, fullScreen: true });
@@ -307,7 +309,6 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await expect(restored(page)).toBeVisible();
   await restored(page).getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => page.evaluate(() => window.calls.slice(-3))).toContain('brightness {"brightness":0.37}');
-  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
   await openBook(page, 'Device Backup');
   await openReadingSettings(page, 'Read aloud');
   await expect(sheet.getByRole('combobox', { name: 'Reading speed' })).toHaveValue('1.5');
@@ -317,4 +318,8 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await expect(sheet.getByRole('button', { name: 'Same as device', exact: true })).toHaveAttribute('aria-pressed', 'false');
   await expect(sheet.getByRole('button', { name: 'Lock rotation', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sheet.getByRole('button', { name: 'Full screen', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  // the restored setting hides the bars when the book is read with its own away
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('t');
+  await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
 });

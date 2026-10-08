@@ -164,7 +164,7 @@ in ui_focus("dialog-note") end
 implement modal_name_field () = let
   val () = ui_show("dialog-text", false)
   val () = ui_clear("dialog-name-box")
-  val () = ui_field("dialog-name-box", "dialog-name", FLine, "mname", "Name")
+  val () = ui_form_field("dialog-name-box", "dialog-name-label", "dialog-name", FormName, "mname", "Name", "A name for it")
   val () = ui_show("dialog-name-box", true)
 in ui_focus("dialog-name") end
 

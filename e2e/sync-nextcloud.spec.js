@@ -72,9 +72,9 @@ const status = page => panel(page).getByRole('status');
 async function openSync(page, server) {
   await page.context().route(`${SERVER}/**`, server.handle);
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
-  await panel(page).getByRole('button', { name: 'Nextcloud ›' }).click();
+  await panel(page).getByRole('button', { name: 'Nextcloud', exact: true }).click();
   await expect(panel(page).getByLabel('Nextcloud server')).toBeVisible();
 }
 
@@ -86,7 +86,7 @@ test('signing in with Nextcloud polls its flow, finds the files folder and syncs
   const server = nextcloud({ pollsBeforeGrant: 1 });
   await openSync(page, server);
   await panel(page).getByLabel('Nextcloud server').fill(`${SERVER}/`);
-  await panel(page).getByRole('button', { name: 'Sign in with Nextcloud' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Nextcloud' }).click();
   // the sign-in page is a link the reader opens, in a tab of its own
   const link = panel(page).getByRole('link', { name: "Open Nextcloud's sign-in page" });
   await expect(link).toBeVisible();
@@ -115,10 +115,10 @@ test('a server address that is not https, or not a Nextcloud, is said so', async
   const server = nextcloud({ startStatus: 404 });
   await openSync(page, server);
   await panel(page).getByLabel('Nextcloud server').fill('http://cloud.example.com');
-  await panel(page).getByRole('button', { name: 'Sign in with Nextcloud' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Nextcloud' }).click();
   await expect(status(page)).toHaveText("Enter your Nextcloud's address, starting with https://.");
   await panel(page).getByLabel('Nextcloud server').fill(SERVER);
-  await panel(page).getByRole('button', { name: 'Sign in with Nextcloud' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to Nextcloud' }).click();
   await expect(status(page)).toHaveText("That address isn't a Nextcloud server, or it didn't answer as one.");
   await expect(panel(page).getByRole('link', { name: "Open Nextcloud's sign-in page" })).toBeHidden();
   expect(server.polls).toBe(0);
@@ -129,7 +129,7 @@ test('a sign-in started again stops the first one polling', async ({ page }) => 
   const server = nextcloud({ pollsBeforeGrant: 1000 });
   await openSync(page, server);
   await panel(page).getByLabel('Nextcloud server').fill(SERVER);
-  const signIn = panel(page).getByRole('button', { name: 'Sign in with Nextcloud' });
+  const signIn = panel(page).getByRole('button', { name: 'Sign in to Nextcloud' });
   const pollsWith = start => server.pollBodies.filter(body => body === `token=${TOKEN}${start}`).length;
   await signIn.click();
   await expect.poll(() => pollsWith(1), { timeout: 15000 }).toBeGreaterThanOrEqual(1);

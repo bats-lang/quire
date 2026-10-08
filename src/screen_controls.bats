@@ -46,15 +46,30 @@ datatype bars_seen =
 
 val _bars = ref<bars_seen>(BarsNotReported())
 
-(* Whether the screen is in full screen now: in the app, its system bars
-   all hidden, as reported (Android brings them back at a swipe from the
-   screen's edge, and full screen asked for stays asked: fullscreen_active
-   still says so); else as bridge has it *)
+(* Whether the immersive reading screen is shown: the reader, its own
+   bars away (quire.bats says, at each change). In the app, full screen
+   hides the system bars only then (quire#348): in the library, and while
+   the in-book menu shows, they are there *)
+val _immersive = ref<bool>(false)
+
+(* Whether the Full screen switch is on. In the app it is the setting,
+   whatever the system's bars are showing at the moment (they come and go
+   with the reader's menu); in a browser, whether the page is in full
+   screen *)
 fn _fullscreen_shown (): bool =
-  case+ !_bars of
-  | BarsNotReported() => $SCR.fullscreen_active()
-  | SomeBarShown() => false
-  | NoBarShown() => true
+  if $BAPP.is_native_platform() then
+    (case+ set_fullscreen_get() of FullscreenOn() => true | FullscreenOff() => false)
+  else $SCR.fullscreen_active()
+
+(* The app's system bars as full screen and the immersive screen want
+   them: hidden when both hold, shown otherwise. Asking to hide bars
+   already hidden changes nothing, and brings back the ones a swipe
+   from the edge showed *)
+fn _follow (): void =
+  if $BAPP.is_native_platform() then
+    (if (if !_immersive then _fullscreen_shown() else false) then $SCR.fullscreen_enter()
+     else (if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else ()))
+  else ()
 
 (* The brightness last set on the screen *)
 val _brightness_on_screen = ref<brightness_choice>(BrightnessSystem())
@@ -91,46 +106,56 @@ end
    Full screen
    ============================================================ *)
 
-(* Full screen clicked: out of it, or into it from what the switch shows
-   (bars the system brought back are hidden again) *)
+(* Full screen clicked. In the app the setting is turned and kept, and
+   the bars follow when the reader is immersive (the switch is clicked in
+   the in-book menu, where the bars stay; quire#348); in a browser, the
+   page goes into full screen or out of it *)
 #pub fn screen_fullscreen_toggle (): void
 
 implement screen_fullscreen_toggle () =
-  if _fullscreen_shown() then $SCR.fullscreen_exit() else $SCR.fullscreen_enter()
+  if $BAPP.is_native_platform() then let
+    val () = (case+ set_fullscreen_get() of
+      | FullscreenOn() => set_fullscreen_set(FullscreenOff())
+      | FullscreenOff() => set_fullscreen_set(FullscreenOn()))
+    val () = set_save(lib_state_get())
+    val () = _pressed("screen-fullscreen", _fullscreen_shown())
+  in _follow() end
+  else if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else $SCR.fullscreen_enter()
 
-fn _fullscreen_same (one: fullscreen_choice, other: fullscreen_choice): bool =
-  case+ (one, other) of
-  | (FullscreenOn(), FullscreenOn()) => true
-  | (FullscreenOff(), FullscreenOff()) => true
-  | (_, _) => false
+(* The immersive reading screen entered or left (quire.bats, at the
+   reader's own bars going and coming, the library, a book opened): in
+   the app, full screen hides the system bars then and only then *)
+#pub fn screen_immersive_set (immersive: bool): void
 
-(* Full screen entered or left (Escape leaves it too): the toggle
-   follows, and the lock, which a browser allows only in full screen. In
-   the app, what the screen now shows is kept with the settings (a
-   change to it saved), so the app opens again as it was (quire#313); a
-   browser's full screen is a moment's, never kept *)
+implement screen_immersive_set (immersive) = let
+  val () = !_immersive := immersive
+in _follow() end
+
+(* A page shown while immersive: bars a swipe from the screen's edge
+   brought back are hidden again, as a reading app keeps them hidden
+   while it reads (quire#300); not while the in-book menu is up *)
+#pub fn screen_bars_hidden_again (): void
+
+implement screen_bars_hidden_again () = _follow()
+
+(* Full screen entered or left (Escape leaves it too): in a browser the
+   toggle follows, and the lock, which a browser allows only in full
+   screen. In the app the setting is the switch's, kept when the switch is
+   clicked (quire#313), and the bars come and go with the reader (quire#348),
+   so what the screen shows does not change it; a browser's full screen
+   is a moment's, never kept *)
 #pub fn screen_fullscreen_changed (change: $SCR.fullscreen_change): void
 
 implement screen_fullscreen_changed (change) = let
-  val shown = (case+ change of
-    | $SCR.FullscreenEntered() => FullscreenOn()
-    | $SCR.FullscreenLeft() => FullscreenOff()): fullscreen_choice
-  val () = (case+ shown of
-    | FullscreenOn() => _pressed("screen-fullscreen", true)
-    | FullscreenOff() => _pressed("screen-fullscreen", false))
-  val () = (if $BAPP.is_native_platform() then
-      (if _fullscreen_same(shown, set_fullscreen_get()) then ()
-       else let
-         val () = set_fullscreen_set(shown)
-       in set_save(lib_state_get()) end)
-    else ())
+  val () = _pressed("screen-fullscreen", _fullscreen_shown())
 in screen_controls_show() end
 
 (* The app's system bars reported (at each of Android's window insets
-   dispatches): the switch shows them at once. Bars the system brought
-   back stay until the next page is shown (reader.bats hides them again
-   while full screen is on), as a swipe from the edge is the reader's
-   own way out of immersive mode (quire#314) *)
+   dispatches): whether what they show changed is answered, for the
+   reading area changes with it. Bars the system brought back stay until
+   the next page is shown (reader.bats hides them again while the reader
+   is immersive), as a swipe from the edge is the reader's own way out of
+   immersive mode (quire#314) *)
 #pub fn screen_system_bars_changed (bars: $SCR.system_bars): bool
 
 implement screen_system_bars_changed (bars) = let
@@ -152,12 +177,9 @@ in changed end
 
 (* In the app, the screen put in full screen or out of it as the
    settings keep it, where it is not so already *)
-fn _fullscreen_apply (): void =
-  if $BAPP.is_native_platform() then
-    (case+ set_fullscreen_get() of
-     | FullscreenOn() => if $SCR.fullscreen_active() then () else $SCR.fullscreen_enter()
-     | FullscreenOff() => if $SCR.fullscreen_active() then $SCR.fullscreen_exit() else ())
-  else ()
+fn _fullscreen_apply (): void = let
+  val () = _pressed("screen-fullscreen", _fullscreen_shown())
+in _follow() end
 
 (* ============================================================
    The rotation lock
@@ -306,23 +328,18 @@ end
 
 implement screen_controls_start () = let
   val () = _brightness_controls()
-  (* the app starts as full screen was kept (quire#313): its system bars
-     hidden, or shown (bars a page before this one hid, the app reopened
-     and its page loaded again, are shown), set either way, so the screen
-     is as kept whatever an earlier page left (quire#300). A browser
-     starts out of full screen: it enters it only at a click *)
-  val () = (if $BAPP.is_native_platform() then
-      (case+ set_fullscreen_get() of
-       | FullscreenOn() => $SCR.fullscreen_enter()
-       | FullscreenOff() => $SCR.fullscreen_exit())
-    else ())
+  (* the app starts in the library, where the system bars are shown
+     whatever full screen was kept (quire#348, quire#313): they are set so,
+     whatever an earlier page left (quire#300), and hidden when the reader
+     is immersive. A browser starts out of full screen: it enters it only
+     at a click *)
+  val () = (if $BAPP.is_native_platform() then $SCR.fullscreen_exit() else ())
   (* what full screen hides, on this platform: the system's bars in the
      app, the browser's own around the page in a browser *)
-  val () = (if $BAPP.is_native_platform() then ui_text("screen-fullscreen-about", "Hides the status and navigation bars")
+  val () = (if $BAPP.is_native_platform() then ui_text("screen-fullscreen-about", "Hides the status and navigation bars while you read; the menus and the library show them")
     else ui_text("screen-fullscreen-about", "Hides the browser's bars around the page"))
   val () = screen_controls_show()
-  (* the switch says so from the first frame: the bars are hidden as the
-     plugin answers, and its change confirms it *)
+  (* the switch says what is kept from the first frame *)
   val () = (if $BAPP.is_native_platform() then
       (case+ set_fullscreen_get() of
        | FullscreenOn() => _pressed("screen-fullscreen", true)
