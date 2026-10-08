@@ -50,7 +50,7 @@ test('the reading settings are tabs in the one sheet, by tap and by keyboard', a
   await expect(panel('Turning').getByRole('group', { name: 'Tap to turn pages' })).toBeVisible();
   await tab('Page').click();
   await shown('Page');
-  await expect(panel('Page').getByRole('group', { name: 'Justify text' })).toBeVisible();
+  await expect(panel('Page').getByRole('button', { name: 'Justify text', exact: true })).toBeVisible();
   // by keyboard: the arrows move along, round at the ends, and Home and End
   await expect(tab('Page')).toBeFocused();
   await page.keyboard.press('ArrowRight');
@@ -110,17 +110,18 @@ test('size, line spacing and margins change the page, and are kept', async ({ pa
 test('alignment, hyphenation and the spacings change the page, and are kept', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, { title: 'Spaced', author: 'Settings Tests', rawChapters: chapters(2) });
-  const group = name => more(page).getByRole('group', { name });
+  const toggle = name => more(page).getByRole('button', { name, exact: true });
   // ragged and hyphenated to start with (WCAG 1.4.8: not justified)
   expect(await style(page, 'textAlign')).toBe('start');
   expect(await style(page, 'hyphens')).toBe('auto');
   expect(await style(page, 'letterSpacing')).toBe('normal');
   await openReadingSettings(page, 'Page');
-  await expect(group('Justify text').getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'true');
-  await group('Justify text').getByRole('button', { name: 'On' }).click();
+  await expect(toggle('Justify text')).toHaveAttribute('aria-pressed', 'false');
+  await toggle('Justify text').click();
   await expect.poll(() => style(page, 'textAlign')).toBe('justify');
-  await expect(group('Justify text').getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
-  await group('Hyphenation').getByRole('button', { name: 'Off' }).click();
+  await expect(toggle('Justify text')).toHaveAttribute('aria-pressed', 'true');
+  await expect(toggle('Hyphenation')).toHaveAttribute('aria-pressed', 'true');
+  await toggle('Hyphenation').click();
   await expect.poll(() => style(page, 'hyphens')).toBe('manual');
   // the spacings reach what WCAG 1.4.12 asks a page to take
   await openReadingSettings(page, 'Look');
@@ -169,9 +170,10 @@ test('a book\'s images are dimmed in the dark theme, unless that is turned off',
   await choose(page, 'Sepia');
   await expect.poll(filter).toBe('none');
   await choose(page, 'Dark');
-  const dim = more(page).getByRole('group', { name: 'Dim images in the dark themes' });
-  await expect(dim.getByRole('button', { name: 'On' })).toHaveAttribute('aria-pressed', 'true');
-  await dim.getByRole('button', { name: 'Off' }).click();
+  const dim = more(page).getByRole('button', { name: 'Dim images in the dark themes', exact: true });
+  await expect(dim).toHaveAttribute('aria-pressed', 'true');
+  await dim.click();
+  await expect(dim).toHaveAttribute('aria-pressed', 'false');
   await expect.poll(filter).toBe('none');
   await choose(page, 'Close');
   // a reload comes back to the book, and the setting was kept
@@ -291,7 +293,7 @@ test('reset puts the defaults back', async ({ page }) => {
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => style(page, 'fontSize')).toBe('30px');
-  await more(page).getByRole('group', { name: 'Justify text' }).getByRole('button', { name: 'On', exact: true }).click();
+  await more(page).getByRole('button', { name: 'Justify text', exact: true }).click();
   await expect.poll(() => style(page, 'textAlign')).toBe('justify');
   await reset.click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);

@@ -756,13 +756,8 @@ fn _settings (): void = let
   val () = ui_text_btn("ruby-choice", "ruby-hide", "sbtn", "Hide")
   val () = _hide("ruby-row")
   (* a book's images dimmed in the dark themes *)
-  val () = ui_el("typography-look", "dim-row", TDiv, "srow")
-  val () = ui_el("dim-row", "dim-label", TSpan, "slabel")
-  val () = ui_text("dim-label", "Dim images in dark themes")
-  val () = ui_el("dim-row", "dim-choice", TDiv, "seg")
-  val () = ui_named("dim-choice", NGroup, "Dim images in the dark themes")
-  val () = ui_text_btn("dim-choice", "dim-on", "sbtn", "On")
-  val () = ui_text_btn("dim-choice", "dim-off", "sbtn", "Off")
+  val () = _switch_row("typography-look", "dim-row", "dim-images-switch", "dim-images-track",
+    "dim-images-knob", "dim-images-about", "Dim images in the dark themes", "Softens a book's pictures in the dark themes")
   (* Page: pages turned across, or the chapter scrolled down *)
   val () = ui_el("typography-page", "layout-row", TDiv, "srow")
   val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
@@ -784,20 +779,10 @@ fn _settings (): void = let
   (* the text's alignment (justified, its lines' ends even, or ragged)
      and hyphenation, each a named group, so its buttons are announced
      with what they set *)
-  val () = ui_el("typography-page", "align-row", TDiv, "srow")
-  val () = ui_el("align-row", "align-label", TSpan, "slabel")
-  val () = ui_text("align-label", "Justify text")
-  val () = ui_el("align-row", "align-choice", TDiv, "seg")
-  val () = ui_named("align-choice", NGroup, "Justify text")
-  val () = ui_text_btn("align-choice", "align-justified", "sbtn", "On")
-  val () = ui_text_btn("align-choice", "align-ragged", "sbtn", "Off")
-  val () = ui_el("typography-page", "hyphens-row", TDiv, "srow")
-  val () = ui_el("hyphens-row", "hyphens-label", TSpan, "slabel")
-  val () = ui_text("hyphens-label", "Hyphenation")
-  val () = ui_el("hyphens-row", "hyphens-choice", TDiv, "seg")
-  val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
-  val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
-  val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
+  val () = _switch_row("typography-page", "align-row", "justify-switch", "justify-track",
+    "justify-knob", "justify-about", "Justify text", "Lines end evenly at both edges")
+  val () = _switch_row("typography-page", "hyphens-row", "hyphenation-switch", "hyphenation-track",
+    "hyphenation-knob", "hyphenation-about", "Hyphenation", "Breaks long words at the end of a line")
   (* the screen (quire#300): full screen, the rotation locked (as
      Kindle's Layout tab locks the orientation), and (in the Android
      app) the brightness, each a row of its own, shown only where it can
@@ -837,10 +822,8 @@ fn _settings (): void = let
     "taps-one-hand-back", "taps-one-hand-forward", "taps-one-hand-about")
   val () = ui_el("typography-turning", "pictures-about", TSpan, "sabout")
   val () = ui_text("pictures-about", "Double-tap a picture, or press and hold it, to see it full screen.")
-  val () = ui_el("typography-turning", "volume-row", TDiv, "srow")
-  val () = ui_el("volume-row", "volume-choice", TDiv, "seg")
-  val () = ui_text_btn("volume-choice", "volume-keys-turn", "sbtn", "Turn pages with volume keys")
-  val () = ui_attr("volume-keys-turn", APressed, "false")
+  val () = _switch_row("typography-turning", "volume-row", "volume-keys-turn", "volume-keys-track",
+    "volume-keys-knob", "volume-keys-about", "Turn pages with volume keys", "The volume buttons turn the page, not the volume")
   val () = _hide("volume-row")
   (* Read aloud: its speed and voice (the voices of the book's
      language), offered and kept by read_aloud.bats, where the platform

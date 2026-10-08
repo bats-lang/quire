@@ -12,6 +12,9 @@
  * - statesUnseen: every toggle shows whether it is on in how it looks,
  *   not only in aria-pressed (WCAG 1.4.1): its look, and its parts',
  *   differ between on and off.
+ * - onOffPairs: a setting with two states is a switch (Material 3: a
+ *   switch makes a binary selection, its effect immediate), never a
+ *   segmented On | Off, nor a lone button pressed on and off (quire#363).
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
  * - inSafeArea: no control or text comes within the spacing scale's
@@ -92,6 +95,27 @@ export async function statesUnseen(page) {
       const after = look(e);
       e.setAttribute('aria-pressed', was);
       if (before === after) bad.push((e.getAttribute('aria-label') || e.textContent || e.id).trim().slice(0, 40));
+    }
+    return bad;
+  });
+}
+
+/** The visible two-state settings on the screen shown that are not
+    switches: a segmented group (.seg) whose buttons are exactly On and
+    Off, and a .seg holding one button that is pressed on and off.
+    Each is named */
+export async function onOffPairs(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const bad = [];
+    // (.cseg is the collections' chips, which are a list that has one chip at times, not a setting)
+    for (const group of document.querySelectorAll('.seg:not(.cseg)')) {
+      if (!shown(group)) continue;
+      const buttons = [...group.querySelectorAll('button')].filter(shown);
+      const names = buttons.map(b => b.textContent.trim()).sort();
+      const named = (group.getAttribute('aria-label') || group.id).trim();
+      if (names.length === 2 && names[0] === 'Off' && names[1] === 'On') bad.push(`${named}: On | Off`);
+      if (buttons.length === 1 && buttons[0].hasAttribute('aria-pressed') && !buttons[0].classList.contains('switch')) bad.push(`${named}: one pressed button`);
     }
     return bad;
   });

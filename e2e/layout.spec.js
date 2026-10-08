@@ -11,7 +11,7 @@ import {
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen, insetsShort } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort, onOffPairs } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -38,6 +38,7 @@ async function outside(page, locators) {
 async function fits(page, screen) {
   expect(await cutOff(page), `cut off on ${screen}`).toEqual([]);
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
+  expect(await onOffPairs(page), `two-state settings on ${screen} that are not switches`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
@@ -575,7 +576,7 @@ test('the reading settings sheet keeps its box and its tabs in place on every ta
   // each tab, and a control only its panel holds
   const held = {
     Look: sheet.getByRole('group', { name: 'Theme', exact: true }),
-    Page: sheet.getByRole('group', { name: 'Justify text', exact: true }),
+    Page: sheet.getByRole('button', { name: 'Justify text', exact: true }),
     Turning: sheet.getByRole('group', { name: 'Tap to turn pages' }),
     'Read aloud': sheet.getByRole('combobox', { name: 'Reading speed' }),
   };

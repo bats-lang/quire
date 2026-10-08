@@ -97,7 +97,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   await page.getByRole('button', { name: 'Sepia', exact: true }).click();
   await expect.poll(() => bg(page)).not.toBe(plain);
   await openReadingSettings(page, 'Page');
-  await readingSettings(page).getByRole('group', { name: 'Justify text' }).getByRole('button', { name: 'On', exact: true }).click();
+  await readingSettings(page).getByRole('button', { name: 'Justify text', exact: true }).click();
   await page.keyboard.press('Escape');
   // the place as the book is left: justified text can move a page's
   // first paragraph to the page before

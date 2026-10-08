@@ -1701,14 +1701,25 @@ fn _typography_chosen (control: typography_control): bool =
   | ColumnsAuto() => let val () = set_cols_set(AutoColumns()) in true end
   | ColumnsOne() => let val () = set_cols_set(OneColumn()) in true end
   | ColumnsTwo() => let val () = set_cols_set(TwoColumns()) in true end
-  | AlignRagged() => let val () = set_align_set(Ragged()) in true end
-  | AlignJustified() => let val () = set_align_set(Justified()) in true end
-  | HyphensOff() => let val () = set_hyph_set(NoHyphens()) in true end
-  | HyphensOn() => let val () = set_hyph_set(Hyphenated()) in true end
+  (* a switch: the lines justified or ragged, the words hyphenated or
+     not, the images dimmed or as they are (quire#363) *)
+  | JustifySwitch() => let
+      val () = (case+ set_align_get() of
+        | Justified() => set_align_set(Ragged())
+        | Ragged() => set_align_set(Justified()))
+    in true end
+  | HyphenationSwitch() => let
+      val () = (case+ set_hyph_get() of
+        | Hyphenated() => set_hyph_set(NoHyphens())
+        | NoHyphens() => set_hyph_set(Hyphenated()))
+    in true end
   | RubyShow() => let val () = set_ruby_set(RubyShown()) in true end
   | RubyHide() => let val () = set_ruby_set(RubyHidden()) in true end
-  | DimOff() => let val () = set_dim_set(ImagesAsTheyAre()) in true end
-  | DimOn() => let val () = set_dim_set(ImagesDimmed()) in true end
+  | DimImagesSwitch() => let
+      val () = (case+ set_dim_get() of
+        | ImagesDimmed() => set_dim_set(ImagesAsTheyAre())
+        | ImagesAsTheyAre() => set_dim_set(ImagesDimmed()))
+    in true end
   | TapsSides() => let val () = set_taps_set(SideZones()) in true end
   | TapsForward() => let val () = set_taps_set(ForwardZones()) in true end
   | TapsOneHand() => let val () = set_taps_set(OneHandZones()) in true end
