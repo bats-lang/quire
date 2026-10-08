@@ -2244,6 +2244,18 @@ implement lib_load () =
    The search query
    ============================================================ *)
 
+(* What the library view has to show: books, nothing to show, or a library that
+   could not be read (#354) *)
+datatype library_view =
+  | ViewBooks
+  | ViewEmpty
+  | ViewUnreadable
+
+fn _view_of (shown: int): library_view =
+  if ~storage_savable(LibraryRecord()) then ViewUnreadable()
+  else if shown > 0 then ViewBooks()
+  else ViewEmpty()
+
 (* The library view shows only the books whose title or author has
    query[0, query_len) in it (letters in any case); an empty query shows
    all *)
@@ -2840,8 +2852,11 @@ implement lib_render () = let
   val () = _coll_row()
   val () = _install_hint_show()
 in
-  if shown > 0 then ()
-  else if has_query then ui_text("library-empty", "No books match")
+  case+ _view_of(shown) of
+  | ViewBooks() => ()
+  | ViewUnreadable() => ui_text("library-empty", "Your library could not be read, so it is not shown. Reopen Quire to try again.")
+  | ViewEmpty() =>
+  if has_query then ui_text("library-empty", "No books match")
   else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
   else (case+ !_filter of
     | Unread() => ui_text("library-empty", "No unread books")

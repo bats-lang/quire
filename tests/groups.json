@@ -68,6 +68,7 @@
       "reject/import-unmatched",
       "reject/library-read-forged",
       "reject/library-reading-unmatched",
+      "reject/library-view-unmatched",
       "reject/link-unmatched",
       "reject/page-turn-copy-marked",
       "reject/page-turn-forged-copy",
