@@ -31,7 +31,7 @@ const linked = (testInfo, href, address, baseURL) => onAndroid(testInfo)
 test('Settings opens About, which shows the app and links out of it', async ({ page, baseURL }, testInfo) => {
   const errors = await start(page);
   await librarySettings(page);
-  await settingsButton(page, 'About Quire ›').click();
+  await settingsButton(page, 'About Quire').click();
   await expect(about(page)).toBeVisible();
   await expect(about(page)).toContainText('Quire, an EPUB reader');
   // the version: the commit's UTC date, as packages are versioned, and its short SHA (#219)
@@ -58,9 +58,9 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   await about(page).getByRole('button', { name: 'Done' }).click();
   await expect(about(page)).toBeHidden();
   await expect(settingsScreen(page)).toBeVisible();
-  await expect(settingsButton(page, 'About Quire ›')).toBeFocused();
+  await expect(settingsButton(page, 'About Quire')).toBeFocused();
   // Escape closes About, then Settings
-  await settingsButton(page, 'About Quire ›').click();
+  await settingsButton(page, 'About Quire').click();
   await expect(about(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(about(page)).toBeHidden();

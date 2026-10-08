@@ -1080,6 +1080,19 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   effect at once); a segmented group is for three or more choices, or
   two that are not on and off (Pages | Scroll). `onOffPairs` in
   `e2e/controls-shown.js` fails a screen that has one, in `fits`.
+* A sign-in field is named by a visible label (quire#361, WCAG 3.3.2 and
+  1.3.1): `ui_form_field` (`FormUrl`, `FormUser`, `FormPassword`,
+  `FormName`) makes a `<label for>` above the input and shows only an
+  example as the placeholder, so the name does not vanish as the field is
+  typed in; `ui_field` has no such kinds, so a password field made
+  without a label does not type-check (`tests/static/reject/
+  form-field-as-field`). A sync service's step button is `Sign in to
+  <service>` for every service (`sign_in_label`, the title being
+  `service_title`), and a row that opens a screen ends in a chevron
+  drawn by the stylesheet (`.chev::after`, with an empty alternative text),
+  never a character of its words: `tests/static/glyphs.py` rejects U+203A in
+  `ui_text_btn`. `labelsShown` and `labelInName` in
+  `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
   least 44px square, text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.

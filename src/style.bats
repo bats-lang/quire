@@ -3210,6 +3210,12 @@ fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)
   val sheet = rule(sheet, ".srow>.rowbtn")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
+  (* a row that opens a screen ends in a chevron, drawn and not part of its
+     name (the empty alternative text), so the name is the row's words
+     alone (WCAG 2.5.3, quire#361) *)
+  val sheet = rule(sheet, ".chev::after")
+  val () = raw(sheet, "content:\"\\203A\" / \"\";margin-left:8px;")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".srow.tapsrow")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, AlignItems(), "stretch")
