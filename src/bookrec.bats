@@ -72,6 +72,51 @@ implement book_of_vals {vals}{kv} (vals) =
   | {bs:bytes} BOOKDEC_newer(bs, br_newer()) of DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_newer())
   | {bs:bytes} BOOKDEC_damaged(bs, br_damaged()) of DECODES(BOOK_SPECS, BOOK_KIND, bs, rr_damaged())
 
+(* BOOKEQ(x, y): the books are one *)
+#pub dataprop BOOKEQ(bookx, bookx) =
+  | {x:bookx} BOOKEQ_refl(x, x)
+
+(* A book written and read back is the book written, in the same format *)
+#pub prfun book_roundtrip {x,y:bookx}{ver,minver,ver2,minver2:int}{e,e2:extras}{bs:bytes}{n:nat}
+  (LEN(bs, n), BOOKENC(x, ver, minver, e, bs), BOOKDEC(bs, br_ok(y, ver2, minver2, e2)))
+  : (BOOKEQ(x, y), EQI(ver, ver2), EQI(minver, minver2))
+
+primplement book_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, written, read) =
+  case+ written of
+  | BOOKENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | BOOKDEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval BOOKV_mk() = fields_written
+         prval BOOKV_mk() = fields_read
+       in (BOOKEQ_refl(), EQI_refl(), EQI_refl()) end)
+
+(* BOOKRES(a, b): the results of reading are one *)
+#pub dataprop BOOKRES(bookres, bookres) =
+  | {r:bookres} BOOKRES_refl(r, r)
+
+(* Reading what a book was written as is reading that book *)
+#pub prfun book_enc_dec {x:bookx}{ver,minver:int}{e:extras}{bs:bytes}{n:nat}{res:bookres}
+  (LEN(bs, n), BOOKENC(x, ver, minver, e, bs), BOOKDEC(bs, res)): BOOKRES(res, br_ok(x, ver, minver, e))
+
+primplement book_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
+  case+ written of
+  | BOOKENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | BOOKDEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval BOOKV_mk() = fields_written
+         prval BOOKV_mk() = fields_read
+       in BOOKRES_refl() end
+     | BOOKDEC_loss(_, decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | BOOKDEC_notquire(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | BOOKDEC_newer(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | BOOKDEC_damaged(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ()))
+
 (* a book record at run time: its format version, the least version that reads it, the book,
    and the chunks kept *)
 #pub datavtype bookrecord(bookx, int, int, extras) =
@@ -116,5 +161,19 @@ in
   | ~RR_newer() => (BOOKDEC_newer(read) | BR_newer())
   | ~RR_damaged() => (BOOKDEC_damaged(read) | BR_damaged())
 end
+
+(* A result of reading as another it is the same as *)
+#pub fun book_read_recast {first,second:bookres} (same: BOOKRES(first, second) | read: bookread(first)): bookread(second)
+
+implement book_read_recast {first,second} (same | read) = let
+  prval BOOKRES_refl() = same
+in read end
+
+(* A decoding as the decoding it is the same as *)
+#pub prfun book_dec_recast {bs:bytes}{first,second:bookres} (BOOKRES(first, second), BOOKDEC(bs, first)): BOOKDEC(bs, second)
+
+primplement book_dec_recast {bs}{first,second} (same, dec) = let
+  prval BOOKRES_refl() = same
+in dec end
 
 end

@@ -60,13 +60,20 @@ fn text_of {n:nat | n < 256} (len: int n, letter: int): [l:agz] $A.arr(byte, l, 
   val () = fill(text, 0)
 in text end
 
-fn image_of {t,a,s:nat | t < 256; a < 256; s < 256} (value: Int, title_len: int t, author_len: int a, series_len: int s): book_image =
-  book_image_make(numbers_of(value), text_of(author_len, 1), author_len, text_of(series_len, 2), series_len, text_of(title_len, 3), title_len)
+(* An image of some book *)
+datavtype tested =
+  | {x:bookx} Tested of book_image(x)
+  | NoTested of ()
+
+fn image_of {t,a,s:nat | t < 256; a < 256; s < 256} (value: Int, title_len: int t, author_len: int a, series_len: int s): tested =
+  case+ book_image_make(numbers_of(value), text_of(author_len, 1), author_len, text_of(series_len, 2), series_len, text_of(title_len, 3), title_len) of
+  | ~BookImaged(image) => Tested(image)
+  | ~BookNotImaged() => let val () = fail("an image of a number of 32 bits") in NoTested() end
 
 (* ---------------- bytes in arrays ---------------- *)
 
 (* the record of an image, written: its bytes and their count *)
-fn encode (image: !book_image): [l:agz][n:pos | n <= 1048576] @($A.arr(byte, l, n), int n) = let
+fn encode {x:bookx} (image: !book_image(x)): [l:agz][n:pos | n <= 1048576] @($A.arr(byte, l, n), int n) = let
   val record = book_record_new(image)
   val (_ | list) = book_record_write(record)
   val () = book_record_free(record)
@@ -100,7 +107,7 @@ fun equal_prefix {l1,l2:agz}{n1,n2:pos}{i:nat | i <= n1; n1 == n2} .<n1 - i>.
 (* 0 whole and the same image, 1 whole but another image, 2 lost a group,
    3 not a record, 4 newer, 5 damaged; and, for a whole record, whether it
    is written again as the bytes it was read from *)
-fn classify {l:agz}{n:pos | n <= 1048576} (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image): @(int, bool) = let
+fn classify {l:agz}{n:pos | n <= 1048576}{x:bookx} (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x)): @(int, bool) = let
   val list = blist_of_array(bytes, 0, n)
   val (_ | read) = book_record_read(list)
 in
@@ -176,13 +183,15 @@ fn edge (i: int): Int =
 fun check_edges {i:nat | i <= 20} .<20 - i>. (i: int i): void =
   if i >= 20 then ()
   else let
-    val image = image_of(edge(i), 5, 4, 0)
-    val @(bytes, n) = encode(image)
-    val @(code, written) = classify(bytes, n, image)
-    val () = expect(code = 0, "an edge number is read back as it was written")
-    val () = expect(written, "an edge number is written again as it was read")
-    val () = $A.free<byte>(bytes)
-    val () = book_image_free(image)
+    val () = (case+ image_of(edge(i), 5, 4, 0) of
+      | ~NoTested() => ()
+      | ~Tested(image) => let
+          val @(bytes, n) = encode(image)
+          val @(code, written) = classify(bytes, n, image)
+          val () = expect(code = 0, "an edge number is read back as it was written")
+          val () = expect(written, "an edge number is written again as it was read")
+          val () = $A.free<byte>(bytes)
+        in book_image_free(image) end)
   in check_edges(i + 1) end
 
 (* ---------------- strings of every length that matters ---------------- *)
@@ -192,13 +201,15 @@ fn check_strings (): void = let
     if t >= 256 then ()
     else if t <> 0 && t <> 1 && t <> 2 && t <> 127 && t <> 128 && t <> 254 && t <> 255 then go(t + 1)
     else let
-      val image = image_of(t + 1000, t, 255 - t, t)
-      val @(bytes, n) = encode(image)
-      val @(code, written) = classify(bytes, n, image)
-      val () = expect(code = 0, "strings of any length are read back as they were written")
-      val () = expect(written, "strings of any length are written again as they were read")
-      val () = $A.free<byte>(bytes)
-      val () = book_image_free(image)
+      val () = (case+ image_of(t + 1000, t, 255 - t, t) of
+        | ~NoTested() => ()
+        | ~Tested(image) => let
+            val @(bytes, n) = encode(image)
+            val @(code, written) = classify(bytes, n, image)
+            val () = expect(code = 0, "strings of any length are read back as they were written")
+            val () = expect(written, "strings of any length are written again as they were read")
+            val () = $A.free<byte>(bytes)
+          in book_image_free(image) end)
     in go(t + 1) end
 in go(0) end
 
@@ -206,16 +217,15 @@ in go(0) end
 
 (* every byte of a record changed to each of a few other values, and every
    shortened of it: nothing is read as another record *)
-fn check_damage (): void = let
-  val image = image_of(31337, 9, 7, 5)
+fn damage_with {x0:bookx} (image: book_image(x0)): void = let
   val @(bytes, n) = encode(image)
-  fun flip {l:agz}{n:pos | n <= 1048576}{i:nat | i <= n} .<n - i>.
-    (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image, i: int i): void =
+  fun flip {l:agz}{n:pos | n <= 1048576}{x:bookx}{i:nat | i <= n} .<n - i>.
+    (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), i: int i): void =
     if i >= n then ()
     else let
       val copy = copy_of(bytes, n)
       val old = $A.get<byte>(copy, i)
-      fun values {m:agz}{k:nat | k <= 3} .<3 - k>. (copy: !$A.arr(byte, m, n), original: !book_image, i: int i, old: byte, k: int k): void =
+      fun values {m:agz}{x:bookx}{k:nat | k <= 3} .<3 - k>. (copy: !$A.arr(byte, m, n), original: !book_image(x), i: int i, old: byte, k: int k): void =
         if k >= 3 then ()
         else let
           val change = (if k = 0 then 1 else if k = 1 then 128 else 255): [change:nat | change < 256] int change
@@ -231,7 +241,7 @@ fn check_damage (): void = let
     in flip(bytes, n, original, i + 1) end
   val () = flip(bytes, n, image, 0)
   (* the bytes cut off anywhere *)
-  fun cut {l:agz}{n:pos | n <= 1048576}{m:nat | m <= n} .<n - m>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image, m: int m): void =
+  fun cut {l:agz}{n:pos | n <= 1048576}{x:bookx}{m:nat | m <= n} .<n - m>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), m: int m): void =
     if m >= n then ()
     else if m <= 0 then cut(bytes, n, original, m + 1)
     else let
@@ -249,13 +259,17 @@ fn check_damage (): void = let
   val () = book_image_free(image)
 in () end
 
+fn check_damage (): void =
+  case+ image_of(31337, 9, 7, 5) of
+  | ~NoTested() => ()
+  | ~Tested(image) => damage_with(image)
+
 (* ---------------- fuzz ---------------- *)
 
 (* a record changed in a few places, many times; and bytes of no record *)
-fn check_fuzz {rounds:nat} (rounds: int rounds): void = let
-  val image = image_of(2718281, 12, 6, 3)
+fn fuzz_with {x0,x1:bookx}{rounds:nat} (image: book_image(x0), other: book_image(x1), rounds: int rounds): void = let
   val @(bytes, n) = encode(image)
-  fun round {l:agz}{n:pos | n <= 1048576}{left:nat} .<left>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image, left: int left): void =
+  fun round {l:agz}{n:pos | n <= 1048576}{x:bookx}{left:nat} .<left>. (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(x), left: int left): void =
     if left <= 0 then ()
     else let
       val copy = copy_of(bytes, n)
@@ -277,7 +291,7 @@ fn check_fuzz {rounds:nat} (rounds: int rounds): void = let
   val () = $A.free<byte>(bytes)
   val () = book_image_free(image)
   (* bytes of no record *)
-  fn junk_read {len:pos | len <= 64} (original: !book_image, length: int len): void = let
+  fn junk_read {len:pos | len <= 64}{x:bookx} (original: !book_image(x), length: int len): void = let
     val junk = $A.alloc<byte>(length)
     fun fill {j:agz}{i:nat | i <= 64} .<64 - i>. (junk: !$A.arr(byte, j, len), i: int i): void =
       if i >= length then ()
@@ -289,16 +303,23 @@ fn check_fuzz {rounds:nat} (rounds: int rounds): void = let
     val () = expect(written, "fuzz: noise that was read is not written as it was read")
     val () = $A.free<byte>(junk)
   in () end
-  fun noise {k:nat} .<k>. (original: !book_image, k: int k): void =
+  fun noise {k:nat}{x:bookx} .<k>. (original: !book_image(x), k: int k): void =
     if k <= 0 then ()
     else let
       val length = $AR.add_g1(1, $AR.band_g1(next_number(), 63)): [length:pos | length <= 64] int length
       val () = junk_read(original, length)
     in noise(original, k - 1) end
-  val other = image_of(1, 1, 1, 0)
   val () = noise(other, rounds)
   val () = book_image_free(other)
 in () end
+
+fn check_fuzz {rounds:nat} (rounds: int rounds): void =
+  case+ image_of(2718281, 12, 6, 3) of
+  | ~NoTested() => ()
+  | ~Tested(image) =>
+    (case+ image_of(1, 1, 1, 0) of
+     | ~NoTested() => book_image_free(image)
+     | ~Tested(other) => fuzz_with(image, other, rounds))
 
 implement main0 () = let
   val () = check_crc()

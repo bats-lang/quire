@@ -19,6 +19,8 @@ staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
+staload "bookrec.sats"
+staload "indexrec.sats"
 staload "bookimage.sats"
 staload "indeximage.sats"
 staload "libstore.sats"
@@ -1491,7 +1493,7 @@ fn _copy_plus {l:agz}{size,n:nat | n < 256; n <= size} (source: !$A.arr(byte, l,
 in copy end
 
 (* A book as the values its record holds *)
-fn _image_of_book (book: !book): book_image = let
+fn _image_of_book (book: !book): [x:bookx] book_imaged(x) = let
   val+ Book(title, title_len, author, author_len, series, series_len, nums) = book
   val numbers = @{
     id_high = nums.id_high, id_low = nums.id_low, collections = nums.collections, collections_modified = nums.collections_modified,
@@ -1507,7 +1509,7 @@ in book_image_make(numbers, _copy_plus(author, author_len), author_len, _copy_pl
 
 (* The title of a stored book, 1 to 255 bytes: a book stored with none (its
    group lost) is shown as "Untitled" *)
-fn _title_of (image: !book_image): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
+fn _title_of {x:bookx} (image: !book_image(x)): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
   val @(source, len) = book_image_title(image)
 in
   if len <= 0 then let
@@ -1522,7 +1524,7 @@ in
   in @(title, len) end
 end
 
-fn _author_of (image: !book_image): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
+fn _author_of {x:bookx} (image: !book_image(x)): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
   val @(source, len) = book_image_author(image)
 in
   if len <= 0 then let
@@ -1538,7 +1540,7 @@ in
 end
 
 (* The book a stored record holds, numbered in this run *)
-fn _book_of_image (image: !book_image): book = let
+fn _book_of_image {x:bookx} (image: !book_image(x)): book = let
   val stored = book_image_numbers(image)
   val @(title, title_len) = _title_of(image)
   val @(author, author_len) = _author_of(image)
@@ -1562,7 +1564,7 @@ in Book(title, title_len, author, author_len, series, series_len, nums) end
    its own: a save reads the stored record first (libstore). *)
 datavtype shadows(int) =
   | shadows_nil(0) of ()
-  | {count:nat} shadows_cons(count + 1) of (Int, Int, book_image, shadows(count))
+  | {count:nat}{x:bookx} shadows_cons(count + 1) of (Int, Int, book_image(x), shadows(count))
 
 datavtype shadow_cell =
   | {count:nat} ShadowCell of (shadows(count))
@@ -1587,7 +1589,7 @@ in shadows_free(list) end
 
 (* The groups in which image differs from the shadow of that book: all of
    them when it has none *)
-fun _shadow_mask {count:nat} .<count>. (list: !shadows(count), id_high: Int, id_low: Int, image: !book_image): int =
+fun _shadow_mask {count:nat}{x:bookx} .<count>. (list: !shadows(count), id_high: Int, id_low: Int, image: !book_image(x)): int =
   case+ list of
   | shadows_nil() => book_group_all()
   | shadows_cons(other_high, other_low, other, rest) =>
@@ -1596,7 +1598,7 @@ fun _shadow_mask {count:nat} .<count>. (list: !shadows(count), id_high: Int, id_
 
 (* The shadow of the book with this id set to image: the one there was is
    dropped *)
-fun _shadow_replace {count:nat} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image)
+fun _shadow_replace {count:nat}{x:bookx} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image(x))
   : [more:nat] shadows(more) =
   case+ list of
   | ~shadows_nil() => shadows_cons(id_high, id_low, image, shadows_nil())
@@ -1607,7 +1609,7 @@ fun _shadow_replace {count:nat} .<count>. (list: shadows(count), id_high: Int, i
       else shadows_cons(other_high, other_low, other, _shadow_replace(rest, id_high, id_low, image)))
     else shadows_cons(other_high, other_low, other, _shadow_replace(rest, id_high, id_low, image))
 
-fn _shadow_set (id_high: Int, id_low: Int, image: book_image): void = let
+fn _shadow_set {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): void = let
   val+ ~ShadowCell(list) = shadow_take()
 in shadow_put(ShadowCell(_shadow_replace(list, id_high, id_low, image))) end
 
@@ -1627,16 +1629,16 @@ fn _shadow_forget (id_high: Int, id_low: Int): void = let
 in shadow_put(ShadowCell(_shadow_drop(list, id_high, id_low))) end
 
 (* The shadow of a book read or converted, added (it had none) *)
-fn _shadow_add (id_high: Int, id_low: Int, image: book_image): void = let
+fn _shadow_add {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): void = let
   val+ ~ShadowCell(list) = shadow_take()
 in shadow_put(ShadowCell(shadows_cons(id_high, id_low, image, list))) end
 
 (* A shadow taken out, if there was one *)
 datavtype taken =
   | NoShadow of ()
-  | HadShadow of (book_image)
+  | {x:bookx} HadShadow of (book_image(x))
 
-fun _shadow_swap_in {count:nat} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image)
+fun _shadow_swap_in {count:nat}{x:bookx} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image(x))
   : [more:nat] @(taken, shadows(more)) =
   case+ list of
   | ~shadows_nil() => @(NoShadow(), shadows_cons(id_high, id_low, image, shadows_nil()))
@@ -1653,7 +1655,7 @@ fun _shadow_swap_in {count:nat} .<count>. (list: shadows(count), id_high: Int, i
    A book's shadow is set as its groups are sent, not when they are kept: a
    change sent and changed back before the first is kept is a change
    still. *)
-fn _shadow_swap (id_high: Int, id_low: Int, image: book_image): taken = let
+fn _shadow_swap {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): taken = let
   val+ ~ShadowCell(list) = shadow_take()
   val @(was, more) = _shadow_swap_in(list, id_high, id_low, image)
   val () = shadow_put(ShadowCell(more))
@@ -1661,7 +1663,7 @@ in was end
 
 (* What was sent was not kept: if the shadow is still what was sent, it is
    what it was before, so that the groups are sent again *)
-fn _shadow_unsend (id_high: Int, id_low: Int, sent: book_image, previous: taken): void = let
+fn _shadow_unsend {x:bookx} (id_high: Int, id_low: Int, sent: book_image(x), previous: taken): void = let
   val cell = shadow_take()
   val+ ShadowCell(list) = cell
   val unchanged = (_shadow_mask(list, id_high, id_low, sent) = 0)
@@ -1673,10 +1675,16 @@ in
   | ~HadShadow(image) => if unchanged then _shadow_set(id_high, id_low, image) else book_image_free(image)
 end
 
+(* The shadow of a book read or converted: what the book is, as its record holds it *)
+fn _book_shadow_of (id_high: Int, id_low: Int, book: !book): void =
+  case+ _image_of_book(book) of
+  | ~BookNotImaged() => ()
+  | ~BookImaged(kept) => _shadow_add(id_high, id_low, kept)
+
 (* What the collections' record held when it was last read or saved *)
 datavtype index_shadow =
   | NoIndexShadow of ()
-  | IndexShadow of (index_image)
+  | {x:indexx} IndexShadow of (index_image(x))
 
 val _index_shadow = ref<index_shadow>(NoIndexShadow())
 
@@ -1710,7 +1718,7 @@ fun _index_name_at {count:nat} .<count>. (collections: !colls(count), position: 
     else _index_name_at(rest, position - 1)
 
 (* The collections as the values their record holds *)
-fn _image_of_collections (): index_image = let
+fn _image_of_collections (): [x:indexx] index_imaged(x) = let
   val cell = colls_take()
   val+ CollCell(collections, count) = cell
   val @(name0, len0) = _index_name_at(collections, 0)
@@ -1725,8 +1733,14 @@ fn _image_of_collections (): index_image = let
   val () = colls_put(cell)
 in index_image_make(numbers, name0, len0, name1, len1, name2, len2, name3, len3, name4, len4, name5, len5, name6, len6, name7, len7) end
 
+(* The shadow of the collections' record set to the collections as they are *)
+fn _index_shadow_current (): void =
+  case+ _image_of_collections() of
+  | ~IndexNotImaged() => ()
+  | ~IndexImaged(image) => index_shadow_put(IndexShadow(image))
+
 (* The name at position of a stored index, a copy *)
-fn _index_name_of (image: !index_image, position: int): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len) =
+fn _index_name_of {x:indexx} (image: !index_image(x), position: int): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len) =
   if position = 0 then index_image_name0(image)
   else if position = 1 then index_image_name1(image)
   else if position = 2 then index_image_name2(image)
@@ -1738,8 +1752,8 @@ fn _index_name_of (image: !index_image, position: int): [l:agz][len:nat | len < 
 
 (* The collections a stored index names, from position on: those of 1 to
    COLL_NAME bytes *)
-fun _colls_of_index {count:nat | count <= COLL_MAX}{position:nat | position <= 8} .<8 - position>.
-  (image: !index_image, position: int position, collections: colls(count), count: int count)
+fun _colls_of_index {x:indexx}{count:nat | count <= COLL_MAX}{position:nat | position <= 8} .<8 - position>.
+  (image: !index_image(x), position: int position, collections: colls(count), count: int count)
   : [total:nat | total <= COLL_MAX] @(colls(total), int total) = let
   val numbers = index_image_numbers(image)
 in
@@ -1780,21 +1794,23 @@ fun _stale {count,shadow_count,found:nat} .<shadow_count>.
 (* What a book's save is to change: its record's groups and the book *)
 datavtype pending(int) =
   | pending_nil(0) of ()
-  | {count:nat} pending_cons(count + 1) of (Int, Int, int, book_image, pending(count))
+  | {count:nat}{x:bookx} pending_cons(count + 1) of (Int, Int, int, book_image(x), pending(count))
 
 (* The books that differ from their shadows, onto planned *)
 fun _plan {count,shadow_count,planned:nat} .<count>.
   (books: !books(count), list: !shadows(shadow_count), planned: pending(planned)): [more:nat] pending(more) =
   case+ books of
   | books_nil() => planned
-  | books_cons(book, rest) => let
-      val image = _image_of_book(book)
-      val stored = book_image_numbers(image)
-      val mask = _shadow_mask(list, stored.id_high, stored.id_low, image)
-    in
-      if mask = 0 then let val () = book_image_free(image) in _plan(rest, list, planned) end
-      else _plan(rest, list, pending_cons(stored.id_high, stored.id_low, mask, image, planned))
-    end
+  | books_cons(book, rest) =>
+      (case+ _image_of_book(book) of
+      | ~BookNotImaged() => _plan(rest, list, planned)
+      | ~BookImaged(image) => let
+          val stored = book_image_numbers(image)
+          val mask = _shadow_mask(list, stored.id_high, stored.id_low, image)
+        in
+          if mask = 0 then let val () = book_image_free(image) in _plan(rest, list, planned) end
+          else _plan(rest, list, pending_cons(stored.id_high, stored.id_low, mask, image, planned))
+        end)
 
 val _save_told = ref<bool>(false)
 
@@ -1818,10 +1834,9 @@ fn _record_refused (why: unusable): void =
   end
 
 (* A book's save came back *)
-fn _book_saved (id_high: Int, id_low: Int, sent: book_image, previous: taken, saved: book_saved): void =
+fn _book_saved {x:bookx} (id_high: Int, id_low: Int, sent: book_image(x), previous: taken, saved: book_saved): void =
   case+ saved of
-  | ~BookSaved(stored) => let
-      val () = book_image_free(stored)
+  | ~BookSaved() => let
       val () = book_image_free(sent)
     in (case+ previous of ~NoShadow() => () | ~HadShadow(image) => book_image_free(image)) end
   | ~BookRefused(why) => let
@@ -1853,7 +1868,7 @@ fun _delete_all {count:nat} .<count>. (gone: ids(count)): void =
 
 (* What was sent was not kept: if the shadow is still what was sent, it is
    what it was before, so that the groups are sent again *)
-fn _index_unsend (sent: index_image, previous: index_shadow): void = let
+fn _index_unsend {x:indexx} (sent: index_image(x), previous: index_shadow): void = let
   val current = index_shadow_take()
   val unchanged = (case+ current of
     | NoIndexShadow() => false
@@ -1868,8 +1883,7 @@ in
   in index_shadow_free(previous) end
 end
 
-fn _send_index (): void = let
-  val image = _image_of_collections()
+fn _send_index_of {x:indexx} (image: index_image(x)): void = let
   val previous = index_shadow_take()
   val mask = (case+ previous of
     | NoIndexShadow() => index_group_all()
@@ -1883,8 +1897,7 @@ in
     val saving = libstore_save_index(mask, image)
   in $P.finish<index_saved>(saving, llam(saved) =>
     case+ saved of
-    | ~IndexSaved(stored) => let
-        val () = index_image_free(stored)
+    | ~IndexSaved() => let
         val () = index_image_free(image)
       in index_shadow_free(previous) end
     | ~IndexRefused(why) => let
@@ -1894,6 +1907,11 @@ in
         val () = _index_unsend(image, previous)
       in _save_failed() end) end
 end
+
+fn _send_index (): void =
+  case+ _image_of_collections() of
+  | ~IndexNotImaged() => ()
+  | ~IndexImaged(image) => _send_index_of(image)
 
 (* Saves the library: each book that changed since it was read or last
    saved, in its own record, only the groups that changed, in an update that
@@ -2128,36 +2146,42 @@ in
         val planned = _plan(sorted, no_shadows, pending_nil())
         val () = shadows_free(no_shadows)
         val () = lib_put(LibCell(sorted, count))
-        val index = _image_of_collections()
-        val batch = batch_add_index(_batch_of(planned, BatchNone()), index)
-        val committing = batch_commit(batch)
       in
-        $P.and_then<$IDB.stored><int>(committing, llam(status) =>
-          case+ status of
-          | $IDB.Stored() => let
-              val () = _shadows_of(planned)
-              val () = index_shadow_put(IndexShadow(index))
-            in $P.ret<int>(count) end
-          (* the records are not there: nothing is written piecemeal over a
-             library that has not been converted *)
-          | $IDB.NotStored() => let
-              val () = _pending_free(planned)
-              val () = index_image_free(index)
-              val () = storage_unreadable(LibraryRecord())
-            in $P.ret<int>(count) end)
+        case+ _image_of_collections() of
+        | ~IndexNotImaged() => let
+            val () = _pending_free(planned)
+            val () = storage_unreadable(LibraryRecord())
+          in $P.ret<int>(count) end
+        | ~IndexImaged(index) => let
+            val batch = batch_add_index(_batch_of(planned, BatchNone()), index)
+            val committing = batch_commit(batch)
+          in
+            $P.and_then<$IDB.stored><int>(committing, llam(status) =>
+              case+ status of
+              | $IDB.Stored() => let
+                  val () = _shadows_of(planned)
+                  val () = index_shadow_put(IndexShadow(index))
+                in $P.ret<int>(count) end
+              (* the records are not there: nothing is written piecemeal over a
+                 library that has not been converted *)
+              | $IDB.NotStored() => let
+                  val () = _pending_free(planned)
+                  val () = index_image_free(index)
+                  val () = storage_unreadable(LibraryRecord())
+                in $P.ret<int>(count) end)
+          end
       end)
 end
 
 (* A stored book taken into the library: it is the book, and its shadow is
    what the book holds, so only a change to it is saved *)
-fn _adopt_image {parsed:nat | parsed <= LIB_MAX} (image: book_image, books: books(parsed), parsed: int parsed)
+fn _adopt_image {x:bookx}{parsed:nat | parsed <= LIB_MAX} (image: book_image(x), books: books(parsed), parsed: int parsed)
   : [count:nat | count <= LIB_MAX] @(books(count), int count) =
   if parsed >= 100000 then let val () = book_image_free(image) in @(books, parsed) end
   else let
     val book = _book_of_image(image)
-    val kept = _image_of_book(book)
     val stored = book_image_numbers(image)
-    val () = _shadow_add(stored.id_high, stored.id_low, kept)
+    val () = _book_shadow_of(stored.id_high, stored.id_low, book)
     val () = book_image_free(image)
   in @(books_cons(book, books), parsed + 1) end
 
@@ -2183,7 +2207,7 @@ fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
 fn _adopt_index (index: stored_index): bool =
   case+ index of
   | ~IndexNone() => let
-      val () = index_shadow_put(IndexShadow(_image_of_collections()))
+      val () = _index_shadow_current()
     in false end
   | ~WholeIndex(image) => let
       val numbers = index_image_numbers(image)
@@ -2192,7 +2216,7 @@ fn _adopt_index (index: stored_index): bool =
       val @(collections, count) = _colls_of_index(image, 0, colls_nil(), 0)
       val () = colls_put(CollCell(collections, count))
       val () = index_image_free(image)
-      val () = index_shadow_put(IndexShadow(_image_of_collections()))
+      val () = _index_shadow_current()
     in false end
   | ~LossyIndex(image) => let
       val numbers = index_image_numbers(image)
@@ -2201,10 +2225,10 @@ fn _adopt_index (index: stored_index): bool =
       val @(collections, count) = _colls_of_index(image, 0, colls_nil(), 0)
       val () = colls_put(CollCell(collections, count))
       val () = index_image_free(image)
-      val () = index_shadow_put(IndexShadow(_image_of_collections()))
+      val () = _index_shadow_current()
     in true end
   | ~UnusableIndex(_) => let
-      val () = index_shadow_put(IndexShadow(_image_of_collections()))
+      val () = _index_shadow_current()
     in true end
 
 (* What reading the records lost is said once, apart from what is kept *)

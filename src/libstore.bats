@@ -108,8 +108,8 @@ in key end
 
 (* A book of the library as stored: its id and what it holds *)
 #pub datavtype stored_book =
-  | WholeBook of (Int, Int, book_image)
-  | LossyBook of (Int, Int, book_image)    (* a group that may be lost was: the defaults stand in for it until the book is next saved *)
+  | {x:bookx} WholeBook of (Int, Int, book_image(x))
+  | {x:bookx} LossyBook of (Int, Int, book_image(x))    (* a group that may be lost was: the defaults stand in for it until the book is next saved *)
   | UnusableBook of (Int, Int, unusable)
 
 #pub datavtype stored_books(int) =
@@ -119,8 +119,8 @@ in key end
 (* The collections' record as stored *)
 #pub datavtype stored_index =
   | IndexNone of ()                         (* none yet: the library is new, or it is not converted *)
-  | WholeIndex of (index_image)
-  | LossyIndex of (index_image)
+  | {x:indexx} WholeIndex of (index_image(x))
+  | {x:indexx} LossyIndex of (index_image(x))
   | UnusableIndex of (unusable)
 
 (* What reading the library came to *)
@@ -381,7 +381,7 @@ end
 
 (* What saving a book came to *)
 #pub datavtype book_saved =
-  | BookSaved of (book_image)         (* the record as stored after the update *)
+  | BookSaved of ()                   (* the record is stored with the groups put in *)
   | BookRefused of (unusable)         (* the stored record is not one this Quire can change: nothing was written *)
   | BookNotSaved of ()                (* it could not be read or written: nothing was kept *)
 
@@ -389,7 +389,7 @@ end
 
 implement book_saved_free (saved) =
   case+ saved of
-  | ~BookSaved(image) => book_image_free(image)
+  | ~BookSaved() => ()
   | ~BookRefused(_) => ()
   | ~BookNotSaved() => ()
 
@@ -454,7 +454,7 @@ in @(65535 - high, 65535 - low) end
 (* What an update of a book's record decides, from what it read.
    Closed over the image to put in, the groups of it to take, and the
    resolver of the answer *)
-fn _decide_book (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image: book_image, answer: $P.resolver(book_saved)): $IDB.writeback =
+fn _decide_book {x:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image: book_image(x), answer: $P.resolver(book_saved)): $IDB.writeback =
   case+ found of
   | ~$IDB.Unreadable(cause) => let
       val () = $IDB.unreadable_cause_free(cause)
@@ -467,9 +467,8 @@ fn _decide_book (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image
     in
       case+ _bytes_of_record(record) of
       | ~RecordBytes(bytes, count) => let
-          val stored = book_record_image(record)
           val () = book_record_free(record)
-          val () = $P.resolve<book_saved>(answer, BookSaved(stored))
+          val () = $P.resolve<book_saved>(answer, BookSaved())
         in $IDB.Write(bytes, count) end
       | ~NoRecordBytes() => let
           val () = book_record_free(record)
@@ -504,9 +503,8 @@ fn _decide_book (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image
           in
             case+ _bytes_of_record(patched) of
             | ~RecordBytes(bytes, count) => let
-                val stored = book_record_image(patched)
                 val () = book_record_free(patched)
-                val () = $P.resolve<book_saved>(answer, BookSaved(stored))
+                val () = $P.resolve<book_saved>(answer, BookSaved())
               in $IDB.Write(bytes, count) end
             | ~NoRecordBytes() => let
                 val () = book_record_free(patched)
@@ -522,7 +520,6 @@ fn _decide_book (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image
           in
             case+ _bytes_of_record(patched) of
             | ~RecordBytes(bytes, count) => let
-                val stored = book_record_image(patched)
                 val () = book_record_free(patched)
                 val @(sum_high, sum_low) = _crc_of(old, size)
                 val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
@@ -535,7 +532,7 @@ fn _decide_book (found: $IDB.lookup, id_high: Int, id_low: Int, mask: int, image
                 val () = $A.free<byte>(key)
                 val () = $A.free<byte>(old)
                 val () = $A.free<byte>(bytes)
-                val () = $P.resolve<book_saved>(answer, BookSaved(stored))
+                val () = $P.resolve<book_saved>(answer, BookSaved())
               in $IDB.WriteBatch(batch, batch_size) end
             | ~NoRecordBytes() => let
                 val () = book_record_free(patched)
@@ -572,9 +569,9 @@ fn _unsaved (answer: $P.promise(book_saved, $P.Pending)): $P.promise(book_saved,
    rest left as it is, with the chunks a newer Quire added. A book with no
    record is made. A record that cannot be read, or is not one Quire can
    change, is not written over *)
-#pub fun libstore_save_book (id_high: Int, id_low: Int, mask: int, image: !book_image): $P.promise(book_saved, $P.Chained)
+#pub fun libstore_save_book {x:bookx} (id_high: Int, id_low: Int, mask: int, image: !book_image(x)): $P.promise(book_saved, $P.Chained)
 
-implement libstore_save_book (id_high, id_low, mask, image) = let
+implement libstore_save_book {x} (id_high, id_low, mask, image) = let
   val key = libstore_book_key(id_high, id_low)
   val copy = book_image_copy(image)
   val @(answer, resolver) = $P.create<book_saved>()
@@ -635,7 +632,7 @@ end
 
 (* What saving the collections came to *)
 #pub datavtype index_saved =
-  | IndexSaved of (index_image)
+  | IndexSaved of ()
   | IndexRefused of (unusable)
   | IndexNotSaved of ()
 
@@ -643,7 +640,7 @@ end
 
 implement index_saved_free (saved) =
   case+ saved of
-  | ~IndexSaved(image) => index_image_free(image)
+  | ~IndexSaved() => ()
   | ~IndexRefused(_) => ()
   | ~IndexNotSaved() => ()
 
@@ -661,7 +658,7 @@ in
   in RecordBytes(bytes, count) end
 end
 
-fn _decide_index (found: $IDB.lookup, mask: int, image: index_image, answer: $P.resolver(index_saved)): $IDB.writeback =
+fn _decide_index {x:indexx} (found: $IDB.lookup, mask: int, image: index_image(x), answer: $P.resolver(index_saved)): $IDB.writeback =
   case+ found of
   | ~$IDB.Unreadable(cause) => let
       val () = $IDB.unreadable_cause_free(cause)
@@ -674,9 +671,8 @@ fn _decide_index (found: $IDB.lookup, mask: int, image: index_image, answer: $P.
     in
       case+ _index_bytes_of(record) of
       | ~RecordBytes(bytes, count) => let
-          val stored = index_record_image(record)
           val () = index_record_free(record)
-          val () = $P.resolve<index_saved>(answer, IndexSaved(stored))
+          val () = $P.resolve<index_saved>(answer, IndexSaved())
         in $IDB.Write(bytes, count) end
       | ~NoRecordBytes() => let
           val () = index_record_free(record)
@@ -711,9 +707,8 @@ fn _decide_index (found: $IDB.lookup, mask: int, image: index_image, answer: $P.
           in
             case+ _index_bytes_of(patched) of
             | ~RecordBytes(bytes, count) => let
-                val stored = index_record_image(patched)
                 val () = index_record_free(patched)
-                val () = $P.resolve<index_saved>(answer, IndexSaved(stored))
+                val () = $P.resolve<index_saved>(answer, IndexSaved())
               in $IDB.Write(bytes, count) end
             | ~NoRecordBytes() => let
                 val () = index_record_free(patched)
@@ -727,7 +722,6 @@ fn _decide_index (found: $IDB.lookup, mask: int, image: index_image, answer: $P.
           in
             case+ _index_bytes_of(patched) of
             | ~RecordBytes(bytes, count) => let
-                val stored = index_record_image(patched)
                 val () = index_record_free(patched)
                 val @(sum_high, sum_low) = _crc_of(old, size)
                 val damaged_key = _damaged_key(0, 0, sum_high, sum_low)
@@ -740,7 +734,7 @@ fn _decide_index (found: $IDB.lookup, mask: int, image: index_image, answer: $P.
                 val () = $A.free<byte>(key)
                 val () = $A.free<byte>(old)
                 val () = $A.free<byte>(bytes)
-                val () = $P.resolve<index_saved>(answer, IndexSaved(stored))
+                val () = $P.resolve<index_saved>(answer, IndexSaved())
               in $IDB.WriteBatch(batch, batch_size) end
             | ~NoRecordBytes() => let
                 val () = index_record_free(patched)
@@ -773,9 +767,9 @@ fn _index_unsaved (answer: $P.promise(index_saved, $P.Pending)): $P.promise(inde
 
 (* The groups of image in mask (see index_group_all) saved into the collections'
    record, as a book's are *)
-#pub fun libstore_save_index (mask: int, image: !index_image): $P.promise(index_saved, $P.Chained)
+#pub fun libstore_save_index {x:indexx} (mask: int, image: !index_image(x)): $P.promise(index_saved, $P.Chained)
 
-implement libstore_save_index (mask, image) = let
+implement libstore_save_index {x} (mask, image) = let
   val key = libstore_index_key()
   val copy = index_image_copy(image)
   val @(answer, resolver) = $P.create<index_saved>()
@@ -804,10 +798,10 @@ end
 
 (* A put of the book's record added to a batch; the batch as it was when the
    record would not fit *)
-#pub fun batch_add_book {count:nat} (batch: batch(count), id_high: Int, id_low: Int, image: !book_image)
+#pub fun batch_add_book {count:nat}{x:bookx} (batch: batch(count), id_high: Int, id_low: Int, image: !book_image(x))
   : [more:nat] batch(more)
 
-implement batch_add_book {count} (batch, id_high, id_low, image) = let
+implement batch_add_book {count}{x} (batch, id_high, id_low, image) = let
   val record = book_record_new(image)
 in
   case+ _bytes_of_record(record) of
@@ -819,9 +813,9 @@ in
 end
 
 (* The same for the collections' record *)
-#pub fun batch_add_index {count:nat} (batch: batch(count), image: !index_image): [more:nat] batch(more)
+#pub fun batch_add_index {count:nat}{x:indexx} (batch: batch(count), image: !index_image(x)): [more:nat] batch(more)
 
-implement batch_add_index {count} (batch, image) = let
+implement batch_add_index {count}{x} (batch, image) = let
   val record = index_record_new(image)
 in
   case+ _index_bytes_of(record) of

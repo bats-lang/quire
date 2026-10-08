@@ -72,6 +72,51 @@ implement index_of_vals {vals}{kv} (vals) =
   | {bs:bytes} INDEXDEC_newer(bs, ir_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_newer())
   | {bs:bytes} INDEXDEC_damaged(bs, ir_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, bs, rr_damaged())
 
+(* INDEXEQ(x, y): the indexs are one *)
+#pub dataprop INDEXEQ(indexx, indexx) =
+  | {x:indexx} INDEXEQ_refl(x, x)
+
+(* A index written and read back is the index written, in the same format *)
+#pub prfun index_roundtrip {x,y:indexx}{ver,minver,ver2,minver2:int}{e,e2:extras}{bs:bytes}{n:nat}
+  (LEN(bs, n), INDEXENC(x, ver, minver, e, bs), INDEXDEC(bs, ir_ok(y, ver2, minver2, e2)))
+  : (INDEXEQ(x, y), EQI(ver, ver2), EQI(minver, minver2))
+
+primplement index_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, written, read) =
+  case+ written of
+  | INDEXENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | INDEXDEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval INDEXV_mk() = fields_written
+         prval INDEXV_mk() = fields_read
+       in (INDEXEQ_refl(), EQI_refl(), EQI_refl()) end)
+
+(* INDEXRES(a, b): the results of reading are one *)
+#pub dataprop INDEXRES(indexres, indexres) =
+  | {r:indexres} INDEXRES_refl(r, r)
+
+(* Reading what a index was written as is reading that index *)
+#pub prfun index_enc_dec {x:indexx}{ver,minver:int}{e:extras}{bs:bytes}{n:nat}{res:indexres}
+  (LEN(bs, n), INDEXENC(x, ver, minver, e, bs), INDEXDEC(bs, res)): INDEXRES(res, ir_ok(x, ver, minver, e))
+
+primplement index_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
+  case+ written of
+  | INDEXENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | INDEXDEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval INDEXV_mk() = fields_written
+         prval INDEXV_mk() = fields_read
+       in INDEXRES_refl() end
+     | INDEXDEC_loss(_, decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | INDEXDEC_notquire(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | INDEXDEC_newer(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | INDEXDEC_damaged(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ()))
+
 (* a index record at run time: its format version, the least version that reads it, the index,
    and the chunks kept *)
 #pub datavtype indexrecord(indexx, int, int, extras) =
@@ -116,5 +161,19 @@ in
   | ~RR_newer() => (INDEXDEC_newer(read) | IR_newer())
   | ~RR_damaged() => (INDEXDEC_damaged(read) | IR_damaged())
 end
+
+(* A result of reading as another it is the same as *)
+#pub fun index_read_recast {first,second:indexres} (same: INDEXRES(first, second) | read: indexread(first)): indexread(second)
+
+implement index_read_recast {first,second} (same | read) = let
+  prval INDEXRES_refl() = same
+in read end
+
+(* A decoding as the decoding it is the same as *)
+#pub prfun index_dec_recast {bs:bytes}{first,second:indexres} (INDEXRES(first, second), INDEXDEC(bs, first)): INDEXDEC(bs, second)
+
+primplement index_dec_recast {bs}{first,second} (same, dec) = let
+  prval INDEXRES_refl() = same
+in dec end
 
 end

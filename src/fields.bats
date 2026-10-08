@@ -231,9 +231,14 @@ in
   if r >= 0 then (c, r) else (c - 1, r + 256)
 end
 
-#pub fun int32_make (x: Int): [n:int] int32v(n)
+(* A number made of an int: that same number, or, when it is not one of 32 bits, none *)
+#pub datavtype int32_made(int) =
+  | {x:int} I32_made(x) of int32v(x)
+  | {x:int} I32_unrepresentable(x) of ()
 
-implement int32_make (x) = let
+#pub fun int32_make {x:int} (x: int x): int32_made(x)
+
+implement int32_make {x} (x) = let
   val (q0, b0) = _split(x)
   val (q1, b1) = _split(q0)
   val (q2, b2) = _split(q1)
@@ -241,16 +246,13 @@ implement int32_make (x) = let
 in
   if q3 = 0 then
     (if b3 < 128 then
-       I32V(LES_cons(LES_cons(LES_cons(LES_last()))) | x, blist_cons(b0, blist_cons(b1, blist_cons(b2, blist_cons(b3, blist_nil())))))
-     else
-       I32V(LES_cons(LES_cons(LES_cons(LES_last()))) | 0, blist_cons(0, blist_cons(0, blist_cons(0, blist_cons(0, blist_nil()))))))
+       I32_made(I32V(LES_cons(LES_cons(LES_cons(LES_last()))) | x, blist_cons(b0, blist_cons(b1, blist_cons(b2, blist_cons(b3, blist_nil()))))))
+     else I32_unrepresentable())
   else if q3 = ~1 then
     (if b3 >= 128 then
-       I32V(LES_cons(LES_cons(LES_cons(LES_last_neg()))) | x, blist_cons(b0, blist_cons(b1, blist_cons(b2, blist_cons(b3, blist_nil())))))
-     else
-       I32V(LES_cons(LES_cons(LES_cons(LES_last()))) | 0, blist_cons(0, blist_cons(0, blist_cons(0, blist_cons(0, blist_nil()))))))
-  else
-    I32V(LES_cons(LES_cons(LES_cons(LES_last()))) | 0, blist_cons(0, blist_cons(0, blist_cons(0, blist_cons(0, blist_nil())))))
+       I32_made(I32V(LES_cons(LES_cons(LES_cons(LES_last_neg()))) | x, blist_cons(b0, blist_cons(b1, blist_cons(b2, blist_cons(b3, blist_nil()))))))
+     else I32_unrepresentable())
+  else I32_unrepresentable()
 end
 
 (* The number made of four bytes read, with the proof *)

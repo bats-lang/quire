@@ -756,14 +756,40 @@ so a codec that is not the inverse of itself does not type-check:
   before a chunk is `ok` (`CKD_ok` cannot be built from a sum that
   differs).
 
-The one step not proved is `bytesarr.bats`, the copy between an array
-of bytes and a `blist`, which `tests/codec` tests natively (the CRC-32
-check value, the numbers at the edge of 32 bits, a record written, read and
-written again, every byte of it damaged, every prefix, 20000 rounds of
-fuzz; `tests/codec/run.sh`, in CI's build job). Everything the codec proves rests on arith's
-`xor_g1`, `and_proved` and `or_proved`: C operators trusted to be the
-ones their propositions describe, tested for every pair of 16-bit
-numbers (arith's `tests/dynamic/xor`).
+**The round trip is proved, from the value to the bytes and back.**
+
+* A stored book is a `book_image(x)`, indexed by the book `x` it holds
+  (`bookx_mk(author, id_high, ..., title)`): each number is an
+  `int32v(n)` (its four bytes and the proof `LES` that they are the
+  number `n`), each string a `bstr(bs)`, an array of array's `barr` whose
+  cells are proved to hold the bytes `bs` (`HOLDS`, by induction on the
+  list over array's own lemmas about `NTH` and `SETC`). `int32_make`
+  gives the number `n = x` of an int `x`, or says it is not one of 32 bits.
+* `book_record_new` makes a `bookrecord(x, 1, 1, ex_nil())` of an
+  image, `book_record_image` an image of the very `x` of a record,
+  `book_of_image` and `book_image_of` keep it; the lemma
+  `book_roundtrip` (generated with the records: `index_roundtrip` too)
+  proves that bytes written from `x` and read back as a book `y` make
+  `x = y`, and `book_enc_dec` that they are read back as a book at all.
+  `book_image_roundtrip` is the whole of it as a function: an image
+  written as a record and read back from the bytes is an image of the
+  same book, and the compiler accepts it only by those lemmas
+  (`tests/static/reject/image-roundtrip-another-book`). Without the
+  lemma it does not type-check.
+* The bytes of a record reach an array through `blist_to_buffer`, which
+  fills a `barr` whose cells it proves hold the list. What is outside the
+  proof is only what is outside quire: bridge's atoms that write an array
+  to IndexedDB and fill one from it (JS), the array package's memory
+  primitives (`barr_get`, `barr_set`, ..., the one unsafe core), arith's C
+  operators (`and_proved`, `or_proved`, and `xor_g1` from them) and the
+  prelude's `/`. Each is tested where it lives (array's
+  `tests/dynamic/content`, arith's `tests/dynamic/xor`). The copy of
+  a library `Book`'s fields into an image and back (`_image_of_book`,
+  `_book_of_image` in `src/library.bats`) is a copy of its numbers and
+  strings by `book_image_make`, which refuses a number that is not 32 bits.
+  `tests/codec` runs the whole on bytes and numbers at the edge (damage to
+  every byte, every prefix, fuzz) as a check of those boundaries, not as the
+  proof.
 
 **The solver is 32-bit**: a constant or a coefficient of 2 to the 30 or
 more in a hypothesis makes the context contradictory, and anything is

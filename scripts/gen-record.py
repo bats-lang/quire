@@ -149,6 +149,51 @@ w("""
   | {bs:bytes} @U@DEC_newer(bs, @ql@_newer()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_newer())
   | {bs:bytes} @U@DEC_damaged(bs, @ql@_damaged()) of DECODES(@U@_SPECS, @U@_KIND, bs, rr_damaged())
 
+(* @U@EQ(x, y): the @p@s are one *)
+#pub dataprop @U@EQ(@p@x, @p@x) =
+  | {x:@p@x} @U@EQ_refl(x, x)
+
+(* A @p@ written and read back is the @p@ written, in the same format *)
+#pub prfun @p@_roundtrip {x,y:@p@x}{ver,minver,ver2,minver2:int}{e,e2:extras}{bs:bytes}{n:nat}
+  (LEN(bs, n), @U@ENC(x, ver, minver, e, bs), @U@DEC(bs, @ql@_ok(y, ver2, minver2, e2)))
+  : (@U@EQ(x, y), EQI(ver, ver2), EQI(minver, minver2))
+
+primplement @p@_roundtrip {x,y}{ver,minver,ver2,minver2}{e,e2}{bs}{n} (whole, written, read) =
+  case+ written of
+  | @U@ENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | @U@DEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval @U@V_mk() = fields_written
+         prval @U@V_mk() = fields_read
+       in (@U@EQ_refl(), EQI_refl(), EQI_refl()) end)
+
+(* @U@RES(a, b): the results of reading are one *)
+#pub dataprop @U@RES(@p@res, @p@res) =
+  | {r:@p@res} @U@RES_refl(r, r)
+
+(* Reading what a @p@ was written as is reading that @p@ *)
+#pub prfun @p@_enc_dec {x:@p@x}{ver,minver:int}{e:extras}{bs:bytes}{n:nat}{res:@p@res}
+  (LEN(bs, n), @U@ENC(x, ver, minver, e, bs), @U@DEC(bs, res)): @U@RES(res, @ql@_ok(x, ver, minver, e))
+
+primplement @p@_enc_dec {x}{ver,minver}{e}{bs}{n}{res} (whole, written, read) =
+  case+ written of
+  | @U@ENC_mk(fields_written, encoded) =>
+    (case+ read of
+     | @U@DEC_ok(fields_read, decoded) => let
+         prval EQRR_refl() = decodes_functional(whole, encodes_decodes(encoded), decoded)
+         prval @U@V_mk() = fields_written
+         prval @U@V_mk() = fields_read
+       in @U@RES_refl() end
+     | @U@DEC_loss(_, decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | @U@DEC_notquire(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | @U@DEC_newer(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ())
+     | @U@DEC_damaged(decoded) =>
+       (case+ decodes_functional(whole, encodes_decodes(encoded), decoded) of EQRR_refl() =/=> ()))
+
 (* a @p@ record at run time: its format version, the least version that reads it, the @p@,
    and the chunks kept *)
 #pub datavtype @p@record(@p@x, int, int, extras) =
@@ -193,6 +238,20 @@ in
   | ~RR_newer() => (@U@DEC_newer(read) | @QU@_newer())
   | ~RR_damaged() => (@U@DEC_damaged(read) | @QU@_damaged())
 end
+
+(* A result of reading as another it is the same as *)
+#pub fun @p@_read_recast {first,second:@p@res} (same: @U@RES(first, second) | read: @p@read(first)): @p@read(second)
+
+implement @p@_read_recast {first,second} (same | read) = let
+  prval @U@RES_refl() = same
+in read end
+
+(* A decoding as the decoding it is the same as *)
+#pub prfun @p@_dec_recast {bs:bytes}{first,second:@p@res} (@U@RES(first, second), @U@DEC(bs, first)): @U@DEC(bs, second)
+
+primplement @p@_dec_recast {bs}{first,second} (same, dec) = let
+  prval @U@RES_refl() = same
+in dec end
 """)
 w("end")
 text = "\n".join(o) + "\n"
