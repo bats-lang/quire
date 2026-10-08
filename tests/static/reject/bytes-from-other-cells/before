@@ -1,0 +1,1 @@
+(* A byte string in an array: the array holds the bytes octets, one cell longer

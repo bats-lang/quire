@@ -1,0 +1,3 @@
+function _static_drops_extras
+line 2
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Evar(e(_)); S2Eapp(S2Ecst(ex_nil); )))

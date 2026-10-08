@@ -313,17 +313,21 @@ val _save_failure_told = ref<bool>(false)
    shows the banner, once a session. It never takes the place
    of a message still up (the failure of a book's own file names the
    book, and says to free space too): it waits for a later failure *)
+#pub fn save_failed (): void
+
 #pub fn save_checked {s:$P.promise_state} (saving: $P.promise($IDB.stored, s)): void
 
-implement save_checked (saving) = $P.finish<$IDB.stored>(saving, llam(status) =>
-  case+ status of
-  | $IDB.Stored() => ()
-  | $IDB.NotStored() =>
+implement save_failed () =
   if !_save_failure_told then ()
   else if !_banner_up then ()
   else let
     val () = !_save_failure_told := true
-  in notice_error("Quire could not save your changes. The browser's storage may be full: free some space and try again.") end)
+  in notice_error("Quire could not save your changes. The browser's storage may be full: free some space and try again.") end
+
+implement save_checked (saving) = $P.finish<$IDB.stored>(saving, llam(status) =>
+  case+ status of
+  | $IDB.Stored() => ()
+  | $IDB.NotStored() => save_failed())
 
 (* How long the copy status stays, in milliseconds *)
 #define COPIED_SHOWN 2000

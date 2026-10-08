@@ -19,6 +19,11 @@ staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
+staload "bookrec.sats"
+staload "indexrec.sats"
+staload "bookimage.sats"
+staload "indeximage.sats"
+staload "libstore.sats"
 staload "paths.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
@@ -296,6 +301,26 @@ fun _find_key {count:nat}{i:nat} .<count>. (books: !books(count), key: int, i: i
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
     in if nums.key = key then i else _find_key(rest, key, i + 1) end
+
+fun _find_id {count:nat}{i:nat} .<count>. (books: !books(count), id_high: Int, id_low: Int, i: int i): [found:int | found >= ~1] int found =
+  case+ books of
+  | books_nil() => ~1
+  | books_cons(book, rest) => let
+      val+ Book(_, _, _, _, _, _, nums) = book
+    in if nums.id_high = id_high then (if nums.id_low = id_low then i else _find_id(rest, id_high, id_low, i + 1))
+       else _find_id(rest, id_high, id_low, i + 1) end
+
+(* The index of the book with this id, or -1: a book's id is what it is
+   stored by, where its key is only the number it was given this session *)
+#pub fn lib_index_of_id (id_high: Int, id_low: Int): [found:int | found >= ~1] int found
+
+implement lib_index_of_id (id_high, id_low) = let
+  val cell = lib_take()
+  val+ @LibCell(books, _) = cell
+  val found = _find_id(books, id_high, id_low, 0)
+  prval () = fold@(cell)
+  val () = lib_put(cell)
+in found end
 
 #pub fn lib_index_of_key (key: int): [found:int | found >= ~1] int found
 
@@ -712,6 +737,8 @@ implement lib_ask_harm (harm) =
     | Accepted() => let
         val () = undo_close()
         val () = _empty_trash(lib_count())
+        (* the records of the books gone are deleted *)
+        val () = lib_save()
       in $P.ret<reply>(Accepted()) end
     | Declined() => $P.ret<reply>(Declined()))
 
@@ -1474,111 +1501,451 @@ in colls_put(cell) end
 
 
 
-fun _put_bytes {source_loc,out_loc:agz}{owner:addr}{source_len,source_size:nat | source_len <= source_size}{out_size:nat}
-  {start:nat | start + source_len <= out_size}{j:nat | j <= source_len} .<source_len - j>.
-  (source: !$A.arr(byte, source_loc, source_size), source_len: int source_len,
-   out: !$A.arrx(byte, out_loc, out_size, owner), start: int start, j: int j): void =
-  if j >= source_len then ()
+(* ============================================================
+   Storage: a record for each book and one for the collections (#354)
+   ============================================================ *)
+
+(* source[0, len) in a new array one longer *)
+fn _copy_plus {l:agz}{size,n:nat | n < 256; n <= size} (source: !$A.arr(byte, l, size), len: int n)
+  : [m:agz] $A.arr(byte, m, n + 1) = let
+  val copy = $A.alloc<byte>(len + 1)
+  val () = _copy_from(source, 0, len, copy, 0)
+in copy end
+
+(* A book as the values its record holds; position is its place in the
+   library's order, kept so that the order is the same when it is read again *)
+fn _image_of_book (book: !book, position: Int): [x:bookx] book_imaged(x) = let
+  val+ Book(title, title_len, author, author_len, series, series_len, nums) = book
+  val numbers = @{
+    id_high = nums.id_high, id_low = nums.id_low, collections = nums.collections, collections_modified = nums.collections_modified,
+    minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere, finished_at = nums.finished_at,
+    finished_modified = nums.finished_modified, position = position, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
+    anchor = nums.anchor, place_modified = nums.place_modified, place_declined = nums.place_declined, series_number = nums.series_number,
+    shelf = shelf_code(nums.shelf), added = nums.added, opened = nums.opened, shelf_modified = nums.shelf_modified,
+    file_size = nums.file_size, cover = image_code(nums.cover), done = nums.done, minutes_read = nums.minutes_read,
+    pages_read = nums.pages_read
+  }: book_numbers
+in book_image_make(numbers, _copy_plus(author, author_len), author_len, _copy_plus(series, series_len), series_len,
+     _copy_plus(title, title_len), title_len) end
+
+(* The title of a stored book, 1 to 255 bytes: a book stored with none (its
+   group lost) is shown as "Untitled" *)
+fn _title_of {x:bookx} (image: !book_image(x)): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
+  val @(source, len) = book_image_title(image)
+in
+  if len <= 0 then let
+    val () = $A.free<byte>(source)
+    val title = $A.alloc<byte>(8)
+    val () = $A.write_text(title, 0, $A.text_lit("Untitled"), 8)
+  in @(title, 8) end
   else let
-    val () = $A.write_byte(out, start + j, $AR.low_byte(byte2int0($A.get<byte>(source, j))))
-  in _put_bytes(source, source_len, out, start, j + 1) end
+    val title = $A.alloc<byte>(len)
+    val () = _copy_from(source, 0, len, title, 0)
+    val () = $A.free<byte>(source)
+  in @(title, len) end
+end
 
-fun _write_names {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 41 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), start: int start, collections: !colls(count))
-  : [stop:nat | stop <= start + 41 * count] int stop =
+fn _author_of {x:bookx} (image: !book_image(x)): [m:agz][k:pos | k < 256] @($A.arr(byte, m, k), int k) = let
+  val @(source, len) = book_image_author(image)
+in
+  if len <= 0 then let
+    val () = $A.free<byte>(source)
+    val author = $A.alloc<byte>(7)
+    val () = $A.write_text(author, 0, $A.text_lit("Unknown"), 7)
+  in @(author, 7) end
+  else let
+    val author = $A.alloc<byte>(len)
+    val () = _copy_from(source, 0, len, author, 0)
+    val () = $A.free<byte>(source)
+  in @(author, len) end
+end
+
+(* The book a stored record holds, numbered in this run *)
+fn _book_of_image {x:bookx} (image: !book_image(x)): book = let
+  val stored = book_image_numbers(image)
+  val @(title, title_len) = _title_of(image)
+  val @(author, author_len) = _author_of(image)
+  val @(series, series_len) = book_image_series(image)
+  val key = !_next_key
+  val () = !_next_key := key + 1
+  val nums = @{
+    key = key, id_high = stored.id_high, id_low = stored.id_low, shelf = shelf_of_code(stored.shelf), added = stored.added,
+    opened = stored.opened, chapter = stored.chapter, chapters = stored.chapters, page = stored.page, pages = stored.pages,
+    anchor = stored.anchor, file_size = stored.file_size, cover = image_of_code(stored.cover), done = stored.done,
+    series_number = stored.series_number, collections = stored.collections, minutes_read = stored.minutes_read,
+    pages_read = stored.pages_read, finished_at = stored.finished_at, shelf_modified = stored.shelf_modified,
+    collections_modified = stored.collections_modified, finished_modified = stored.finished_modified,
+    minutes_elsewhere = stored.minutes_elsewhere, pages_elsewhere = stored.pages_elsewhere,
+    place_modified = stored.place_modified, place_declined = stored.place_declined
+  }: bnums
+in Book(title, title_len, author, author_len, series, series_len, nums) end
+
+(* What each book's record held when it was last read or saved, so that a
+   save sends only the groups that changed since. Never what to write on
+   its own: a save reads the stored record first (libstore). *)
+datavtype shadows(int) =
+  | shadows_nil(0) of ()
+  | {count:nat}{x:bookx} shadows_cons(count + 1) of (Int, Int, book_image(x), shadows(count))
+
+datavtype shadow_cell =
+  | {count:nat} ShadowCell of (shadows(count))
+
+val _shadows = ref<shadow_cell>(ShadowCell(shadows_nil()))
+
+fun shadows_free {count:nat} .<count>. (list: shadows(count)): void =
+  case+ list of
+  | ~shadows_nil() => ()
+  | ~shadows_cons(_, _, image, rest) => let val () = book_image_free(image) in shadows_free(rest) end
+
+fn shadow_take (): shadow_cell = let
+  var cell: shadow_cell = ShadowCell(shadows_nil())
+  val () = ref_exch_elt<shadow_cell>(_shadows, cell)
+in cell end
+
+fn shadow_put (cell: shadow_cell): void = let
+  var current: shadow_cell = cell
+  val () = ref_exch_elt<shadow_cell>(_shadows, current)
+  val+ ~ShadowCell(list) = current
+in shadows_free(list) end
+
+(* The groups in which image differs from the shadow of that book: all of
+   them when it has none *)
+fun _shadow_mask {count:nat}{x:bookx} .<count>. (list: !shadows(count), id_high: Int, id_low: Int, image: !book_image(x)): int =
+  case+ list of
+  | shadows_nil() => book_group_all()
+  | shadows_cons(other_high, other_low, other, rest) =>
+    if other_high = id_high then (if other_low = id_low then book_image_diff(image, other) else _shadow_mask(rest, id_high, id_low, image))
+    else _shadow_mask(rest, id_high, id_low, image)
+
+(* The shadow of the book with this id set to image: the one there was is
+   dropped *)
+fun _shadow_replace {count:nat}{x:bookx} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image(x))
+  : [more:nat] shadows(more) =
+  case+ list of
+  | ~shadows_nil() => shadows_cons(id_high, id_low, image, shadows_nil())
+  | ~shadows_cons(other_high, other_low, other, rest) =>
+    if other_high = id_high then (if other_low = id_low then let
+        val () = book_image_free(other)
+      in shadows_cons(id_high, id_low, image, rest) end
+      else shadows_cons(other_high, other_low, other, _shadow_replace(rest, id_high, id_low, image)))
+    else shadows_cons(other_high, other_low, other, _shadow_replace(rest, id_high, id_low, image))
+
+fn _shadow_set {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): void = let
+  val+ ~ShadowCell(list) = shadow_take()
+in shadow_put(ShadowCell(_shadow_replace(list, id_high, id_low, image))) end
+
+(* The shadow of the book with this id dropped *)
+fun _shadow_drop {count:nat} .<count>. (list: shadows(count), id_high: Int, id_low: Int): [more:nat] shadows(more) =
+  case+ list of
+  | ~shadows_nil() => shadows_nil()
+  | ~shadows_cons(other_high, other_low, other, rest) =>
+    if other_high = id_high then (if other_low = id_low then let
+        val () = book_image_free(other)
+      in _shadow_drop(rest, id_high, id_low) end
+      else shadows_cons(other_high, other_low, other, _shadow_drop(rest, id_high, id_low)))
+    else shadows_cons(other_high, other_low, other, _shadow_drop(rest, id_high, id_low))
+
+fn _shadow_forget (id_high: Int, id_low: Int): void = let
+  val+ ~ShadowCell(list) = shadow_take()
+in shadow_put(ShadowCell(_shadow_drop(list, id_high, id_low))) end
+
+(* The shadow of a book read or converted, added (it had none) *)
+fn _shadow_add {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): void = let
+  val+ ~ShadowCell(list) = shadow_take()
+in shadow_put(ShadowCell(shadows_cons(id_high, id_low, image, list))) end
+
+(* A shadow taken out, if there was one *)
+datavtype taken =
+  | NoShadow of ()
+  | {x:bookx} HadShadow of (book_image(x))
+
+fun _shadow_swap_in {count:nat}{x:bookx} .<count>. (list: shadows(count), id_high: Int, id_low: Int, image: book_image(x))
+  : [more:nat] @(taken, shadows(more)) =
+  case+ list of
+  | ~shadows_nil() => @(NoShadow(), shadows_cons(id_high, id_low, image, shadows_nil()))
+  | ~shadows_cons(other_high, other_low, other, rest) =>
+    if other_high = id_high then (if other_low = id_low then @(HadShadow(other), shadows_cons(id_high, id_low, image, rest))
+      else let
+        val @(was, more) = _shadow_swap_in(rest, id_high, id_low, image)
+      in @(was, shadows_cons(other_high, other_low, other, more)) end)
+    else let
+      val @(was, more) = _shadow_swap_in(rest, id_high, id_low, image)
+    in @(was, shadows_cons(other_high, other_low, other, more)) end
+
+(* The shadow of the book with this id set to image, and the one it was.
+   A book's shadow is set as its groups are sent, not when they are kept: a
+   change sent and changed back before the first is kept is a change
+   still. *)
+fn _shadow_swap {x:bookx} (id_high: Int, id_low: Int, image: book_image(x)): taken = let
+  val+ ~ShadowCell(list) = shadow_take()
+  val @(was, more) = _shadow_swap_in(list, id_high, id_low, image)
+  val () = shadow_put(ShadowCell(more))
+in was end
+
+(* What was sent was not kept: if the shadow is still what was sent, it is
+   what it was before, so that the groups are sent again *)
+fn _shadow_unsend {x:bookx} (id_high: Int, id_low: Int, sent: book_image(x), previous: taken): void = let
+  val cell = shadow_take()
+  val+ ShadowCell(list) = cell
+  val unchanged = (_shadow_mask(list, id_high, id_low, sent) = 0)
+  val () = shadow_put(cell)
+  val () = book_image_free(sent)
+in
+  case+ previous of
+  | ~NoShadow() => if unchanged then _shadow_forget(id_high, id_low) else ()
+  | ~HadShadow(image) => if unchanged then _shadow_set(id_high, id_low, image) else book_image_free(image)
+end
+
+(* What the collections' record held when it was last read or saved *)
+datavtype index_shadow =
+  | NoIndexShadow of ()
+  | {x:indexx} IndexShadow of (index_image(x))
+
+val _index_shadow = ref<index_shadow>(NoIndexShadow())
+
+(* The old "lib"'s size and byte sum when it was converted, kept in the
+   collections' record *)
+val _legacy_size = ref<Int>(0)
+val _legacy_sum = ref<Int>(0)
+
+fn index_shadow_take (): index_shadow = let
+  var cell: index_shadow = NoIndexShadow()
+  val () = ref_exch_elt<index_shadow>(_index_shadow, cell)
+in cell end
+
+fn index_shadow_free (shadow: index_shadow): void =
+  case+ shadow of
+  | ~NoIndexShadow() => ()
+  | ~IndexShadow(image) => index_image_free(image)
+
+fn index_shadow_put (shadow: index_shadow): void = let
+  var current: index_shadow = shadow
+  val () = ref_exch_elt<index_shadow>(_index_shadow, current)
+in index_shadow_free(current) end
+
+(* The name of the collection at position as a copy, or an empty one *)
+fun _index_name_at {count:nat} .<count>. (collections: !colls(count), position: int)
+  : [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len) =
   case+ collections of
-  | colls_nil() => start
-  | @colls_cons(name, name_len, rest) => let
-      val () = $A.write_byte(out, start, name_len)
-      val () = _put_bytes(name, name_len, out, start + 1, 0)
-      val stop = _write_names(out, start + 1 + name_len, rest)
-      prval () = fold@(collections)
-    in stop end
+  | colls_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | colls_cons(name, name_len, rest) =>
+    if position <= 0 then let val copy = _copy_plus(name, name_len) in @(copy, name_len) end
+    else _index_name_at(rest, position - 1)
 
-fun _write_books {l:agz}{owner:addr}{n:int}{count:nat}{start:nat | start + 864 * count <= n} .<count>.
-  (out: !$A.arrx(byte, l, n, owner), start: int start, books: !books(count)): [stop:nat | stop <= n] int stop =
+(* The collections as the values their record holds *)
+fn _image_of_collections (): [x:indexx] index_imaged(x) = let
+  val cell = colls_take()
+  val+ CollCell(collections, count) = cell
+  val @(name0, len0) = _index_name_at(collections, 0)
+  val @(name1, len1) = _index_name_at(collections, 1)
+  val @(name2, len2) = _index_name_at(collections, 2)
+  val @(name3, len3) = _index_name_at(collections, 3)
+  val @(name4, len4) = _index_name_at(collections, 4)
+  val @(name5, len5) = _index_name_at(collections, 5)
+  val @(name6, len6) = _index_name_at(collections, 6)
+  val @(name7, len7) = _index_name_at(collections, 7)
+  val numbers = @{legacy_size = !_legacy_size, legacy_sum = !_legacy_sum, name_count = count}: index_numbers
+  val () = colls_put(cell)
+in index_image_make(numbers, name0, len0, name1, len1, name2, len2, name3, len3, name4, len4, name5, len5, name6, len6, name7, len7) end
+
+(* The shadow of the collections' record set to the collections as they are *)
+fn _index_shadow_current (): void =
+  case+ _image_of_collections() of
+  | ~IndexNotImaged() => ()
+  | ~IndexImaged(image) => index_shadow_put(IndexShadow(image))
+
+(* The name at position of a stored index, a copy *)
+fn _index_name_of {x:indexx} (image: !index_image(x), position: int): [l:agz][len:nat | len < 256] @($A.arr(byte, l, len + 1), int len) =
+  if position = 0 then index_image_name0(image)
+  else if position = 1 then index_image_name1(image)
+  else if position = 2 then index_image_name2(image)
+  else if position = 3 then index_image_name3(image)
+  else if position = 4 then index_image_name4(image)
+  else if position = 5 then index_image_name5(image)
+  else if position = 6 then index_image_name6(image)
+  else index_image_name7(image)
+
+(* The collections a stored index names, from position on: those of 1 to
+   COLL_NAME bytes *)
+fun _colls_of_index {x:indexx}{count:nat | count <= COLL_MAX}{position:nat | position <= 8} .<8 - position>.
+  (image: !index_image(x), position: int position, collections: colls(count), count: int count)
+  : [total:nat | total <= COLL_MAX] @(colls(total), int total) = let
+  val numbers = index_image_numbers(image)
+in
+  if position >= 8 then @(collections, count)
+  else if position >= numbers.name_count then @(collections, count)
+  else if count >= 8 then @(collections, count)
+  else let
+    val @(name, name_len) = _index_name_of(image, position)
+  in
+    if name_len <= 0 then let val () = $A.free<byte>(name) in _colls_of_index(image, position + 1, collections, count) end
+    else if name_len > 40 then let val () = $A.free<byte>(name) in _colls_of_index(image, position + 1, collections, count) end
+    else _colls_of_index(image, position + 1, _colls_insert(collections, count, name, name_len), count + 1)
+  end
+end
+
+(* The ids of the books whose records are to be deleted *)
+datavtype ids(int) =
+  | ids_nil(0) of ()
+  | {count:nat} ids_cons(count + 1) of (Int, Int, ids(count))
+
+(* Whether a book of this id is in books *)
+fun _has_id {count:nat} .<count>. (books: !books(count), id_high: Int, id_low: Int): bool =
   case+ books of
-  | books_nil() => start
+  | books_nil() => false
   | books_cons(book, rest) => let
-      val+ Book(title, title_len, author, author_len, series, series_len, nums) = book
-      val () = $A.write_i32(out, start, nums.id_high)
-      val () = $A.write_i32(out, start + 4, nums.id_low)
-      val () = $A.write_byte(out, start + 8, title_len)
-      val () = _put_bytes(title, title_len, out, start + 9, 0)
-      val author_at = start + 9 + title_len
-      val () = $A.write_byte(out, author_at, author_len)
-      val () = _put_bytes(author, author_len, out, author_at + 1, 0)
-      val numbers_at = author_at + 1 + author_len
-      val () = $A.write_i32(out, numbers_at, shelf_code(nums.shelf))
-      val () = $A.write_i32(out, numbers_at + 4, nums.added)
-      val () = $A.write_i32(out, numbers_at + 8, nums.opened)
-      val () = $A.write_i32(out, numbers_at + 12, nums.chapter)
-      val () = $A.write_i32(out, numbers_at + 16, nums.chapters)
-      val () = $A.write_i32(out, numbers_at + 20, nums.page)
-      val () = $A.write_i32(out, numbers_at + 24, nums.pages)
-      val () = $A.write_i32(out, numbers_at + 28, nums.anchor)
-      val () = $A.write_i32(out, numbers_at + 32, nums.file_size)
-      val () = $A.write_i32(out, numbers_at + 36, image_code(nums.cover) + nums.done * 256)
-      (* QLB2: the series' name and the book's number in it *)
-      val series_at = numbers_at + 40
-      val () = $A.write_byte(out, series_at, series_len)
-      val () = _put_bytes(series, series_len, out, series_at + 1, 0)
-      val () = $A.write_i32(out, series_at + 1 + series_len, nums.series_number)
-      (* QLB3: the collections it is in *)
-      val () = $A.write_i32(out, series_at + 5 + series_len, nums.collections)
-      (* QLB4: how long it has been read, and when it was finished *)
-      val () = $A.write_i32(out, series_at + 9 + series_len, nums.minutes_read)
-      val () = $A.write_i32(out, series_at + 13 + series_len, nums.pages_read)
-      val () = $A.write_i32(out, series_at + 17 + series_len, nums.finished_at)
-      (* QLB5: when its shelf, collections and being finished changed,
-         and its reading on other devices *)
-      val () = $A.write_i32(out, series_at + 21 + series_len, nums.shelf_modified)
-      val () = $A.write_i32(out, series_at + 25 + series_len, nums.collections_modified)
-      val () = $A.write_i32(out, series_at + 29 + series_len, nums.finished_modified)
-      val () = $A.write_i32(out, series_at + 33 + series_len, nums.minutes_elsewhere)
-      val () = $A.write_i32(out, series_at + 37 + series_len, nums.pages_elsewhere)
-      (* QLB6: when its place changed, and the place declined *)
-      val () = $A.write_i32(out, series_at + 41 + series_len, nums.place_modified)
-      val () = $A.write_i32(out, series_at + 45 + series_len, nums.place_declined)
-    in _write_books(out, series_at + 49 + series_len, rest) end
+      val+ Book(_, _, _, _, _, _, nums) = book
+    in if nums.id_high = id_high then (if nums.id_low = id_low then true else _has_id(rest, id_high, id_low)) else _has_id(rest, id_high, id_low) end
 
-(* Stores the library under "lib" *)
+(* The ids of the shadows that no book in books has, onto found *)
+fun _stale {count,shadow_count,found:nat} .<shadow_count>.
+  (list: !shadows(shadow_count), books: !books(count), found: ids(found)): [more:nat] ids(more) =
+  case+ list of
+  | shadows_nil() => found
+  | shadows_cons(id_high, id_low, _, rest) =>
+    if _has_id(books, id_high, id_low) then _stale(rest, books, found)
+    else _stale(rest, books, ids_cons(id_high, id_low, found))
+
+(* What a book's save is to change: its record's groups and the book *)
+datavtype pending(int) =
+  | pending_nil(0) of ()
+  | {count:nat}{x:bookx} pending_cons(count + 1) of (Int, Int, int, book_image(x), pending(count))
+
+(* The books that differ from their shadows, onto planned *)
+fun _plan {count,shadow_count,planned:nat} .<count>.
+  (books: !books(count), list: !shadows(shadow_count), position: Int, planned: pending(planned)): [more:nat] pending(more) =
+  case+ books of
+  | books_nil() => planned
+  | books_cons(book, rest) =>
+      (case+ _image_of_book(book, position) of
+      | ~BookNotImaged() => _plan(rest, list, position + 1, planned)
+      | ~BookImaged(image) => let
+          val stored = book_image_numbers(image)
+          val mask = _shadow_mask(list, stored.id_high, stored.id_low, image)
+        in
+          if mask = 0 then let val () = book_image_free(image) in _plan(rest, list, position + 1, planned) end
+          else _plan(rest, list, position + 1, pending_cons(stored.id_high, stored.id_low, mask, image, planned))
+        end)
+
+val _save_told = ref<bool>(false)
+
+(* A save that could not be kept is said as every failed save is, once a
+   session and never over a message still up (the changes stay in memory and
+   are sent again at the next save) *)
+fn _save_failed (): void = save_failed()
+
+fn _record_refused (why: unusable): void =
+  if !_save_told then ()
+  else let
+    val () = !_save_told := true
+  in
+    case+ why of
+    | UnusableNewer() => notice_error("A book's stored record was written by a newer Quire, so changes to it are not saved. Update Quire.")
+    | UnusableDamaged() => notice_error("A book's stored record is damaged, so changes to it are not saved. Your other books are saved.")
+    | UnusableNotQuire() => notice_error("A book's stored record is not one Quire wrote, so changes to it are not saved.")
+  end
+
+(* A book's save came back *)
+fn _book_saved {x:bookx} (id_high: Int, id_low: Int, sent: book_image(x), previous: taken, saved: book_saved): void =
+  case+ saved of
+  | ~BookSaved() => let
+      val () = book_image_free(sent)
+    in (case+ previous of ~NoShadow() => () | ~HadShadow(image) => book_image_free(image)) end
+  | ~BookRefused(why) => let
+      val () = _shadow_unsend(id_high, id_low, sent, previous)
+    in _record_refused(why) end
+  | ~BookNotSaved() => let
+      val () = _shadow_unsend(id_high, id_low, sent, previous)
+    in _save_failed() end
+
+fun _send_all {count:nat} .<count>. (planned: pending(count)): void =
+  case+ planned of
+  | ~pending_nil() => ()
+  | ~pending_cons(id_high, id_low, mask, image, rest) => let
+      val previous = _shadow_swap(id_high, id_low, book_image_copy(image))
+      val saving = libstore_save_book(id_high, id_low, mask, image)
+      val () = $P.finish<book_saved>(saving, llam(saved) => _book_saved(id_high, id_low, image, previous, saved))
+    in _send_all(rest) end
+
+fun _delete_all {count:nat} .<count>. (gone: ids(count)): void =
+  case+ gone of
+  | ~ids_nil() => ()
+  | ~ids_cons(id_high, id_low, rest) => let
+      val deleting = libstore_delete_book(id_high, id_low)
+      val () = $P.finish<book_deleted>(deleting, llam(deleted) =>
+        case+ deleted of
+        | BookDeleted() => _shadow_forget(id_high, id_low)
+        | BookNotDeleted() => _save_failed())
+    in _delete_all(rest) end
+
+(* What was sent was not kept: if the shadow is still what was sent, it is
+   what it was before, so that the groups are sent again *)
+fn _index_unsend {x:indexx} (sent: index_image(x), previous: index_shadow): void = let
+  val current = index_shadow_take()
+  val unchanged = (case+ current of
+    | NoIndexShadow() => false
+    | IndexShadow(kept) => index_image_diff(sent, kept) = 0): bool
+  val () = index_image_free(sent)
+in
+  if unchanged then let
+    val () = index_shadow_put(previous)
+  in index_shadow_free(current) end
+  else let
+    val () = index_shadow_put(current)
+  in index_shadow_free(previous) end
+end
+
+fn _send_index_of {x:indexx} (image: index_image(x)): void = let
+  val previous = index_shadow_take()
+  val mask = (case+ previous of
+    | NoIndexShadow() => index_group_all()
+    | IndexShadow(other) => index_image_diff(image, other)): int
+in
+  if mask = 0 then let
+    val () = index_shadow_put(previous)
+  in index_image_free(image) end
+  else let
+    val () = index_shadow_put(IndexShadow(index_image_copy(image)))
+    val saving = libstore_save_index(mask, image)
+  in $P.finish<index_saved>(saving, llam(saved) =>
+    case+ saved of
+    | ~IndexSaved() => let
+        val () = index_image_free(image)
+      in index_shadow_free(previous) end
+    | ~IndexRefused(why) => let
+        val () = _index_unsend(image, previous)
+      in _record_refused(why) end
+    | ~IndexNotSaved() => let
+        val () = _index_unsend(image, previous)
+      in _save_failed() end) end
+end
+
+fn _send_index (): void =
+  case+ _image_of_collections() of
+  | ~IndexNotImaged() => ()
+  | ~IndexImaged(image) => _send_index_of(image)
+
+(* Saves the library: each book that changed since it was read or last
+   saved, in its own record, only the groups that changed, in an update that
+   reads the stored record first (libstore); the records of the books gone;
+   the collections' record if it changed. Nothing is written over a library
+   that could not be read (#174). *)
 #pub fn lib_save (): void
 
-implement lib_save () = let
-  val library = lib_take()
-  val+ @LibCell(books, count) = library
-  val collections_cell = colls_take()
-  val+ @CollCell(collections, collection_count) = collections_cell
-  val size = 333 + 864 * count
-in
-  case+ piece_new(size) of
-  | ~NoPiece() => let
-      prval () = fold@(collections_cell)
-      val () = colls_put(collections_cell)
-      prval () = fold@(library)
-    in lib_put(library) end
-  | ~Piece(owner, out) => let
-      val () = $A.write_text(out, 0, $A.text_lit("QLB6"), 4)
-      val () = $A.write_byte(out, 4, collection_count)
-      val books_at = _write_names(out, 5, collections)
-      prval () = fold@(collections_cell)
-      val () = colls_put(collections_cell)
-      val stop = _write_books(out, books_at, books)
-      prval () = fold@(library)
-      val () = lib_put(library)
-      val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
-      val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
-      val key = $A.alloc<byte>(3)
-      val () = $A.write_text(key, 0, $A.text_lit("lib"), 3)
-      val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
-      (* never over a library that could not be read *)
-      val () = (if storage_savable(LibraryRecord()) then save_checked($IDB.idb_put(key_bytes, 3, used, stop)) else ())
-      val () = release_bytes(key_frozen, key_bytes)
-      val out_bytes = $A.borrow_join<byte>(out_frozen, used, rest)
-      val () = $A.drop<byte>(out_frozen, out_bytes)
-    in piece_free(owner, $A.thaw<byte>(out_frozen)) end
-end
+implement lib_save () =
+  if ~storage_savable(LibraryRecord()) then ()
+  else let
+    val library = lib_take()
+    val+ LibCell(books, _) = library
+    val shadow_cell = shadow_take()
+    val+ ShadowCell(list) = shadow_cell
+    val planned = _plan(books, list, 0, pending_nil())
+    val gone = _stale(list, books, ids_nil())
+    val () = shadow_put(shadow_cell)
+    val () = lib_put(library)
+    val () = _send_all(planned)
+    val () = _delete_all(gone)
+  in _send_index() end
 
 (* The little-endian int at buf[start, start + 4) *)
 fn _int32_at {l:agz}{owner:addr}{n:nat}{start:nat | start + 4 <= n}
@@ -1719,11 +2086,36 @@ fn _names_of {l:agz}{owner:addr}{n:nat | n >= 4}
   else if n <= 4 then @(n, colls_nil(), 0)
   else _parse_names(buf, n, 5, byte2int0($A.get<byte>(buf, 4)), colls_nil(), 0)
 
-(* Reads the library stored under "lib"; the promise resolves with the
-   number of books *)
-#pub fn lib_load (): $P.promise(int, $P.Chained)
+(* The byte sum of buf[i, n) modulo 2 to the 24, onto sum *)
+fun _byte_sum {l:agz}{owner:addr}{n:nat}{i:nat | i <= n}{s:nat | s < 16777216} .<n - i>.
+  (buf: !$A.arrx(byte, l, n, owner), n: int n, i: int i, sum: int s): [r:nat | r < 16777216] int r =
+  if i >= n then sum
+  else _byte_sum(buf, n, i + 1, $AR.band_g1(sum + $AR.low_byte(byte2int0($A.get<byte>(buf, i))), 16777215))
 
-implement lib_load () = let
+(* The puts of the books planned, onto batch *)
+fun _batch_of {count,added:nat} .<count>. (planned: !pending(count), batch: batch(added)): [more:nat] batch(more) =
+  case+ planned of
+  | pending_nil() => batch
+  | pending_cons(id_high, id_low, _, image, rest) => _batch_of(rest, batch_add_book(batch, id_high, id_low, image))
+
+(* The books planned, now what their records hold: their shadows *)
+fun _shadows_of {count:nat} .<count>. (planned: pending(count)): void =
+  case+ planned of
+  | ~pending_nil() => ()
+  | ~pending_cons(id_high, id_low, _, image, rest) => let
+      val () = _shadow_add(id_high, id_low, image)
+    in _shadows_of(rest) end
+
+fun _pending_free {count:nat} .<count>. (planned: pending(count)): void =
+  case+ planned of
+  | ~pending_nil() => ()
+  | ~pending_cons(_, _, _, image, rest) => let val () = book_image_free(image) in _pending_free(rest) end
+
+(* The library kept before there were records (#354), under "lib": read,
+   shown, and written as records in one transaction, all or none, the
+   collections' record with the size and sum of what was read. "lib" itself
+   is never changed. The promise resolves with the number of books. *)
+fn _convert_legacy (): $P.promise(int, $P.Chained) = let
   val key = $A.alloc<byte>(3)
   val () = $A.write_text(key, 0, $A.text_lit("lib"), 3)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
@@ -1736,23 +2128,187 @@ in
     (* shown as it can be read (empty), and never saved over (#174) *)
     | ~ContentUnreadable() => let val () = storage_unreadable(LibraryRecord()) in $P.ret<int>(0) end
     | ~StoredContent(owner, buf, n) =>
-      if n < 4 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) < 49 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
-      else if byte2int0($A.get<byte>(buf, 3)) > 54 then let val () = piece_free(owner, buf) in $P.ret<int>(0) end
+      if n < 4 then let
+        val () = piece_free(owner, buf)
+        val () = storage_unreadable(LibraryRecord())
+      in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let
+        val () = piece_free(owner, buf)
+        val () = storage_unreadable(LibraryRecord())
+      in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) < 49 then let
+        val () = piece_free(owner, buf)
+        val () = storage_unreadable(LibraryRecord())
+      in $P.ret<int>(0) end
+      else if byte2int0($A.get<byte>(buf, 3)) > 54 then let
+        val () = piece_free(owner, buf)
+        val () = storage_unreadable(LibraryRecord())
+      in $P.ret<int>(0) end
       else let
         val version = byte2int0($A.get<byte>(buf, 3)) - 48
         val @(books_at, collections, collection_count) = _names_of(buf, n, version)
         val () = colls_put(CollCell(collections, collection_count))
-        val @(books, count) = _parse_books(buf, n, books_at, books_nil(), 0, version)
+        val @(parsed, count) = _parse_books(buf, n, books_at, books_nil(), 0, version)
+        val sum = _byte_sum(buf, n, 0, 0)
         val () = piece_free(owner, buf)
-        val () = lib_put(LibCell(_sort(books, books_nil(), !_sort_order), count))
-      in $P.ret<int>(count) end)
+        val () = !_legacy_size := n
+        val () = !_legacy_sum := sum
+        val sorted = _sort(parsed, books_nil(), !_sort_order)
+        val no_shadows = shadows_nil()
+        val planned = _plan(sorted, no_shadows, 0, pending_nil())
+        val () = shadows_free(no_shadows)
+        val () = lib_put(LibCell(sorted, count))
+      in
+        case+ _image_of_collections() of
+        | ~IndexNotImaged() => let
+            val () = _pending_free(planned)
+            val () = storage_unreadable(LibraryRecord())
+          in $P.ret<int>(count) end
+        | ~IndexImaged(index) => let
+            val batch = batch_add_index(_batch_of(planned, BatchNone()), index)
+            val committing = batch_commit(batch)
+          in
+            $P.and_then<$IDB.stored><int>(committing, llam(status) =>
+              case+ status of
+              | $IDB.Stored() => let
+                  val () = _shadows_of(planned)
+                  val () = index_shadow_put(IndexShadow(index))
+                in $P.ret<int>(count) end
+              (* the records are not there: nothing is written piecemeal over a
+                 library that has not been converted *)
+              | $IDB.NotStored() => let
+                  val () = _pending_free(planned)
+                  val () = index_image_free(index)
+                  val () = storage_unreadable(LibraryRecord())
+                in $P.ret<int>(count) end)
+          end
+      end)
 end
+
+(* The books read, each with the place its record gives it in the library's
+   order, in that order *)
+datavtype ranked(int) =
+  | ranked_nil(0) of ()
+  | {count:nat} ranked_cons(count + 1) of (Int, book, ranked(count))
+
+fun _rank_insert {count:nat} .<count>. (position: Int, book: book, list: ranked(count)): ranked(count + 1) =
+  case+ list of
+  | ~ranked_nil() => ranked_cons(position, book, ranked_nil())
+  | ~ranked_cons(other_position, other, rest) =>
+    if position < other_position then ranked_cons(position, book, ranked_cons(other_position, other, rest))
+    else ranked_cons(other_position, other, _rank_insert(position, book, rest))
+
+fun _ranked_books {count,more:nat} .<count>. (list: ranked(count), books: books(more)): books(count + more) =
+  case+ list of
+  | ~ranked_nil() => books
+  | ~ranked_cons(_, book, rest) => books_cons(book, _ranked_books(rest, books))
+
+(* A stored book taken into the library: it is the book, and its shadow is
+   the image its record gave, so only a change to it is saved *)
+fn _adopt_image {x:bookx}{parsed:nat | parsed <= LIB_MAX} (image: book_image(x), books: ranked(parsed), parsed: int parsed)
+  : [count:nat | count <= LIB_MAX] @(ranked(count), int count) =
+  if parsed >= 100000 then let val () = book_image_free(image) in @(books, parsed) end
+  else let
+    val book = _book_of_image(image)
+    val stored = book_image_numbers(image)
+    val () = _shadow_add(stored.id_high, stored.id_low, image)
+  in @(_rank_insert(stored.position, book, books), parsed + 1) end
+
+(* The books read from their records, onto books: those that could not be
+   used, and those that lost a group, are counted *)
+fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
+  (stored: stored_books(stored), books: ranked(parsed), parsed: int parsed, unusable: int, lossy: int)
+  : [count:nat | count <= LIB_MAX] @(ranked(count), int count, int, int) =
+  case+ stored of
+  | ~StoredNone() => @(books, parsed, unusable, lossy)
+  | ~StoredSome(one, rest) =>
+    (case+ one of
+    | ~WholeBook(_, _, image) => let
+        val @(more, total) = _adopt_image(image, books, parsed)
+      in _adopt_books(rest, more, total, unusable, lossy) end
+    | ~LossyBook(_, _, image) => let
+        val @(more, total) = _adopt_image(image, books, parsed)
+      in _adopt_books(rest, more, total, unusable, lossy + 1) end
+    | ~UnusableBook(_, _, _) => _adopt_books(rest, books, parsed, unusable + 1, lossy))
+
+(* The collections read from their record; whether it was damaged or
+   could not be used (no collections, until one is made) *)
+fn _adopt_index (index: stored_index): bool =
+  case+ index of
+  | ~IndexNone() => let
+      val () = _index_shadow_current()
+    in false end
+  | ~WholeIndex(image) => let
+      val numbers = index_image_numbers(image)
+      val () = !_legacy_size := numbers.legacy_size
+      val () = !_legacy_sum := numbers.legacy_sum
+      val @(collections, count) = _colls_of_index(image, 0, colls_nil(), 0)
+      val () = colls_put(CollCell(collections, count))
+      val () = index_image_free(image)
+      val () = _index_shadow_current()
+    in false end
+  | ~LossyIndex(image) => let
+      val numbers = index_image_numbers(image)
+      val () = !_legacy_size := numbers.legacy_size
+      val () = !_legacy_sum := numbers.legacy_sum
+      val @(collections, count) = _colls_of_index(image, 0, colls_nil(), 0)
+      val () = colls_put(CollCell(collections, count))
+      val () = index_image_free(image)
+      val () = _index_shadow_current()
+    in true end
+  | ~UnusableIndex(_) => let
+      val () = _index_shadow_current()
+    in true end
+
+(* What reading the records lost is said once, apart from what is kept *)
+fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
+  if unusable > 0 then notice_error("Some books in your library could not be read. They are left as they are and are not shown.")
+  else if lossy > 0 then notice_error("Some details of your library were damaged and show as defaults. The rest of it is intact.")
+  else if index_damaged then notice_error("Your collections could not be read. They are left as they are and are not shown.")
+  else ()
+
+(* Reads the library: its records, or the old "lib" converted to them. The
+   promise resolves with the number of books. *)
+#pub fn lib_load (): $P.promise(int, $P.Chained)
+
+implement lib_load () =
+  $P.and_then<library_read><int>(libstore_read(), llam(read) =>
+    case+ read of
+    | ~ReadFailed() => let val () = storage_unreadable(LibraryRecord()) in $P.ret<int>(0) end
+    | ~ReadNothing() => _convert_legacy()
+    | ~ReadLibrary(index, stored, stored_count) => let
+        val no_index = (case+ index of IndexNone() => true | _ => false): bool
+      in
+        (* records of books and no collections' record is a library that
+           was never converted only when it holds no book either *)
+        if no_index && stored_count <= 0 then let
+          val () = stored_index_free(index)
+          val () = stored_books_free(stored)
+        in _convert_legacy() end
+        else let
+          val @(ranked_books, count, unusable, lossy) = _adopt_books(stored, ranked_nil(), 0, 0, 0)
+          val books = _ranked_books(ranked_books, books_nil())
+          val index_damaged = _adopt_index(index)
+          val () = lib_put(LibCell(_sort(books, books_nil(), !_sort_order), count))
+          val () = _adopt_told(unusable, lossy, index_damaged)
+        in $P.ret<int>(count) end
+      end)
 
 (* ============================================================
    The search query
    ============================================================ *)
+
+(* What the library view has to show: books, nothing to show, or a library that
+   could not be read (#354) *)
+datatype library_view =
+  | ViewBooks
+  | ViewEmpty
+  | ViewUnreadable
+
+fn _view_of (shown: int): library_view =
+  if ~storage_savable(LibraryRecord()) then ViewUnreadable()
+  else if shown > 0 then ViewBooks()
+  else ViewEmpty()
 
 (* The library view shows only the books whose title or author has
    query[0, query_len) in it (letters in any case); an empty query shows
@@ -2350,8 +2906,11 @@ implement lib_render () = let
   val () = _coll_row()
   val () = _install_hint_show()
 in
-  if shown > 0 then ()
-  else if has_query then ui_text("library-empty", "No books match")
+  case+ _view_of(shown) of
+  | ViewBooks() => ()
+  | ViewUnreadable() => ui_text("library-empty", "Your library could not be read, so it is not shown. Reopen Quire to try again.")
+  | ViewEmpty() =>
+  if has_query then ui_text("library-empty", "No books match")
   else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
   else (case+ !_filter of
     | Unread() => ui_text("library-empty", "No unread books")

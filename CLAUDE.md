@@ -19,6 +19,19 @@ was searched. The quality rules below (the
 proofs, the static tests, the e2e suite) still hold: when a choice
 would break one, choose another that keeps it.
 
+## A proof is a proof
+
+When a requirement says proof, it means a static proof, checked by the
+compiler from types and lemmas. It never means a test, a runtime check,
+a read-back, an assertion or a witness that is only believed. A claim
+that is only tested is said to be tested, and the proof is still owed:
+where the proof system cannot reach (the array package had no model of
+an array's contents), the tool is extended (a content-indexed array API
+in the array package), not worked around at runtime. Trusted primitives
+live in the one package that owns the platform, state what they assume,
+and are tested there; nothing in quire uses `praxi`, `assume` or
+`$UNSAFE` to skip a proof.
+
 ## Names are words
 
 Element ids, numbered-id prefixes (up to 16 bytes), variables, static
@@ -730,6 +743,145 @@ only where its platform has it, by its own `data-hide`.
   file is kept (`_handed_kept`, linear) and not added, and the banner
   says so.
 
+## The library is stored as records (#354)
+
+The library is not one record any more. Each book is a record,
+`library/book/<14 hex digits>` (its id as two 28-bit halves, 7 digits
+each), and the collections another, `library/index`. They are read
+together by their prefix (`libstore_read`, bridge's `idb_get_prefix`)
+and saved one at a time, so a change to one book writes one book's bytes,
+and a record damaged in one place costs that record's damaged part and
+nothing else.
+
+**The format** is `QREC`, a kind (book, index), the version of the
+format that wrote it (1) and the least version that can read it (1, the
+reader's `READER`), then chunks as PNG has them: a u32le length under
+2 to the 20, a 4-byte tag, the data and a CRC-32 (IEEE, 0xEDB88320, the
+check value of "123456789" is 0xCBF43926) as its low 16 bits and then
+its high 16 bits, little endian, over the tag and the data; the last
+chunk is `IEND`. A record is a set of groups, one chunk each, in
+ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
+SIZE TIME TITL`, the index's `LEGA NAMS`); each group is required (its
+loss makes the record `Undecodable`) or optional (its loss gives its
+defaults and `DecodedWithLoss`). A chunk of a tag this version does not
+know is kept as it is, at the end, when its first letter is lower case
+(ancillary, as in PNG), so a newer Quire's addition survives this one's
+save; a capital one (critical), or a least version over `READER`, makes
+the record `Newer`, and a first four bytes that are not `QREC` make it
+`NotQuire`. What a record is decoded to is one of those five outcomes
+(`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
+a decode never fails to say which.
+
+**The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
+`seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
+the index's tables are in `scripts/record_tables.py` and
+`bookrec.bats`, `indexrec.bats`, `bookimage.bats`, `indeximage.bats` are
+generated from them by `scripts/gen-record.py` and `scripts/gen-image.py`,
+so a field is added in one place). Byte strings are a datasort
+(`bytes`) in the types, `blist(bs, n)` linear lists indexed by them, so a
+proof can say what the bytes are. Reading is a relation between bytes
+and its result (`DECODES(sp, kind, bs, res)`, built of `CK`, `SEQ`,
+`FIN`, `SDEC`), writing another (`ENCODES(sp, kind, x, bs)`, built of
+`CKENC`, `CHAINS`, `SENC`), and the laws are lemmas the compiler checks,
+so a codec that is not the inverse of itself does not type-check:
+
+* `decodes_encodes`: if the bytes decode to a record x, encoding x gives
+  exactly those bytes (so a record is never altered by being read and
+  saved: no padding is accepted, no unknown chunk is lost);
+* `encodes_decodes`: what is encoded decodes to what was encoded;
+* `decodes_functional`: bytes decode to one result;
+* `record_read` is total: it answers every list of bytes with a result
+  and its `DECODES` proof, and `record_write` returns the `ENCODES`
+  proof of the bytes it made. The CRC's tables are `CRCP`, a relation
+  checked by the same compiler, and the stored sum is compared with it
+  before a chunk is `ok` (`CKD_ok` cannot be built from a sum that
+  differs).
+
+**The round trip is proved, from the value to the bytes and back.**
+
+* A stored book is a `book_image(x)`, indexed by the book `x` it holds
+  (`bookx_mk(author, id_high, ..., title)`): each number is an
+  `int32v(n)` (its four bytes and the proof `LES` that they are the
+  number `n`), each string a `bstr(bs)`, an array of array's `barr` whose
+  cells are proved to hold the bytes `bs` (`HOLDS`, by induction on the
+  list over array's own lemmas about `NTH` and `SETC`). `int32_make`
+  gives the number `n = x` of an int `x`, or says it is not one of 32 bits.
+* `book_record_new` makes a `bookrecord(x, 1, 1, ex_nil())` of an
+  image, `book_record_image` an image of the very `x` of a record,
+  `book_of_image` and `book_image_of` keep it; the lemma
+  `book_roundtrip` (generated with the records: `index_roundtrip` too)
+  proves that bytes written from `x` and read back as a book `y` make
+  `x = y`, and `book_enc_dec` that they are read back as a book at all.
+  `book_image_roundtrip` is the whole of it as a function: an image
+  written as a record and read back from the bytes is an image of the
+  same book, and the compiler accepts it only by those lemmas
+  (`tests/static/reject/image-roundtrip-another-book`). Without the
+  lemma it does not type-check.
+* The bytes of a record reach an array through `blist_to_buffer`, which
+  fills a `barr` whose cells it proves hold the list. What is outside the
+  proof is only what is outside quire: bridge's atoms that write an array
+  to IndexedDB and fill one from it (JS), the array package's memory
+  primitives (`barr_get`, `barr_set`, ..., the one unsafe core), arith's C
+  operators (`and_proved`, `or_proved`, and `xor_g1` from them) and the
+  prelude's `/`. Each is tested where it lives (array's
+  `tests/dynamic/content`, arith's `tests/dynamic/xor`). The copy of
+  a library `Book`'s fields into an image and back (`_image_of_book`,
+  `_book_of_image` in `src/library.bats`) is a copy of its numbers and
+  strings by `book_image_make`, which refuses a number that is not 32 bits.
+  `tests/codec` runs the whole on bytes and numbers at the edge (damage to
+  every byte, every prefix, fuzz) as a check of those boundaries, not as the
+  proof.
+
+**The solver is 32-bit**: a constant or a coefficient of 2 to the 30 or
+more in a hypothesis makes the context contradictory, and anything is
+then proved. No proof here has one (integers are built from bytes,
+`b + 256 * m`, and bounded by 2 to the 28); `tests/static/literals.py`
+fails the checkers on a literal of 2 to the 29 or more in `src/`, apart
+from a run-time value marked `(* wide *)`.
+
+**The only way to change a record** is `libstore_save_book` and
+`libstore_save_index` (`idb_update`, bridge: one transaction in which a
+key is read, the closure decides from what it read, and the answer is
+written back, kept as it was or deleted). The closure reads the stored
+record, decodes it, puts the groups of the image that changed into it
+(`book_record_patch`: the other groups, and the chunks it does not
+know, stay as they were), writes it, and answers `BookSaved`,
+`BookRefused` (undecodable: `Newer`, `NotQuire`, `Damaged`; nothing is
+written) or `BookNotSaved`. A record that lost a group is repaired, and
+its old bytes are kept in the same transaction under
+`library/damaged/<id>/<crc>`. Nothing else writes `library/` keys
+(`tests/static/keys.py` fails the checkers on a `"library/` key named
+outside `src/libstore.bats`).
+
+**What the library keeps in memory** (`src/library.bats`): the books and
+collections, and a shadow of each record (`shadows`, `index_shadow`): the
+image of what was last sent. `lib_save` makes the image of each book,
+compares it with its shadow by group (`book_image_diff`) and sends the
+groups that differ, none when it does not. A shadow is set when its
+groups are sent, not when they are kept, so a change sent and changed
+back before the first is kept is still sent; a save that is refused or
+fails puts the shadow back (`_shadow_unsend`) and says so once. A book
+whose record is no longer in the library has its record deleted; a stale
+tab sends only its own groups, so two tabs changing different parts of a
+book (a shelf, a collection) keep both changes (`e2e/library-records.spec.js`).
+
+**The order and the view.** A book's record holds its place in the
+library's order (`ORDR`, the `position` it had when last saved), and the
+books are read back in it, so a book touched last is first again. The
+view kept for a reload ("view") names its book by id (the key is only
+the number the book was given as the library was read, and records are
+read in id order): `lib_index_of_id`; a view kept before, of a key
+alone, is found by the key.
+
+**The old record** `"lib"` (QLB1 to QLB6) is converted once, by
+`_convert_legacy`: when no record of the library is there, "lib" is read,
+shown, and written as the records of its books and the collections'
+(with the size and the byte sum of "lib", `LEGA`) in one transaction,
+all or none (`batch_commit`, bridge's `idb_write_all`, the index in it
+too); until it commits nothing is saved. "lib" itself is never changed or
+deleted, so an older Quire still finds it; a "lib" that is not a QLB1 to
+6 record is a library that could not be read.
+
 ## What allocates is linear
 
 wasm has no garbage collector, so outside `$UNSAFE` nothing that
@@ -1007,12 +1159,15 @@ A read of storage that failed is never taken for an empty one (#174):
 `lookup_bytes` and `lookup_content` (`src/book.bats`) answer
 `StoredUnreadable` / `ContentUnreadable` apart from nothing stored, so
 every load must say what it does then. A record each save rewrites
-whole (the library, settings, statistics, reading speed, catalogues,
-dictionaries, sync's state, a book's annotations) that could not be
-read is not saved this session (`src/storage.bats`: its save checks
-`storage_savable`), books are not added to an unread library, and an
-unread book's annotations cannot be made; the banner says so. A backup
-that could not read a book's notes is not made.
+whole (settings, statistics, reading speed, catalogues, dictionaries,
+sync's state, a book's annotations) that could not be read is not
+saved this session (`src/storage.bats`: its save checks
+`storage_savable`), and an unread book's annotations cannot be made;
+the banner says so. The library is read as its records are (below): one
+that could not be read at all is not saved this session and books are not
+added to it; a book's record that is damaged, newer or not Quire's is
+shown nowhere, said once and never written over. A backup that could not
+read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
 screens: Settings, Sync, a sync service's step) are a `layer` (`src/layer.bats`), whose

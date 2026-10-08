@@ -6,3 +6,4 @@ e2e/screenshots/
 test-results/
 playwright-report/
 src/version.bats
+__pycache__/
