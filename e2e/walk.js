@@ -127,14 +127,17 @@ export async function walkEveryScreen(page, { look, back }) {
   await menuItem(page, 'Move to Trash').click();
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible();
   await check('the Undo toast');
+  // the offer stays until it is dismissed (quire#364): it would cover the next steps
+  await page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) })
+    .getByRole('button', { name: 'Dismiss' }).click();
+  await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeHidden();
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
   await check('the Empty the Trash dialog');
   await back();
   // a note and a picture in its second chapter, so the note and the
-  // picture's viewer open (shown last: a tap in the page's middle,
-  // which brings up the bars, would open the picture)
+  // picture's viewer open (the picture by a double tap, quire#365)
   await readBook(page, {
     title: 'A Rather Long Title, Read', author: 'L',
     rawChapters: [...chapters(1), { body: '<p>ephemeral claims<a epub:type="noteref" href="#n1">1</a>.</p><p><img src="images/map.png" alt="the map"/></p>' +
@@ -184,7 +187,7 @@ export async function walkEveryScreen(page, { look, back }) {
   await check('a footnote');
   await back();
   await expect.poll(() => map.evaluate(i => i.naturalWidth)).toBe(120);
-  await map.click();
+  await map.dblclick();
   await expect(dialog(page, 'Image')).toBeVisible();
   await check('the picture viewer');
   await back();

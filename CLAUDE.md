@@ -8,7 +8,14 @@ cannot see). Every other question, design choices included (which
 layout, which wording, which default), is settled by research (what
 other apps do, what their users and reviewers say, what studies and
 guidelines say) and best judgement, written down where it is decided
-(the issue or the PR), and then done. The quality rules below (the
+(the issue or the PR), and then done. Judgement is what is left after
+the research, never a substitute for it: a value or a design chosen
+with no look at what comparable software does (the libraries,
+frameworks and apps that face the same question, and what they chose
+and why) is not decided. "The platform documents no value" is where
+the research goes on, to what others do, not where it stops; if
+nothing comparable can be found, say so where it is decided, with what
+was searched. The quality rules below (the
 proofs, the static tests, the e2e suite) still hold: when a choice
 would break one, choose another that keeps it.
 
@@ -67,6 +74,36 @@ listing the old and new versions and dispatches `check.yml` on it, so a
 breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
 workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
 `android.yml` pin as not moved; move it in a PR of its own.
+
+## Check locally before every push
+
+A session sets up the compiler in its own environment and runs `bats
+check` before it pushes, so a push that does not type-check never
+reaches CI (#350's first push failed on a comparison and a free that
+`bats check` rejects in a few minutes; CI took 15 to learn it). Setup is
+what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
+tarball it names), `lld`, the compiler built from the commit in
+`.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
+clone of bats-lang/repository-prototype; then `scripts/version.sh` and
+`bats check --repository <the clone>`. A check takes about 10 minutes
+on a cold build: run it in the background and wait for it, never push on
+the hope that it passes. A change to a spec or a static fixture runs
+that group too where the machine can (`tests/static/run.sh`, `npx
+playwright test <spec>`), and what it cannot run is left to CI and said
+in the PR. A fix pushed after a red CI is checked the same way first.
+
+The e2e suite needs Playwright 1.58 or later (`package.json` says so,
+`package-lock.json` pins 1.58.2): before 1.58 its fake clock can set the
+time back after a `page.clock.fastForward` (a `_runTo` already in flight
+finishes after the jump and writes its old target over it; 1.58 ignores a
+target in the past), so a spec that counts minutes, like "the minutes
+read on each device are summed" (#352), loses one now and then (about one
+run in five on 1.56.1; none in 40 on 1.58.2). A machine whose Chromium
+build is older than 1.58 expects (`ls $PLAYWRIGHT_BROWSERS_PATH`) runs
+1.58.2 on it by pointing `PLAYWRIGHT_BROWSERS_PATH` at a directory whose
+`chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell`
+is a link to the installed `headless_shell`; it does not downgrade
+Playwright.
 
 ## The version is the commit's
 
@@ -655,7 +692,11 @@ only where its platform has it, by its own `data-hide`.
   from the first frame (`screen_controls_start`). A browser keeps none:
   the Fullscreen API enters only at a click (the user's activation), so
   a page opened again starts out of it, its switch off, and a click
-  there does not change what is kept. While full screen is on, a page shown hides the
+  there does not change what is kept.
+  Where the device refuses the rotation lock (bridge's `LockRefused`),
+  Lock rotation is not offered again that session (`_lock_refused` in
+  `src/screen_controls.bats`) and the banner says so (quire#355): a
+  control that cannot work is not shown. While full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge. Meanwhile the switch shows
   them (quire#314): pwa's activity reports each bar's visibility at each
@@ -953,6 +994,36 @@ Sync screen:
   handles (`e2e/sync-android-outcomes.spec.js` for google_authorize);
   an answer bridge's JS never gives is passed through by bridge's own
   dynamic test.
+* A call that never answers is an outcome too (#340): no call to Google
+  is left pending with nothing shown. A call that shows nothing
+  (`authorizationForScopes`, `clearAuthorizationToken`, `revokeAccess`)
+  is ended after 30 s (`GOOGLE_ANSWER_MS`: Play services documents no
+  timeout, so it is chosen from what comparable software does: OkHttp
+  ends a request at 10 s each for connect, read and write; Firebase
+  Auth's own 3 minutes is the length developers call too long, and
+  Flutter developers who bound a hanging `signIn()` themselves use
+  about 30 s; Google's Tasks guide says to bound a wait and gives no
+  value, only a 500 ms example; and Nielsen's 10 s is the limit of a
+  reader's attention, a sync saying "Syncing..." meanwhile) as `GoogleNoAnswer`: "Google didn't
+  answer. Check the connection, then try again." (a revoke's, in the
+  banner, with where to take the grant back by hand). The consent screen
+  (`authorizeScopes`) is the reader's to take as long as they like, so
+  no timer ends it: while it is awaited (`GoogleAsking`) the status card
+  says "Waiting for Google's consent screen. Finish it there, or stop
+  waiting." and shows Stop waiting (`sync-stop`, `sync_stop`) in place
+  of Sync now and Turn off; it ends the ask as the reader's cancel, as
+  backing out of Google's screen does, and a second ask meanwhile is
+  said as the consent screen already open. Each such call is the
+  promise of a resolver kept in a cell with the call's number
+  (`answer_wait`, `consent_wait` in `src/sync.bats`): the plugin's
+  answer and the timer or Stop waiting each settle that number, the
+  first resolves it, and what comes after (the answer of a call already
+  ended) is dropped, so it changes nothing, keeps no token and asks
+  Google nothing more (`_authorization_late`: a late answer that logged
+  the reader in after they were told Google did not answer is what
+  Flutter developers who time out Firebase's sign-in found).
+  `e2e/sync-android-hang.spec.js` leaves each call pending (`hold` in
+  `e2e/sync-stores.js`) and settles it late.
 
 ## What the types guarantee about the interface
 
@@ -1035,8 +1106,13 @@ Nothing is lost at a click, except by emptying the Trash:
   resetting the settings are done at once. Each is offered back by the
   Undo toast (`undo_offer` in `src/undo.bats`), whose undo runs only
   from its own button, whose listener the module registers
-  (`undo_listen`). An earlier offer is made final when another takes
-  its place or the toast goes.
+  (`undo_listen`). An offer stays until it is used, dismissed (the
+  toast's Dismiss) or another takes its place, which makes the earlier
+  one final (quire#364: Material 3's snackbar with an action, WCAG
+  2.2.1): `undo_offer` takes an `offered(UntilDismissed)`, a datatype
+  indexed by its `offer_life`, so an offer with a `Brief` life does not
+  type-check (`tests/static/reject/undo-offer-brief`), and each
+  constructor says what an Undo would undo.
 * A factory reset moves every book to the Trash and resets the
   settings (`lib_trash_all`, `set_reset_undoable`), with one Undo that
   puts back each book's shelf and the settings.

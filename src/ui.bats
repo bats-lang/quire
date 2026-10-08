@@ -1815,6 +1815,8 @@ implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(by
   (* the WebDAV step's own button, and the step's Cancel *)
   | SyncWebDav
   | SyncStepCancel
+  (* the status card's, while Google's consent screen is awaited (#340) *)
+  | SyncStop
 
 #pub fn sync_screen_control_id (control: sync_screen_control): [id_len:pos | id_len < 256] string id_len
 implement sync_screen_control_id (control) =
@@ -1834,6 +1836,7 @@ implement sync_screen_control_id (control) =
   | SyncRowWebDav() => "sync-row-webdav"
   | SyncWebDav() => "sync-webdav"
   | SyncStepCancel() => "sync-step-cancel"
+  | SyncStop() => "sync-stop"
 
 (* The control after control, in the order the decoder tries them *)
 fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_screen_control) =
@@ -1852,7 +1855,8 @@ fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_scr
   | SyncRowNextcloud() => $R.some(SyncRowWebDav())
   | SyncRowWebDav() => $R.some(SyncWebDav())
   | SyncWebDav() => $R.some(SyncStepCancel())
-  | SyncStepCancel() => $R.none()
+  | SyncStepCancel() => $R.some(SyncStop())
+  | SyncStop() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)

@@ -219,6 +219,8 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   // the one red question
   await bookMenu(page, 'Short');
   await menuItem(page, 'Move to Trash').click();
+  // the offer stays until it is dismissed (quire#364), over the menu on a short screen
+  await page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) }).getByRole('button', { name: 'Dismiss' }).click();
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await expect(dialog(page, 'Empty the Trash?')).toBeVisible();

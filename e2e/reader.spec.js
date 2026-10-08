@@ -425,7 +425,11 @@ function png(w, h) {
     chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
 
-test('an image is shown full screen from a tap on it between the sides, or a long press', async ({ page }) => {
+// quire#365: no major reader opens a picture from a single tap (Kindle,
+// Libby and KOReader: press and hold; Apple Books and Kobo: double tap),
+// so a single tap is the page's tap, over a picture as anywhere; the
+// middle brings up the bars, a side turns the page
+test('an image is shown full screen from a double tap on it between the sides, or a long press; a single tap is the page\'s', async ({ page }) => {
   await start(page);
   await readBook(page, {
     title: 'Viewer', author: 'Bot',
@@ -437,11 +441,18 @@ test('an image is shown full screen from a tap on it between the sides, or a lon
   const pic = bookPage(page).getByRole('img', { name: 'the map' });
   await expect.poll(() => pic.evaluate(i => i.naturalWidth)).toBe(64);
   const at = await place(page);
+  // a single tap in the middle brings the bars up or away, and opens nothing
+  const barsShown = () => page.evaluate(() => !!document.querySelector('[role=toolbar]') && [...document.querySelectorAll('[role=toolbar]')].some(e => e.checkVisibility({ visibilityProperty: true }) && e.getClientRects().length > 0));
+  const before = await barsShown();
   await pic.click();
+  await expect.poll(barsShown).toBe(!before);
+  await expect(viewer).toBeHidden();
+  expect(await place(page)).toMatchObject({ ch: at.ch, p: at.p });
+  // a double tap opens it; the page is not turned (the chapter's page
+  // count may settle as its image loads, which is not a turn)
+  await pic.dblclick();
   await expect(viewer).toBeVisible();
   await expect.poll(() => viewer.locator('img').evaluate(i => i.complete && i.naturalWidth)).toBe(64);
-  // the page is not turned (the chapter's page count may settle as its
-  // image loads, which is not a turn)
   expect(await place(page)).toMatchObject({ ch: at.ch, p: at.p });
   await viewer.getByRole('button', { name: 'Close' }).click();
   await expect(viewer).toBeHidden();
@@ -451,7 +462,8 @@ test('an image is shown full screen from a tap on it between the sides, or a lon
   await expect(viewer).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(viewer).toBeHidden();
-  // a tap on the page's side still turns it
+  expect(await place(page)).toMatchObject({ ch: at.ch, p: at.p });
+  // a tap on the page's side still turns it, and opens nothing
   const box = await bookPage(page).boundingBox();
   await page.mouse.click(box.x + box.width * 0.9, box.y + box.height * 0.7);
   await expect.poll(async () => (await place(page)).p).toBe(at.p + 1);

@@ -27,9 +27,14 @@ staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload "mem.sats"
+staload "notice.sats"
 
 (* Whether the screen's rotation is locked now (by this module) *)
 val _locked = ref<bool>(false)
+
+(* Whether the device refused the rotation lock this session: its row is
+   then not shown, as a control that cannot work is not (quire#355) *)
+val _lock_refused = ref<bool>(false)
 
 (* What the app's system bars show, as its native side last reported
    them (bridge's listen_system_bars): full screen is what the screen
@@ -63,7 +68,7 @@ fn _pressed {id_len:pos | id_len < 256} (id: string id_len, on: bool): void =
 
 implement screen_controls_show () = let
   val full = $SCR.fullscreen_available()
-  val lock = $SCR.orientation_available()
+  val lock = (if !_lock_refused then false else $SCR.orientation_available())
   val brightness = $SCR.brightness_available()
   val () = ui_show("screen-fullscreen-row", full)
   val () = ui_show("screen-lock-row", lock)
@@ -160,9 +165,12 @@ fn _lock (): void =
       in _pressed("screen-lock", true) end
     | $SCR.LockRefused() => let
         val () = !_locked := false
+        val () = !_lock_refused := true
         val () = set_rotation_set(RotationFree())
         val () = set_save(lib_state_get())
-      in _pressed("screen-lock", false) end)
+        val () = _pressed("screen-lock", false)
+        val () = screen_controls_show()
+      in notice_error("This device does not let Quire lock the rotation, so Lock rotation is no longer offered. Turn the device's own rotation lock on instead.") end)
 
 (* Lock rotation clicked: locked, or let go, and kept *)
 #pub fn screen_lock_toggle (): void

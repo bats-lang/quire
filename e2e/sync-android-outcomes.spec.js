@@ -371,6 +371,8 @@ test('a sync the app makes by itself, and Turn off, say each answer of Google\'s
     const asked = a.google.asked('revokeAccess').length;
     await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
     await expect(status(a.page)).toHaveText('Sync is off.');
+    // the offer stays until it is dismissed (quire#364); made final, it takes the grant back
+    await a.page.getByRole('status').filter({ hasText: 'Sync turned off' }).getByRole('button', { name: 'Dismiss' }).click();
     await expect.poll(() => a.google.asked('revokeAccess').length, { timeout: 15000 }).toBe(asked + 1);
     await said();
     if (await banner(a.page).isVisible()) await dismiss(a.page);

@@ -196,12 +196,15 @@ test('the catalogues: Project Gutenberg at first, one added, removed with Undo, 
   await openCatalogues(page);
   await expect(row).toBeVisible();
 
-  // removed, and the toast left to go: gone for good, as Project
-  // Gutenberg's is once it is removed
+  // removed, and the toast dismissed: gone for good, as Project
+  // Gutenberg's is once it is removed (the toast stays until then,
+  // quire#364)
   await row.getByRole('button', { name: 'Remove' }).click();
   await catalogues(page).getByRole('group', { name: 'Project Gutenberg' }).getByRole('button', { name: 'Remove' }).click();
   await expect(catalogues(page).getByText('No catalogues yet')).toBeVisible();
-  await expect(toast).toBeHidden({ timeout: 15000 });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(toast).toBeHidden();
   await reload(page);
   await openCatalogues(page);
   await expect(catalogues(page).getByText('No catalogues yet')).toBeVisible();

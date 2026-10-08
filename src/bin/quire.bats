@@ -747,7 +747,7 @@ fn _archive {book:int} (book: int book): void =
       val id_low = book_numbers.id_low
       val () = _set_shelf(book, Archived())
     in
-      $P.finish<settled>(undo_offer("Archived"), llam(how) =>
+      $P.finish<settled>(undo_offer(BookArchived()), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -778,7 +778,7 @@ fn _hide_toggle {book:int} (book: int book): void =
       val was_hidden = same_shelf(was, Hidden())
       val () = _set_shelf(book, (if was_hidden then OnShelf() else Hidden()): shelf)
     in
-      $P.finish<settled>(undo_offer((if was_hidden then "Unhidden" else "Hidden"): [text_len:pos | text_len < 256] string text_len), llam(how) =>
+      $P.finish<settled>(undo_offer(if was_hidden then BookUnhidden() else BookHidden()), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -1171,7 +1171,7 @@ in if chapter >= 0 then reader_jump_to(chapter, page, node) else () end
    their defaults; Undo puts both back *)
 fn _factory_reset (): void = let
   val shelved = lib_trash_all()
-  val how = set_reset_undoable(undo_offer("Library moved to the Trash, settings reset"))
+  val how = set_reset_undoable(undo_offer(LibraryTrashed()))
   val () = _settings_apply()
 in
   $P.finish<settled>(how, llam(settling) =>
@@ -1548,7 +1548,9 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(SyncRowNextcloud()) => sync_step_open(ServiceNextcloud())
         | ~$R.some(SyncRowWebDav()) => sync_step_open(ServiceWebDav())
         | ~$R.some(SyncWebDav()) => sync_webdav()
-        | ~$R.some(SyncStepCancel()) => sync_step_cancel())
+        | ~$R.some(SyncStepCancel()) => sync_step_cancel()
+        (* the consent screen no longer awaited (#340) *)
+        | ~$R.some(SyncStop()) => sync_stop())
     in 0 end)
   val listeners = RCons(listeners, OnEl("sync-offer"), "click", llam(h) => let
       val clicked = _target(h)
@@ -2379,7 +2381,7 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
     in 0 end)
 in listeners end
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 16) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
@@ -2393,9 +2395,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
       if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
-      (* with the sides' zones, a tap on an image between them shows it
-         full screen, rather than the bars *)
-      else if (if node >= 0 then (if _side_zones() then (if _in_middle(x) then reader_image_at(node) else false) else false) else false) then 0
+      (* a single tap on an image is a tap on the page: the sides turn
+         it, the middle brings up the bars; the image is shown full
+         screen by a double tap or a long press (quire#365) *)
       else if x >= 0 then let
         (* a tap on text the narration reads, between the sides' zones,
            plays on from there; the bars come up or go as ever *)
@@ -2403,8 +2405,24 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 15) = let
       in let val () = _zone_click(x, y) in 0 end end
       else 0
     end)
+  (* an image of the book, double-tapped between the sides' zones, is
+     shown full screen, as Apple Books and Kobo show one (the two taps
+     before it bring the bars up and put them away again) *)
+  val listeners = RCons(listeners, OnEl("page"), "dblclick", llam(h) => let
+      val clicked = _target(h)
+      val node = _row_of(clicked, "c")
+      val x = _target_x(clicked)
+      val () = _target_free(clicked)
+    in
+      if _has_selection() then 0
+      else if node < 0 then 0
+      else if ~_side_zones() then 0
+      else if ~_in_middle(x) then 0
+      else if reader_image_at(node) then let val () = $EV.prevent_default() in 0 end
+      else 0
+    end)
   (* an image of the book, long-pressed (or right-clicked), is shown
-     full screen *)
+     full screen, anywhere on the page *)
   val listeners = RCons(listeners, OnEl("page"), "contextmenu", llam(h) => let
       val clicked = _target(h)
       val node = _row_of(clicked, "c")

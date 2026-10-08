@@ -688,7 +688,7 @@ implement lib_trash (index) =
       val old_shelf = nums.shelf
       val () = lib_set_shelf(index, Trash())
     in
-      $P.finish<settled>(undo_offer("Moved to Trash"), llam(how) =>
+      $P.finish<settled>(undo_offer(MovedToTrash()), llam(how) =>
         case+ how of
         | Undone() => let
             val index_now = lib_index_of_key(key)
@@ -1370,7 +1370,7 @@ in
     val () = _gone_put(CollGone(name, name_len))
     val () = lib_save()
     val () = lib_render()
-  in $P.finish<settled>(undo_offer("Collection deleted"), llam(how) =>
+  in $P.finish<settled>(undo_offer(CollectionDeleted()), llam(how) =>
     case+ how of
     | Undone() => _coll_restore(collection, keys)
     | Final() => let val () = _keys_free(keys) in _gone_put(CollNotGone()) end) end

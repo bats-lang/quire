@@ -1068,7 +1068,7 @@ fn _list_render (shown: annotation_list): void =
 
 (* Deletes annotation index at once, offering it back: Undo puts it
    back, and then shows the list it was in (shown) again *)
-fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string text_len, shown: annotation_list): void = let
+fn _delete_undoable (index: int, what: offered(UntilDismissed), shown: annotation_list): void = let
   val offer = !_held_serial + 1
   val () = !_held_serial := offer
   val () = _deleting(index)
@@ -1081,7 +1081,7 @@ fn _delete_undoable {text_len:pos | text_len < 256} (index: int, text: string te
   val () = _removed_free(_held_swap(pulled))
   val () = _list_render(shown)
 in
-  $P.finish<settled>(undo_offer(text), llam(how) =>
+  $P.finish<settled>(undo_offer(what), llam(how) =>
     case+ how of
     | Undone() => let val () = _put_back(offer) in _list_render(shown) end
     | Final() => _let_go(offer))
@@ -1091,13 +1091,13 @@ end
 #pub fn annot_delete_highlight {index:int} (index: int index): void
 
 implement annot_delete_highlight (index) =
-  if ~_changeable() then () else _delete_undoable(index, "Highlight deleted", HighlightList())
+  if ~_changeable() then () else _delete_undoable(index, HighlightDeleted(), HighlightList())
 
 (* Deletes bookmark index, offering Undo *)
 #pub fn annot_delete_bookmark {index:int} (index: int index): void
 
 implement annot_delete_bookmark (index) =
-  if ~_changeable() then () else _delete_undoable(index, "Bookmark deleted", BookmarkList())
+  if ~_changeable() then () else _delete_undoable(index, BookmarkDeleted(), BookmarkList())
 
 (* Both lists, after a note changed: the highlights' and the bookmarks' *)
 fn _lists_render (): void = let
