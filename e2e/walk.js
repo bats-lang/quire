@@ -38,7 +38,7 @@ export async function syncSteps(page, checked, back = () => page.keyboard.press(
   for (const row of rows) {
     await sync.getByRole('button', { name: row, exact: true }).click();
     await expect(sync.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
-    await checked(`Sync, ${row.replace(' ›', '')}'s step`);
+    await checked(`Sync, ${row}'s step`);
     await back('a step within Sync');
     await expect(sync.getByRole('button', { name: row, exact: true })).toBeVisible();
   }
@@ -109,16 +109,16 @@ export async function walkEveryScreen(page, { look, back }) {
   await check('Settings');
   // a dictionary, so the Dictionaries screen lists one and a word is looked up below
   const made = createStardict({ name: 'Pocket English', entries: [{ word: 'ephemeral', article: 'lasting a very short time' }] });
-  await settingsButton(page, 'Dictionaries ›').click();
+  await settingsButton(page, 'Dictionaries').click();
   await page.getByLabel('Import dictionary').setInputFiles([
     rawFile('walk.ifo', made.ifo), rawFile('walk.idx', made.idx), rawFile('walk.dict', made.dict)]);
   await expect(dialog(page, 'Dictionaries').getByRole('status')).toHaveText('Dictionary added.', { timeout: 30000 });
   await back();
-  for (const row of ['Sync ›', 'Dictionaries ›', 'About Quire ›']) {
+  for (const row of ['Sync', 'Dictionaries', 'About Quire']) {
     await settingsButton(page, row).click();
-    await expect(page.getByRole('dialog', { name: row.replace(' ›', ''), exact: true })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: row, exact: true })).toBeVisible();
     await check(row);
-    if (row === 'Sync ›') await syncSteps(page, check, back);
+    if (row === 'Sync') await syncSteps(page, check, back);
     await back();
   }
   await back();

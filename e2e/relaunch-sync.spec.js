@@ -27,7 +27,7 @@ const status = page => panel(page).getByRole('status');
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -55,11 +55,11 @@ const stores = {
     },
     async join(page) {
       await openSync(page);
-      await panel(page).getByRole('button', { name: 'WebDAV ›' }).click();
+      await panel(page).getByRole('button', { name: 'WebDAV', exact: true }).click();
       await panel(page).getByLabel('Folder URL').fill(folder(page));
       await panel(page).getByLabel('User name').fill(USER);
       await panel(page).getByLabel('Password', { exact: true }).fill(PASSWORD);
-      await panel(page).getByRole('button', { name: 'Sync with this folder' }).click();
+      await panel(page).getByRole('button', { name: 'Sign in to WebDAV' }).click();
       await expect(status(page)).toHaveText(/^Last synced on /);
       await closeSync(page);
     },
@@ -76,7 +76,7 @@ const stores = {
     },
     async join(page) {
       await openSync(page);
-      await panel(page).getByRole('button', { name: 'Dropbox ›' }).click();
+      await panel(page).getByRole('button', { name: 'Dropbox', exact: true }).click();
       await panel(page).getByRole('button', { name: 'Sign in to Dropbox' }).click();
       await page.waitForURL(url => url.searchParams.get('oauth') === 'dropbox' && url.searchParams.has('code'));
       await expect(status(page)).toHaveText(/^Last synced on /);
@@ -93,7 +93,7 @@ const stores = {
     },
     async join(page) {
       await openSync(page);
-      await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
+      await panel(page).getByRole('button', { name: 'Google Drive', exact: true }).click();
       await panel(page).getByRole('button', { name: 'Sign in to Google Drive' }).click();
       await expect(status(page)).toHaveText(/^Last synced on /);
       await closeSync(page);
@@ -108,8 +108,8 @@ const stores = {
     },
     async join(page) {
       await openSync(page);
-      await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
-      await panel(page).getByRole('button', { name: 'Use Android' }).click();
+      await panel(page).getByRole('button', { name: 'Google Drive', exact: true }).click();
+      await panel(page).getByRole('button', { name: 'Sign in to Google Drive' }).click();
       await expect(status(page)).toHaveText(/^Last synced on /);
       await closeSync(page);
     },

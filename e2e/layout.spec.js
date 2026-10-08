@@ -11,7 +11,7 @@ import {
   readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch,
 } from './helpers.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen, insetsShort, onOffPairs, textContrastShort } from './controls-shown.js';
+import { cutOff, statesUnseen, insetsShort, onOffPairs, textContrastShort, labelsShown, labelInName } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -40,6 +40,8 @@ async function fits(page, screen) {
   expect(await statesUnseen(page), `toggles on ${screen} that look the same on and off`).toEqual([]);
   expect(await textContrastShort(page), `placeholders under 4.5:1 on ${screen}`).toEqual([]);
   expect(await onOffPairs(page), `two-state settings on ${screen} that are not switches`).toEqual([]);
+  expect(await labelsShown(page), `fields without a visible label on ${screen}`).toEqual([]);
+  expect(await labelInName(page), `buttons whose name is not their words on ${screen}`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }
@@ -229,12 +231,12 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await page.keyboard.press('Escape');
   await librarySettings(page);
   await fits(page, 'Settings');
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(dialog(page, 'Sync')).toBeVisible();
   await fits(page, 'Sync');
   await syncSteps(page, screen => fits(page, screen));
   await page.keyboard.press('Escape');
-  await settingsButton(page, 'Dictionaries ›').click();
+  await settingsButton(page, 'Dictionaries').click();
   await expect(dialog(page, 'Dictionaries')).toBeVisible();
   await fits(page, 'Dictionaries');
   await page.keyboard.press('Escape');

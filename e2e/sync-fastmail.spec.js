@@ -65,7 +65,7 @@ function fastmail({ cors = true } = {}) {
 
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
-const fastmailButton = page => panel(page).getByRole('button', { name: 'Sync with Fastmail' });
+const fastmailButton = page => panel(page).getByRole('button', { name: 'Sign in to Fastmail' });
 const syncRow = page => settingsScreen(page).getByRole('group', { name: 'Sync' });
 
 /** The Android app (its platform played): Fastmail routed in its own
@@ -81,7 +81,7 @@ async function app(browser, server) {
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -97,7 +97,7 @@ test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({
   const server = fastmail({ cors: false });
   await page.context().route(`${SERVER}/**`, server.handle);
   await openSync(page);
-  await expect(panel(page).getByRole('button', { name: 'WebDAV ›' })).toBeVisible();
+  await expect(panel(page).getByRole('button', { name: 'WebDAV', exact: true })).toBeVisible();
   await expect(fastmailButton(page)).toBeHidden();
   await expect(panel(page).getByLabel('Fastmail address')).toBeHidden();
   await expect(panel(page).getByRole('link', { name: 'Make an app password' })).toBeHidden();
@@ -105,7 +105,7 @@ test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({
   await expect(panel(page)).not.toContainText('Fastmail', { useInnerText: true });
   // opened again, from Settings: still no request
   await panel(page).getByRole('button', { name: 'Done' }).click();
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
   await page.waitForTimeout(500);
   expect(sent).toEqual([]);
@@ -117,7 +117,7 @@ test("in the app, the first sync makes Fastmail's folder, then syncs there; the 
   const server = fastmail();
   const { context, page, errors } = await app(browser, server);
   await openSync(page);
-  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
+  await panel(page).getByRole('button', { name: 'Fastmail', exact: true }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await expect(panel(page)).toContainText('Syncs through Fastmail');
   // the app password is made in Fastmail's settings, in a tab of its own
@@ -159,7 +159,7 @@ test('in the app, an address or app password Fastmail refuses is said so, and em
   const server = fastmail();
   const { context, page } = await app(browser, server);
   await openSync(page);
-  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
+  await panel(page).getByRole('button', { name: 'Fastmail', exact: true }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await fastmailButton(page).click();
   await expect(status(page)).toHaveText('Enter your Fastmail address and an app password.');
@@ -177,7 +177,7 @@ test('in the app, Fastmail is listed with no question to it first', async ({ bro
   const server = fastmail({ cors: false });
   const { context, page } = await app(browser, server);
   await openSync(page);
-  await panel(page).getByRole('button', { name: 'Fastmail ›' }).click();
+  await panel(page).getByRole('button', { name: 'Fastmail', exact: true }).click();
   await expect(fastmailButton(page)).toBeVisible();
   await expect(panel(page).getByLabel('Fastmail address')).toBeVisible();
   await expect(panel(page)).toContainText('Syncs through Fastmail');

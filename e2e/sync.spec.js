@@ -33,7 +33,7 @@ const status = page => panel(page).getByRole('status');
 /** Opens the sync panel from Settings, opened from the library menu */
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -47,7 +47,7 @@ async function closeSync(page) {
 
 /** The WebDAV row's own step (#331): its fields and its button */
 async function webdavStep(page) {
-  await panel(page).getByRole('button', { name: 'WebDAV ›' }).click();
+  await panel(page).getByRole('button', { name: 'WebDAV', exact: true }).click();
   await expect(panel(page).getByLabel('Folder URL')).toBeVisible();
 }
 
@@ -58,7 +58,7 @@ async function setUp(page, password = PASSWORD) {
   await panel(page).getByLabel('Folder URL').fill(folder(page));
   await panel(page).getByLabel('User name').fill(USER);
   await panel(page).getByLabel('Password', { exact: true }).fill(password);
-  await panel(page).getByRole('button', { name: 'Sync with this folder' }).click();
+  await panel(page).getByRole('button', { name: 'Sign in to WebDAV' }).click();
 }
 
 /** Sync set up and done, its screen closed */
@@ -424,7 +424,7 @@ test('a sync that fails says why, and changes nothing here', async ({ browser })
   await webdavStep(b.page);
   await panel(b.page).getByLabel('Password', { exact: true }).fill(PASSWORD);
   server.putStatus = 403;
-  await panel(b.page).getByRole('button', { name: 'Sync with this folder' }).click();
+  await panel(b.page).getByRole('button', { name: 'Sign in to WebDAV' }).click();
   await expect(status(b.page)).toContainText('The user name or password is wrong.');
   server.putStatus = null;
   server.noFolder = true;
@@ -570,14 +570,14 @@ test('the Settings screen\'s Sync row says whether sync is on, and when it last 
   await expect(row).toHaveText(/^WebDAV · synced [23] min ago$/);
   // a failure says why, in short
   server.status = 401;
-  await settingsButton(a.page, 'Sync ›').click();
+  await settingsButton(a.page, 'Sync').click();
   await panel(a.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(a.page)).toContainText('The user name or password is wrong.');
   await a.page.keyboard.press('Escape');
   await expect(row).toHaveText('Wrong user name or password');
   // turned off, it says so
   server.status = null;
-  await settingsButton(a.page, 'Sync ›').click();
+  await settingsButton(a.page, 'Sync').click();
   await panel(a.page).getByRole('button', { name: 'Turn off' }).click();
   await a.page.keyboard.press('Escape');
   await expect(row).toHaveText('Off');

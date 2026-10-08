@@ -37,6 +37,8 @@ MAKERS = {name: (1,) for name in (
 )}
 # a range row: its label, its input and its value
 MAKERS['ui_range'] = (1, 3, 6)
+# a sign-in form's field: its label (position 1) and its input (position 2)
+MAKERS['ui_form_field'] = (1, 2)
 # function -> the positions of its arguments that name an element
 NAMERS = {name: (0,) for name in (
     'ui_clear', 'ui_attr', 'ui_attr_buf', 'ui_place', 'ui_class', 'ui_show',

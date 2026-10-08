@@ -35,8 +35,8 @@ implement app_dictionary_input () =
 #pub fn app_catalogue_form (): void
 implement app_catalogue_form () = let
   val () = ui_clear("catalogue-form")
-  val () = ui_field("catalogue-form", "catalogue-name", FLine, "mname", "Catalogue name")
-in ui_field("catalogue-form", "catalogue-address", FLine, "mname", "Catalogue URL") end
+  val () = ui_form_field("catalogue-form", "catalogue-name-label", "catalogue-name", FormName, "mname", "Catalogue name", "Project Gutenberg")
+in ui_form_field("catalogue-form", "catalogue-address-label", "catalogue-address", FormUrl, "mname", "Catalogue URL", "https://example.com/opds") end
 
 (* The catalogue's search field, empty, and its button *)
 #pub fn app_catalogue_search (): void
@@ -299,12 +299,12 @@ fn _settings_screen (): void = let
   (* sync: its screen, and its state *)
   val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
   val () = ui_named("settings-sync-row", NGroup, "Sync")
-  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn", "Sync \xE2\x80\xBA")
+  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn chev", "Sync")
   val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
   val () = ui_role("settings-sync-state", RStatus)
   (* the dictionaries' panel *)
   val () = ui_el("settings-box", "settings-dictionaries-row", TDiv, "srow")
-  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn", "Dictionaries \xE2\x80\xBA")
+  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn chev", "Dictionaries")
   (* the backup *)
   val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
   val () = ui_text("settings-backup-title", "Backup")
@@ -336,7 +336,7 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
   (* the About screen *)
   val () = ui_el("settings-box", "settings-about-row", TDiv, "srow")
-  val () = ui_text_btn("settings-about-row", "settings-about", "btn", "About Quire \xE2\x80\xBA")
+  val () = ui_text_btn("settings-about-row", "settings-about", "btn chev", "About Quire")
   val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
   val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
 in _hide("settings-screen") end

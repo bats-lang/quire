@@ -36,17 +36,17 @@ const unexpected = d => d.errors.filter(e => !/status of (401|404)/.test(e));
 
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
-const useAndroid = page => panel(page).getByRole('button', { name: 'Use Android' });
+const useAndroid = page => panel(page).getByRole('button', { name: 'Sign in to Google Drive' });
 /** The Google Drive row's own step (#331), then its Use Android */
 async function chooseAndroid(page) {
-  await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
+  await panel(page).getByRole('button', { name: 'Google Drive', exact: true }).click();
   await useAndroid(page).click();
 }
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -225,7 +225,7 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   await openSync(page);
   await expect(useAndroid(page)).toBeHidden();
   // nor, in a build with no client, Google Drive
-  await expect(panel(page).getByRole('button', { name: 'Google Drive' })).toBeHidden();
+  await expect(panel(page).getByRole('button', { name: 'Google Drive', exact: true })).toBeHidden();
   await web.close();
   // nor, in an app built without a client, Use Android: a row that
   // could only say it is not set up is not listed
@@ -408,7 +408,7 @@ test('in a browser, Google Drive syncs through the same app data folder, an hour
   // the hour is up: Drive refuses the token, and Sync now asks Google again
   server.token = 'token-2';
   await web.page.evaluate(() => { window.__gis.token = 'token-2'; });
-  await settingsButton(web.page, 'Sync ›').click();
+  await settingsButton(web.page, 'Sync').click();
   await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(web.page)).toContainText('Sync paused: tap Sync now to sign in to Google again.');
   await panel(web.page).getByRole('button', { name: 'Sync now' }).click();
@@ -427,7 +427,7 @@ test('in a browser opened again, Google Drive syncs with the token it kept; once
   const web = await browserDevice(browser, server);
   await importFiles(web.page, [epubFile(book)], 1);
   await openSync(web.page);
-  await panel(web.page).getByRole('button', { name: 'Google Drive ›' }).click();
+  await panel(web.page).getByRole('button', { name: 'Google Drive', exact: true }).click();
   await panel(web.page).getByRole('button', { name: 'Sign in to Google Drive' }).click();
   await expect(status(web.page)).toHaveText(/^Last synced on /);
   await closeSync(web.page);
