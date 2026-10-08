@@ -62,8 +62,8 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeHidden();
   await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeHidden();
   await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeHidden();
-  await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeHidden();
-  await expect(readingSettings(page).getByRole('group', { name: 'Hyphenation' })).toBeHidden();
+  await expect(readingSettings(page).getByRole('button', { name: 'Justify text', exact: true })).toBeHidden();
+  await expect(readingSettings(page).getByRole('button', { name: 'Hyphenation', exact: true })).toBeHidden();
   await page.keyboard.press('Escape');
   await toLibrary(page);
   await openBook(page, 'Across');
@@ -71,8 +71,8 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
   await expect(sheet(page).getByRole('group', { name: 'Layout' })).toBeVisible();
   await expect(readingSettings(page).getByRole('group', { name: 'Pages on screen' })).toBeVisible();
   await expect(readingSettings(page).getByRole('slider', { name: 'Margins' })).toBeVisible();
-  await expect(readingSettings(page).getByRole('group', { name: 'Justify text' })).toBeVisible();
-  await expect(readingSettings(page).getByRole('group', { name: 'Hyphenation' })).toBeVisible();
+  await expect(readingSettings(page).getByRole('button', { name: 'Justify text', exact: true })).toBeVisible();
+  await expect(readingSettings(page).getByRole('button', { name: 'Hyphenation', exact: true })).toBeVisible();
   // and the horizontal book is not set vertically
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).writingMode)).toBe('horizontal-tb');
 });

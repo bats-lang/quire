@@ -30,6 +30,7 @@ staload "annot.sats"
 staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
+staload "screen_controls.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -1804,8 +1805,7 @@ val _bars_left_alone = ref<bool>(false)
    unasked *)
 fn _bars_hidden_again (): void =
   if !_bars_left_alone then ()
-  else if $BAPP.is_native_platform() then (if $SCR.fullscreen_active() then $SCR.fullscreen_enter() else ())
-  else ()
+  else screen_bars_hidden_again()
 
 (* Shows a page of page_count, scrolled down by top when scrolled (the page's
    own step otherwise) *)

@@ -21,9 +21,9 @@ async function device(browser, server) {
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
 const banner = page => page.getByRole('alert');
-const useAndroid = page => panel(page).getByRole('button', { name: 'Use Android' });
+const useAndroid = page => panel(page).getByRole('button', { name: 'Sign in to Google Drive' });
 async function chooseAndroid(page) {
-  await panel(page).getByRole('button', { name: 'Google Drive ›' }).click();
+  await panel(page).getByRole('button', { name: 'Google Drive', exact: true }).click();
   await useAndroid(page).click();
 }
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
@@ -32,7 +32,7 @@ const VERSION = /^Quire \d{4}\.\d{1,2}\.\d{1,2}\.\d+ \([0-9a-f]{7,}\)\n/;
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -119,7 +119,7 @@ test('Use Android: each answer of Google\'s consent is said where the reader is'
     await dismiss(a.page);
     await a.page.keyboard.press('Escape');
     await expect(row(a.page)).toHaveText(`Off · ${SHORT[said]}`);
-    await settingsButton(a.page, 'Sync ›').click();
+    await settingsButton(a.page, 'Sync').click();
   }
 
   a.google.outcomes.authorizeScopes = [{ error: 'CONSENT_SHOWING', message: "Another call's consent screen is showing" }];
@@ -140,7 +140,7 @@ test('Use Android: each answer of Google\'s consent is said where the reader is'
   await expect(banner(a.page)).toBeHidden();
   await a.page.keyboard.press('Escape');
   await expect(row(a.page)).toHaveText('Off');
-  await settingsButton(a.page, 'Sync ›').click();
+  await settingsButton(a.page, 'Sync').click();
 
   await chooseAndroid(a.page);
   await expect(status(a.page)).toHaveText(/^Last synced on /);
@@ -269,8 +269,8 @@ test('every answer bridge does not recognise is said as unexpected, with which c
 
   await a.page.keyboard.press('Escape');
   await a.page.evaluate(() => { window.__googleThrows = [{ at: 'presence', value: 'error' }]; });
-  await settingsButton(a.page, 'Sync ›').click();
-  await expect(panel(a.page).getByRole('button', { name: 'Google Drive ›' })).toBeHidden();
+  await settingsButton(a.page, 'Sync').click();
+  await expect(panel(a.page).getByRole('button', { name: 'Google Drive', exact: true })).toBeHidden();
   await saidWithDetails(a.page, "An unexpected error occurred while looking for Google's authorization in the app. Copy the details and post them in a report.",
     "Platform: Android app\nWhile: looking for Google's authorization in the app\nCall: GoogleAuthorize lookup\nCase: Thrown, LookupThrew", thrown);
   await dismiss(a.page);

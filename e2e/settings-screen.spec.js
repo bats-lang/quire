@@ -32,11 +32,11 @@ test('Settings opens from the library menu, which no longer holds what it took',
   await menuItem(page, 'Settings').click();
   await expect(settingsScreen(page)).toBeVisible();
   await expect(page.getByRole('menu')).toBeHidden();
-  for (const row of ['Sync ›', 'Dictionaries ›', 'Export backup', 'Reset settings', 'Factory reset', 'Done']) {
+  for (const row of ['Sync', 'Dictionaries', 'Export backup', 'Reset settings', 'Factory reset', 'Done']) {
     await expect(settingsButton(page, row)).toBeVisible();
   }
   // the reading settings are the book's own sheet's, not a row here
-  await expect(settingsButton(page, 'Reading ›')).toHaveCount(0);
+  await expect(settingsButton(page, 'Reading')).toHaveCount(0);
   await expect(settingsScreen(page).getByRole('button', { name: 'Turn pages with volume keys' })).toHaveCount(0);
   await expect(settingsScreen(page).getByRole('group', { name: 'Tap to turn pages' })).toHaveCount(0);
   await expect(restoreInput(page)).toHaveCount(1);
@@ -66,20 +66,20 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await start(page);
   await librarySettings(page);
   await expect(syncRow(page)).toContainText('Off');
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   const sync = dialog(page, 'Sync');
   await expect(sync).toBeVisible();
   // a service's row opens its own step over the list, and Escape (as
   // Cancel) goes back to the list (#331)
-  await sync.getByRole('button', { name: 'WebDAV ›' }).click();
+  await sync.getByRole('button', { name: 'WebDAV', exact: true }).click();
   await expect(sync.getByLabel('Folder URL')).toBeVisible();
-  await expect(sync.getByRole('button', { name: 'WebDAV ›' })).toBeHidden();
+  await expect(sync.getByRole('button', { name: 'WebDAV', exact: true })).toBeHidden();
   await page.keyboard.press('Escape');
   await expect(sync.getByLabel('Folder URL')).toBeHidden();
-  await sync.getByRole('button', { name: 'WebDAV ›' }).click();
+  await sync.getByRole('button', { name: 'WebDAV', exact: true }).click();
   await sync.getByRole('button', { name: 'Cancel' }).click();
   await expect(sync.getByLabel('Folder URL')).toBeHidden();
-  await expect(sync.getByRole('button', { name: 'WebDAV ›' })).toBeVisible();
+  await expect(sync.getByRole('button', { name: 'WebDAV', exact: true })).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(sync).toBeHidden();
   await expect(settingsScreen(page)).toBeVisible();

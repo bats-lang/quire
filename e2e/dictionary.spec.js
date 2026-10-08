@@ -64,7 +64,7 @@ const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up'
     unless it is open) */
 async function openDictionaries(page) {
   if (!(await settingsScreen(page).isVisible())) await librarySettings(page);
-  await settingsButton(page, 'Dictionaries ›').click();
+  await settingsButton(page, 'Dictionaries').click();
   await expect(dictionaries(page)).toBeVisible();
 }
 

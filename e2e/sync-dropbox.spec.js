@@ -33,17 +33,17 @@ const unexpected = d => d.errors.filter(e => !/status of (401|409)/.test(e));
 
 const panel = page => dialog(page, 'Sync');
 const status = page => panel(page).getByRole('status');
-const dropboxButton = page => panel(page).getByRole('button', { name: 'Dropbox' });
+const dropboxButton = page => panel(page).getByRole('button', { name: 'Dropbox', exact: true });
 /** The Dropbox row's own step (#331), then its Sign in to Dropbox */
 async function chooseDropbox(page) {
-  await panel(page).getByRole('button', { name: 'Dropbox ›' }).click();
+  await panel(page).getByRole('button', { name: 'Dropbox', exact: true }).click();
   await panel(page).getByRole('button', { name: 'Sign in to Dropbox' }).click();
 }
 const row = page => settingsScreen(page).getByRole('group', { name: 'Sync' }).getByRole('status');
 
 async function openSync(page) {
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
 }
 
@@ -83,7 +83,7 @@ test('Dropbox signs in with PKCE and syncs two browsers through the app folder',
   await nextChapter(a.page, 2);
   await toLibrary(a.page);
   await openSync(a.page);
-  await panel(a.page).getByRole('button', { name: 'Dropbox ›' }).click();
+  await panel(a.page).getByRole('button', { name: 'Dropbox', exact: true }).click();
   await expect(panel(a.page)).toContainText('in a folder of its own (Apps, then Quire) that only Quire sees');
   await panel(a.page).getByRole('button', { name: 'Cancel' }).click();
   await closeSync(a.page);
@@ -112,7 +112,7 @@ test('Dropbox signs in with PKCE and syncs two browsers through the app folder',
   // the access token expires: the refresh token gets another, with no
   // sign-in, and the sync goes on
   server.access.clear();
-  await settingsButton(b.page, 'Sync ›').click();
+  await settingsButton(b.page, 'Sync').click();
   await panel(b.page).getByRole('button', { name: 'Sync now' }).click();
   await expect(status(b.page)).toHaveText(/^Last synced on /);
 

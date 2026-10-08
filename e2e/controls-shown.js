@@ -12,6 +12,20 @@
  * - statesUnseen: every toggle shows whether it is on in how it looks,
  *   not only in aria-pressed (WCAG 1.4.1): its look, and its parts',
  *   differ between on and off.
+ * - textContrastShort: a placeholder reads at 4.5:1 against its field
+ *   (WCAG 1.4.3), in whatever theme is shown (quire#357). Every other
+ *   text colour is written through the stylesheet's proven pairs.
+ * - stateCueShort: a chosen tab is told apart by more than a tint
+ *   (WCAG 1.4.11): an underline, a border or a bolder weight that the
+ *   others do not have (quire#358).
+ * - onOffPairs: a setting with two states is a switch (Material 3: a
+ *   switch makes a binary selection, its effect immediate), never a
+ *   segmented On | Off, nor a lone button pressed on and off (quire#363).
+ * - labelsShown: every visible sign-in field is named by a visible label
+ *   (a <label for>) that reads at 4.5:1, not by a placeholder that
+ *   vanishes as it is typed in (WCAG 3.3.2, 1.3.1; quire#361).
+ * - labelInName: a button's accessible name holds the words it shows
+ *   (WCAG 2.5.3), so a glyph drawn into its text is not part of it.
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
  * - coveredByBanner: while the error banner is up, no control outside it
@@ -95,6 +109,157 @@ export async function statesUnseen(page) {
       const after = look(e);
       e.setAttribute('aria-pressed', was);
       if (before === after) bad.push((e.getAttribute('aria-label') || e.textContent || e.id).trim().slice(0, 40));
+    }
+    return bad;
+  });
+}
+
+/** The visible fields on the screen shown whose placeholder is under
+    4.5:1 against the field's ground, as the page draws it (the colour
+    with its opacity over the field's background). Each is named, with
+    the ratio */
+export async function textContrastShort(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const parse = css => {
+      const m = css.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const [r, g, b, a = 1] = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number);
+      return { r, g, b, a };
+    };
+    const over = (top, under) => ({
+      r: top.r * top.a + under.r * (1 - top.a), g: top.g * top.a + under.g * (1 - top.a), b: top.b * top.a + under.b * (1 - top.a), a: 1,
+    });
+    const light = c => {
+      const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    const ground = e => {
+      let under = { r: 255, g: 255, b: 255, a: 1 };
+      const chain = [];
+      for (let a = e; a; a = a.parentElement) chain.push(parse(getComputedStyle(a).backgroundColor));
+      for (const c of chain.reverse()) if (c && c.a > 0) under = over(c, under);
+      return under;
+    };
+    const bad = [];
+    for (const e of document.querySelectorAll('input[placeholder],textarea[placeholder]')) {
+      if (!shown(e) || e.value) continue;
+      const style = getComputedStyle(e, '::placeholder');
+      const text = parse(style.color);
+      if (!text) continue;
+      const back = ground(e);
+      const drawn = over({ ...text, a: text.a * parseFloat(style.opacity || '1') }, back);
+      const [hi, lo] = [light(drawn), light(back)].sort((x, y) => y - x);
+      const ratio = (hi + 0.05) / (lo + 0.05);
+      if (ratio < 4.5) bad.push(`${e.getAttribute('aria-label') || e.id || e.placeholder}: ${ratio.toFixed(2)}:1`);
+    }
+    return bad;
+  });
+}
+
+/** The visible tabs on the screen shown whose chosen one has no cue
+    beside its ground: an inset shadow, a border, an underline or a
+    weight the other tabs of its list do not have. Each list is named */
+export async function stateCueShort(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const cue = e => {
+      const style = getComputedStyle(e);
+      return [style.boxShadow, style.textDecorationLine, style.fontWeight, style.borderBottomWidth, style.outlineStyle].join('|');
+    };
+    const bad = [];
+    for (const list of document.querySelectorAll('[role=tablist]')) {
+      if (!shown(list)) continue;
+      const tabs = [...list.querySelectorAll('[role=tab]')].filter(shown);
+      const chosen = tabs.filter(t => t.getAttribute('aria-selected') === 'true');
+      const others = tabs.filter(t => t.getAttribute('aria-selected') !== 'true');
+      if (!chosen.length || !others.length) continue;
+      if (others.every(o => cue(o) === cue(chosen[0]))) bad.push(list.getAttribute('aria-label') || list.id);
+    }
+    return bad;
+  });
+}
+
+/** The visible two-state settings on the screen shown that are not
+    switches: a segmented group (.seg) whose buttons are exactly On and
+    Off, and a .seg holding one button that is pressed on and off.
+    Each is named */
+export async function onOffPairs(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const bad = [];
+    // (.cseg is the collections' chips, which are a list that has one chip at times, not a setting)
+    for (const group of document.querySelectorAll('.seg:not(.cseg)')) {
+      if (!shown(group)) continue;
+      const buttons = [...group.querySelectorAll('button')].filter(shown);
+      const names = buttons.map(b => b.textContent.trim()).sort();
+      const named = (group.getAttribute('aria-label') || group.id).trim();
+      if (names.length === 2 && names[0] === 'Off' && names[1] === 'On') bad.push(`${named}: On | Off`);
+      if (buttons.length === 1 && buttons[0].hasAttribute('aria-pressed') && !buttons[0].classList.contains('switch')) bad.push(`${named}: one pressed button`);
+    }
+    return bad;
+  });
+}
+
+/** The visible sign-in fields (url, user name and password inputs) on
+    the screen shown with no visible label of their own, or with one
+    under 4.5:1 against its ground. Each is named */
+export async function labelsShown(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const parse = css => {
+      const m = css.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const [r, g, b, a = 1] = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number);
+      return { r, g, b, a };
+    };
+    const over = (top, under) => ({
+      r: top.r * top.a + under.r * (1 - top.a), g: top.g * top.a + under.g * (1 - top.a), b: top.b * top.a + under.b * (1 - top.a), a: 1,
+    });
+    const light = c => {
+      const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+      return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+    };
+    const ground = e => {
+      let under = { r: 255, g: 255, b: 255, a: 1 };
+      const chain = [];
+      for (let a = e; a; a = a.parentElement) chain.push(parse(getComputedStyle(a).backgroundColor));
+      for (const c of chain.reverse()) if (c && c.a > 0) under = over(c, under);
+      return under;
+    };
+    const bad = [];
+    for (const input of document.querySelectorAll('input[type=url],input[type=password],input[type=text]')) {
+      if (!shown(input)) continue;
+      const labels = [...(input.labels || [])].filter(shown);
+      const name = input.getAttribute('aria-label') || input.id;
+      if (!labels.length) { bad.push(`${name}: no visible label`); continue; }
+      const text = parse(getComputedStyle(labels[0]).color);
+      const back = ground(labels[0]);
+      const [hi, lo] = [light(over(text, back)), light(back)].sort((x, y) => y - x);
+      const ratio = (hi + 0.05) / (lo + 0.05);
+      if (ratio < 4.5) bad.push(`${name}: its label reads at ${ratio.toFixed(2)}:1`);
+    }
+    return bad;
+  });
+}
+
+/** The visible buttons on the screen shown whose accessible name does
+    not hold the words they show (WCAG 2.5.3): one that carries an
+    aria-label without its visible text, and one whose text has a drawn
+    glyph in it (the chevron a row ends in is the stylesheet's, with an
+    empty alternative, never a character of the name). Each is named */
+export async function labelInName(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const bad = [];
+    for (const button of document.querySelectorAll('button')) {
+      if (!shown(button)) continue;
+      // (an icon button's text is its glyph, in the Private Use Area: its name is its label alone)
+      const text = button.textContent.replace(/[\uE000-\uF8FF]/g, '').replace(/\s+/g, ' ').trim();
+      if (!text) continue;
+      const label = button.getAttribute('aria-label');
+      if (label && !label.toLowerCase().includes(text.toLowerCase())) bad.push(`${text.slice(0, 40)} (named ${label.slice(0, 40)})`);
+      if (/[\u203A\u00BB\u2192]/.test(text)) bad.push(`${text.slice(0, 40)} (a glyph in its name)`);
     }
     return bad;
   });

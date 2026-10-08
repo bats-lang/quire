@@ -96,7 +96,7 @@ test('Back from About goes back to the library, and from there leaves', async ({
 test('Back from Settings › Sync goes back to Settings, then to the library', async ({ page }, testInfo) => {
   const errors = await start(page);
   await librarySettings(page);
-  await settingsButton(page, 'Sync ›').click();
+  await settingsButton(page, 'Sync').click();
   const sync = page.getByRole('dialog', { name: 'Sync', exact: true });
   await expect(sync).toBeVisible();
   await pressBack(page, testInfo);

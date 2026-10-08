@@ -35,8 +35,8 @@ implement app_dictionary_input () =
 #pub fn app_catalogue_form (): void
 implement app_catalogue_form () = let
   val () = ui_clear("catalogue-form")
-  val () = ui_field("catalogue-form", "catalogue-name", FLine, "mname", "Catalogue name")
-in ui_field("catalogue-form", "catalogue-address", FLine, "mname", "Catalogue URL") end
+  val () = ui_form_field("catalogue-form", "catalogue-name-label", "catalogue-name", FormName, "mname", "Catalogue name", "Project Gutenberg")
+in ui_form_field("catalogue-form", "catalogue-address-label", "catalogue-address", FormUrl, "mname", "Catalogue URL", "https://example.com/opds") end
 
 (* The catalogue's search field, empty, and its button *)
 #pub fn app_catalogue_search (): void
@@ -303,12 +303,12 @@ fn _settings_screen (): void = let
   (* sync: its screen, and its state *)
   val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
   val () = ui_named("settings-sync-row", NGroup, "Sync")
-  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn", "Sync \xE2\x80\xBA")
+  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn chev", "Sync")
   val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
   val () = ui_role("settings-sync-state", RStatus)
   (* the dictionaries' panel *)
   val () = ui_el("settings-box", "settings-dictionaries-row", TDiv, "srow")
-  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn", "Dictionaries \xE2\x80\xBA")
+  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn chev", "Dictionaries")
   (* the backup *)
   val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
   val () = ui_text("settings-backup-title", "Backup")
@@ -340,7 +340,7 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
   (* the About screen *)
   val () = ui_el("settings-box", "settings-about-row", TDiv, "srow")
-  val () = ui_text_btn("settings-about-row", "settings-about", "btn", "About Quire \xE2\x80\xBA")
+  val () = ui_text_btn("settings-about-row", "settings-about", "btn chev", "About Quire")
   val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
   val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
 in _hide("settings-screen") end
@@ -760,13 +760,8 @@ fn _settings (): void = let
   val () = ui_text_btn("ruby-choice", "ruby-hide", "sbtn", "Hide")
   val () = _hide("ruby-row")
   (* a book's images dimmed in the dark themes *)
-  val () = ui_el("typography-look", "dim-row", TDiv, "srow")
-  val () = ui_el("dim-row", "dim-label", TSpan, "slabel")
-  val () = ui_text("dim-label", "Dim images in dark themes")
-  val () = ui_el("dim-row", "dim-choice", TDiv, "seg")
-  val () = ui_named("dim-choice", NGroup, "Dim images in the dark themes")
-  val () = ui_text_btn("dim-choice", "dim-on", "sbtn", "On")
-  val () = ui_text_btn("dim-choice", "dim-off", "sbtn", "Off")
+  val () = _switch_row("typography-look", "dim-row", "dim-images-switch", "dim-images-track",
+    "dim-images-knob", "dim-images-about", "Dim images in the dark themes", "Softens a book's pictures in the dark themes")
   (* Page: pages turned across, or the chapter scrolled down *)
   val () = ui_el("typography-page", "layout-row", TDiv, "srow")
   val () = ui_el("layout-row", "layout-label", TSpan, "slabel")
@@ -788,20 +783,10 @@ fn _settings (): void = let
   (* the text's alignment (justified, its lines' ends even, or ragged)
      and hyphenation, each a named group, so its buttons are announced
      with what they set *)
-  val () = ui_el("typography-page", "align-row", TDiv, "srow")
-  val () = ui_el("align-row", "align-label", TSpan, "slabel")
-  val () = ui_text("align-label", "Justify text")
-  val () = ui_el("align-row", "align-choice", TDiv, "seg")
-  val () = ui_named("align-choice", NGroup, "Justify text")
-  val () = ui_text_btn("align-choice", "align-justified", "sbtn", "On")
-  val () = ui_text_btn("align-choice", "align-ragged", "sbtn", "Off")
-  val () = ui_el("typography-page", "hyphens-row", TDiv, "srow")
-  val () = ui_el("hyphens-row", "hyphens-label", TSpan, "slabel")
-  val () = ui_text("hyphens-label", "Hyphenation")
-  val () = ui_el("hyphens-row", "hyphens-choice", TDiv, "seg")
-  val () = ui_named("hyphens-choice", NGroup, "Hyphenation")
-  val () = ui_text_btn("hyphens-choice", "hyphens-on", "sbtn", "On")
-  val () = ui_text_btn("hyphens-choice", "hyphens-off", "sbtn", "Off")
+  val () = _switch_row("typography-page", "align-row", "justify-switch", "justify-track",
+    "justify-knob", "justify-about", "Justify text", "Lines end evenly at both edges")
+  val () = _switch_row("typography-page", "hyphens-row", "hyphenation-switch", "hyphenation-track",
+    "hyphenation-knob", "hyphenation-about", "Hyphenation", "Breaks long words at the end of a line")
   (* the screen (quire#300): full screen, the rotation locked (as
      Kindle's Layout tab locks the orientation), and (in the Android
      app) the brightness, each a row of its own, shown only where it can
@@ -841,10 +826,8 @@ fn _settings (): void = let
     "taps-one-hand-back", "taps-one-hand-forward", "taps-one-hand-about")
   val () = ui_el("typography-turning", "pictures-about", TSpan, "sabout")
   val () = ui_text("pictures-about", "Double-tap a picture, or press and hold it, to see it full screen.")
-  val () = ui_el("typography-turning", "volume-row", TDiv, "srow")
-  val () = ui_el("volume-row", "volume-choice", TDiv, "seg")
-  val () = ui_text_btn("volume-choice", "volume-keys-turn", "sbtn", "Turn pages with volume keys")
-  val () = ui_attr("volume-keys-turn", APressed, "false")
+  val () = _switch_row("typography-turning", "volume-row", "volume-keys-turn", "volume-keys-track",
+    "volume-keys-knob", "volume-keys-about", "Turn pages with volume keys", "The volume buttons turn the page, not the volume")
   val () = _hide("volume-row")
   (* Read aloud: its speed and voice (the voices of the book's
      language), offered and kept by read_aloud.bats, where the platform

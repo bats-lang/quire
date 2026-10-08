@@ -1346,6 +1346,18 @@ fn accent {left:nat | left >= 40}{media:bool}{edge,ground:colour_role}
   val () = raw(sheet, ";")
 in sheet end
 
+(* A chosen state's underline (a selected tab's) in role edge on ground:
+   a 3px inset line along the foot, 3:1 against the ground (EDGEP, as an
+   accent), so a chosen state is told apart by more than a tint
+   (quire#358, WCAG 1.4.11; Material 3: an underline and a colour change
+   on the active tab) *)
+fn underline {left:nat | left >= 48}{media:bool}{edge,ground:colour_role}
+  (visible: EDGEP(edge, ground) | sheet: sheet(left, media, true), edge: role_value(edge), ground: role_value(ground)): [after:nat | after >= left - 48] sheet(after, media, true) = let
+  val () = raw(sheet, "box-shadow:inset 0 -3px 0 ")
+  val () = _role_variable(sheet, edge)
+  val () = raw(sheet, ";")
+in sheet end
+
 (* translateX(-50%): the only transform, which moves and never scales *)
 fn centre_x {left:nat | left >= 32}{media:bool}
   (sheet: sheet(left, media, true)): [after:nat | after >= left - 32] sheet(after, media, true) =
@@ -1421,7 +1433,7 @@ fn theme {theme_number:palette}{left:nat | left >= 740}
 in close(sheet) end
 
 (* The rules the guarantees rest on; the only !important in the sheet *)
-fn _base {left:nat | left >= 1400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1400] sheet(after, false, false) = let
+fn _base {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1700] sheet(after, false, false) = let
   val () = raw(sheet, "[data-hide='1'],[hidden]{display:none!important}")
   (* 44 x 44 targets: every button and field, everything given a
      control's role, and the app's links out (ui_link_out); links in a
@@ -1438,6 +1450,13 @@ fn _base {left:nat | left >= 1400} (sheet: sheet(left, false, false)): [after:na
   prval _ = E_edge_card
   val () = raw(sheet, "input:not([type=range]):not([type=file]),textarea,select")
   val () = raw(sheet, "{color:var(--fg)!important;background-color:var(--card)!important;border:1px solid var(--edge)!important}")
+  (* a placeholder is text like any other (quire#357): muted on the
+     field's own card, proven in every theme (SURF), and drawn in full,
+     where a browser's default fades it below the proof *)
+  val sheet = rule(sheet, "input::placeholder,textarea::placeholder")
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
+  val () = raw(sheet, "opacity:1;")
+  val sheet = close(sheet)
   (* a search field's own clear button is too small a target *)
   val () = raw(sheet, "input[type=search]::-webkit-search-cancel-button{display:none}")
   (* a button is a surface like any other: fg on card until a rule
@@ -2598,8 +2617,11 @@ fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
   val sheet = close(sheet)
+  (* the chosen tab keeps the card and is told apart by an underline in
+     the accent, proven 3:1 on the card (quire#358) *)
   val sheet = rule(sheet, ".tab[aria-selected=true]")
-  val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
+  val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = underline(E_accent_card | sheet, RoleAccent(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".plist")
   val sheet = lay(sheet, Flex(), "1")
@@ -3217,6 +3239,12 @@ fn _reading_settings {left:nat | left >= 4800} (sheet: sheet(left, false, false)
      beside it (the Sync row's) wraps instead *)
   val sheet = rule(sheet, ".srow>.rowbtn")
   val sheet = lay(sheet, Flex(), "none")
+  val sheet = close(sheet)
+  (* a row that opens a screen ends in a chevron, drawn and not part of its
+     name (the empty alternative text), so the name is the row's words
+     alone (WCAG 2.5.3, quire#361) *)
+  val sheet = rule(sheet, ".chev::after")
+  val () = raw(sheet, "content:\"\\203A\" / \"\";margin-left:8px;")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow.tapsrow")
   val sheet = lay(sheet, FlexDirection(), "column")

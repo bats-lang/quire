@@ -66,6 +66,7 @@
       "reject/control-unmatched",
       "reject/dictionary-file-unmatched",
       "reject/external-file-dropped",
+   "reject/form-field-as-field",
       "reject/highlight-unmatched",
       "reject/image-roundtrip-another-book",
       "reject/import-unmatched",

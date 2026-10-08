@@ -958,13 +958,24 @@ fn _step_part_id (service: sync_service): [id_len:pos | id_len < 256] string id_
   | ServiceWebDav() => "sync-step-webdav"
 
 (* A service's name, as its row and its step's title say it *)
-fn _service_name (service: sync_service): [name_len:pos | name_len < 64] string name_len =
+fn service_title (service: sync_service): [name_len:pos | name_len < 64] string name_len =
   case+ service of
   | ServiceGoogle() => "Google Drive"
   | ServiceDropbox() => "Dropbox"
   | ServiceFastmail() => "Fastmail"
   | ServiceNextcloud() => "Nextcloud"
   | ServiceWebDav() => "WebDAV"
+
+(* The one verb of a service's step button, whichever the service: the
+   name says where to (quire#361; the app's Google account is Google
+   Drive's sign-in too) *)
+fn sign_in_label (service: sync_service): [label_len:pos | label_len < 64] string label_len =
+  case+ service of
+  | ServiceGoogle() => "Sign in to Google Drive"
+  | ServiceDropbox() => "Sign in to Dropbox"
+  | ServiceFastmail() => "Sign in to Fastmail"
+  | ServiceNextcloud() => "Sign in to Nextcloud"
+  | ServiceWebDav() => "Sign in to WebDAV"
 
 (* Whether a folder's URL is a Nextcloud user's files folder, as its
    sign-in makes it (nextcloud_folder: <server>/remote.php/dav/files/<id>) *)
@@ -3430,23 +3441,23 @@ in ui_show("sync-offer", false) end
    password (made again to be emptied) *)
 fn _fields_make (): void = let
   val () = ui_clear("sync-fields")
-  val () = ui_field("sync-fields", "sync-url", FUrl, "mname", "Folder URL")
-  val () = ui_field("sync-fields", "sync-user", FUser, "mname", "User name")
-in ui_field("sync-fields", "sync-password", FPassword, "mname", "Password") end
+  val () = ui_form_field("sync-fields", "sync-url-label", "sync-url", FormUrl, "mname", "Folder URL", "https://example.com/dav/quire/")
+  val () = ui_form_field("sync-fields", "sync-user-label", "sync-user", FormUser, "mname", "User name", "you")
+in ui_form_field("sync-fields", "sync-password-label", "sync-password", FormPassword, "mname", "Password", "An app password") end
 
 (* Fastmail's fields, empty: its address and an app password (made
    again to be emptied) *)
 fn _fastmail_fields_make (): void = let
   val () = ui_clear("fastmail-fields")
-  val () = ui_field("fastmail-fields", "fastmail-user", FUser, "mname", "Fastmail address")
-in ui_field("fastmail-fields", "fastmail-password", FPassword, "mname", "Fastmail app password") end
+  val () = ui_form_field("fastmail-fields", "fastmail-user-label", "fastmail-user", FormUser, "mname", "Fastmail address", "you@fastmail.com")
+in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-password", FormPassword, "mname", "Fastmail app password", "An app password") end
 
 (* A service's row: its name, a button that opens its step, and its
    state beside it *)
 fn _row_make {row_len,button_len,state_len,label_len:pos | row_len < 256; button_len < 256; state_len < 256; label_len < 256}
   (row: string row_len, button: string button_len, state: string state_len, label: string label_len): void = let
   val () = ui_el("sync-services", row, TDiv, "srow")
-  val () = ui_text_btn(row, button, "btn rowbtn", label)
+  val () = ui_text_btn(row, button, "btn rowbtn chev", label)
   val () = ui_add(row, state, TSpan)
 in ui_show(state, false) end
 
@@ -3494,7 +3505,7 @@ implement sync_screen_make () = let
   val () = ui_el("sync-step", "nextcloud-box", TDiv, "sfields")
   val () = ui_el("nextcloud-box", "nextcloud-about", TDiv, "stext")
   val () = ui_text_long("nextcloud-about", "Your Nextcloud's address. Its own sign-in page then gives Quire an app password.")
-  val () = ui_field("nextcloud-box", "nextcloud-server", FUrl, "mname", "Nextcloud server")
+  val () = ui_form_field("nextcloud-box", "nextcloud-server-label", "nextcloud-server", FormUrl, "mname", "Nextcloud server", "https://cloud.example.com")
   val () = ui_link_out("nextcloud-box", "nextcloud-page", "btn linkout", "Open Nextcloud's sign-in page")
   val () = ui_show("nextcloud-page", false)
   (* any WebDAV folder *)
@@ -3511,12 +3522,12 @@ implement sync_screen_make () = let
      confirming action last, at the end) *)
   val () = ui_el("sync-step", "sync-step-buttons", TDiv, "mbtns")
   val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", "Cancel")
-  val () = ui_text_btn("sync-step-buttons", "sync-android", "btn btn-p", "Use Android")
-  val () = ui_text_btn("sync-step-buttons", "sync-google", "btn btn-p", "Sign in to Google Drive")
-  val () = ui_text_btn("sync-step-buttons", "sync-dropbox", "btn btn-p", "Sign in to Dropbox")
-  val () = ui_text_btn("sync-step-buttons", "sync-fastmail", "btn btn-p", "Sync with Fastmail")
-  val () = ui_text_btn("sync-step-buttons", "nextcloud-sign-in", "btn btn-p", "Sign in with Nextcloud")
-  val () = ui_text_btn("sync-step-buttons", "sync-webdav", "btn btn-p", "Sync with this folder")
+  val () = ui_text_btn("sync-step-buttons", "sync-android", "btn btn-p", sign_in_label(ServiceGoogle()))
+  val () = ui_text_btn("sync-step-buttons", "sync-google", "btn btn-p", sign_in_label(ServiceGoogle()))
+  val () = ui_text_btn("sync-step-buttons", "sync-dropbox", "btn btn-p", sign_in_label(ServiceDropbox()))
+  val () = ui_text_btn("sync-step-buttons", "sync-fastmail", "btn btn-p", sign_in_label(ServiceFastmail()))
+  val () = ui_text_btn("sync-step-buttons", "nextcloud-sign-in", "btn btn-p", sign_in_label(ServiceNextcloud()))
+  val () = ui_text_btn("sync-step-buttons", "sync-webdav", "btn btn-p", sign_in_label(ServiceWebDav()))
   val () = ui_show("sync-step", false)
   (* the screen *)
   val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
@@ -3537,11 +3548,11 @@ implement sync_screen_make () = let
   val () = ui_text("sync-services-title", "Sync with")
   val () = ui_el("sync-box", "sync-services", TDiv, "sgroup")
   val () = ui_named("sync-services", NGroup, "Sync with")
-  val () = _row_make("sync-google-row", "sync-row-google", "sync-google-state", "Google Drive \xE2\x80\xBA")
-  val () = _row_make("sync-dropbox-row", "sync-row-dropbox", "sync-dropbox-state", "Dropbox \xE2\x80\xBA")
-  val () = _row_make("sync-fastmail-row", "sync-row-fastmail", "sync-fastmail-state", "Fastmail \xE2\x80\xBA")
-  val () = _row_make("sync-nextcloud-row", "sync-row-nextcloud", "sync-nextcloud-state", "Nextcloud \xE2\x80\xBA")
-  val () = _row_make("sync-webdav-row", "sync-row-webdav", "sync-webdav-state", "WebDAV \xE2\x80\xBA")
+  val () = _row_make("sync-google-row", "sync-row-google", "sync-google-state", service_title(ServiceGoogle()))
+  val () = _row_make("sync-dropbox-row", "sync-row-dropbox", "sync-dropbox-state", service_title(ServiceDropbox()))
+  val () = _row_make("sync-fastmail-row", "sync-row-fastmail", "sync-fastmail-state", service_title(ServiceFastmail()))
+  val () = _row_make("sync-nextcloud-row", "sync-row-nextcloud", "sync-nextcloud-state", service_title(ServiceNextcloud()))
+  val () = _row_make("sync-webdav-row", "sync-row-webdav", "sync-webdav-state", service_title(ServiceWebDav()))
   val () = ui_show("sync-google-row", false)
   val () = ui_show("sync-dropbox-row", false)
   val () = ui_show("sync-fastmail-row", false)
@@ -3637,7 +3648,7 @@ in ui_focus("sync-done") end
 #pub fn sync_step_open (service: sync_service): void
 implement sync_step_open (service) = let
   val app = $BAPP.is_native_platform()
-  val () = ui_text("sync-step-title", _service_name(service))
+  val () = ui_text("sync-step-title", service_title(service))
   val () = ui_text("sync-step-status", " ")
   val () = ui_show("sync-step-google", false)
   val () = ui_show("sync-step-dropbox", false)
