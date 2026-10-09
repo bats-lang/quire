@@ -2622,7 +2622,7 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6500] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6700] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2659,6 +2659,11 @@ fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .ibtn")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  (* three tabs and Close fit the panel's head at 320px: the tabs are at
+     least 48px tall (the base rule), so their sides give the room *)
+  val sheet = rule(sheet, ".ph .tab")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceTight())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tabs")
   val sheet = lay(sheet, Display(), "flex")

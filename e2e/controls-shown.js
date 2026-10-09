@@ -488,14 +488,19 @@ export async function coveredByBanner(page, header = '#library-bar') {
         if (covered(control)) bad.push(`${named(control)} is under the banner`);
       }
     }
+    // the library scrolls: the offer is looked at where a reader who
+    // scrolls to it finds it (on a short window, at 48px a control, it is
+    // below the fold)
     for (const id of ['library-empty', 'library-try-again']) {
       const offered = document.getElementById(id);
       if (!offered || !shown(offered)) continue;
+      offered.scrollIntoView({ block: 'nearest' });
       if (covered(offered)) bad.push(`#${id} is under the banner`);
     }
     // the button must be the thing a press at its centre reaches
     const button = document.getElementById('library-try-again');
     if (button && shown(button)) {
+      button.scrollIntoView({ block: 'nearest' });
       const box = button.getBoundingClientRect();
       const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
       if (!top || !button.contains(top)) bad.push(`Try again is under ${top ? (top.id || top.tagName) : 'nothing'}`);
