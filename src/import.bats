@@ -16,6 +16,7 @@ staload "ui.sats"
 staload "notice.sats"
 staload "modal.sats"
 staload "book.sats"
+staload "zipcheck.sats"
 staload "paths.sats"
 staload "epub_xml.sats"
 staload "entity.sats"
@@ -190,7 +191,7 @@ fn _is_reopen (mode: import_mode): bool =
    one that could not be read; the book not finished, or not put in the
    library *)
 datatype archive_failure =
-  | NoContainer | ContainerNotRead | NoPackagePath | NoPackage | PackageNotRead | NotFinished | NotInLibrary
+  | NoContainer | SplitArchive | OtherCompression | ContainerNotRead | NoPackagePath | NoPackage | PackageNotRead | NotFinished | NotInLibrary
 
 (* How opening an archive went: a book added or replaced (its key), a
    stored book reopened, or a failure *)
@@ -206,6 +207,8 @@ implement $P.dispose<archive_outcome>(outcome) =
 fn _archive_named (cause: archive_failure): named_failure =
   case+ cause of
   | NoContainer() => NotAnEpub()
+  | SplitArchive() => ArchiveSplit()
+  | OtherCompression() => CompressionNotAllowed()
   | ContainerNotRead() => ContainerDamaged()
   | NoPackagePath() => PackageMissing()
   | NoPackage() => PackageMissing()
@@ -426,7 +429,14 @@ fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: i
   val () = release_bytes(name_frozen, name_bytes)
 in
   case+ container of
-  | ~ZipMissing() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(NoContainer())) end
+  | ~ZipMissing() => let
+      (* an archive refused for what it is (zipcheck) says so *)
+      val cause = (case+ book_refusal() of
+        | ZipAllowed() => NoContainer()
+        | ZipSplit() => SplitArchive()
+        | ZipOtherCompression() => OtherCompression()): archive_failure
+      val () = book_abandon(serial)
+    in $P.ret<archive_outcome>(ArchiveFailed(cause)) end
   | ~ZipGot(container_owner, container_data, container_size, container_method, _, _, _) => let
       val @(data_frozen, data_bytes) = $A.freeze<byte>(container_data)
       val decompressing = decompress(data_bytes, container_size, zip_compression(container_method))
@@ -772,6 +782,8 @@ implement $P.dispose<book_opening>(_) = ()
 fn _reopen_failed (cause: archive_failure): book_opening =
   case+ cause of
   | NoContainer() => BookFileMissing()
+  | SplitArchive() => BookFileMissing()
+  | OtherCompression() => BookFileMissing()
   | ContainerNotRead() => BookFileMissing()
   | NoPackagePath() => BookFileMissing()
   | NoPackage() => BookFileMissing()
