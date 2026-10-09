@@ -23,3 +23,7 @@ fn _static_remedy (failed: failure): remedy =
   | GrantNoAnswer() => ReopenQuire()
   | TextNotCopied() => ReopenQuire()
   | DetailsNotCopied() => ReopenQuire()
+  | BooksNotReadCanSetAside() => ReopenQuire()
+  | CollectionsNotReadCanSetAside() => ReopenQuire()
+  | AsideNotRead() => ReopenQuire()
+  | AsideIncomplete() => ReopenQuire()
