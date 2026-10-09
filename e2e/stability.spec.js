@@ -112,6 +112,8 @@ test('a window swap keeps the paragraph when scrolled, in two columns, and verti
   // scrolled
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
   await bookPage(page).evaluate(doc => { doc.scrollTop = doc.scrollHeight / 3; });
+  // the place follows a scroll once the page rests a moment
+  await page.waitForTimeout(1500);
   top = await middleParagraph(page);
   await page.setViewportSize({ width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
@@ -138,9 +140,15 @@ test('a fixed-layout book keeps its page across a window swap', async ({ page })
   await page.keyboard.press('ArrowRight');
   const before = await fixedPlace(page);
   await page.setViewportSize({ width: size.height, height: size.width });
-  await expect.poll(() => fixedPlace(page)).toEqual(before);
+  // a turned phone is wider than tall, so the page may be shown in a
+  // spread: it is kept when it is one of the pages shown
+  const keeps = async () => {
+    const now = await fixedPlace(page);
+    return now.t === before.t && now.p <= before.p && before.p <= (now.last ?? now.p);
+  };
+  await expect.poll(keeps).toBe(true);
   await page.setViewportSize(size);
-  await expect.poll(() => fixedPlace(page)).toEqual(before);
+  await expect.poll(keeps).toBe(true);
 });
 
 for (const [name, apply] of Object.entries(changes)) {
