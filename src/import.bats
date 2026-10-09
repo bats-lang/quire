@@ -521,17 +521,22 @@ datatype protection =
 
 implement $P.dispose<protection>(_) = ()
 
-(* Whether the open book, book `serial` of file_size bytes, has an
-   entry named name[0, name_len) *)
+(* Whether the book being imported, book `serial` of file_size bytes,
+   has an entry named name[0, name_len) (read, and let go: book_find_entry
+   answers only for a book that is open) *)
 fn _has_entry {file_size:pos}{l:agz}{name_len:pos}
   (serial: int, file_size: int file_size, name: $A.arr(byte, l, name_len), name_len: int name_len): bool = let
   val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
-  val hit = book_find_entry(serial, file_size, name_bytes, name_len)
+  val got = book_zip_read(serial, file_size, name_bytes, name_len)
   val () = release_bytes(name_frozen, name_bytes)
 in
-  case+ hit of
-  | ~EntryHit(_, _, _, _, _) => true
-  | ~EntryMiss() => false
+  case+ got of
+  | ~ZipMissing() => false
+  | ~ZipGot(owner, data, _, _, _, _, _) => let
+      val @(data_frozen, data_bytes) = $A.freeze<byte>(data)
+      val () = $A.drop<byte>(data_frozen, data_bytes)
+      val () = piece_free(owner, $A.thaw<byte>(data_frozen))
+    in true end
 end
 
 fn _protection_of (found: encryption_found): protection =
