@@ -19,6 +19,8 @@
       "wide.spec.js",
       "stability.spec.js",
       "keys.spec.js",
+      "landmarks.spec.js",
+      "epubcheck.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
