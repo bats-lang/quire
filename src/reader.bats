@@ -2631,6 +2631,14 @@ and _render_node
       val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      (* an audio or video element is not played (the DOM's attributes have
+         no controls: #424): its fallback content shows, and a line says so,
+         as an empty box would not *)
+      var _tag_audio = @[char][5]('a', 'u', 'd', 'i', 'o')
+      var _tag_video = @[char][5]('v', 'i', 'd', 'e', 'o')
+      val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else ())
       val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')

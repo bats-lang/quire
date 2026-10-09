@@ -15,6 +15,7 @@
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
+      "media.spec.js",
       "headings.spec.js",
       "pagebreak.spec.js",
       "wide.spec.js",
