@@ -1,2 +1,6 @@
-function x
-line 0
+function _static_restored_count
+line 3
+the dynamic expression cannot be assigned the type [S2Etyrec(flt0; npf=-1; books=S2Ecst(int), files_missing=S2Ecst(int), notes=S2Ecst(int), settings=S2Ecst(bool), days=S2Ecst(int))].
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(g1int_int_t0ype); S2Eextkind(atstype_int), S2Eintinf(1))
+The needed term is: S2Etyrec(flt0; npf=-1; books=S2Ecst(int), files_missing=S2Ecst(int), notes=S2Ecst(int), settings=S2Ecst(bool), days=S2Ecst(int))

@@ -7,7 +7,7 @@
 
 import { expect } from '@playwright/test';
 import { createEpub, solidPng } from './create-epub.js';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -489,4 +489,28 @@ export async function expectBarFollows(page, rightToLeft) {
   expect(thumb.middle > trackMiddle, 'the thumb at the start is in the track\'s ' + (rightToLeft ? 'right' : 'left') + ' half').toBe(rightToLeft);
   expect(previous.middle > next.middle, 'Previous is ' + (rightToLeft ? 'right' : 'left') + ' of Next').toBe(rightToLeft);
   expect(track.middle > Math.max(previous.middle, next.middle) || track.middle < Math.min(previous.middle, next.middle), 'the scrubber between the page turns').toBe(false);
+}
+
+/** Export backup, from the open Settings screen: the file's text, as the
+    browser downloads it or the app shares it, and the dialog that says
+    it was saved (quire#362) answered. */
+export async function exportedBackup(page) {
+  const inApp = await page.evaluate(() => !!(window.__android && window.Capacitor && window.Capacitor.Plugins.Share));
+  const shares = () => page.evaluate(() => window.__android.calls.filter(c => c.plugin === 'Share').length);
+  const before = inApp ? await shares() : 0;
+  const download = inApp ? null : page.waitForEvent('download');
+  await settingsButton(page, 'Export backup').click();
+  let text;
+  if (inApp) {
+    await expect.poll(shares).toBe(before + 1);
+    text = Buffer.from(await page.evaluate(() => window.__android.files.get('quire-backup.json')), 'base64').toString('utf8');
+  } else {
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('quire-backup.json');
+    text = readFileSync(await file.path(), 'utf8');
+  }
+  const saved = dialog(page, 'Backup saved');
+  await expect(saved).toContainText(inApp ? 'quire-backup.json was shared' : 'quire-backup.json is in your downloads');
+  await saved.getByRole('button', { name: 'OK' }).click();
+  return text;
 }

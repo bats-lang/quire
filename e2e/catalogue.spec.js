@@ -12,7 +12,7 @@
 import { test, expect } from './fixtures.js';
 import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
-import { start, libraryMenu, menuItem, dialog, reload, cards, card, librarySettings, settingsButton } from './helpers.js';
+import { start, libraryMenu, menuItem, dialog, reload, cards, card, librarySettings, settingsButton, exportedBackup } from './helpers.js';
 import { createEpub, TINY_PNG } from './create-epub.js';
 
 const HOST = 'https://catalogue.test';
@@ -371,9 +371,7 @@ test('the backup lists the catalogues, by name and URL', async ({ page }) => {
   await addCatalogue(page, 'Test Catalogue', ROOT);
   await page.keyboard.press('Escape');
   await librarySettings(page);
-  const downloading = page.waitForEvent('download');
-  await settingsButton(page, 'Export backup').click();
-  const backup = JSON.parse(readFileSync(await (await downloading).path(), 'utf8'));
+  const backup = JSON.parse(await exportedBackup(page));
   expect(backup.catalogues).toEqual([
     { name: 'Project Gutenberg', url: 'https://www.gutenberg.org/ebooks/search.opds/' },
     { name: 'Test Catalogue', url: ROOT },

@@ -7,7 +7,7 @@ import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
   selectionButton, colours, bookPage, pagedBook, showChrome, control,
-  librarySettings, settingsButton, restoreInput,
+  librarySettings, settingsButton, restoreInput, exportedBackup,
   readingSettings, openReadingSettings,
 } from './helpers.js';
 
@@ -17,12 +17,9 @@ const bg = async page => (await colours(page)).bg.join(',');
 
 async function exportBackup(page) {
   await librarySettings(page);
-  const download = page.waitForEvent('download');
-  await settingsButton(page, 'Export backup').click();
-  const d = await download;
-  expect(d.suggestedFilename()).toBe('quire-backup.json');
+  const text = await exportedBackup(page);
   await settingsButton(page, 'Done').click();
-  return readFileSync(await d.path(), 'utf8');
+  return text;
 }
 
 async function restoreBackup(page, path) {
@@ -120,7 +117,9 @@ test('a backup restored after a reset brings everything back, and a book importe
   // only book one comes back first
   await importFiles(page, [one], 1);
   await restoreBackup(page, path);
-  await expect(restored(page)).toContainText('Books restored: 2');
+  await expect(restored(page)).toContainText('Restored 1 book, 1 highlight or bookmark, your settings');
+  // the book the library does not have is said, not counted as restored
+  await expect(restored(page)).toContainText('1 book in the backup is not in your library');
   await restored(page).getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => bg(page)).toBe(sepia);
   await expect(sort).toHaveText('Sort: Series');
@@ -166,7 +165,7 @@ test('a highlight\'s print page is in the backup, and a restore keeps it', async
   await factoryReset(page);
   await importFiles(page, [file], 1);
   await restoreBackup(page, path);
-  await expect(restored(page)).toContainText('Books restored: 1');
+  await expect(restored(page)).toContainText('Restored 1 book, 2 highlights and bookmarks, your settings');
   await restored(page).getByRole('button', { name: 'OK' }).click();
   // the restored highlight cites its page in the export, and is in the
   // next backup with it
@@ -321,4 +320,35 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await page.keyboard.press('Escape');
   await page.keyboard.press('t');
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(true);
+});
+
+test('a restore can be undone: the settings, the notes and the places it replaced come back', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Undo Restore', author: 'A', rawChapters: chapters(2) })], 1);
+  // the state the backup holds: no highlight, the plain theme
+  const path = rawFile('quire-backup.json', await exportBackup(page));
+  await openBook(page, 'Undo Restore');
+  const plain = await bg(page);
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Sepia', exact: true }).click();
+  await expect.poll(() => bg(page)).not.toBe(plain);
+  const sepia = await bg(page);
+  await page.keyboard.press('Escape');
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
+  await toLibrary(page);
+  await restoreBackup(page, path);
+  await expect(restored(page)).toContainText('Restored 1 book, your settings');
+  await restored(page).getByRole('button', { name: 'OK' }).click();
+  // what the backup held is back: the plain theme, and no highlight
+  await expect.poll(() => bg(page)).toBe(plain);
+  await openBook(page, 'Undo Restore');
+  await expect.poll(() => marks(page)).toEqual({ size: 0, text: '' });
+  await toLibrary(page);
+  // the Undo puts back what it replaced
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect.poll(() => bg(page)).toBe(sepia);
+  await openBook(page, 'Undo Restore');
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
 });
