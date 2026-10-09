@@ -266,8 +266,20 @@ every 64th headword of each with where its record is; a lookup
 binary-searches it and reads one block of records. An article is
 shown as text only (`article_text`): HTML and XDXF tags are dropped,
 never put in the DOM. The list of dictionaries (`dicts`) is stored
-under "dicts"; a removal is offered back by the Undo toast, and its
-files are deleted when the offer is made final. The backup lists the
+under "dicts"; a removal moves the dictionary to the Trash (#396, as a
+book is: `dict_state`, `Installed | InTrash`, stored in bit 4 of the
+form's byte), offered back by the Undo toast, its files kept. It is out of
+Look up, listed under the books while the Trash is the shelf shown
+(`trash-dictionaries`, `dict_trash_render`) with a Restore, and only Empty
+Trash deletes its files (`dict_trash_empty`, in quire.bats' `_harm_clicked`
+after `lib_ask_harm` resolves Accepted; the dialog says dictionaries go
+too). `tests/static/trash.py` fails any other call: that is a scan of the
+source, not a type, and the proof that only an answered dialog deletes
+them is owed (the dialog is in library.bats, which cannot staload
+dictionary.sats while dictionary.bats uses library's `lib_key`). Drive and
+Files by Google keep trashed items, which still use storage, until they
+are emptied; the Trash shows counts, not sizes (a dictionary's files are
+on the JS side). The backup lists the
 dictionaries' names and languages, not their files.
 
 ### Sync
@@ -595,6 +607,40 @@ index. The chapters (`book_chapters`, each an entry whose data span is
 proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
+
+### Where a book opens the first time (#409)
+
+A book never read opens where it says reading starts, as Apple Books
+opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
+DAISY's knowledge base and Thorium's "Start of Content" have it), not at
+its cover or copyright page: `toc_start_dest` (`src/toc.bats`) gives the
+chapter and fragment of the first `bodymatter` entry of the nav document's
+`landmarks` nav (`nav_part`'s `PartStart`, read beside the contents and
+the page list in `toc_build`), else, for a book with none (EPUB 2), of the
+OPF's `<guide>` `<reference type="text">` (`find_guide_text`, its entry
+found in `toc_locate`; its fragment is not kept). A start that names no
+chapter of the book (no href, a file the book lacks, one outside it)
+gives none, and the book opens at its first spine item, saying nothing.
+`reader_open_at` takes `unread`: set by `_open_book` only when the place
+is the first chapter's first page, no move has been dated
+(`place_modified` 0) and no minute is read, so a book once read, even
+back at its first page, opens at its kept place. The chapters, contents
+and fonts are made ready first (`_book_prepare`), so the cover is never
+shown before the jump; the jump is not dated, as no open is.
+
+The landmarks are not listed in Contents (issue #409: Apple Books uses
+the bodymatter landmark to open the book and lists none, Calibre's viewer
+shows none, only Thorium has a Landmarks list; publishers put the
+contents page, index and list of illustrations in the table of contents
+too, so the list would repeat it).
+
+`e2e/landmarks.spec.js` plays the books in `e2e/landmark-books.js`
+(`createEpub`'s `landmarks`, `guide` and `epub2`), and
+`e2e/epubcheck.spec.js` checks every book there with epubcheck (5.2.1,
+pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
+locally): a valid book must pass, one that is invalid on purpose (a
+landmark naming a file the book lacks) may give only the errors its
+entry lists.
 
 ### Found while taking this inventory
 

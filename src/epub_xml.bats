@@ -887,6 +887,49 @@ implement find_ncx_href (data, data_len, nodes) =
   | ~xspan_at(id_offset, id_len) => _manifest_href_nodes(data, data_len, nodes, id_offset, id_len)
   | ~xspan_none() => xspan_none()
 
+(* The href of the first <reference type="text"> of the OPF's <guide>
+   (EPUB 2: the first page of the main content) *)
+fun _guide_text_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _guide_text(data, node) of
+     | ~xspan_none() => _guide_text_nodes(data, rest)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _guide_text
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): xspan(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var reference_chars = @[char][9]('r', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, reference_chars, 9) then let
+      var type_chars = @[char][4]('t', 'y', 'p', 'e')
+      var text_chars = @[char][4]('t', 'e', 'x', 't')
+    in
+      case+ _find_attr_value(data, attrs, type_chars, 4) of
+      | ~xspan_at(type_offset, type_len) =>
+        if xml_name_eq(data, type_offset, type_len, text_chars, 4) then let
+          var href_chars = @[char][4]('h', 'r', 'e', 'f')
+        in _find_attr_value(data, attrs, href_chars, 4) end
+        else xspan_none()
+      | ~xspan_none() => xspan_none()
+    end
+    else _guide_text_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The href of the guide's text reference: where an EPUB 2 book says
+   reading starts *)
+#pub fn find_guide_text
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
+
+implement find_guide_text (data, nodes) = _guide_text_nodes(data, nodes)
+
 (* Whether data[offset, offset + span_len) has pattern[0, pattern_len)
    in it *)
 #pub fn span_has {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}

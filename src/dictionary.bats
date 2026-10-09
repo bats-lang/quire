@@ -193,6 +193,22 @@ end
    and whether it has a .syn *)
 typedef dict_form = @{ compressed = bool, synonyms = bool }
 
+(* Where a dictionary is: in Look up, or in the Trash. Stored with its
+   form, in the bit 4 of the form's byte (an earlier record's entries
+   have it clear: installed) *)
+datatype dict_state = Installed | InTrash
+
+fn _state_code (state: dict_state): [code:nat | code <= 4] int code =
+  case+ state of Installed() => 0 | InTrash() => 4
+
+fn _state_of_code (code: int): dict_state =
+  if $AR.band_int_int(code, 4) <> 0 then InTrash() else Installed()
+
+fn _same_state (first: dict_state, second: dict_state): bool =
+  case+ first of
+  | Installed() => (case+ second of Installed() => true | InTrash() => false)
+  | InTrash() => (case+ second of Installed() => false | InTrash() => true)
+
 (* A form as "dicts" stores it, a byte, and back: 1 for a .dict.dz, 2
    for a .syn *)
 fn _form_code (form: dict_form): [code:nat | code <= 3] int code =
@@ -332,21 +348,22 @@ fn _dicts_put (cell: dict_cell): void = let
   val+ ~DictCell(list, _) = previous
 in _dicts_free(list) end
 
-(* The dictionaries removed whose Undo is still offered: they are kept
-   (and stored) until it is made final *)
-datavtype pending_cell = {count:nat} PendingCell of (dicts(count))
+(* The dictionaries removed: they are kept, with their files, and stored
+   as removed ("dicts" holds a state with each) until Empty Trash (#396).
+   Undo, or Restore in the Trash, puts one back *)
+datavtype trash_cell = {count:nat} TrashCell of (dicts(count))
 
-val _pending = ref<pending_cell>(PendingCell(DictsNil()))
+val _trash = ref<trash_cell>(TrashCell(DictsNil()))
 
-fn _pending_take (): pending_cell = let
-  var cell: pending_cell = PendingCell(DictsNil())
-  val () = ref_exch_elt<pending_cell>(_pending, cell)
+fn _trash_take (): trash_cell = let
+  var cell: trash_cell = TrashCell(DictsNil())
+  val () = ref_exch_elt<trash_cell>(_trash, cell)
 in cell end
 
-fn _pending_put (cell: pending_cell): void = let
-  var previous: pending_cell = cell
-  val () = ref_exch_elt<pending_cell>(_pending, previous)
-  val+ ~PendingCell(list) = previous
+fn _trash_put (cell: trash_cell): void = let
+  var previous: trash_cell = cell
+  val () = ref_exch_elt<trash_cell>(_trash, previous)
+  val+ ~TrashCell(list) = previous
 in _dicts_free(list) end
 
 (* ============================================================
@@ -372,18 +389,18 @@ in _file_delete(88, id) end
 (* The entries of list at out[at, ...): each its number, language,
    form, name's length and name, and types' length and types *)
 fun _write_entries {l:agz}{n:nat}{count:nat}{at:nat | at + ENTRY_MOST * count <= n} .<count>.
-  (out: !$A.arr(byte, l, n), at: int at, list: !dicts(count)): [stop:nat | stop <= at + ENTRY_MOST * count] int stop =
+  (out: !$A.arr(byte, l, n), at: int at, list: !dicts(count), state: dict_state): [stop:nat | stop <= at + ENTRY_MOST * count] int stop =
   case+ list of
   | DictsNil() => at
   | @DictsCons(id, language, form, name, name_len, types, types_len, rest) => let
       val () = u32_put(out, at, id)
       val () = u32_put(out, at + 4, language)
-      val () = $A.write_byte(out, at + 8, _form_code(form))
+      val () = $A.write_byte(out, at + 8, _form_code(form) + _state_code(state))
       val () = $A.write_byte(out, at + 9, name_len)
       val () = _copy_bytes(name, 0, out, at + 10, name_len, 0)
       val () = $A.write_byte(out, at + 10 + name_len, types_len)
       val () = _copy_bytes(types, 0, out, at + 11 + name_len, types_len, 0)
-      val stop = _write_entries(out, at + 11 + name_len + types_len, rest)
+      val stop = _write_entries(out, at + 11 + name_len + types_len, rest, state)
       prval () = fold@(list)
     in stop end
 
@@ -391,21 +408,21 @@ fun _write_entries {l:agz}{n:nat}{count:nat}{at:nat | at + ENTRY_MOST * count <=
    undone) under "dicts" *)
 fn _save (): void = let
   val+ ~DictCell(list, next_id) = _dicts_take()
-  val+ ~PendingCell(pending) = _pending_take()
+  val+ ~TrashCell(pending) = _trash_take()
   val total = _dicts_count(list) + _dicts_count(pending)
   val size = 12 + ENTRY_MOST * total
 in
   if size > 1048576 then let
-    val () = _pending_put(PendingCell(pending))
+    val () = _trash_put(TrashCell(pending))
   in _dicts_put(DictCell(list, next_id)) end
   else let
     val out = $A.alloc<byte>(size)
     val () = $A.write_text(out, 0, $A.text_lit("QDC1"), 4)
     val () = u32_put(out, 4, next_id)
     val () = u32_put(out, 8, total)
-    val stop = _write_entries(out, 12, list)
-    val stop = _write_entries(out, stop, pending)
-    val () = _pending_put(PendingCell(pending))
+    val stop = _write_entries(out, 12, list, Installed())
+    val stop = _write_entries(out, stop, pending, InTrash())
+    val () = _trash_put(TrashCell(pending))
     val () = _dicts_put(DictCell(list, next_id))
     val @(out_frozen, out_bytes) = $A.freeze<byte>(out)
     val @(used, rest) = $A.borrow_split<byte>(out_frozen, out_bytes, stop)
@@ -420,13 +437,14 @@ end
 
 (* The entries stored at data[at, n), remaining of them, after list *)
 fun _parse_entries {l:agz}{n:pos}{at:nat | at <= n}{remaining:nat}{count:nat} .<remaining>.
-  (data: !$A.arr(byte, l, n), n: int n, at: int at, remaining: int remaining, list: dicts(count)): [total:nat] dicts(total) =
+  (data: !$A.arr(byte, l, n), n: int n, at: int at, remaining: int remaining, list: dicts(count), want: dict_state): [total:nat] dicts(total) =
   if remaining <= 0 then list
   else if at + 11 > n then list
   else let
     val id = u32_at(data, at)
     val language = u32_at(data, at + 4)
     val form = _form_of_code(_byte_at(data, at + 8))
+    val state = _state_of_code(_byte_at(data, at + 8))
     val name_len = _byte_at(data, at + 9)
   in
     if name_len <= 0 then list
@@ -438,13 +456,15 @@ fun _parse_entries {l:agz}{n:pos}{at:nat | at <= n}{remaining:nat}{count:nat} .<
       else if at + 11 + name_len + types_len > n then list
       else if id <= 0 then list
       else if ~_language_valid(language) then list
+      (* the entries of the other state are read by the other pass *)
+      else if ~_same_state(state, want) then _parse_entries(data, n, at + 11 + name_len + types_len, remaining - 1, list, want)
       else let
         val name = $A.alloc<byte>(256)
         val () = _copy_bytes(data, at + 10, name, 0, name_len, 0)
         val types = $A.alloc<byte>(16)
         val () = _copy_bytes(data, at + 11 + name_len, types, 0, types_len, 0)
         val list = _dicts_join(list, DictsCons(id, language, form, name, name_len, types, types_len, DictsNil()))
-      in _parse_entries(data, n, at + 11 + name_len + types_len, remaining - 1, list) end
+      in _parse_entries(data, n, at + 11 + name_len + types_len, remaining - 1, list, want) end
     end
   end
 
@@ -469,9 +489,11 @@ in
         val next_id = u32_at(data, 4)
         val total = u32_at(data, 8)
         val total = (if total < 0 then 0 else if total > 1000 then 1000 else total): [total:nat | total <= 1000] int total
-        val list = _parse_entries(data, n, 12, total, DictsNil())
+        val list = _parse_entries(data, n, 12, total, DictsNil(), Installed())
+        val removed = _parse_entries(data, n, 12, total, DictsNil(), InTrash())
         val () = $A.free<byte>(data)
         val () = _dicts_put(DictCell(list, (if next_id > 0 then next_id else 1000)))
+        val () = _trash_put(TrashCell(removed))
       in $P.ret<int>(0) end)
 end
 
@@ -1280,28 +1302,113 @@ implement dict_panel_open (code, code_len) = let
   val () = layer_open(LDictionaries())
 in ui_focus("dictionaries-done") end
 
-(* Dictionary id, removed for good once its Undo is not taken *)
-fn _forget (id: int): void = let
-  val+ ~PendingCell(pending) = _pending_take()
-  val @(left, taken) = _dicts_take_id(pending, id)
-  val () = _dicts_free(taken)
-  val () = _pending_put(PendingCell(left))
-  val () = _files_delete(id)
+(* ============================================================
+   The Trash's dictionaries (#396)
+   ============================================================ *)
+
+(* How many dictionaries the Trash holds *)
+#pub fn dict_trash_count (): int
+
+implement dict_trash_count () = let
+  val+ ~TrashCell(list) = _trash_take()
+  val count = _dicts_count(list)
+  val () = _trash_put(TrashCell(list))
+in count end
+
+(* Each removed dictionary's row from index on: its name and language,
+   and Restore *)
+fun _trash_rows {count:nat}{index:nat} .<count>. (list: !dicts(count), index: int index): void =
+  case+ list of
+  | DictsNil() => ()
+  | @DictsCons(_, language, _, name, name_len, _, _, rest) => let
+      val @(row, row_len) = nid_make("trash-dict-row", index)
+      val () = ui_add_n("trash-dictionaries-list", row, row_len, TDiv)
+      val @(row, row_len) = nid_make("trash-dict-row", index)
+      val () = ui_attr_n(row, row_len, AClass, "srow")
+      val @(row, row_len) = nid_make("trash-dict-row", index)
+      val @(label, label_len) = nid_make("trash-dict-name", index)
+      val () = ui_add_nn(row, row_len, label, label_len, TB)
+      val text = $A.alloc<byte>(320)
+      val () = _copy_bytes(name, 0, text, 0, name_len, 0)
+      val at = _put_string(text, name_len, " \xC2\xB7 ", 4, 0)
+      val text_len = _language_put(text, at, language)
+      val @(label, label_len) = nid_make("trash-dict-name", index)
+      val () = ui_text_n_buf(label, label_len, text, text_len)
+      val @(row, row_len) = nid_make("trash-dict-row", index)
+      val @(label, label_len) = nid_make("trash-dict-name", index)
+      val () = ui_labelled_nn(row, row_len, NGroup, label, label_len)
+      val @(row, row_len) = nid_make("trash-dict-row", index)
+      val @(restore, restore_len) = nid_make("restore-dict", index)
+      val () = ui_text_btn_nn(row, row_len, restore, restore_len, "btn", "Restore")
+      val () = _trash_rows(rest, index + 1)
+      prval () = fold@(list)
+    in end
+
+(* Whether the Trash is the shelf shown, as dict_trash_render last was
+   told: what changes the Trash's dictionaries shows them again *)
+val _trash_visible = ref<bool>(false)
+
+(* The Trash's dictionaries shown under the library's books while the
+   Trash is the shelf shown (shown), each with a Restore *)
+#pub fn dict_trash_render (shown: bool): void
+
+implement dict_trash_render (shown) = let
+  val () = !_trash_visible := shown
+  val () = ui_clear("trash-dictionaries-list")
+  val+ ~TrashCell(list) = _trash_take()
+  val count = _dicts_count(list)
+  val () = _trash_rows(list, 0)
+  val () = _trash_put(TrashCell(list))
+in ui_show("trash-dictionaries", shown && count > 0) end
+
+(* The dictionary at index of the Trash's list put back in Look up *)
+#pub fn dict_trash_restore (index: int): void
+
+implement dict_trash_restore (index) = let
+  val+ ~TrashCell(removed) = _trash_take()
+  val @(left, taken) = _dicts_take_at(removed, index)
+  val () = _trash_put(TrashCell(left))
+  val+ ~DictCell(list, next_id) = _dicts_take()
+  val () = _dicts_put(DictCell(_dicts_join(list, taken), next_id))
+  val () = _render()
+in let val () = dict_trash_render(!_trash_visible) in _save() end end
+
+fun _delete_listed {count:nat} .<count>. (list: !dicts(count)): void =
+  case+ list of
+  | DictsNil() => ()
+  | @DictsCons(id, _, _, _, _, _, _, rest) => let
+      val () = _files_delete(id)
+      val () = _delete_listed(rest)
+      prval () = fold@(list)
+    in end
+
+(* The Trash's dictionaries deleted, their files with them. Only Empty
+   Trash does this, once its dialog is answered Accepted: it runs in
+   quire.bats' _harm_clicked, after lib_ask_harm's promise resolves
+   Accepted (tests/static/trash.py fails any other call) *)
+#pub fn dict_trash_empty (): void
+
+implement dict_trash_empty () = let
+  val+ ~TrashCell(removed) = _trash_take()
+  val () = _delete_listed(removed)
+  val () = _dicts_free(removed)
+  val () = _trash_put(TrashCell(DictsNil()))
 in _save() end
 
 (* Dictionary id put back at index *)
 fn _restore (id: int, index: int): void = let
-  val+ ~PendingCell(pending) = _pending_take()
+  val+ ~TrashCell(pending) = _trash_take()
   val @(left, taken) = _dicts_take_id(pending, id)
-  val () = _pending_put(PendingCell(left))
+  val () = _trash_put(TrashCell(left))
   val+ ~DictCell(list, next_id) = _dicts_take()
   val () = _dicts_put(DictCell(_dicts_insert(list, index, taken), next_id))
   val () = _render()
+  val () = dict_trash_render(!_trash_visible)
 in _save() end
 
-(* Removes the dictionary at index of the panel's list: at once, and
-   offered back by the Undo toast; its files go when the offer is made
-   final *)
+(* Removes the dictionary at index of the panel's list: it moves to the
+   Trash at once, files kept, and is offered back by the Undo toast
+   (#396: only Empty Trash deletes its files, as it does a book's) *)
 #pub fn dict_remove (index: int): void
 
 implement dict_remove (index) = let
@@ -1309,17 +1416,22 @@ implement dict_remove (index) = let
   val id = _dicts_id_at(list, index)
   val @(left, taken) = _dicts_take_at(list, index)
   val () = _dicts_put(DictCell(left, next_id))
-  val+ ~PendingCell(pending) = _pending_take()
-  val () = _pending_put(PendingCell(_dicts_join(pending, taken)))
+  val+ ~TrashCell(pending) = _trash_take()
+  val () = _trash_put(TrashCell(_dicts_join(pending, taken)))
 in
   if id < 0 then ()
   else let
     val () = _unload()
     val () = _render()
+    val () = dict_trash_render(!_trash_visible)
+    (* kept as removed at once: nothing else saves it now that the offer's
+       end deletes nothing *)
+    val () = _save()
   in $P.finish<settled>(undo_offer(DictionaryRemoved()), llam(how) =>
     case+ how of
     | Undone() => _restore(id, index)
-    | Final() => _forget(id)) end
+    (* it stays in the Trash, with a Restore there *)
+    | Final() => ()) end
 end
 
 (* ============================================================
