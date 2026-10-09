@@ -1120,6 +1120,73 @@ a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
+## Backup: Export says it saved, Restore says what it did and can be undone (#362)
+
+A restore overwrites, from the file, the settings (the device's own too:
+brightness, rotation lock, full screen, voices, sort order), the books it
+has in the library (shelf, place when the file's is later, collections,
+finished, minutes), the notes of each book it names (the book's stored
+array is replaced, deletions dropped), the reading log's missing days,
+and the collections it names (made when missing); a book the library
+does not have keeps its record as an orphan ("o"). Nothing went to the
+Trash, so the Undo rule was not met: nothing was offered back.
+
+Now what is in the library is kept first, as a backup file in memory
+(`backup_snapshot`, linear: the same file Export makes, made by the same
+code into an `export_sink`, `IntoReader` or `IntoSnapshot`), then the
+file is restored, `_restored(restore_report)` says it (books, notes,
+settings, days, and the books the backup knows that this library lacks:
+`_restored(1)` does not type-check, `tests/static/reject/restored-bare-count`),
+and `undo_offer(BackupRestored())` is made; its `Undone` puts the snapshot
+back (`PutBack`: shelf, place and Trash exactly as they were, the reading
+log replaced, not merged), its `Final` frees it, so a snapshot unconsumed
+is a type error (`snapshot-not-handed-on`). A restore whose snapshot
+cannot be made (memory, a book's notes unreadable) is not made; a file
+found damaged midway is put back at once. Left behind by an Undo: a
+collection the restore made stays, empty, and orphan records a restore
+kept for books not in the library stay until they are imported.
+
+Export says how it ended (`export_outcome`, matched with `case+`:
+`tests/static/reject/export-unmatched`): in a browser the file is
+downloaded and the dialog says it is in the downloads; in the app a
+blob download does nothing in the WebView, so the file goes to Android's
+share sheet (bridge's `share_file`) and the dialog says it was shared,
+a closed sheet or a failure is said too. Settings says under Backup,
+browser and app alike, what a backup holds and that the books' files are
+not in it.
+
+## Every error says what to do (#360)
+
+The error banner (`error-banner`, `src/notice.bats`) says a failure and
+a next step, made in one place from data: `notice_say(failure)` for a
+fault (`SettingsNotRead`, `BookFileLost`, `StorageFull`,
+`RotationNotLockable`, ...; `notice_say_part(chapter)` for a chapter
+that could not be read, which it names), and `notice_say_named(name,
+name_len, named_failure)` for a file or book that has a name
+(`NotAnEpub`, `PackageDamaged`, `FileEmpty`, `BookFileNotStored`, ...).
+The words come from two total `case+` matches, `_what_put` (what
+happened, per `host`: `InBrowser | InApp`, so the app never says
+"browser") and `remedy_of` / `named_remedy_of` (the next step, a
+`remedy`: `ReopenQuire`, `ImportAgain`, `OtherChapterOrReplace`,
+`ChooseAnotherFile`, `UpdateQuire`, `FreeSpace`, `OpenAgain`,
+`RemoveGrantByHand`, `UseDeviceRotation`, `CopyByHand`, `RestoreBackup`,
+`TryNextPhrase`), so a failure added without words or without a next
+step does not type-check (`tests/static/reject/notice-without-remedy`).
+Where reopening is the step, the banner has a Reopen Quire button
+(`error-reopen`, a reload). A step is words, not a Try again button: no
+failure has data to retry from, and a retry would be a closure (linear).
+A chapter's failure does not say "import the book again" alone: that
+meets the duplicate dialog, so it also says to choose Replace.
+`notice_error` is private; `tests/static/notice.py` (in
+`tests/static/run.sh`) rejects `notice_error(` outside `notice.bats` and
+a wildcard in a match of `ArchiveFailed(_)` (`tests/static/notice/reject`).
+Import's causes are matched one by one (`_archive_named`); no case
+detects DRM, so none is blamed. A sync's result texts, made by
+`sync.bats` from its `sync_result`, go through `notice_sync_said`.
+`expectBannerSaysWhatToDo` (`e2e/helpers.js`) checks a banner has a
+Reopen Quire button or words naming the step, and in the android project
+no "browser".
+
 ## Every outcome is said, and the unexpected as such
 
 After #334, where a Google error that ended the consent screen reached

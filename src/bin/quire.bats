@@ -643,7 +643,7 @@ fn _opened_checked (result: opened): void =
   | OpenedInLibrary() => ()
   | OpenedNotShown() => let
     val () = (if _in_reader() then _show_library() else ())
-  in notice_part_unread() end
+  in notice_say_part(reader_chapter_asked()) end
 
 fn _open_book {book:int} (book: int book, cause: opening_cause): void =
   case+ lib_nums(book) of
@@ -692,12 +692,12 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
           case+ opening of
           | BookFileMissing() => let
               val () = _show_library()
-              val () = notice_error("This book's file could not be read. Import it again.")
+              val () = notice_say(BookFileLost())
             in $P.ret<opened>(OpenedInLibrary()) end
           (* a passing failure of storage: importing again is not the fix *)
           | BookFileUnreadable() => let
               val () = _show_library()
-              val () = notice_error("This book could not be read from storage. Try again, or reopen Quire if it keeps happening.")
+              val () = notice_say(BookStorageFailed())
             in $P.ret<opened>(OpenedInLibrary()) end
           | BookOpened() => $P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
             $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
@@ -1188,7 +1188,7 @@ fn _copy_selection (): void =
         val () = $P.finish<$CB.copied>($CB.clipboard_write(text_bytes, selection_len), llam(copied) =>
           case+ copied of
           | $CB.Copied() => notice_copied()
-          | $CB.NotCopied() => notice_error("The text could not be copied: the browser did not allow it."))
+          | $CB.NotCopied() => notice_say(TextNotCopied()))
       in release_bytes(text_frozen, text_bytes) end
     end
 
@@ -1350,7 +1350,7 @@ fn _stats_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_show() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 24) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 25) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1502,6 +1502,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 24) = let
   (* the error banner *)
   val listeners = RCons(listeners, OnEl("error-dismiss"), "click", llam(_) => let val () = notice_dismiss() in 0 end)
   val listeners = RCons(listeners, OnEl("error-copy"), "click", llam(_) => let val () = notice_details_copy() in 0 end)
+  val listeners = RCons(listeners, OnEl("error-reopen"), "click", llam(_) => let val () = $NAV.reload() in 0 end)
   val listeners = RCons(listeners, OnEl("install-hint-dismiss"), "click", llam(_) => let val () = lib_install_hint_dismiss() in 0 end)
   (* the library menu *)
   val listeners = RCons(listeners, OnEl("library-menu-button"), "click", llam(_) => let
@@ -2769,7 +2770,7 @@ fun _external_keep {rounds:nat} .<rounds>. (rounds: int rounds): void =
   if rounds <= 0 then ()
   else $P.finish<$BE.external>($BE.external_next(), llam(handed) => let
       val () = _handed_keep(handed)
-      val () = notice_error("This book was not added: Quire could not read your library. Open or share the book again once Quire can read it.")
+      val () = notice_say(HandedBookNotAdded())
     in _external_keep(rounds - 1) end)
 
 (* Files handed to the app from outside it, once the library's reading

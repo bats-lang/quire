@@ -8,7 +8,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, openBook, place, toLibrary, chapters, dialog, menuItem, libraryMenu,
   selectText, selectionButton, showChrome, control, clickControl, oneColumn, pageShown, cards,
-  librarySettings, settingsButton, settingsScreen, restoreInput, reload, jumpBack,
+  librarySettings, settingsButton, settingsScreen, restoreInput, exportedBackup, reload, jumpBack,
 } from './helpers.js';
 import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 
@@ -255,10 +255,8 @@ test('a jump to a far chapter and back leaves no far place: not after a reopen, 
   await toLibrary(a.page);
   // a backup, restored
   await librarySettings(a.page);
-  const download = a.page.waitForEvent('download');
-  await settingsButton(a.page, 'Export backup').click();
   const path = testInfo.outputPath('backup.json');
-  writeFileSync(path, readFileSync(await (await download).path(), 'utf8'));
+  writeFileSync(path, await exportedBackup(a.page));
   expect(JSON.parse(readFileSync(path, 'utf8')).books[0].chapter).toBe(0);
   await restoreInput(a.page).setInputFiles([path]);
   await expect(dialog(a.page, 'Backup restored')).toBeVisible();
@@ -454,9 +452,7 @@ test('the folder, user name and password are kept on the device, never in a back
   await importFiles(a.page, [epubFile(book)], 1);
   await joinSync(a.page);
   await librarySettings(a.page);
-  const download = a.page.waitForEvent('download');
-  await settingsButton(a.page, 'Export backup').click();
-  const json = readFileSync(await (await download).path(), 'utf8');
+  const json = await exportedBackup(a.page);
   expect(json).not.toContain(PASSWORD);
   expect(json).not.toContain('dav/books');
   // kept across a reload
@@ -524,9 +520,7 @@ test('annotations from before ids, restored on two devices from one backup, sync
   await dialog(a.page, 'Note').getByRole('button', { name: 'Save' }).click();
   await toLibrary(a.page);
   await librarySettings(a.page);
-  const download = a.page.waitForEvent('download');
-  await settingsButton(a.page, 'Export backup').click();
-  const backup = JSON.parse(readFileSync(await (await download).path(), 'utf8'));
+  const backup = JSON.parse(await exportedBackup(a.page));
   await settingsButton(a.page, 'Done').click();
   // as a version before ids wrote it
   for (const kept of backup.books) for (const n of kept.annotations) { delete n.id; delete n.modified; }

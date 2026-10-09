@@ -142,6 +142,19 @@ for d in "$ROOT"/tests/static/glyphs/reject/*/; do
   elif grep -qF -- "$(cat "$d/expect")" "$TMP/glyphs-$n.log"; then echo "ok   glyphs/reject/$n"
   else echo "FAIL glyphs/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/glyphs-$n.log"; fail=1; fi
 done
+
+# The error banner is said from a failure (notice.py, quire#360): the
+# app's own, and the checker's fixtures, each a src.bats that must fail
+# it with its `expect`
+if python3 "$ROOT/tests/static/notice.py" "$ROOT/src" > "$TMP/notice.log" 2>&1; then echo "ok   notice: $(tail -1 "$TMP/notice.log")"
+else echo "FAIL notice:"; cat "$TMP/notice.log"; fail=1; fi
+for d in "$ROOT"/tests/static/notice/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/notice.py" "$d" > "$TMP/notice-$n.log" 2>&1; then echo "FAIL notice/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/notice-$n.log"; then echo "ok   notice/reject/$n"
+  else echo "FAIL notice/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/notice-$n.log"; fail=1; fi
+done
 fi
 
 # The fixtures, one after another, each put into the checked copy

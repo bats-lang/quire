@@ -4,7 +4,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
+  expectBannerSaysWhatToDo, chapterTitle, start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
   librarySettings, libraryMenu, menuItem, settingsButton,
   readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown,
@@ -133,6 +133,27 @@ test('Try again is one retry: when it fails too, the button is gone for the sess
   await expect(card(page, 'Kept Safe')).toBeVisible();
 });
 
+test('a book\'s file that fails to read is read again by itself, and said only when it keeps failing', async ({ page }, testInfo) => {
+  await stubReads(page);
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Slow Disk', author: 'Storage Tests', rawChapters: chapters(2) })], 1);
+  // two failed reads, then it reads: the book opens, nothing is said
+  await page.evaluate(() => { localStorage.setItem('failTimes', '2'); localStorage.setItem('failReads', 'bookfile'); });
+  await reload(page);
+  await openBook(page, 'Slow Disk');
+  await expect(chapterTitle(page)).not.toHaveText(/Loading/);
+  await expect(alert(page)).toBeHidden();
+  expect(await page.evaluate(() => window.bookFileReadsFailed)).toBe(2);
+  await toLibrary(page);
+  // it never reads: after the tries, the banner says so and what to do
+  await page.evaluate(() => localStorage.setItem('failTimes', '-1'));
+  await reload(page);
+  await card(page, 'Slow Disk').click();
+  await expect(alert(page)).toContainText('This book could not be read from storage. Quire tried three times');
+  await expectBannerSaysWhatToDo(page, testInfo);
+  await healReads(page);
+});
+
 test('a book\'s annotations that cannot be read are said, none is made, and none is lost', async ({ page }) => {
   await stubReads(page);
   await start(page);
@@ -144,7 +165,7 @@ test('a book\'s annotations that cannot be read are said, none is made, and none
   await failReads(page, 'annotations');
   await reload(page);
   await openBook(page, 'Marked Once');
-  await expect(alert(page)).toContainText('This book\'s highlights and notes could not be read. New ones cannot be made until you reopen Quire, so the old ones are kept.');
+  await expect(alert(page)).toContainText('This book\'s highlights and notes could not be read, so new ones cannot be made and the old ones are kept. Reopen Quire to try again.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   // a highlight made now is not made (it could only be kept by saving
   // over the ones that could not be read)
@@ -174,7 +195,7 @@ test('settings that cannot be read are said, the defaults used, and not saved ov
   await toLibrary(page);
   await failReads(page, 'set');
   await reload(page);
-  await expect(alert(page)).toContainText('Quire could not read your settings. It is using the defaults, and changes will not be saved until you reopen Quire.');
+  await expect(alert(page)).toContainText('Quire could not read your settings, so it is using the defaults and changes will not be saved. Reopen Quire to try again.');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Set Once');
   await expect.poll(fontSize).toBe('18px');
@@ -231,7 +252,7 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await toLibrary(page);
   await failReads(page, 'set');
   await reload(page);
-  await expect(alert(page)).toContainText('Quire could not read your settings.');
+  await expect(alert(page)).toContainText('Quire could not read your settings');
   await alert(page).getByRole('button', { name: 'Dismiss' }).click();
   await openBook(page, 'Spoken Once');
   await openReadingSettings(page, 'Read aloud');

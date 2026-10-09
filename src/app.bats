@@ -317,6 +317,10 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-backup", "settings-export-backup", "btn", "Export backup")
   val () = ui_el("settings-backup", "settings-restore", TDiv, "btn")
   val () = app_backup_input()
+  (* what a backup holds, in the browser and in the app alike: the
+     books' files are not in it *)
+  val () = ui_el("settings-box", "settings-backup-note", TDiv, "sabout")
+  val () = ui_text_long("settings-backup-note", "A backup holds your settings, places, shelves, collections, notes and reading log, not the books' files: keep your EPUB files. Restoring one can be undone.")
   (* in a browser, whether it keeps the books, once that is known
      (platform.bats): a backup does not hold them (quire#333) *)
   val () = ui_el("settings-box", "settings-storage", TDiv, "sabout")
@@ -424,6 +428,8 @@ fn _notices (): void = let
   val () = _hide("error-copy")
   val () = ui_link_out_https("error-banner", "error-report", "btn linkout", "Report", "github.com/bats-lang/quire/issues")
   val () = _hide("error-report")
+  val () = ui_text_btn("error-banner", "error-reopen", "btn", "Reopen Quire")
+  val () = _hide("error-reopen")
   val () = ui_icon_btn("error-banner", "error-dismiss", "ibtn", IcClose, "Dismiss")
   val () = _hide("error-banner")
   val () = ui_el("bats-root", "copy-status", TDiv, "toast tcopy")

@@ -7,7 +7,7 @@
 
 import { expect } from '@playwright/test';
 import { createEpub, solidPng } from './create-epub.js';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -501,4 +501,42 @@ export function cjkFontInstalled(page) {
     context.font = '32px sans-serif';
     return context.measureText('日本語').width !== context.measureText('\uFFFF\uFFFF\uFFFF').width;
   });
+}
+
+/** Export backup, from the open Settings screen: the file's text, as the
+    browser downloads it or the app shares it, and the dialog that says
+    it was saved (quire#362) answered. */
+export async function exportedBackup(page) {
+  const inApp = await page.evaluate(() => !!(window.__android && window.Capacitor && window.Capacitor.Plugins.Share));
+  const shares = () => page.evaluate(() => window.__android.calls.filter(c => c.plugin === 'Share').length);
+  const before = inApp ? await shares() : 0;
+  const download = inApp ? null : page.waitForEvent('download');
+  await settingsButton(page, 'Export backup').click();
+  let text;
+  if (inApp) {
+    await expect.poll(shares).toBe(before + 1);
+    text = Buffer.from(await page.evaluate(() => window.__android.files.get('quire-backup.json')), 'base64').toString('utf8');
+  } else {
+    const file = await download;
+    expect(file.suggestedFilename()).toBe('quire-backup.json');
+    text = readFileSync(await file.path(), 'utf8');
+  }
+  const saved = dialog(page, 'Backup saved');
+  await expect(saved).toContainText(inApp ? 'quire-backup.json was shared' : 'quire-backup.json is in your downloads');
+  await saved.getByRole('button', { name: 'OK' }).click();
+  return text;
+}
+
+/** The error banner on screen says what to do next (quire#360): a
+    button besides Dismiss (Reopen Quire), or words that name the step;
+    and in the Android app it does not say "browser". Call it where a
+    spec has the banner up */
+const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|try opening it again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
+export async function expectBannerSaysWhatToDo(page, testInfo) {
+  const banner = page.getByRole('alert');
+  await expect(banner).toBeVisible();
+  const text = await banner.innerText();
+  const reopen = await banner.getByRole('button', { name: 'Reopen Quire' }).isVisible();
+  expect(reopen || NEXT_STEP.test(text), `the banner says what to do: ${text}`).toBe(true);
+  if (testInfo.project.name === 'android') expect(text, 'no "browser" in the app').not.toMatch(/browser/i);
 }

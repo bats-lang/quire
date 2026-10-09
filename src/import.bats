@@ -123,12 +123,13 @@ fn _kept_name_into {l:agz} (buffer: !$A.arr(byte, l, 512)): [name_len:nat | name
     in name_len end
   | ~NoKeptName() => _put_string(buffer, 0, "The file")
 
-(* Shows the error banner for the file being imported *)
-fn _error (): void = let
+(* Shows the error banner for the file being imported, saying how it
+   failed (no case detects DRM, so none is blamed) *)
+fn _error (cause: named_failure): void = let
   val message = $A.alloc<byte>(512)
   val name_end = _kept_name_into(message)
-  val text_end = _put_string(message, name_end, " could not be imported. Quire supports .epub files without DRM.")
-  val () = notice_error_buf(message, text_end)
+  val () = notice_say_named(message, name_end, cause)
+  val () = $A.free<byte>(message)
 in ui_show("import-progress", false) end
 
 (* The import card: stage text and progress in percent *)
@@ -199,7 +200,18 @@ datavtype archive_outcome =
   | ArchiveFailed of archive_failure
 
 implement $P.dispose<archive_outcome>(outcome) =
-  case+ outcome of ~BookAdded(_) => () | ~BookReopened() => () | ~ArchiveFailed(_) => ()
+  case+ outcome of ~BookAdded(_) => () | ~BookReopened() => () | ~ArchiveFailed(_cause) => ()
+
+(* Why an archive could not be imported, matched case by case *)
+fn _archive_named (cause: archive_failure): named_failure =
+  case+ cause of
+  | NoContainer() => NotAnEpub()
+  | ContainerNotRead() => ContainerDamaged()
+  | NoPackagePath() => PackageMissing()
+  | NoPackage() => PackageMissing()
+  | PackageNotRead() => PackageDamaged()
+  | NotFinished() => ReadingNotFinished()
+  | NotInLibrary() => NotKeptInLibrary()
 
 (* target[6 + position, 6 + count) := source[position, count) *)
 fun _put_after_head {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat | count <= source_size; count + 6 <= target_size}{position:nat | position <= count} .<count - position>.
@@ -331,8 +343,8 @@ fn _book_store_checked (storing: $P.promise($IDB.stored, $P.Chained), key: Int):
     | $IDB.NotStored() => let
       val message = $A.alloc<byte>(512)
       val name_end = _title_into(message, key)
-      val text_end = _put_string(message, name_end, " is open, but could not be stored, so it will not open next time. Free some space and import it again.")
-    in notice_error_buf(message, text_end) end)
+      val () = notice_say_named(message, name_end, BookFileNotStored())
+    in $A.free<byte>(message) end)
 
 (* The book's file, stored from the JS side under 'b' *)
 fn _store_file (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained) = let
@@ -571,10 +583,10 @@ in
       in $P.ret<import_outcome>(Added(key)) end
     (* an import neither reopens nor fails silently *)
     | ~BookReopened() => let
-        val () = _error()
+        val () = _error(NotKeptInLibrary())
       in $P.ret<import_outcome>(Failed()) end
-    | ~ArchiveFailed(_) => let
-        val () = _error()
+    | ~ArchiveFailed(cause) => let
+        val () = _error(_archive_named(cause))
       in $P.ret<import_outcome>(Failed()) end)
 end
 
@@ -585,7 +597,7 @@ fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: in
   if ~storage_savable(LibraryRecord()) then let
     val () = $BF.file_close(book_file)
     val () = _kept_name_put(NoKeptName())
-    val () = notice_error("Books cannot be added until Quire can read your library. The library screen says why.")
+    val () = notice_say(LibraryNotAdded())
   in $P.ret<import_outcome>(Failed()) end
   else let
   val () = _stage_name()
@@ -594,7 +606,7 @@ fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: in
 in
   if file_size <= 0 then let
     val () = $BF.file_close(book_file)
-    val () = _error()
+    val () = _error(FileEmpty())
   in $P.ret<import_outcome>(Failed()) end
   else let
     val @(id_high, id_low) = _file_id(book_file, file_size)
@@ -646,8 +658,8 @@ end
 fn _unread (): void = let
   val message = $A.alloc<byte>(512)
   val name_end = _kept_name_into(message)
-  val text_end = _put_string(message, name_end, " could not be read.")
-  val () = notice_error_buf(message, text_end)
+  val () = notice_say_named(message, name_end, FileNotRead())
+  val () = $A.free<byte>(message)
 in ui_show("import-progress", false) end
 
 (* Imports the file an open promise resolved with *)
@@ -754,11 +766,22 @@ implement import_external (handed) =
 
 implement $P.dispose<book_opening>(_) = ()
 
+(* A stored book whose archive no longer opens: its file is gone for
+   reading, whichever part failed (each case written, so a new one
+   must be placed here) *)
+fn _reopen_failed (cause: archive_failure): book_opening =
+  case+ cause of
+  | NoContainer() => BookFileMissing()
+  | ContainerNotRead() => BookFileMissing()
+  | NoPackagePath() => BookFileMissing()
+  | NoPackage() => BookFileMissing()
+  | PackageNotRead() => BookFileMissing()
+  | NotFinished() => BookFileMissing()
+  | NotInLibrary() => BookFileMissing()
+
 (* Puts library book (id_high, id_low), whose key is key, in the book cell from
    its stored file *)
-#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained)
-
-implement open_stored (key, id_high, id_low) = let
+fn _open_stored_once (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained) = let
   val file_key = lib_key(98, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(file_key)
   val stored = $BF.file_idb_get(key_bytes, 15)
@@ -779,9 +802,39 @@ in
             case+ outcome of
             | ~BookReopened() => let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end
             | ~BookAdded(_) => $P.ret<book_opening>(BookFileMissing())
-            | ~ArchiveFailed(_) => $P.ret<book_opening>(BookFileMissing()))
+            | ~ArchiveFailed(cause) => $P.ret<book_opening>(_reopen_failed(cause)))
         end
       end)
 end
+
+(* How many times a read of storage that failed is made again, and the
+   wait before the first of them (doubling): a failed read of a stored
+   file is usually transient (IndexedDB's UnknownError is low memory or
+   a disk hiccup, MDN; Dexie's workaround for Chromium's after a restart
+   is to open it again), so Quire retries it itself, three times in
+   1.75 s, and says so, before it asks the reader for anything. One
+   reader, no contention: no jitter *)
+#define STORAGE_RETRIES 3
+#define STORAGE_FIRST_WAIT_MS 250
+
+fun _open_stored_try {tries:nat} .<tries>.
+  (key: int, id_high: Int, id_low: Int, tries: int tries, wait_ms: int): $P.promise(book_opening, $P.Chained) =
+  $P.and_then<book_opening><book_opening>(_open_stored_once(key, id_high, id_low), llam(opening) =>
+    case+ opening of
+    | BookFileUnreadable() =>
+      if tries <= 0 then $P.ret<book_opening>(BookFileUnreadable())
+      else let
+        val () = ui_text("chapter-title", "Loading... (storage was slow, trying again)")
+      in
+        $P.and_then<Int><book_opening>($P.vow($TM.timer_set(wait_ms)), llam(_) =>
+          _open_stored_try(key, id_high, id_low, tries - 1, wait_ms * 2))
+      end
+    | BookOpened() => $P.ret<book_opening>(BookOpened())
+    | BookFileMissing() => $P.ret<book_opening>(BookFileMissing()))
+
+#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained)
+
+implement open_stored (key, id_high, id_low) =
+  _open_stored_try(key, id_high, id_low, STORAGE_RETRIES, STORAGE_FIRST_WAIT_MS)
 
 end (* #target wasm *)
