@@ -641,6 +641,20 @@ pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
 locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
+### Publisher styling and the reader's settings (#411)
+No part of a book's own styling reaches the page: the CSS (a `<style>`, a
+style attribute, `!important`, a media rule) is dropped with the rest, and
+so are the obsolete presentational attributes (`<font>`, `bgcolor`,
+`width`), so a book's sizes, colours, grounds, margins, alignment, line
+height and font cannot fight the size, theme, margins, Justify, spacing and
+Font settings, and no theme has a light slab. That is the opposite of
+Readium CSS (Thorium), which keeps the publisher's styles unless the reader
+turns advanced settings on, and in which an `!important` in a book can beat
+a setting. What only CSS hid (`display:none` by a rule or a style
+attribute) is shown, there being no CSS to say it; the `hidden` attribute is
+HTML's own word and is kept: `_pass_attrs` gives an element that has it the
+class `hidden-by-book`, which the stylesheet hides. `e2e/publisher.spec.js`
+plays `e2e/publisher-books.js`.
 
 ### Found while taking this inventory
 

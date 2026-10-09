@@ -17,6 +17,7 @@
       "navigation.spec.js",
       "landmarks.spec.js",
       "epubcheck.spec.js",
+      "publisher.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
