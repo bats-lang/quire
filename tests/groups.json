@@ -15,6 +15,7 @@
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
+      "media.spec.js",
       "landmarks.spec.js",
       "epubcheck.spec.js",
       "spreads.spec.js",
