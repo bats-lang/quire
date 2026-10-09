@@ -24,6 +24,7 @@ staload "bookimage.sats"
 staload "indexrec.sats"
 staload "indeximage.sats"
 staload "book.sats"
+staload "unreadable.sats"
 staload "mem.sats"
 
 implement $P.dispose<$IDB.stored>(_) = ()
@@ -126,7 +127,7 @@ in key end
 (* What reading the library came to *)
 #pub datavtype library_read =
   | ReadNothing of ()                       (* nothing is stored under "library/" *)
-  | ReadFailed of ()                        (* it could not be read: nothing may be written over it *)
+  | ReadFailed of (failure_found)           (* it could not be read, and why: nothing may be written over it *)
   | {count:nat} ReadLibrary of (stored_index, stored_books(count), int count)
 
 #pub fun stored_book_free (book: stored_book): void
@@ -160,7 +161,7 @@ implement stored_index_free (index) =
 implement library_read_free (read) =
   case+ read of
   | ~ReadNothing() => ()
-  | ~ReadFailed() => ()
+  | ~ReadFailed(found) => failure_found_free(found)
   | ~ReadLibrary(index, books, _) => let
       val () = stored_index_free(index)
     in stored_books_free(books) end
@@ -355,6 +356,28 @@ fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count:nat | count
   end
 
 
+(* What a read of storage for the library found, as content (in a
+   piece), nothing, or why it failed. Unlike lookup_content, which folds
+   every cause into one, this keeps the browser's reason (#374): the
+   screen offers what fits it. *)
+#pub datavtype library_content =
+  | {arena_loc,piece_loc:agz}{content_size:pos} LibraryContent of (piece_owner(content_size, arena_loc), $A.arrx(byte, piece_loc, content_size, arena_loc), int content_size)
+  | LibraryNone of ()
+  | LibraryFailed of (failure_found)
+
+#pub fun library_content (found: $IDB.lookup): library_content
+
+implement library_content (found) =
+  case+ found of
+  | ~$IDB.Unreadable(cause) => LibraryFailed(failure_of_cause(cause))
+  | ~$IDB.Absent() => LibraryNone()
+  | ~$IDB.Found(blob) =>
+    (case+ lookup_content($IDB.Found(blob)) of
+    | ~StoredContent(owner, piece, size) => LibraryContent(owner, piece, size)
+    | ~NoStoredContent() => LibraryNone()
+    (* the bytes could not be taken into memory *)
+    | ~ContentUnreadable() => LibraryFailed(FailureFound(KindBytesUnreadable(), NoUnexpectedText())))
+
 (* The library, read: every record under "library/" in one view *)
 #pub fun libstore_read (): $P.promise(library_read, $P.Chained)
 
@@ -366,10 +389,10 @@ implement libstore_read () = let
   val () = release_bytes(key_prefix_frozen, key_prefix_bytes)
 in
   $P.and_then<$IDB.lookup><library_read>(stored, llam(found) =>
-    case+ lookup_content(found) of
-    | ~NoStoredContent() => $P.ret<library_read>(ReadNothing())
-    | ~ContentUnreadable() => $P.ret<library_read>(ReadFailed())
-    | ~StoredContent(owner, piece, size) => let
+    case+ library_content(found) of
+    | ~LibraryNone() => $P.ret<library_read>(ReadNothing())
+    | ~LibraryFailed(why) => $P.ret<library_read>(ReadFailed(why))
+    | ~LibraryContent(owner, piece, size) => let
         val @(index, books, count) = _read_entries(piece, size, 0, IndexNone(), StoredNone(), 0)
         val () = piece_free(owner, piece)
       in $P.ret<library_read>(ReadLibrary(index, books, count)) end)

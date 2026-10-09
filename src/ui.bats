@@ -25,6 +25,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload ME = "wasm.bats-packages.dev/bridge/src/media.sats"
 #use result as R
 staload "mem.sats"
+staload "unreadable.sats"
 
 (* ============================================================
    Ids
@@ -1544,6 +1545,34 @@ end
 #pub fn ui_library_view_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_view_control)
 implement ui_library_view_control (bytes, n, at) = _library_view_control_from(bytes, n, at, FilterBooksAll(), 9)
 
+(* The button that reads the library again, by its element's id (retry_control_id) *)
+#pub datatype retry_control =
+  | RetryRead
+
+#pub fn retry_control_id (control: retry_control): [id_len:pos | id_len < 256] string id_len
+implement retry_control_id (control) =
+  case+ control of
+  | RetryRead() => "library-try-again"
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_retry_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(retry_control)
+implement ui_retry_control (bytes, n, at) = let
+  val id = retry_control_id(RetryRead())
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(RetryRead()) else $R.none()
+end
+
+(* Try again is shown only with the proof that the failure has hope
+   (unreadable.bats's HOPE): for any other failure this does not
+   type-check *)
+#pub fn ui_try_again_show {f:failure} (hope: HOPE(f) | ): void
+implement ui_try_again_show (hope | ) = let
+  prval HopeTransient() = hope
+in ui_show("library-try-again", true) end
+
+#pub fn ui_try_again_hide (): void
+implement ui_try_again_hide () = ui_show("library-try-again", false)
+
 (* A book's menu's items, each by its element's id (card_menu_control_id) *)
 #pub datatype card_menu_control =
   | CardMenuInfo
@@ -1964,6 +1993,7 @@ implement ui_sync_offer_control (bytes, n, at) = _sync_offer_control_from(bytes,
   | TypographyClose
   | ScreenFullscreen
   | ScreenLock
+  | ScreenBrightnessSystem
 
 #pub fn typography_control_id (control: typography_control): [id_len:pos | id_len < 256] string id_len
 implement typography_control_id (control) =
@@ -1998,6 +2028,7 @@ implement typography_control_id (control) =
   | TypographyClose() => "typography-close"
   | ScreenFullscreen() => "screen-fullscreen"
   | ScreenLock() => "screen-lock"
+  | ScreenBrightnessSystem() => "screen-brightness-system"
 
 (* The control after control, in the order the decoder tries them *)
 fn _typography_control_after (control: typography_control): $R.option(typography_control) =
@@ -2031,7 +2062,8 @@ fn _typography_control_after (control: typography_control): $R.option(typography
   | TypographyReset() => $R.some(TypographyClose())
   | TypographyClose() => $R.some(ScreenFullscreen())
   | ScreenFullscreen() => $R.some(ScreenLock())
-  | ScreenLock() => $R.none()
+  | ScreenLock() => $R.some(ScreenBrightnessSystem())
+  | ScreenBrightnessSystem() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)

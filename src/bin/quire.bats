@@ -154,6 +154,11 @@ fn _settings_control (clicked: !target): $R.option(settings_control) =
   | Target(bytes, n, _) => ui_settings_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
+fn _retry_control (clicked: !target): $R.option(retry_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_retry_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
 fn _library_view_control (clicked: !target): $R.option(library_view_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_library_view_control(bytes, n, 10)
@@ -1758,6 +1763,7 @@ fn _typography_chosen (control: typography_control): bool =
   | TypographyClose() => let val () = layer_close(LTypography()) in false end
   | ScreenFullscreen() => let val () = screen_fullscreen_toggle() in false end
   | ScreenLock() => let val () = screen_lock_toggle() in false end
+  | ScreenBrightnessSystem() => let val () = screen_brightness_system_toggle() in false end
 
 fn _wire_settings {count:nat} (listeners: regs(count)): regs(count + 10) = let
   val listeners = RCons(listeners, OnEl("typography-button"), "click", llam(_) => let
@@ -2594,8 +2600,9 @@ fn _wire_platform {count:nat} (listeners: regs(count)): regs(count + 12) = let
       val () = aloud_voice_chosen()
     in 0 end)
   val listeners = RSpeech(listeners, llam(event) => aloud_event(event))
-  val listeners = RCons(listeners, OnEl("screen-brightness"), "change", llam(_) => let
-      val () = screen_brightness_chosen()
+  (* the brightness slider: the screen follows it as it moves *)
+  val listeners = RCons(listeners, OnEl("screen-brightness-slider"), "input", llam(h) => let
+      val () = screen_brightness_moved(_input_number(h))
     in 0 end)
   val listeners = RFullscreen(listeners, llam(change) => screen_fullscreen_changed(change))
   (* the app is drawn edge to edge, so bars shown or hidden change the
@@ -2753,6 +2760,54 @@ fn _external_start (reading: library_reading): void =
   | ~LibraryRead(pf | ) => _external_wait(pf | EXTERNAL_ROUNDS)
   | ~LibraryUnreadable() => _external_keep(EXTERNAL_ROUNDS)
 
+(* The steps that wait for the library's reading, run once, whenever the
+   reading is known: files handed to the app (imported when the library
+   was read, kept when it was not), sync, the search and the view kept by
+   the last run. At start-up they run as soon as the read ends, unless it
+   failed for a reason Try again could change: then they wait for the one
+   retry (_retry_read), and run when it ends, whichever way. *)
+fn _after_read (reading: library_reading): $P.promise(int, $P.Chained) = let
+  val () = _external_start(reading)
+  val () = sync_start()
+in
+  $P.and_then<int><int>($P.and_then<int><int>(_query_restore(), llam(_) => _view_restore()), llam(view) => let
+    (* back from Dropbox's sign-in: Settings, where it was asked
+       for, and the sync screen comes over it as the sign-in ends *)
+    val () = (if sync_returning() then _settings_open() else ())
+  in $P.ret<int>(view) end)
+end
+
+(* Try again: the library is read again, once (#374). It repeats the one
+   read start-up makes, through _library_read, so the proof that it was
+   read is still only made there; on success the saving that was stopped
+   resumes (storage_read_again), the library is shown, and the steps that
+   waited run now, exactly once (lib_retry_begin refuses a second try).
+   If it fails again the screen has no remedy for the rest of the session *)
+fn _retry_read (): void =
+  case+ lib_retry_begin() of
+  | RetryNotOffered() => ()
+  | RetryOffered() => let
+      (* the failure's banner goes; a new failure raises its own *)
+      val () = notice_dismiss()
+      val () = ui_try_again_hide()
+    in
+      (* ignored: the steps deal with their own values *)
+      $P.finish<int>($P.and_then<library_reading><int>(_library_read(), llam(reading) => let
+        val () = lib_render()
+      in _after_read(reading) end), llam(_) => ())
+    end
+
+(* Try again, on the library screen *)
+fn _wire_retry {count:nat} (listeners: regs(count)): regs(count + 1) =
+  RCons(listeners, OnEl("library-try-again"), "click", llam(h) => let
+    val clicked = _target(h)
+    val control = _retry_control(clicked)
+    val () = _target_free(clicked)
+    val () = (case+ control of
+      | ~$R.none() => ()
+      | ~$R.some(RetryRead()) => _retry_read())
+  in 0 end)
+
 implement main0 () = let
   val () = app_build()
   (* the page restores its own scroll when Back goes over a guard
@@ -2764,6 +2819,7 @@ implement main0 () = let
   (* every listener, in one table: each one's id is its place in it *)
   val listeners = _wire_platform(_wire_settings_screen(_wire_sync(_wire_catalogues(_wire_search(_wire_annotations(_wire_toc(_wire_reader(_wire_settings(undo_listen(modal_listen(_wire_library(RNil()))))))))))))
   val listeners = _wire_update(listeners)
+  val listeners = _wire_retry(listeners)
   (* the narration's controls and its audio's events *)
   val listeners = narration_listen(listeners)
   val () = ui_listen_all(listeners)
@@ -2793,18 +2849,18 @@ implement main0 () = let
         (* the screen's controls, with the brightness and the lock kept *)
         val () = screen_controls_start()
         val () = lib_render()
-        (* files handed to the app from outside it (an Android intent,
-           the installed app opened with a file or shared one), once the
-           library is read: the bridge keeps them until then (#262) *)
-        val () = _external_start(reading)
-        (* sync, once the library is read *)
-        val () = sync_start()
       in
-        $P.and_then<int><int>($P.and_then<int><int>(_query_restore(), llam(_) => _view_restore()), llam(view) => let
-          (* back from Dropbox's sign-in: Settings, where it was asked
-             for, and the sync screen comes over it as the sign-in ends *)
-          val () = (if sync_returning() then _settings_open() else ())
-        in $P.ret<int>(view) end)
+        (* the steps that wait for the read (files handed to the app from
+           outside it, sync, the search and view kept): now, once the
+           library is read (#262), or, when it could not be read for a
+           reason Try again could change, after that retry. The bridge
+           keeps the files in their order meanwhile *)
+        case+ reading of
+        | ~LibraryRead(pf | ) => _after_read(LibraryRead(pf | ))
+        | ~LibraryUnreadable() =>
+          (case+ lib_retry_offer() of
+          | RetryOffered() => let val () = _show_library() in $P.ret<int>(0) end
+          | RetryNotOffered() => _after_read(LibraryUnreadable()))
       end)
     end)
 (* ignored: each step deals with its own value (but see bats-lang/bridge#87:

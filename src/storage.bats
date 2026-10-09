@@ -45,7 +45,9 @@ fn _unread_cell (kind: record_kind): ref(bool) =
    for (when storage is failing, another record says so) *)
 fn _tell (kind: record_kind): void =
   case+ kind of
-  | LibraryRecord() => notice_say(LibraryNotRead())
+  (* the library's failure is told by the library (library.bats), which
+     knows why it failed *)
+  | LibraryRecord() => ()
   | SettingsRecord() => notice_say(SettingsNotRead())
   | CataloguesRecord() => notice_say(CataloguesNotRead())
   | DictionariesRecord() => notice_say(DictionariesNotRead())
@@ -68,6 +70,28 @@ end
 (* Whether the record kind may be saved: it was read (or found absent) *)
 #pub fn storage_savable (kind: record_kind): bool
 implement storage_savable (kind) = ~(!(_unread_cell(kind)))
+
+(* How a read made again by the caller ended: the record was read, or
+   was not *)
+#pub datatype read_attempt =
+  | AttemptRead
+  | AttemptFailed
+
+(* Whether the record kind may be saved again *)
+#pub datatype read_again =
+  | Readable
+  | StillUnread
+
+(* A read of the record kind has ended (the first at start-up, or one
+   made again). The record may be saved only once it has been read, and
+   nothing else clears the flag (#374): a failed attempt leaves it set. *)
+#pub fn storage_read_again (kind: record_kind, attempt: read_attempt): read_again
+implement storage_read_again (kind, attempt) =
+  case+ attempt of
+  | AttemptRead() => let
+      val () = !(_unread_cell(kind)) := false
+    in Readable() end
+  | AttemptFailed() => StillUnread()
 
 (* The books whose annotations could not be read, by id *)
 datavtype unread_books(int) =

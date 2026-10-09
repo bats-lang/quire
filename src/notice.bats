@@ -305,7 +305,6 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
    next step are made from it by two total matches (_what_put,
    remedy_of), so a failure added without either does not type-check *)
 #pub datatype failure =
-  | LibraryNotRead
   | LibraryNotAdded
   | HandedBookNotAdded
   | SettingsNotRead
@@ -344,6 +343,7 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
 (* The next step a banner offers: words, and for ReopenQuire a button *)
 #pub datatype remedy =
   | ReopenQuire
+  | LibraryScreenSays
   | ImportAgain
   | OtherChapterOrReplace
   | ChooseAnotherFile
@@ -358,9 +358,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
 
 fn remedy_of (failed: failure): remedy =
   case+ failed of
-  | LibraryNotRead() => ReopenQuire()
-  | LibraryNotAdded() => ReopenQuire()
-  | HandedBookNotAdded() => ReopenQuire()
+  | LibraryNotAdded() => LibraryScreenSays()
+  | HandedBookNotAdded() => LibraryScreenSays()
   | SettingsNotRead() => ReopenQuire()
   | CataloguesNotRead() => ReopenQuire()
   | DictionariesNotRead() => ReopenQuire()
@@ -424,8 +423,7 @@ fn _what_put {l:agz}{at:nat | at <= 512}
   (out: !$A.arr(byte, l, 512), at: int at, failed: failure, where_: host, part: int)
   : [stop:nat | at <= stop; stop <= 512] int stop =
   case+ failed of
-  | LibraryNotRead() => _put_text(out, 512, at, "Quire could not read your library, so nothing will be saved until it is reopened and your books and places are kept")
-  | LibraryNotAdded() => _put_text(out, 512, at, "Books cannot be added: Quire could not read your library")
+  | LibraryNotAdded() => _put_text(out, 512, at, "Books cannot be added until Quire can read your library")
   | HandedBookNotAdded() => _put_text(out, 512, at, "This book was not added: Quire could not read your library")
   | SettingsNotRead() => _put_text(out, 512, at, "Quire could not read your settings, so it is using the defaults and changes will not be saved")
   | CataloguesNotRead() => _put_text(out, 512, at, "Quire could not read your catalogues, so changes to them will not be saved")
@@ -482,6 +480,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
   (out: !$A.arr(byte, l, 512), at: int at, next: remedy, where_: host): [stop:nat | at <= stop; stop <= 512] int stop =
   case+ next of
   | ReopenQuire() => _put_text(out, 512, at, ". Reopen Quire to try again.")
+  | LibraryScreenSays() => _put_text(out, 512, at, ". The library screen says why and what to do; then open or share the book again.")
   | ImportAgain() => _put_text(out, 512, at, ". Import the book again and choose Replace when Quire says it is already in your library.")
   | OtherChapterOrReplace() => _put_text(out, 512, at, ". Choose another chapter in the contents, or import the book again and choose Replace.")
   | ChooseAnotherFile() => _put_text(out, 512, at, ". Choose another file, or get the book again from where you had it.")
@@ -500,6 +499,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
 fn _reopens (next: remedy): bool =
   case+ next of
   | ReopenQuire() => true
+  | LibraryScreenSays() => false
   | ImportAgain() => false
   | OtherChapterOrReplace() => false
   | ChooseAnotherFile() => false
