@@ -336,7 +336,7 @@ export function createEpub(opts = {}) {
       const langAttrs = lang ? ` xml:lang="${lang}" lang="${lang}"` : '';
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"${langAttrs}>
 <head><title>Chapter ${i}</title>${rawChapters[i - 1].head || ''}</head>
 <body>
 ${rawBody}
