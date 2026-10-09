@@ -11,11 +11,12 @@ import { join } from 'node:path';
 import { createEpub } from './create-epub.js';
 import { landmarkBooks } from './landmark-books.js';
 import { pagelistBooks } from './pagelist-books.js';
-
-const jar = process.env.EPUBCHECK_JAR;
 import { epub2Books } from './epub2-books.js';
 import { wideBooks } from './wide-books.js';
-const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks };
+import { w3cBooks } from './w3c-books.js';
+
+const jar = process.env.EPUBCHECK_JAR;
+const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks, 'w3c epub-tests': w3cBooks };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once
@@ -30,7 +31,7 @@ for (const [group, books] of Object.entries(registries)) {
       const dir = mkdtempSync(join(tmpdir(), 'quire-epubcheck-'));
       const epub = join(dir, `${name}.epub`);
       const report = join(dir, `${name}.json`);
-      writeFileSync(epub, createEpub(entry.opts));
+      writeFileSync(epub, entry.bytes ? entry.bytes() : createEpub(entry.opts));
       try {
         execFileSync('java', ['-jar', jar, epub, '--json', report, '--quiet'], { stdio: 'pipe' });
       } catch (e) {

@@ -23,6 +23,7 @@
       "pagelist.spec.js",
       "epub2.spec.js",
       "epubcheck.spec.js",
+      "w3c-epub-tests.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
