@@ -2419,6 +2419,11 @@ fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".caf figure")
   val sheet = lay(sheet, Margin(), "1em auto")
   val sheet = close(sheet)
+  (* a note's text and a caption are set smaller than the text round them,
+     and scale with it (#422) *)
+  val sheet = rule(sheet, ".caf .note-text,.caf figcaption")
+  val sheet = lay(sheet, FontSize(), ".875em")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".caf sup,.caf sub")
   val sheet = lay(sheet, LineHeight(), "0")
   val sheet = close(sheet)
