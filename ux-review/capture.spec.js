@@ -10,7 +10,7 @@ import {
   start, importFiles, epubFile, rawFile, readBook, openBook, toLibrary, showChrome, clickControl, chapters,
   japaneseChapters, libraryMenu, menuItem, dialog, librarySettings, settingsScreen, settingsButton, bookMenu,
   openReadingSettings, readingSettings, selectText, selectionButton, bookPage, card, cards, control, topBar,
-  fixedLayoutBook, readFixed, importInput,
+  fixedLayoutBook, readFixed, importInput, cjkFontInstalled,
 } from '../e2e/helpers.js';
 import { createStardict } from '../e2e/create-stardict.js';
 import { solidPng } from '../e2e/create-epub.js';
@@ -162,6 +162,8 @@ test('reading', async ({ page }, info) => {
   await shot('rtl-reading-bars-down');
   await shot('rtl-reading-bars-up', async () => { await showChrome(page); });
   await attempt(page, async () => { await toLibrary(page); });
+  // without a CJK font these shots are empty boxes and prove nothing about glyphs (quire#391)
+  expect(await cjkFontInstalled(page), 'a font with Japanese characters is installed (fonts-noto-cjk)').toBe(true);
   await readBook(page, { title: '縦書き', author: '著者', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
   await shot('vertical-reading-bars-down');
   await shot('vertical-reading-bars-up', async () => { await showChrome(page); });

@@ -491,6 +491,18 @@ export async function expectBarFollows(page, rightToLeft) {
   expect(track.middle > Math.max(previous.middle, next.middle) || track.middle < Math.min(previous.middle, next.middle), 'the scrubber between the page turns').toBe(false);
 }
 
+/** Whether a font with Han characters is installed: the canvas draws a
+    Han character and a code point no font has the same width when none
+    is, so a vertical book is empty boxes (quire#359, #391). The e2e job
+    installs fonts-noto-cjk; the UX review's capture needs one too */
+export function cjkFontInstalled(page) {
+  return page.evaluate(() => {
+    const context = document.createElement('canvas').getContext('2d');
+    context.font = '32px sans-serif';
+    return context.measureText('日本語').width !== context.measureText('\uFFFF\uFFFF\uFFFF').width;
+  });
+}
+
 /** Export backup, from the open Settings screen: the file's text, as the
     browser downloads it or the app shares it, and the dialog that says
     it was saved (quire#362) answered. */
