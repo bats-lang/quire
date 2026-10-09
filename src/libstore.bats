@@ -810,6 +810,195 @@ end
 
 
 (* ============================================================
+   Setting a record aside
+   ============================================================ *)
+
+(* What setting a record aside came to *)
+#pub datatype aside_result =
+  | AsideDone          (* its bytes are kept under library/damaged and the record is gone *)
+  | AsideNotNeeded     (* it reads (or is not there): nothing was changed *)
+  | AsideNewer         (* a newer Quire wrote it: the one kind never set aside, since it is not damaged *)
+  | AsideFailed        (* it could not be read, kept or deleted: nothing was changed *)
+
+implement $P.dispose<aside_result>(_) = ()
+
+(* A record's bytes copied to its damaged key and the record deleted, both in
+   the one transaction that read it: all of it or none of it. The copy is
+   made before the key is deleted, in the batch's order. *)
+fn _aside_writeback {previous_l,key_l:agz}{size:pos | size <= 900000}{key_n:pos | key_n < 65536}
+  (previous: $A.arr(byte, previous_l, size), size: int size, id_high: int, id_low: int,
+   key: $A.arr(byte, key_l, key_n), key_len: int key_n): $IDB.writeback = let
+  val @(sum_high, sum_low) = _crc_of(previous, size)
+  val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
+  val batch_size = 7 + 39 + size + 3 + key_len
+  val batch = $A.alloc<byte>(batch_size)
+  val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
+  val delete_at = 7 + 39 + size
+  val () = $A.write_byte(batch, delete_at, 2)
+  val () = _put_u16(batch, delete_at + 1, key_len)
+  val () = _put_bytes(batch, delete_at + 3, key, key_len)
+  val () = $A.free<byte>(damaged_key)
+  val () = $A.free<byte>(previous)
+  val () = $A.free<byte>(key)
+in $IDB.WriteBatch(batch, batch_size) end
+
+(* A record with no bytes has nothing to keep: only the key is deleted *)
+fn _aside_empty {key_l:agz}{key_n:pos | key_n < 65536}
+  (key: $A.arr(byte, key_l, key_n), key_len: int key_n): $IDB.writeback = let
+  val batch_size = 3 + key_len
+  val batch = $A.alloc<byte>(batch_size)
+  val () = $A.write_byte(batch, 0, 2)
+  val () = _put_u16(batch, 1, key_len)
+  val () = _put_bytes(batch, 3, key, key_len)
+  val () = $A.free<byte>(key)
+in $IDB.WriteBatch(batch, batch_size) end
+
+fn _decide_aside_book (found: $IDB.lookup, id_high: Int, id_low: Int, answer: $P.resolver(aside_result)): $IDB.writeback =
+  case+ found of
+  | ~$IDB.Unreadable(cause) => let
+      val () = $IDB.unreadable_cause_free(cause)
+      val () = $P.resolve<aside_result>(answer, AsideFailed())
+    in $IDB.Keep() end
+  | ~$IDB.Absent() => let
+      val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+    in $IDB.Keep() end
+  | ~$IDB.Found(blob) => let
+      val size = $BD.blob_len(blob)
+    in
+      if size <= 0 then let
+        val () = $BD.blob_free(blob)
+        val () = $P.resolve<aside_result>(answer, AsideDone())
+      in _aside_empty(libstore_book_key(id_high, id_low), 27) end
+      else if size > 900000 then let
+        val () = $BD.blob_free(blob)
+        val () = $P.resolve<aside_result>(answer, AsideFailed())
+      in $IDB.Keep() end
+      else let
+        val previous = $A.alloc<byte>(size)
+        val () = $BD.blob_read(blob, 0, previous, size)
+        val () = $BD.blob_free(blob)
+      in
+        case+ _read_book(previous, 0, size, id_high, id_low) of
+        | ~WholeBook(_, _, image) => let
+            val () = book_image_free(image)
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~LossyBook(_, _, image) => let
+            val () = book_image_free(image)
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~UnusableBook(_, _, why) =>
+          (case+ why of
+           | UnusableNewer() => let
+               val () = $A.free<byte>(previous)
+               val () = $P.resolve<aside_result>(answer, AsideNewer())
+             in $IDB.Keep() end
+           | UnusableDamaged() => let
+               val () = $P.resolve<aside_result>(answer, AsideDone())
+             in _aside_writeback(previous, size, id_high, id_low, libstore_book_key(id_high, id_low), 27) end
+           | UnusableNotQuire() => let
+               val () = $P.resolve<aside_result>(answer, AsideDone())
+             in _aside_writeback(previous, size, id_high, id_low, libstore_book_key(id_high, id_low), 27) end)
+      end
+    end
+
+fn _decide_aside_index (found: $IDB.lookup, answer: $P.resolver(aside_result)): $IDB.writeback =
+  case+ found of
+  | ~$IDB.Unreadable(cause) => let
+      val () = $IDB.unreadable_cause_free(cause)
+      val () = $P.resolve<aside_result>(answer, AsideFailed())
+    in $IDB.Keep() end
+  | ~$IDB.Absent() => let
+      val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+    in $IDB.Keep() end
+  | ~$IDB.Found(blob) => let
+      val size = $BD.blob_len(blob)
+    in
+      if size <= 0 then let
+        val () = $BD.blob_free(blob)
+        val () = $P.resolve<aside_result>(answer, AsideDone())
+      in _aside_empty(libstore_index_key(), 13) end
+      else if size > 900000 then let
+        val () = $BD.blob_free(blob)
+        val () = $P.resolve<aside_result>(answer, AsideFailed())
+      in $IDB.Keep() end
+      else let
+        val previous = $A.alloc<byte>(size)
+        val () = $BD.blob_read(blob, 0, previous, size)
+        val () = $BD.blob_free(blob)
+      in
+        case+ _read_index(previous, 0, size) of
+        | ~WholeIndex(image) => let
+            val () = index_image_free(image)
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~LossyIndex(image) => let
+            val () = index_image_free(image)
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~IndexNone() => let
+            val () = $A.free<byte>(previous)
+            val () = $P.resolve<aside_result>(answer, AsideNotNeeded())
+          in $IDB.Keep() end
+        | ~UnusableIndex(why) =>
+          (case+ why of
+           | UnusableNewer() => let
+               val () = $A.free<byte>(previous)
+               val () = $P.resolve<aside_result>(answer, AsideNewer())
+             in $IDB.Keep() end
+           | UnusableDamaged() => let
+               val () = $P.resolve<aside_result>(answer, AsideDone())
+             in _aside_writeback(previous, size, 0, 0, libstore_index_key(), 13) end
+           | UnusableNotQuire() => let
+               val () = $P.resolve<aside_result>(answer, AsideDone())
+             in _aside_writeback(previous, size, 0, 0, libstore_index_key(), 13) end)
+      end
+    end
+
+fn _aside_failed (answer: $P.promise(aside_result, $P.Pending)): $P.promise(aside_result, $P.Chained) =
+  $P.and_then<aside_result><aside_result>(answer, llam(_) => $P.ret<aside_result>(AsideFailed()))
+
+fn _aside_finished (updating: $P.promise($IDB.updated, $P.Chained), answer: $P.promise(aside_result, $P.Pending)): $P.promise(aside_result, $P.Chained) =
+  $P.and_then<$IDB.updated><aside_result>(updating, llam(updated) =>
+    case+ updated of
+    | ~$IDB.Updated() => $P.vow(answer)
+    | ~$IDB.KeptAsRead() => $P.vow(answer)
+    | ~$IDB.UpdateUnreadable(cause) => let val () = $IDB.unreadable_cause_free(cause) in _aside_failed(answer) end
+    | ~$IDB.NotUpdated(cause) => let val () = $IDB.write_failure_free(cause) in _aside_failed(answer) end)
+
+(* A book's record that cannot be used set aside: when it is damaged or not
+   Quire's, its bytes are copied to library/damaged/<id>/<crc> and the
+   record deleted, in the one transaction that read it, so the book can be
+   imported again. One a newer Quire wrote, one that reads and one that is
+   not there are left as they are (the record is read again inside the
+   transaction: what was believed of it before does not decide) *)
+#pub fun libstore_set_aside_book (id_high: Int, id_low: Int): $P.promise(aside_result, $P.Chained)
+
+implement libstore_set_aside_book (id_high, id_low) = let
+  val key = libstore_book_key(id_high, id_low)
+  val @(answer, resolver) = $P.create<aside_result>()
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  val updating = $IDB.idb_update(key_bytes, 27, llam(found) => _decide_aside_book(found, id_high, id_low, resolver))
+  val () = release_bytes(key_frozen, key_bytes)
+in _aside_finished(updating, answer) end
+
+(* The same for the collections' record *)
+#pub fun libstore_set_aside_index (): $P.promise(aside_result, $P.Chained)
+
+implement libstore_set_aside_index () = let
+  val key = libstore_index_key()
+  val @(answer, resolver) = $P.create<aside_result>()
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(key)
+  val updating = $IDB.idb_update(key_bytes, 13, llam(found) => _decide_aside_index(found, resolver))
+  val () = release_bytes(key_frozen, key_bytes)
+in _aside_finished(updating, answer) end
+
+
+(* ============================================================
    Writing the whole library at once (the conversion)
    ============================================================ *)
 

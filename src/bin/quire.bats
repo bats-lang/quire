@@ -1273,6 +1273,7 @@ in ui_focus("about-done") end
 fn _settings_open (): void = let
   val () = stats_goal_show()
   val () = sync_summary_show()
+  val () = lib_aside_show()
   val () = layer_open(LSettings())
 in ui_focus("settings-sync") end
 
@@ -1303,6 +1304,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
         | ~$R.some(SettingsExportBackup()) => backup_export()
+        | ~$R.some(SettingsSetAside()) => lib_aside_run()
         | ~$R.some(SettingsResetSettings()) => _settings_reset()
         | ~$R.some(SettingsFactoryReset()) => let
           val () = layer_close(LSettings())

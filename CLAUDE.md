@@ -946,12 +946,38 @@ read of storage changed: each still folds, as #174 says.
   details in the banner. None but Transient has a button. Import is off
   while the library is unreadable (`inert` on `import-file`; a file
   handed or dropped is refused with "Books cannot be added until Quire
-  can read your library"). Starting a new library over records that
-  cannot be decoded is not here yet (it is not a `harm`: the old bytes
-  are copied to `library/damaged/...` in the same transaction as the
-  new records, so nothing is lost, and it is offered only where nothing
-  else can be done: never for Transient, StorageBlocked or NewerVersion);
-  the screen says only what is true now.
+  can read your library"). Records that can be read but not
+  used are another case, below (set aside); a read that failed as a whole
+  is not one, since nothing is known of what it holds and a new library
+  made beside it could not be seen while the read keeps failing.
+* **Records that cannot be used are set aside, not replaced** (the
+  follow-up of #374). A library whose read worked can still hold a book's
+  record, or the collections', that is damaged or not Quire's: it is shown
+  nowhere and never written over, so the book cannot be imported again and
+  no collection can be made. Settings shows a row then (`settings-aside`,
+  `lib_aside_show`: "Set aside unreadable records",
+  `settings-set-aside`), and only then. Pressing it
+  (`lib_aside_run`, `lib_set_aside`) reads the library again and, for each
+  such record, runs `libstore_set_aside_book` / `libstore_set_aside_index`:
+  one `idb_update` transaction that reads the record, decides again with
+  the codec (`_read_book`, `_read_index`; what was believed before does
+  not decide) and, only for `UnusableDamaged` and `UnusableNotQuire`,
+  writes the record's bytes to `library/damaged/<id>/<crc>` and deletes
+  the record in the one batch (`_aside_writeback`), so an aborted
+  transaction leaves the old record byte for byte
+  (`e2e/library-records.spec.js`). A newer Quire's record
+  (`UnusableNewer`) is never set aside: it is not damaged, an update of
+  Quire reads it (`AsideNewer`). Nothing is lost, so it is not a `harm`
+  and has no confirmation; the row then says to import those books again
+  and restore a backup, which re-applies their places, shelves and notes.
+  By research: Firefox renames a corrupt `places.sqlite` to
+  `places.sqlite.corrupt` and starts a new one; Mozilla's application-services
+  weighed moving the file aside against deleting it and chose deleting only
+  because it acts on confirmed corruption; Roon and Miro tell the user to
+  keep the old data folder or back the corrupt database up, then start
+  fresh. Quire keeps the copy, as they do, and acts on one record at a time
+  instead of the whole library, so what reads is never touched.
+
 * **The banner.** A kind the screen says completely has no banner: the
   screen gives what happened, what Quire did, what to do and the
   browser's name for it ("Details: UnknownError."), which is what a

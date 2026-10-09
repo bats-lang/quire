@@ -1438,6 +1438,7 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsSync
   | SettingsDictionaries
   | SettingsExportBackup
+  | SettingsSetAside
   | SettingsResetSettings
   | SettingsFactoryReset
   | SettingsAbout
@@ -1454,6 +1455,7 @@ implement settings_control_id (control) =
   | SettingsSync() => "settings-sync"
   | SettingsDictionaries() => "settings-dictionaries"
   | SettingsExportBackup() => "settings-export-backup"
+  | SettingsSetAside() => "settings-set-aside"
   | SettingsResetSettings() => "settings-reset-settings"
   | SettingsFactoryReset() => "settings-factory-reset"
   | SettingsAbout() => "settings-about"
@@ -1469,7 +1471,8 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsGoalSixty() => $R.some(SettingsSync())
   | SettingsSync() => $R.some(SettingsDictionaries())
   | SettingsDictionaries() => $R.some(SettingsExportBackup())
-  | SettingsExportBackup() => $R.some(SettingsResetSettings())
+  | SettingsExportBackup() => $R.some(SettingsSetAside())
+  | SettingsSetAside() => $R.some(SettingsResetSettings())
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
   | SettingsFactoryReset() => $R.some(SettingsAbout())
   | SettingsAbout() => $R.some(SettingsDone())
