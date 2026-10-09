@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 72 | 50 | 17 | 139 |
+| must | 86 | 36 | 17 | 139 |
 | should | 11 | 22 | 5 | 38 |
 | may | 0 | 1 | 0 | 1 |
 | deprecated | 16 | 10 | 1 | 27 |
-| all | 99 | 83 | 23 | 205 |
+| all | 113 | 69 | 23 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -38,10 +38,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `cnt-svg-css-inclusion` | must | an SVG included in the XHTML is not drawn (svg elements are made divs) | 12/18 | yes |
 | `cnt-svg-embedded` | must | an inline svg is not drawn (made a div; no graphics) | 16/18 | yes |
 | `cnt-svg-support` | must | an SVG spine document shows its text but not its drawing | 9/17 | yes |
-| `lay-pp-images-in-spine` | must | crash: an image in the spine is read as XHTML text; 3 MB PNGs kill the page (the fallback is not followed) | 2/2 | yes |
-| `lay-pp-images-mixed` | must | hang: an image in the spine is read as XHTML text (the fallback is not followed) | 2/2 | yes |
-| `lay-pp-spine-overrides_image-spine-pp` | must | the PNG spine item is shown as binary text; its fallback is not followed | 1/1 | yes |
-| `lay-pp-spine-overrides_image-spine-reflow` | must | the PNG spine item is shown as binary text; its fallback is not followed | 1/1 | yes |
 | `lay-pp-svg-icb_multi` | must | SVG spine documents are not drawn, nor sized by their viewBox | 0/0 | yes |
 | `lay-pp-xhtml-icb` | must | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi` | must | each page's own viewport is read (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
@@ -50,35 +46,25 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `lay-pp-xhtml-icb_units` | must | units are ignored, values in pixels (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `lay-roll-embedded-images` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
 | `lay-roll-embedded-images-svg` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
-| `lay-roll-images-in-spine` | must | crash: an image in the spine is read as XHTML text (and roll layout is not implemented) | 2/2 | yes |
-| `lay-roll-images-mixed` | must | hang: an image in the spine is read as XHTML text (and roll layout is not implemented) | 2/2 | yes |
 | `nav-spine_in-spine-hidden-toc-css` | must | the navigation document in the spine shows the entry its CSS hides (display:none): the book's CSS is dropped by design; the contents panel lists both, as asked | 1/2 | policy |
 | `nav-spine_in-spine-hidden-toc-html` | must | the navigation document in the spine shows the entry its hidden attribute hides; the contents panel lists both, as asked | 1/2 | yes |
 | `ocf-url_link-path-absolute` | must | a path-absolute address ("/images/photograph.jpg") is not resolved from the container root: the image is blanked | 6/16 | yes |
 | `ocf-zip-comp` | must | the suite's EPUB opens with no error (it is built with Deflate: it cannot show the case); the e2e test makes a bzip2 entry | 7/15 | yes |
 | `ocf-zip-mult` | must | the suite's EPUB opens with no error (it is one zip, not a split archive); the e2e test makes a split archive's end record | 3/15 | yes |
-| `pkg-creator-order` | must | the last dc:creator is used, not the first (_opf_metadata_node in src/epub_xml.bats replaces the author at each one) | 7/9 | yes |
 | `pkg-dir_but_not_content` | must | the OPF's language and direction become the content's: the page is rtl and the list right-aligned | 13/13 | yes |
 | `pkg-dir_creator-rtl` | must | a dc:creator's dir attribute is not read: the name is shown left to right | 1/12 | yes |
 | `pkg-dir_rtl-root-ltr` | must | a dc:title's dir attribute is not read: the title is shown left to right | 3/12 | yes |
 | `pkg-dir_rtl-root-unset` | must | a dc:title's dir attribute is not read: the title is shown left to right | 3/12 | yes |
 | `pkg-dir_unset-root-rtl` | must | the package's dir attribute is not read for the title: it is shown left to right | 1/11 | yes |
 | `pkg-lang_but_not_content` | must | the OPF's language is put on the content (lang=fr), so a q gets French quotation marks | 11/15 | yes |
-| `pkg-title-order` | must | the last dc:title is used, not the first (_opf_metadata_node in src/epub_xml.bats replaces the title at each one) | 8/10 | yes |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
 | `pub-cmt-mp3` | must | an audio element is not shown (its fallback content is) | 12/14 | yes |
 | `pub-cmt-mp4` | must | an audio element is not shown (its fallback content is) | 11/14 | yes |
 | `pub-cmt-opus` | must | an audio element is not shown (its fallback content is) | 6/14 | yes |
 | `pub-data-urls_browsing-context` | must | an img with a data: URL is blanked (src="data:,") | 16/16 | yes |
 | `pub-data-urls_top-level-content` | must | an img with a data: URL is blanked (src="data:,") | 14/15 | yes |
-| `pub-foreign_bad-fallback` | must | a binary item in the spine is shown as text (65536 garbage pages) instead of being refused or skipped | 4/8 | yes |
-| `pub-foreign_image` | must | an img whose item has a manifest fallback is not shown (the fallback is not followed) | 4/17 | yes |
-| `pub-foreign_json-spine` | must | a JSON spine item is shown as text; its manifest fallback is not followed | 4/9 | yes |
-| `pub-foreign_xml-spine` | must | an XML spine item is shown as text; its manifest fallback is not followed | 4/9 | yes |
-| `pub-foreign_xml-suffix-spine` | must | an XML spine item is shown as text; its manifest fallback is not followed | 4/10 | yes |
 | `pub-xml-names` | must | a content document with an invalid name (a::b) is shown, not reported as an error | 9/9 | yes |
 | `pub-xml-non-validating_unclosed` | must | a content document with an unclosed element is shown, not reported as an error | 8/9 | yes |
-| `scr-support-fallback` | must | a scripted spine item with a manifest fallback is shown instead of its fallback, where scripts are not run | 3/5 | yes |
 | `css-epub-hyphens` | should | the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's) | 7/18 | policy |
 | `css-epub-line-break` | should | the book's own CSS is dropped by design | 3/15 | policy |
 | `css-epub-text-align-last` | should | the book's own CSS is dropped by design | 1/19 | policy |
@@ -163,12 +149,18 @@ Caveats of a pass, where there is one:
 * `lay-pkg-flow-paginated`: paginated is the default
 * `lay-pp-embedded-images`: measured: each image fills its page
 * `lay-pp-embedded-images-svg`: the images inside the SVG are shown
+* `lay-pp-images-in-spine`: an image in the spine is replaced by its fallback and never read as text; no crash (the 3 MB PNG)
+* `lay-pp-images-mixed`: an image in the spine is replaced by its fallback; no hang
 * `lay-pp-layout-pre-paginated-spreads`: pages meet with no gap, measured
 * `lay-pp-page-spread-combined`: measured
 * `lay-pp-page-spread-left`: measured
 * `lay-pp-page-spread-right`: measured
+* `lay-pp-spine-overrides_image-spine-pp`: the PNG spine item is replaced by its fallback
+* `lay-pp-spine-overrides_image-spine-reflow`: the PNG spine item is replaced by its fallback
 * `lay-pp-spread-none`: one page a screen, measured
 * `lay-rendition-flow-pre-pag`: rendition:flow is ignored everywhere
+* `lay-roll-images-in-spine`: an image in the spine is replaced by its fallback, no crash (roll layout itself is not implemented, as lay-roll-embedded-images says)
+* `lay-roll-images-mixed`: an image in the spine is replaced by its fallback, no hang (roll layout itself is not implemented)
 * `lay-viewport-meta-prop`: only the dimensions of the viewport are read (measured)
 * `mol-audio`: clipBegin/clipEnd obeyed (MP3)
 * `mol-audio-exceeding-clipend`: MP3
@@ -189,6 +181,7 @@ Caveats of a pass, where there is one:
 * `mol-timing-synchronization_svg-fxl`: the text of the SVG is read and marked (the drawing is not shown); MP3
 * `nav-spine_in-spine-no-list-style`: the contents panel is not numbered
 * `ocf-font_obfuscation_bis`: the font is not displayed (no embedded font is ever used)
+* `pkg-creator-order`: the first dc:creator is used
 * `pkg-dir-auto_root-rtl`: the title is shown with a left to right base, as the test says it should be (dir=auto, first letter Latin)
 * `pkg-dir-auto_root-unset`: the title is shown with a left to right base, as the test says it should be
 * `pkg-dir_unset-root-unset`: the title is shown left to right, as the test says it should be
@@ -197,10 +190,17 @@ Caveats of a pass, where there is one:
 * `pkg-spine-duplicate-item-rendering`: three places of the document, measured by progress
 * `pkg-spine-duplicate-item-ui`: three bookmarks, one for each place
 * `pkg-spine-order-svg`: the text of each page, in order (the drawings are not shown)
+* `pkg-title-order`: the first dc:title is used
 * `pkg-unique-id`: two books with the one identifier are two cards
 * `pkg-unique-id_duplicate`: two books with the one identifier are two cards
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded
+* `pub-foreign_bad-fallback`: an item and a fallback that are both foreign are left out of the spine, never shown as text
+* `pub-foreign_image`: an img of a foreign type is shown as its manifest fallback
+* `pub-foreign_json-spine`: the fallback is shown in place of the JSON item
+* `pub-foreign_xml-spine`: the fallback is shown in place of the XML item
+* `pub-foreign_xml-suffix-spine`: the fallback is shown in place of the XML item
 * `pub-xml-external-id`: the entity is not resolved
+* `scr-support-fallback`: a scripted item with a fallback is replaced by the fallback (no scripts are run)
 * `sec-untrusted-consent_network`: no remote resource is requested, with or without consent (measured: no request left the page)
 * `sec-untrusted-consent_scripting`: no script is run, with or without consent
 

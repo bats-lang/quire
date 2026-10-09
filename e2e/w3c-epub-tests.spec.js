@@ -103,6 +103,13 @@ test('pub-foreign_xml-spine, pub-foreign_xml-suffix-spine (must): an XML spine i
   expect(await visibleText(page)).not.toContain('The XML text');
 });
 
+test('pub-foreign_xml-suffix-spine (must): a spine item of an XML type with a +xml suffix is replaced by its manifest fallback', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'xml-suffix-spine', 'XML suffix in the spine');
+  await expect.poll(() => visibleText(page)).toContain(W3C_TEXT.FALLBACK_TEXT);
+  expect(await visibleText(page)).not.toContain('The XML suffix text');
+});
+
 test('lay-pp-images-in-spine, lay-pp-images-mixed, lay-pp-spine-overrides_image-spine-pp, lay-pp-spine-overrides_image-spine-reflow, lay-roll-images-in-spine, lay-roll-images-mixed (must): an image in the spine is replaced by its fallback, and is never read as text', async ({ page }) => {
   const crashed = watchCrash(page);
   await start(page);

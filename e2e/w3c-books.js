@@ -151,6 +151,14 @@ export const w3cBooks = {
     ],
     spine: [{ idref: 'primary' }, { idref: 'closing' }],
   })),
+  'xml-suffix-spine': book(() => packageEpub({
+    title: 'XML suffix in the spine',
+    items: [
+      { id: 'primary', href: 'novel.xml', type: 'application/x-novel+xml', fallback: 'fallback', data: '<?xml version="1.0"?><novel><para>The XML suffix text, not shown.</para></novel>' },
+      fallbackItem, closing,
+    ],
+    spine: [{ idref: 'primary' }, { idref: 'closing' }],
+  })),
   'image-spine': book(() => packageEpub({
     title: 'Image in the spine',
     items: [

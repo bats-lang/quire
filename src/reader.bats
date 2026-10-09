@@ -2677,6 +2677,75 @@ fn _pictures_push {l:agz}{path_len:pos | path_len < 65536} (node: int, path: $A.
   val+ ~PicturesCell(rest) = _pictures_take()
 in _pictures_put(PicturesCell(pictures_cons(node, path, path_len, rest))) end
 
+(* The images of the book that a reader does not show but whose manifest
+   item has a fallback that it does (EPUB 3.3 §3.3, the suite's
+   pub-foreign_image): each one's entry path and the path of the entry
+   its fallbacks lead to. Found once, with the spine (_fallbacks_collect),
+   and forgotten with the next book's *)
+datavtype image_fallbacks(int) =
+  | image_fallbacks_nil(0) of ()
+  | {count:nat}{item_l:agz}{item_len:pos | item_len < 65536}{target_l:agz}{target_len:pos | target_len < 65536}
+    image_fallbacks_cons(count + 1) of ($A.arr(byte, item_l, item_len), int item_len, $A.arr(byte, target_l, target_len), int target_len, image_fallbacks(count))
+
+fun image_fallbacks_free {count:nat} .<count>. (entries: image_fallbacks(count)): void =
+  case+ entries of
+  | ~image_fallbacks_nil() => ()
+  | ~image_fallbacks_cons(item, _, target, _, rest) => let
+      val () = $A.free<byte>(item)
+      val () = $A.free<byte>(target)
+    in image_fallbacks_free(rest) end
+
+datavtype image_fallbacks_cell = {count:nat} ImageFallbacksCell of image_fallbacks(count)
+
+val _image_fallbacks = ref<image_fallbacks_cell>(ImageFallbacksCell(image_fallbacks_nil()))
+
+fn _image_fallbacks_take (): image_fallbacks_cell = let
+  var cell: image_fallbacks_cell = ImageFallbacksCell(image_fallbacks_nil())
+  val () = ref_exch_elt<image_fallbacks_cell>(_image_fallbacks, cell)
+in cell end
+
+fn _image_fallbacks_put (new_cell: image_fallbacks_cell): void = let
+  var cell: image_fallbacks_cell = new_cell
+  val () = ref_exch_elt<image_fallbacks_cell>(_image_fallbacks, cell)
+  val+ ~ImageFallbacksCell(old) = cell
+in image_fallbacks_free(old) end
+
+(* A path of a book's entry, kept; none when there is none *)
+datavtype kept_path =
+  | {l:agz}{path_len:pos | path_len < 65536} KeptPath of ($A.arr(byte, l, path_len), int path_len)
+  | NoKeptPath of ()
+
+(* Whether the first len bytes of the array and of the borrowed path are
+   the same, from byte i *)
+fun _path_same {l1,l2:agz}{n1,n2:pos}{len:nat | len <= n1; len <= n2}{i:nat | i <= len} .<len - i>.
+  (kept: !$A.arr(byte, l1, n1), path: !$A.borrow(byte, l2, n2), len: int len, i: int i): bool =
+  if i >= len then true
+  else if byte2int0($A.get<byte>(kept, i)) <> byte2int0($A.read<byte>(path, i)) then false
+  else _path_same(kept, path, len, i + 1)
+
+(* The path of the entry the fallbacks of the image at path[0, path_len)
+   lead to, copied; none when it has no fallback *)
+fun _image_fallback_find {count:nat}{l:agz}{path_len:pos} .<count>.
+  (entries: !image_fallbacks(count), path: !$A.borrow(byte, l, path_len), path_len: int path_len): kept_path =
+  case+ entries of
+  | image_fallbacks_nil() => NoKeptPath()
+  | @image_fallbacks_cons(item, item_len, target, target_len, rest) =>
+    if item_len = path_len then
+      (if _path_same(item, path, item_len, 0) then let
+         val copy = $A.alloc<byte>(target_len)
+         val () = _fragment_duplicate(target, copy, target_len, 0)
+         val copy_len = target_len
+         prval () = fold@(entries)
+       in KeptPath(copy, copy_len) end
+       else let
+         val found = _image_fallback_find(rest, path, path_len)
+         prval () = fold@(entries)
+       in found end)
+    else let
+      val found = _image_fallback_find(rest, path, path_len)
+      prval () = fold@(entries)
+    in found end
+
 (* A content node's image (or the viewer's, when in_viewer): the n bytes of
    data, of type mime *)
 fn _set_src {node:nat}{l:agz}{n:pos}{mime_len:pos | mime_len <= 24}
@@ -2696,7 +2765,7 @@ in release_bytes(mime_frozen, mime_bytes) end
    file_size-byte file (book serial): shown now when it is stored, once decompressed when it
    is deflated (unless chapter load generation is no longer the latest); not at
    all when it is missing *)
-fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
+fn _show_image_entry {file_size:pos}{node:nat}{l:agz}{path_len:pos}
   (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
    path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
   val mime = mime_of(path, path_len)
@@ -2729,6 +2798,26 @@ in
             val () = $A.drop<byte>(content_frozen, content_bytes)
           in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
     end
+end
+
+(* A content node's image, the entry named path[0, path_len): or, when
+   the manifest item of that entry is a type the reader does not show
+   and its fallbacks lead to one it does, that fallback's entry *)
+fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
+  (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
+   path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
+  val cell = _image_fallbacks_take()
+  val+ @ImageFallbacksCell(entries) = cell
+  val found = _image_fallback_find(entries, path, path_len)
+  prval () = fold@(cell)
+  val () = _image_fallbacks_put(cell)
+in
+  case+ found of
+  | ~NoKeptPath() => _show_image_entry(serial, file_size, node, in_viewer, generation, path, path_len)
+  | ~KeptPath(target, target_len) => let
+      val @(target_frozen, target_bytes) = $A.freeze<byte>(target)
+      val () = _show_image_entry(serial, file_size, node, in_viewer, generation, target_bytes, target_len)
+    in release_bytes(target_frozen, target_bytes) end
 end
 
 (* The image of a content node, whose src is data[src_start, src_start + src_len): the
@@ -2823,42 +2912,103 @@ fn _overlay_of {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_of
         Overlay(data_start, data_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len))
       | ~EntryMiss() => NoOverlay())
 
-(* The chapters from spine itemref item down to the first, onto found: each
-   href, after the OPF's directory (prefix_len bytes of the name at
-   opf_name_offset), found in book serial's index, with its layout (its
-   itemref's, else book_layout); the OPF's data checked here, once *)
+(* The path of the entry at the OPF's directory (prefix_len bytes of the
+   name at opf_name_offset) and data[href_start, href_start + href_len),
+   its "." and ".." resolved: the name an <img> that names it resolves to *)
+fn _kept_path {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{href_start,href_len:nat | href_start + href_len <= n}
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   data: !$A.borrow(byte, l, n), n: int n, href_start: int href_start, href_len: int href_len): kept_path =
+  if href_len <= 0 then NoKeptPath()
+  else if href_len >= 65536 then NoKeptPath()
+  else if prefix_len + href_len >= 65536 then NoKeptPath()
+  else let
+    val joined_len = prefix_len + href_len
+    val buf = $A.alloc<byte>(joined_len)
+    val _ = book_read(serial, file_size, opf_name_offset, buf, prefix_len)
+    val () = $S.copy_from_borrow(data, href_start, n, buf, prefix_len, joined_len, href_len)
+    val path_len = path_norm(buf, joined_len)
+  in
+    if path_len <= 0 then let val () = $A.free<byte>(buf) in NoKeptPath() end
+    else let
+      val exact = $A.alloc<byte>(path_len)
+      val buf = $S.copy_arr_region(buf, 0, joined_len, exact, path_len, path_len)
+      val () = $A.free<byte>(buf)
+    in KeptPath(exact, path_len) end
+  end
+
+(* The images the manifest gives a fallback (find_image_fallback_n), from
+   the skip-th on, kept for _show_image: at most 256 of them *)
+fun _fallbacks_collect {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{tree_size:nat}{skip:nat | skip <= 256} .<256 - skip>.
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), skip: int skip): void =
+  if skip >= 256 then ()
+  else (case+ find_image_fallback_n(opf_bytes, opf_size, nodes, skip) of
+    | ~ImageFallbackSkip(_) => ()
+    | ~ImageFallback(item_offset, item_len, fallback_offset, fallback_len) => let
+        val item = _kept_path(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, item_offset, item_len)
+        val target = (case+ find_image_target(opf_bytes, opf_size, nodes, fallback_offset, fallback_len) of
+          | ~xspan_none() => NoKeptPath()
+          | ~xspan_at(target_offset, target_len) =>
+            _kept_path(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, target_offset, target_len)): kept_path
+        val () = (case+ item of
+          | ~NoKeptPath() => (case+ target of
+            | ~NoKeptPath() => ()
+            | ~KeptPath(target_path, _) => $A.free<byte>(target_path))
+          | ~KeptPath(item_path, item_path_len) => (case+ target of
+            | ~NoKeptPath() => $A.free<byte>(item_path)
+            | ~KeptPath(target_path, target_path_len) => let
+                val+ ~ImageFallbacksCell(rest) = _image_fallbacks_take()
+              in _image_fallbacks_put(ImageFallbacksCell(
+                   image_fallbacks_cons(item_path, item_path_len, target_path, target_path_len, rest))) end))
+      in _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, skip + 1) end)
+
+(* The chapters from spine itemref item down to the first, onto found
+   (found_total of them): each itemref's item, or the item its fallback
+   chain shows when that is not a content document (find_chapter_shown_href_n),
+   its href after the OPF's directory (prefix_len bytes of the name at
+   opf_name_offset) found in book serial's index, with its layout (its
+   itemref's, else book_layout). An itemref whose item and fallbacks are
+   all not content documents is left out, so the reader never turns to
+   it nor reads its bytes as XHTML (quire#419); the OPF's data checked
+   here, once. The chapters and how many *)
 fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
   {l:agz}{n:pos}{tree_size:nat}{item:int | item >= ~1}{found_count:nat} .<item + 1>.
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
    opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), book_layout: rendition_layout,
-   item: int item, found: book_chapters(file_size, found_count)): book_chapters(file_size, found_count + item + 1) =
-  if item < 0 then found
-  else let
-    val chapters = (case+ find_chapter_href_n(opf_bytes, opf_size, nodes, item) of
-      | ~xspan_none() => ChapterMissing(found)
-      | ~xspan_at(href_offset, href_len) =>
-        if href_len <= 0 then ChapterMissing(found)
-        else if prefix_len + href_len > 1048576 then ChapterMissing(found)
-        else let
-          val path_len = prefix_len + href_len
-          val path_buf = $A.alloc<byte>(path_len)
-          (* The prefix read from the file at the OPF's name, then the
-             chapter href from the OPF *)
-          val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
-          val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
-                    path_buf, prefix_len, path_len, href_len)
-          val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
-          val hit = book_find_entry(serial, file_size, path_bytes, path_len)
-          val () = release_bytes(path_frozen, path_bytes)
-        in
-          case+ hit of
-          | ~EntryMiss() => ChapterMissing(found)
-          | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
-              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
-                itemref_layout_n(opf_bytes, nodes, item, book_layout), itemref_spread_n(opf_bytes, nodes, item),
-                _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
-        end): book_chapters(file_size, found_count + 1)
-  in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout, item - 1, chapters) end
+   item: int item, found: book_chapters(file_size, found_count), found_total: int found_count): [total:nat] @(book_chapters(file_size, total), int total) =
+  if item < 0 then @(found, found_total)
+  else (case+ find_chapter_href_n(opf_bytes, opf_size, nodes, item) of
+    | ~xspan_none() => _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+                         item - 1, ChapterMissing(found), found_total + 1)
+    | ~xspan_at(_, _) => (case+ find_chapter_shown_href_n(opf_bytes, opf_size, nodes, item) of
+      | ~xspan_none() => _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+                           item - 1, found, found_total)
+      | ~xspan_at(href_offset, href_len) => let
+          val chapters = (if href_len <= 0 then ChapterMissing(found)
+            else if prefix_len + href_len > 1048576 then ChapterMissing(found)
+            else let
+              val path_len = prefix_len + href_len
+              val path_buf = $A.alloc<byte>(path_len)
+              (* The prefix read from the file at the OPF's name, then the
+                 chapter href from the OPF *)
+              val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
+              val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
+                        path_buf, prefix_len, path_len, href_len)
+              val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
+              val hit = book_find_entry(serial, file_size, path_bytes, path_len)
+              val () = release_bytes(path_frozen, path_bytes)
+            in
+              case+ hit of
+              | ~EntryMiss() => ChapterMissing(found)
+              | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
+                  Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
+                    itemref_layout_n(opf_bytes, nodes, item, book_layout), itemref_spread_n(opf_bytes, nodes, item),
+                    _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
+            end): book_chapters(file_size, found_count + 1)
+        in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+             item - 1, chapters, found_total + 1) end))
 
 (* ============================================================
    The book's own font, for the "Book" font setting
@@ -3102,9 +3252,11 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
                   prefixes chapter hrefs *)
                val prefix_len = _opf_prefix_len(serial, file_size, opf_name_offset, opf_name_len)
-               val chapters = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
-                           opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil())
-               val () = book_spine_set(serial, file_size, chapters, total)
+               val @(chapters, chapter_total) = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
+                           opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil(), 0)
+               val () = book_spine_set(serial, file_size, chapters, chapter_total)
+               val () = _image_fallbacks_put(ImageFallbacksCell(image_fallbacks_nil()))
+               val () = _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes, 0)
                (* a book with Media Overlays is read aloud by its narration *)
                val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
