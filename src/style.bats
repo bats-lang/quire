@@ -2094,7 +2094,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9450] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9650] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2320,10 +2320,15 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, BreakInside(), "avoid")
   val sheet = close(sheet)
+  (* a table is a scroll container, as wide as the column and as tall as its
+     height at most (#413): a block that scrolls cannot be split between
+     columns, so one taller than the page would lose the rows past the
+     page's foot *)
   val sheet = rule(sheet, ".caf table")
   val sheet = lay(sheet, Display(), "block")
-  val sheet = lay(sheet, OverflowX(), "auto")
+  val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, MaxWidth(), "100%")
+  val sheet = lay(sheet, MaxHeight(), "calc(100dvh - var(--page-top) - var(--page-bottom))")
   val sheet = lay(sheet, BorderCollapse(), "collapse")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf td,.caf th")
