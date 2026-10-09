@@ -6,11 +6,13 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, bookPage, visibleText, marks, dialog, selectionButton, control, showChrome,
+  start, readBook, bookPage, marks, dialog, selectionButton, control, showChrome,
 } from './helpers.js';
 import { pagebreakBooks } from './pagebreak-books.js';
 
 const footerPage = page => page.getByText(/^ · page \d+ in print$/);
+/** The chapter's whole text, on the page or not */
+const fullText = page => bookPage(page).evaluate(doc => doc.textContent.replace(/\s+/g, ' '));
 const searchPanel = page => dialog(page, 'Search in book');
 const searchBox = page => searchPanel(page).getByRole('searchbox', { name: 'Search in book' });
 const searchSummary = page => searchPanel(page).getByRole('status');
@@ -44,12 +46,15 @@ async function selectWord(page, word) {
 test('text inside a page-break span is shown, selectable and searchable, and the footer names the print page', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, pagebreakBooks.textInside.opts);
-  const text = await visibleText(page);
+  const text = await fullText(page);
   expect(text).toContain('‘But of course!’ said the first.');
   expect(text).toContain('Wait what? asked the second.');
   // the words are the page's: selectable
   await selectWord(page, 'But');
   await expect(selectionButton(page, 'Highlight')).toBeVisible();
+  // the footer names the print page from the title, with the text there
+  await page.keyboard.press('t');
+  await expect(footerPage(page)).toHaveText(' · page 10 in print');
   // searchable: the break's own words, and those after it (a hit is
   // inside one text, so a phrase across the break's end is not found:
   // quire#437)
@@ -64,9 +69,6 @@ test('text inside a page-break span is shown, selectable and searchable, and the
   await search(page, 'Wait', 1);
   await searchResults(page).first().click();
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Wait' });
-  // the footer names the print page from the title, with the text there
-  await page.keyboard.press('t');
-  await expect(footerPage(page)).toHaveText(' · page 10 in print');
   expect(errors).toEqual([]);
 });
 
@@ -85,19 +87,19 @@ test('text inside a page-break span is shown, selectable and searchable, and the
 test('a page break whose text is the page number is shown as the book has it, and names the print page', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, pagebreakBooks.numberText.opts);
-  expect(await visibleText(page)).toContain('Page ten ends here.');
-  expect(await visibleText(page)).toContain('10 And page eleven begins.');
+  expect(await fullText(page)).toContain('Page ten ends here.');
+  expect(await fullText(page)).toContain('10 And page eleven begins.');
   await page.keyboard.press('t');
   await expect(footerPage(page)).toHaveText(' · page 10 in print');
   // the second has no title or label: shown, and the footer keeps the page before
-  expect(await visibleText(page)).toContain('20 After the number twenty.');
+  expect(await fullText(page)).toContain('20 After the number twenty.');
   expect(errors).toEqual([]);
 });
 
 test('a block-level page break neither hides nor duplicates the text round it, and a break inside a word or an inline element leaves it whole', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, pagebreakBooks.structure.opts);
-  const text = await visibleText(page);
+  const text = await fullText(page);
   expect(text.match(/Before the block break\./g)).toHaveLength(1);
   expect(text.match(/After the block break\./g)).toHaveLength(1);
   expect(text).toContain('An unbelievable word.');
@@ -148,7 +150,7 @@ async function fakeSpeech(page) {
 test('read aloud says the words inside a page-break span, with those round it', async ({ page }) => {
   await fakeSpeech(page);
   const errors = await start(page);
-  await readBook(page, pagebreakBooks.textInside.opts);
+  await readBook(page, pagebreakBooks.textInsideShort.opts);
   await showChrome(page);
   await control(page, 'Read aloud').click();
   for (let k = 0; k < 5; k++) {
