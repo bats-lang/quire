@@ -124,7 +124,8 @@ fn _kept_name_into {l:agz} (buffer: !$A.arr(byte, l, 512)): [name_len:nat | name
   | ~NoKeptName() => _put_string(buffer, 0, "The file")
 
 (* Shows the error banner for the file being imported, saying how it
-   failed (no case detects DRM, so none is blamed) *)
+   failed (only a book that declares its protection is blamed on DRM,
+   by _protection_check; a damaged one never is) *)
 fn _error (cause: named_failure): void = let
   val message = $A.alloc<byte>(512)
   val name_end = _kept_name_into(message)
@@ -188,9 +189,10 @@ fn _is_reopen (mode: import_mode): bool =
 (* Why an archive could not be opened: no container.xml, or one that
    could not be read; no package (OPF) path in it, no package there, or
    one that could not be read; the book not finished, or not put in the
-   library *)
+   library; or the book declares a protection Quire cannot open (quire#427) *)
 datatype archive_failure =
   | NoContainer | ContainerNotRead | NoPackagePath | NoPackage | PackageNotRead | NotFinished | NotInLibrary
+  | DrmAdept | DrmLcp | DrmFairPlay | DrmKobo | DrmUnknown
 
 (* How opening an archive went: a book added or replaced (its key), a
    stored book reopened, or a failure *)
@@ -212,6 +214,11 @@ fn _archive_named (cause: archive_failure): named_failure =
   | PackageNotRead() => PackageDamaged()
   | NotFinished() => ReadingNotFinished()
   | NotInLibrary() => NotKeptInLibrary()
+  | DrmAdept() => ProtectedByAdept()
+  | DrmLcp() => ProtectedByLcp()
+  | DrmFairPlay() => ProtectedByFairPlay()
+  | DrmKobo() => ProtectedByKobo()
+  | DrmUnknown() => ProtectedUnknown()
 
 (* target[6 + position, 6 + count) := source[position, count) *)
 fun _put_after_head {source_loc,target_loc:agz}{source_size,target_size:pos}{count:nat | count <= source_size; count + 6 <= target_size}{position:nat | position <= count} .<count - position>.
@@ -417,7 +424,7 @@ end
 (* Reads the container.xml and OPF of book `serial` (the file_size-byte
    file just put in the book cell), then _opf_done; the promise resolves with
    how that went *)
-fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: import_mode, library_index: Int, id_high: Int, id_low: Int)
+fn _open_archive_plain {file_size:pos} (serial: int, file_size: int file_size, mode: import_mode, library_index: Int, id_high: Int, id_low: Int)
   : $P.promise(archive_outcome, $P.Chained) = let
   var container_chars = @[char][22]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'c', 'o', 'n', 't', 'a', 'i', 'n', 'e', 'r', '.', 'x', 'm', 'l')
   val container_name = $S.from_char_array(container_chars, 22)
@@ -493,6 +500,113 @@ in
           end)
     end
 end
+
+(* ============================================================
+   Declared protection (quire#427)
+   ============================================================ *)
+
+(* What a book declares about its protection, found before it is read:
+   a licence or rights file of a scheme (Readium LCP's license.lcpl,
+   Apple FairPlay's sinf.xml, Adobe ADEPT's rights.xml), or an
+   encryption.xml that names that scheme or an algorithm that is not a
+   font obfuscation. Only what a book says is believed: a damaged book
+   that declares nothing is damaged, never DRM *)
+datatype protection =
+  | Unprotected
+  | AdeptProtected
+  | LcpProtected
+  | FairPlayProtected
+  | KoboProtected
+  | UnknownProtected
+
+implement $P.dispose<protection>(_) = ()
+
+(* Whether the open book, book `serial` of file_size bytes, has an
+   entry named name[0, name_len) *)
+fn _has_entry {file_size:pos}{l:agz}{name_len:pos}
+  (serial: int, file_size: int file_size, name: $A.arr(byte, l, name_len), name_len: int name_len): bool = let
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+  val hit = book_find_entry(serial, file_size, name_bytes, name_len)
+  val () = release_bytes(name_frozen, name_bytes)
+in
+  case+ hit of
+  | ~EntryHit(_, _, _, _, _) => true
+  | ~EntryMiss() => false
+end
+
+fn _protection_of (found: encryption_found): protection =
+  case+ found of
+  | EncryptionNone() => Unprotected()
+  | EncryptionAdept() => AdeptProtected()
+  | EncryptionLcp() => LcpProtected()
+  | EncryptionKobo() => KoboProtected()
+  | EncryptionUnknownAlgorithm() => UnknownProtected()
+
+(* What the book of key serial declares: its licence and rights files
+   first, then its encryption.xml *)
+fn _protection_check {file_size:pos} (serial: int, file_size: int file_size): $P.promise(protection, $P.Chained) = let
+  var license_chars = @[char][21]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'l', 'i', 'c', 'e', 'n', 's', 'e', '.', 'l', 'c', 'p', 'l')
+  val license_name = $S.from_char_array(license_chars, 21)
+  var sinf_chars = @[char][17]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 's', 'i', 'n', 'f', '.', 'x', 'm', 'l')
+  val sinf_name = $S.from_char_array(sinf_chars, 17)
+  var rights_chars = @[char][19]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'r', 'i', 'g', 'h', 't', 's', '.', 'x', 'm', 'l')
+  val rights_name = $S.from_char_array(rights_chars, 19)
+in
+  if _has_entry(serial, file_size, license_name, 21) then let
+    val () = $A.free<byte>(sinf_name)
+    val () = $A.free<byte>(rights_name)
+  in $P.ret<protection>(LcpProtected()) end
+  else if _has_entry(serial, file_size, sinf_name, 17) then let
+    val () = $A.free<byte>(rights_name)
+  in $P.ret<protection>(FairPlayProtected()) end
+  else if _has_entry(serial, file_size, rights_name, 19) then $P.ret<protection>(AdeptProtected())
+  else let
+    var encryption_chars = @[char][23]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'e', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', '.', 'x', 'm', 'l')
+    val encryption_name = $S.from_char_array(encryption_chars, 23)
+    val @(name_frozen, name_bytes) = $A.freeze<byte>(encryption_name)
+    val encryption = book_zip_read(serial, file_size, name_bytes, 23)
+    val () = release_bytes(name_frozen, name_bytes)
+  in
+    case+ encryption of
+    | ~ZipMissing() => $P.ret<protection>(Unprotected())
+    | ~ZipGot(encryption_owner, encryption_data, encryption_size, encryption_method, _, _, _) => let
+        val @(data_frozen, data_bytes) = $A.freeze<byte>(encryption_data)
+        val decompressing = decompress(data_bytes, encryption_size, zip_compression(encryption_method))
+        val () = $A.drop<byte>(data_frozen, data_bytes)
+        val () = piece_free(encryption_owner, $A.thaw<byte>(data_frozen))
+      in
+        $P.and_then<decompressed><protection>(decompressing, llam(inflated) =>
+          case+ take_decompressed(inflated) of
+          (* an encryption.xml that cannot be read declares nothing *)
+          | ~NoContentBytes() => $P.ret<protection>(Unprotected())
+          | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
+              val @(xml_frozen, xml_bytes) = $A.freeze<byte>(xml_buffer)
+              val nodes = $X.parse_document(xml_bytes, xml_size)
+              val found = encryption_of(xml_bytes, xml_size, nodes)
+              val () = $X.free_nodes(nodes)
+              val () = $A.drop<byte>(xml_frozen, xml_bytes)
+              val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
+            in $P.ret<protection>(_protection_of(found)) end)
+      end
+  end
+end
+
+(* Reads the container.xml and OPF of book `serial`, once the book is
+   known to declare no protection Quire cannot open (a stored book was
+   checked when it was imported); the promise resolves with how that
+   went *)
+fn _open_archive {file_size:pos} (serial: int, file_size: int file_size, mode: import_mode, library_index: Int, id_high: Int, id_low: Int)
+  : $P.promise(archive_outcome, $P.Chained) =
+  if _is_reopen(mode) then _open_archive_plain(serial, file_size, mode, library_index, id_high, id_low)
+  else
+    $P.and_then<protection><archive_outcome>(_protection_check(serial, file_size), llam(found) =>
+      case+ found of
+      | Unprotected() => _open_archive_plain(serial, file_size, mode, library_index, id_high, id_low)
+      | AdeptProtected() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(DrmAdept())) end
+      | LcpProtected() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(DrmLcp())) end
+      | FairPlayProtected() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(DrmFairPlay())) end
+      | KoboProtected() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(DrmKobo())) end
+      | UnknownProtected() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(DrmUnknown())) end)
 
 (* ============================================================
    Import
@@ -778,6 +892,11 @@ fn _reopen_failed (cause: archive_failure): book_opening =
   | PackageNotRead() => BookFileMissing()
   | NotFinished() => BookFileMissing()
   | NotInLibrary() => BookFileMissing()
+  | DrmAdept() => BookFileMissing()
+  | DrmLcp() => BookFileMissing()
+  | DrmFairPlay() => BookFileMissing()
+  | DrmKobo() => BookFileMissing()
+  | DrmUnknown() => BookFileMissing()
 
 (* Puts library book (id_high, id_low), whose key is key, in the book cell from
    its stored file *)
