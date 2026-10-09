@@ -655,8 +655,17 @@ async function theAnnotation(page) {
   return { rows, text };
 }
 
+// FIXME (p3, needs bridge): tapping a highlight must make its range the
+// selection, and no atom of bridge's sets a selection (dom_read has
+// get_selection_text, get_selection_rect and get_selection_range, and
+// mark_range draws a highlight without selecting). Needed in bridge: a
+// `select_range` (start node id + offset, end node id + offset) and a
+// `clear_selection`. Then quire's page click finds the annotation at the
+// tapped node, selects its range, remembers its index, and Highlight
+// replaces that annotation's range (note kept) behind an Undo offer
+// (`HighlightRangeChanged`).
 for (const how of ['extend', 'shorten']) {
-  test(`a highlight is re-selected to ${how} it: tapping it shows its toolbar, and the new range replaces the old with its note kept, undoably`, async ({ page }, testInfo) => {
+  test.fixme(`a highlight is re-selected to ${how} it: tapping it shows its toolbar, and the new range replaces the old with its note kept, undoably`, async ({ page }, testInfo) => {
     await open(page, 'prose', { oneColumn: true });
     const words = await pageWords(page);
     // the highlight is three words round the page's middle (so a tap on
@@ -768,9 +777,14 @@ for (const where of ['in the middle of the page', 'in the zone that turns the pa
     expect(await selected(page)).toBe(word.text);
     const width = page.viewportSize().width;
     const lines = await pageLines(page);
-    // a spot with no text under it, clear of the toolbar: the page's top margin
-    const y = Math.max(...[lines[0][0].top - 20, 60].filter(v => v > 0));
+    // a spot with no text under it, clear of the toolbar (which lies over
+    // or under the selection, wherever that is): the page's top margin, or
+    // the margin under its last line
     const x = where === 'in the middle of the page' ? width / 2 : width - 12;
+    const bar = await toolbar(page).boundingBox();
+    const clear = y => y > 0 && !(x >= bar.x - 4 && x <= bar.x + bar.width + 4 && y >= bar.y - 4 && y <= bar.y + bar.height + 4);
+    const y = [Math.max(lines[0][0].top - 20, 60), lines.at(-1)[0].bottom + 20].find(clear);
+    expect(y, 'a spot clear of the toolbar and of text').toBeDefined();
     await tapAt(page, testInfo, { x, y });
     await expect(toolbar(page)).toBeHidden();
     expect(await selected(page)).toBe('');

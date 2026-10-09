@@ -905,6 +905,19 @@ in
       in _index_of(chapter, start_node, start_offset) end)
 end
 
+(* Whether the selection starts in the chapter's text (a content node of
+   the page), not in a note's popup, a field or a panel: only then can it
+   be made a highlight (quire#428) *)
+#pub fn annot_selection_in_page (): bool
+
+implement annot_selection_in_page () = let
+  val @(start_blob, end_blob) = $DR.get_selection_range()
+  val start_node = _node_number_of(start_blob)
+  (* the end is only freed: a selection that ends at an element's edge
+     (a triple click) still starts in the text *)
+  val _ = _node_number_of(end_blob)
+in start_node >= 0 end
+
 (* ============================================================
    Notes
    ============================================================ *)

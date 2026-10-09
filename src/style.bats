@@ -2094,7 +2094,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9450] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9800] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2572,7 +2572,9 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".seltb")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "50%")
-  val sheet = lay(sheet, Bottom(), "106px")
+  (* the top comes from the selection (ui_toolbar_at): above it, else
+     below its end handle, kept in the window and the safe area *)
+  val sheet = lay(sheet, Top(), "min(max(var(--seltb-top,40%),max(8px,var(--safe-top))),calc(100% - max(8px,var(--safe-bottom)) - var(--seltb-height,56px)))")
   val sheet = centre_x(sheet)
   val sheet = lay(sheet, ZIndex(), "5")
   val sheet = lay(sheet, Display(), "flex")
@@ -2595,6 +2597,17 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seltb button:hover,.seltb a:hover")
   val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
+  val sheet = close(sheet)
+  (* a probe as tall as the least distance the toolbar keeps from the
+     window's top (the safe area), for the code to measure (quire#428) *)
+  val sheet = rule(sheet, ".seltbfloor")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = lay(sheet, Left(), "0")
+  val sheet = lay(sheet, Width(), "0")
+  val sheet = lay(sheet, Height(), "max(8px,var(--safe-top))")
+  val sheet = lay(sheet, Visibility(), "hidden")
+  val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".snavf")
   val sheet = lay(sheet, Position(), "absolute")

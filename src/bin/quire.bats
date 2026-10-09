@@ -90,6 +90,13 @@ val _scrubbing = ref<bool>(false)
 datavtype gesture_cell = GNone | GSome of ($GT.gstate, $GS.source)
 val _gestures = ref<gesture_cell>(GNone())
 val _dragged = ref<bool>(false)
+
+(* Whether text was selected when the last pointer went down on the page
+   (quire#428). Chrome clears the selection on the press, so by the click
+   that follows nothing is selected: that tap only ended the selection
+   (the platform's rule for text selection), and a drag that began on a
+   selection does not turn the page *)
+val _press_selected = ref<bool>(false)
 (* The latest keystroke in the search field's number *)
 val _search_tick = ref<int>(0)
 
@@ -2140,6 +2147,10 @@ fn _drag_ended (): void = let
   val () = !_dragged := true
 in $P.finish<Int>($P.vow($TM.timer_set(0)), llam(_) => !_dragged := false) end
 
+(* Whether a selection holds the page: text is selected, or was when the
+   pointer went down (the press has since cleared it) *)
+fn _selection_holds (): bool = if _has_selection() then true else !_press_selected
+
 (* The page turn's events: a pan moves the page being left with the
    finger, a commit turns it (a drag to the left shows the page to the
    right), from where the finger let go, a cancel puts it back *)
@@ -2148,9 +2159,18 @@ fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): voi
   | ~list_vt_nil() => ()
   | ~list_vt_cons(event, rest) => let
       val () = (case+ event of
-        | ~$GT.GPan(region, distance) => if region = PAGE_REGION then reader_pan(distance / 16) else ()
+        | ~$GT.GPan(region, distance) =>
+          if region <> PAGE_REGION then ()
+          else if _selection_holds() then ()
+          else reader_pan(distance / 16)
         | ~$GT.GCommit(region, direction) =>
           if region <> PAGE_REGION then ()
+          else if _selection_holds() then let
+            (* a drag from or after a long press moves the selection's
+               handles, not the page: nothing turns, and its click is
+               no tap *)
+            val () = _drag_ended()
+          in reader_pan_back() end
           else let
             val () = _drag_ended()
           in case+ direction of
@@ -2353,15 +2373,38 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
       if _in_reader() then let val () = reader_save() in 0 end else 0)
 in listeners end
 
+(* The toolbar's top: above the selection (with the gap Flutter's
+   TextSelectionToolbar keeps, 8 px), else below its end handle, which
+   hangs under the selection, clear of it by 20 px (Firefox for Android
+   moves its toolbar 20dp off the selection for the same reason). The
+   stylesheet keeps it inside the window and the safe area (quire#428) *)
+#define TOOLBAR_GAP 8
+#define HANDLE_CLEARANCE 20
+fn _toolbar_place (): void = let
+  val () = $DR.get_selection_rect()
+  val selection_top = $DR.get_measure_y()
+  val selection_bottom = selection_top + $DR.get_measure_h()
+  val () = ui_measure("selection-toolbar")
+  val height = $DR.get_measure_h()
+  (* above, only where it clears the window's top and the safe area
+     (a probe the stylesheet makes that tall) *)
+  val () = ui_measure("selection-toolbar-floor")
+  val floor = $DR.get_measure_h()
+  val above = selection_top - TOOLBAR_GAP - height
+  val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
+in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
+
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
   val listeners = RCons(listeners, OnEl("bookmark-button"), "click", llam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "selectionchange", llam(_) =>
       if _in_reader() then let
-        val selected = _has_selection()
+        (* only text of the chapter can be highlighted or noted: a
+           selection in the note's popup has no toolbar (quire#428) *)
+        val selected = (if _has_selection() then annot_selection_in_page() else false)
         val () = ui_show("selection-toolbar", selected)
-        val () = (if selected then _lookup_update(1) else ())
+        val () = (if selected then let val () = _lookup_update(1) in _toolbar_place() end else ())
       in 0 end else 0)
   val listeners = RCons(listeners, OnEl("selection-toolbar"), "click", llam(h) => let
       val clicked = _target(h)
@@ -2466,10 +2509,14 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
     in 0 end)
 in listeners end
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 16) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  (* what is selected as a pointer goes down: the press clears it *)
+  val listeners = RCons(listeners, OnEl("page"), "pointerdown", llam(_) => let
+      val () = !_press_selected := _has_selection()
+    in 0 end)
   val listeners = RCons(listeners, OnEl("page"), "click", llam(h) => let
       val clicked = _target(h)
       val node = _row_of(clicked, "c")
@@ -2477,7 +2524,10 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 16) = let
       val y = _target_y(clicked)
       val () = _target_free(clicked)
     in
-      if _has_selection() then 0
+      (* a tap that began on a selection only ended it (Chrome cleared it
+         on the press): it turns nothing and brings up nothing *)
+      if !_press_selected then 0
+      else if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
       (* a single tap on an image is a tap on the page: the sides turn
