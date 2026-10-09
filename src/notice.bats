@@ -40,11 +40,32 @@ fn _details_swap (held: details): details = let
   val () = ref_exch_elt<details>(_details, previous)
 in previous end
 
+(* The banner's Copy details and Report, shown or hidden *)
+fn _details_buttons (shown: bool): void = let
+  val () = ui_show("error-copy", shown)
+in ui_show("error-report", shown) end
+
+(* The details of the last unexpected failure are kept after its banner
+   goes (a plain error, its Dismiss, a new import), so the reader can
+   still copy them from About (quire#374; Firefox keeps its troubleshooting
+   information on about:support, with a Copy text to clipboard button,
+   apart from whatever raised the problem, and Radiacode's and Zoho's
+   Android apps attach diagnostics from their settings: a settings or
+   About place, not the alert): a later failure's details replace them, and
+   they are held in memory only, never stored *)
 fn _details_set (held: details): void = let
   val shown = (case+ held of Details(_, _) => true | NoDetails() => false): bool
   val () = _details_free(_details_swap(held))
-  val () = ui_show("error-copy", shown)
-in ui_show("error-report", shown) end
+in _details_buttons(shown) end
+
+(* Whether the details of an unexpected failure are kept *)
+#pub fn notice_details_kept (): bool
+
+implement notice_details_kept () = let
+  val held = _details_swap(NoDetails())
+  val kept = (case+ held of Details(_, _) => true | NoDetails() => false): bool
+  val () = _details_free(_details_swap(held))
+in kept end
 
 fn _banner_show (): void = let
   val () = !_banner_up := true
@@ -54,7 +75,7 @@ in ui_show("error-banner", true) end
 #pub fn notice_error {text_len:pos | text_len < 256} (text: string text_len): void
 
 implement notice_error (text) = let
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
   val () = ui_text("error-text", text)
 in _banner_show() end
 
@@ -63,7 +84,7 @@ in _banner_show() end
   (text: $A.arr(byte, l, n), text_len: int text_len): void
 
 implement notice_error_buf (text, text_len) = let
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
   val () = ui_text_buf("error-text", text, text_len)
 in _banner_show() end
 
@@ -293,7 +314,7 @@ in _failure_said(said, at, doing, call, $R.some(which), $R.none(), answer) end
 
 implement notice_dismiss () = let
   val () = !_banner_up := false
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
 in ui_show("error-banner", false) end
 
 (* A part of the open book (a chapter, or the list of them) could not

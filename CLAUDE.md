@@ -944,9 +944,11 @@ read of storage changed: each still folds, as #174 says.
   Quire. Update Quire."; Aborted, NoReasonGiven and BytesUnreadable, to
   reopen Quire to read it again; Unexpected, an unexpected error with the
   details in the banner. None but Transient has a button. Import is off
-  while the library is unreadable (`inert` on `import-file`; a file
-  handed or dropped is refused with "Books cannot be added until Quire
-  can read your library"). Records that can be read but not
+  while the library is unreadable (`inert` on `import-file`, and the
+  button drawn disabled: muted text on the card, a cursor that says no,
+  `#import-button:has(input[inert])` in the stylesheet, a `surf` pair
+  proven in each theme; a file handed or dropped is refused with "Books
+  cannot be added until Quire can read your library"). Records that can be read but not
   used are another case, below (set aside); a read that failed as a whole
   is not one, since nothing is known of what it holds and a new library
   made beside it could not be seen while the read keeps failing.
@@ -995,7 +997,23 @@ read of storage changed: each still folds, as #174 says.
   under anything at its centre, whether a banner is up or not; the layout
   spec runs it on an unreadable library of each sort in every project. A
   banner wraps its buttons under its message on a narrow window instead
-  of squeezing Report. Over the reader it is still fixed at the top.
+  of squeezing Report. Over the reader it is fixed at the top while the
+  reader's bars are away, and under the top bar while they are up
+  (`#bats-root:has(.rv:not(.chrome-off)) .banner`: the bar's safe inset,
+  44px control and 2px, and 8px), as material.io's, Flutter's and
+  Zeta's banners sit under the app bar and none draws over it;
+  `e2e/storage.spec.js` raises one over the reader with its bars up and
+  runs `coveredByBanner` on both bars. The details of an unexpected
+  failure outlive its banner: they are kept in memory (`_details` in
+  `src/notice.bats`, replaced by the next such failure, never stored)
+  and About shows "Copy last error details" (`about-error-copy`, an
+  `about_control` of the screen's one listener, since the table of
+  listeners is full) once one is kept, as Firefox keeps its
+  troubleshooting information on about:support with a Copy text to
+  clipboard button. Start-up with a library that could not be read yet
+  does not write over the stored view (`_library_shown(false)`): the
+  retry opens the book it names, as the sync that waits for the retry
+  runs then (`e2e/storage.spec.js`).
 * **One honest retry.** Try again repeats the read start-up makes
   (`lib_load`) through `_library_read`, so the `LIBRARY_READ` proof is
   still only made there. `lib_retry_begin` spends the retry when it
