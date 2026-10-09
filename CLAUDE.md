@@ -1340,6 +1340,23 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* The page's width is a whole number of pixels (`page_extent`, indexed by
+  whether it is whole; `page_width` writes the `.caf` rule's `max-width`
+  from a `page_extent(1)` only, so an extent that is a fraction does not
+  type-check: `tests/static/reject/page-width-fraction`). The reader
+  scrolls to page n by n times the width it is told and counts pages by
+  the scroll width over it, and both are whole numbers (bridge's measure
+  and `scrollWidth` round). A Pixel 9's window is 1080 device pixels at
+  2.625 a CSS pixel, 411.43 wide; the page was as wide as that, the
+  offsets 0.43 px out more with each page, and a chapter of 19 pages or
+  more was counted a page too many, whose scroll clamped to nearly the
+  page before it: the last page of every chapter, doubled, and each page
+  before it begun in the previous page's last letters. The rule rounds
+  the container's width down (CSS `round()`, Chrome 125; a WebView
+  without it drops the declaration and is as before). What the proof does
+  not reach is the browser (that columns are as wide as the page and that
+  `round()` rounds): `e2e/fractional-window.spec.js` plays a window 411.43
+  wide and walks two chapters page by page.
 * A setting with two states is a switch (`_switch_row`: Justify text,
   Hyphenation, Dim images, Turn pages with volume keys, Full screen,
   Lock rotation), never a segmented On | Off nor a lone pressed button

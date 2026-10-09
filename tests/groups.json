@@ -18,7 +18,8 @@
       "landmarks.spec.js",
       "epubcheck.spec.js",
       "spreads.spec.js",
-      "page-turn.spec.js"
+      "page-turn.spec.js",
+      "fractional-window.spec.js"
     ],
     "reading-tools": [
       "annotations.spec.js",
@@ -112,6 +113,8 @@
       "reject/fixed-box-zoom-zero"
     ],
     "style": [
+      "accept/page-width-whole",
+      "reject/page-width-fraction",
       "reject/role-unmatched"
     ]
   }
