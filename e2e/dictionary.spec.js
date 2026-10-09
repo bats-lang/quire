@@ -6,7 +6,7 @@ import { test, expect } from './fixtures.js';
 import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {
-  start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
+  importFiles, epubFile, start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
   librarySettings, settingsButton, settingsScreen, exportedBackup,
 } from './helpers.js';
 import { createStardict } from './create-stardict.js';
@@ -212,7 +212,8 @@ test('a dictionary is removed with Undo, and gone once the offer is dismissed', 
   await readBook(page, book('Words', 'en'));
   await select(page, 'colour');
   await expect(lookUpHere(page)).toBeVisible();
-  // removed, and the toast dismissed: gone for good (it stays until then, quire#364)
+  // removed and the toast dismissed: out of Look up, in the Trash with its
+  // files, until the Trash is emptied (quire#396)
   await toLibrary(page);
   await openDictionaries(page);
   await row.getByRole('button', { name: 'Remove' }).click();
@@ -228,6 +229,73 @@ test('a dictionary is removed with Undo, and gone once the offer is dismissed', 
   await select(page, 'colour');
   await expect(lookUpOnline(page)).toBeVisible();
   await expect(lookUpHere(page)).toBeHidden();
+  expect(await dictionaryFiles(page), 'its files are kept in the Trash').toBeGreaterThan(0);
+});
+
+/** How many of the dictionaries' files are stored ('I', 'D', 'S', 'X' and the number) */
+const dictionaryFiles = page => page.evaluate(async () => {
+  const db = await new Promise((resolve, reject) => {
+    const request = indexedDB.open('bats');
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  const keys = await new Promise((resolve, reject) => {
+    const tx = db.transaction('kv', 'readonly');
+    const request = tx.objectStore('kv').getAllKeys();
+    tx.oncomplete = () => resolve(request.result);
+    tx.onerror = () => reject(tx.error);
+  });
+  db.close();
+  return keys.filter(key => /^[IDSX]0000000[0-9a-f]{7}$/.test(key)).length;
+});
+
+/** The library's shelf button pressed until the Trash is shown */
+async function showTrash(page) {
+  const shelf = page.locator('#shelf-button');
+  for (let i = 0; i < 4 && (await shelf.textContent()) !== 'Trash'; i++) await shelf.click();
+  await expect(shelf).toHaveText('Trash');
+}
+
+test('a removed dictionary is in the Trash with Restore, and only Empty Trash deletes its files', async ({ page }) => {
+  await start(page);
+  // the shelf button is there once the library has a book
+  await importFiles(page, [epubFile({ title: 'Beside Dictionaries', author: 'A' })], 1);
+  await importDictionary(page, english, 'en');
+  const files = await dictionaryFiles(page);
+  expect(files).toBeGreaterThan(0);
+  await openDictionaries(page);
+  const row = dictionaries(page).getByRole('group', { name: 'Pocket English · English' });
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('status').filter({ hasText: 'Dictionary removed' }).getByRole('button', { name: 'Dismiss' }).click();
+  await closeDictionaries(page);
+  await showTrash(page);
+  const listed = page.locator('#trash-dictionaries');
+  await expect(listed).toContainText('Dictionaries in the Trash');
+  await expect(listed.getByRole('group', { name: 'Pocket English · English' })).toBeVisible();
+  expect(await dictionaryFiles(page)).toBe(files);
+  // Restore puts it back, the same table
+  await listed.getByRole('button', { name: 'Restore' }).click();
+  await expect(listed).toBeHidden();
+  await openDictionaries(page);
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Remove' }).click();
+  await page.getByRole('status').filter({ hasText: 'Dictionary removed' }).getByRole('button', { name: 'Dismiss' }).click();
+  await closeDictionaries(page);
+  // Empty Trash asks, names the dictionaries, and deletes the files with the books'
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  const ask = dialog(page, 'Empty the Trash?');
+  await expect(ask).toContainText('every dictionary in it, with its files');
+  await ask.getByRole('button', { name: 'Cancel' }).click();
+  expect(await dictionaryFiles(page), 'declined: nothing deleted').toBe(files);
+  await libraryMenu(page);
+  await menuItem(page, 'Empty Trash').click();
+  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await expect(listed).toBeHidden();
+  expect(await dictionaryFiles(page)).toBe(0);
+  await reload(page);
+  await showTrash(page);
+  await expect(page.locator('#trash-dictionaries')).toBeHidden();
 });
 
 test('a dictionary is kept across a reload', async ({ page }) => {

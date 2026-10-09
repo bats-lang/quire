@@ -145,6 +145,9 @@ fn _is {id_len:pos} (clicked: !target, id: string id_len): bool =
 
 (* The harm whose menu item (ui_harm_item) clicked is: its click asks about
    that same harm *)
+(* The Trash's dictionaries are listed while the Trash is the shelf shown *)
+fn _trash_dictionaries (): void = dict_trash_render(same_shelf(lib_shelf_get(), Trash()))
+
 fn _harm_clicked (clicked: !target): Option_vt(harm) =
   if _is(clicked, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
 
@@ -1352,7 +1355,7 @@ fn _stats_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_show() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 25) = let
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 26) = let
   (* import *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   (* drag and drop *)
@@ -1476,7 +1479,14 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 25) = let
     in let val () = lib_render() in 0 end end)
   val listeners = RCons(listeners, OnEl("shelf-button"), "click", llam(_) => let
       val () = lib_shelf_set(shelf_next(lib_shelf_get()))
+      val () = _trash_dictionaries()
     in let val () = lib_render() in 0 end end)
+  (* the dictionaries in the Trash, each with a Restore (#396) *)
+  val listeners = RCons(listeners, OnEl("trash-dictionaries"), "click", llam(h) => let
+      val clicked = _target(h)
+      val restored = _row_of(clicked, "restore-dict")
+      val () = _target_free(clicked)
+    in if restored >= 0 then let val () = dict_trash_restore(restored) in 0 end else 0 end)
   (* search *)
   (* the field is made again to be cleared: its events are taken on
      its box *)
@@ -1515,9 +1525,14 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 25) = let
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) => let
             val () = layer_close(LLibraryMenu())
-          in $P.finish<reply>(lib_ask_harm(the_harm), llam(answer) =>
+          in $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>
             case+ answer of
-            | Accepted() => _save_render()
+            (* the dictionaries in the Trash go with the books, here and
+               nowhere else (tests/static/trash.py) *)
+            | Accepted() => let
+                val () = dict_trash_empty()
+                val () = dict_trash_render(false)
+              in _save_render() end
             | Declined() => ()) end
         | ~None_vt() =>
         case+ _library_menu_control(clicked) of
@@ -2858,7 +2873,7 @@ implement main0 () = let
   val () = lib_install_hint_load()
   val () = stats_load()
   val () = stamp_load()
-  val () = $P.finish<int>(dict_load(), llam(_) => ())
+  val () = $P.finish<int>(dict_load(), llam(_) => _trash_dictionaries())
   val () = $P.finish<int>(catalogue_load(), llam(_) => ())
   (* nothing is shown until the view kept by the last run is known: a
      reader who was in a book comes back to it, not to the library *)
