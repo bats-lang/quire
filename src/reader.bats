@@ -2241,6 +2241,33 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
         else ())
     in _pass_attrs(doc, data, rest, node) end
 
+(* Whether an element is a note's text: its epub:type names footnote,
+   endnote or rearnote, or its role is doc-footnote or doc-endnote (a note
+   is set smaller than the text it is in, #422) *)
+fn _note_text {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _foot = @[char][4]('f', 'o', 'o', 't')
+  var _endnote = @[char][7]('e', 'n', 'd', 'n', 'o', 't', 'e')
+  var _rearnote = @[char][8]('r', 'e', 'a', 'r', 'n', 'o', 't', 'e')
+  var _doc_foot = @[char][12]('d', 'o', 'c', '-', 'f', 'o', 'o', 't', 'n', 'o', 't', 'e')
+  var _doc_end = @[char][11]('d', 'o', 'c', '-', 'e', 'n', 'd', 'n', 'o', 't', 'e')
+  val typed = (case+ find_attr(data, attrs, _attr_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _endnote, 7) then true
+      else if span_has(data, start, span_len, _rearnote, 8) then true
+      else span_has(data, start, span_len, _foot, 4)): bool
+in
+  if typed then true
+  else (case+ find_attr(data, attrs, _attr_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _doc_foot, 12) then true
+      else span_has(data, start, span_len, _doc_end, 11))
+end
+
 (* Whether an <a> is a note's reference: its epub:type names noteref, or
    its role is doc-noteref *)
 fn _noteref {l:agz}{n:pos}{attr_count:nat}
@@ -2612,6 +2639,7 @@ and _render_node
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
         else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
         else ())
+      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
@@ -4055,8 +4083,20 @@ fn _snippet {l:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{at,quer
   val () = _ellipsis_if(snippet, ellipsis_before + snippet_len, ellipsis_after)
 in @(snippet, ellipsis_before + snippet_len + ellipsis_after) end
 
+(* The UTF-16 units of text[from, until), as the page counts a text node's
+   offsets: one for each character, two for one past U+FFFF (a 4-byte
+   character) *)
+fun _arr_units {l:agz}{size:pos}{from,until:nat | from <= until; until <= size} .<until - from>.
+  (text: !$A.arr(byte, l, size), from: int from, until: int until, units: Nat): Nat =
+  if from >= until then units
+  else let
+    val code = byte2int0($A.get<byte>(text, from))
+    val more = (if code >= 240 then 2 else if $AR.band_int_int(code, 192) = 128 then 0 else 1): Nat
+  in _arr_units(text, from + 1, until, units + more) end
+
 (* The hits of the query in text[at, text_len), a content node of a chapter,
-   onto found, while there are fewer than HIT_MAX *)
+   onto found, while there are fewer than HIT_MAX; each hit's offset is in
+   UTF-16 units, as the page counts them, not in bytes *)
 fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_len:nat | text_len <= text_size}{query_len:pos | query_len <= query_size}{at:nat}{hit_count:nat | hit_count <= HIT_MAX} .<max(text_len - at, 0)>.
   (text: !$A.arr(byte, text_location, text_size), text_size: int text_size, text_len: int text_len, at: int at, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
    chapter: Int, node: Int, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(hits(new_count), int new_count) =
@@ -4064,7 +4104,7 @@ fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_
   else if at + query_len > text_len then @(found, hit_count)
   else if _match_at(text, at, query, query_len, 0) then let
     val @(snippet, snippet_len) = _snippet(text, text_size, text_len, at, query_len)
-  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, at, snippet, snippet_len, found), hit_count + 1) end
+  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, _arr_units(text, 0, at, 0), snippet, snippet_len, found), hit_count + 1) end
   else _find_all(text, text_size, text_len, at + 1, query, query_len, chapter, node, found, hit_count)
 
 (* The hits in text data[offset, offset + piece_len), a content node's, decoded *)
@@ -4417,23 +4457,27 @@ in
 end
 
 (* Jumps to a row of the contents list, remembering where the reader
-   was *)
-#pub fun reader_goto_entry (row: Int): void
+   was; whether the row leads anywhere (an entry with no href, or one
+   outside the book, does not: nothing moves) *)
+#pub fun reader_goto_entry (row: Int): bool
 implement reader_goto_entry (row) =
   case+ toc_dest_of(row) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
-(* Goes to a print page, remembering where the reader was *)
-#pub fun reader_goto_page (print_page: Int): void
+(* Goes to a print page, remembering where the reader was; whether it
+   leads anywhere *)
+#pub fun reader_goto_page (print_page: Int): bool
 implement reader_goto_page (print_page) =
   case+ toc_page_dest_of(print_page) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
 (* Jumps to a chapter's element fragment[0, fragment_len), remembering where the reader
    was *)
@@ -4899,8 +4943,10 @@ fn _hit (hit: Int): @(Int, Int, Int, Int, Int) =
   | ~SearchNone() => @(~1, 0, 0, 0, 0)
   | ~SearchCell(found, hit_count, query, query_len) => let
       val @(chapter, node, offset) = _hit_at(found, hit)
+      (* the match's length in the units the page counts *)
+      val query_units = _arr_units(query, 0, query_len, 0)
       val () = _search_put(SearchCell(found, hit_count, query, query_len))
-    in @(chapter, node, offset, hit_count, query_len) end
+    in @(chapter, node, offset, hit_count, query_units) end
 
 (* "3 of 12": the hit's number of the hit count, under the results *)
 fn _hit_count (hit: Int, hit_count: Int): void = let
