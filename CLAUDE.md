@@ -1574,7 +1574,7 @@ CSS columns follow the inline axis, which then runs down, so its pages
 go down the page: the page's class is `caf vertical` (not `rtl`, whose
 `direction` would turn that axis upward), a column and its gap (the
 page's top and bottom paddings) are exactly the page's height, and
-`_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
+the page is `text-orientation:upright` (quire#391: digits stand upright; `text-combine-upright:digits` is supported by no browser, `all` needs an element round the number, which render's content node numbers do not allow, so a Latin word is upright too), and `_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
 shows pages, by scrollTop for `Down`. Such a book is always paged, one
 column a screen, a drag does not follow the finger (a committed one
 turns the page), and the settings of the page's layout and of its
