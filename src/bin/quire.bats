@@ -677,6 +677,8 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
       val page = book_numbers.page
       val pages = book_numbers.pages
       val anchor = book_numbers.anchor
+      (* never read: nothing moved, no minute spent *)
+      val unread = (if chapter = 0 then (if page = 0 then (if book_numbers.place_modified = 0 then book_numbers.minutes_read = 0 else false) else false) else false): bool
       val id_high = book_numbers.id_high
       val id_low = book_numbers.id_low
       (* the other devices' place and annotations, brought *)
@@ -685,7 +687,7 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
       (* the annotations' load deals with its own value *)
       if open_key_get() = book_numbers.key then
         $P.finish<opened>($P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
-          $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
+          $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor, unread), llam(outcome) => $P.ret<opened>(_opened_of(outcome)))), llam(result) =>
           _opened_checked(result))
       else
         $P.finish<opened>($P.and_then<book_opening><opened>(open_stored(book_numbers.key, id_high, id_low), llam(opening) =>
@@ -700,7 +702,7 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
               val () = notice_say(BookStorageFailed())
             in $P.ret<opened>(OpenedInLibrary()) end
           | BookOpened() => $P.and_then<int><opened>(annot_load(id_high, id_low), llam(_) =>
-            $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
+            $P.and_then<load_outcome><opened>(reader_open_at(chapter, page, pages, anchor, unread), llam(outcome) => $P.ret<opened>(_opened_of(outcome))))), llam(result) =>
           _opened_checked(result))
     end
 
