@@ -134,13 +134,16 @@ implement modal_open (asked, title) = _show(Harmless(asked), title)
 (* its one button, OK, answers nothing: the answer is let go *)
 implement modal_inform (title) = $P.finish<reply>(_show(Harmless(QInform()), title), llam(_) => ())
 
-(* Asks whether to do the_harm: the_harm's title, text and red button.
+(* Asks whether to do the_harm (dictionaries: how many the Trash holds, for the words that name them): the_harm's title, text and red button.
    The promise resolves Accepted only from that button *)
-#pub fn modal_confirm (the_harm: harm): $P.promise(reply, $P.Pending)
-implement modal_confirm (the_harm) = let
+#pub fn modal_confirm (the_harm: harm, dictionaries: int): $P.promise(reply, $P.Pending)
+implement modal_confirm (the_harm, dictionaries) = let
   val @(title, text, _) = _harm_words(the_harm)
   val answered = _show(Harmful(the_harm), title)
-  val () = ui_text("dialog-text", text)
+  val () = (if dictionaries > 0 then
+    (case+ the_harm of
+     | HEmptyTrash() => ui_text("dialog-text", "Every book in the Trash is deleted, with its reading position and annotations, and so is every dictionary in it, with its files. This cannot be undone."))
+    else ui_text("dialog-text", text))
 in answered end
 
 (* The dialog's text: buf[0, text_len) *)

@@ -266,8 +266,20 @@ every 64th headword of each with where its record is; a lookup
 binary-searches it and reads one block of records. An article is
 shown as text only (`article_text`): HTML and XDXF tags are dropped,
 never put in the DOM. The list of dictionaries (`dicts`) is stored
-under "dicts"; a removal is offered back by the Undo toast, and its
-files are deleted when the offer is made final. The backup lists the
+under "dicts"; a removal moves the dictionary to the Trash (#396, as a
+book is: `dict_state`, `Installed | InTrash`, stored in bit 4 of the
+form's byte), offered back by the Undo toast, its files kept. It is out of
+Look up, listed under the books while the Trash is the shelf shown
+(`trash-dictionaries`, `dict_trash_render`) with a Restore, and only Empty
+Trash deletes its files (`dict_trash_empty`, in quire.bats' `_harm_clicked`
+after `lib_ask_harm` resolves Accepted; the dialog says dictionaries go
+too). `tests/static/trash.py` fails any other call: that is a scan of the
+source, not a type, and the proof that only an answered dialog deletes
+them is owed (the dialog is in library.bats, which cannot staload
+dictionary.sats while dictionary.bats uses library's `lib_key`). Drive and
+Files by Google keep trashed items, which still use storage, until they
+are emptied; the Trash shows counts, not sizes (a dictionary's files are
+on the JS side). The backup lists the
 dictionaries' names and languages, not their files.
 
 ### Sync
