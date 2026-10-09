@@ -6,9 +6,10 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
-  librarySettings, settingsButton,
-  readingSettings, openReadingSettings,
+  librarySettings, libraryMenu, menuItem, settingsButton,
+  readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown,
 } from './helpers.js';
+import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 import { coveredByBanner } from './controls-shown.js';
 import { failReads, healReads, failLibrary, stubReads } from './storage-stub.js';
 
@@ -245,4 +246,105 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await openBook(page, 'Spoken Once');
   await openReadingSettings(page, 'Read aloud');
   await expect(speed).toHaveValue('1.5');
+});
+
+// #374's leftovers
+
+// The error banner is fixed at the top over the reader; with the bars up
+// it must sit under the top bar (Material 3 puts a banner under the top
+// app bar), and clear of the bottom bar
+test('the error banner over the reader covers neither of its bars', async ({ page }) => {
+  await stubReads(page);
+  await start(page);
+  await readBook(page, { title: 'Marked Once', author: 'Storage Tests', rawChapters: chapters(2) });
+  await selectText(page, 0, 8);
+  await selectionButton(page, 'Highlight').click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'Para 1.0' });
+  await toLibrary(page);
+  await failReads(page, 'annotations');
+  await reload(page);
+  await openBook(page, 'Marked Once');
+  await expect(alert(page)).toBeVisible();
+  await showChrome(page);
+  await expect(page.locator('#reader-top-bar')).toBeVisible();
+  await expect(page.locator('#reader-bottom-bar')).toBeVisible();
+  expect(await coveredByBanner(page, '#reader-top-bar')).toEqual([]);
+  expect(await coveredByBanner(page, '#reader-bottom-bar')).toEqual([]);
+});
+
+// The details of an unexpected failure outlive its banner: About copies them
+test('the details of an unexpected error can still be copied from About after the banner is dismissed', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await stubReads(page);
+  await start(page);
+  // no failure yet, no row
+  await libraryMenu(page);
+  await menuItem(page, 'About Quire').click();
+  await expect(page.getByRole('button', { name: 'Copy last error details' })).toBeHidden();
+  await failLibrary(page, 'WeirdBrowserError');
+  await reload(page);
+  await expect(alert(page)).toContainText('An unexpected error occurred');
+  await alert(page).getByRole('button', { name: 'Dismiss' }).click();
+  await expect(alert(page)).toBeHidden();
+  await libraryMenu(page);
+  await menuItem(page, 'About Quire').click();
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  await page.getByRole('button', { name: 'Copy last error details' }).click();
+  await expect(page.getByText('Copied', { exact: true })).toBeVisible();
+  await expect.poll(() => clipboard(page)).toContain('WeirdBrowserError\nthe library could not be read');
+});
+
+// With the first read failed (with hope), what waits for the read (the
+// sync and the stored view) waits for the retry, and runs when it ends
+test('a sync and the stored view wait for Try again, and happen once the library is read', async ({ page, context }) => {
+  const server = webdav();
+  await context.route('**/dav/books/quire-sync.json', server.handle);
+  await stubReads(page);
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Kept Safe', author: 'Storage Tests', rawChapters: chapters(2) })], 1);
+  await librarySettings(page);
+  await settingsButton(page, 'Sync').click();
+  const panel = dialog(page, 'Sync');
+  await panel.getByRole('button', { name: 'WebDAV', exact: true }).click();
+  await panel.getByLabel('Folder URL').fill(folder(page));
+  await panel.getByLabel('User name').fill(USER);
+  await panel.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  await panel.getByRole('button', { name: 'Sign in to WebDAV' }).click();
+  await expect(panel.getByRole('status')).toHaveText(/^Last synced on /);
+  await panel.getByRole('button', { name: 'Done' }).click();
+  await settingsButton(page, 'Done').click();
+  await expect(settingsScreen(page)).toBeHidden();
+  // a book open, so the view kept is that book
+  await openBook(page, 'Kept Safe');
+  await failLibrary(page, 'UnknownError', 1);
+  await reload(page);
+  await expectUnreadable(page, 'Quire could not read your library this time.');
+  const before = server.gets;
+  await page.waitForTimeout(1500);
+  expect(server.gets, 'no sync before the library is read').toBe(before);
+  await expect(bookPage(page)).toBeHidden();
+  await tryAgain(page).click();
+  await expect.poll(() => server.gets, 'the sync runs once the retry ends').toBeGreaterThan(before);
+  await pageShown(page);
+});
+
+// Import is off while the library cannot be read, and looks it
+test('Import looks disabled while the library cannot be read', async ({ page }) => {
+  await stubReads(page);
+  await start(page);
+  const look = () => page.locator('#import-button').evaluate(e => {
+    const s = getComputedStyle(e);
+    return { background: s.backgroundColor, color: s.color, cursor: s.cursor, height: e.getBoundingClientRect().height };
+  });
+  const readable = await look();
+  expect(readable.cursor).not.toBe('not-allowed');
+  await failLibrary(page, 'SecurityError');
+  await reload(page);
+  await expectUnreadable(page, 'Your browser is not letting Quire use its storage');
+  const off = await look();
+  expect(off.cursor).toBe('not-allowed');
+  expect(off.background).not.toBe(readable.background);
+  expect(off.color).not.toBe(readable.color);
+  // the same size, and its text still readable (muted on the card is proven 4.5:1)
+  expect(off.height).toBe(readable.height);
 });

@@ -377,6 +377,10 @@ fn _about_screen (): void = let
   val () = ui_text("about-version-label", "Version")
   val () = ui_add("about-version-row", "about-version", TB)
   val () = ui_text("about-version", quire_version())
+  (* the details of the last unexpected error, for a report, once one
+     has happened (shown when About opens, `_about_open`) *)
+  val () = ui_text_btn("about-box", "about-error-copy", "btn", "Copy last error details")
+  val () = _hide("about-error-copy")
   val () = ui_el("about-box", "about-links", TDiv, "sfields")
   val () = ui_named("about-links", NGroup, "Links")
   val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
