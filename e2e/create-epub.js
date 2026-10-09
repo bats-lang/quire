@@ -290,6 +290,14 @@ export function createEpub(opts = {}) {
   // manifest item
   const rawChapters = opts.rawChapters || null;
   const language = opts.language === undefined ? 'en' : opts.language;
+  // opts.epub2: an EPUB 2.0 package (OPF 2.0, XHTML 1.1, an NCX and no
+  // nav document), as books made before EPUB 3 are
+  const epub2 = !!opts.epub2;
+  const useNcx = opts.ncx || epub2;
+  const doctype = epub2
+    ? '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
+    : '<!DOCTYPE html>';
+  const uid = crypto.randomUUID();
 
   // mimetype must be first entry, stored uncompressed
   const mimetype = 'application/epub+zip';
@@ -335,7 +343,7 @@ export function createEpub(opts = {}) {
       const lang = rawChapters[i - 1].lang;
       const langAttrs = lang ? ` xml:lang="${lang}" lang="${lang}"` : '';
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
+${doctype}
 <html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
 <head><title>Chapter ${i}</title>${rawChapters[i - 1].head || ''}</head>
 <body>
@@ -353,7 +361,7 @@ ${rawBody}
         body += `      <p>${loremParagraph(i * 100 + p)}</p>\n`;
       }
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE html>
+${doctype}
 <html xmlns="http://www.w3.org/1999/xhtml">
 <head><title>Chapter ${i}</title></head>
 <body>
@@ -379,13 +387,18 @@ ${rawBody}
   const tocItems = navLis(tocTree);
   // opts.pageList: [{ label, href }] the print edition's pages
   const pageList = opts.pageList || [];
+  // opts.landmarks: [{ type, label, href }] the landmarks nav (EPUB 3.3
+  // 5.4.1.2), type an epub:type such as bodymatter or toc
+  const landmarks = opts.landmarks || [];
+  // opts.guide: [{ type, title, href }] the OPF's <guide> (EPUB 2)
+  const guide = opts.guide || [];
   let ncxOrder = 0;
   const ncxPoints = (es) => es.map(e => `<navPoint id="np${++ncxOrder}" playOrder="${ncxOrder}">` +
     `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/>` +
     (e.children ? ncxPoints(e.children) : '') + '</navPoint>\n').join('');
   const tocNcx = `<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-<head/><docTitle><text>${title}</text></docTitle>
+<head><meta name="dtb:uid" content="urn:uuid:${uid}"/></head><docTitle><text>${title}</text></docTitle>
 <navMap>
 ${ncxPoints(tocTree)}</navMap>
 ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}" type="normal" value="${k + 1}">` +
@@ -400,7 +413,7 @@ ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}"
     <ol>
 ${tocItems}    </ol>
   </nav>
-${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}</body>
+${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}${landmarks.length ? `  <nav epub:type="landmarks" hidden="">\n    <ol>\n${landmarks.map(e => `<li><a epub:type="${e.type}"${e.href === undefined ? '' : ` href="${e.href}"`}>${e.label}</a></li>\n`).join('')}    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
   // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
@@ -409,7 +422,7 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
     manifestItems += `    <item id="x${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
   }
   // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
-  if (opts.ncx) {
+  if (useNcx) {
     manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
   } else {
     manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
@@ -417,17 +430,17 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
 
   // content.opf
   const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+<package xmlns="http://www.idpf.org/2007/opf" version="${epub2 ? '2.0' : '3.0'}" unique-identifier="uid">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>${title}</dc:title>
     <dc:creator>${author}</dc:creator>
-${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${crypto.randomUUID()}</dc:identifier>
-${opts.metadata || ''}  </metadata>
+${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${uid}</dc:identifier>
+${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${opts.metadata || ''}  </metadata>
   <manifest>
 ${manifestItems}  </manifest>
-  <spine${opts.ncx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
+  <spine${useNcx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
 ${spineItems}  </spine>
-</package>`;
+${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" title="${g.title}" href="${g.href}"/>\n`).join('')}  </guide>\n` : ''}</package>`;
 
   // Assemble ZIP entries
   // mimetype MUST be first and stored (EPUB spec)
@@ -436,7 +449,7 @@ ${spineItems}  </spine>
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
     { name: 'OEBPS/content.opf', data: contentOpf, store: true },
-    opts.ncx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
+    useNcx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
   for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
   zipEntries.push(...overlays);

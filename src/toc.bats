@@ -55,6 +55,25 @@ val _contents_cell = ref<toc_cell>(TocCell(toc_nil(), 0))
 (* The book's print pages (its page-list), entries as the contents' *)
 val _pages_cell = ref<toc_cell>(TocCell(toc_nil(), 0))
 
+(* Where reading starts, at most one entry: the landmarks' bodymatter
+   (EPUB 3), else the guide's text reference (EPUB 2) *)
+val _start_cell = ref<toc_cell>(TocCell(toc_nil(), 0))
+
+(* The zip entry the OPF's guide names as the text, as its name's offset
+   in the file; -1 when it names none *)
+val _guide_entry = ref<int>(~1)
+
+fn _start_put (cell: toc_cell): void = let
+  var previous: toc_cell = cell
+  val () = ref_exch_elt<toc_cell>(_start_cell, previous)
+  val+ ~TocCell(entries, _) = previous
+in toc_free(entries) end
+
+fn _start_take (): toc_cell = let
+  var cell: toc_cell = TocCell(toc_nil(), 0)
+  val () = ref_exch_elt<toc_cell>(_start_cell, cell)
+in cell end
+
 fn _pages_take (): toc_cell = let
   var cell: toc_cell = TocCell(toc_nil(), 0)
   val () = ref_exch_elt<toc_cell>(_pages_cell, cell)
@@ -136,6 +155,11 @@ fn _opf_entry {file_size:pos}{opf_name_offset:nat}{opf_dir_len:nat | opf_name_of
     val path_len = path_norm(path, path_size)
   in _find_entry(serial, file_size, path, path_size, path_len) end
 
+(* The length of the href data[offset, offset + href_len) before its '#' *)
+fn _path_part {l:agz}{n:pos}{offset,href_len:nat | offset + href_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, href_len: int href_len): [path_len:nat | path_len <= href_len] int path_len =
+  if href_len > 0 then src_end(data, offset, href_len) else 0
+
 fn _source_of {file_size:pos} (file_size: int file_size, hit: entry_hit(file_size), ncx: bool): toc_source =
   case+ hit of
   | ~EntryHit(data_offset, data_size, method, name_offset, name_len) => TocSource(file_size, data_offset, data_size, method, name_offset, name_len, ncx)
@@ -158,6 +182,16 @@ implement toc_locate (serial, file_size, opf_name_offset, opf_dir_len, opf_bytes
     | ~TocNone() => (case+ find_ncx_href(opf_bytes, opf_size, nodes) of
       | ~xspan_at(href_offset, href_len) => _source_of(file_size, _opf_entry(serial, file_size, opf_name_offset, opf_dir_len, opf_bytes, opf_size, href_offset, href_len), true)
       | ~xspan_none() => TocNone())): toc_source
+  val guide_entry = (case+ find_guide_text(opf_bytes, nodes) of
+    | ~xspan_at(href_offset, href_len) => let
+        val path_len = _path_part(opf_bytes, href_offset, href_len)
+      in
+        case+ _opf_entry(serial, file_size, opf_name_offset, opf_dir_len, opf_bytes, opf_size, href_offset, path_len) of
+        | ~EntryHit(_, _, _, entry_name_offset, _) => entry_name_offset
+        | ~EntryMiss() => ~1
+      end
+    | ~xspan_none() => ~1): int
+  val () = !_guide_entry := guide_entry
 in _source_put(source) end
 
 (* ============================================================
@@ -304,22 +338,47 @@ in
   in raw_cons(label_bytes, label_len, level, href_offset, href_len, entries) end
 end
 
+(* Which of the navigation document's lists is read: the contents (a nav
+   whose epub:type has toc, or the NCX's navPoints), the print pages (page-list,
+   pageTarget) or where reading starts (the entry of the landmarks nav
+   whose epub:type has bodymatter; the NCX has none) *)
+datatype nav_part = PartContents | PartPages | PartStart
+
+fn _is_contents (part: nav_part): bool = (case+ part of PartContents() => true | PartPages() => false | PartStart() => false)
+fn _is_pages (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => true | PartStart() => false)
+fn _is_start (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => false | PartStart() => true)
+
+(* Whether the epub:type data[offset, offset + type_len) of a nav is the
+   one part is read from *)
+fn _nav_is_part {data_loc:agz}{data_size:pos}{offset,type_len:nat | offset + type_len <= data_size}
+  (data: !$A.borrow(byte, data_loc, data_size), offset: int offset, type_len: int type_len, part: nav_part): bool = let
+  var _c_toc = @[char][3]('t', 'o', 'c')
+  var _c_page_list_type = @[char][9]('p', 'a', 'g', 'e', '-', 'l', 'i', 's', 't')
+  var _c_landmarks = @[char][9]('l', 'a', 'n', 'd', 'm', 'a', 'r', 'k', 's')
+in
+  case+ part of
+  | PartContents() => span_has(data, offset, type_len, _c_toc, 3)
+  | PartPages() => span_has(data, offset, type_len, _c_page_list_type, 9)
+  | PartStart() => span_has(data, offset, type_len, _c_landmarks, 9)
+end
+
 (* The entries of nodes, onto entries (newest first): the <li> of a nav
-   whose epub:type has toc (mode 0), or each navPoint (mode 1); each one
-   level deeper than the entry it is in. With page_list, the print pages
+   whose epub:type has toc (PartContents), or each navPoint; each one
+   level deeper than the entry it is in. With PartPages, the print pages
    instead: the <li> of a nav whose epub:type has page-list, or each
-   pageTarget *)
+   pageTarget. With PartStart, the <li> of a nav whose epub:type has
+   landmarks whose <a> has epub:type bodymatter: "start reading" *)
 fun _walk_nodes {data_loc:agz}{data_size:pos}{nodes_size:nat}{count:nat} .<nodes_size, 1>.
   (data: !$A.borrow(byte, data_loc, data_size), nodes: !$X.xml_node_list(data_size, nodes_size),
-   ncx: bool, page_list: bool, in_toc: bool, level: Int, entries: raw(data_size, count)): [new_count:nat] raw(data_size, new_count) =
+   ncx: bool, part: nav_part, in_toc: bool, level: Int, entries: raw(data_size, count)): [new_count:nat] raw(data_size, new_count) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) =>
-    _walk_nodes(data, rest, ncx, page_list, in_toc, level, _walk_node(data, node, ncx, page_list, in_toc, level, entries))
+    _walk_nodes(data, rest, ncx, part, in_toc, level, _walk_node(data, node, ncx, part, in_toc, level, entries))
   | $X.xml_nodes_nil() => entries
 
 and _walk_node {data_loc:agz}{data_size:pos}{node_size:pos}{count:nat} .<node_size, 0>.
   (data: !$A.borrow(byte, data_loc, data_size), node: !$X.xml_node(data_size, node_size),
-   ncx: bool, page_list: bool, in_toc: bool, level: Int, entries: raw(data_size, count)): [new_count:nat] raw(data_size, new_count) =
+   ncx: bool, part: nav_part, in_toc: bool, level: Int, entries: raw(data_size, count)): [new_count:nat] raw(data_size, new_count) =
   case+ node of
   | $X.xml_text(_, _) => entries
   | $X.xml_element(name_offset, name_len, attributes, children) => let
@@ -329,43 +388,54 @@ and _walk_node {data_loc:agz}{data_size:pos}{node_size:pos}{count:nat} .<node_si
       var _c_span = @[char][4]('s', 'p', 'a', 'n')
       var _c_href = @[char][4]('h', 'r', 'e', 'f')
       var _c_epub_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
-      var _c_toc = @[char][3]('t', 'o', 'c')
       var _c_nav_point = @[char][8]('n', 'a', 'v', 'P', 'o', 'i', 'n', 't')
       var _c_nav_label = @[char][8]('n', 'a', 'v', 'L', 'a', 'b', 'e', 'l')
       var _c_content = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
       var _c_src = @[char][3]('s', 'r', 'c')
       var _c_page_list = @[char][8]('p', 'a', 'g', 'e', 'L', 'i', 's', 't')
       var _c_page_target = @[char][10]('p', 'a', 'g', 'e', 'T', 'a', 'r', 'g', 'e', 't')
-      var _c_page_list_type = @[char][9]('p', 'a', 'g', 'e', '-', 'l', 'i', 's', 't')
+      var _c_body_matter = @[char][10]('b', 'o', 'd', 'y', 'm', 'a', 't', 't', 'e', 'r')
     in
       if ncx then
-        (if (if page_list then false else xml_name_eq(data, name_offset, name_len, _c_nav_point, 8)) then let
+        (if (if _is_contents(part) then xml_name_eq(data, name_offset, name_len, _c_nav_point, 8) else false) then let
            val label_buffer = $A.alloc<byte>(LABEL_MAX)
            val label_len = _child_text(data, children, _c_nav_label, 8, label_buffer, 0)
            val href = _child_attr(data, children, _c_content, 7, _c_src, 3)
            val entries = _entry(label_buffer, label_len, level, href, entries)
-         in _walk_nodes(data, children, ncx, page_list, in_toc, level + 1, entries) end
-         else if (if page_list then xml_name_eq(data, name_offset, name_len, _c_page_target, 10) else false) then let
+         in _walk_nodes(data, children, ncx, part, in_toc, level + 1, entries) end
+         else if (if _is_pages(part) then xml_name_eq(data, name_offset, name_len, _c_page_target, 10) else false) then let
            val label_buffer = $A.alloc<byte>(LABEL_MAX)
            val label_len = _child_text(data, children, _c_nav_label, 8, label_buffer, 0)
            val href = _child_attr(data, children, _c_content, 7, _c_src, 3)
          in _entry(label_buffer, label_len, 0, href, entries) end
-         else if (if page_list then false else xml_name_eq(data, name_offset, name_len, _c_page_list, 8)) then entries
-         else _walk_nodes(data, children, ncx, page_list, in_toc, level, entries))
+         else if (if _is_pages(part) then false else xml_name_eq(data, name_offset, name_len, _c_page_list, 8)) then entries
+         else _walk_nodes(data, children, ncx, part, in_toc, level, entries))
       else if xml_name_eq(data, name_offset, name_len, _c_nav, 3) then
         (case+ find_attr(data, attributes, _c_epub_type, 9) of
          | ~xspan_at(type_offset, type_len) =>
-           if (if page_list then span_has(data, type_offset, type_len, _c_page_list_type, 9) else span_has(data, type_offset, type_len, _c_toc, 3)) then
-             _walk_nodes(data, children, ncx, page_list, true, level, entries)
+           if _nav_is_part(data, type_offset, type_len, part) then
+             _walk_nodes(data, children, ncx, part, true, level, entries)
            else entries
          | ~xspan_none() => entries)
-      else if (if in_toc then xml_name_eq(data, name_offset, name_len, _c_li, 2) else false) then let
-        val label_buffer = $A.alloc<byte>(LABEL_MAX)
-        val label_len = _li_label(data, children, label_buffer)
-        val href = _child_attr(data, children, _c_a, 1, _c_href, 4)
-        val entries = _entry(label_buffer, label_len, level, href, entries)
-      in _walk_nodes(data, children, ncx, page_list, in_toc, level + 1, entries) end
-      else _walk_nodes(data, children, ncx, page_list, in_toc, level, entries)
+      else if (if in_toc then xml_name_eq(data, name_offset, name_len, _c_li, 2) else false) then
+        (if _is_start(part) then
+           (* only the landmark that is where the body matter starts *)
+           (case+ _child_attr(data, children, _c_a, 1, _c_epub_type, 9) of
+            | ~xspan_at(type_offset, type_len) =>
+              if span_has(data, type_offset, type_len, _c_body_matter, 10) then let
+                val label_buffer = $A.alloc<byte>(LABEL_MAX)
+                val label_len = _li_label(data, children, label_buffer)
+                val href = _child_attr(data, children, _c_a, 1, _c_href, 4)
+              in _entry(label_buffer, label_len, 0, href, entries) end
+              else entries
+            | ~xspan_none() => entries)
+         else let
+           val label_buffer = $A.alloc<byte>(LABEL_MAX)
+           val label_len = _li_label(data, children, label_buffer)
+           val href = _child_attr(data, children, _c_a, 1, _c_href, 4)
+           val entries = _entry(label_buffer, label_len, level, href, entries)
+         in _walk_nodes(data, children, ncx, part, in_toc, level + 1, entries) end)
+      else _walk_nodes(data, children, ncx, part, in_toc, level, entries)
     end
 
 (* The chapter the href data[href_offset, href_offset + path_len) names,
@@ -442,6 +512,7 @@ in dir_len end
 implement toc_build (serial) = let
   val () = _contents_put(TocCell(toc_nil(), 0))
   val () = _pages_put(TocCell(toc_nil(), 0))
+  val () = _start_put(TocCell(toc_nil(), 0))
 in
   case+ _source_take() of
   | ~TocNone() => $P.ret<int>(0)
@@ -461,13 +532,16 @@ in
            | ~ContentBytes(content_owner, content, content_size) => let
                val @(content_frozen, content_bytes) = $A.freeze<byte>(content)
                val nodes = $X.parse_document(content_bytes, content_size)
-               val contents_raw = _walk_nodes(content_bytes, nodes, ncx, false, false, 0, raw_nil())
-               val pages_raw = _walk_nodes(content_bytes, nodes, ncx, true, false, 0, raw_nil())
+               val contents_raw = _walk_nodes(content_bytes, nodes, ncx, PartContents(), false, 0, raw_nil())
+               val pages_raw = _walk_nodes(content_bytes, nodes, ncx, PartPages(), false, 0, raw_nil())
+               val start_raw = _walk_nodes(content_bytes, nodes, ncx, PartStart(), false, 0, raw_nil())
                val () = $X.free_nodes(nodes)
                val dir_len = _dir_len(serial, file_size, name_offset, name_len)
                val @(contents, contents_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, contents_raw, toc_nil(), 0)
                val @(pages, pages_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, pages_raw, toc_nil(), 0)
                val () = _pages_put(TocCell(pages, pages_count))
+               val @(start, start_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, start_raw, toc_nil(), 0)
+               val () = _start_put(TocCell(start, start_count))
                val () = $A.drop<byte>(content_frozen, content_bytes)
                val () = piece_free(content_owner, $A.thaw<byte>(content_frozen))
                val () = _contents_put(TocCell(contents, contents_count))
@@ -669,6 +743,34 @@ implement toc_page_dest_of (i) = let
   prval () = fold@(cell)
   val () = _pages_put(cell)
 in dest end
+
+(* Where reading starts, for a book not yet read: the landmarks'
+   bodymatter entry (EPUB 3), else the guide's text reference (EPUB 2);
+   none when the book names none, or it names a place outside the book *)
+#pub fn toc_start_dest (serial: int): toc_dest
+
+implement toc_start_dest (serial) = let
+  val cell = _start_take()
+  val+ @TocCell(entries, _) = cell
+  val dest = _dest_at(entries, 0)
+  prval () = fold@(cell)
+  val () = _start_put(cell)
+in
+  case+ dest of
+  | TocDest(_, _, _) => dest
+  | ~TocNoDest() => let
+      val guide_entry = !_guide_entry
+    in
+      if guide_entry < 0 then TocNoDest()
+      else let
+        val chapter = book_chapter_of(serial, guide_entry)
+        val no_fragment = $A.alloc<byte>(1)
+      in
+        if chapter < 0 then let val () = $A.free<byte>(no_fragment) in TocNoDest() end
+        else TocDest(chapter, no_fragment, 0)
+      end
+    end
+end
 
 (* The label of entry i *)
 fun _title_at {count:nat}{id_len:pos | id_len < 256} .<count>. (entries: !toc(count), i: int, id: string id_len): bool =

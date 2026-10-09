@@ -4371,15 +4371,42 @@ implement reader_goto (chapter, page, anchor) = let
   val () = !_dating := true
 in _goto(chapter, page, anchor) end
 
+(* The book's chapters, contents and fonts made ready without showing a
+   chapter, as a first load does; the promise resolves with 1 when they
+   are, else 0 *)
+fn _book_prepare (): $P.promise(int, $P.Chained) = let
+  val serial = book_serial()
+in
+  case+ book_chapter_get(serial, 0) of
+  | ~ChaptersUnknown() =>
+    $P.and_then<spine_built><int>(_spine_build(serial), llam(built) =>
+      case+ built of
+      | SpineNotBuilt() => $P.ret<int>(0)
+      | SpineBuilt() => $P.and_then<int><int>(toc_build(serial), llam(_) =>
+        $P.and_then<int><int>(_font_load(serial), llam(_) => $P.ret<int>(1))))
+  | ~ChapterNone(_) => $P.ret<int>(1)
+  | ~ChapterGot(_, _, _, _, _, _, _, _, _) => $P.ret<int>(1)
+end
+
 (* A book opened at the place it was left (as reader_goto shows it):
-   showing it there is no move of the reader's, so it is not dated *)
-#pub fun reader_open_at (chapter: Int, page: Int, pages: Int, anchor: Int): $P.promise(load_outcome, $P.Chained)
-implement reader_open_at (chapter, page, pages, anchor) = let
+   showing it there is no move of the reader's, so it is not dated. A
+   book never read (unread: no move, no minute) opens where it says
+   reading starts (its landmarks' bodymatter, or its guide's text), else
+   at its first chapter *)
+#pub fun reader_open_at (chapter: Int, page: Int, pages: Int, anchor: Int, unread: bool): $P.promise(load_outcome, $P.Chained)
+implement reader_open_at (chapter, page, pages, anchor, unread) = let
   val () = !_dating := false
   val () = !_dated_chapter := chapter
   val () = !_dated_page := page
   val () = !_dated_pages := pages
-in _goto(chapter, page, anchor) end
+in
+  if unread then
+    $P.and_then<int><load_outcome>(_book_prepare(), llam(_) =>
+      case+ toc_start_dest(book_serial()) of
+      | ~TocNoDest() => _goto(chapter, page, anchor)
+      | ~TocDest(start_chapter, fragment, fragment_len) => _goto_fragment(start_chapter, fragment, fragment_len))
+  else _goto(chapter, page, anchor)
+end
 
 (* Jumps to a row of the contents list, remembering where the reader
    was *)
