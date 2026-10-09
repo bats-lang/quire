@@ -3,7 +3,6 @@
 fn _static_remedy (failed: failure): remedy =
   case+ failed of
   | PartNotRead() => ImportAgain()
-  | LibraryNotRead() => ReopenQuire()
   | LibraryNotAdded() => ReopenQuire()
   | HandedBookNotAdded() => ReopenQuire()
   | SettingsNotRead() => ReopenQuire()
