@@ -79,11 +79,13 @@ export const pagelistBooks = {
 
   /** A Devanagari numeral, an empty label and one of 200 characters */
   oddLabels: { valid: true, opts: book('Odd labels', {
-    rawChapters: [{ body: `<h1>One</h1>\n${brk('pa', '१')}${paras('One', 5)}${brk('pb', ' ')}${paras('One', 5)}${brk('pc', 'x')}${paras('One', 5)}` }],
+    rawChapters: [{ body: `<h1>One</h1>\n${brk('pa', '१')}${paras('One', 5)}${brk('pb', ' ')}${paras('One', 5)}${brk('pc', 'x')}${paras('One', 5)}${brk('pd', 'y')}${paras('One', 5)}${brk('pe', 'z')}${paras('One', 5)}` }],
     pageList: [
       { label: '१', href: 'chapter1.xhtml#pa' },
       { label: '&#160;', href: 'chapter1.xhtml#pb' },
-      { label: 'Plate 12, the long label '.repeat(8).slice(0, 200).trim(), href: 'chapter1.xhtml#pc' }] }) },
+      { label: 'Plate 12, the long label '.repeat(8).slice(0, 200).trim(), href: 'chapter1.xhtml#pc' },
+      { label: 'Caf&#233; &#x2019;s &amp; co', href: 'chapter1.xhtml#pd' },
+      { label: '\u65e5'.repeat(80), href: 'chapter1.xhtml#pe' }] }) },
 
   /** doc-pagebreak markers without epub:type, in a book with no page list */
   roleOnly: { valid: true, opts: book('Role only', {
