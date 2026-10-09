@@ -16,6 +16,8 @@
       "reader.spec.js",
       "navigation.spec.js",
       "landmarks.spec.js",
+      "pagebreak.spec.js",
+      "epub2.spec.js",
       "epubcheck.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
