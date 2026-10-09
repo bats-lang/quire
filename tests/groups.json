@@ -15,7 +15,15 @@
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
+      "media.spec.js",
+      "headings.spec.js",
+      "pagebreak.spec.js",
+      "wide.spec.js",
+      "stability.spec.js",
+      "keys.spec.js",
       "landmarks.spec.js",
+      "pagelist.spec.js",
+      "epub2.spec.js",
       "epubcheck.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"

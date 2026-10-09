@@ -119,3 +119,30 @@ test('a search that was ended starts afresh when opened again', async ({ page })
   await page.keyboard.type('para 3.1');
   await expect(box(page)).toHaveValue('para 3.1');
 });
+
+// A hit is marked on its own words after characters that take more than
+// one byte in the book's UTF-8 (a curly quote, an accent) and one that
+// takes two UTF-16 units (an emoji); the page counts a text's offsets in
+// UTF-16 units, not bytes (#421: the words after a curly quote were
+// marked three characters late)
+test('a hit after multi-byte characters is marked on its own words', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Accents', author: 'Search Tests', rawChapters: [{
+    body: '<p>‘But of course’ said the élève first. Zürich café \u{1F600} smile Wait. 日本語 needle.</p>',
+  }] });
+  for (const word of ['But', 'course', 'first', 'café', 'smile', 'Wait', 'needle']) {
+    await page.keyboard.press('/');
+    await box(page).fill(word);
+    await expect(summary(page)).toHaveText('1 result');
+    await results(page).first().click();
+    await expect.poll(() => marks(page)).toEqual({ size: 1, text: word });
+    await page.getByRole('button', { name: 'Close search' }).click();
+  }
+  // the query itself may hold them
+  await page.keyboard.press('/');
+  await box(page).fill('日本語');
+  await expect(summary(page)).toHaveText('1 result');
+  await results(page).first().click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: '日本語' });
+  expect(errors).toEqual([]);
+});
