@@ -119,7 +119,9 @@ it (`appVersion`), and gen-pwa appends it to the Android project's
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI writes it for a pull request's
 own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
+in `check.yml`, should a queue be switched on) from the group's own
+commit (`github.sha`). `tests/version/same.sh` checks that it is the
 same in other time zones and that the Android project carries it.
 
 ## To do: book memory in a rolling window of page arenas
