@@ -1382,7 +1382,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   `ui_text_btn`. `labelsShown` and `labelInName` in
   `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
-  least 44px square, text fields use a 16px font (so iOS does not zoom
+  least 48px square (quire#403: Material 3 and Android's accessibility
+  guidance say 48dp, Apple's HIG 44pt, WCAG 2.5.5 44px, which 48 also
+  meets; the app is released on Android; `targetsShort` in
+  `e2e/controls-shown.js` measures it on every screen the layout walks), text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
 * The sheet's size is in its type (`sheet(r, media, open)`: r bytes
   left, and whether an @media block and a rule are open), so it always
