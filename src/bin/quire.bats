@@ -2313,15 +2313,14 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         | ~$R.some(BookmarksTab()) => _bookmarks_open()
         | ~$R.some(PagesTab()) => _pages_open()
         | ~$R.none() =>
-        if print_page >= 0 then let
-          val () = layer_close(LContents())
-        in reader_goto_page(print_page) end
+        if print_page >= 0 then
+          (* a row that leads nowhere keeps the panel up: nothing moved *)
+          (if reader_goto_page(print_page) then layer_close(LContents()) else ())
         else if bookmark_go >= 0 then let val () = layer_close(LContents()) in _annotation_go(bookmark_go) end
         else if bookmark_delete >= 0 then annot_delete_bookmark(bookmark_delete)
         else if bookmark_note >= 0 then annot_ask_note(bookmark_note, false)
-        else if contents_row >= 0 then let
-          val () = layer_close(LContents())
-        in reader_goto_entry(contents_row) end
+        else if contents_row >= 0 then
+          (if reader_goto_entry(contents_row) then layer_close(LContents()) else ())
         else ())
     in 0 end)
   val listeners = RCons(listeners, OnEl("jump-back"), "click", llam(_) => let val () = reader_back() in 0 end)

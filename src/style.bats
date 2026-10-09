@@ -1440,7 +1440,7 @@ fn _base {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:na
      book's text are inline targets, which WCAG leaves to the text they
      sit in *)
   val () = raw(sheet, "button,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=slider],[role=option],[role=switch],.linkout")
-  val () = raw(sheet, "{min-height:44px!important;min-width:44px!important;box-sizing:border-box}")
+  val () = raw(sheet, "{min-height:48px!important;min-width:48px!important;box-sizing:border-box}")
   (* 16px in text fields, so iOS does not zoom into them *)
   val () = raw(sheet, "input,select,textarea{font-size:16px!important}")
   (* focus: 2px inside the edge in the control's own proven colour *)
@@ -2468,7 +2468,7 @@ fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".trk")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Position(), "relative")
-  val sheet = lay(sheet, Height(), "44px")
+  val sheet = lay(sheet, Height(), "48px")
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = lay(sheet, TouchAction(), "none")
   val sheet = close(sheet)
@@ -2622,7 +2622,7 @@ fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
 in sheet end
 
-fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6500] sheet(after, false, false) = let
+fn _panels {left:nat | left >= 6700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6700] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -2655,10 +2655,21 @@ fn _panels {left:nat | left >= 6500} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .grow")
   val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ph .ibtn")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  (* three tabs and Close fit the panel's head at 320px: the tabs are at
+     least 48px tall (the base rule), so their sides give the room *)
+  val sheet = rule(sheet, ".ph .tab")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceTight())
+  val sheet = close(sheet)
+  (* a header's buttons keep their whole text: the title gives way *)
+  val sheet = rule(sheet, ".ph .btn")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = spaced(sheet, Padding(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tabs")
   val sheet = lay(sheet, Display(), "flex")
