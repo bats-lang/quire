@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, readBook, place, placeChanged, toLibrary, chapters, dialog, menuItem, libraryMenu, bookMenu,
   oneColumn, reload, openBook, cards,
-  librarySettings, settingsButton, restoreInput,
+  librarySettings, settingsButton, restoreInput, exportedBackup,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 60) => ({ title, author: 'Stats Tests', rawChapters: chapters(n, paras) });
@@ -142,9 +142,7 @@ test('a backup keeps the reading log, the goal and each book\'s time, and a rest
   await page.keyboard.press('Escape');
 
   await librarySettings(page);
-  const download = page.waitForEvent('download');
-  await settingsButton(page, 'Export backup').click();
-  const json = readFileSync(await (await download).path(), 'utf8');
+  const json = await exportedBackup(page);
   await settingsButton(page, 'Done').click();
   const b = JSON.parse(json);
   expect(b.settings.dailyGoal).toBe(30);
@@ -182,9 +180,7 @@ test.describe('in Auckland (UTC+12 in June)', () => {
     await expect(stat(page, 'stats-today')).toHaveText('3 min');
     await page.keyboard.press('Escape');
     await librarySettings(page);
-    const download = page.waitForEvent('download');
-    await settingsButton(page, 'Export backup').click();
-    const b = JSON.parse(readFileSync(await (await download).path(), 'utf8'));
+    const b = JSON.parse(await exportedBackup(page));
     const localDay = Math.floor(Date.parse('2026-06-02T00:00:00Z') / 86400000);
     expect(b.readingLog).toEqual([[localDay, 3]]);
   });

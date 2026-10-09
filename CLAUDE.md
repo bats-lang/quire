@@ -1120,6 +1120,41 @@ a `dictionary_file`; a lookup finds a `word_match` (`Exact`,
 `tests/static/case_plus.py` fails on any plain `case` (ATS2 checks only
 `case+`), in CI through `tests/static/run.sh`.
 
+## Backup: Export says it saved, Restore says what it did and can be undone (#362)
+
+A restore overwrites, from the file, the settings (the device's own too:
+brightness, rotation lock, full screen, voices, sort order), the books it
+has in the library (shelf, place when the file's is later, collections,
+finished, minutes), the notes of each book it names (the book's stored
+array is replaced, deletions dropped), the reading log's missing days,
+and the collections it names (made when missing); a book the library
+does not have keeps its record as an orphan ("o"). Nothing went to the
+Trash, so the Undo rule was not met: nothing was offered back.
+
+Now what is in the library is kept first, as a backup file in memory
+(`backup_snapshot`, linear: the same file Export makes, made by the same
+code into an `export_sink`, `IntoReader` or `IntoSnapshot`), then the
+file is restored, `_restored(restore_report)` says it (books, notes,
+settings, days, and the books the backup knows that this library lacks:
+`_restored(1)` does not type-check, `tests/static/reject/restored-bare-count`),
+and `undo_offer(BackupRestored())` is made; its `Undone` puts the snapshot
+back (`PutBack`: shelf, place and Trash exactly as they were, the reading
+log replaced, not merged), its `Final` frees it, so a snapshot unconsumed
+is a type error (`snapshot-not-handed-on`). A restore whose snapshot
+cannot be made (memory, a book's notes unreadable) is not made; a file
+found damaged midway is put back at once. Left behind by an Undo: a
+collection the restore made stays, empty, and orphan records a restore
+kept for books not in the library stay until they are imported.
+
+Export says how it ended (`export_outcome`, matched with `case+`:
+`tests/static/reject/export-unmatched`): in a browser the file is
+downloaded and the dialog says it is in the downloads; in the app a
+blob download does nothing in the WebView, so the file goes to Android's
+share sheet (bridge's `share_file`) and the dialog says it was shared,
+a closed sheet or a failure is said too. Settings says under Backup,
+browser and app alike, what a backup holds and that the books' files are
+not in it.
+
 ## Every error says what to do (#360)
 
 The error banner (`error-banner`, `src/notice.bats`) says a failure and

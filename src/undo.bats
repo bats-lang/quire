@@ -37,6 +37,7 @@ implement $P.dispose<settled>(_) = ()
   | BookArchived(UntilDismissed) of ()
   | BookHidden(UntilDismissed) of ()
   | BookUnhidden(UntilDismissed) of ()
+  | BackupRestored(UntilDismissed) of ()
   | PlainMessage(Brief) of ()
 
 (* What the toast says of an offer *)
@@ -54,6 +55,7 @@ fn _offered_text {life:offer_life} (what: offered(life)): [text_len:pos | text_l
   | BookArchived() => "Book archived"
   | BookHidden() => "Book hidden"
   | BookUnhidden() => "Book unhidden"
+  | BackupRestored() => "Backup restored"
   | PlainMessage() => "Done"
 
 (* The offer shown: the resolver of the promise undo_offer returned. An action that can be undone is done at once

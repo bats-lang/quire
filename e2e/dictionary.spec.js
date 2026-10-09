@@ -7,7 +7,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
-  librarySettings, settingsButton, settingsScreen,
+  librarySettings, settingsButton, settingsScreen, exportedBackup,
 } from './helpers.js';
 import { createStardict } from './create-stardict.js';
 
@@ -272,9 +272,7 @@ test('the backup lists the dictionaries, by name and language', async ({ page })
   await importDictionary(page, english, 'en');
   await importDictionary(page, french, 'fr');
   await librarySettings(page);
-  const downloading = page.waitForEvent('download');
-  await settingsButton(page, 'Export backup').click();
-  const backup = JSON.parse(readFileSync(await (await downloading).path(), 'utf8'));
+  const backup = JSON.parse(await exportedBackup(page));
   expect(backup.dictionaries).toEqual([
     { name: 'Pocket English', language: 'en' },
     { name: 'Petit Larousse', language: 'fr' },
