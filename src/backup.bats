@@ -235,7 +235,7 @@ fn _collections_chunk (): jchunk =
    numbers[21] the device that made that change (its number in sync's
    file). A number a file does not give is -1 (0 for those before the
    anchor, and for done) *)
-#pub stadef BOOK_NUMBERS = 22
+#pub stadef BOOK_NUMBERS = 23
 
 #define SLOT_SHELF 3
 #define SLOT_ADDED 4
@@ -256,11 +256,13 @@ fn _collections_chunk (): jchunk =
 #define SLOT_SIZE 19
 #define SLOT_PLACE_MODIFIED 20
 #define SLOT_PLACE_DEVICE 21
+(* how far through the book the place is, by the chapters' sizes: the library's progress_weighted *)
+#define SLOT_PROGRESS_WEIGHTED 22
 
 (* A book's numbers, before its members are read *)
 fun _clear_numbers {numbers_loc:agz}{i:nat | i <= BOOK_NUMBERS} .<BOOK_NUMBERS - i>.
   (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), i: int i): void =
-  if i >= 22 then ()
+  if i >= 23 then ()
   else let
     val () = $A.set<Int>(numbers, i, (if i = SLOT_ANCHOR then ~1 else if i >= SLOT_COLLECTIONS then ~1 else 0))
   in _clear_numbers(numbers, i + 1) end
@@ -271,7 +273,7 @@ implement backup_numbers_clear (numbers) = _clear_numbers(numbers, 0)
 (* A book's numbers, cleared *)
 #pub fn backup_numbers_new (): [numbers_loc:agz] $A.arr(Int, numbers_loc, BOOK_NUMBERS)
 implement backup_numbers_new () = let
-  val numbers = $A.alloc<Int>(22)
+  val numbers = $A.alloc<Int>(23)
   val () = _clear_numbers(numbers, 0)
 in numbers end
 
@@ -299,6 +301,7 @@ implement backup_numbers_of (nums, numbers) = let
   val () = $A.set<Int>(numbers, SLOT_COLLECTIONS_MODIFIED, nums.collections_modified)
   val () = $A.set<Int>(numbers, SLOT_FINISHED_MODIFIED, nums.finished_modified)
   val () = $A.set<Int>(numbers, SLOT_PLACE_MODIFIED, nums.place_modified)
+  val () = $A.set<Int>(numbers, SLOT_PROGRESS_WEIGHTED, nums.progress_weighted)
   (* which device made the change is sync's to say *)
   val () = $A.set<Int>(numbers, SLOT_PLACE_DEVICE, ~1)
 in $A.set<Int>(numbers, SLOT_SIZE, nums.file_size) end
@@ -404,6 +407,7 @@ implement backup_numbers_place_same (numbers, other) =
 fn _take_place {numbers_loc,other_loc:agz}
   (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS)): void = let
   val () = _take_slots(numbers, other, SLOT_CHAPTER, 5)
+  val () = _take_slots(numbers, other, SLOT_PROGRESS_WEIGHTED, 1)
 in _take_slots(numbers, other, SLOT_PLACE_MODIFIED, 2) end
 
 (* numbers merged with other's (the same book's on another device, both
@@ -535,6 +539,8 @@ implement backup_book_chunk (book_index, numbers, first) =
       val next = jw_stamp(out, next, _given(numbers, SLOT_PLACE_MODIFIED))
       val next = jw_lit(out, next, ",\"placeDevice\":")
       val next = jw_int(out, next, _given(numbers, SLOT_PLACE_DEVICE))
+      val next = jw_lit(out, next, ",\"progressWeighted\":")
+      val next = jw_int(out, next, _given(numbers, SLOT_PROGRESS_WEIGHTED))
       val next = jw_lit(out, next, ",\"annotations\":")
     in JChunk(owner, out, next) end
 
@@ -732,15 +738,16 @@ in pending end
    chapters, page, pages, anchor, done, collections (as the library
    numbers them), minutes read, pages turned on them, finished, and when
    the shelf, the collections and being finished last changed, and when
-   the place did. A record kept by an earlier version has the first 9
-   (RECORD_NUMBERS_FIRST), 10, 13 or 16 of them. *)
-#define RECORD_NUMBERS 17
+   the place did, and the place's weighing by the chapters' sizes. A record
+   kept by an earlier version has the first 9 (RECORD_NUMBERS_FIRST), 10, 13,
+   16 or 17 of them. *)
+#define RECORD_NUMBERS 18
 #define RECORD_NUMBERS_FIRST 9
 
 (* The slot of numbers the record's i-th number is: numbers[3, 19) in
-   order, then when the place changed *)
+   order, then when the place changed, then its weighing *)
 fn _record_slot {i:nat | i < RECORD_NUMBERS} (i: int i): [slot:nat | slot < BOOK_NUMBERS] int slot =
-  if i < 16 then 3 + i else SLOT_PLACE_MODIFIED
+  if i < 16 then 3 + i else if i = 16 then SLOT_PLACE_MODIFIED else SLOT_PROGRESS_WEIGHTED
 
 fun _orphan_write {record_loc,numbers_loc:agz}{i:nat | i <= RECORD_NUMBERS} .<RECORD_NUMBERS - i>.
   (record: !$A.arr(byte, record_loc, 4 + 4 * RECORD_NUMBERS),
@@ -772,6 +779,7 @@ fun _orphan_read_numbers {record_loc,numbers_loc:agz}{count:nat | count <= RECOR
 fn _orphan_read {record_loc,numbers_loc:agz}{n:int | n >= 4 + 4 * RECORD_NUMBERS_FIRST}
   (record: !$A.arr(byte, record_loc, n), n: int n, numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS)): void =
   if n >= 4 + 4 * RECORD_NUMBERS then _orphan_read_numbers(record, RECORD_NUMBERS, numbers, 0)
+  else if n >= 4 + 4 * 17 then _orphan_read_numbers(record, 17, numbers, 0)
   else if n >= 4 + 4 * 16 then _orphan_read_numbers(record, 16, numbers, 0)
   else if n >= 4 + 4 * 13 then _orphan_read_numbers(record, 13, numbers, 0)
   else if n >= 4 + 4 * 10 then _orphan_read_numbers(record, 10, numbers, 0)
@@ -827,6 +835,8 @@ implement backup_apply_numbers (book_index, numbers, to_trash) = let
   val collections_modified = _in_range($A.get<Int>(numbers, SLOT_COLLECTIONS_MODIFIED), ~1, 2147483647, ~1) (* wide *)
   val finished_modified = _in_range($A.get<Int>(numbers, SLOT_FINISHED_MODIFIED), ~1, 2147483647, ~1) (* wide *)
   val place_modified = _in_range($A.get<Int>(numbers, SLOT_PLACE_MODIFIED), ~1, 2147483647, ~1) (* wide *)
+  (* the place's weighing, when the file has it; else the place is counted by chapters until the book is read here *)
+  val progress_weighted = _in_range($A.get<Int>(numbers, SLOT_PROGRESS_WEIGHTED), 0, 1001, 0)
 in
   (case+ lib_nums(book_index) of ~$R.none() => () | ~$R.some(before) => lib_nums_set(book_index, @{
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
@@ -842,7 +852,7 @@ in
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
     minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere,
     place_modified = (if place_modified >= 0 then place_modified else before.place_modified),
-    place_declined = before.place_declined }))
+    place_declined = before.place_declined, progress_weighted = progress_weighted }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)
@@ -912,6 +922,7 @@ fn _number_slot {key_loc:agz}{key_len:nat | key_len <= KEY_BYTES} (key: !$A.arr(
   else if jr_key_is(key, key_len, "finished") then SLOT_FINISHED
   else if jr_key_is(key, key_len, "size") then SLOT_SIZE
   else if jr_key_is(key, key_len, "placeDevice") then SLOT_PLACE_DEVICE
+  else if jr_key_is(key, key_len, "progressWeighted") then SLOT_PROGRESS_WEIGHTED
   else ~1
 
 (* The stamp a book member's key names, its slot in numbers; -1 for any

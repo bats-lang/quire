@@ -203,6 +203,14 @@ implement $P.dispose<$IDB.stored>(_) = ()
    own, and all of theirs; @(0, 0, 0) when the chapters are unknown *)
 #pub fn book_weights (serial: int, chapter_index: int): @([before:nat] int before, [own:nat] int own, [total:nat] int total)
 
+(* Where the book's text ends, for its percentage (#426): the first chapter
+   of its back matter, as its landmarks name it (EPUB 3's `backmatter`).
+   The chapters from there on weigh nothing in book_weights, so the end of
+   the text is 100%. A chapter that is not after the first one is no end
+   (the book's first chapter is no back matter); forgotten when a book
+   opens. *)
+#pub fn book_text_end_set (serial: int, chapter_index: int): void
+
 (* Closes the book being imported, book `serial`, when its import fails *)
 #pub fn book_abandon (serial: int): void
 
@@ -322,6 +330,9 @@ implement $P.dispose<$IDB.stored>(_) = ()
 val _book = ref<open_book>(NoBook())
 
 val _book_serial = ref<int>(0)
+
+(* The first chapter of the open book's back matter, -1 when none is named *)
+val _text_end = ref<int>(~1)
 
 fun book_entries_free {file_size,directory_size:int}{count:nat} .<count>. (entries: book_entries(file_size, directory_size, count)): void =
   case+ entries of
@@ -644,6 +655,7 @@ implement decompress (data, data_len, method) =
 
 implement book_begin {file_size} (book_file, file_size) = let
   val () = !_book_serial := !_book_serial + 1
+  val () = !_text_end := ~1
   val () = (case+ book_index_make(book_file, file_size) of
     | ~$R.some(index) => book_put(Importing(book_file, file_size, index))
     | ~$R.none() => let
@@ -867,19 +879,54 @@ end
    of that chapter, and of all of them, added to before, own and
    total *)
 fun book_weigh {file_size:pos}{remaining:nat} .<remaining>.
-  (chapters: !book_chapters(file_size, remaining), chapter_index: int, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
+  (chapters: !book_chapters(file_size, remaining), chapter_index: int, equal: bool, before: Nat, own: Nat, total: Nat): @(Nat, Nat, Nat) =
   case+ chapters of
   | ChaptersNil() => @(before, own, total)
   | @Chapter(_, data_size, _, _, _, _, _, _, _, rest) => let
-      val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, before + data_size, own, total + data_size)
-        else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, before, data_size, total + data_size)
-        else book_weigh(rest, chapter_index - 1, before, own, total + data_size)): @(Nat, Nat, Nat)
+      (* a book of fixed pages counts its spine items, as the page indicator does *)
+      val weight = (if equal then 1 else data_size): [weight:pos] int weight
+      val weights = (if chapter_index > 0 then book_weigh(rest, chapter_index - 1, equal, before + weight, own, total + weight)
+        else if chapter_index = 0 then book_weigh(rest, chapter_index - 1, equal, before, weight, total + weight)
+        else book_weigh(rest, chapter_index - 1, equal, before, own, total + weight)): @(Nat, Nat, Nat)
       prval () = fold@(chapters)
     in weights end
   | @ChapterMissing(rest) => let
-      val weights = book_weigh(rest, chapter_index - 1, before, own, total)
+      val weights = book_weigh(rest, chapter_index - 1, equal, before, own, total)
       prval () = fold@(chapters)
     in weights end
+
+(* Whether every chapter that is there is a fixed page, and one at least is *)
+fun book_all_fixed {file_size:pos}{remaining:nat} .<remaining>.
+  (chapters: !book_chapters(file_size, remaining), seen: bool): bool =
+  case+ chapters of
+  | ChaptersNil() => seen
+  | @Chapter(_, _, _, _, _, _, layout, _, _, rest) => let
+      val fixed = (case+ layout of PrePaginated() => true | Reflowable() => false)
+      val all = (if fixed then book_all_fixed(rest, true) else false): bool
+      prval () = fold@(chapters)
+    in all end
+  | @ChapterMissing(rest) => let
+      val all = book_all_fixed(rest, seen)
+      prval () = fold@(chapters)
+    in all end
+
+(* The weights of chapter chapter_index of the chapters, the back matter
+   from text_end on weighing nothing, so that the text's end is the end *)
+fn book_weigh_text {file_size:pos}{remaining:nat}
+  (chapters: !book_chapters(file_size, remaining), chapter_index: int, text_end: int): @(Nat, Nat, Nat) = let
+  val equal = book_all_fixed(chapters, false)
+in
+  if text_end <= 0 then book_weigh(chapters, chapter_index, equal, 0, 0, 0)
+  else let
+    val @(text_size, _, _) = book_weigh(chapters, text_end, equal, 0, 0, 0)
+  in
+    if chapter_index >= text_end then @(text_size, 0, text_size)
+    else let val @(before, own, _) = book_weigh(chapters, chapter_index, equal, 0, 0, 0) in @(before, own, text_size) end
+  end
+end
+
+implement book_text_end_set (serial, chapter_index) =
+  if serial = !_book_serial then !_text_end := chapter_index else ()
 
 implement book_weights (serial, chapter_index) = let
   val book = book_take()
@@ -889,7 +936,7 @@ in
     if serial = !_book_serial then let
       val weights = (case+ spine of
         | @Spine(chapters, _) => let
-            val weights = book_weigh(chapters, chapter_index, 0, 0, 0)
+            val weights = book_weigh_text(chapters, chapter_index, !_text_end)
             prval () = fold@(spine)
           in weights end
         | NoSpine() => @(0, 0, 0)): @(Nat, Nat, Nat)

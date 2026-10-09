@@ -342,11 +342,12 @@ end
    whose epub:type has toc, or the NCX's navPoints), the print pages (page-list,
    pageTarget) or where reading starts (the entry of the landmarks nav
    whose epub:type has bodymatter; the NCX has none) *)
-datatype nav_part = PartContents | PartPages | PartStart
+datatype nav_part = PartContents | PartPages | PartStart | PartEnd
 
-fn _is_contents (part: nav_part): bool = (case+ part of PartContents() => true | PartPages() => false | PartStart() => false)
-fn _is_pages (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => true | PartStart() => false)
-fn _is_start (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => false | PartStart() => true)
+fn _is_contents (part: nav_part): bool = (case+ part of PartContents() => true | PartPages() => false | PartStart() => false | PartEnd() => false)
+fn _is_pages (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => true | PartStart() => false | PartEnd() => false)
+fn _is_start (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => false | PartStart() => true | PartEnd() => false)
+fn _is_end (part: nav_part): bool = (case+ part of PartContents() => false | PartPages() => false | PartStart() => false | PartEnd() => true)
 
 (* Whether the epub:type data[offset, offset + type_len) of a nav is the
    one part is read from *)
@@ -360,6 +361,7 @@ in
   | PartContents() => span_has(data, offset, type_len, _c_toc, 3)
   | PartPages() => span_has(data, offset, type_len, _c_page_list_type, 9)
   | PartStart() => span_has(data, offset, type_len, _c_landmarks, 9)
+  | PartEnd() => span_has(data, offset, type_len, _c_landmarks, 9)
 end
 
 (* The entries of nodes, onto entries (newest first): the <li> of a nav
@@ -367,7 +369,9 @@ end
    level deeper than the entry it is in. With PartPages, the print pages
    instead: the <li> of a nav whose epub:type has page-list, or each
    pageTarget. With PartStart, the <li> of a nav whose epub:type has
-   landmarks whose <a> has epub:type bodymatter: "start reading" *)
+   landmarks whose <a> has epub:type bodymatter: "start reading". With
+   PartEnd, the same landmark whose <a> has epub:type backmatter: where
+   the text ends and the back matter begins *)
 fun _walk_nodes {data_loc:agz}{data_size:pos}{nodes_size:nat}{count:nat} .<nodes_size, 1>.
   (data: !$A.borrow(byte, data_loc, data_size), nodes: !$X.xml_node_list(data_size, nodes_size),
    ncx: bool, part: nav_part, in_toc: bool, level: Int, entries: raw(data_size, count)): [new_count:nat] raw(data_size, new_count) =
@@ -395,6 +399,7 @@ and _walk_node {data_loc:agz}{data_size:pos}{node_size:pos}{count:nat} .<node_si
       var _c_page_list = @[char][8]('p', 'a', 'g', 'e', 'L', 'i', 's', 't')
       var _c_page_target = @[char][10]('p', 'a', 'g', 'e', 'T', 'a', 'r', 'g', 'e', 't')
       var _c_body_matter = @[char][10]('b', 'o', 'd', 'y', 'm', 'a', 't', 't', 'e', 'r')
+      var _c_back_matter = @[char][10]('b', 'a', 'c', 'k', 'm', 'a', 't', 't', 'e', 'r')
     in
       if ncx then
         (if (if _is_contents(part) then xml_name_eq(data, name_offset, name_len, _c_nav_point, 8) else false) then let
@@ -418,11 +423,13 @@ and _walk_node {data_loc:agz}{data_size:pos}{node_size:pos}{count:nat} .<node_si
            else entries
          | ~xspan_none() => entries)
       else if (if in_toc then xml_name_eq(data, name_offset, name_len, _c_li, 2) else false) then
-        (if _is_start(part) then
-           (* only the landmark that is where the body matter starts *)
+        (if (if _is_start(part) then true else _is_end(part)) then
+           (* only the landmark that is where the body matter starts (or
+              where the back matter does) *)
            (case+ _child_attr(data, children, _c_a, 1, _c_epub_type, 9) of
             | ~xspan_at(type_offset, type_len) =>
-              if span_has(data, type_offset, type_len, _c_body_matter, 10) then let
+              if (if _is_start(part) then span_has(data, type_offset, type_len, _c_body_matter, 10)
+                  else span_has(data, type_offset, type_len, _c_back_matter, 10)) then let
                 val label_buffer = $A.alloc<byte>(LABEL_MAX)
                 val label_len = _li_label(data, children, label_buffer)
                 val href = _child_attr(data, children, _c_a, 1, _c_href, 4)
@@ -505,6 +512,15 @@ fn _dir_len {file_size:pos}{name_offset:nat}{name_len:pos | name_offset + name_l
   val () = $A.free<byte>(name)
 in dir_len end
 
+(* The chapter of the first entry, -1 when there is none *)
+fn _first_chapter {count:nat} (entries: !toc(count)): int =
+  case+ entries of
+  | toc_nil() => ~1
+  | @toc_cons(_, _, _, entry_chapter, _, _, _) => let
+      val chapter = entry_chapter
+      prval () = fold@(entries)
+    in chapter end
+
 (* Reads the entries of book serial from the document toc_locate found;
    the promise resolves with their count (0 when there is none) *)
 #pub fn toc_build (serial: int): $P.promise(int, $P.Chained)
@@ -535,6 +551,7 @@ in
                val contents_raw = _walk_nodes(content_bytes, nodes, ncx, PartContents(), false, 0, raw_nil())
                val pages_raw = _walk_nodes(content_bytes, nodes, ncx, PartPages(), false, 0, raw_nil())
                val start_raw = _walk_nodes(content_bytes, nodes, ncx, PartStart(), false, 0, raw_nil())
+               val end_raw = _walk_nodes(content_bytes, nodes, ncx, PartEnd(), false, 0, raw_nil())
                val () = $X.free_nodes(nodes)
                val dir_len = _dir_len(serial, file_size, name_offset, name_len)
                val @(contents, contents_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, contents_raw, toc_nil(), 0)
@@ -542,6 +559,11 @@ in
                val () = _pages_put(TocCell(pages, pages_count))
                val @(start, start_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, start_raw, toc_nil(), 0)
                val () = _start_put(TocCell(start, start_count))
+               (* the text ends where the landmarks' back matter begins, when that is not the first chapter *)
+               val @(text_end, text_end_count) = _resolve(serial, file_size, name_offset, dir_len, name_offset, content_bytes, content_size, end_raw, toc_nil(), 0)
+               val back_matter = _first_chapter(text_end)
+               val () = toc_free(text_end)
+               val () = (if back_matter >= 1 then book_text_end_set(serial, back_matter) else ())
                val () = $A.drop<byte>(content_frozen, content_bytes)
                val () = piece_free(content_owner, $A.thaw<byte>(content_frozen))
                val () = _contents_put(TocCell(contents, contents_count))
