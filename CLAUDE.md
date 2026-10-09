@@ -596,6 +596,22 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+### Note popups (#414)
+
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+
 ### Found while taking this inventory
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the

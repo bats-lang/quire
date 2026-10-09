@@ -15,6 +15,7 @@
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
+      "footnotes.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
