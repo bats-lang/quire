@@ -24,6 +24,7 @@ staload "indexrec.sats"
 staload "bookimage.sats"
 staload "indeximage.sats"
 staload "libstore.sats"
+staload "unreadable.sats"
 staload "paths.sats"
 staload BDOM = "wasm.bats-packages.dev/bridge/src/dom.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
@@ -2111,6 +2112,70 @@ fun _pending_free {count:nat} .<count>. (planned: pending(count)): void =
   | ~pending_nil() => ()
   | ~pending_cons(_, _, _, image, rest) => let val () = book_image_free(image) in _pending_free(rest) end
 
+(* ============================================================
+   A library that could not be read (#374)
+   ============================================================ *)
+
+(* Why the last read of the library failed, if it did: the screen shows
+   it, and what is offered depends on it *)
+val _read_outcome = ref<read_attempt>(AttemptRead())
+val _read_kind = ref<failure_kind>(KindNoReasonGiven())
+
+(* Whether the one retry has been used (or is under way): the first read
+   at start-up is not counted. After it a failure has no remedy for the
+   rest of the session, so Try again is one honest retry and no loop *)
+val _retry_spent = ref<bool>(false)
+
+(* An unexpected failure: the banner says an unexpected error occurred,
+   with the name and message as the browser gave them in the details *)
+fn _banner_unexpected {call_len:pos | call_len < 64}
+  (text: unexpected_text, call: string call_len): void =
+  case+ text of
+  | ~NoUnexpectedText() =>
+    notice_unexpected("reading your library", call, CaseNamed("ReadUnexpected"), NoAnswer())
+  | ~UnexpectedText(bytes, count, whole) =>
+    if count < whole then
+      notice_unexpected("reading your library", call, CaseNamed("ReadUnexpected"), AnswerCut("name and message", bytes, count, whole))
+    else
+      notice_unexpected("reading your library", call, CaseNamed("ReadUnexpected"), AnswerShown("name and message", bytes, count))
+
+(* What a failure is told with. A kind the screen already says
+   completely (what happened, what Quire did, what to do, and the
+   browser's name for it, which is what a report needs) has no banner
+   over the library: a banner is a fixed overlay, and on a short window
+   it covered Try again, the one thing the screen offers (#374, CI on
+   mobile-portrait). Only an unexpected failure has one: it carries what
+   the screen cannot (the name and message, Copy details, Report), and
+   its screen offers no button for it to cover. *)
+fn _failure_told {call_len:pos | call_len < 64}
+  (kind: failure_kind, text: unexpected_text, call: string call_len): void =
+  case+ kind of
+  | KindUnexpected() => _banner_unexpected(text, call)
+  | KindTransient() => unexpected_text_free(text)
+  | KindStorageBlocked() => unexpected_text_free(text)
+  | KindNewerVersion() => unexpected_text_free(text)
+  | KindAborted() => unexpected_text_free(text)
+  | KindNoReasonGiven() => unexpected_text_free(text)
+  | KindBytesUnreadable() => unexpected_text_free(text)
+
+(* The library could not be read, for this reason: it is not saved over
+   this session, the screen says why, and the banner has the details *)
+fn _read_failed {call_len:pos | call_len < 64} (found: failure_found, call: string call_len): void =
+  case+ found of
+  | ~FailureFound(kind, text) => let
+      val () = !_read_kind := kind
+      val () = !_read_outcome := AttemptFailed()
+      val () = storage_unreadable(LibraryRecord())
+    in _failure_told(kind, text, call) end
+
+fn _failed_bytes (): void =
+  _read_failed(FailureFound(KindBytesUnreadable(), NoUnexpectedText()), "idb_get")
+
+(* A failure with no name of its own (the conversion could not keep what
+   it read), said as unexpected *)
+fn _failed_unexpected {text_len:pos | text_len < 256} (text: string text_len): void =
+  _read_failed(FailureFound(KindUnexpected(), unexpected_literal(text)), "idb_write_all")
+
 (* The library kept before there were records (#354), under "lib": read,
    shown, and written as records in one transaction, all or none, the
    collections' record with the size and sum of what was read. "lib" itself
@@ -2123,26 +2188,26 @@ fn _convert_legacy (): $P.promise(int, $P.Chained) = let
   val () = release_bytes(key_frozen, key_bytes)
 in
   $P.and_then<$IDB.lookup><int>(stored, llam(found) =>
-    case+ lookup_content(found) of
-    | ~NoStoredContent() => $P.ret<int>(0)
-    (* shown as it can be read (empty), and never saved over (#174) *)
-    | ~ContentUnreadable() => let val () = storage_unreadable(LibraryRecord()) in $P.ret<int>(0) end
-    | ~StoredContent(owner, buf, n) =>
+    case+ library_content(found) of
+    | ~LibraryNone() => $P.ret<int>(0)
+    (* said, with why, and never saved over (#174) *)
+    | ~LibraryFailed(why) => let val () = _read_failed(why, "idb_get") in $P.ret<int>(0) end
+    | ~LibraryContent(owner, buf, n) =>
       if n < 4 then let
         val () = piece_free(owner, buf)
-        val () = storage_unreadable(LibraryRecord())
+        val () = _failed_bytes()
       in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 0)) <> 81 then let
         val () = piece_free(owner, buf)
-        val () = storage_unreadable(LibraryRecord())
+        val () = _failed_bytes()
       in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) < 49 then let
         val () = piece_free(owner, buf)
-        val () = storage_unreadable(LibraryRecord())
+        val () = _failed_bytes()
       in $P.ret<int>(0) end
       else if byte2int0($A.get<byte>(buf, 3)) > 54 then let
         val () = piece_free(owner, buf)
-        val () = storage_unreadable(LibraryRecord())
+        val () = _failed_bytes()
       in $P.ret<int>(0) end
       else let
         val version = byte2int0($A.get<byte>(buf, 3)) - 48
@@ -2162,7 +2227,7 @@ in
         case+ _image_of_collections() of
         | ~IndexNotImaged() => let
             val () = _pending_free(planned)
-            val () = storage_unreadable(LibraryRecord())
+            val () = _failed_unexpected("converting the old library: a number in it does not fit 32 bits")
           in $P.ret<int>(count) end
         | ~IndexImaged(index) => let
             val batch = batch_add_index(_batch_of(planned, BatchNone()), index)
@@ -2179,7 +2244,7 @@ in
               | $IDB.NotStored() => let
                   val () = _pending_free(planned)
                   val () = index_image_free(index)
-                  val () = storage_unreadable(LibraryRecord())
+                  val () = _failed_unexpected("converting the old library: its records were not stored")
                 in $P.ret<int>(count) end)
           end
       end)
@@ -2271,10 +2336,10 @@ fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
    promise resolves with the number of books. *)
 #pub fn lib_load (): $P.promise(int, $P.Chained)
 
-implement lib_load () =
+fn _load_records (): $P.promise(int, $P.Chained) =
   $P.and_then<library_read><int>(libstore_read(), llam(read) =>
     case+ read of
-    | ~ReadFailed() => let val () = storage_unreadable(LibraryRecord()) in $P.ret<int>(0) end
+    | ~ReadFailed(why) => let val () = _read_failed(why, "idb_get_prefix") in $P.ret<int>(0) end
     | ~ReadNothing() => _convert_legacy()
     | ~ReadLibrary(index, stored, stored_count) => let
         val no_index = (case+ index of IndexNone() => true | _ => false): bool
@@ -2294,21 +2359,107 @@ implement lib_load () =
         in $P.ret<int>(count) end
       end)
 
+implement lib_load () = let
+  (* a read made again starts from nothing failed; only a read that
+     works leaves it so *)
+  val () = !_read_outcome := AttemptRead()
+in
+  $P.and_then<int><int>(_load_records(), llam(count) => let
+    val attempt = !_read_outcome
+    (* the flag that stops every save is cleared by storage_read_again
+       and only when the read worked *)
+    val () = (case+ storage_read_again(LibraryRecord(), attempt) of
+      | Readable() => ()
+      | StillUnread() => ())
+  in $P.ret<int>(count) end)
+end
+
+(* Whether Try again is offered: the library failed to read for a reason
+   a second read could change, and the one retry is not used *)
+#pub datatype retry_offer =
+  | RetryOffered
+  | RetryNotOffered
+
+#pub fn lib_retry_offer (): retry_offer
+
+implement lib_retry_offer () =
+  if !_retry_spent then RetryNotOffered()
+  else (case+ !_read_outcome of
+    | AttemptRead() => RetryNotOffered()
+    | AttemptFailed() => (case+ remedy_of(!_read_kind) of
+      | ~TryAgain(pf | _) => let prval HopeTransient() = pf in RetryOffered() end
+      | ~NoRemedy() => RetryNotOffered()))
+
+(* Try again was pressed: the retry is spent, whatever comes of it, and
+   RetryOffered says the read may be made again (the caller reads it
+   through its start-up steps) *)
+#pub fn lib_retry_begin (): retry_offer
+
+implement lib_retry_begin () =
+  case+ lib_retry_offer() of
+  | RetryOffered() => let val () = !_retry_spent := true in RetryOffered() end
+  | RetryNotOffered() => RetryNotOffered()
+
 (* ============================================================
    The search query
    ============================================================ *)
 
 (* What the library view has to show: books, nothing to show, or a library that
    could not be read (#354) *)
-datatype library_view =
+datavtype library_view =
   | ViewBooks
   | ViewEmpty
-  | ViewUnreadable
+  | ViewUnreadable of failure_kind
 
+(* The library is unreadable when a read of it failed (the last one: a
+   read made again starts from nothing failed). Why is held in
+   _read_state, set where the read fails, so the view never has to guess *)
 fn _view_of (shown: int): library_view =
-  if ~storage_savable(LibraryRecord()) then ViewUnreadable()
-  else if shown > 0 then ViewBooks()
-  else ViewEmpty()
+  case+ !_read_outcome of
+  | AttemptFailed() => ViewUnreadable(!_read_kind)
+  | AttemptRead() => if shown > 0 then ViewBooks() else ViewEmpty()
+
+(* What the screen says for a library that could not be read. Always
+   what Quire did: nothing is changed, and nothing is saved until it can
+   read the library. Nothing here offers to import (that is for an empty
+   library) *)
+fn _unreadable_text (kind: failure_kind, spent: bool): void =
+  case+ kind of
+  | KindTransient() =>
+    if spent then ui_text_long("library-empty", "Quire still could not read your library after trying again. Reopen Quire to try once more. Quire has not changed anything and will not save until it can read your library. Details: UnknownError.")
+    else ui_text_long("library-empty", "Quire could not read your library this time. Quire has not changed anything and will not save until it can read your library. Details: UnknownError.")
+  | KindStorageBlocked() =>
+    ui_text_long("library-empty", "Your browser is not letting Quire use its storage (a private window, or site data blocked). Allow site data for this address, or leave the private window, then reopen Quire. Quire has not changed anything and will not save until it can read your library. Details: SecurityError.")
+  | KindNewerVersion() =>
+    ui_text_long("library-empty", "This device holds data from a newer version of Quire. Update Quire. Quire has not changed anything and will not save until it can read your library. Details: VersionError.")
+  | KindAborted() =>
+    ui_text_long("library-empty", "The browser stopped Quire's read of your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: AbortError.")
+  | KindNoReasonGiven() =>
+    ui_text_long("library-empty", "The browser did not say why Quire could not read your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: NoErrorGiven.")
+  | KindBytesUnreadable() =>
+    ui_text_long("library-empty", "Quire could not read what is stored for your library. Reopen Quire to read it again. Quire has not changed anything and will not save until it can read your library. Details: BytesUnreadable.")
+  | KindUnexpected() =>
+    ui_text_long("library-empty", "An unexpected error stopped Quire from reading your library. The details are in the message above. Quire has not changed anything and will not save until it can read your library.")
+
+(* A library that can be read: Import works and there is nothing to retry *)
+fn _readable_shown (): void = let
+  val () = ui_try_again_hide()
+in ui_inert("import-file", false) end
+
+(* The remedy offered: none once the one retry is spent *)
+fn _remedy_for (spent: bool, kind: failure_kind): remedy =
+  if spent then NoRemedy() else remedy_of(kind)
+
+(* A library that could not be read, shown: why, Try again only when the
+   kind has hope and the one retry is not spent, and Import off *)
+fn _unreadable_shown (kind: failure_kind): void = let
+  val spent = !_retry_spent
+  val () = _unreadable_text(kind, spent)
+  val remedy = _remedy_for(spent, kind)
+  val () = (case+ remedy of
+    | ~TryAgain(pf | _) => ui_try_again_show(pf | )
+    | ~NoRemedy() => ui_try_again_hide())
+in ui_inert("import-file", true) end
 
 (* The library view shows only the books whose title or author has
    query[0, query_len) in it (letters in any case); an empty query shows
@@ -2902,14 +3053,20 @@ implement lib_render () = let
   val () = lib_put(library)
   val () = ui_show("continue-reading", want >= 0)
   val () = query_put(query)
-  val () = ui_show("library-empty", shown = 0)
+  val view = _view_of(shown)
+  val () = ui_show("library-empty", (case+ view of
+    | ViewBooks() => false
+    | ViewUnreadable(_) => true
+    | ViewEmpty() => true))
   val () = _coll_row()
   val () = _install_hint_show()
 in
-  case+ _view_of(shown) of
-  | ViewBooks() => ()
-  | ViewUnreadable() => ui_text("library-empty", "Your library could not be read, so it is not shown. Reopen Quire to try again.")
-  | ViewEmpty() =>
+  case+ view of
+  | ~ViewBooks() => _readable_shown()
+  | ~ViewUnreadable(kind) => _unreadable_shown(kind)
+  | ~ViewEmpty() => let
+  val () = _readable_shown()
+in
   if has_query then ui_text("library-empty", "No books match")
   else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
   else (case+ !_filter of
@@ -2921,6 +3078,7 @@ in
       | Archived() => ui_text("library-empty", "No archived books")
       | Trash() => ui_text("library-empty", "The Trash is empty")
       | OnShelf() => ui_text("library-empty", "Import an EPUB file to start reading.")))
+end
 end
 
 (* Shows shelf *)

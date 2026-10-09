@@ -85,6 +85,7 @@
       "reject/snapshot-not-handed-on",
       "reject/sync-result-unmatched",
       "reject/theme-unmatched",
+      "reject/try-again-without-hope",
       "reject/turn-unmatched",
    "reject/undo-offer-brief",
       "reject/unreadable-unhandled"
@@ -99,6 +100,7 @@
       "accept/image-roundtrip",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
+      "accept/try-again-transient",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
       "reject/back-nothing-to-offer",

@@ -585,7 +585,7 @@ fn _import_file {file_size:nat} (book_file: $BF.infile(file_size), file_size: in
   if ~storage_savable(LibraryRecord()) then let
     val () = $BF.file_close(book_file)
     val () = _kept_name_put(NoKeptName())
-    val () = notice_error("Books cannot be added: Quire could not read your library. Reopen Quire to try again.")
+    val () = notice_error("Books cannot be added until Quire can read your library. The library screen says why.")
   in $P.ret<import_outcome>(Failed()) end
   else let
   val () = _stage_name()

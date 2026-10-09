@@ -63,12 +63,12 @@ fn _say {text_len:pos | text_len < 256} (text: string text_len): void = let
   val () = modal_inform("Backup")
 in modal_text_lit(text) end
 
-(* The brightness: a level in percent, or "system" for the system's own *)
+(* The brightness: its level (10 to 100), or "system" for the system's own *)
 fn _brightness_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 11 <= n}
   (out: !$A.arrx(byte, l, n, owner), position: int position): [stop:nat | stop <= position + 11] int stop =
   case+ set_brightness_get() of
   | BrightnessSystem() => jw_lit(out, position, "\"system\"")
-  | level => jw_int(out, position, brightness_percent(level))
+  | BrightnessOwn() => jw_int(out, position, set_brightness_level_get())
 
 (* Whether the rotation is locked: true or false *)
 (* Whether a narration reads page numbers and notes, as JSON's true or
@@ -1334,7 +1334,10 @@ in
         val () = set_speech_rate_set(speech_rate_of_hundredths(value))
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "brightness") then let
-        val () = set_brightness_set(brightness_of_percent(value))
+        val () = (if value >= 10 then (if value <= 100 then let
+            val () = set_brightness_level_set(value)
+          in set_brightness_set(BrightnessOwn()) end
+          else set_brightness_set(BrightnessSystem()) ) else set_brightness_set(BrightnessSystem()))
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "size") then let
         val () = (if value >= 12 then (if value <= 32 then set_size_set(value) else ()) else ())
