@@ -596,6 +596,40 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+### Where a book opens the first time (#409)
+
+A book never read opens where it says reading starts, as Apple Books
+opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
+DAISY's knowledge base and Thorium's "Start of Content" have it), not at
+its cover or copyright page: `toc_start_dest` (`src/toc.bats`) gives the
+chapter and fragment of the first `bodymatter` entry of the nav document's
+`landmarks` nav (`nav_part`'s `PartStart`, read beside the contents and
+the page list in `toc_build`), else, for a book with none (EPUB 2), of the
+OPF's `<guide>` `<reference type="text">` (`find_guide_text`, its entry
+found in `toc_locate`; its fragment is not kept). A start that names no
+chapter of the book (no href, a file the book lacks, one outside it)
+gives none, and the book opens at its first spine item, saying nothing.
+`reader_open_at` takes `unread`: set by `_open_book` only when the place
+is the first chapter's first page, no move has been dated
+(`place_modified` 0) and no minute is read, so a book once read, even
+back at its first page, opens at its kept place. The chapters, contents
+and fonts are made ready first (`_book_prepare`), so the cover is never
+shown before the jump; the jump is not dated, as no open is.
+
+The landmarks are not listed in Contents (issue #409: Apple Books uses
+the bodymatter landmark to open the book and lists none, Calibre's viewer
+shows none, only Thorium has a Landmarks list; publishers put the
+contents page, index and list of illustrations in the table of contents
+too, so the list would repeat it).
+
+`e2e/landmarks.spec.js` plays the books in `e2e/landmark-books.js`
+(`createEpub`'s `landmarks`, `guide` and `epub2`), and
+`e2e/epubcheck.spec.js` checks every book there with epubcheck (5.2.1,
+pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
+locally): a valid book must pass, one that is invalid on purpose (a
+landmark naming a file the book lacks) may give only the errors its
+entry lists.
+
 ### Found while taking this inventory
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the
