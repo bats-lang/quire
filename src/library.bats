@@ -2279,6 +2279,18 @@ fn _adopt_image {x:bookx}{parsed:nat | parsed <= LIB_MAX} (image: book_image(x),
     val () = _shadow_add(stored.id_high, stored.id_low, image)
   in @(_rank_insert(stored.position, book, books), parsed + 1) end
 
+(* How many records of the library cannot be read and can be set aside
+   (damaged, or not Quire's; one a newer Quire wrote never is), as the
+   last read found them, and how many have been set aside since *)
+val _aside_count = ref<int>(0)
+val _aside_done = ref<int>(0)
+
+fn _aside_counted (why: unusable): void =
+  case+ why of
+  | UnusableNewer() => ()
+  | UnusableDamaged() => !_aside_count := !_aside_count + 1
+  | UnusableNotQuire() => !_aside_count := !_aside_count + 1
+
 (* The books read from their records, onto books: those that could not be
    used, and those that lost a group, are counted *)
 fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
@@ -2294,7 +2306,9 @@ fun _adopt_books {stored,parsed:nat | parsed <= LIB_MAX} .<stored>.
     | ~LossyBook(_, _, image) => let
         val @(more, total) = _adopt_image(image, books, parsed)
       in _adopt_books(rest, more, total, unusable, lossy + 1) end
-    | ~UnusableBook(_, _, _) => _adopt_books(rest, books, parsed, unusable + 1, lossy))
+    | ~UnusableBook(_, _, why) => let
+        val () = _aside_counted(why)
+      in _adopt_books(rest, books, parsed, unusable + 1, lossy) end)
 
 (* The collections read from their record; whether it was damaged or
    could not be used (no collections, until one is made) *)
@@ -2321,15 +2335,16 @@ fn _adopt_index (index: stored_index): bool =
       val () = index_image_free(image)
       val () = _index_shadow_current()
     in true end
-  | ~UnusableIndex(_) => let
+  | ~UnusableIndex(why) => let
+      val () = _aside_counted(why)
       val () = _index_shadow_current()
     in true end
 
 (* What reading the records lost is said once, apart from what is kept *)
 fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
-  if unusable > 0 then notice_say(BooksNotRead())
+  if unusable > 0 then notice_say(if !_aside_count > 0 then BooksNotReadCanSetAside() else BooksNotRead())
   else if lossy > 0 then notice_say(DetailsDamaged())
-  else if index_damaged then notice_say(CollectionsNotRead())
+  else if index_damaged then notice_say(if !_aside_count > 0 then CollectionsNotReadCanSetAside() else CollectionsNotRead())
   else ()
 
 (* Reads the library: its records, or the old "lib" converted to them. The
@@ -2351,6 +2366,7 @@ fn _load_records (): $P.promise(int, $P.Chained) =
           val () = stored_books_free(stored)
         in _convert_legacy() end
         else let
+          val () = !_aside_count := 0
           val @(ranked_books, count, unusable, lossy) = _adopt_books(stored, ranked_nil(), 0, 0, 0)
           val books = _ranked_books(ranked_books, books_nil())
           val index_damaged = _adopt_index(index)
@@ -2399,6 +2415,108 @@ implement lib_retry_begin () =
   case+ lib_retry_offer() of
   | RetryOffered() => let val () = !_retry_spent := true in RetryOffered() end
   | RetryNotOffered() => RetryNotOffered()
+
+(* ============================================================
+   Setting unreadable records aside
+   ============================================================ *)
+
+(* The records that cannot be read and can be set aside, as the last read
+   found them *)
+#pub fn lib_aside_count (): int
+
+implement lib_aside_count () = !_aside_count
+
+(* One if the record was set aside *)
+fn _aside_added (result: aside_result): int =
+  case+ result of
+  | AsideDone() => 1
+  | AsideNotNeeded() => 0
+  | AsideNewer() => 0
+  | AsideFailed() => 0
+
+(* Each book of stored whose record cannot be used set aside, one
+   transaction each; the promise resolves with how many were *)
+fun _aside_books {count:nat} .<count>. (stored: stored_books(count), done: int): $P.promise(int, $P.Chained) =
+  case+ stored of
+  | ~StoredNone() => $P.ret<int>(done)
+  | ~StoredSome(one, rest) =>
+    (case+ one of
+     | ~WholeBook(_, _, image) => let
+         val () = book_image_free(image)
+       in _aside_books(rest, done) end
+     | ~LossyBook(_, _, image) => let
+         val () = book_image_free(image)
+       in _aside_books(rest, done) end
+     | ~UnusableBook(id_high, id_low, why) => let
+         val settable = (case+ why of
+           | UnusableNewer() => false
+           | UnusableDamaged() => true
+           | UnusableNotQuire() => true): bool
+       in
+         if settable then
+           $P.and_then<aside_result><int>(libstore_set_aside_book(id_high, id_low), llam(result) =>
+             _aside_books(rest, done + _aside_added(result)))
+         else _aside_books(rest, done)
+       end)
+
+(* The collections' record, then each book's, set aside when it cannot be
+   used. Every record is read again in the transaction that sets it aside,
+   so a record that reads by now, or a newer Quire's, is left. Resolves
+   with how many were set aside, and -1 when the library could not be read
+   to find them *)
+#pub fn lib_set_aside (): $P.promise(int, $P.Chained)
+
+implement lib_set_aside () =
+  $P.and_then<library_read><int>(libstore_read(), llam(read) =>
+    case+ read of
+    | ~ReadFailed(found) => let val () = failure_found_free(found) in $P.ret<int>(~1) end
+    | ~ReadNothing() => $P.ret<int>(0)
+    | ~ReadLibrary(index, stored, _) =>
+      (case+ index of
+       | ~UnusableIndex(why) => let
+           val settable = (case+ why of
+             | UnusableNewer() => false
+             | UnusableDamaged() => true
+             | UnusableNotQuire() => true): bool
+         in
+           if settable then
+             $P.and_then<aside_result><int>(libstore_set_aside_index(), llam(result) =>
+               _aside_books(stored, _aside_added(result)))
+           else _aside_books(stored, 0)
+         end
+       | other => let
+           val () = stored_index_free(other)
+         in _aside_books(stored, 0) end))
+
+(* Settings' row on what cannot be read: shown while there is something to
+   set aside, or to say what was set aside *)
+#pub fn lib_aside_show (): void
+
+implement lib_aside_show () =
+  if !_aside_count > 0 then let
+    val () = ui_text_long("settings-aside-text", "Some of what Quire stored for your library cannot be read. Quire can keep a copy of each and start those records over, so the books can be imported again. Restore backup then brings back their places, shelves and notes.")
+    val () = ui_show("settings-aside", true)
+  in ui_show("settings-set-aside", true) end
+  else if !_aside_done > 0 then let
+    val () = ui_text_long("settings-aside-text", "Quire kept a copy of the records it could not read and started them over. Import those books again, then restore a backup to bring back their places, shelves and notes.")
+    val () = ui_show("settings-aside", true)
+  in ui_show("settings-set-aside", false) end
+  else ui_show("settings-aside", false)
+
+(* Set aside was pressed: what was set aside is counted off, and said *)
+#pub fn lib_aside_run (): void
+
+implement lib_aside_run () =
+  $P.finish<int>(lib_set_aside(), llam(done) => let
+    val () = (if done < 0 then notice_say(AsideNotRead())
+      else if done < !_aside_count then notice_say(AsideIncomplete())
+      else ())
+    val () = (if done > 0 then let
+        val () = !_aside_done := !_aside_done + done
+        val left = !_aside_count - done
+      in !_aside_count := (if left > 0 then left else 0) end
+      else ())
+  in lib_aside_show() end)
 
 (* ============================================================
    The search query

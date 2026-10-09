@@ -40,11 +40,32 @@ fn _details_swap (held: details): details = let
   val () = ref_exch_elt<details>(_details, previous)
 in previous end
 
+(* The banner's Copy details and Report, shown or hidden *)
+fn _details_buttons (shown: bool): void = let
+  val () = ui_show("error-copy", shown)
+in ui_show("error-report", shown) end
+
+(* The details of the last unexpected failure are kept after its banner
+   goes (a plain error, its Dismiss, a new import), so the reader can
+   still copy them from About (quire#374; Firefox keeps its troubleshooting
+   information on about:support, with a Copy text to clipboard button,
+   apart from whatever raised the problem, and Radiacode's and Zoho's
+   Android apps attach diagnostics from their settings: a settings or
+   About place, not the alert): a later failure's details replace them, and
+   they are held in memory only, never stored *)
 fn _details_set (held: details): void = let
   val shown = (case+ held of Details(_, _) => true | NoDetails() => false): bool
   val () = _details_free(_details_swap(held))
-  val () = ui_show("error-copy", shown)
-in ui_show("error-report", shown) end
+in _details_buttons(shown) end
+
+(* Whether the details of an unexpected failure are kept *)
+#pub fn notice_details_kept (): bool
+
+implement notice_details_kept () = let
+  val held = _details_swap(NoDetails())
+  val kept = (case+ held of Details(_, _) => true | NoDetails() => false): bool
+  val () = _details_free(_details_swap(held))
+in kept end
 
 fn _banner_show (): void = let
   val () = !_banner_up := true
@@ -64,7 +85,7 @@ fn _reopen_show (shown: bool): void = ui_show("error-reopen", shown)
    (notice_say), so a message cannot go without a next step (#360) *)
 fn _error_buf {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
   (text: $A.arr(byte, l, n), text_len: int text_len, reopen: bool): void = let
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
   val () = _reopen_show(reopen)
   val () = ui_text_buf("error-text", text, text_len)
 in _banner_show() end
@@ -319,8 +340,12 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | RecordDamaged
   | RecordNotQuires
   | BooksNotRead
+  | BooksNotReadCanSetAside
+  | AsideNotRead
+  | AsideIncomplete
   | DetailsDamaged
   | CollectionsNotRead
+  | CollectionsNotReadCanSetAside
   | NarrationNotPlayable
   | RotationNotLockable
   | GrantNotTaken
@@ -354,6 +379,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | UseDeviceRotation
   | CopyByHand
   | RestoreBackup
+  | SetAsideInSettings
+  | SetAsideAgain
   | TryNextPhrase
 
 fn remedy_of (failed: failure): remedy =
@@ -372,8 +399,12 @@ fn remedy_of (failed: failure): remedy =
   | RecordDamaged() => RestoreBackup()
   | RecordNotQuires() => RestoreBackup()
   | BooksNotRead() => RestoreBackup()
+  | BooksNotReadCanSetAside() => SetAsideInSettings()
+  | AsideNotRead() => ReopenQuire()
+  | AsideIncomplete() => SetAsideAgain()
   | DetailsDamaged() => RestoreBackup()
   | CollectionsNotRead() => RestoreBackup()
+  | CollectionsNotReadCanSetAside() => SetAsideInSettings()
   | NarrationNotPlayable() => TryNextPhrase()
   | RotationNotLockable() => UseDeviceRotation()
   | GrantNotTaken() => RemoveGrantByHand()
@@ -445,8 +476,12 @@ fn _what_put {l:agz}{at:nat | at <= 512}
   | RecordDamaged() => _put_text(out, 512, at, "A book's stored record is damaged, so changes to it are not saved and your other books are saved")
   | RecordNotQuires() => _put_text(out, 512, at, "A book's stored record is not one Quire wrote, so changes to it are not saved")
   | BooksNotRead() => _put_text(out, 512, at, "Some books in your library could not be read, so they are left as they are and not shown")
+  | AsideNotRead() => _put_text(out, 512, at, "Quire could not read your library to set those records aside, so nothing was changed")
+  | AsideIncomplete() => _put_text(out, 512, at, "Some records could not be set aside, and nothing was lost")
+  | BooksNotReadCanSetAside() => _put_text(out, 512, at, "Some books in your library could not be read, so they are left as they are and not shown")
   | DetailsDamaged() => _put_text(out, 512, at, "Some details of your library were damaged and show as defaults, and the rest of it is intact")
   | CollectionsNotRead() => _put_text(out, 512, at, "Your collections could not be read, so they are left as they are and not shown")
+  | CollectionsNotReadCanSetAside() => _put_text(out, 512, at, "Your collections could not be read, so they are left as they are and not shown")
   | NarrationNotPlayable() => _put_text(out, 512, at, "This narration cannot be played")
   | RotationNotLockable() => _put_text(out, 512, at, "This device does not let Quire lock the rotation, so Lock rotation is no longer offered")
   | GrantNotTaken() => _put_text(out, 512, at, "Google didn't take back Quire's access to Drive")
@@ -494,6 +529,8 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
   | UseDeviceRotation() => _put_text(out, 512, at, ". Turn the device's own rotation lock on instead.")
   | CopyByHand() => _put_text(out, 512, at, ". Select the text and copy it yourself.")
   | RestoreBackup() => _put_text(out, 512, at, ". Restore a backup in Settings to bring back what is missing.")
+  | SetAsideAgain() => _put_text(out, 512, at, ". Press Set aside unreadable records in Settings to try those again.")
+  | SetAsideInSettings() => _put_text(out, 512, at, ". Settings can set them aside.")
   | TryNextPhrase() => _put_text(out, 512, at, ". Try Next phrase, or read the book without the narration.")
 
 fn _reopens (next: remedy): bool =
@@ -510,6 +547,8 @@ fn _reopens (next: remedy): bool =
   | UseDeviceRotation() => false
   | CopyByHand() => false
   | RestoreBackup() => false
+  | SetAsideInSettings() => false
+  | SetAsideAgain() => false
   | TryNextPhrase() => false
 
 (* The error banner, saying what failed and what to do next (the one
@@ -550,7 +589,7 @@ in _error_buf(out, at, _reopens(next)) end
 
 implement notice_dismiss () = let
   val () = !_banner_up := false
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
 in ui_show("error-banner", false) end
 
 (* Whether this session has said that a save failed: when storage is

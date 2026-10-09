@@ -1548,6 +1548,15 @@ fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:n
   val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
   val sheet = line(sheet, AllSides(), 1, RoleAccent())
   val sheet = close(sheet)
+  (* Import while the library cannot be read (its input is inert,
+     #374): not the accent's call to act but the muted text on the card,
+     a pair proven in every theme, with a cursor that says no (Material 3
+     draws a disabled button with its container and text faded) *)
+  val sheet = rule(sheet, "#import-button:has(input[inert])")
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
+  val sheet = line(sheet, AllSides(), 1, RoleLine())
+  val sheet = lay(sheet, Cursor(), "not-allowed")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".btn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -1610,12 +1619,21 @@ fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:n
      again on a short phone, because the library's own height is not
      known to it (the app bar wraps to five rows at 320px). The base
      rule's left 50% and translateX(-50%) still centre it when it is
-     relative instead of fixed. Over the reader it stays fixed at the top
-     (its bars hide) *)
+     relative instead of fixed. Over the reader it stays fixed at the
+     top while the bars are away (the reader's own bars hide) *)
   val sheet = rule(sheet, "#bats-root:has(#library:not([data-hide='1'])) .banner")
   val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Top(), "auto")
   val sheet = lay(sheet, Margin(), "8px 0 0")
+  val sheet = close(sheet)
+  (* While the reader's bars are up the banner sits under the top bar
+     (#374): the bar is the top app bar, and Material 3 puts a banner
+     under it (material.io's banners, Flutter's MaterialBanner, Zebra's
+     Zeta banner all sit under the app bar; none draws over it); the bar is its safe inset (at least 2px),
+     a 44px control and 2px below, and the banner 8px under it. The
+     bottom bar is at the other edge, out of its way *)
+  val sheet = rule(sheet, "#bats-root:has(.rv:not(.chrome-off):not([data-hide='1'])) .banner")
+  val sheet = lay(sheet, Top(), "calc(max(2px,var(--safe-top)) + 54px)")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
   val sheet = surf(S_bannerfg_banner | sheet, RoleBannerText(), RoleBanner())

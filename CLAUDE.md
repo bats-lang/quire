@@ -944,14 +944,42 @@ read of storage changed: each still folds, as #174 says.
   Quire. Update Quire."; Aborted, NoReasonGiven and BytesUnreadable, to
   reopen Quire to read it again; Unexpected, an unexpected error with the
   details in the banner. None but Transient has a button. Import is off
-  while the library is unreadable (`inert` on `import-file`; a file
-  handed or dropped is refused with "Books cannot be added until Quire
-  can read your library"). Starting a new library over records that
-  cannot be decoded is not here yet (it is not a `harm`: the old bytes
-  are copied to `library/damaged/...` in the same transaction as the
-  new records, so nothing is lost, and it is offered only where nothing
-  else can be done: never for Transient, StorageBlocked or NewerVersion);
-  the screen says only what is true now.
+  while the library is unreadable (`inert` on `import-file`, and the
+  button drawn disabled: muted text on the card, a cursor that says no,
+  `#import-button:has(input[inert])` in the stylesheet, a `surf` pair
+  proven in each theme; a file handed or dropped is refused with "Books
+  cannot be added until Quire can read your library"). Records that can be read but not
+  used are another case, below (set aside); a read that failed as a whole
+  is not one, since nothing is known of what it holds and a new library
+  made beside it could not be seen while the read keeps failing.
+* **Records that cannot be used are set aside, not replaced** (the
+  follow-up of #374). A library whose read worked can still hold a book's
+  record, or the collections', that is damaged or not Quire's: it is shown
+  nowhere and never written over, so the book cannot be imported again and
+  no collection can be made. Settings shows a row then (`settings-aside`,
+  `lib_aside_show`: "Set aside unreadable records",
+  `settings-set-aside`), and only then. Pressing it
+  (`lib_aside_run`, `lib_set_aside`) reads the library again and, for each
+  such record, runs `libstore_set_aside_book` / `libstore_set_aside_index`:
+  one `idb_update` transaction that reads the record, decides again with
+  the codec (`_read_book`, `_read_index`; what was believed before does
+  not decide) and, only for `UnusableDamaged` and `UnusableNotQuire`,
+  writes the record's bytes to `library/damaged/<id>/<crc>` and deletes
+  the record in the one batch (`_aside_writeback`), so an aborted
+  transaction leaves the old record byte for byte
+  (`e2e/library-records.spec.js`). A newer Quire's record
+  (`UnusableNewer`) is never set aside: it is not damaged, an update of
+  Quire reads it (`AsideNewer`). Nothing is lost, so it is not a `harm`
+  and has no confirmation; the row then says to import those books again
+  and restore a backup, which re-applies their places, shelves and notes.
+  By research: Firefox renames a corrupt `places.sqlite` to
+  `places.sqlite.corrupt` and starts a new one; Mozilla's application-services
+  weighed moving the file aside against deleting it and chose deleting only
+  because it acts on confirmed corruption; Roon and Miro tell the user to
+  keep the old data folder or back the corrupt database up, then start
+  fresh. Quire keeps the copy, as they do, and acts on one record at a time
+  instead of the whole library, so what reads is never touched.
+
 * **The banner.** A kind the screen says completely has no banner: the
   screen gives what happened, what Quire did, what to do and the
   browser's name for it ("Details: UnknownError."), which is what a
@@ -969,7 +997,23 @@ read of storage changed: each still folds, as #174 says.
   under anything at its centre, whether a banner is up or not; the layout
   spec runs it on an unreadable library of each sort in every project. A
   banner wraps its buttons under its message on a narrow window instead
-  of squeezing Report. Over the reader it is still fixed at the top.
+  of squeezing Report. Over the reader it is fixed at the top while the
+  reader's bars are away, and under the top bar while they are up
+  (`#bats-root:has(.rv:not(.chrome-off)) .banner`: the bar's safe inset,
+  44px control and 2px, and 8px), as material.io's, Flutter's and
+  Zeta's banners sit under the app bar and none draws over it;
+  `e2e/storage.spec.js` raises one over the reader with its bars up and
+  runs `coveredByBanner` on both bars. The details of an unexpected
+  failure outlive its banner: they are kept in memory (`_details` in
+  `src/notice.bats`, replaced by the next such failure, never stored)
+  and About shows "Copy last error details" (`about-error-copy`, an
+  `about_control` of the screen's one listener, since the table of
+  listeners is full) once one is kept, as Firefox keeps its
+  troubleshooting information on about:support with a Copy text to
+  clipboard button. Start-up with a library that could not be read yet
+  does not write over the stored view (`_library_shown(false)`): the
+  retry opens the book it names, as the sync that waits for the retry
+  runs then (`e2e/storage.spec.js`).
 * **One honest retry.** Try again repeats the read start-up makes
   (`lib_load`) through `_library_read`, so the `LIBRARY_READ` proof is
   still only made there. `lib_retry_begin` spends the retry when it
