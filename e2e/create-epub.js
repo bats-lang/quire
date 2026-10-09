@@ -344,7 +344,7 @@ export function createEpub(opts = {}) {
       const langAttrs = lang ? ` xml:lang="${lang}" lang="${lang}"` : '';
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 ${doctype}
-<html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"${langAttrs}>
 <head><title>Chapter ${i}</title>${rawChapters[i - 1].head || ''}</head>
 <body>
 ${rawBody}
@@ -372,6 +372,12 @@ ${doctype}
     // opts.damagedChapters: the chapters (from 1) whose data cannot be read
     chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
+
+  // opts.extraImages are manifest items, as an EPUB must declare what it holds
+  (opts.extraImages || []).forEach((img, k) => {
+    const type = /\.png$/i.test(img.name) ? 'image/png' : /\.jpe?g$/i.test(img.name) ? 'image/jpeg' : /\.svg$/i.test(img.name) ? 'image/svg+xml' : null;
+    if (type) manifestItems += `    <item id="extra-img${k}" href="${img.name}" media-type="${type}"/>\n`;
+  });
 
   // Add cover image if requested (EPUB3: properties="cover-image")
   if (coverImage) {

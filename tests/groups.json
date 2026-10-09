@@ -28,7 +28,8 @@
       "vertical.spec.js",
       "fixed.spec.js",
       "ruby.spec.js",
-      "modal-panels.spec.js"
+      "modal-panels.spec.js",
+      "touch-selection.spec.js"
     ],
     "sync": [
       "sync.spec.js",
