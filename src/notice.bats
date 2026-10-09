@@ -490,7 +490,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
     (case+ where_ of
     | InBrowser() => _put_text(out, 512, at, ". Free some space in the browser and try again.")
     | InApp() => _put_text(out, 512, at, ". Free some space on the device and try again."))
-  | OpenAgain() => _put_text(out, 512, at, ". Open the book again, or reopen Quire if it keeps happening.")
+  | OpenAgain() => _put_text(out, 512, at, ". Quire tried three times; the book is still stored, so try opening it again in a moment.")
   | RemoveGrantByHand() => _put_text(out, 512, at, ": remove it in your Google account, under Security, Your connections to third-party apps.")
   | UseDeviceRotation() => _put_text(out, 512, at, ". Turn the device's own rotation lock on instead.")
   | CopyByHand() => _put_text(out, 512, at, ". Select the text and copy it yourself.")

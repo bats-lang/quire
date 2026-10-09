@@ -4,7 +4,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
+  expectBannerSaysWhatToDo, chapterTitle, start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
   librarySettings, settingsButton,
   readingSettings, openReadingSettings,
@@ -32,6 +32,16 @@ async function stubReads(page) {
       const which = localStorage.getItem('failReads');
       if (!which || typeof key !== 'string') return false;
       if (which === 'annotations') return key.length === 15 && key[0] === 'a';
+      // a book's file ("b" record): fails as many times as failTimes
+      // says (negative: always), then reads
+      if (which === 'bookfile') {
+        if (!(key.length === 15 && key[0] === 'b')) return false;
+        const left = Number(localStorage.getItem('failTimes'));
+        if (left === 0) return false;
+        if (left > 0) localStorage.setItem('failTimes', String(left - 1));
+        window.bookFileReadsFailed = (window.bookFileReadsFailed || 0) + 1;
+        return true;
+      }
       return key === which;
     };
     const erring = () => {
@@ -76,6 +86,27 @@ test('a library that cannot be read is said, takes no book, and is not saved ove
   await expect(cards(page)).toHaveCount(1);
   await expect(card(page, 'Kept Safe')).toBeVisible();
   await expect(alert(page)).toBeHidden();
+});
+
+test('a book\'s file that fails to read is read again by itself, and said only when it keeps failing', async ({ page }, testInfo) => {
+  await stubReads(page);
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Slow Disk', author: 'Storage Tests', rawChapters: chapters(2) })], 1);
+  // two failed reads, then it reads: the book opens, nothing is said
+  await page.evaluate(() => { localStorage.setItem('failTimes', '2'); localStorage.setItem('failReads', 'bookfile'); });
+  await reload(page);
+  await openBook(page, 'Slow Disk');
+  await expect(chapterTitle(page)).not.toHaveText(/Loading/);
+  await expect(alert(page)).toBeHidden();
+  expect(await page.evaluate(() => window.bookFileReadsFailed)).toBe(2);
+  await toLibrary(page);
+  // it never reads: after the tries, the banner says so and what to do
+  await page.evaluate(() => localStorage.setItem('failTimes', '-1'));
+  await reload(page);
+  await card(page, 'Slow Disk').click();
+  await expect(alert(page)).toContainText('This book could not be read from storage. Quire tried three times');
+  await expectBannerSaysWhatToDo(page, testInfo);
+  await healReads(page);
 });
 
 test('a book\'s annotations that cannot be read are said, none is made, and none is lost', async ({ page }) => {

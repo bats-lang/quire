@@ -495,7 +495,7 @@ export async function expectBarFollows(page, rightToLeft) {
     button besides Dismiss (Reopen Quire), or words that name the step;
     and in the Android app it does not say "browser". Call it where a
     spec has the banner up */
-const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|Open the book again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
+const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|try opening it again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
 export async function expectBannerSaysWhatToDo(page, testInfo) {
   const banner = page.getByRole('alert');
   await expect(banner).toBeVisible();

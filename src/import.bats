@@ -781,9 +781,7 @@ fn _reopen_failed (cause: archive_failure): book_opening =
 
 (* Puts library book (id_high, id_low), whose key is key, in the book cell from
    its stored file *)
-#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained)
-
-implement open_stored (key, id_high, id_low) = let
+fn _open_stored_once (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained) = let
   val file_key = lib_key(98, id_high, id_low)
   val @(key_frozen, key_bytes) = $A.freeze<byte>(file_key)
   val stored = $BF.file_idb_get(key_bytes, 15)
@@ -808,5 +806,35 @@ in
         end
       end)
 end
+
+(* How many times a read of storage that failed is made again, and the
+   wait before the first of them (doubling): a failed read of a stored
+   file is usually transient (IndexedDB's UnknownError is low memory or
+   a disk hiccup, MDN; Dexie's workaround for Chromium's after a restart
+   is to open it again), so Quire retries it itself, three times in
+   1.75 s, and says so, before it asks the reader for anything. One
+   reader, no contention: no jitter *)
+#define STORAGE_RETRIES 3
+#define STORAGE_FIRST_WAIT_MS 250
+
+fun _open_stored_try {tries:nat} .<tries>.
+  (key: int, id_high: Int, id_low: Int, tries: int tries, wait_ms: int): $P.promise(book_opening, $P.Chained) =
+  $P.and_then<book_opening><book_opening>(_open_stored_once(key, id_high, id_low), llam(opening) =>
+    case+ opening of
+    | BookFileUnreadable() =>
+      if tries <= 0 then $P.ret<book_opening>(BookFileUnreadable())
+      else let
+        val () = ui_text("chapter-title", "Loading... (storage was slow, trying again)")
+      in
+        $P.and_then<Int><book_opening>($P.vow($TM.timer_set(wait_ms)), llam(_) =>
+          _open_stored_try(key, id_high, id_low, tries - 1, wait_ms * 2))
+      end
+    | BookOpened() => $P.ret<book_opening>(BookOpened())
+    | BookFileMissing() => $P.ret<book_opening>(BookFileMissing()))
+
+#pub fn open_stored (key: int, id_high: Int, id_low: Int): $P.promise(book_opening, $P.Chained)
+
+implement open_stored (key, id_high, id_low) =
+  _open_stored_try(key, id_high, id_low, STORAGE_RETRIES, STORAGE_FIRST_WAIT_MS)
 
 end (* #target wasm *)
