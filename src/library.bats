@@ -729,11 +729,11 @@ fun _empty_trash {left:nat} .<left>. (left: int left): void =
    that is done. HEmptyTrash: every book in the Trash and everything
    stored for it go (and any Undo offer, which could only put back what
    is gone) *)
-#pub fn lib_ask_harm (harm: harm): $P.promise(reply, $P.Chained)
+#pub fn lib_ask_harm (harm: harm, dictionaries: int): $P.promise(reply, $P.Chained)
 
-implement lib_ask_harm (harm) =
+implement lib_ask_harm (harm, dictionaries) =
   case+ harm of
-  | HEmptyTrash() => $P.and_then<reply><reply>(modal_confirm(harm), llam(answer) =>
+  | HEmptyTrash() => $P.and_then<reply><reply>(modal_confirm(harm, dictionaries), llam(answer) =>
     case+ answer of
     | Accepted() => let
         val () = undo_close()
