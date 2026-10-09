@@ -43,8 +43,9 @@ test('a font with Japanese characters is installed, or the vertical book is draw
 test('a Japanese book read right to left is set vertically, its pages going down', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, verticalBook('縦書き'));
-  const style = await bookPage(page).evaluate(e => ({ mode: getComputedStyle(e).writingMode, direction: getComputedStyle(e).direction }));
-  expect(style).toEqual({ mode: 'vertical-rl', direction: 'ltr' });
+  const style = await bookPage(page).evaluate(e => ({ mode: getComputedStyle(e).writingMode, direction: getComputedStyle(e).direction, upright: getComputedStyle(e).textOrientation }));
+  // digits stand upright, not on their side (quire#391)
+  expect(style).toEqual({ mode: 'vertical-rl', direction: 'ltr', upright: 'upright' });
   // the bottom bar follows its reading axis, from the right (quire#359)
   await expectBarFollows(page, true);
   const at = await place(page);
@@ -91,6 +92,7 @@ test('a book set vertically is not offered the layout\'s settings; a horizontal 
   await expect(readingSettings(page).getByRole('button', { name: 'Hyphenation', exact: true })).toBeVisible();
   // and the horizontal book is not set vertically
   expect(await bookPage(page).evaluate(e => getComputedStyle(e).writingMode)).toBe('horizontal-tb');
+  expect(await bookPage(page).evaluate(e => getComputedStyle(e).textOrientation)).toBe('mixed');
 });
 
 test('set vertically, the space after a paragraph is beside it, not below it, and its row is offered', async ({ page }) => {

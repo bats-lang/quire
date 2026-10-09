@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, cards, card, openBook, readBook, toLibrary, chapters, dialog, menuItem, libraryMenu,
   openSettings, colours, showChrome, librarySearch, bookPage, topBar, openReadingSettings, readingSettings,
-  settingsScreen, settingsButton, librarySettings, restoreInput,
+  settingsScreen, settingsButton, librarySettings, restoreInput, exportedBackup,
 } from './helpers.js';
 
 const bg = async page => (await colours(page)).bg.join(',');
@@ -92,11 +92,7 @@ test('the backup is exported and restored from Settings', async ({ page }, testI
   await start(page);
   await importFiles(page, [epubFile({ title: 'Kept Safe', author: 'Archivist' })], 1);
   await librarySettings(page);
-  const download = page.waitForEvent('download');
-  await settingsButton(page, 'Export backup').click();
-  const d = await download;
-  expect(d.suggestedFilename()).toBe('quire-backup.json');
-  const backup = JSON.parse(readFileSync(await d.path(), 'utf8'));
+  const backup = JSON.parse(await exportedBackup(page));
   expect(backup.books.map(b => b.title)).toEqual(['Kept Safe']);
   // a goal put in the backup comes back with its restore
   backup.settings.dailyGoal = 20;

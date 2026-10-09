@@ -1,0 +1,3 @@
+function _static_snapshot_forgotten
+line 6
+a value matching this pattern may not be freed: it contains a linear component of the following type [S2Ecst(backup_snapshot)].

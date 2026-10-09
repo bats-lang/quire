@@ -1182,7 +1182,7 @@ in Sheet(builder) end
   | Width | MaxWidth | MinWidth | Height | MaxHeight | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
-  | WhiteSpace | Hyphens | Direction | WritingMode
+  | WhiteSpace | Hyphens | Direction | WritingMode | TextOrientation
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
@@ -1210,7 +1210,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | TextTransform() => "text-transform" | TextAlign() => "text-align"
   | TextOverflow() => "text-overflow" | TextDecoration() => "text-decoration"
   | WhiteSpace() => "white-space" | Hyphens() => "hyphens" | Direction() => "direction"
-  | WritingMode() => "writing-mode"
+  | WritingMode() => "writing-mode" | TextOrientation() => "text-orientation"
   | Overflow() => "overflow" | OverflowX() => "overflow-x" | Position() => "position"
   | Top() => "top" | Bottom() => "bottom" | Left() => "left" | Right() => "right"
   | Inset() => "inset" | ZIndex() => "z-index" | Cursor() => "cursor"
@@ -2361,6 +2361,16 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.vertical")
   val sheet = lay(sheet, WritingMode(), "vertical-rl")
+  (* digits stand upright in the line, as in "第1章", not on their side
+     (quire#391). text-combine-upright:digits, which would set only one
+     or two digits upright, is supported by no browser (MDN; Chrome has
+     only `all`, which needs the number in an element of its own, and
+     render's content nodes are the numbers of annotations and places),
+     so the whole page is text-orientation:upright: every character
+     upright, so a Latin word in a vertical book is stacked upright too,
+     as Japanese typesetting also sets one; not for Mongolian (.vertical-lr),
+     whose script is turned, not upright *)
+  val sheet = lay(sheet, TextOrientation(), "upright")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.vertical-lr")
   val sheet = lay(sheet, WritingMode(), "vertical-lr")

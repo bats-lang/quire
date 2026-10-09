@@ -430,6 +430,11 @@ implement stats_restore_day (day, minutes) =
     val () = _days_free(merged)
   in _cell_put(_days, kept) end
 
+(* The log emptied: the days a snapshot holds are then put in it, so an
+   Undo of a restore leaves the days the log had *)
+#pub fn stats_days_clear (): void
+implement stats_days_clear () = _cell_put(_days, DaysNil())
+
 (* Keeps the days a backup put back *)
 #pub fn stats_restored (): void
 implement stats_restored () = _save()
