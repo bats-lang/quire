@@ -16,6 +16,9 @@
       "reader.spec.js",
       "navigation.spec.js",
       "pagebreak.spec.js",
+      "wide.spec.js",
+      "stability.spec.js",
+      "keys.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
