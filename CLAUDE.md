@@ -266,8 +266,20 @@ every 64th headword of each with where its record is; a lookup
 binary-searches it and reads one block of records. An article is
 shown as text only (`article_text`): HTML and XDXF tags are dropped,
 never put in the DOM. The list of dictionaries (`dicts`) is stored
-under "dicts"; a removal is offered back by the Undo toast, and its
-files are deleted when the offer is made final. The backup lists the
+under "dicts"; a removal moves the dictionary to the Trash (#396, as a
+book is: `dict_state`, `Installed | InTrash`, stored in bit 4 of the
+form's byte), offered back by the Undo toast, its files kept. It is out of
+Look up, listed under the books while the Trash is the shelf shown
+(`trash-dictionaries`, `dict_trash_render`) with a Restore, and only Empty
+Trash deletes its files (`dict_trash_empty`, in quire.bats' `_harm_clicked`
+after `lib_ask_harm` resolves Accepted; the dialog says dictionaries go
+too). `tests/static/trash.py` fails any other call: that is a scan of the
+source, not a type, and the proof that only an answered dialog deletes
+them is owed (the dialog is in library.bats, which cannot staload
+dictionary.sats while dictionary.bats uses library's `lib_key`). Drive and
+Files by Google keep trashed items, which still use storage, until they
+are emptied; the Trash shows counts, not sizes (a dictionary's files are
+on the JS side). The backup lists the
 dictionaries' names and languages, not their files.
 
 ### Sync
@@ -629,6 +641,27 @@ pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
 locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
+
+### EPUB 2 packages (#416)
+
+A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
+an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
+document order, whatever their `playOrder`; one with no `content` is listed
+and leads nowhere, one with no label is "Untitled"), its cover the
+manifest item a `<meta name="cover">` names, its `<guide>`'s `text`
+reference where a first open lands (#409), its author the first
+`dc:creator` as written (`opf:file-as` is not read: books are sorted by
+the name shown). XHTML 1.1's named entities (`&nbsp;`, `&mdash;`) are
+decoded as any text's are. A DTBook or OEB 1 spine item (`application/x-dtbook+xml`,
+`text/x-oeb1-document`, which a package names an XHTML fallback for) is read
+as XML and its text shown. A Hebrew book whose spine names no direction
+reads right to left, as Readium reads it. A row of the contents or the
+page list that leads nowhere keeps the panel up (`reader_goto_entry` and
+`reader_goto_page` say whether they went).
+
+`e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
+`creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
+under epubcheck 2.0 rules except those invalid on purpose.
 
 ### Found while taking this inventory
 
