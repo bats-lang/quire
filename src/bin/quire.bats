@@ -485,6 +485,7 @@ fn _library_shown (save_view: bool): void = let
   (* nothing is read aloud from the library *)
   val () = aloud_stop()
   val () = ui_show("library", true)
+  val () = banner_place_set(BannerInLibrary())
   (* a reload now comes back here *)
   val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
@@ -511,6 +512,7 @@ fn _show_library (): void = _library_shown(true)
 fn _chrome_set_off (): void = let
   val () = !_chrome := false
   val () = ui_attr("reader", AClass, "rv chrome-off")
+  val () = (if _in_reader() then banner_place_set(BannerAtTop()) else ())
 in screen_immersive_set(_in_reader()) end
 
 fn _chrome_set (shown: bool): void = let
@@ -519,6 +521,7 @@ fn _chrome_set (shown: bool): void = let
   val () = (if shown && ~(!_chrome) then reader_stack_clear() else ())
   val () = !_chrome := shown
   val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
+  val () = (if _in_reader() then banner_place_set(if shown then BannerUnderBars() else BannerAtTop()) else ())
   val () = !_chrome_generation := !_chrome_generation + 1
   val generation = !_chrome_generation
   (* the system bars follow: away with the reader's own bars (the
@@ -588,6 +591,7 @@ fn _show_reader (cause: opening_cause): void = let
   val () = ui_show("library", false)
   val () = layer_close(LBookInfo())
   val () = ui_show("reader", true)
+  val () = banner_place_set(if !_chrome then BannerUnderBars() else BannerAtTop())
   (* A reader does not touch the screen for a page's length: it stays
      awake while the book is open *)
   val () = $WN.keep_awake(true)

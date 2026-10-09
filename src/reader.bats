@@ -1159,6 +1159,25 @@ fn _motion_reduced (): bool = let
   val () = release_bytes(query_frozen, query_bytes)
 in case+ answer of $MEDIA.Matches() => true | $MEDIA.NoMatch() => false end
 
+(* The bytes of the chapter shown (its XHTML), set as it is rendered *)
+val _chapter_bytes = ref<Int>(0)
+
+(* Whether the chapter is too big to slide a copy of: a turn shows its
+   first frame only after the browser has prepainted the copy, which costs
+   in proportion to the chapter's boxes (10,000 one-line paragraphs: 170 ms,
+   and the chapter's own prepaint, a hover hit test the browser makes after
+   the scroll, is 190 ms of the turn without a copy; 1 MB without a space:
+   100 ms more; a 300 KB chapter of 1000 paragraphs: under 5 ms more).
+   Such a chapter turns at once, as it does where the system asks for less
+   motion: a first frame 100 ms or more late is not an animation, by the
+   RAIL model's 100 ms to respond, and the turn is no longer than the
+   reader's own key. Chosen from measurements of this machine and its
+   shape, not a rule of the platform: 6000 content nodes or 600 KB sits
+   between the 300 KB chapter (about 2100 nodes) and the first that is
+   late (the 10,000 paragraphs, 20,000 nodes, 140 KB; the megabyte, 5
+   nodes) (#423) *)
+fn _chapter_heavy (): bool = !_content_count >= 6000 || !_chapter_bytes >= 614400
+
 (* page-turn's classes: the way its sheet slides (its gap, beneath the
    sheet's edge, before it when it slides right or down), and a blank
    gap *)
@@ -1275,6 +1294,11 @@ in
   $P.finish<Int>($P.vow($TM.timer_set(COPY_SETTLE_MS)), llam(_) =>
     if !_copy_asked <> number then ()
     else if !_sheet_laid then ()
+    (* a chapter too big to slide a copy of (_chapter_heavy) is turned
+       at once, so a copy made ahead is only a clone of its whole DOM:
+       3 s of script for 30,000 nodes, in which the page does not answer.
+       A drag, which does lay a copy, makes one then (_copy_ready) *)
+    else if _chapter_heavy() then ()
     else (case+ !_copy of
       | CopyStale() => _copy_make()
       | CopyKept() => ()
@@ -1460,6 +1484,7 @@ fn _turn_frames (number: int): void =
    asks for less motion) *)
 fn _turn_lay (slide: slide): int =
   if _motion_reduced() then 0
+  else if _chapter_heavy() then 0
   else if !_page_width <= 0 then 0
   else let
     val number = !_turn_number + 1
@@ -3417,6 +3442,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   (* Parse XHTML with xml-tree *)
                   val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                  val () = !_chapter_bytes := xhtml_size
 
                   (* Clear the content area, then render the XHTML tree
                      into it: one document for the chapter *)
