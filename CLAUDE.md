@@ -630,6 +630,19 @@ locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
 
+### The print page list and page breaks (#415)
+
+The Pages tab lists the page list's entries as the book gives them (not
+sorted, duplicates kept, each going to its own target); an entry whose chapter
+the book lacks is listed and leads nowhere (the panel stays), one whose fragment
+is missing goes to its chapter, an empty page list shows no tab. The
+footer names the latest page the screen reaches, from the break's `title`, else
+its `aria-label`, whichever of `epub:type="pagebreak"` or `role="doc-pagebreak"`
+the element has, with no page list too; a break with neither is shown and names
+no page. A label in the contents or the page list is decoded as any text is
+(numeric references too) and cut at a whole character.
+`e2e/pagelist.spec.js` plays `e2e/pagelist-books.js`.
+
 ### Found while taking this inventory
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the
