@@ -642,6 +642,27 @@ locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
 
+### EPUB 2 packages (#416)
+
+A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
+an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
+document order, whatever their `playOrder`; one with no `content` is listed
+and leads nowhere, one with no label is "Untitled"), its cover the
+manifest item a `<meta name="cover">` names, its `<guide>`'s `text`
+reference where a first open lands (#409), its author the first
+`dc:creator` as written (`opf:file-as` is not read: books are sorted by
+the name shown). XHTML 1.1's named entities (`&nbsp;`, `&mdash;`) are
+decoded as any text's are. A DTBook or OEB 1 spine item (`application/x-dtbook+xml`,
+`text/x-oeb1-document`, which a package names an XHTML fallback for) is read
+as XML and its text shown. A Hebrew book whose spine names no direction
+reads right to left, as Readium reads it. A row of the contents or the
+page list that leads nowhere keeps the panel up (`reader_goto_entry` and
+`reader_goto_page` say whether they went).
+
+`e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
+`creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
+under epubcheck 2.0 rules except those invalid on purpose.
+
 ### Found while taking this inventory
 
 * (Fixed) An EPUB larger than 1 MiB could not be imported, because the
@@ -1410,7 +1431,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   `ui_text_btn`. `labelsShown` and `labelInName` in
   `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
-  least 44px square, text fields use a 16px font (so iOS does not zoom
+  least 48px square (quire#403: Material 3 and Android's accessibility
+  guidance say 48dp, Apple's HIG 44pt, WCAG 2.5.5 44px, which 48 also
+  meets; the app is released on Android; `targetsShort` in
+  `e2e/controls-shown.js` measures it on every screen the layout walks), text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
 * The sheet's size is in its type (`sheet(r, media, open)`: r bytes
   left, and whether an @media block and a rule are open), so it always

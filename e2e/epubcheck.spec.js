@@ -11,9 +11,10 @@ import { join } from 'node:path';
 import { createEpub } from './create-epub.js';
 import { landmarkBooks } from './landmark-books.js';
 import { drmBooks } from './drm-books.js';
+import { epub2Books } from './epub2-books.js';
 
 const jar = process.env.EPUBCHECK_JAR;
-const registries = { landmarks: landmarkBooks, drm: drmBooks };
+const registries = { landmarks: landmarkBooks, drm: drmBooks, epub2: epub2Books };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once
