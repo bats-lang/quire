@@ -40,32 +40,57 @@ fn _details_swap (held: details): details = let
   val () = ref_exch_elt<details>(_details, previous)
 in previous end
 
+(* The banner's Copy details and Report, shown or hidden *)
+fn _details_buttons (shown: bool): void = let
+  val () = ui_show("error-copy", shown)
+in ui_show("error-report", shown) end
+
+(* The details of the last unexpected failure are kept after its banner
+   goes (a plain error, its Dismiss, a new import), so the reader can
+   still copy them from About (quire#374; Firefox keeps its troubleshooting
+   information on about:support, with a Copy text to clipboard button,
+   apart from whatever raised the problem, and Radiacode's and Zoho's
+   Android apps attach diagnostics from their settings: a settings or
+   About place, not the alert): a later failure's details replace them, and
+   they are held in memory only, never stored *)
 fn _details_set (held: details): void = let
   val shown = (case+ held of Details(_, _) => true | NoDetails() => false): bool
   val () = _details_free(_details_swap(held))
-  val () = ui_show("error-copy", shown)
-in ui_show("error-report", shown) end
+in _details_buttons(shown) end
+
+(* Whether the details of an unexpected failure are kept *)
+#pub fn notice_details_kept (): bool
+
+implement notice_details_kept () = let
+  val held = _details_swap(NoDetails())
+  val kept = (case+ held of Details(_, _) => true | NoDetails() => false): bool
+  val () = _details_free(_details_swap(held))
+in kept end
 
 fn _banner_show (): void = let
   val () = !_banner_up := true
 in ui_show("error-banner", true) end
 
-(* The error banner, saying text *)
-#pub fn notice_error {text_len:pos | text_len < 256} (text: string text_len): void
+(* The reader's next step shows as the banner's Reopen Quire button only
+   when reopening is the step *)
+fn _reopen_show (shown: bool): void = ui_show("error-reopen", shown)
 
-implement notice_error (text) = let
-  val () = _details_set(NoDetails())
-  val () = ui_text("error-text", text)
-in _banner_show() end
-
-(* The error banner, saying text[0, text_len) *)
-#pub fn notice_error_buf {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+(* The error banner, saying text[0, text_len): a sync's result, whose
+   words and next step sync makes from its own `sync_result` *)
+#pub fn notice_sync_said {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
   (text: $A.arr(byte, l, n), text_len: int text_len): void
 
-implement notice_error_buf (text, text_len) = let
-  val () = _details_set(NoDetails())
+(* The error banner, saying text[0, text_len), and Reopen Quire when
+   reopen. Private: what the banner says is a failure, in words made here
+   (notice_say), so a message cannot go without a next step (#360) *)
+fn _error_buf {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+  (text: $A.arr(byte, l, n), text_len: int text_len, reopen: bool): void = let
+  val () = _details_buttons(false)
+  val () = _reopen_show(reopen)
   val () = ui_text_buf("error-text", text, text_len)
 in _banner_show() end
+
+implement notice_sync_said (text, text_len) = _error_buf(text, text_len, false)
 
 fn _put_text {l:agz}{cap:pos}{n:nat}{at:nat | at <= cap}
   (out: !$A.arr(byte, l, cap), cap: int cap, at: int at, text: string n)
@@ -77,6 +102,7 @@ in
     val () = $A.write_text(out, at, $A.text_lit(text), n)
   in at + n end
 end
+
 
 fun _put_bytes {l,b:agz}{size:nat}{bytes_len:nat | bytes_len <= size}{at:nat | at <= DETAILS_MAX}{j:nat | j <= bytes_len} .<bytes_len - j>.
   (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, bytes: !$A.arr(byte, b, size), bytes_len: int bytes_len, j: int j)
@@ -272,6 +298,7 @@ fn _failure_said {said_loc:agz}{said_size:pos}
   val at = _details_end(out, at)
   val () = (if at > 0 then _details_set(Details(out, at))
     else let val () = $A.free<byte>(out) in _details_set(NoDetails()) end)
+  val () = _reopen_show(false)
   val () = ui_text_buf("error-text", said, said_len)
 in _banner_show() end
 
@@ -288,20 +315,282 @@ implement notice_unexpected (doing, call, which, answer) = let
   val at = _put_text(said, 512, at, ". Copy the details and post them in a report.")
 in _failure_said(said, at, doing, call, $R.some(which), $R.none(), answer) end
 
+(* Where Quire runs: its words say "the browser" only in one *)
+#pub datatype host =
+  | InBrowser
+  | InApp
+
+fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
+
+(* What failed. Every banner says one of these, and its words and its
+   next step are made from it by two total matches (_what_put,
+   remedy_of), so a failure added without either does not type-check *)
+#pub datatype failure =
+  | LibraryNotAdded
+  | HandedBookNotAdded
+  | SettingsNotRead
+  | CataloguesNotRead
+  | DictionariesNotRead
+  | AnnotationsNotRead
+  | BookFileLost
+  | BookStorageFailed
+  | PartNotRead
+  | StorageFull
+  | RecordFromNewerQuire
+  | RecordDamaged
+  | RecordNotQuires
+  | BooksNotRead
+  | BooksNotReadCanSetAside
+  | AsideNotRead
+  | AsideIncomplete
+  | DetailsDamaged
+  | CollectionsNotRead
+  | CollectionsNotReadCanSetAside
+  | NarrationNotPlayable
+  | RotationNotLockable
+  | GrantNotTaken
+  | GrantNoAnswer
+  | TextNotCopied
+  | DetailsNotCopied
+
+(* What failed to a file or book that has a name *)
+#pub datatype named_failure =
+  | NotAnEpub
+  | ContainerDamaged
+  | PackageMissing
+  | PackageDamaged
+  | ReadingNotFinished
+  | NotKeptInLibrary
+  | FileEmpty
+  | FileNotRead
+  | BookFileNotStored
+
+(* The next step a banner offers: words, and for ReopenQuire a button *)
+#pub datatype remedy =
+  | ReopenQuire
+  | LibraryScreenSays
+  | ImportAgain
+  | OtherChapterOrReplace
+  | ChooseAnotherFile
+  | UpdateQuire
+  | FreeSpace
+  | OpenAgain
+  | RemoveGrantByHand
+  | UseDeviceRotation
+  | CopyByHand
+  | RestoreBackup
+  | SetAsideInSettings
+  | SetAsideAgain
+  | TryNextPhrase
+
+fn remedy_of (failed: failure): remedy =
+  case+ failed of
+  | LibraryNotAdded() => LibraryScreenSays()
+  | HandedBookNotAdded() => LibraryScreenSays()
+  | SettingsNotRead() => ReopenQuire()
+  | CataloguesNotRead() => ReopenQuire()
+  | DictionariesNotRead() => ReopenQuire()
+  | AnnotationsNotRead() => ReopenQuire()
+  | BookFileLost() => ImportAgain()
+  | BookStorageFailed() => OpenAgain()
+  | PartNotRead() => OtherChapterOrReplace()
+  | StorageFull() => FreeSpace()
+  | RecordFromNewerQuire() => UpdateQuire()
+  | RecordDamaged() => RestoreBackup()
+  | RecordNotQuires() => RestoreBackup()
+  | BooksNotRead() => RestoreBackup()
+  | BooksNotReadCanSetAside() => SetAsideInSettings()
+  | AsideNotRead() => ReopenQuire()
+  | AsideIncomplete() => SetAsideAgain()
+  | DetailsDamaged() => RestoreBackup()
+  | CollectionsNotRead() => RestoreBackup()
+  | CollectionsNotReadCanSetAside() => SetAsideInSettings()
+  | NarrationNotPlayable() => TryNextPhrase()
+  | RotationNotLockable() => UseDeviceRotation()
+  | GrantNotTaken() => RemoveGrantByHand()
+  | GrantNoAnswer() => RemoveGrantByHand()
+  | TextNotCopied() => CopyByHand()
+  | DetailsNotCopied() => CopyByHand()
+
+fn named_remedy_of (failed: named_failure): remedy =
+  case+ failed of
+  | NotAnEpub() => ChooseAnotherFile()
+  | ContainerDamaged() => ChooseAnotherFile()
+  | PackageMissing() => ChooseAnotherFile()
+  | PackageDamaged() => ChooseAnotherFile()
+  | ReadingNotFinished() => ImportAgain()
+  | NotKeptInLibrary() => ReopenQuire()
+  | FileEmpty() => ChooseAnotherFile()
+  | FileNotRead() => ChooseAnotherFile()
+  | BookFileNotStored() => FreeSpace()
+
+fn _put_number_at {l:agz}{cap:pos}{at:nat | at <= cap}
+  (out: !$A.arr(byte, l, cap), cap: int cap, at: int at, v: int): [stop:nat | at <= stop; stop <= cap] int stop = let
+  val digits = $A.alloc<byte>(12)
+  val start = _digits_put(digits, 12, v)
+  fun copy {d,o:agz}{c:pos}{j:nat | j <= 12}{k:nat | k <= c} .<12 - j>.
+    (out: !$A.arr(byte, o, c), cap: int c, at: int k, digits: !$A.arr(byte, d, 12), j: int j)
+    : [stop:nat | k <= stop; stop <= c] int stop =
+    if j >= 12 then at
+    else if at >= cap then at
+    else let
+      val () = $A.set<byte>(out, at, $A.get<byte>(digits, j))
+    in copy(out, cap, at + 1, digits, j + 1) end
+  val stop = copy(out, cap, at, digits, start)
+  val () = $A.free<byte>(digits)
+in stop end
+
+fun _copy_name {l,o:agz}{n,c:pos}{name_len:nat | name_len <= n; name_len < 256}{at:nat | at + name_len <= c}{j:nat | j <= name_len} .<name_len - j>.
+  (name: !$A.arr(byte, l, n), name_len: int name_len, out: !$A.arr(byte, o, c), at: int at, j: int j)
+  : int(at + name_len) =
+  if j >= name_len then at + name_len
+  else let
+    val () = $A.set<byte>(out, at + j, $A.get<byte>(name, j))
+  in _copy_name(name, name_len, out, at, j + 1) end
+
+(* What happened, without its next step and without a final period;
+   part is the chapter (from 1) a PartNotRead names, 0 for the contents *)
+fn _what_put {l:agz}{at:nat | at <= 512}
+  (out: !$A.arr(byte, l, 512), at: int at, failed: failure, where_: host, part: int)
+  : [stop:nat | at <= stop; stop <= 512] int stop =
+  case+ failed of
+  | LibraryNotAdded() => _put_text(out, 512, at, "Books cannot be added until Quire can read your library")
+  | HandedBookNotAdded() => _put_text(out, 512, at, "This book was not added: Quire could not read your library")
+  | SettingsNotRead() => _put_text(out, 512, at, "Quire could not read your settings, so it is using the defaults and changes will not be saved")
+  | CataloguesNotRead() => _put_text(out, 512, at, "Quire could not read your catalogues, so changes to them will not be saved")
+  | DictionariesNotRead() => _put_text(out, 512, at, "Quire could not read your dictionaries, so changes to them will not be saved")
+  | AnnotationsNotRead() => _put_text(out, 512, at, "This book's highlights and notes could not be read, so new ones cannot be made and the old ones are kept")
+  | BookFileLost() => _put_text(out, 512, at, "This book's file could not be read")
+  | BookStorageFailed() => _put_text(out, 512, at, "This book could not be read from storage")
+  | PartNotRead() =>
+    if part > 0 then let
+      val at = _put_text(out, 512, at, "Chapter ")
+      val at = _put_number_at(out, 512, at, part)
+    in _put_text(out, 512, at, " of this book could not be read") end
+    else _put_text(out, 512, at, "The contents of this book could not be read")
+  | StorageFull() =>
+    (case+ where_ of
+    | InBrowser() => _put_text(out, 512, at, "Quire could not save your changes: the browser's storage may be full")
+    | InApp() => _put_text(out, 512, at, "Quire could not save your changes: the device's storage may be full"))
+  | RecordFromNewerQuire() => _put_text(out, 512, at, "A book's stored record was written by a newer Quire, so changes to it are not saved")
+  | RecordDamaged() => _put_text(out, 512, at, "A book's stored record is damaged, so changes to it are not saved and your other books are saved")
+  | RecordNotQuires() => _put_text(out, 512, at, "A book's stored record is not one Quire wrote, so changes to it are not saved")
+  | BooksNotRead() => _put_text(out, 512, at, "Some books in your library could not be read, so they are left as they are and not shown")
+  | AsideNotRead() => _put_text(out, 512, at, "Quire could not read your library to set those records aside, so nothing was changed")
+  | AsideIncomplete() => _put_text(out, 512, at, "Some records could not be set aside, and nothing was lost")
+  | BooksNotReadCanSetAside() => _put_text(out, 512, at, "Some books in your library could not be read, so they are left as they are and not shown")
+  | DetailsDamaged() => _put_text(out, 512, at, "Some details of your library were damaged and show as defaults, and the rest of it is intact")
+  | CollectionsNotRead() => _put_text(out, 512, at, "Your collections could not be read, so they are left as they are and not shown")
+  | CollectionsNotReadCanSetAside() => _put_text(out, 512, at, "Your collections could not be read, so they are left as they are and not shown")
+  | NarrationNotPlayable() => _put_text(out, 512, at, "This narration cannot be played")
+  | RotationNotLockable() => _put_text(out, 512, at, "This device does not let Quire lock the rotation, so Lock rotation is no longer offered")
+  | GrantNotTaken() => _put_text(out, 512, at, "Google didn't take back Quire's access to Drive")
+  | GrantNoAnswer() => _put_text(out, 512, at, "Google didn't answer when Quire took back its access to Drive")
+  | TextNotCopied() =>
+    (case+ where_ of
+    | InBrowser() => _put_text(out, 512, at, "The text could not be copied: the browser did not allow it")
+    | InApp() => _put_text(out, 512, at, "The text could not be copied: the device did not allow it"))
+  | DetailsNotCopied() =>
+    (case+ where_ of
+    | InBrowser() => _put_text(out, 512, at, "The details could not be copied: the browser did not allow it")
+    | InApp() => _put_text(out, 512, at, "The details could not be copied: the device did not allow it"))
+
+(* What happened to the file or book named, after its name *)
+fn _named_what_put {l:agz}{at:nat | at <= 512}
+  (out: !$A.arr(byte, l, 512), at: int at, failed: named_failure): [stop:nat | at <= stop; stop <= 512] int stop =
+  case+ failed of
+  | NotAnEpub() => _put_text(out, 512, at, " is not an EPUB: it has no container.xml, so it could not be imported")
+  | ContainerDamaged() => _put_text(out, 512, at, " has a damaged container.xml, so it could not be imported")
+  | PackageMissing() => _put_text(out, 512, at, " has no package document (.opf), so it could not be imported")
+  | PackageDamaged() => _put_text(out, 512, at, " has a damaged package document (.opf), so it could not be imported")
+  | ReadingNotFinished() => _put_text(out, 512, at, " was not finished being read, so it was not imported")
+  | NotKeptInLibrary() => _put_text(out, 512, at, " could not be added to your library")
+  | FileEmpty() => _put_text(out, 512, at, " is empty, so it could not be imported")
+  | FileNotRead() => _put_text(out, 512, at, " could not be read")
+  | BookFileNotStored() => _put_text(out, 512, at, " is open, but its file could not be stored, so it will not open next time")
+
+(* The next step, after the sentence it follows: it starts with its
+   own separator *)
+fn _remedy_put {l:agz}{at:nat | at <= 512}
+  (out: !$A.arr(byte, l, 512), at: int at, next: remedy, where_: host): [stop:nat | at <= stop; stop <= 512] int stop =
+  case+ next of
+  | ReopenQuire() => _put_text(out, 512, at, ". Reopen Quire to try again.")
+  | LibraryScreenSays() => _put_text(out, 512, at, ". The library screen says why and what to do; then open or share the book again.")
+  | ImportAgain() => _put_text(out, 512, at, ". Import the book again and choose Replace when Quire says it is already in your library.")
+  | OtherChapterOrReplace() => _put_text(out, 512, at, ". Choose another chapter in the contents, or import the book again and choose Replace.")
+  | ChooseAnotherFile() => _put_text(out, 512, at, ". Choose another file, or get the book again from where you had it.")
+  | UpdateQuire() => _put_text(out, 512, at, ". Update Quire.")
+  | FreeSpace() =>
+    (case+ where_ of
+    | InBrowser() => _put_text(out, 512, at, ". Free some space in the browser and try again.")
+    | InApp() => _put_text(out, 512, at, ". Free some space on the device and try again."))
+  | OpenAgain() => _put_text(out, 512, at, ". Quire tried three times; the book is still stored, so try opening it again in a moment.")
+  | RemoveGrantByHand() => _put_text(out, 512, at, ": remove it in your Google account, under Security, Your connections to third-party apps.")
+  | UseDeviceRotation() => _put_text(out, 512, at, ". Turn the device's own rotation lock on instead.")
+  | CopyByHand() => _put_text(out, 512, at, ". Select the text and copy it yourself.")
+  | RestoreBackup() => _put_text(out, 512, at, ". Restore a backup in Settings to bring back what is missing.")
+  | SetAsideAgain() => _put_text(out, 512, at, ". Press Set aside unreadable records in Settings to try those again.")
+  | SetAsideInSettings() => _put_text(out, 512, at, ". Settings can set them aside.")
+  | TryNextPhrase() => _put_text(out, 512, at, ". Try Next phrase, or read the book without the narration.")
+
+fn _reopens (next: remedy): bool =
+  case+ next of
+  | ReopenQuire() => true
+  | LibraryScreenSays() => false
+  | ImportAgain() => false
+  | OtherChapterOrReplace() => false
+  | ChooseAnotherFile() => false
+  | UpdateQuire() => false
+  | FreeSpace() => false
+  | OpenAgain() => false
+  | RemoveGrantByHand() => false
+  | UseDeviceRotation() => false
+  | CopyByHand() => false
+  | RestoreBackup() => false
+  | SetAsideInSettings() => false
+  | SetAsideAgain() => false
+  | TryNextPhrase() => false
+
+(* The error banner, saying what failed and what to do next (the one
+   place the reader's words for a failure are made, #360) *)
+#pub fn notice_say (failed: failure): void
+
+(* The same for a chapter (from 1) that could not be read, which it
+   names; 0 is the contents *)
+#pub fn notice_say_part (chapter: int): void
+
+fn _say (failed: failure, part: int): void = let
+  val where_ = _host()
+  val next = remedy_of(failed)
+  val out = $A.alloc<byte>(512)
+  val at = _what_put(out, 0, failed, where_, part)
+  val at = _remedy_put(out, at, next, where_)
+in _error_buf(out, at, _reopens(next)) end
+
+implement notice_say (failed) = _say(failed, 0)
+
+implement notice_say_part (chapter) = _say(PartNotRead(), chapter)
+
+(* The same, for the file or book whose name is name[0, name_len) *)
+#pub fn notice_say_named {l:agz}{n:pos}{name_len:nat | name_len <= n; name_len < 256}
+  (name: !$A.arr(byte, l, n), name_len: int name_len, failed: named_failure): void
+
+implement notice_say_named (name, name_len, failed) = let
+  val where_ = _host()
+  val next = named_remedy_of(failed)
+  val out = $A.alloc<byte>(512)
+  val at = _copy_name(name, name_len, out, 0, 0)
+  val at = _named_what_put(out, at, failed)
+  val at = _remedy_put(out, at, next, where_)
+in _error_buf(out, at, _reopens(next)) end
+
 (* The error banner goes (its Dismiss button, or a new import) *)
 #pub fn notice_dismiss (): void
 
 implement notice_dismiss () = let
   val () = !_banner_up := false
-  val () = _details_set(NoDetails())
+  val () = _details_buttons(false)
 in ui_show("error-banner", false) end
-
-(* A part of the open book (a chapter, or the list of them) could not
-   be read *)
-#pub fn notice_part_unread (): void
-
-implement notice_part_unread () =
-  notice_error("This part of the book could not be read. Its file may be damaged: import the book again.")
 
 (* Whether this session has said that a save failed: when storage is
    full every later save fails too, and a banner at each page turn is
@@ -322,7 +611,7 @@ implement save_failed () =
   else if !_banner_up then ()
   else let
     val () = !_save_failure_told := true
-  in notice_error("Quire could not save your changes. The browser's storage may be full: free some space and try again.") end
+  in notice_say(StorageFull()) end
 
 implement save_checked (saving) = $P.finish<$IDB.stored>(saving, llam(status) =>
   case+ status of
@@ -373,7 +662,7 @@ implement notice_details_copy () =
       val () = $P.finish<$CB.copied>($CB.clipboard_write(bytes, text_len), llam(copied) =>
         case+ copied of
         | $CB.Copied() => notice_copied()
-        | $CB.NotCopied() => notice_error("The details could not be copied: the browser did not allow it."))
+        | $CB.NotCopied() => notice_say(DetailsNotCopied()))
     in release_bytes(frozen, bytes) end
 
 end (* #target wasm *)

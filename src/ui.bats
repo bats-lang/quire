@@ -1438,6 +1438,7 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsSync
   | SettingsDictionaries
   | SettingsExportBackup
+  | SettingsSetAside
   | SettingsResetSettings
   | SettingsFactoryReset
   | SettingsAbout
@@ -1454,6 +1455,7 @@ implement settings_control_id (control) =
   | SettingsSync() => "settings-sync"
   | SettingsDictionaries() => "settings-dictionaries"
   | SettingsExportBackup() => "settings-export-backup"
+  | SettingsSetAside() => "settings-set-aside"
   | SettingsResetSettings() => "settings-reset-settings"
   | SettingsFactoryReset() => "settings-factory-reset"
   | SettingsAbout() => "settings-about"
@@ -1469,7 +1471,8 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsGoalSixty() => $R.some(SettingsSync())
   | SettingsSync() => $R.some(SettingsDictionaries())
   | SettingsDictionaries() => $R.some(SettingsExportBackup())
-  | SettingsExportBackup() => $R.some(SettingsResetSettings())
+  | SettingsExportBackup() => $R.some(SettingsSetAside())
+  | SettingsSetAside() => $R.some(SettingsResetSettings())
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
   | SettingsFactoryReset() => $R.some(SettingsAbout())
   | SettingsAbout() => $R.some(SettingsDone())
@@ -2495,6 +2498,39 @@ end
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_image_viewer_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(image_viewer_control)
 implement ui_image_viewer_control (bytes, n, at) = _image_viewer_control_from(bytes, n, at, ImageClose(), 1)
+
+(* The About screen's buttons, each by its element's id (about_control_id) *)
+#pub datatype about_control =
+  | AboutDone
+  | AboutCopyErrorDetails
+
+#pub fn about_control_id (control: about_control): [id_len:pos | id_len < 256] string id_len
+implement about_control_id (control) =
+  case+ control of
+  | AboutDone() => "about-done"
+  | AboutCopyErrorDetails() => "about-error-copy"
+
+(* The control after control, in the order the decoder tries them *)
+fn _about_control_after (control: about_control): $R.option(about_control) =
+  case+ control of
+  | AboutDone() => $R.some(AboutCopyErrorDetails())
+  | AboutCopyErrorDetails() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _about_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: about_control, fuel: int fuel): $R.option(about_control) = let
+  val id = about_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _about_control_after(control) of
+    | ~$R.some(next) => _about_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_about_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(about_control)
+implement ui_about_control (bytes, n, at) = _about_control_from(bytes, n, at, AboutDone(), 2)
 
 (* The update toast's buttons, each by its element's id (update_control_id) *)
 #pub datatype update_control =

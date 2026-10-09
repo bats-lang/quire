@@ -3,7 +3,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
+  expectBannerSaysWhatToDo, start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
   librarySettings, settingsButton, settingsScreen, continueReading,
@@ -40,12 +40,13 @@ test('imported books show their title and author, and survive a reload', async (
   expect(errors).toEqual([]);
 });
 
-test('a file that is not an EPUB is refused with a message', async ({ page }) => {
+test('a file that is not an EPUB is refused with a message', async ({ page }, testInfo) => {
   await start(page);
   await importInput(page).setInputFiles([rawFile('notes.epub', Buffer.from('this is not a zip file at all'))]);
   const alert = page.getByRole('alert');
   await expect(alert).toBeVisible();
-  await expect(alert).toContainText('could not be imported');
+  await expect(alert).toContainText('so it could not be imported');
+  await expectBannerSaysWhatToDo(page, testInfo);
   await expect(cards(page)).toHaveCount(0);
   await alert.getByRole('button', { name: 'Dismiss' }).click();
   await expect(alert).toBeHidden();
@@ -513,14 +514,15 @@ test('a file the app is started with is imported once, and one handed over while
 
 // A handed-over file whose URL cannot be fetched is named in the error
 // banner, and the files handed over after it are still imported
-test('a file handed over by the host that cannot be read is said, and the next is imported', async ({ page }) => {
+test('a file handed over by the host that cannot be read is said, and the next is imported', async ({ page }, testInfo) => {
   const errors = await start(page);
   const epub = epubFile({ title: 'After The Gone One', author: 'Smoke Test', chapters: 1 });
   await page.route('**/_capacitor_file_/gone', r => r.fulfill({ status: 404, body: '' }));
   await page.route('**/_capacitor_file_/next', r => r.fulfill({ path: epub, contentType: 'application/octet-stream' }));
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/gone', 'gone.epub'));
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('gone.epub could not be read.');
+  await expect(alert).toContainText('gone.epub could not be read. Choose another file');
+  await expectBannerSaysWhatToDo(page, testInfo);
   await expect(cards(page)).toHaveCount(0);
   await page.evaluate(() => globalThis.batsNative.deliverFile('/_capacitor_file_/next', 'next.epub'));
   await expect(card(page, 'After The Gone One')).toBeVisible({ timeout: 30000 });

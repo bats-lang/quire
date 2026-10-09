@@ -514,3 +514,17 @@ export async function exportedBackup(page) {
   await saved.getByRole('button', { name: 'OK' }).click();
   return text;
 }
+
+/** The error banner on screen says what to do next (quire#360): a
+    button besides Dismiss (Reopen Quire), or words that name the step;
+    and in the Android app it does not say "browser". Call it where a
+    spec has the banner up */
+const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|try opening it again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
+export async function expectBannerSaysWhatToDo(page, testInfo) {
+  const banner = page.getByRole('alert');
+  await expect(banner).toBeVisible();
+  const text = await banner.innerText();
+  const reopen = await banner.getByRole('button', { name: 'Reopen Quire' }).isVisible();
+  expect(reopen || NEXT_STEP.test(text), `the banner says what to do: ${text}`).toBe(true);
+  if (testInfo.project.name === 'android') expect(text, 'no "browser" in the app').not.toMatch(/browser/i);
+}
