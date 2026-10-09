@@ -1440,7 +1440,7 @@ fn _base {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:na
      book's text are inline targets, which WCAG leaves to the text they
      sit in *)
   val () = raw(sheet, "button,input,select,textarea,[role=button],[role=menuitem],[role=tab],[role=slider],[role=option],[role=switch],.linkout")
-  val () = raw(sheet, "{min-height:44px!important;min-width:44px!important;box-sizing:border-box}")
+  val () = raw(sheet, "{min-height:48px!important;min-width:48px!important;box-sizing:border-box}")
   (* 16px in text fields, so iOS does not zoom into them *)
   val () = raw(sheet, "input,select,textarea{font-size:16px!important}")
   (* focus: 2px inside the edge in the control's own proven colour *)
@@ -2458,7 +2458,7 @@ fn _reader {left:nat | left >= 9450} (sheet: sheet(left, false, false)): [after:
   val sheet = rule(sheet, ".trk")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Position(), "relative")
-  val sheet = lay(sheet, Height(), "44px")
+  val sheet = lay(sheet, Height(), "48px")
   val sheet = lay(sheet, Cursor(), "pointer")
   val sheet = lay(sheet, TouchAction(), "none")
   val sheet = close(sheet)

@@ -31,6 +31,10 @@
  * - coveredByBanner: while the error banner is up, no control outside it
  *   is under it (#374: the banner hid the library's header, the title,
  *   Import and the menu, exactly when a reader needs them).
+ * - targetsShort: every control is at least 48 by 48 CSS px, the least
+ *   Material and Android's accessibility guidance give a touch target
+ *   (Apple's is 44 pt, WCAG 2.5.5's 44 CSS px), so the stylesheet's
+ *   base rule is checked on the screen, not only written (quire#403).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -498,4 +502,34 @@ export async function coveredByBanner(page, header = '#library-bar') {
     }
     return bad;
   }, header);
+}
+
+/** The least side of a touch target, in CSS px (quire#403): Material 3
+    and Android's accessibility guidance say 48 dp; Apple's HIG says
+    44 pt and WCAG 2.5.5 (AAA) 44 px, which 48 also meets */
+export const TARGET_PX = 48;
+
+/** Each visible control narrower or shorter than TARGET_PX, by its
+    name and size. The book's own page (its links are inline targets,
+    which WCAG leaves to the text they sit in) and inert or 1 px
+    read-out-only elements are left out */
+export async function targetsShort(page) {
+  return page.evaluate(least => {
+    const controls = 'button, select, textarea, input:not([type=hidden]):not([type=file]), [role=button], [role=menuitem], [role=tab], [role=switch], [role=slider], .linkout';
+    const book = document.querySelector('[role=document]');
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const named = e => (e.getAttribute('aria-label') || e.textContent || e.id || e.tagName).trim().slice(0, 40);
+    const short = [];
+    for (const control of document.querySelectorAll(controls)) {
+      if (book && book.contains(control)) continue;
+      if (control.closest('[inert]')) continue;
+      if (!shown(control)) continue;
+      const box = control.getBoundingClientRect();
+      if (box.width <= 1 && box.height <= 1) continue;
+      if (box.width < least - 0.5 || box.height < least - 0.5) {
+        short.push(`${named(control)} (${control.id || control.tagName}): ${Math.round(box.width)} x ${Math.round(box.height)}`);
+      }
+    }
+    return short;
+  }, TARGET_PX);
 }
