@@ -1182,7 +1182,7 @@ in Sheet(builder) end
   | Width | MaxWidth | MinWidth | Height | MaxHeight | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
-  | WhiteSpace | Hyphens | Direction | WritingMode
+  | WhiteSpace | Hyphens | Direction | WritingMode | OverflowWrap
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
@@ -1210,7 +1210,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | TextTransform() => "text-transform" | TextAlign() => "text-align"
   | TextOverflow() => "text-overflow" | TextDecoration() => "text-decoration"
   | WhiteSpace() => "white-space" | Hyphens() => "hyphens" | Direction() => "direction"
-  | WritingMode() => "writing-mode"
+  | WritingMode() => "writing-mode" | OverflowWrap() => "overflow-wrap"
   | Overflow() => "overflow" | OverflowX() => "overflow-x" | Position() => "position"
   | Top() => "top" | Bottom() => "bottom" | Left() => "left" | Right() => "right"
   | Inset() => "inset" | ZIndex() => "z-index" | Cursor() => "cursor"
@@ -2094,7 +2094,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9650] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9700] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2273,6 +2273,13 @@ fn _reader {left:nat | left >= 9650} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, FontFamily(), "Literata,Georgia,serif")
   val sheet = lay(sheet, FontSize(), "18px")
   val sheet = lay(sheet, LineHeight(), "1.6")
+  (* a run with no place to break (a megabyte of letters, a long
+     address, #423) is broken to the column's width, else it is one line
+     that overflows the page and is clipped, the rest out of reach.
+     anywhere, not break-word: the same breaking, but a break the run
+     makes counts in the box's minimum width, so a cell or an inline
+     block holding one does not grow to the run's length *)
+  val sheet = lay(sheet, OverflowWrap(), "anywhere")
   val sheet = lay(sheet, Outline(), "none")
   val sheet = close(sheet)
   (* shown only by the typography's style, for a spread; a point the

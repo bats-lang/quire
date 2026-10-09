@@ -189,11 +189,21 @@ test.describe('a table cell over many pages', () => {
       expect.soft(cell.animated[2], log).toBeLessThanOrEqual(plain.animated[2] + 30);
       expect.soft(cell.animated[2], log).toBeLessThanOrEqual(cell.instant[2] + 30);
 
-      // the cell holds the same text as the plain chapter, so it fills about
-      // as many pages: a cell that is one unbreakable box shows only its
-      // first column and the rest of it cannot be reached
+      // a table is a scroll container no taller than a page (#413), so the
+      // cell does not spread over dozens of pages, each laid out again at
+      // every turn: the table is one box on one page, and its rows past
+      // the page's foot are reached by scrolling the table. (Until #413 a
+      // cell was one unbreakable box of a hundred pages or more, which is
+      // what made these turns slow; this test then asserted the chapter
+      // filled about as many pages as the plain one. That count is no
+      // longer the right measure, since the cell no longer takes the pages.)
       const cellPages = await screens(page);
-      expect(cellPages, `the cell's pages against the plain chapter's ${plainPages} (${log})`).toBeGreaterThan(plainPages * 0.5);
+      expect(cellPages, `the chapter with the table is a few pages, not the cell's hundred (plain chapter ${plainPages})`).toBeLessThan(plainPages);
+      const cellBox = await bookPage(page).evaluate(doc => {
+        const table = doc.querySelector('table');
+        return { scrollHeight: table.scrollHeight, clientHeight: table.clientHeight };
+      });
+      expect(cellBox.scrollHeight, 'the cell holds more than a page, scrolled inside the table').toBeGreaterThan(cellBox.clientHeight * 3);
 
       // every page across the cell: the place, the footer and the text
       await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -229,7 +239,16 @@ test.describe('a table cell over many pages', () => {
         await expect.poll(async () => (await where(page)).fraction).not.toBe(now.fraction);
       }
       expect((await where(page)).end, 'the end of the cell is reached').toBe(true);
-      expect(lastTag, 'the last paragraphs of the cell are shown').toBeGreaterThan(CELL_PARAGRAPHS * 0.75);
+      // the rest of the cell is reached by scrolling the table
+      const lastInCell = await bookPage(page).evaluate((doc, last) => {
+        const table = doc.querySelector('table');
+        table.scrollTop = table.scrollHeight;
+        const box = table.getBoundingClientRect();
+        const paragraph = [...table.querySelectorAll('p')].find(p => p.textContent.startsWith(`Cell ${last} `));
+        const at = paragraph.getBoundingClientRect();
+        return at.bottom <= box.bottom + 1 && at.top >= box.top - 1;
+      }, CELL_PARAGRAPHS - 1);
+      expect(lastInCell, 'the last paragraph of the cell is reached by scrolling the table').toBe(true);
       console.log(`${mode}: ${pages} pages across the cell, the plain chapter ${plainPages}`);
       expect(errors).toEqual([]);
     });
