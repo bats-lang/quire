@@ -7,6 +7,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
+  librarySettings, settingsButton, settingsScreen,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -248,4 +249,99 @@ test('two tabs changing different parts of a book keep both changes', async ({ p
   await bookMenu(page, 'Shared Book');
   await menuItem(page, 'Collections').click();
   await expect(page.getByRole('dialog', { name: 'Collections' }).getByRole('button', { name: 'Both', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});
+
+/* ---------------- records that cannot be read are set aside (#374) ---------------- */
+
+const damagedKeys = (records, id) => Object.keys(records).filter(key => key.startsWith(`library/damaged/${id}/`));
+const setAside = page => settingsButton(page, 'Set aside unreadable records');
+
+test('a damaged book record and a damaged collections record are set aside, their bytes kept, and the rest is untouched', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const stored = await store(page);
+  const damagedBook = stored[bookKey(books[0])].slice();
+  damagedBook[10] ^= 0x5a;
+  const damagedIndex = stored['library/index'].slice();
+  damagedIndex[10] ^= 0x5a;
+  await put(page, bookKey(books[0]), damagedBook);
+  await put(page, 'library/index', damagedIndex);
+  await reload(page);
+  await expect(card(page, 'Alpha Tales')).toHaveCount(0);
+  await expect(card(page, 'Gamma Days')).toBeVisible();
+  const before = await store(page);
+  await librarySettings(page);
+  await expect(setAside(page)).toBeVisible();
+  await setAside(page).click();
+  // it is said, and the button goes: there is nothing left to set aside
+  await expect(settingsScreen(page)).toContainText('Quire kept a copy of the records it could not read');
+  await expect(setAside(page)).toBeHidden();
+  const after = await store(page);
+  // both records are gone from where they were, and each one's bytes are kept
+  expect(after[bookKey(books[0])]).toBeUndefined();
+  expect(after['library/index']).toBeUndefined();
+  const bookCopies = damagedKeys(after, `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`);
+  expect(bookCopies).toHaveLength(1);
+  expect(same(after[bookCopies[0]], damagedBook)).toBe(true);
+  const indexCopies = damagedKeys(after, '00000000000000');
+  expect(indexCopies).toHaveLength(1);
+  expect(same(after[indexCopies[0]], damagedIndex)).toBe(true);
+  // the other books' records are as they were
+  for (const book of [books[1], books[2]]) expect(same(after[bookKey(book)], before[bookKey(book)])).toBe(true);
+  // after a reload nothing is said to be unreadable, and the book that read is shown
+  await reload(page);
+  await expect(alert(page)).toBeHidden();
+  await expect(card(page, 'Gamma Days')).toBeVisible();
+  await librarySettings(page);
+  await expect(setAside(page)).toBeHidden();
+});
+
+test('a record a newer Quire wrote, or one that reads, is not offered to be set aside', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const stored = await store(page);
+  const newer = stored[bookKey(books[0])].slice();
+  newer[6] = 9;
+  await put(page, bookKey(books[0]), newer);
+  await reload(page);
+  await librarySettings(page);
+  await expect(setAside(page)).toBeHidden();
+  expect(same((await store(page))[bookKey(books[0])], newer)).toBe(true);
+});
+
+test('a set aside that is aborted midway leaves the old record byte for byte, and can be tried again', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const damaged = (await store(page))[bookKey(books[0])].slice();
+  damaged[10] ^= 0x5a;
+  await put(page, bookKey(books[0]), damaged);
+  await reload(page);
+  await librarySettings(page);
+  // the transaction is aborted after the copy is put and before the key is deleted
+  await page.evaluate(() => {
+    const del = IDBObjectStore.prototype.delete;
+    window.__asideAbort = true;
+    IDBObjectStore.prototype.delete = function (key) {
+      if (window.__asideAbort && String(key).startsWith('library/book/')) {
+        this.transaction.abort();
+        return undefined;
+      }
+      return del.call(this, key);
+    };
+  });
+  await setAside(page).click();
+  await expect(alert(page)).toContainText('could not be set aside');
+  const aborted = await store(page);
+  expect(same(aborted[bookKey(books[0])], damaged)).toBe(true);
+  expect(damagedKeys(aborted, `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`)).toHaveLength(0);
+  // nothing was lost: with the abort lifted, it is set aside
+  await page.evaluate(() => { window.__asideAbort = false; });
+  await expect(setAside(page)).toBeVisible();
+  await setAside(page).click();
+  await expect(setAside(page)).toBeHidden();
+  const done = await store(page);
+  expect(done[bookKey(books[0])]).toBeUndefined();
+  const copies = damagedKeys(done, `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`);
+  expect(copies).toHaveLength(1);
+  expect(same(done[copies[0]], damaged)).toBe(true);
 });

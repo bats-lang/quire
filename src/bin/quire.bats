@@ -269,6 +269,11 @@ fn _image_viewer_control (clicked: !target): $R.option(image_viewer_control) =
   | Target(bytes, n, _) => ui_image_viewer_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
+fn _about_control (clicked: !target): $R.option(about_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_about_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
 fn _update_control (clicked: !target): $R.option(update_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_update_control(bytes, n, 10)
@@ -455,7 +460,11 @@ in _night_watch(!_night_watch_number, NIGHT_CHECKS_MAX) end
 
 fn _night_watch_stop (): void = !_night_watch_number := !_night_watch_number + 1
 
-fn _show_library (): void = let
+(* The library shown. A reload comes back here, unless save_view is false:
+   at start-up with a library that could not be read yet (Try again
+   waits) the view kept by the last run is not written over, since the
+   retry opens the book it names (#374) *)
+fn _library_shown (save_view: bool): void = let
   val () = !_view := LibraryView()
   (* the library is not the immersive screen: the system bars are there *)
   val () = screen_immersive_set(false)
@@ -474,7 +483,7 @@ fn _show_library (): void = let
   val () = aloud_stop()
   val () = ui_show("library", true)
   (* a reload now comes back here *)
-  val () = _view_save(~1, 0, 0)
+  val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
   val () = reader_stack_clear()
   (* a page turn under way ends with the book *)
@@ -489,6 +498,8 @@ fn _show_library (): void = let
   val () = sync_book_closed()
   val () = back_view_set(AtLibrary())
 in lib_render() end
+
+fn _show_library (): void = _library_shown(true)
 
 (* The reader's bars: shown, and hidden again after 5 seconds, unless a
    reader panel is open then: the bars stay under its scrim, so the
@@ -1266,6 +1277,7 @@ end
 
 (* Opens the About screen, from Settings or the library menu *)
 fn _about_open (): void = let
+  val () = ui_show("about-error-copy", notice_details_kept())
   val () = layer_open(LAbout())
 in ui_focus("about-done") end
 
@@ -1273,6 +1285,7 @@ in ui_focus("about-done") end
 fn _settings_open (): void = let
   val () = stats_goal_show()
   val () = sync_summary_show()
+  val () = lib_aside_show()
   val () = layer_open(LSettings())
 in ui_focus("settings-sync") end
 
@@ -1303,6 +1316,7 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = dict_panel_open(code, code_len)
         in $A.free<byte>(code) end
         | ~$R.some(SettingsExportBackup()) => backup_export()
+        | ~$R.some(SettingsSetAside()) => lib_aside_run()
         | ~$R.some(SettingsResetSettings()) => _settings_reset()
         | ~$R.some(SettingsFactoryReset()) => let
           val () = layer_close(LSettings())
@@ -1313,10 +1327,16 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
     in 0 end)
   (* the About screen: its links leave the app by themselves; Done
      goes back to Settings *)
-  val listeners = RCons(listeners, OnEl("about-done"), "click", llam(_) => let
-      val () = layer_close(LAbout())
-      (* back where it was opened: Settings' row, or the library menu's button *)
-      val () = (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button"))
+  val listeners = RCons(listeners, OnEl("about-screen"), "click", llam(h) => let
+      val clicked = _target(h)
+      val () = (case+ _about_control(clicked) of
+        | ~$R.some(AboutDone()) => let
+            val () = layer_close(LAbout())
+            (* back where it was opened: Settings' row, or the library menu's button *)
+          in (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button")) end
+        | ~$R.some(AboutCopyErrorDetails()) => notice_details_copy()
+        | ~$R.none() => ())
+      val () = _target_free(clicked)
     in 0 end)
   val listeners = RCons(listeners, OnEl("settings-restore"), "change", llam(_) => let
       val () = layer_close(LSettings())
@@ -2858,7 +2878,7 @@ implement main0 () = let
         | ~LibraryRead(pf | ) => _after_read(LibraryRead(pf | ))
         | ~LibraryUnreadable() =>
           (case+ lib_retry_offer() of
-          | RetryOffered() => let val () = _show_library() in $P.ret<int>(0) end
+          | RetryOffered() => let val () = _library_shown(false) in $P.ret<int>(0) end
           | RetryNotOffered() => _after_read(LibraryUnreadable()))
       end)
     end)
