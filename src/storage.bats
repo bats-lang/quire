@@ -48,9 +48,9 @@ fn _tell (kind: record_kind): void =
   (* the library's failure is told by the library (library.bats), which
      knows why it failed *)
   | LibraryRecord() => ()
-  | SettingsRecord() => notice_error("Quire could not read your settings. It is using the defaults, and changes will not be saved until you reopen Quire.")
-  | CataloguesRecord() => notice_error("Quire could not read your catalogues. Changes to them will not be saved until you reopen Quire.")
-  | DictionariesRecord() => notice_error("Quire could not read your dictionaries. Changes to them will not be saved until you reopen Quire.")
+  | SettingsRecord() => notice_say(SettingsNotRead())
+  | CataloguesRecord() => notice_say(CataloguesNotRead())
+  | DictionariesRecord() => notice_say(DictionariesNotRead())
   | StatisticsRecord() => ()
   | ReadingSpeedRecord() => ()
   | SyncStateRecord() => ()
@@ -140,7 +140,7 @@ in
   if _unread_has(books, id_high, id_low) then _unread_put(books)
   else let
     val () = _unread_put(UnreadBook(id_high, id_low, books))
-  in notice_error("This book's highlights and notes could not be read. New ones cannot be made until you reopen Quire, so the old ones are kept.") end
+  in notice_say(AnnotationsNotRead()) end
 end
 
 end (* #target wasm *)

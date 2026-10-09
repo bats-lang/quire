@@ -1110,9 +1110,9 @@ fn _banner_say (result: sync_result): void = let
   val stop = _result_text(out, 0, result, !_last_status)
   val stop = _with_detail(out, stop, result)
 in
-  if ~_google_refusal(result) then notice_error_buf(out, stop)
+  if ~_google_refusal(result) then notice_sync_said(out, stop)
   else case+ _refusal_swap(NoRefusalKept()) of
-    | ~NoRefusalKept() => notice_error_buf(out, stop)
+    | ~NoRefusalKept() => notice_sync_said(out, stop)
     | ~RefusalKept(status, call, answer) => let
         val () = notice_failure(out, stop, "signing in to Google", call, $GA.google_status_name(status), answer)
       in _refusal_free(_refusal_swap(RefusalKept(status, call, NoAnswer()))) end
@@ -2052,7 +2052,7 @@ fn _revoked (change: $GA.google_authorization_change): void =
     in notice_failure(said, stop, "taking back Quire's access to Google Drive", "revokeAccess", $GA.google_status_name(status), _said_shown(rejection)) end
   | ~$GA.ChangeUnavailable(said) => let
       val () = _said_free(said)
-    in notice_error("Google didn't take back Quire's access to Drive: remove it in your Google account, under Security, Your connections to third-party apps.") end
+    in notice_say(GrantNotTaken()) end
   | ~$GA.ChangeUnexpected(unexpected) =>
     _unexpected_said("taking back Quire's access to Google Drive", "revokeAccess", unexpected)
 
@@ -4232,7 +4232,7 @@ fn _google_revoke {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
     val @(account_frozen, account_bytes) = $A.freeze<byte>(account)
     val @(used, rest) = $A.borrow_split<byte>(account_frozen, account_bytes, account_len)
     val () = (case+ $GA.google_text_of(used, account_len) of
-      | ~$R.none() => notice_error("Google didn't take back Quire's access to Drive: remove it in your Google account, under Security, Your connections to third-party apps.")
+      | ~$R.none() => notice_say(GrantNotTaken())
       | ~$R.some(text) => (case+ _drive_scopes() of
         | ~$R.none() => let
             val () = $GA.google_text_free(text)
@@ -4250,7 +4250,7 @@ fn _google_revoke {l:agz}{account_len:nat | account_len <= ACCOUNT_MAX}
               if number <> !_revoke_number then ()
               else let
                 val () = !_revoke_number := !_revoke_number + 1
-              in notice_error("Google didn't answer when Quire took back its access to Drive: remove it in your Google account, under Security, Your connections to third-party apps.") end)
+              in notice_say(GrantNoAnswer()) end)
           end))
     val account_bytes = $A.borrow_join<byte>(account_frozen, used, rest)
   in release_bytes(account_frozen, account_bytes) end

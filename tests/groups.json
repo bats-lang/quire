@@ -74,6 +74,7 @@
       "reject/library-reading-unmatched",
       "reject/library-view-unmatched",
       "reject/link-unmatched",
+      "reject/notice-without-remedy",
       "reject/page-turn-copy-marked",
       "reject/page-turn-forged-copy",
       "reject/page-turn-forged-sheet",

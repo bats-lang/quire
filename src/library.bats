@@ -1841,9 +1841,9 @@ fn _record_refused (why: unusable): void =
     val () = !_save_told := true
   in
     case+ why of
-    | UnusableNewer() => notice_error("A book's stored record was written by a newer Quire, so changes to it are not saved. Update Quire.")
-    | UnusableDamaged() => notice_error("A book's stored record is damaged, so changes to it are not saved. Your other books are saved.")
-    | UnusableNotQuire() => notice_error("A book's stored record is not one Quire wrote, so changes to it are not saved.")
+    | UnusableNewer() => notice_say(RecordFromNewerQuire())
+    | UnusableDamaged() => notice_say(RecordDamaged())
+    | UnusableNotQuire() => notice_say(RecordNotQuires())
   end
 
 (* A book's save came back *)
@@ -2342,13 +2342,9 @@ fn _adopt_index (index: stored_index): bool =
 
 (* What reading the records lost is said once, apart from what is kept *)
 fn _adopt_told (unusable: int, lossy: int, index_damaged: bool): void =
-  if unusable > 0 then
-    (if !_aside_count > 0 then notice_error("Some books in your library could not be read. They are left as they are and are not shown. Settings can set them aside.")
-     else notice_error("Some books in your library could not be read. They are left as they are and are not shown."))
-  else if lossy > 0 then notice_error("Some details of your library were damaged and show as defaults. The rest of it is intact.")
-  else if index_damaged then
-    (if !_aside_count > 0 then notice_error("Your collections could not be read. They are left as they are and are not shown. Settings can set them aside.")
-     else notice_error("Your collections could not be read. They are left as they are and are not shown."))
+  if unusable > 0 then notice_say(if !_aside_count > 0 then BooksNotReadCanSetAside() else BooksNotRead())
+  else if lossy > 0 then notice_say(DetailsDamaged())
+  else if index_damaged then notice_say(if !_aside_count > 0 then CollectionsNotReadCanSetAside() else CollectionsNotRead())
   else ()
 
 (* Reads the library: its records, or the old "lib" converted to them. The
@@ -2512,8 +2508,8 @@ implement lib_aside_show () =
 
 implement lib_aside_run () =
   $P.finish<int>(lib_set_aside(), llam(done) => let
-    val () = (if done < 0 then notice_error("Quire could not read your library to set those records aside. Nothing was changed.")
-      else if done < !_aside_count then notice_error("Some records could not be set aside. Nothing was lost, and they can be tried again.")
+    val () = (if done < 0 then notice_say(AsideNotRead())
+      else if done < !_aside_count then notice_say(AsideIncomplete())
       else ())
     val () = (if done > 0 then let
         val () = !_aside_done := !_aside_done + done

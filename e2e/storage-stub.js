@@ -34,6 +34,16 @@ export async function stubReads(page) {
       const which = localStorage.getItem('failReads');
       if (!which || typeof key !== 'string') return false;
       if (which === 'annotations') return key.length === 15 && key[0] === 'a';
+      // a book's file ("b" record): fails as many times as failTimes
+      // says (negative: always), then reads (#360)
+      if (which === 'bookfile') {
+        if (!(key.length === 15 && key[0] === 'b')) return false;
+        const left = Number(localStorage.getItem('failTimes'));
+        if (left === 0) return false;
+        if (left > 0) localStorage.setItem('failTimes', String(left - 1));
+        window.bookFileReadsFailed = (window.bookFileReadsFailed || 0) + 1;
+        return true;
+      }
       return key === which;
     };
     const erring = () => {
