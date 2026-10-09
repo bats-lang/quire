@@ -169,6 +169,15 @@ jobs:
       - name: Install a CJK font
         run: sudo apt-get install -y -q fonts-noto-cjk
 
+      # The checker of the books the specs read (epubcheck.spec.js),
+      # pinned by its version and the archive's SHA-256
+      - name: Install epubcheck
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/epubcheck.zip" https://github.com/w3c/epubcheck/releases/download/v5.2.1/epubcheck-5.2.1.zip
+          echo "0532f6291faa2bb729dd253f958868a2a57dbd2c32f881a97c7c980c5940309e  $RUNNER_TEMP/epubcheck.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/epubcheck.zip" -d "$RUNNER_TEMP"
+          echo "EPUBCHECK_JAR=$RUNNER_TEMP/epubcheck-5.2.1/epubcheck.jar" >> "$GITHUB_ENV"
+
       # Each spec of the group, and only those: the filters must name
       # exactly as many files as the group lists
       - name: Run e2e tests
