@@ -10,13 +10,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpub } from './create-epub.js';
 import { landmarkBooks } from './landmark-books.js';
+import { syncBooks } from './sync-books.js';
 import { mediaBooks } from './media-books.js';
-
-const jar = process.env.EPUBCHECK_JAR;
 import { pagelistBooks } from './pagelist-books.js';
 import { epub2Books } from './epub2-books.js';
 import { wideBooks } from './wide-books.js';
-const registries = { landmarks: landmarkBooks, media: mediaBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks };
+
+const jar = process.env.EPUBCHECK_JAR;
+const registries = { landmarks: landmarkBooks, sync: syncBooks, media: mediaBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once

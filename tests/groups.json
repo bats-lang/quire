@@ -44,7 +44,8 @@
       "sync-dropbox.spec.js",
       "sync-dropbox-android.spec.js",
       "sync-nextcloud.spec.js",
-      "sync-fastmail.spec.js"
+      "sync-fastmail.spec.js",
+      "sync-idempotent.spec.js"
     ],
     "settings": [
       "backup.spec.js",
