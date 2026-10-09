@@ -12,6 +12,10 @@ const chromiumArgs = [
 const ANDROID_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP4A.250105.002; wv) '
   + 'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36';
 
+// QUIRE_PORT: the port the app is served on, so two runs of the suite from two
+// checkouts do not share (and serve each other's) build
+const port = Number(process.env.QUIRE_PORT || 3748);
+
 export default defineConfig({
   testDir: './e2e',
   // every spec's test carries the stall watch (e2e/stall-capture.js, #244)
@@ -19,14 +23,14 @@ export default defineConfig({
   timeout: 90000,
   expect: { timeout: 15000 },
   use: {
-    baseURL: 'http://localhost:3748',
+    baseURL: `http://localhost:${port}`,
     screenshot: 'on',
     trace: 'on',
     headless: true,
   },
   webServer: {
-    command: 'npx serve dist/pwa -l 3748 --no-clipboard',
-    port: 3748,
+    command: `npx serve dist/pwa -l ${port} --no-clipboard`,
+    port,
     reuseExistingServer: !process.env.CI,
   },
   projects: [

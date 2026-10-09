@@ -4449,23 +4449,27 @@ in
 end
 
 (* Jumps to a row of the contents list, remembering where the reader
-   was *)
-#pub fun reader_goto_entry (row: Int): void
+   was; whether the row leads anywhere (an entry with no href, or one
+   outside the book, does not: nothing moves) *)
+#pub fun reader_goto_entry (row: Int): bool
 implement reader_goto_entry (row) =
   case+ toc_dest_of(row) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
-(* Goes to a print page, remembering where the reader was *)
-#pub fun reader_goto_page (print_page: Int): void
+(* Goes to a print page, remembering where the reader was; whether it
+   leads anywhere *)
+#pub fun reader_goto_page (print_page: Int): bool
 implement reader_goto_page (print_page) =
   case+ toc_page_dest_of(print_page) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
 (* Jumps to a chapter's element fragment[0, fragment_len), remembering where the reader
    was *)

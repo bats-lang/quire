@@ -323,6 +323,10 @@ export function createEpub(opts = {}) {
   }
 
   const effectiveChapters = rawChapters ? rawChapters.length : numChapters;
+  // opts.extraSpine: [{ id, href, mediaType, data, fallback }] spine items
+  // of other kinds (EPUB 2's DTBook or OEB 1 documents, which name an
+  // XHTML fallback by its manifest id), after the chapters
+  const extraSpine = opts.extraSpine || [];
   const overlays = [];
   for (let i = 1; i <= effectiveChapters; i++) {
     const overlay = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].overlay;
@@ -373,9 +377,15 @@ ${doctype}
     chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
 
+  for (const item of extraSpine) {
+    manifestItems += `    <item id="${item.id}" href="${item.href}" media-type="${item.mediaType}"${item.fallback ? ` fallback="${item.fallback}"` : ''}/>\n`;
+    spineItems += `    <itemref idref="${item.id}"/>\n`;
+    chapters.push({ name: `OEBPS/${item.href}`, data: item.data });
+  }
+
   // Add cover image if requested (EPUB3: properties="cover-image")
   if (coverImage) {
-    manifestItems += `    <item id="cover-img" href="images/cover.png" media-type="image/png" properties="cover-image"/>\n`;
+    manifestItems += `    <item id="cover-img" href="images/cover.png" media-type="image/png"${epub2 ? '' : ' properties="cover-image"'}/>\n`;
   }
 
   // Build TOC nav document
@@ -400,7 +410,7 @@ ${doctype}
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
 <head><meta name="dtb:uid" content="urn:uuid:${uid}"/></head><docTitle><text>${title}</text></docTitle>
 <navMap>
-${ncxPoints(tocTree)}</navMap>
+${opts.ncxNavMap !== undefined ? opts.ncxNavMap : ncxPoints(tocTree)}</navMap>
 ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}" type="normal" value="${k + 1}">` +
     `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/></pageTarget>`).join('\n')}</pageList>\n` : ''}</ncx>`;
 
@@ -413,7 +423,7 @@ ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}"
     <ol>
 ${tocItems}    </ol>
   </nav>
-${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}${landmarks.length ? `  <nav epub:type="landmarks" hidden="">\n    <ol>\n${landmarks.map(e => `<li><a epub:type="${e.type}"${e.href === undefined ? '' : ` href="${e.href}"`}>${e.label}</a></li>\n`).join('')}    </ol>\n  </nav>\n` : ''}</body>
+${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : opts.emptyPageNav ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n    </ol>\n  </nav>\n` : ''}${landmarks.length ? `  <nav epub:type="landmarks" hidden="">\n    <ol>\n${landmarks.map(e => `<li><a epub:type="${e.type}"${e.href === undefined ? '' : ` href="${e.href}"`}>${e.label}</a></li>\n`).join('')}    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
   // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
@@ -424,18 +434,20 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
   // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
   if (useNcx) {
     manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
+    // opts.alsoNav: a nav document too (a package that says 2.0 and has one)
+    if (opts.alsoNav) manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
   } else {
     manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
   }
 
   // content.opf
   const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="${epub2 ? '2.0' : '3.0'}" unique-identifier="uid">
+<package xmlns="http://www.idpf.org/2007/opf" version="${epub2 ? '2.0' : '3.0'}" unique-identifier="uid"${epub2 ? ' xmlns:opf="http://www.idpf.org/2007/opf"' : ''}>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>${title}</dc:title>
-    <dc:creator>${author}</dc:creator>
+    ${opts.creatorXml || `<dc:creator>${author}</dc:creator>`}
 ${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${uid}</dc:identifier>
-${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${opts.metadata || ''}  </metadata>
+${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${epub2 && coverImage ? '    <meta name="cover" content="cover-img"/>\n' : ''}${opts.metadata || ''}  </metadata>
   <manifest>
 ${manifestItems}  </manifest>
   <spine${useNcx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
@@ -451,6 +463,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
     { name: 'OEBPS/content.opf', data: contentOpf, store: true },
     useNcx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
+  if (opts.alsoNav) zipEntries.push({ name: 'OEBPS/nav.xhtml', data: navXhtml });
   for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
   zipEntries.push(...overlays);
 
