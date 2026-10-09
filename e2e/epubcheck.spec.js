@@ -14,7 +14,8 @@ import { pagelistBooks } from './pagelist-books.js';
 
 const jar = process.env.EPUBCHECK_JAR;
 import { epub2Books } from './epub2-books.js';
-const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books };
+import { wideBooks } from './wide-books.js';
+const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once

@@ -2025,6 +2025,10 @@ fn _reader_key (pressed: key, held: modifiers): void =
      to the page: down on, up back, and the volume left as it is *)
   | VolumeDown() => if _volume_turns() then let val () = $EV.prevent_default() in _next() end else ()
   | VolumeUp() => if _volume_turns() then let val () = $EV.prevent_default() in _previous() end else ()
+  (* a page turner's multimedia mode sends the media keys (the DuRoBo
+     Moodi's: previous and next track) *)
+  | MediaNext() => let val () = $EV.prevent_default() in _next() end
+  | MediaPrevious() => let val () = $EV.prevent_default() in _previous() end
   | HomeKey() => let val () = $EV.prevent_default() in reader_page(0) end
   | EndKey() => let val () = $EV.prevent_default() in reader_page(1000000) end
   | LetterB() => annot_bookmark_toggle(reader_anchor())
