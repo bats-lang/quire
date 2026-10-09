@@ -253,6 +253,8 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   for (const t of ['Trash One', 'Trash Two']) {
     await bookMenu(page, t);
     await menuItem(page, 'Move to Trash').click();
+    // the offer stays until it is used or dismissed (#364): it would cover the next card
+    await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
   }
   await libraryMenu(page);
   // the one irreversible action is the one marked: red, unlike the
