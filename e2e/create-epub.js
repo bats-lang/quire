@@ -400,7 +400,7 @@ ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}"
     <ol>
 ${tocItems}    </ol>
   </nav>
-${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}</body>
+${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : opts.emptyPageNav ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
   // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
