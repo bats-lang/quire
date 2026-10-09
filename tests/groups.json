@@ -113,7 +113,9 @@
       "reject/fixed-box-zoom-zero"
     ],
     "style": [
+      "accept/page-height-whole",
       "accept/page-width-whole",
+      "reject/page-height-fraction",
       "reject/page-width-fraction",
       "reject/role-unmatched"
     ]
