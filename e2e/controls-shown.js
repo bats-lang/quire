@@ -28,6 +28,9 @@
  *   (WCAG 2.5.3), so a glyph drawn into its text is not part of it.
  * - insetsShort: every control keeps the spacing scale's least inset
  *   from the edges of the container it is drawn in (#331).
+ * - coveredByBanner: while the error banner is up, no control outside it
+ *   is under it (#374: the banner hid the library's header, the title,
+ *   Import and the menu, exactly when a reader needs them).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -436,4 +439,63 @@ export async function inSafeArea(page, insets) {
     }
     return bad;
   }, insets);
+}
+
+/** What the error banner (when it is up) is drawn over that the reader
+    needs: the header's controls (by default the library's bar: its
+    title, shelf, sort, Import and menu), and, on a library that could
+    not be read, the text that says why (#library-empty) and the one
+    button it offers (#library-try-again). Any part of such a box inside
+    the banner's box with the banner on top there is reported, and so is
+    an offered button that anything but itself is on top of at its
+    centre (a banner, or whatever else), banner or not: a check that
+    passed while the remedy was covered is the bug (#374, CI on
+    mobile-portrait). The banner's own controls are left out. A banner
+    is a fixed overlay and covers whatever is at the foot of a short
+    window (a card, as a toast does); these are what it must never hide.
+    Each is named. Run on a screen that may raise the banner */
+export async function coveredByBanner(page, header = '#library-bar') {
+  return page.evaluate(header => {
+    const banner = document.getElementById('error-banner');
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const named = e => (e.getAttribute('aria-label') || e.textContent || e.id || e.tagName).trim().slice(0, 40);
+    const up = banner && banner.checkVisibility() && banner.getClientRects().length > 0;
+    const over = up ? banner.getBoundingClientRect() : null;
+    const controls = 'button, a[href], select, textarea, input:not([type=hidden]):not([type=file]), [role=button], [role=menuitem], [role=tab], [role=switch], [role=slider], #import-button';
+    const bad = [];
+    const covered = e => {
+      if (!up) return false;
+      const box = e.getBoundingClientRect();
+      const x = Math.max(box.left, over.left), right = Math.min(box.right, over.right);
+      const y = Math.max(box.top, over.top), bottom = Math.min(box.bottom, over.bottom);
+      if (right - x <= 1 || bottom - y <= 1) return false;
+      // the banner is on top where they meet
+      const top = document.elementFromPoint((x + right) / 2, (y + bottom) / 2);
+      return top !== null && banner.contains(top);
+    };
+    const bar = document.querySelector(header);
+    if (bar && shown(bar)) {
+      if (covered(bar)) bad.push(`${header} is under the banner`);
+      for (const control of bar.querySelectorAll(controls)) {
+        if (up && banner.contains(control)) continue;
+        if (!shown(control)) continue;
+        const box = control.getBoundingClientRect();
+        if (box.width <= 1 && box.height <= 1) continue;
+        if (covered(control)) bad.push(`${named(control)} is under the banner`);
+      }
+    }
+    for (const id of ['library-empty', 'library-try-again']) {
+      const offered = document.getElementById(id);
+      if (!offered || !shown(offered)) continue;
+      if (covered(offered)) bad.push(`#${id} is under the banner`);
+    }
+    // the button must be the thing a press at its centre reaches
+    const button = document.getElementById('library-try-again');
+    if (button && shown(button)) {
+      const box = button.getBoundingClientRect();
+      const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      if (!top || !button.contains(top)) bad.push(`Try again is under ${top ? (top.id || top.tagName) : 'nothing'}`);
+    }
+    return bad;
+  }, header);
 }
