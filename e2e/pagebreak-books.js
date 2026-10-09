@@ -9,7 +9,7 @@ export const pagebreakBooks = {
   /** Real words inside a page-break span (as the print edition's
       first word of a page) */
   textInside: { valid: true, opts: {
-    title: 'Text in a page break', author: 'Breaks', toc: [{ label: 'Chapter', href: 'chapter1.xhtml' }],
+    title: 'Text in a page break', author: 'Breaks',
     rawChapters: [{ body:
       '<h1>Text inside</h1>\n' +
       '<p><span epub:type="pagebreak" id="p10" title="10">‘But</span> of course!’ said the first. ' + filler + '</p>\n' +
@@ -19,7 +19,7 @@ export const pagebreakBooks = {
 
   /** The same words with nothing between: a short chapter, read aloud */
   textInsideShort: { valid: true, opts: {
-    title: 'Text in a page break, short', author: 'Breaks', toc: [{ label: 'Chapter', href: 'chapter1.xhtml' }],
+    title: 'Text in a page break, short', author: 'Breaks',
     rawChapters: [{ body:
       '<h1>Text inside</h1>\n' +
       '<p><span epub:type="pagebreak" id="p10" title="10">\u2018But</span> of course!\u2019 said the first.</p>\n' +
@@ -27,7 +27,7 @@ export const pagebreakBooks = {
 
   /** The page number is the span's own text */
   numberText: { valid: true, opts: {
-    title: 'Number in a page break', author: 'Breaks', toc: [{ label: 'Chapter', href: 'chapter1.xhtml' }],
+    title: 'Number in a page break', author: 'Breaks',
     rawChapters: [{ body:
       '<h1>Numbers</h1>\n' +
       '<p>Page ten ends here. ' + filler + '<span epub:type="pagebreak" id="p10" title="10">10</span> And page eleven begins.</p>\n' +
@@ -37,7 +37,7 @@ export const pagebreakBooks = {
   /** A block-level break between paragraphs, one inside a word and one
       inside an inline element */
   structure: { valid: true, opts: {
-    title: 'Breaks inside words', author: 'Breaks', toc: [{ label: 'Chapter', href: 'chapter1.xhtml' }],
+    title: 'Breaks inside words', author: 'Breaks',
     rawChapters: [{ body:
       '<h1>Structure</h1>\n' +
       '<p>Before the block break. ' + filler + '</p>\n' +
