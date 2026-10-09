@@ -678,8 +678,19 @@ locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
 
-### EPUB 2 packages (#416)
+### The print page list and page breaks (#415)
 
+The Pages tab lists the page list's entries as the book gives them (not
+sorted, duplicates kept, each going to its own target); an entry whose chapter
+the book lacks is listed and leads nowhere (the panel stays), one whose fragment
+is missing goes to its chapter, an empty page list shows no tab. The
+footer names the latest page the screen reaches, from the break's `title`, else
+its `aria-label`, whichever of `epub:type="pagebreak"` or `role="doc-pagebreak"`
+the element has, with no page list too; a break with neither is shown and names
+no page. A label in the contents or the page list is decoded as any text is
+(numeric references too) and cut at a whole character.
+`e2e/pagelist.spec.js` plays `e2e/pagelist-books.js`.
+### EPUB 2 packages (#416)
 A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
 an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
 document order, whatever their `playOrder`; one with no `content` is listed
@@ -694,7 +705,6 @@ as XML and its text shown. A Hebrew book whose spine names no direction
 reads right to left, as Readium reads it. A row of the contents or the
 page list that leads nowhere keeps the panel up (`reader_goto_entry` and
 `reader_goto_page` say whether they went).
-
 `e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
 `creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
 under epubcheck 2.0 rules except those invalid on purpose.
