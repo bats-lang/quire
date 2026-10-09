@@ -56,7 +56,8 @@ test('a table wider than the page scrolls inside its own container; the page doe
   expect(['auto', 'scroll']).toContain(geometry.overflowX);
   const page_ = await bookPage(page).boundingBox();
   const box = await table.boundingBox();
-  expect(box.x + box.width).toBeLessThanOrEqual(page_.x + page_.width + 1);
+  // the table may lie in a later column: its width, not its x, is bounded
+  expect(box.width).toBeLessThanOrEqual(page_.width + 1);
   expect(await noOverflow(page)).toBe(true);
   // scrolling the table moves its cells, not the page
   await table.evaluate(t => { t.scrollLeft = t.scrollWidth; });

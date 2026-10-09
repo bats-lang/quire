@@ -13,8 +13,17 @@ export const pagebreakBooks = {
     rawChapters: [{ body:
       '<h1>Text inside</h1>\n' +
       '<p><span epub:type="pagebreak" id="p10" title="10">‘But</span> of course!’ said the first. ' + filler + '</p>\n' +
+      Array.from({ length: 24 }, (_, k) => `<p>Between ${k}. ${filler}</p>`).join('\n') + '\n' +
       '<p><span role="doc-pagebreak" epub:type="pagebreak" id="p20" title="20" aria-label="Page 20">Wait</span> what? asked the second. ' + filler + '</p>' }],
     pageList: pages } },
+
+  /** The same words with nothing between: a short chapter, read aloud */
+  textInsideShort: { valid: true, opts: {
+    title: 'Text in a page break, short', author: 'Breaks',
+    rawChapters: [{ body:
+      '<h1>Text inside</h1>\n' +
+      '<p><span epub:type="pagebreak" id="p10" title="10">\u2018But</span> of course!\u2019 said the first.</p>\n' +
+      '<p><span role="doc-pagebreak" epub:type="pagebreak" id="p20" title="20" aria-label="Page 20">Wait</span> what? asked the second.</p>' }] } },
 
   /** The page number is the span's own text */
   numberText: { valid: true, opts: {
