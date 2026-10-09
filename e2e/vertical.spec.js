@@ -43,9 +43,9 @@ test('a font with Japanese characters is installed, or the vertical book is draw
 test('a Japanese book read right to left is set vertically, its pages going down', async ({ page }) => {
   const errors = await start(page);
   await readBook(page, verticalBook('縦書き'));
-  const style = await bookPage(page).evaluate(e => ({ mode: getComputedStyle(e).writingMode, direction: getComputedStyle(e).direction, upright: getComputedStyle(e).textOrientation }));
-  // digits stand upright, not on their side (quire#391)
-  expect(style).toEqual({ mode: 'vertical-rl', direction: 'ltr', upright: 'upright' });
+  const style = await bookPage(page).evaluate(e => ({ mode: getComputedStyle(e).writingMode, direction: getComputedStyle(e).direction, orientation: getComputedStyle(e).textOrientation }));
+  // Latin and digits are turned, as JLREQ has them (quire#391)
+  expect(style).toEqual({ mode: 'vertical-rl', direction: 'ltr', orientation: 'mixed' });
   // the bottom bar follows its reading axis, from the right (quire#359)
   await expectBarFollows(page, true);
   const at = await place(page);
