@@ -27,6 +27,18 @@ import {
 
 const MODES = ['pages', 'scrolled', 'columns'];
 
+/** How much of a long book a window shows as many columns as the desktop's
+    1024 x 768 does: its area against that. Chrome's cost of drawing a page
+    of a paged chapter grows with its columns times its boxes (a second a
+    page at 1800 columns of 5 MB, measured in e2e below), and a phone fits
+    a third of the desktop's text on a page, so the same 5 MB has three
+    times the columns there and a turn takes seconds; the books are sized
+    to the window so that every project walks the same number of columns */
+const sizedTo = (page) => {
+  const view = page.viewportSize();
+  return Math.min(1, (view.width * view.height) / (1024 * 768));
+};
+
 // Playwright's trace and screenshots snapshot the whole DOM at every action
 // (its snapshotter walks every node, 2 to 3 s on a chapter of 30,000), which
 // is the harness's cost, not the app's, and made the long chapters' steps
@@ -118,10 +130,10 @@ async function turnTimes(page) {
 const ms = (times) => times.map(Math.round).join(', ');
 
 /** How much later than an instant turn an animated one may come: 30 ms
-    (page-turn.spec.js's margin), or a tenth of it where the browser's own
-    frame takes a second, which varies by more than 30 ms from one run to
-    the next */
-const slack = (instant) => Math.max(30, instant * 0.1);
+    (page-turn.spec.js's margin), or a quarter of it where the browser's own
+    frame takes 150 ms or more, which spreads by that much within one run
+    (157 to 209 ms for six turns of the same chapter) */
+const slack = (instant) => Math.max(30, instant * 0.25);
 
 /** The middle turn of six, instant (less motion) and animated, in this page */
 async function turnBudget(page) {
@@ -264,9 +276,11 @@ test.describe('a table cell over many pages', () => {
         const box = table.getBoundingClientRect();
         const paragraph = [...table.querySelectorAll('p')].find(p => p.textContent.startsWith(`Cell ${last} `));
         const at = paragraph.getBoundingClientRect();
-        return at.bottom <= box.bottom + 1 && at.top >= box.top - 1;
+        // its last line is in view (a paragraph can be taller than a phone's table)
+        const reached = at.bottom <= box.bottom + 1 && at.bottom > box.top;
+        return { reached, paragraph: [at.top, at.bottom], table: [box.top, box.bottom], scrolled: [table.scrollTop, table.scrollHeight, table.clientHeight] };
       }, CELL_PARAGRAPHS - 1);
-      expect(lastInCell, 'the last paragraph of the cell is reached by scrolling the table').toBe(true);
+      expect(lastInCell.reached, `the last paragraph of the cell is reached by scrolling the table: ${JSON.stringify(lastInCell)}`).toBe(true);
       console.log(`${mode}: ${pages} pages across the cell, the plain chapter ${plainPages}`);
       expect(errors).toEqual([]);
     });
@@ -406,7 +420,6 @@ test.describe('a single-file book of 5 MB', () => {
   // for the costs that do not grow with the text and the machine's noise
   // (a quadratic cost is 17 times that again), and the small one's time
   // counts as at least 150 ms, the grain of the steps that wait.
-  const ratio = 2 * NOVEL_BYTES / NOVEL_SMALL_BYTES;
   const least = 150;
   const smallBook = () => book('Small Novel', [singleFileChapter(NOVEL_SMALL_BYTES, 'Novel'), plainChapter(3, 'After', false)]);
 
@@ -424,7 +437,9 @@ test.describe('a single-file book of 5 MB', () => {
       const small = await operations(page);
       await toLibrary(page);
       const importStarted = Date.now();
-      await importFiles(page, [epubFile(novelBook())], 2);
+      const bigBytes = Math.round(NOVEL_BYTES * sizedTo(page));
+      const ratio = 2 * bigBytes / NOVEL_SMALL_BYTES;
+      await importFiles(page, [epubFile(novelBook(bigBytes))], 2);
       const importMs = Date.now() - importStarted;
       const bigOpen = await opened(page, 'Single File', 'Novel chapter');
       await settled(page);
@@ -565,7 +580,10 @@ test.describe('ten thousand short paragraphs in one chapter', () => {
 test.describe('one paragraph of a megabyte without a space', () => {
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
-      test.setTimeout(85000);
+      // a phone fits a third of the text a page, so a megabyte is three
+      // times the columns and Chrome takes about 2 s to draw each page of it
+      // (six turns instant and six animated, then the search): twice the time
+      test.setTimeout(sizedTo(page) < 0.5 ? 170000 : 85000);
       const errors = await start(page);
       await readBook(page, unbrokenBook());
       await arrange(page, mode);

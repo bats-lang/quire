@@ -89,7 +89,7 @@ export const UNBROKEN_BYTES = 1024 * 1024;
 export const tableBook = () => book('Table Cell', [plainChapter(CELL_PARAGRAPHS), tableChapter(CELL_PARAGRAPHS)]);
 
 /** One spine item of about 5 MB, then a short one */
-export const novelBook = () => book('Single File', [singleFileChapter(NOVEL_BYTES), plainChapter(3, 'After', false)]);
+export const novelBook = (bytes = NOVEL_BYTES) => book('Single File', [singleFileChapter(bytes), plainChapter(3, 'After', false)]);
 
 /** 1000 nested divs, 1000 nested spans (inside one paragraph) and both
     mixed, each chapter holding its DEEP_WORD in the middle of the nesting */
@@ -103,7 +103,7 @@ export const nestedBook = () => book('Deep Nesting', [
 export const shortParagraphsBook = () => book('Short Paragraphs', [manyParagraphsChapter(SHORT_PARAGRAPHS)]);
 
 /** One paragraph of 1 MB without a space */
-export const unbrokenBook = () => book('Unbroken Paragraph', [longParagraphChapter(UNBROKEN_BYTES)]);
+export const unbrokenBook = (bytes = UNBROKEN_BYTES) => book('Unbroken Paragraph', [longParagraphChapter(bytes)]);
 
 /** The registry e2e/epubcheck.spec.js walks */
 export const pathologicalBooks = {
