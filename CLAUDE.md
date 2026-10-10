@@ -119,7 +119,9 @@ it (`appVersion`), and gen-pwa appends it to the Android project's
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI writes it for a pull request's
 own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
+in `check.yml`, should a queue be switched on) from the group's own
+commit (`github.sha`). `tests/version/same.sh` checks that it is the
 same in other time zones and that the Android project carries it.
 
 ## To do: book memory in a rolling window of page arenas
@@ -608,8 +610,22 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
-### Wide and structured content (#413)
+### Note popups (#414)
 
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+### Wide and structured content (#413)
 A table is its own scroll container (`.caf table`: `overflow: auto`), at
 most as wide as the column and as tall as the reading area
 (`calc(100dvh - var(--page-top) - var(--page-bottom))`, as a picture is):
@@ -623,9 +639,7 @@ indents made of the book's CSS (`text-indent`, `padding-left`, hanging)
 are not kept, since no publisher CSS is applied (#411), and a wrapped
 line of verse is told from a new one only by the text.
 `e2e/wide.spec.js` plays `e2e/wide-books.js`.
-
 ### Position stability and page-turner keys (#412)
-
 The place is a content node (the first paragraph that begins on the page,
 `_anchor_kept`), not a page: `e2e/stability.spec.js` changes each of the
 theme, font, size, line spacing, paragraph spacing, margins and columns,
@@ -675,6 +689,20 @@ pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
 locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
+### Publisher styling and the reader's settings (#411)
+No part of a book's own styling reaches the page: the CSS (a `<style>`, a
+style attribute, `!important`, a media rule) is dropped with the rest, and
+so are the obsolete presentational attributes (`<font>`, `bgcolor`,
+`width`), so a book's sizes, colours, grounds, margins, alignment, line
+height and font cannot fight the size, theme, margins, Justify, spacing and
+Font settings, and no theme has a light slab. That is the opposite of
+Readium CSS (Thorium), which keeps the publisher's styles unless the reader
+turns advanced settings on, and in which an `!important` in a book can beat
+a setting. What only CSS hid (`display:none` by a rule or a style
+attribute) is shown, there being no CSS to say it; the `hidden` attribute is
+HTML's own word and is kept: `_pass_attrs` gives an element that has it the
+class `hidden-by-book`, which the stylesheet hides. `e2e/publisher.spec.js`
+plays `e2e/publisher-books.js`.
 
 ### The print page list and page breaks (#415)
 
@@ -1376,12 +1404,61 @@ meets the duplicate dialog, so it also says to choose Replace.
 `notice_error` is private; `tests/static/notice.py` (in
 `tests/static/run.sh`) rejects `notice_error(` outside `notice.bats` and
 a wildcard in a match of `ArchiveFailed(_)` (`tests/static/notice/reject`).
-Import's causes are matched one by one (`_archive_named`); no case
-detects DRM, so none is blamed. A sync's result texts, made by
+Import's causes are matched one by one (`_archive_named`); only a book
+that declares its protection is blamed on DRM (below), never a damaged one. A sync's result texts, made by
 `sync.bats` from its `sync_result`, go through `notice_sync_said`.
 `expectBannerSaysWhatToDo` (`e2e/helpers.js`) checks a banner has a
 Reopen Quire button or words naming the step, and in the android project
 no "browser".
+
+## A book that declares its protection is refused, named (#427)
+
+A file that *declares* its encryption is not a guess, so it is refused at
+import, before its container.xml is read (`_protection_check` in
+`src/import.bats`, only for an import, since a stored book was checked
+then), with the scheme named and not added to the library. What it looks
+for, in this order: `META-INF/license.lcpl` (Readium LCP,
+`ProtectedByLcp`), `META-INF/sinf.xml` (Apple FairPlay,
+`ProtectedByFairPlay`), `META-INF/rights.xml` (Adobe ADEPT,
+`ProtectedByAdept`); then `META-INF/encryption.xml` read by
+`encryption_of` (`src/epub_xml.bats`): `ns.adobe.com/adept` (ADEPT),
+`readium.org/2014/01/lcp` (LCP), `kobo.com` or `kobobooks.com` (Kobo,
+`ProtectedByKobo`), else any `EncryptionMethod` whose `Algorithm` is
+neither font obfuscation (IDPF's `http://www.idpf.org/2008/embedding`,
+Adobe's `http://ns.adobe.com/pdf/enc#RC`: undone by a reading system,
+no DRM, and not refused) is `ProtectedUnknown`. Each is a
+`named_failure` and an `archive_failure` (`DrmAdept`, ...), matched with
+`case+`, so a scheme added without words does not type-check. A damaged
+book that declares nothing, or whose encryption.xml cannot be read, stays
+"damaged": DRM is never guessed from damage.
+
+By research (Thorium, Calibre, Readium's docs): Thorium, which has an LCP
+client, only says what is missing ("This publication needs an LCP
+passphrase", and, for an encrypted publication with no licence,
+"Publication is encrypted but lacks an LCP license!"); Calibre, which has
+none for the schemes it cannot open, says the book is locked by DRM and
+points the reader to its manual's DRM page, offering no way round it.
+Quire has no client for any scheme, so its words name the scheme (as
+Thorium names LCP), say it cannot open it and that the book was not
+imported, and give the next step, which is to read it in the app it came
+from or get a copy without DRM (`ReadWhereItCameFrom`); it points to no
+way of removing DRM. A build that one day has a client for a scheme
+changes only that scheme's case. Kobo's check is a guess at its
+namespace (the issue names `http://www.kobo.com/...`; no Kobo book was
+available to look at), written in one place. The books the tests use are
+made by `e2e/drm-books.js` (chapter bytes replaced by random ones, the
+encryption.xml and licence files written), registered in
+`e2e/epubcheck.spec.js`, and played by `e2e/drm.spec.js`.
+
+An OPDS entry whose acquisition link has type
+`application/vnd.adobe.adept+xml` or
+`application/vnd.readium.lcp.license.v1.0+json` is an `acquiring`
+(`AdeptAcquisition`, `LcpAcquisition`, in `src/opds.bats`, kept over the
+entry's other acquisitions): with no EPUB link of the entry's own, the
+row says "Protected by Adobe DRM: Quire cannot open it, so it cannot be
+got here" (or Readium LCP) in place of Get and the licence is never
+fetched; an entry that also has an EPUB is got as ever
+(`e2e/drm-catalogue.spec.js`).
 
 ## Every outcome is said, and the unexpected as such
 

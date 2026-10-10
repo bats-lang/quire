@@ -531,7 +531,7 @@ export async function exportedBackup(page) {
     button besides Dismiss (Reopen Quire), or words that name the step;
     and in the Android app it does not say "browser". Call it where a
     spec has the banner up */
-const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|try opening it again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase)/;
+const NEXT_STEP = /(Reopen Quire|Import the book again|Choose another|Update Quire|Free some space|try opening it again|remove it in your Google account|Turn the device's own rotation lock|Select the text and copy|Restore a backup|Try Next phrase|read this one in the app it came from)/;
 export async function expectBannerSaysWhatToDo(page, testInfo) {
   const banner = page.getByRole('alert');
   await expect(banner).toBeVisible();

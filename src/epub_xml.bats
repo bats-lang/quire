@@ -1691,3 +1691,81 @@ implement itemref_spread_n (data, nodes, item_index) =
         else if _span_has(data, properties_offset, properties_len, center_chars, 18, 0) then SpreadSlotCenter()
         else SpreadSlotAny()
       end)
+
+(* ============================================================
+   META-INF/encryption.xml: what a book declares to be encrypted with
+   (quire#427)
+   ============================================================ *)
+
+(* What an encryption.xml declares. EncryptionNone: nothing, or only
+   the two font obfuscations a reading system undoes itself (IDPF's
+   http://www.idpf.org/2008/embedding and Adobe's
+   http://ns.adobe.com/pdf/enc#RC), which are no DRM. The others are a
+   protection Quire has no client for: Adobe's ADEPT (its namespace),
+   Readium LCP (its profile), Kobo's (kobo.com or kobobooks.com in a namespace), or an
+   EncryptionMethod whose Algorithm is neither obfuscation *)
+#pub datatype encryption_found =
+  | EncryptionNone
+  | EncryptionAdept
+  | EncryptionLcp
+  | EncryptionKobo
+  | EncryptionUnknownAlgorithm
+
+(* Whether the algorithm named at data[offset, offset + name_len) is
+   one of the two font obfuscations *)
+fn _is_obfuscation {l:agz}{n:pos}{offset,name_len:nat | offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, name_len: int name_len): bool = let
+  var idpf_chars = @[char][34]('h', 't', 't', 'p', ':', '/', '/', 'w', 'w', 'w', '.', 'i', 'd', 'p', 'f', '.', 'o', 'r', 'g', '/', '2', '0', '0', '8', '/', 'e', 'm', 'b', 'e', 'd', 'd', 'i', 'n', 'g')
+  var adobe_chars = @[char][30]('h', 't', 't', 'p', ':', '/', '/', 'n', 's', '.', 'a', 'd', 'o', 'b', 'e', '.', 'c', 'o', 'm', '/', 'p', 'd', 'f', '/', 'e', 'n', 'c', '#', 'R', 'C')
+in
+  if xml_name_eq(data, offset, name_len, idpf_chars, 34) then true
+  else xml_name_eq(data, offset, name_len, adobe_chars, 30)
+end
+
+(* Whether an EncryptionMethod anywhere in nodes names an algorithm
+   that is not a font obfuscation (or names none) *)
+fun _unknown_algorithm_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    if _unknown_algorithm_node(data, node) then true
+    else _unknown_algorithm_nodes(data, rest)
+  | $X.xml_nodes_nil() => false
+
+and _unknown_algorithm_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): bool =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var method_chars = @[char][16]('E', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', 'M', 'e', 't', 'h', 'o', 'd')
+  in
+    if _span_has(data, tag_offset, tag_len, method_chars, 16, 0) then let
+      var algorithm_chars = @[char][9]('A', 'l', 'g', 'o', 'r', 'i', 't', 'h', 'm')
+    in
+      case+ _find_attr_value(data, attrs, algorithm_chars, 9) of
+      | ~xspan_at(algorithm_offset, algorithm_len) => ~_is_obfuscation(data, algorithm_offset, algorithm_len)
+      | ~xspan_none() => true
+    end
+    else _unknown_algorithm_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => false
+
+(* What the encryption.xml data[0, n), parsed as nodes, declares *)
+#pub fn encryption_of
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), n: int n, nodes: !$X.xml_node_list(n, tree_size)): encryption_found
+
+implement encryption_of (data, n, nodes) = let
+  var adept_chars = @[char][18]('n', 's', '.', 'a', 'd', 'o', 'b', 'e', '.', 'c', 'o', 'm', '/', 'a', 'd', 'e', 'p', 't')
+  var lcp_chars = @[char][23]('r', 'e', 'a', 'd', 'i', 'u', 'm', '.', 'o', 'r', 'g', '/', '2', '0', '1', '4', '/', '0', '1', '/', 'l', 'c', 'p')
+  var kobo_chars = @[char][8]('k', 'o', 'b', 'o', '.', 'c', 'o', 'm')
+  var kobobooks_chars = @[char][13]('k', 'o', 'b', 'o', 'b', 'o', 'o', 'k', 's', '.', 'c', 'o', 'm')
+in
+  if _span_has(data, 0, n, adept_chars, 18, 0) then EncryptionAdept()
+  else if _span_has(data, 0, n, lcp_chars, 23, 0) then EncryptionLcp()
+  else if _span_has(data, 0, n, kobo_chars, 8, 0) then EncryptionKobo()
+  else if _span_has(data, 0, n, kobobooks_chars, 13, 0) then EncryptionKobo()
+  else if _unknown_algorithm_nodes(data, nodes) then EncryptionUnknownAlgorithm()
+  else EncryptionNone()
+end
