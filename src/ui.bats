@@ -2578,6 +2578,8 @@ implement ui_update_control (bytes, n, at) = _update_control_from(bytes, n, at, 
   | SpaceBar
   | VolumeDown
   | VolumeUp
+  | MediaNext
+  | MediaPrevious
   | HomeKey
   | EndKey
   | LetterB
@@ -2619,6 +2621,8 @@ implement ui_key (key_bytes, n) =
   else if _key_named(key_bytes, n, " ") then SpaceBar()
   else if _key_named(key_bytes, n, "AudioVolumeDown") then VolumeDown()
   else if _key_named(key_bytes, n, "AudioVolumeUp") then VolumeUp()
+  else if _key_named(key_bytes, n, "MediaTrackNext") then MediaNext()
+  else if _key_named(key_bytes, n, "MediaTrackPrevious") then MediaPrevious()
   else if _key_named(key_bytes, n, "Home") then HomeKey()
   else if _key_named(key_bytes, n, "End") then EndKey()
   else if _key_named(key_bytes, n, "b") then LetterB()
