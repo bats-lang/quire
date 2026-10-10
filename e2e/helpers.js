@@ -329,12 +329,9 @@ export async function toLibrary(page) {
 /** Opens the reader's bars when they are hidden */
 export async function showChrome(page) {
   const prev = control(page, 'Previous page');
-  // a tap while text is selected only ends the selection (quire#428), so
-  // the tap is made again when the bars did not come up
-  for (let tap = 0; tap < 2 && !(await prev.isVisible()); tap++) {
+  if (!(await prev.isVisible())) {
     const box = await bookPage(page).boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
-    await page.waitForTimeout(150);
   }
   await expect(prev).toBeVisible();
 }

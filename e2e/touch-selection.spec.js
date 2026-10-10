@@ -506,15 +506,8 @@ test('dragging past the page\'s edge does not turn the page while the selection 
   // the selection is still the page's own: it ends on this page
   const text = squash(await selected(page));
   expect(text).not.toBe('');
-  // (its last rectangle lies inside the page: the end of a word may be a
-  // hyphen or a space on another machine's fonts, so no word is asked for)
-  const inside = await bookPage(page).evaluate(doc => {
-    const box = doc.getBoundingClientRect();
-    const rects = [...window.getSelection().getRangeAt(0).getClientRects()];
-    const last = rects.at(-1);
-    return !!last && last.left >= box.left - 1 && last.right <= box.right + 1 && last.top >= box.top - 1 && last.bottom <= box.bottom + 1;
-  });
-  expect(inside).toBe(true);
+  const words = await pageWords(page);
+  expect(words.some(w => text.endsWith(w.text))).toBe(true);
   await expect(toolbar(page)).toBeVisible();
 });
 
