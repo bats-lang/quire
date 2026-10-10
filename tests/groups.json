@@ -40,8 +40,7 @@
       "vertical.spec.js",
       "fixed.spec.js",
       "ruby.spec.js",
-      "modal-panels.spec.js",
-      "pathological.spec.js"
+      "modal-panels.spec.js"
     ],
     "sync": [
       "sync.spec.js",
@@ -66,6 +65,9 @@
       "relaunch.spec.js",
       "relaunch-sync.spec.js",
       "back.spec.js"
+    ],
+    "pathological": [
+      "pathological.spec.js"
     ]
   },
   "static": {
@@ -83,7 +85,7 @@
       "reject/dictionary-file-unmatched",
       "reject/export-unmatched",
       "reject/external-file-dropped",
-   "reject/form-field-as-field",
+      "reject/form-field-as-field",
       "reject/highlight-unmatched",
       "reject/image-roundtrip-another-book",
       "reject/import-unmatched",
@@ -104,7 +106,7 @@
       "reject/theme-unmatched",
       "reject/try-again-without-hope",
       "reject/turn-unmatched",
-   "reject/undo-offer-brief",
+      "reject/undo-offer-brief",
       "reject/unreadable-unhandled"
     ],
     "accepts": [

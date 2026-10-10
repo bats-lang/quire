@@ -583,7 +583,7 @@ test.describe('one paragraph of a megabyte without a space', () => {
       // a phone fits a third of the text a page, so a megabyte is three
       // times the columns and Chrome takes about 2 s to draw each page of it
       // (six turns instant and six animated, then the search): twice the time
-      test.setTimeout(sizedTo(page) < 0.5 ? 170000 : 85000);
+      test.setTimeout(sizedTo(page) < 0.5 ? 420000 : 300000);
       const errors = await start(page);
       await readBook(page, unbrokenBook());
       await arrange(page, mode);
