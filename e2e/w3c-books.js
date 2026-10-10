@@ -177,6 +177,33 @@ export const w3cBooks = {
     ],
     spine: [{ idref: 'one' }],
   })),
+  // XML that is not well formed: the reader must report it
+  'unclosed-tag': book(() => packageEpub({
+    title: 'Unclosed tag',
+    items: [page('one', '<p>This paragraph has an unclosed tag.</p><p>Another paragraph')],
+    spine: [{ idref: 'one' }],
+  }), { valid: false, errors: ['RSC-016'] }),
+  'double-colon-name': book(() => packageEpub({
+    title: 'Invalid element name',
+    items: [page('one', '<p>This page has an element with an invalid name.</p><a::b>text</a::b>')],
+    spine: [{ idref: 'one' }],
+  }), { valid: false, errors: ['RSC-016'] }),
+  'odd-markup': book(() => packageEpub({
+    title: 'Odd but well formed markup',
+    items: [page('one', '<!-- a <comment> with <tags> and no end tags --><p title="a > b">Both paragraphs<br/> are <![CDATA[ <b> ]]>shown.</p><?pi <x> ?>')],
+    spine: [{ idref: 'one' }],
+  })),
+  // OCF: the zip container
+  'zip-bzip2': book(() => packageEpub({
+    title: 'Compressed with bzip2',
+    items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+    archive: withMethod('OEBPS/one.xhtml', 12),
+  }), { valid: false, errors: ['PKG-027'] }),
+  'zip-split': book(() => packageEpub({
+    title: 'A split archive',
+    items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+    patch: split,
+  })), // epubcheck does not see the end record's disk numbers: valid to it, a split archive to the test
 };
 
 /** The texts the books are made to show */

@@ -156,8 +156,8 @@ VERDICTS = {
     'ocf-url_origin': (N, 'needs scripting, which Quire does not run'),
     'ocf-url_parse-leaking-relative': (N, 'needs scripting, which Quire does not run'),
     'ocf-url_parse-path-absolute': (N, 'needs scripting, which Quire does not run'),
-    'ocf-zip-comp': (F, 'the suite\'s EPUB opens with no error (it is built with Deflate: it cannot show the case); the e2e test makes a bzip2 entry'),
-    'ocf-zip-mult': (F, 'the suite\'s EPUB opens with no error (it is one zip, not a split archive); the e2e test makes a split archive\'s end record'),
+    'ocf-zip-comp': (T, 'an archive with an entry compressed by anything but Deflate or stored is refused (the suite\'s EPUB is built with Deflate, so it cannot show the case; the e2e test makes a bzip2 entry)'),
+    'ocf-zip-mult': (T, 'an archive whose end record names more than one disk is refused (the suite\'s EPUB is one zip; the e2e test makes a split archive\'s end record)'),
     # Package Documents
     'pkg-collections-unknown': (T, ''),
     'pkg-creator-order': (T, 'the first dc:creator is used'),
@@ -216,9 +216,9 @@ VERDICTS = {
     'pub-foreign_xml-spine': (T, 'the fallback is shown in place of the XML item'),
     'pub-foreign_xml-suffix-spine': (T, 'the fallback is shown in place of the XML item'),
     'pub-xml-external-id': (T, 'the entity is not resolved'),
-    'pub-xml-names': (F, 'a content document with an invalid name (a::b) is shown, not reported as an error'),
+    'pub-xml-names': (T, 'a content document with an invalid element name (a::b) is reported as an error when its chapter is opened'),
     'pub-xml-non-validating_comment': (T, ''),
-    'pub-xml-non-validating_unclosed': (F, 'a content document with an unclosed element is shown, not reported as an error'),
+    'pub-xml-non-validating_unclosed': (T, 'a content document with an unclosed element is reported as an error when its chapter is opened'),
     # Scripting
     'scr-not-support_ccscript-modify-host': (N, 'Quire runs no scripts and shows no iframes'),
     'scr-not-support_ccscript-modify-size': (N, 'Quire runs no scripts and shows no iframes'),
@@ -356,7 +356,7 @@ def main(clone):
             if tests[id]['level'] != level or VERDICTS[id][0] is not F:
                 continue
             passed, answered = answers.get(id, (0, 0))
-            policy = 'dropped by design' in VERDICTS[id][1] or 'not implemented' in VERDICTS[id][1]
+            policy = 'dropped by design' in VERDICTS[id][1] or 'not implemented' in VERDICTS[id][1] or 'by decision' in VERDICTS[id][1]
             platform = 'decoder' in VERDICTS[id][1]
             e2e = 'yes' if id in tested else ('policy' if policy else ('platform' if platform else ('decision' if id in DECISIONS else 'next')))
             lines.append(f'| `{id}` | {level} | {VERDICTS[id][1]} | {passed}/{answered} | {e2e} |')

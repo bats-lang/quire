@@ -808,6 +808,47 @@ shown as text and the fallback its manifest names was never followed.
   one and a reader needs one author (`pkg-title-order`,
   `pkg-creator-order`). EPUB 3's `title-type` refinement is not read.
 
+## The archive and the XML are checked for what EPUB forbids (#419)
+
+* **A zip that EPUB's OCF forbids is refused at import** (`src/zipcheck.bats`,
+  called from `book_index_make` in `src/book.bats`; the suite's
+  `ocf-zip-comp` and `ocf-zip-mult`, both "MUST treat ... as in error"):
+  an archive whose end record names a disk other than 0 (a split
+  archive), and one with an entry compressed by a method other than stored
+  or Deflate. The zip package leaves such an entry out of its references
+  without a word (its own documentation says so), so a book with a bzip2
+  chapter used to open with the chapter gone; `zipcheck` reads the end
+  record's and the central directory's own fields, `book_refusal` says
+  why, and the import banner says it (`ArchiveSplit`,
+  `CompressionNotAllowed`: "... is a zip split into segments, which an
+  EPUB may not be ..."). The zip package is the tool that could report this
+  itself (a refusal in `cd_refs`); until it does, the check is Quire's.
+* **A content document that is not well formed is not shown**
+  (`src/wellformed.bats`, `xml_well_formed`, called by `_chapter_render`;
+  `pub-xml-non-validating_unclosed`, `pub-xml-names`, both "The reading
+  system must produce an error", EPUB RS 3.3 §3.1: a non-validating XML
+  processor, a fatal error for a document that is not well formed):
+  an element not closed by its own end tag, an end tag that closes
+  another, and an element name with two colons, a colon at either end, a
+  digit first or a character no name has. The chapter is then a chapter
+  that could not be read: the banner says "Chapter N of this book could
+  not be read" and to open another chapter or import it again with
+  Replace. Comments, CDATA, processing instructions, the DOCTYPE and
+  quoted attribute values (with a `>` in them) are read over, and entity
+  references are not checked: XHTML's named entities are decoded as any
+  text's are. Of the reading systems the suite holds, 8 of 9 (unclosed)
+  and 9 of 9 (names) pass, Thorium and Apple Books among them. The check
+  is on the chapter shown; the chapters read for search, notes or
+  narration are not refused. xml-tree builds a tree from any bytes, so it
+  reports nothing itself; a well-formedness error from the parser would
+  be the better place for it.
+* **An image the manifest does not list is shown, by decision**
+  (`pkg-manifest-unlisted-resource`, a SHOULD): the zip is read by name.
+  11 of the 15 reading systems that answered the suite show the image
+  too, hiding it would blank the images of books whose manifest is merely
+  incomplete, and nothing is gained, the file being in the book's own
+  archive.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
@@ -1526,6 +1567,28 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* The page's width and height are a whole number of pixels (`page_extent`,
+  indexed by whether it is whole; `page_width_rule` and `page_height_rule`
+  (`src/page_size.bats`, a module of its own so its fixtures check in a
+  minute, where a snippet in `style.bats` costs 7 to 18) give the `.caf`
+  rule's `max-width` and `max-height` from a `page_extent(1)` only,
+  so an extent that is a fraction does not type-check:
+  `tests/static/reject/page-width-fraction`, `page-height-fraction`). The reader
+  scrolls to page n by n times the width (the height, down) it is told and
+  counts pages by the scroll width over it, and both are whole numbers (bridge's measure
+  and `scrollWidth` round). A Pixel 9's window is 1080 device pixels at
+  2.625 a CSS pixel, 411.43 wide and 923.43 high; the page was as large as
+  that, the
+  offsets 0.43 px out more with each page, and a chapter of 19 pages or
+  more was counted a page too many, whose scroll clamped to nearly the
+  page before it: the last page of every chapter, doubled, and each page
+  before it begun in the previous page's last letters. The rule rounds
+  the container's width down (CSS `round()`, Chrome 125; a WebView
+  without it drops the declaration and is as before). What the proof does
+  not reach is the browser (that columns are as wide as the page and that
+  `round()` rounds): `e2e/fractional-window.spec.js` plays a window 411.43
+  wide or 923.43 high and walks two chapters page by page across, right to
+  left, as a spread, down (a vertical book) and scrolled.
 * A setting with two states is a switch (`_switch_row`: Justify text,
   Hyphenation, Dim images, Turn pages with volume keys, Full screen,
   Lock rotation), never a segmented On | Off nor a lone pressed button
