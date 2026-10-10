@@ -193,6 +193,80 @@ and _get_first_text
 implement walk_opf_metadata(data, nodes) =
   _opf_metadata_nodes(data, nodes, xspan_none(), xspan_none())
 
+(* ============================================================
+   OPF: the direction of the title and of the author (the `dir`
+   attribute of dc:title, dc:creator and the package, EPUB 3.3 §5.2.1.1)
+   ============================================================ *)
+
+(* The `dir` of the first element named name among nodes and below: whether
+   there is such an element, and its attribute's value if it has one *)
+fun _element_dir_nodes
+  {l:agz}{n:pos}{tree_size:nat}{name_len:pos} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
+   name: &(@[char][name_len]), name_len: int name_len): @(bool, xspan(n)) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(found, value) = _element_dir_node(data, node, name, name_len)
+    in
+      if found then @(true, value)
+      else let val () = xspan_free(value) in _element_dir_nodes(data, rest, name, name_len) end
+    end
+  | $X.xml_nodes_nil() => @(false, xspan_none())
+
+and _element_dir_node
+  {l:agz}{n:pos}{tree_size:pos}{name_len:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
+   name: &(@[char][name_len]), name_len: int name_len): @(bool, xspan(n)) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) =>
+    if xml_name_eq(data, tag_offset, tag_len, name, name_len) then let
+    var dir_chars = @[char][3]('d', 'i', 'r')
+    in @(true, _find_attr_value(data, attrs, dir_chars, 3)) end
+    else _element_dir_nodes(data, children, name, name_len)
+  | $X.xml_text(_, _) => @(false, xspan_none())
+
+(* A direction's code from the value of a `dir` attribute: 0 none or not
+   one, 1 ltr, 2 rtl, 3 auto *)
+fn _direction_code {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), value: xspan(n)): int =
+  case+ value of
+  | ~xspan_none() => 0
+  | ~xspan_at(offset, span_len) => let
+    var ltr_chars = @[char][3]('l', 't', 'r')
+    var rtl_chars = @[char][3]('r', 't', 'l')
+    var auto_chars = @[char][4]('a', 'u', 't', 'o')
+    in
+      if xml_name_eq(data, offset, span_len, ltr_chars, 3) then 1
+      else if xml_name_eq(data, offset, span_len, rtl_chars, 3) then 2
+      else if xml_name_eq(data, offset, span_len, auto_chars, 4) then 3
+      else 0
+    end
+
+(* The direction of the first element named name: its own `dir`, else the
+   package's (root), as a code *)
+fn _text_direction {l:agz}{n:pos}{tree_size:nat}{name_len:pos}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), name: &(@[char][name_len]), name_len: int name_len, root: int): int = let
+  val @(_, value) = _element_dir_nodes(data, nodes, name, name_len)
+  val own = _direction_code(data, value)
+in if own > 0 then own else root end
+
+(* The direction of the first dc:title and of the first dc:creator, as
+   title + 4 * author, each 0 none, 1 ltr, 2 rtl, 3 auto: the element's own
+   `dir`, else the package element's (the suite's pkg-dir_creator-rtl,
+   pkg-dir_rtl-root-ltr, pkg-dir_rtl-root-unset, pkg-dir_unset-root-rtl) *)
+#pub fn opf_text_directions
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): [code:int] int code
+
+implement opf_text_directions(data, nodes) = let
+    var package_chars = @[char][7]('p', 'a', 'c', 'k', 'a', 'g', 'e')
+    var title_chars = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
+    var creator_chars = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
+  val @(_, root_value) = _element_dir_nodes(data, nodes, package_chars, 7)
+  val root = _direction_code(data, root_value)
+  val title = _text_direction(data, nodes, title_chars, 8, root)
+  val author = _text_direction(data, nodes, creator_chars, 10, root)
+in g1ofg0(title + 4 * author) end
+
 (* The text of the OPF's first dc:language *)
 fun _opf_language_nodes
   {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.

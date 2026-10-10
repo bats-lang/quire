@@ -1184,7 +1184,7 @@ in Sheet(builder) end
   | Width | MaxWidth | MinWidth | Height | MaxHeight | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
-  | WhiteSpace | Hyphens | Direction | WritingMode
+  | WhiteSpace | Hyphens | Direction | WritingMode | OverflowWrap
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
@@ -1212,7 +1212,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | TextTransform() => "text-transform" | TextAlign() => "text-align"
   | TextOverflow() => "text-overflow" | TextDecoration() => "text-decoration"
   | WhiteSpace() => "white-space" | Hyphens() => "hyphens" | Direction() => "direction"
-  | WritingMode() => "writing-mode"
+  | WritingMode() => "writing-mode" | OverflowWrap() => "overflow-wrap"
   | Overflow() => "overflow" | OverflowX() => "overflow-x" | Position() => "position"
   | Top() => "top" | Bottom() => "bottom" | Left() => "left" | Right() => "right"
   | Inset() => "inset" | ZIndex() => "z-index" | Cursor() => "cursor"
@@ -1641,7 +1641,7 @@ fn _shell {left:nat | left >= 8300} (sheet: sheet(left, false, false)): [after:n
      rule's left 50% and translateX(-50%) still centre it when it is
      relative instead of fixed. Over the reader it stays fixed at the
      top while the bars are away (the reader's own bars hide) *)
-  val sheet = rule(sheet, "#bats-root:has(#library:not([data-hide='1'])) .banner")
+  val sheet = rule(sheet, ".banner.in-library")
   val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Top(), "auto")
   val sheet = lay(sheet, Margin(), "8px 0 0")
@@ -1652,7 +1652,7 @@ fn _shell {left:nat | left >= 8300} (sheet: sheet(left, false, false)): [after:n
      Zeta banner all sit under the app bar; none draws over it); the bar is its safe inset (at least 2px),
      a 44px control and 2px below, and the banner 8px under it. The
      bottom bar is at the other edge, out of its way *)
-  val sheet = rule(sheet, "#bats-root:has(.rv:not(.chrome-off):not([data-hide='1'])) .banner")
+  val sheet = rule(sheet, ".banner.under-bars")
   val sheet = lay(sheet, Top(), "calc(max(2px,var(--safe-top)) + 54px)")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".banner .ibtn")
@@ -2133,7 +2133,7 @@ fn _overlays {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 10300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10300] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 10450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10450] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2315,6 +2315,14 @@ fn _reader {left:nat | left >= 10300} (sheet: sheet(left, false, false)): [after
   val sheet = lay(sheet, FontFamily(), "Literata,Georgia,serif")
   val sheet = lay(sheet, FontSize(), "18px")
   val sheet = lay(sheet, LineHeight(), "1.6")
+  (* a run with no place to break (a megabyte of letters, a long
+     address, #423) is broken to the column's width, else it is one line
+     that overflows the page and is clipped, the rest out of reach.
+     break-word, not anywhere: the same breaking, but the breaks a run
+     makes do not count in a box's minimum width, so a table cell holding
+     a run still makes its table as wide as the run and the table scrolls
+     (#413); anywhere would shrink the table to the column and wrap it *)
+  val sheet = lay(sheet, OverflowWrap(), "break-word")
   val sheet = lay(sheet, Outline(), "none")
   val sheet = close(sheet)
   (* shown only by the typography's style, for a spread; a point the
@@ -2344,6 +2352,13 @@ fn _reader {left:nat | left >= 10300} (sheet: sheet(left, false, false)): [after
   val sheet = lay(sheet, TextAlign(), "center")
   val sheet = lay(sheet, MarginBlock(), "1.5em .5em")
   val sheet = lay(sheet, BreakAfter(), "avoid")
+  val sheet = close(sheet)
+  (* the pieces of a text of 64 KiB or more (reader.bats' _text_spans) are
+     blocks: the inline run of a paragraph drawn across its columns costs
+     time in proportion to the square of them in Chrome, so none is longer
+     than a piece (#423) *)
+  val sheet = rule(sheet, ".caf .run")
+  val sheet = lay(sheet, Display(), "block")
   val sheet = close(sheet)
   (* an element the book marks hidden stays hidden (#411) *)
   val sheet = rule(sheet, ".caf .hidden-by-book")
@@ -3281,7 +3296,10 @@ fn _page_turn {left:nat | left >= 3600} (sheet: sheet(left, false, false)): [aft
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
-  (* idle, between turns: laid out (its copy ready) but not seen *)
+  (* idle, between turns: laid out (its copy ready) but not seen. Hidden
+     by visibility, which is inherited: showing and hiding it restyles
+     every node of its copy, about 2.5 microseconds each, so a chapter of
+     thousands of nodes is not slid at all (_chapter_heavy, #423) *)
   val sheet = rule(sheet, ".turn.idle")
   val sheet = lay(sheet, Visibility(), "hidden")
   val sheet = close(sheet)

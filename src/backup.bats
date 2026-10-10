@@ -852,7 +852,7 @@ in
     finished_modified = (if finished_modified >= 0 then finished_modified else before.finished_modified),
     minutes_elsewhere = before.minutes_elsewhere, pages_elsewhere = before.pages_elsewhere,
     place_modified = (if place_modified >= 0 then place_modified else before.place_modified),
-    place_declined = before.place_declined, progress_weighted = progress_weighted }))
+    place_declined = before.place_declined, progress_weighted = progress_weighted, text_directions = before.text_directions }))
 end
 
 (* Library book id_high, id_low (when it is there) takes the numbers *)
