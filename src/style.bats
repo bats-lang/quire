@@ -49,6 +49,8 @@ staload CT = "css/src/contrast.sats"
 staload H = "css/src/harmony.sats"
 staload GT = "gestures/src/tracker.sats"
 
+staload "page_size.sats"
+
 (* ============================================================
    Roles and palette
    ============================================================ *)
@@ -1286,53 +1288,6 @@ fn spaced_pair {left:nat | left >= 28}{media:bool}{block,inline:int}
   val () = raw(sheet, ";")
 in sheet end
 
-(* ============================================================
-   The page is a whole number of pixels wide
-   ============================================================
-
-   The reader scrolls to page n by n times the page's width (its height,
-   down) and counts the pages as the chapter's scroll width over it, and
-   the size it is told is a whole number: the bridge's measure rounds, and
-   so does the scroll width. A window whose size is a fraction of a pixel
-   (a Pixel 9 is 1080 by 2424 device pixels at 2.625 a CSS pixel, 411.43
-   by 923.43) made the page as large as that fraction, so each page's
-   offset was out by 0.43 px more than the one before it: a chapter of
-   19 pages or more was counted a page too many, and that page, past the
-   end of what scrolls, showed what the one before it did (the last page
-   of every chapter, doubled), while the pages before it began in the
-   previous page's last letters.
-
-   Columns of a page's width (a vertical page's, its height) are the
-   page's size exactly when it is whole, so the stylesheet states the
-   page's width and height only as an extent of the first kind, indexed
-   by whether it is whole, so one that is a fraction does not type-check
-   (tests/static/reject/page-width-fraction, page-height-fraction).
-   What stays outside the proof is the browser: that a column is as wide
-   as the page it is in, and that round() rounds, which the e2e suite
-   plays in a window of a fraction's width (e2e/fractional-window.spec.js) *)
-
-datatype page_extent(int) =
-  | ContainerLessInsets(0) of ()
-  | RoundedDown(1) of ()
-
-(* max-height:<extent>; the page's height, a vertical page's column and
-   the pages down a scrolled chapter, rounded down to a whole pixel *)
-fn page_height {left:nat | left >= 40}{media:bool}
-  (sheet: sheet(left, media, true), extent: page_extent(1)): [after:nat | after >= left - 40] sheet(after, media, true) =
-  case+ extent of
-  | RoundedDown() => let
-      val () = raw(sheet, "max-height:round(down,100%,1px);")
-    in sheet end
-
-(* max-width:<extent>; the page's width: the container's less the safe
-   area's insets at the sides, rounded down to a whole pixel *)
-fn page_width {left:nat | left >= 100}{media:bool}
-  (sheet: sheet(left, media, true), extent: page_extent(1)): [after:nat | after >= left - 100] sheet(after, media, true) =
-  case+ extent of
-  | RoundedDown() => let
-      val () = raw(sheet, "max-width:round(down,calc(100% - env(safe-area-inset-left) - env(safe-area-inset-right)),1px);")
-    in sheet end
-
 (* color:var(--text);background-color:var(--ground); : text on ground,
    proven *)
 fn surf {left:nat | left >= 60}{media:bool}{text,ground:colour_role}
@@ -2310,8 +2265,9 @@ fn _reader {left:nat | left >= 9800} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, BoxSizing(), "border-box")
-  val sheet = page_width(sheet, RoundedDown())
-  val sheet = page_height(sheet, RoundedDown())
+  (* the page's width and height, whole pixels: only a page_extent(1) gives their text (page_size.bats) *)
+  val () = raw(sheet, page_width_rule(RoundedDown()))
+  val () = raw(sheet, page_height_rule(RoundedDown()))
   val sheet = lay(sheet, MarginLeft(), "env(safe-area-inset-left)")
   val sheet = lay(sheet, MarginRight(), "env(safe-area-inset-right)")
   val sheet = lay(sheet, PaddingTop(), "var(--page-top)")

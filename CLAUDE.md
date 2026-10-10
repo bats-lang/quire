@@ -1434,8 +1434,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
 * The page's width and height are a whole number of pixels (`page_extent`,
-  indexed by whether it is whole; `page_width` and `page_height` write the
-  `.caf` rule's `max-width` and `max-height` from a `page_extent(1)` only,
+  indexed by whether it is whole; `page_width_rule` and `page_height_rule`
+  (`src/page_size.bats`, a module of its own so its fixtures check in a
+  minute, where a snippet in `style.bats` costs 7 to 18) give the `.caf`
+  rule's `max-width` and `max-height` from a `page_extent(1)` only,
   so an extent that is a fraction does not type-check:
   `tests/static/reject/page-width-fraction`, `page-height-fraction`). The reader
   scrolls to page n by n times the width (the height, down) it is told and

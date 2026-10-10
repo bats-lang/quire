@@ -1,1 +1,1 @@
-(* color:var(--text);background-color:var(--ground); : text on ground,
+(* The two rules above are all this module holds *)

@@ -112,6 +112,8 @@
       "accept/codec-length-ok",
       "accept/codec-roundtrip",
       "accept/fixed-box-fits",
+      "accept/page-height-whole",
+      "accept/page-width-whole",
       "accept/image-roundtrip",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
@@ -121,13 +123,11 @@
       "reject/back-nothing-to-offer",
       "reject/back-other-timeout",
       "reject/clip-past-end",
-      "reject/fixed-box-zoom-zero"
+      "reject/fixed-box-zoom-zero",
+      "reject/page-height-fraction",
+      "reject/page-width-fraction"
     ],
     "style": [
-      "accept/page-height-whole",
-      "accept/page-width-whole",
-      "reject/page-height-fraction",
-      "reject/page-width-fraction",
       "reject/role-unmatched"
     ]
   }
