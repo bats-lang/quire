@@ -681,12 +681,12 @@ fn _destination (rule: !relocation, chapter: Int, start_node: Int, end_node: Int
       else chapter
 
 (* annotations, each kept where rule says, put in order onto built; an
-   annotation that moves has its old id deleted at stamp (sync passes the
+   annotation that moves has its old id deleted now (sync passes the
    move on as a deletion and a new annotation), and how many moved is
    counted from moved *)
 fun _relocate {count:nat}{built_count:nat}{tomb_count:nat | built_count + count <= ANNOTATIONS_MAX} .<count>.
   (annotations: annotations(count), rule: !relocation, built: annotations(built_count), built_count: int built_count,
-   tombs: tombs(tomb_count), stamp: Int, moved: int)
+   tombs: tombs(tomb_count), moved: int)
   : [total:nat | total <= ANNOTATIONS_MAX][tombs_total:nat] @(annotations(total), int total, tombs(tombs_total), int) =
   case+ annotations of
   | ~annotations_nil() => @(built, built_count, tombs, moved)
@@ -695,10 +695,10 @@ fun _relocate {count:nat}{built_count:nat}{tomb_count:nat | built_count + count 
       val moves = (destination <> chapter): bool
       val tombs_after = (if moves then let
           val @(id_high, id_low) = _id_of(kind, chapter, start_node, start_offset, end_node, end_offset, made_at)
-        in _tomb_put(tombs, id_high, id_low, stamp) end
+        in _tomb_put(tombs, id_high, id_low, stamp_now()) end
         else tombs): [total:nat] tombs(total)
       val inserted = _insert(kind, destination, start_node, start_offset, end_node, end_offset, page, made_at, modified, text, text_len, note, note_len, label, label_len, built)
-    in _relocate(rest, rule, inserted, built_count + 1, tombs_after, stamp, (if moves then moved + 1 else moved)) end
+    in _relocate(rest, rule, inserted, built_count + 1, tombs_after, (if moves then moved + 1 else moved)) end
 
 (* The annotations of the book (id_high, id_low), kept in a record, moved
    by map (consumed) from the chapters of an old file to those of the new
@@ -725,7 +725,7 @@ in
         val @(annotations, count, tombs) = _parse_record(stored, stored_size)
         val () = piece_free(owner, stored)
         val rule = RelocateByMap(map)
-        val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, tombs, stamp_now(), 0)
+        val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, tombs, 0)
         val () = _relocation_free(rule)
         val () = (if moved > 0 then _store(id_high, id_low, relocated, relocated_count, relocated_tombs) else ())
         val () = annotations_free(relocated)
@@ -747,7 +747,7 @@ implement annot_chapter_shown (content_count) =
   else let
     val+ ~AnnotationsCell(annotations, _) = _take()
     val rule = RelocateByNodes(_chapter(), content_count)
-    val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, _tombs_take(), stamp_now(), 0)
+    val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, _tombs_take(), 0)
     val () = _relocation_free(rule)
     val () = _put(AnnotationsCell(relocated, relocated_count))
     val () = _tombs_put(relocated_tombs)

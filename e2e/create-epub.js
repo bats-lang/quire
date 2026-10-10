@@ -542,7 +542,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
 </body>
 </html>`;
     zipEntries.push({ name: 'OEBPS/wrap0000.xhtml', data: wrapXhtml });
-    zipEntries.push({ name: 'OEBPS/images/cover.png', data: opts.coverBytes || TINY_PNG, store: true });
+    zipEntries.push({ name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true });
   }
 
   // extraEntries: more files in the archive, e.g. a large one that makes
@@ -561,7 +561,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
 
   // Add cover image as stored (uncompressed) entry for synchronous reading
   if (coverImage) {
-    zipEntries.push({ name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true });
+    zipEntries.push({ name: 'OEBPS/images/cover.png', data: opts.coverBytes || TINY_PNG, store: true });
   }
 
   // Add extra images (for rawChapters that reference images)

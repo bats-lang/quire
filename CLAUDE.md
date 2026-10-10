@@ -1289,10 +1289,64 @@ the whole record of the library, the file's size and the card, before and
 after, to be the same, and plays a backup, a second device and a second
 tab over it. By research (the issue's comment): Apple Books and Kobo make
 a corrected file a new book and the notes stay with the old one, which is
-what users complain of; so a corrected file of a book in the library
-(same title and author, another id) is to be offered Replace too, with
-the place and each note kept by chapter href and a note whose anchor is
-gone kept in the list as not found. That part is not built yet.
+what users complain of; so a corrected file of a book in the library is
+offered Replace too.
+
+**A corrected file** has another id, so it is not the duplicate question's.
+When the OPF of a new file is read (`_opf_done`), its title and author are
+compared with the library's (`lib_find_similar`: case and the white space
+around them ignored, a title that is empty never matches, a book in the
+Trash is not one); a match asks "Newer file of a book?" (`QNewerFile`,
+`_ask_newer`): **Replace** or **Add as new book** (also Escape: nothing is
+lost either way). Nothing has been stored by then (`BookLooksLike`); after
+the answer the OPF is read again as `Replace` (the file, cover and
+accessibility data stored under the *book's* id, the id kept) or as
+`AddAlone`.
+
+**Chapters are found by name.** The hrefs of a book's chapters (`src/chapter_hrefs.bats`,
+the chapters as `_spine_chapters` numbers them, an empty line for one that
+names no file) are kept under the key `h<id>`, written when a book is
+opened and by every replace. A replace reads the old record, makes a
+`chapter_map` with the new file's hrefs (`MapByHref`; `MapByNumber` when
+the old file's were not kept, a book not opened since: the same number
+when the count is the same) and:
+
+* the place (`_place_moved`): the chapter of its href, at the same page and
+  anchor; else the chapter of the same number if there are as many, else
+  the first, at its start; the progress weights are counted anew. Nothing
+  changes when the hrefs are the same in the same order.
+* each note (`annot_reanchor`, `_relocate`): its chapter's new number; one
+  whose chapter is not in the new file is kept under `LOST_CHAPTER` + its old
+  chapter, which is listed after every chapter under "Not found in this
+  version" with its words and note, painted nowhere, leading nowhere,
+  exported with that heading. A note's id contains its chapter, so a moved
+  note has its old id deleted (a tombstone) and sync passes on a deletion
+  and a new note. A note of a chapter that exists but has not the node it
+  names is lost the same way when the chapter is shown
+  (`annot_chapter_shown`, from the chapter's count of content nodes): the
+  nodes of a chapter are known only when it is rendered, and a changed
+  word is not noticed (a note is lost when its nodes are gone, not when
+  its text changed).
+
+By research for the annotation rule: Kobo keeps an annotation of a
+restructured book in the list when it no longer shows in the text; Apple
+Books and Kobo lose them when the corrected file is a new book. No
+documentation was found of how Thorium or Moon+ match annotations of a
+replaced file (searched), so nothing is taken from them.
+
+**Another tab** (`src/file_version.bats`): bridge has no channel between tabs,
+so a tab that has a book open asks, when it is shown again
+(`visibilitychange`, the moment sync runs; web apps refetch stale data when
+a tab regains focus, as TanStack Query does by default with
+`refetchOnWindowFocus`), which
+file the book is made from: the key `v<id>` holds the file's id when it is
+not the book's own (a corrected file; deleted when the book's own file comes
+back). If it is not the file the tab opened, the tab goes to the library and
+the banner says "This book was replaced with another file in another tab"
+with Reopen Quire (`BookReplacedElsewhere`). A tab in a second window
+side by side is told when it is shown again, not at once. An identical file
+changes nothing, so nothing is said. `e2e/replace-corrected.spec.js` plays
+all of it with fixtures that pass epubcheck (`e2e/replace-books.js`).
 
 ## A library that cannot be read says why, and offers what fits (#374)
 

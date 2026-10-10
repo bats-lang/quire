@@ -140,8 +140,23 @@ export async function coverBytes(page) {
   });
 }
 
-/** Selects from..to of the last paragraph that begins on the page shown */
+/** How many paragraphs begin on the page shown */
+const beginning = page => bookPage(page).evaluate(doc => {
+  const c = doc.getBoundingClientRect();
+  return [...doc.querySelectorAll('p')].filter(e => {
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.left >= c.left - 1 && r.left < c.right;
+  }).length;
+});
+
+/** Selects from..to of the last paragraph that begins on the page shown
+    (on a narrow page the last page of a chapter may have none: the page
+    before it is taken then) */
 export async function selectLastText(page, from, to) {
+  for (let back = 0; back < 5 && (await beginning(page)) === 0; back++) {
+    await page.keyboard.press('ArrowLeft');
+    await page.waitForTimeout(400);
+  }
   await bookPage(page).evaluate((doc, [from, to]) => {
     const c = doc.getBoundingClientRect();
     const starting = [...doc.querySelectorAll('p')].filter(e => {

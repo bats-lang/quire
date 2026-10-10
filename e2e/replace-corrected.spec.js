@@ -84,9 +84,9 @@ test('a corrected file of a book in the library replaces it: the place, the note
   await expect(cards(page)).toHaveCount(1);
   expect(await titles(page)).toEqual(order);
   const changed = Object.keys({ ...before, ...after }).filter(key => before[key] !== after[key])
-    .map(key => key.replace(/[0-9a-f]{14}/, '<id>')).sort();
+    .map(key => key.replace(/"([a-z])[0-9a-f]{14}"/, '"$1<id>"').replace(/[0-9a-f]{14}/, '<id>')).sort();
   expect(changed, 'the stored records that changed').toEqual(
-    ['"b<id>"', '"c<id>"', '"v<id>"', '"library/book/<id>"'].map(name => name).sort());
+    ['bats/kv "b<id>"', 'bats/kv "c<id>"', 'bats/kv "v<id>"', 'bats/kv "library/book/<id>"'].sort());
   // one file, the corrected one's size, and its cover is the corrected file's
   expect(Object.values(await fileSizes(page))).toEqual([statSync(corrected).size]);
   const covers = Object.values(await coverBytes(page));
@@ -185,7 +185,7 @@ test('a file that adds, removes and reorders chapters is found by the chapters\'
   await expect.poll(() => marks(page)).toMatchObject({ size: 1 });
   // going to a note goes to its chapter
   await clickControl(page, 'Annotations');
-  await panel(page).getByRole('button', { name: /Para 3\.0/ }).click();
+  await panel(page).getByRole('button', { name: /Note of three/ }).click();
   await expect.poll(async () => (await place(page)).ch).toBe(3);
   expect(errors).toEqual([]);
 });
