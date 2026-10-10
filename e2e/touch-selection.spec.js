@@ -507,7 +507,7 @@ test('dragging past the page\'s edge does not turn the page while the selection 
   const text = squash(await selected(page));
   expect(text).not.toBe('');
   const words = await pageWords(page);
-  expect(words.some(w => text.endsWith(w.text))).toBe(true);
+  expect(words.some(w => text.endsWith(w.text)), `the selection ends in ${JSON.stringify(text.slice(-40))}, the page's words include ${JSON.stringify(words.slice(0, 6).map(w => w.text))}`).toBe(true);
   await expect(toolbar(page)).toBeVisible();
 });
 
