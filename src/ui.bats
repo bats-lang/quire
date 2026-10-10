@@ -351,7 +351,7 @@ in release_bytes(id_frozen, id_bytes) end
    styles are a place (ui_place) and a fixed page's box (ui_fixed_box_n),
    so nothing can set a colour or anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
-  | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy
+  | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy | ADir
 
 fn _attr_name (attribute: attr): $D.attribute =
   case+ attribute of
@@ -359,7 +359,7 @@ fn _attr_name (attribute: attr): $D.attribute =
   | AValue() => $D.Value | AControls() => $D.Aria("controls")
   | ATabindex() => $D.Tabindex | AValueNow() => $D.Aria("valuenow")
   | ACurrent() => $D.Aria("current") | AGestureRegion() => $D.Data("gesture-region")
-  | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby")
+  | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby") | ADir() => $D.Dir
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}

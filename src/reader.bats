@@ -1586,7 +1586,7 @@ in
         (* finished now: a change sync passes on *)
         finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
         minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
-        place_modified = (if moved then stamp_now() else record.place_modified), place_declined = record.place_declined, progress_weighted = weighed }) end)
+        place_modified = (if moved then stamp_now() else record.place_modified), place_declined = record.place_declined, progress_weighted = weighed, text_directions = record.text_directions }) end)
       val () = lib_touch(book_index)
     in lib_save() end
 end

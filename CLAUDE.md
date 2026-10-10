@@ -849,6 +849,31 @@ shown as text and the fallback its manifest names was never followed.
   incomplete, and nothing is gained, the file being in the book's own
   archive.
 
+## The package's directions and language (#419)
+
+* **A title's and an author's direction are the package's** (`opf_text_directions` in
+  `src/epub_xml.bats`; the suite's `pkg-dir_creator-rtl`, `pkg-dir_rtl-root-ltr`,
+  `pkg-dir_rtl-root-unset`, `pkg-dir_unset-root-rtl`): the first `dc:title` and the first
+  `dc:creator` take their own `dir` (`ltr`, `rtl`, `auto`), else the `package` element's.
+  They are kept in the book's record as one number (`text_directions`, title + 4 * author, the
+  optional group `tdir`, lower case so an older Quire keeps it as an unknown chunk), set at
+  import and again by Replace, decoded once into a `text_direction` (`_direction_of_code`), and
+  the library card sets `dir` on its title and author (`ADir`). `dir=auto` is the browser's
+  first-strong-character rule; none leaves the page's. A book imported before this has none
+  until it is replaced. The backup and sync do not carry it (it comes from the package).
+* **The package's language and direction are not the content's, by decision, and the suite's
+  `pkg-lang_but_not_content` and `pkg-dir_but_not_content` stay failures.** A chapter that
+  names no language is shown in the book's (`_page_book_lang`; "und" when the book names none):
+  browsers hyphenate and pick quotation marks only for text whose language is known (MDN on
+  `hyphens`; the CSS specification requires hyphenation only where the content language is
+  known), and the package's `dc:language` is the only language a book declares. A Hebrew or
+  Arabic book whose spine names no direction reads right to left (#416, as Readium reads it): the
+  page is one flow of CSS columns whose order is the page's `direction`, so a list or paragraph
+  in it inherits it. The suite's criterion (a document that names none stays in the reading
+  system's own language and left to right) is met by 11 of the 15 reading systems that answered
+  for language and all 13 for direction, which lay each document out on its own; Quire's flow
+  cannot without giving up one of those two decisions. They stay listed as policy in the report.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading

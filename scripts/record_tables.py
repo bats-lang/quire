@@ -16,6 +16,8 @@ BOOK_GROUPS = [
   ("TITL", "req", [("title", "s")]),
   # lower case first letter: ancillary, so a Quire that does not know it keeps it and still reads the record
   ("prog", "opt", [("progress_weighted", "i")]),
+  # the direction of the title and of the author as the package gives them (quire#419): two codes in one number
+  ("tdir", "opt", [("text_directions", "i")]),
 ]
 BOOK_KIND = 1
 INDEX_GROUPS = [
