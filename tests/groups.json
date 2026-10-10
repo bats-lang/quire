@@ -1,77 +1,77 @@
 {
   "e2e": {
     "library": [
-      "library.spec.js",
-      "icons.spec.js",
-      "storage.spec.js",
-      "notices.spec.js",
-      "smoke.spec.js",
-      "catalogue.spec.js",
-      "safe-area.spec.js",
-      "stats.spec.js",
-      "stall-capture.spec.js",
-      "library-records.spec.js",
-      "drm.spec.js",
-      "drm-catalogue.spec.js"
+      "keys.spec.js",
+      "media.spec.js",
+      "relaunch.spec.js",
+      "spreads.spec.js",
+      "sync-fastmail.spec.js"
     ],
     "reader": [
-      "reader.spec.js",
-      "navigation.spec.js",
-      "footnotes.spec.js",
-      "pagebreak.spec.js",
-      "media.spec.js",
-      "headings.spec.js",
-      "wide.spec.js",
-      "stability.spec.js",
-      "keys.spec.js",
+      "backup.spec.js",
       "landmarks.spec.js",
-      "progress.spec.js",
-      "pagelist.spec.js",
-      "epub2.spec.js",
-      "epubcheck.spec.js",
+      "relaunch-sync.spec.js",
+      "smoke.spec.js",
+      "sync-dropbox.spec.js",
       "w3c-epub-tests.spec.js",
-      "publisher.spec.js",
-      "spreads.spec.js",
-      "fractional-window.spec.js"
+      "wide.spec.js"
     ],
     "reading-tools": [
       "annotations.spec.js",
-      "search.spec.js",
-      "narration.spec.js",
-      "dictionary.spec.js",
-      "vertical.spec.js",
-      "fixed.spec.js",
-      "ruby.spec.js",
-      "modal-panels.spec.js",
-      "touch-selection.spec.js"
-    ],
-    "sync": [
-      "sync.spec.js",
-      "sync-android.spec.js",
-      "sync-dropbox.spec.js",
-      "sync-dropbox-android.spec.js",
-      "sync-nextcloud.spec.js",
-      "sync-fastmail.spec.js",
-      "sync-idempotent.spec.js"
-    ],
-    "settings": [
-      "backup.spec.js",
+      "drm-catalogue.spec.js",
+      "pathological.spec.js",
+      "progress.spec.js",
+      "publisher.spec.js",
       "settings.spec.js",
-      "settings-screen.spec.js",
-      "a11y.spec.js",
-      "about.spec.js",
-      "layout.spec.js",
-      "sync-android-outcomes.spec.js",
+      "stall-capture.spec.js",
+      "stats.spec.js",
       "sync-android-hang.spec.js"
     ],
+    "sync": [
+      "footnotes.spec.js",
+      "headings.spec.js",
+      "notices.spec.js",
+      "page-turn.spec.js",
+      "pagelist.spec.js",
+      "safe-area.spec.js",
+      "sync-android-outcomes.spec.js",
+      "sync-dropbox-android.spec.js",
+      "sync.spec.js",
+      "touch-selection.spec.js"
+    ],
+    "settings": [
+      "a11y.spec.js",
+      "about.spec.js",
+      "dictionary.spec.js",
+      "fixed.spec.js",
+      "fractional-window.spec.js",
+      "library-records.spec.js",
+      "library.spec.js",
+      "search.spec.js",
+      "sync-idempotent.spec.js",
+      "vertical.spec.js"
+    ],
     "relaunch": [
-      "relaunch.spec.js",
-      "relaunch-sync.spec.js",
-      "back.spec.js"
+      "drm.spec.js",
+      "icons.spec.js",
+      "layout.spec.js",
+      "modal-panels.spec.js",
+      "navigation.spec.js",
+      "pagebreak.spec.js",
+      "reader.spec.js",
+      "storage.spec.js",
+      "sync-nextcloud.spec.js"
     ],
     "pathological": [
-      "pathological.spec.js",
-      "page-turn.spec.js"
+      "back.spec.js",
+      "catalogue.spec.js",
+      "epub2.spec.js",
+      "epubcheck.spec.js",
+      "narration.spec.js",
+      "ruby.spec.js",
+      "settings-screen.spec.js",
+      "stability.spec.js",
+      "sync-android.spec.js"
     ]
   },
   "static": {
