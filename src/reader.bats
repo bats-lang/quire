@@ -2219,7 +2219,8 @@ fn _starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_
   if span_len < pattern_len then false else xml_name_eq(data, offset, pattern_len, pattern, pattern_len)
 
 (* The attributes of an XHTML element that are kept on its content node:
-   dir, lang (and xml:lang), title, colspan and rowspan *)
+   dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
+   class the stylesheet hides) *)
 fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_count>.
   (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
   case+ attrs of
@@ -2231,6 +2232,7 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
       var _title = @[char][5]('t', 'i', 't', 'l', 'e')
       var _colspan = @[char][7]('c', 'o', 'l', 's', 'p', 'a', 'n')
       var _rowspan = @[char][7]('r', 'o', 'w', 's', 'p', 'a', 'n')
+      var _hidden = @[char][6]('h', 'i', 'd', 'd', 'e', 'n')
       val () = (if value_len >= 65536 then ()
         else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, $D.Dir, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _lang, 4) then _node_attr(doc, node, $D.Lang, data, value_offset, value_len)
@@ -2238,6 +2240,8 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
         else if xml_name_eq(data, name_offset, name_len, _title, 5) then _node_attr(doc, node, $D.Title, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _colspan, 7) then _node_attr(doc, node, $D.Colspan, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _rowspan, 7) then _node_attr(doc, node, $D.Rowspan, data, value_offset, value_len)
+        (* the HTML's own word for hidden content, kept (no CSS is applied) *)
+        else if xml_name_eq(data, name_offset, name_len, _hidden, 6) then _node_attr_literal(doc, node, $D.Class, "hidden-by-book")
         else ())
     in _pass_attrs(doc, data, rest, node) end
 
