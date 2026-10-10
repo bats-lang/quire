@@ -232,9 +232,22 @@ jobs:
           listed=$(npx playwright test --list $specs | tail -1)
           echo "$listed"
           echo "$listed" | grep -q " in $(echo "$specs" | wc -l) files$" || { echo "::error::the group's filters do not name exactly its $(echo "$specs" | wc -l) specs"; exit 1; }
-          npx playwright test --reporter=list,html $specs
+          npx playwright test --reporter=list,html,json $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-timings.json
+
+      # Each test's time per project and spec (#461), kept for every run
+      # so the groups are balanced by measurement, not guessing: sum
+      # `duration` of the report's tests by spec file (tests/groups.json)
+      - name: Upload the spec timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-timings-${{ matrix.group }}
+          path: ${{ runner.temp }}/e2e-timings.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload the Playwright report
         if: failure()
