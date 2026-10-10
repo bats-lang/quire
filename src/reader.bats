@@ -14,6 +14,7 @@
 #use zip as Z
 
 staload "epub_xml.sats"
+staload "xhtml_parse.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
@@ -729,34 +730,28 @@ fun _first_start {node:nat}{more:nat} .<more>. (node: int node, more: int more, 
   else if more <= 0 then ~1
   else _first_start(node + 1, more - 1, low, high)
 
-(* The content node the page shown starts with (its number), or -1: the
-   first element down the middle of the page from its first line, or,
-   when that one began on a page before (a paragraph carried over), the
-   first of the next 40 that begins on this one, so that the page it
-   names is this page *)
-fn _anchor_now (): [node:int | node >= ~1] int node = let
+(* A fixed page's anchor: the first element down the middle of the page
+   from its first line, or, when that one began on a page before (a
+   paragraph carried over), the first of the next 40 that begins on this
+   one. A fixed page is one spine item with few nodes, so a hit test
+   (which costs in proportion to the column fragments of the chapter
+   it tests, not here) finds it *)
+fn _anchor_hit (): [node:int | node >= ~1] int node = let
   val () = _measure_literal("page")
   val page_left = $DR.get_measure_x()
   val page_top = $DR.get_measure_y()
   val page_width = $DR.get_measure_w()
   val page_height = $DR.get_measure_h()
   (* the first column's middle: of a spread's two, the left one, or the
-     right one in a book read right to left; set vertically, the first
-     line, at the page's right edge (or its left, for vertical-lr) *)
-  val x = (case+ _writing() of
-    | VerticalRightToLeft() => page_left + page_width - 12
-    | VerticalLeftToRight() => page_left + 12
-    | Horizontal() =>
-      if _spread() then (if _is_rtl() then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
+     right one in a book read right to left *)
+  val x = (if _spread() then (if _is_rtl() then page_left + 3 * page_width / 4 else page_left + page_width / 4) else page_left + page_width / 2): int
   (* a reader panel's scrim and the reader's inertness would hide the
      page from the hit test: it sees through them *)
   val seen = layer_see_through()
   val node = _node_down(x, page_top + 24, 8)
   val () = layer_see_through_end(seen)
-  (* across the page, or down it *)
-  val down = (case+ _page_axis() of Down() => true | Across() => false | AcrossBack() => false): bool
-  val low = (if down then page_top - 1 else page_left - 1): int
-  val high = (if down then page_top + page_height else page_left + page_width): int
+  val low = page_left - 1
+  val high = page_left + page_width
 in
   if node < 0 then node
   else if _starts_in(node, low, high) then node
@@ -765,14 +760,111 @@ in
   in if first_starting >= 0 then first_starting else node end
 end
 
-(* The content node that marks the place of the page shown: the one it
-   starts with (_anchor_now), when one starts on it; else -1, and the
-   page itself is the place: a page wholly inside a paragraph carried
+(* Content nodes are numbered from 0 in each chapter *)
+val _content_count = ref<[count:nat] int count>(0)
+
+(* Whether a content node has a box: an element, and not one that is not
+   drawn (display none, as a ruby's rp is, measures 0 by 0) *)
+fn _drawn {node:nat} (node: int node): bool =
+  if ~_measure_node(node) then false
+  else $DR.get_measure_w() > 0 || $DR.get_measure_h() > 0
+
+(* The first of content nodes node to node + more that is drawn; -1 when
+   none is *)
+fun _first_drawn {node:nat}{more:nat} .<more>. (node: int node, more: int more): [found:int | found >= ~1; found < 0 || (found >= node && found < node + more)] int found =
+  if more <= 0 then ~1
+  else if _drawn(node) then node
+  else _first_drawn(node + 1, more - 1)
+
+(* Whether the node measured last starts before the page [low, high):
+   above it scrolled or set vertically, to the left across, and, read
+   right to left, with its right edge to the right of the page *)
+fn _measured_before (low: int, high: int): bool =
+  case+ _page_axis() of
+  | Down() => $DR.get_measure_y() < low
+  | AcrossBack() => $DR.get_measure_x() + $DR.get_measure_w() > high + 1
+  | Across() => $DR.get_measure_x() < low
+
+(* How many undrawn nodes in a row the search steps over: the blank
+   text between blocks and a ruby's rp take numbers and have no box, one
+   or a few at a time *)
+#define SEARCH_REACH 64
+
+(* The first drawn content node of [low_node, high_node) that does not
+   start before the page [low, high), or best (the node found so far,
+   -1 for none) when there is none. Content nodes are numbered in
+   document order and the text flows in it, so where they start grows
+   with the number (down the page, across it, or back across it): a
+   binary search, log2 of the nodes' count measures however many column
+   fragments the chapter has, where a hit test costs in proportion to
+   them (#423: 150 to 300 ms a page on a 2 MB chapter). *)
+fun _first_on_or_after {low_node,high_node:nat | low_node <= high_node} .<high_node - low_node>.
+  (low_node: int low_node, high_node: int high_node, low: int, high: int, best: [b:int | b >= ~1] int b): [found:int | found >= ~1] int found =
+  if low_node >= high_node then (if best >= 0 then best else ~1)
+  else let
+    val middle = g1ofg0(low_node + (high_node - low_node) / 2)
+  in
+    if middle < low_node then (if best >= 0 then best else ~1)
+    else if middle >= high_node then (if best >= 0 then best else ~1)
+    else let
+      val reach = g1ofg0((if high_node - middle < SEARCH_REACH then high_node - middle else SEARCH_REACH): Int)
+    in
+      if reach <= 0 then (if best >= 0 then best else ~1)
+      else let
+      val drawn = _first_drawn(middle, reach)
+    in
+      if drawn < 0 then
+        (* none to measure in the stretch: it counts as before the page *)
+        (if middle + reach > high_node then (if best >= 0 then best else ~1)
+         else _first_on_or_after(middle + reach, high_node, low, high, best))
+      else if drawn >= high_node then (if best >= 0 then best else ~1)
+      else if _measured_before(low, high) then _first_on_or_after(drawn + 1, high_node, low, high, best)
+      else _first_on_or_after(low_node, middle, low, high, drawn)
+    end
+    end
+  end
+
+(* The last drawn content node before node, within SEARCH_REACH of it;
+   -1 when there is none *)
+fun _last_drawn_before {node:nat}{more:nat} .<more>. (node: int node, more: int more): [found:int | found >= ~1] int found =
+  if node <= 0 then ~1
+  else if more <= 0 then ~1
+  else if _drawn(node - 1) then node - 1
+  else _last_drawn_before(node - 1, more - 1)
+
+(* The content node the page shown starts with (its number), or -1: the
+   first one that starts on the page, found without a hit test (a reader
+   panel's scrim cannot hide it either); when none does (the page is
+   wholly inside a node carried over), the last that began before it, so
+   that the place it names is a page back and no further than that
+   node. *)
+fn _anchor_now (): [node:int | node >= ~1] int node =
+  if _is_fixed() then _anchor_hit()
+  else let
+    val () = _measure_literal("page")
+    val page_left = $DR.get_measure_x()
+    val page_top = $DR.get_measure_y()
+    val page_width = $DR.get_measure_w()
+    val page_height = $DR.get_measure_h()
+    val down = (case+ _page_axis() of Down() => true | Across() => false | AcrossBack() => false): bool
+    val low = (if down then page_top - 1 else page_left - 1): int
+    val high = (if down then page_top + page_height else page_left + page_width): int
+    val count = !_content_count
+    val first = _first_on_or_after(0, count, low, high, ~1)
+  in
+    if first >= 0 then
+      (* it must start on the page, not past it: a page with nothing
+         starting on it has the first of the next page *)
+      (if _starts_in(first, low, high) then first else _last_drawn_before(first, SEARCH_REACH))
+    else _last_drawn_before(count, SEARCH_REACH)
+  end
+
+(* The content node that marks the place of the page shown: node, the
+   one it starts with (_anchor_now), when one starts on it; else -1, and
+   the page itself is the place: a page wholly inside a paragraph carried
    over (a chapter's last page, often) would be named by the page that
    paragraph starts on, a page before (#302) *)
-fn _place_anchor (): [node:int | node >= ~1] int node = let
-  val node = _anchor_now()
-in
+fn _place_of {node:int | node >= ~1} (node: int node): [node:int | node >= ~1] int node =
   if node < 0 then node
   else let
     val () = _measure_literal("page")
@@ -784,7 +876,8 @@ in
     val low = (if down then page_top - 1 else page_left - 1): int
     val high = (if down then page_top + page_height else page_left + page_width): int
   in if _starts_in(node, low, high) then node else ~1 end
-end
+
+fn _place_anchor (): [node:int | node >= ~1] int node = _place_of(_anchor_now())
 
 (* Scrolled, the screenful of page_count shown with the chapter scrolled down by
    top: the nearest whole step, and the last at the bottom, where the
@@ -1083,6 +1176,25 @@ fn _motion_reduced (): bool = let
   val () = release_bytes(query_frozen, query_bytes)
 in case+ answer of $MEDIA.Matches() => true | $MEDIA.NoMatch() => false end
 
+(* The bytes of the chapter shown (its XHTML), set as it is rendered *)
+val _chapter_bytes = ref<Int>(0)
+
+(* Whether the chapter is too big to slide a copy of: a turn shows its
+   first frame only after the browser has prepainted the copy, which costs
+   in proportion to the chapter's boxes (10,000 one-line paragraphs: 170 ms,
+   and the chapter's own prepaint, a hover hit test the browser makes after
+   the scroll, is 190 ms of the turn without a copy; 1 MB without a space:
+   100 ms more; a 300 KB chapter of 1000 paragraphs: under 5 ms more).
+   Such a chapter turns at once, as it does where the system asks for less
+   motion: a first frame 100 ms or more late is not an animation, by the
+   RAIL model's 100 ms to respond, and the turn is no longer than the
+   reader's own key. Chosen from measurements of this machine and its
+   shape, not a rule of the platform: 6000 content nodes or 600 KB sits
+   between the 300 KB chapter (about 2100 nodes) and the first that is
+   late (the 10,000 paragraphs, 20,000 nodes, 140 KB; the megabyte, 5
+   nodes) (#423) *)
+fn _chapter_heavy (): bool = !_content_count >= 6000 || !_chapter_bytes >= 614400
+
 (* page-turn's classes: the way its sheet slides (its gap, beneath the
    sheet's edge, before it when it slides right or down), and a blank
    gap *)
@@ -1199,6 +1311,11 @@ in
   $P.finish<Int>($P.vow($TM.timer_set(COPY_SETTLE_MS)), llam(_) =>
     if !_copy_asked <> number then ()
     else if !_sheet_laid then ()
+    (* a chapter too big to slide a copy of (_chapter_heavy) is turned
+       at once, so a copy made ahead is only a clone of its whole DOM:
+       3 s of script for 30,000 nodes, in which the page does not answer.
+       A drag, which does lay a copy, makes one then (_copy_ready) *)
+    else if _chapter_heavy() then ()
     else (case+ !_copy of
       | CopyStale() => _copy_make()
       | CopyKept() => ()
@@ -1384,6 +1501,7 @@ fn _turn_frames (number: int): void =
    asks for less motion) *)
 fn _turn_lay (slide: slide): int =
   if _motion_reduced() then 0
+  else if _chapter_heavy() then 0
   else if !_page_width <= 0 then 0
   else let
     val number = !_turn_number + 1
@@ -1539,10 +1657,13 @@ fn _record_position (): void = let
      the place kept would change with no move: #302); else the node the
      place is kept by, while it is; else the node the page starts with
      (-1 when none starts on it) *)
-  val anchor = (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else _place_anchor()): Int
   (* what a new layout keeps in view: that node, or the one at the
      page's top, even one carried over *)
-  val () = !_anchor_last := (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else _anchor_now())
+  val fresh = (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then ~1 else _anchor_now()): [node:int | node >= ~1] int node
+  val placed = _place_of(fresh)
+  val anchor = (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else placed): Int
+  val top_node = (if _is_fixed() then ~1 else if !_anchor_kept >= 0 then !_anchor_kept else fresh): Int
+  val () = !_anchor_last := top_node
   val now = $TM.epoch_minutes()
 in
   case+ reading_get() of
@@ -1875,9 +1996,6 @@ fn _show_page {page_count:pos}{page:nat | page < page_count}{chapter,chapter_cou
    Content tree rendering (XHTML → DOM nodes)
    ============================================================ *)
 
-(* Content nodes are numbered from 0 in each chapter *)
-val _content_count = ref<[count:nat] int count>(0)
-
 (* Content node i's element: id "c" and i's digits, with op run on its
    id as a borrow *)
 (* The id of a content node (or of the content area page, for ~1) in a
@@ -1940,16 +2058,37 @@ fn _utf8_start {l:agz}{n:pos}{at:nat | at < n}
   (data: !$A.borrow(byte, l, n), at: int at): bool =
   $AR.band_int_int(byte2int0($A.read<byte>(data, at)), 192) <> 128
 
-(* The length of the longest prefix of data[offset, offset + text_len), text_len of 64 KiB
-   or more, under 64 KiB (a text op's limit) that ends before a UTF-8
-   character's start, so no character is split; 65535 when the data is
-   not UTF-8 there *)
+(* The cut after the last white space (a space, a tab or a line feed) at
+   or before data[offset + at], looking back no further than floor; -1
+   when there is none *)
+fun _break_back {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}{at:nat | at <= 65534} .<at>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, at: int at, floor: int): [cut:int | ~1 <= cut; cut <= 65535] int cut =
+  if at <= 0 then ~1
+  else if at <= floor then ~1
+  else let
+    val code = byte2int0($A.read<byte>(data, offset + at))
+  in
+    if code = 32 || code = 10 || code = 9 then at + 1
+    else _break_back(data, offset, text_len, at - 1, floor)
+  end
+
+(* The length of the prefix of data[offset, offset + text_len), text_len of
+   64 KiB or more, that is cut off as a piece: under 64 KiB (a text op's
+   limit), after the last white space in its last 512 bytes, so that the
+   words the pieces are shown as blocks between (below) are not cut; else
+   (a run with no white space, a megabyte of one word) the longest prefix
+   that ends before a UTF-8 character's start, so no character is split:
+   65535 when the data is not UTF-8 there *)
 fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
-  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65533 <= cut; cut <= 65535] int cut =
-  if _utf8_start(data, offset + 65535) then 65535
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65000 <= cut; cut <= 65535] int cut = let
+  val back = _break_back(data, offset, text_len, 65534, 65022)
+in
+  if back >= 65000 then back
+  else if _utf8_start(data, offset + 65535) then 65535
   else if _utf8_start(data, offset + 65534) then 65534
   else if _utf8_start(data, offset + 65533) then 65533
   else 65535
+end
 
 (* A content node's attribute name: data[offset, offset + value_len) *)
 fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
@@ -1986,9 +2125,6 @@ fn _node_src_empty {doc_location:agz}{node:nat} (doc: !$D.document(doc_location)
   val () = $D.set_url_literal(doc, id_bytes, node_id_len, $D.Src, $D.EmptyData)
 in release_bytes(id_frozen, id_bytes) end
 
-(* Content nodes are numbered from 0 in each chapter *)
-val _content_count = ref<[count:nat] int count>(0)
-
 (* Get next content node index and increment counter *)
 fn _next_content_node(): [node:nat] int node = let
   val node = !_content_count
@@ -1997,17 +2133,25 @@ in node end
 
 (* Text data[offset, offset + text_len) as spans, the last children of content node
    parent: one span per piece under 64 KiB (a text op's limit), split
-   where a UTF-8 character starts *)
+   where white space is, else where a UTF-8 character starts. The pieces
+   of a text of 64 KiB or more are class run, shown as blocks (style.bats):
+   Chrome draws the one inline run of a paragraph across its columns in
+   time that grows with the square of the columns (a megabyte of one word
+   at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
+   run is longer than one piece (#423) *)
 fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len): void = let
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len, split: bool): void = let
   val node = _next_content_node()
   val () = _add_node(doc, parent, node, $D.Span)
 in
-  if text_len < 65536 then _node_text(doc, node, data, offset, text_len)
+  if text_len < 65536 then let
+    val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
+  in _node_text(doc, node, data, offset, text_len) end
   else let
     val cut = _text_cut(data, offset, text_len)
+    val () = _node_attr_literal(doc, node, $D.Class, "run")
     val () = _node_text(doc, node, data, offset, cut)
-  in _text_spans(doc, data, parent, offset + cut, text_len - cut) end
+  in _text_spans(doc, data, parent, offset + cut, text_len - cut, true) end
 end
 
 (* Whether data[offset + i, offset + text_len) is all white space *)
@@ -2579,8 +2723,8 @@ and _render_node
       (* white space between the page's blocks takes its numbers but
          makes no element: it would be a line of its own *)
       val () = (if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
-          else _text_spans(doc, data, parent, offset, text_len))
-        else _text_spans(doc, data, parent, offset, text_len))
+          else _text_spans(doc, data, parent, offset, text_len, false))
+        else _text_spans(doc, data, parent, offset, text_len, false))
     in found end
   | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
@@ -3484,7 +3628,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
              in $P.ret<load_outcome>(ChapterSuperseded()) end
              else let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
-               val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+               val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                val () = _size_put(_facing_size, xhtml_viewport(xhtml_bytes, nodes))
                val doc = $D.open_document($A.text_lit("bats-root"), 9)
                val () = !_render_into := IntoFacingBox()
@@ -3551,8 +3695,8 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                       val () = _overlay_pending_put(NoOverlayPending())
                     in $P.ret<load_outcome>(ChapterNotRead()) end
                   | WellFormed() => let
-                  (* Parse XHTML with xml-tree *)
-                  val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+                  val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                  val () = !_chapter_bytes := xhtml_size
 
                   (* Clear the content area, then render the XHTML tree
                      into it: one document for the chapter *)
@@ -4502,7 +4646,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                    val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
-                   val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                    val () = _search_add_if(generation, xhtml_bytes, nodes, chapter)
                    val () = $X.free_nodes(nodes)
                    val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
@@ -5002,7 +5146,7 @@ fn _note_found {l:agz}{n:pos} (data: !$A.borrow(byte, l, n), n: int n): void =
     in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
     else let
       val buf = $A.alloc<byte>(_NOTE_CAPACITY)
-      val nodes = $X.parse_document(data, n)
+      val nodes = xhtml_parse(data, n)
       val text_len = _note_nodes(data, nodes, fragment, fragment_len, false, buf, 0)
       val () = $X.free_nodes(nodes)
     in
@@ -5879,7 +6023,7 @@ in
            | ~NoContentBytes() => $P.ret<script>(NoScript())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
-               val nodes = $X.parse_document(xhtml_bytes, xhtml_size)
+               val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                val script = _script_make(xhtml_bytes, nodes, chapter)
                val () = $X.free_nodes(nodes)
                val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)

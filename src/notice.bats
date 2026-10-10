@@ -20,6 +20,24 @@ staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload "version.sats"
 staload "mem.sats"
 
+(* Where the error banner sits: at the top of the window (the reader with
+   its bars away, and before any view is shown), in the library's flow
+   above its header, or under the reader's top bar. The view says it
+   (banner_place_set) as it changes, instead of the stylesheet asking
+   `#bats-root:has(...)`: a :has() on the root that holds the chapter is
+   re-evaluated over its whole subtree at every change of the page's
+   chrome, which cost 16 to 27 ms a change on a 5 MB chapter, four times a
+   page turn (#423) *)
+#pub datatype banner_place = BannerAtTop | BannerInLibrary | BannerUnderBars
+
+#pub fn banner_place_set (place: banner_place): void
+
+implement banner_place_set (place) =
+  case+ place of
+  | BannerAtTop() => ui_attr("error-banner", AClass, "banner")
+  | BannerInLibrary() => ui_attr("error-banner", AClass, "banner in-library")
+  | BannerUnderBars() => ui_attr("error-banner", AClass, "banner under-bars")
+
 (* Whether the error banner is up *)
 val _banner_up = ref<bool>(false)
 

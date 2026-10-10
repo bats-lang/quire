@@ -77,7 +77,20 @@ export async function pageMargins(page) {
       if (node.parentElement.closest('sup,sub,rt,rtc,rp')) continue;
       const range = document.createRange();
       range.selectNodeContents(node);
-      for (const r of range.getClientRects()) {
+      // a box inside the page that scrolls (a table, #413) clips its text
+      // to its own scrollport: what it holds past that is not drawn (#423)
+      const clips = [];
+      for (let a = node.parentElement; a && a !== doc; a = a.parentElement) {
+        const o = getComputedStyle(a);
+        if (o.overflowY === 'visible' && o.overflowX === 'visible') continue;
+        const b = a.getBoundingClientRect();
+        clips.push({ top: b.top + a.clientTop, bottom: b.top + a.clientTop + a.clientHeight, left: b.left + a.clientLeft, right: b.left + a.clientLeft + a.clientWidth });
+      }
+      for (const whole of range.getClientRects()) {
+        const r = { top: whole.top, bottom: whole.bottom, left: whole.left, right: whole.right, width: whole.width };
+        for (const c of clips) { r.top = Math.max(r.top, c.top); r.bottom = Math.min(r.bottom, c.bottom); r.left = Math.max(r.left, c.left); r.right = Math.min(r.right, c.right); }
+        r.width = r.right - r.left;
+        if (r.bottom <= r.top) continue;
         // the page's other columns lie beside it, out of sight
         if (r.width <= 0 || r.right <= box.left + 1 || r.left >= box.right - 1) continue;
         // the part of the line drawn: scrolled, a line at the
