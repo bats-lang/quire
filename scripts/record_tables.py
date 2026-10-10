@@ -14,6 +14,8 @@ BOOK_GROUPS = [
   ("SIZE", "opt", [("file_size", "i"), ("cover", "i"), ("done", "i")]),
   ("TIME", "opt", [("minutes_read", "i"), ("pages_read", "i")]),
   ("TITL", "req", [("title", "s")]),
+  # lower case first letter: ancillary, so a Quire that does not know it keeps it and still reads the record
+  ("prog", "opt", [("progress_weighted", "i")]),
 ]
 BOOK_KIND = 1
 INDEX_GROUPS = [

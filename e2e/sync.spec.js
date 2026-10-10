@@ -11,6 +11,7 @@ import {
   librarySettings, settingsButton, settingsScreen, restoreInput, exportedBackup, reload, jumpBack,
 } from './helpers.js';
 import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
+import { progressBooks } from './progress-books.js';
 
 /** A device: a browser context of its own, the folder routed in it */
 async function device(browser, server, time) {
@@ -576,4 +577,33 @@ test('the Settings screen\'s Sync row says whether sync is on, and when it last 
   await a.page.keyboard.press('Escape');
   await expect(row).toHaveText('Off');
   await a.context.close();
+});
+
+test('how far into the book the place is, weighted by the chapters, travels with the place and shows on the other device\'s card', async ({ browser }) => {
+  const server = webdav();
+  const opts = progressBooks.unequal.opts;
+  const file = epubFile(opts);
+  const a = await device(browser, server);
+  const b = await device(browser, server);
+  // A reads to the end of the long first chapter and syncs
+  await importFiles(a.page, [file], 1);
+  await openBook(a.page, opts.title);
+  // a turn is the reader's first move, which dates the place
+  await a.page.keyboard.press('ArrowRight');
+  await a.page.keyboard.press('End');
+  await toLibrary(a.page);
+  const onCard = async d => /(\d+)%/.exec(await d.page.getByRole('region', { name: /^(Continue reading|Books)$/ }).getByRole('group').first().innerText());
+  const read = +(await onCard(a))[1];
+  // by chapters it would be 10%
+  expect(read).toBeGreaterThanOrEqual(85);
+  await joinSync(a.page);
+  expect(server.json().books[0].progressWeighted).toBeGreaterThan(read * 10);
+  // B has the book, never opened: its card says what A's does, with no chapter weights of its own
+  await importFiles(b.page, [file], 1);
+  await joinSync(b.page);
+  await expect.poll(async () => +(await onCard(b))?.[1]).toBe(read);
+  expect(unexpected(a)).toEqual([]);
+  expect(unexpected(b)).toEqual([]);
+  await a.context.close();
+  await b.context.close();
 });
