@@ -32,7 +32,8 @@
       "w3c-epub-tests.spec.js",
       "publisher.spec.js",
       "spreads.spec.js",
-      "page-turn.spec.js"
+      "page-turn.spec.js",
+      "fractional-window.spec.js"
     ],
     "reading-tools": [
       "annotations.spec.js",
@@ -42,7 +43,8 @@
       "vertical.spec.js",
       "fixed.spec.js",
       "ruby.spec.js",
-      "modal-panels.spec.js"
+      "modal-panels.spec.js",
+      "touch-selection.spec.js"
     ],
     "sync": [
       "sync.spec.js",
@@ -115,6 +117,8 @@
       "accept/codec-length-ok",
       "accept/codec-roundtrip",
       "accept/fixed-box-fits",
+      "accept/page-height-whole",
+      "accept/page-width-whole",
       "accept/image-roundtrip",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
@@ -124,7 +128,9 @@
       "reject/back-nothing-to-offer",
       "reject/back-other-timeout",
       "reject/clip-past-end",
-      "reject/fixed-box-zoom-zero"
+      "reject/fixed-box-zoom-zero",
+      "reject/page-height-fraction",
+      "reject/page-width-fraction"
     ],
     "style": [
       "reject/role-unmatched"

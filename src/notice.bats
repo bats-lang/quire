@@ -356,6 +356,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
 (* What failed to a file or book that has a name *)
 #pub datatype named_failure =
   | NotAnEpub
+  | ArchiveSplit
+  | CompressionNotAllowed
   | ContainerDamaged
   | PackageMissing
   | PackageDamaged
@@ -421,6 +423,8 @@ fn remedy_of (failed: failure): remedy =
 fn named_remedy_of (failed: named_failure): remedy =
   case+ failed of
   | NotAnEpub() => ChooseAnotherFile()
+  | ArchiveSplit() => ChooseAnotherFile()
+  | CompressionNotAllowed() => ChooseAnotherFile()
   | ContainerDamaged() => ChooseAnotherFile()
   | PackageMissing() => ChooseAnotherFile()
   | PackageDamaged() => ChooseAnotherFile()
@@ -511,6 +515,8 @@ fn _named_what_put {l:agz}{at:nat | at <= 512}
   (out: !$A.arr(byte, l, 512), at: int at, failed: named_failure): [stop:nat | at <= stop; stop <= 512] int stop =
   case+ failed of
   | NotAnEpub() => _put_text(out, 512, at, " is not an EPUB: it has no container.xml, so it could not be imported")
+  | ArchiveSplit() => _put_text(out, 512, at, " is a zip split into segments, which an EPUB may not be, so it could not be imported")
+  | CompressionNotAllowed() => _put_text(out, 512, at, " has a file compressed in a way an EPUB may not use (only Deflate or none), so it could not be imported")
   | ContainerDamaged() => _put_text(out, 512, at, " has a damaged container.xml, so it could not be imported")
   | PackageMissing() => _put_text(out, 512, at, " has no package document (.opf), so it could not be imported")
   | PackageDamaged() => _put_text(out, 512, at, " has a damaged package document (.opf), so it could not be imported")

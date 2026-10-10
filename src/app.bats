@@ -553,6 +553,7 @@ fn _reader (): void = let
   (* scrolled, the chapter's last screen goes on to the next *)
   val () = ui_text_btn("reader", "next-chapter", "pback nextch", "Next chapter \xE2\x86\x92")
   val () = _hide("next-chapter")
+  val () = ui_el("reader", "selection-toolbar-floor", TDiv, "seltbfloor")
   val () = ui_el("reader", "selection-toolbar", TDiv, "seltb")
   val () = ui_named("selection-toolbar", NToolbar, "Selection")
   val () = ui_text_btn("selection-toolbar", "selection-highlight", "btn", "Highlight")

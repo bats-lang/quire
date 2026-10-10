@@ -413,6 +413,22 @@ implement ui_place_n (id, id_len, placement, tenths) = let
   val style_len = _place_style(style, placement, tenths)
 in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
 
+(* The selection toolbar's place (quire#428): where its top is and how
+   tall it is, in CSS pixels, as the custom properties the stylesheet's
+   `.seltb` rule reads and clamps to the window and the safe area:
+   "--seltb-top:120px;--seltb-height:48px". Numbers alone, so no colour or
+   anything else the stylesheet proves can be set from here *)
+#pub fn ui_toolbar_at {top,height:nat | top <= 10000; height <= 10000} (top: int top, height: int height): void
+
+implement ui_toolbar_at (top, height) = let
+  val style = $A.alloc<byte>(64)
+  val style_len = _put_text(style, 0, "--seltb-top:", 12, 0)
+  val style_len = $S.int_to_str(style, style_len, 64, top)
+  val style_len = _put_text(style, style_len, "px;--seltb-height:", 18, 0)
+  val style_len = $S.int_to_str(style, style_len, 64, height)
+  val style_len = _put_text(style, style_len, "px", 2, 0)
+in _set_attr_buf("selection-toolbar", $D.Style, style, style_len) end
+
 (* A fixed-layout page's box (reader.bats, made for each fixed page in
    the page): its width and height in CSS pixels and its zoom in
    thousandths, "width:600px;height:800px;zoom:62.5%". The one inline

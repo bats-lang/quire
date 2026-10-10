@@ -15,6 +15,7 @@ staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 staload "epub_xml.sats"
 staload "pages.sats"
 staload "paths.sats"
+staload "zipcheck.sats"
 staload "mem.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -96,6 +97,11 @@ implement $P.dispose<$IDB.stored>(_) = ()
    once, into its index; when it is not an archive (or its central
    directory is over 1 MiB) book_file is closed and no book is open, so every read with the serial
    finds nothing *)
+(* Why the last book_begin found the archive not allowed (zipcheck): it is
+   split into segments, or an entry is compressed by a method other than
+   stored or Deflate; ZipAllowed when it was not that *)
+#pub fn book_refusal (): zip_refusal
+
 #pub fn book_begin {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size): int
 
 (* The book being imported, book `serial` of file_size bytes, opened
@@ -373,6 +379,26 @@ fun book_entries_of {file_size:pos}{directory_size:int}{count,found_count:nat} .
         else book_entries_of(book_file, file_size, rest, BookEntry(data_offset, data_size, data_method, name_offset, name_len, found))
     end
 
+(* What the last archive was refused for, if it was (book_begin sets it) *)
+val _refusal = ref<zip_refusal>(ZipAllowed())
+
+fn _refusal_note (found: zip_refusal): void =
+  case+ found of
+  | ZipAllowed() => ()
+  | ZipSplit() => !_refusal := found
+  | ZipOtherCompression() => (case+ !_refusal of
+    | ZipSplit() => ()
+    | ZipAllowed() => !_refusal := found
+    | ZipOtherCompression() => ())
+
+fn _refused (): bool =
+  case+ !_refusal of
+  | ZipAllowed() => false
+  | ZipSplit() => true
+  | ZipOtherCompression() => true
+
+implement book_refusal () = !_refusal
+
 (* The file's index: its archive's end, central directory and
    every entry's local header, checked once; none when it is not an
    archive or its directory is over 1 MiB *)
@@ -381,6 +407,7 @@ fn book_index_make {file_size:pos} (book_file: !$BF.infile(file_size), file_size
   val tail = $A.alloc<byte>(tail_len)
   val () = $BF.file_read(book_file, file_size - tail_len, tail, tail_len)
   val found = $Z.find_cd(tail, tail_len, file_size)
+  val () = _refusal_note(zip_end_refusal(tail, tail_len))
   val () = $A.free<byte>(tail)
 in
   case+ found of
@@ -395,6 +422,7 @@ in
       else let
         val directory = $A.alloc<byte>(directory_size)
         val () = $BF.file_read(book_file, directory_offset, directory, directory_size)
+        val () = _refusal_note(zip_directory_refusal(directory, directory_size))
         val refs = $Z.cd_refs(directory, end_record, file_size)
         val+ ~$Z.zip_cd_mk(_, _, _) = end_record
       in
@@ -402,7 +430,12 @@ in
         | ~$R.none() => let
             val () = $A.free<byte>(directory)
           in $R.none() end
-        | ~$R.some(entry_refs) => let
+        | ~$R.some(entry_refs) =>
+          if _refused() then let
+            val () = $Z.zip_refs_free(entry_refs)
+            val () = $A.free<byte>(directory)
+          in $R.none() end
+          else let
             val entries = book_entries_of(book_file, file_size, entry_refs, BookEntriesNil())
           in $R.some(BookIndex(directory, directory_size, directory_offset, book_entries_rev(entries, BookEntriesNil()))) end
       end
@@ -656,6 +689,7 @@ implement decompress (data, data_len, method) =
 implement book_begin {file_size} (book_file, file_size) = let
   val () = !_book_serial := !_book_serial + 1
   val () = !_text_end := ~1
+  val () = !_refusal := ZipAllowed()
   val () = (case+ book_index_make(book_file, file_size) of
     | ~$R.some(index) => book_put(Importing(book_file, file_size, index))
     | ~$R.none() => let

@@ -427,6 +427,11 @@ ${doctype}
     chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
 
+  // opts.extraImages are manifest items, as an EPUB must declare what it holds
+  (opts.extraImages || []).forEach((img, k) => {
+    const type = /\.png$/i.test(img.name) ? 'image/png' : /\.jpe?g$/i.test(img.name) ? 'image/jpeg' : /\.svg$/i.test(img.name) ? 'image/svg+xml' : null;
+    if (type) manifestItems += `    <item id="extra-img${k}" href="${img.name}" media-type="${type}"/>\n`;
+  });
   for (const item of extraSpine) {
     manifestItems += `    <item id="${item.id}" href="${item.href}" media-type="${item.mediaType}"${item.fallback ? ` fallback="${item.fallback}"` : ''}/>\n`;
     spineItems += `    <itemref idref="${item.id}"/>\n`;
