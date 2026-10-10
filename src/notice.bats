@@ -364,6 +364,11 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | FileEmpty
   | FileNotRead
   | BookFileNotStored
+  | ProtectedByAdept
+  | ProtectedByLcp
+  | ProtectedByFairPlay
+  | ProtectedByKobo
+  | ProtectedUnknown
 
 (* The next step a banner offers: words, and for ReopenQuire a button *)
 #pub datatype remedy =
@@ -382,6 +387,7 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | SetAsideInSettings
   | SetAsideAgain
   | TryNextPhrase
+  | ReadWhereItCameFrom
 
 fn remedy_of (failed: failure): remedy =
   case+ failed of
@@ -423,6 +429,11 @@ fn named_remedy_of (failed: named_failure): remedy =
   | FileEmpty() => ChooseAnotherFile()
   | FileNotRead() => ChooseAnotherFile()
   | BookFileNotStored() => FreeSpace()
+  | ProtectedByAdept() => ReadWhereItCameFrom()
+  | ProtectedByLcp() => ReadWhereItCameFrom()
+  | ProtectedByFairPlay() => ReadWhereItCameFrom()
+  | ProtectedByKobo() => ReadWhereItCameFrom()
+  | ProtectedUnknown() => ReadWhereItCameFrom()
 
 fn _put_number_at {l:agz}{cap:pos}{at:nat | at <= cap}
   (out: !$A.arr(byte, l, cap), cap: int cap, at: int at, v: int): [stop:nat | at <= stop; stop <= cap] int stop = let
@@ -508,6 +519,11 @@ fn _named_what_put {l:agz}{at:nat | at <= 512}
   | FileEmpty() => _put_text(out, 512, at, " is empty, so it could not be imported")
   | FileNotRead() => _put_text(out, 512, at, " could not be read")
   | BookFileNotStored() => _put_text(out, 512, at, " is open, but its file could not be stored, so it will not open next time")
+  | ProtectedByAdept() => _put_text(out, 512, at, " is protected by Adobe DRM (ADEPT), which Quire cannot open, so it was not imported")
+  | ProtectedByLcp() => _put_text(out, 512, at, " is protected by Readium LCP, which Quire cannot open, so it was not imported")
+  | ProtectedByFairPlay() => _put_text(out, 512, at, " is protected by Apple FairPlay DRM, which Quire cannot open, so it was not imported")
+  | ProtectedByKobo() => _put_text(out, 512, at, " is protected by Kobo DRM, which Quire cannot open, so it was not imported")
+  | ProtectedUnknown() => _put_text(out, 512, at, " is encrypted by a DRM that Quire does not know and cannot open, so it was not imported")
 
 (* The next step, after the sentence it follows: it starts with its
    own separator *)
@@ -532,6 +548,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
   | SetAsideAgain() => _put_text(out, 512, at, ". Press Set aside unreadable records in Settings to try those again.")
   | SetAsideInSettings() => _put_text(out, 512, at, ". Settings can set them aside.")
   | TryNextPhrase() => _put_text(out, 512, at, ". Try Next phrase, or read the book without the narration.")
+  | ReadWhereItCameFrom() => _put_text(out, 512, at, ". Quire opens books without DRM only: read this one in the app it came from, or get a copy without DRM.")
 
 fn _reopens (next: remedy): bool =
   case+ next of
@@ -550,6 +567,7 @@ fn _reopens (next: remedy): bool =
   | SetAsideInSettings() => false
   | SetAsideAgain() => false
   | TryNextPhrase() => false
+  | ReadWhereItCameFrom() => false
 
 (* The error banner, saying what failed and what to do next (the one
    place the reader's words for a failure are made, #360) *)

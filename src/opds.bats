@@ -163,13 +163,24 @@ in resolved end
 
 #pub stadef ENTRIES_MOST = 500
 
+(* How a book's acquisition links stand: none; some, none of them
+   protected; or the one to a licence of a DRM Quire has no client for
+   (Adobe ADEPT's application/vnd.adobe.adept+xml, Readium LCP's
+   application/vnd.readium.lcp.license.v1.0+json), which, with no EPUB
+   to get, is why a book cannot be got (quire#427) *)
+#pub datatype acquiring =
+  | NoAcquisition
+  | OtherAcquisition
+  | AdeptAcquisition
+  | LcpAcquisition
+
 (* A page's entries: a link (its title and address) or a book (its
    title, author, cover's address and EPUB's address; the cover and
    EPUB empty when it has none) *)
 #pub datavtype entries(int) =
   | EntriesNil(0) of ()
   | {count:nat} EntryLink(count + 1) of (kept, kept, entries(count))
-  | {count:nat} EntryBook(count + 1) of (kept, kept, kept, kept, entries(count))
+  | {count:nat} EntryBook(count + 1) of (kept, kept, kept, kept, acquiring, entries(count))
 
 fun _entries_free {count:nat} .<count>. (list: entries(count)): void =
   case+ list of
@@ -178,7 +189,7 @@ fun _entries_free {count:nat} .<count>. (list: entries(count)): void =
       val () = kept_free(title)
       val () = kept_free(address)
     in _entries_free(rest) end
-  | ~EntryBook(title, author, cover, epub, rest) => let
+  | ~EntryBook(title, author, cover, epub, _, rest) => let
       val () = kept_free(title)
       val () = kept_free(author)
       val () = kept_free(cover)
@@ -189,7 +200,7 @@ fun _reverse {count,done:nat} .<count>. (list: entries(count), reversed: entries
   case+ list of
   | ~EntriesNil() => reversed
   | ~EntryLink(title, address, rest) => _reverse(rest, EntryLink(title, address, reversed))
-  | ~EntryBook(title, author, cover, epub, rest) => _reverse(rest, EntryBook(title, author, cover, epub, reversed))
+  | ~EntryBook(title, author, cover, epub, acquiring, rest) => _reverse(rest, EntryBook(title, author, cover, epub, acquiring, reversed))
 
 (* A page: its title, entries and how many, and the addresses of its
    next page, previous page, search template and search description *)
@@ -211,7 +222,7 @@ fn _feed_empty (): feed = Feed(kept_none(), EntriesNil(), 0, kept_none(), kept_n
 (* One entry read, or none *)
 datavtype one_entry =
   | OneLink of (kept, kept)
-  | OneBook of (kept, kept, kept, kept)
+  | OneBook of (kept, kept, kept, kept, acquiring)
   | NoEntry of ()
 
 (* page with entry added (past ENTRIES_MOST, dropped); its entries
@@ -227,8 +238,8 @@ in
       val () = kept_free(link_title)
       val () = kept_free(address)
     in Feed(title, list, count, next, previous, template, description) end
-  | ~OneBook(book_title, author, cover, epub) =>
-    if count < 500 then Feed(title, EntryBook(book_title, author, cover, epub, list), count + 1, next, previous, template, description)
+  | ~OneBook(book_title, author, cover, epub, acquiring) =>
+    if count < 500 then Feed(title, EntryBook(book_title, author, cover, epub, acquiring, list), count + 1, next, previous, template, description)
     else let
       val () = kept_free(book_title)
       val () = kept_free(author)
@@ -252,9 +263,9 @@ datavtype link = Link of (kept, kept, kept, kept)
    previous pages, search template and search description. An
    entry's: its EPUB 3, any EPUB, thumbnail, image and another page;
    and whether it had an acquisition link *)
-datavtype picks = Picks of (kept, kept, kept, kept, kept, bool)
+datavtype picks = Picks of (kept, kept, kept, kept, kept, acquiring)
 
-fn _picks_empty (): picks = Picks(kept_none(), kept_none(), kept_none(), kept_none(), kept_none(), false)
+fn _picks_empty (): picks = Picks(kept_none(), kept_none(), kept_none(), kept_none(), kept_none(), NoAcquisition())
 
 fn _picks_free (found: picks): void = let
   val+ ~Picks(first, second, third, fourth, fifth, _) = found
@@ -269,6 +280,22 @@ in kept_free(fifth) end
 datatype link_list = PageLinks | EntryLinks | ImageLinks
 
 fn _is_acquisition (rel: !kept): bool = _kept_starts(rel, "http://opds-spec.org/acquisition")
+
+(* The acquisitions of an entry once one more link is met: a protected
+   one is kept over the others, the first of them over a later *)
+fn _acquiring_merge (old: acquiring, link: acquiring): acquiring =
+  case+ old of
+  | AdeptAcquisition() => old
+  | LcpAcquisition() => old
+  | OtherAcquisition() => (case+ link of NoAcquisition() => old | _ => link)
+  | NoAcquisition() => link
+
+fn _acquiring_any (acquired: acquiring): bool =
+  case+ acquired of
+  | NoAcquisition() => false
+  | OtherAcquisition() => true
+  | AdeptAcquisition() => true
+  | LcpAcquisition() => true
 
 (* found, with what the link given gives in a list of links of kind *)
 fn _pick (kind: link_list, found: picks, given: link): picks = let
@@ -299,6 +326,8 @@ in
   | EntryLinks() => let
     val acquisition = _is_acquisition(rel)
     val epub = (if acquisition then _kept_starts(kind_of, "application/epub+zip") else false): bool
+    val adept = (if acquisition then _kept_starts(kind_of, "application/vnd.adobe.adept+xml") else false): bool
+    val lcp = (if acquisition then _kept_starts(kind_of, "application/vnd.readium.lcp.license.v1.0+json") else false): bool
     val epub3 = (if epub then (if _kept_has(address, "epub3") then true else _kept_has(kind_of, "version=3")) else false): bool
     val thumbnail = (if _kept_is(rel, "http://opds-spec.org/image/thumbnail") then true
       else _kept_is(rel, "x-stanza-cover-image-thumbnail")): bool
@@ -310,7 +339,9 @@ in
       else _kept_has(kind_of, "opds+json")): bool
     val () = kept_free(rel)
     val () = kept_free(kind_of)
-    val acquired = (if acquisition then true else acquired): bool
+    val link_acquiring = (if adept then AdeptAcquisition() else if lcp then LcpAcquisition()
+      else if acquisition then OtherAcquisition() else NoAcquisition()): acquiring
+    val acquired = _acquiring_merge(acquired, link_acquiring)
   in
     if epub3 then let
       val address_copy = kept_dup(address)
@@ -330,9 +361,9 @@ fn _entry_of (base: !kept, title: kept, author: kept, found: picks): one_entry =
   val epub = _first(epub3, epub)
   val cover = _first(thumbnail, image)
 in
-  if (if kept_len(epub) > 0 then true else acquired) then let
+  if (if kept_len(epub) > 0 then true else _acquiring_any(acquired)) then let
     val () = kept_free(other_page)
-  in OneBook(title, author, _resolve_free(base, cover), _resolve_free(base, epub)) end
+  in OneBook(title, author, _resolve_free(base, cover), _resolve_free(base, epub), acquired) end
   else let
     val () = kept_free(epub)
     val () = kept_free(cover)
