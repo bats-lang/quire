@@ -764,6 +764,50 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+## Spine items and fallbacks (#419)
+
+The W3C's EPUB 3 test suite (`reports/quire-w3c-epub-tests.md`) found that
+a spine item was read as XHTML whatever its type: a 3 MB PNG as a spine
+item killed the page (`lay-pp-images-in-spine`), a JSON or XML one was
+shown as text and the fallback its manifest names was never followed.
+
+* **A spine item shows a content document** (`find_chapter_shown_href_n`
+  in `src/epub_xml.bats`, used by `_spine_chapters` in `src/reader.bats`):
+  the item itself when its media type is `application/xhtml+xml`,
+  `image/svg+xml`, `text/html`, an OEB 1 or DTBook document (read through,
+  quire#416) or none is given; else the item its `fallback` names, and so on
+  down the chain (at most 16 items, so a loop ends), as EPUB 3.3 §3.3
+  says. An item with the property `scripted` and a fallback is replaced by
+  the fallback too, since Quire runs no scripts (`scr-support-fallback`;
+  one with no fallback is shown, scripts unrun). An itemref none of whose
+  items is a content document is left out of the chapters, so the reader
+  never turns to it and never reads its bytes as XHTML; the book opens at
+  the next. Decided by the spec and the suite's reports: EPUB 3.3 (§3.3,
+  §3.5.1) makes a foreign resource valid in the spine only with a manifest
+  fallback to a content document, and the suite's own pass criterion is
+  that the fallback is shown; the W3C working group's minutes (2022-03-11)
+  found few reading systems that show it, so the suite's reports hold
+  the comparison (`lay-pp-images-in-spine` 2/2, `pub-foreign_json-spine`
+  4/9 pass). No documentation of what Thorium or Readium do with a
+  spine item they cannot render with no fallback was found (searched:
+  the specs, the working group's minutes, Readium's wiki); skipping it is
+  chosen because the alternatives are a page of binary text or refusing the
+  whole book, and no word of the book is lost. The
+  chapters' count is the count kept, not the itemrefs' (`_spine_chapters`
+  returns both).
+* **An `<img>` whose manifest item is a type no browser draws and has a
+  fallback is shown as the fallback** (`pub-foreign_image`): at the
+  spine build the items that are not a core image type and have a
+  `fallback` are found (`find_image_fallback_n`, `find_image_target`: the
+  chain down to a core image, 16 items at most, 256 items at most) and
+  their entry paths kept (`image_fallbacks`, replaced by the next book's),
+  and `_show_image` shows the target's entry when the image's path is a
+  kept one, so the image viewer does too.
+* **The title and author are the first `dc:title` and `dc:creator`**
+  (`_opf_metadata_node`), as EPUB 3.3 §5.4 makes the first title the main
+  one and a reader needs one author (`pkg-title-order`,
+  `pkg-creator-order`). EPUB 3's `title-type` refinement is not read.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
