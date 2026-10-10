@@ -25,6 +25,7 @@ staload "layer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
+staload "wellformed.sats"
 staload "settings.sats"
 staload "stats.sats"
 staload "annot.sats"
@@ -3631,8 +3632,19 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   in $P.ret<load_outcome>(ChapterNotRead()) end
                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
 
-                  (* Parse XHTML with xml-tree *)
                   val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                in
+                  (* A document that is not well formed is an error, as it is
+                     for a reading system that is a non-validating XML
+                     processor (EPUB RS 3.3 §3.1, the suite's
+                     pub-xml-non-validating_unclosed and pub-xml-names) *)
+                  case+ xml_well_formed(xhtml_bytes, xhtml_size) of
+                  | Malformed() => let
+                      val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+                      val () = piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen))
+                      val () = _overlay_pending_put(NoOverlayPending())
+                    in $P.ret<load_outcome>(ChapterNotRead()) end
+                  | WellFormed() => let
                   val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
                   val () = !_chapter_bytes := xhtml_size
 
@@ -3705,6 +3717,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   | Single() => $P.ret<load_outcome>(ChapterShown())
                   | AloneLeft() => $P.ret<load_outcome>(ChapterShown())
                   | AloneRight() => $P.ret<load_outcome>(ChapterShown())
+                end
                 end
               end)
             end

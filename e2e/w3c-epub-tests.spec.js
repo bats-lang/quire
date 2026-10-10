@@ -9,7 +9,7 @@
 import { test, expect } from './fixtures.js';
 import { w3cBooks, W3C_TEXT } from './w3c-books.js';
 import {
-  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText,
+  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo,
 } from './helpers.js';
 
 /** Imports the book of that name from w3c-books.js (what makes it the
@@ -18,6 +18,15 @@ async function readW3cBook(page, name, title) {
   const before = await cards(page).count();
   await importFiles(page, [rawFile(`${name}.epub`, w3cBooks[name].bytes())], before + 1);
   await openBook(page, title);
+}
+
+/** Imports the book, and goes as far into it as the reader lets: the
+    book's card is opened when there is one */
+async function tryW3cBook(page, name) {
+  await importInput(page).setInputFiles(rawFile(`${name}.epub`, w3cBooks[name].bytes()));
+  await page.waitForTimeout(2000);
+  if (await cards(page).count() > 0) await cards(page).first().click();
+  await page.waitForTimeout(2000);
 }
 
 /** The images of the page shown: each is loaded (a picture), or not */
@@ -110,3 +119,41 @@ test('pub-foreign_image (must): an image of a type the reader does not show is r
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
+// ---- Publication Resources: XML that is not well formed ----
+
+test('pub-xml-non-validating_unclosed (must): a content document with an unclosed element is reported as an error', async ({ page }, testInfo) => {
+  await start(page);
+  await tryW3cBook(page, 'unclosed-tag');
+  await expectBannerSaysWhatToDo(page, testInfo);
+  await expect(page.getByRole('alert')).toContainText('could not be read');
+});
+
+test('pub-xml-names (must): a content document with an invalid element name is reported as an error', async ({ page }, testInfo) => {
+  await start(page);
+  await tryW3cBook(page, 'double-colon-name');
+  await expectBannerSaysWhatToDo(page, testInfo);
+});
+
+test('well formed markup that looks odd is not refused: comments, CDATA, empty elements, a ">" in an attribute, a processing instruction', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'odd-markup', 'Odd but well formed markup');
+  await expect.poll(() => visibleText(page)).toContain('shown.');
+});
+
+// ---- Open Container Format: the zip ----
+
+test('ocf-zip-comp (must): an archive with an entry compressed by anything but Deflate is refused', async ({ page }, testInfo) => {
+  await start(page);
+  await importInput(page).setInputFiles(rawFile('zip-bzip2.epub', w3cBooks['zip-bzip2'].bytes()));
+  await expectBannerSaysWhatToDo(page, testInfo);
+  await expect(page.getByRole('alert')).toContainText('Deflate');
+  await expect(cards(page)).toHaveCount(0);
+});
+
+test('ocf-zip-mult (must): an archive split into segments is refused', async ({ page }, testInfo) => {
+  await start(page);
+  await importInput(page).setInputFiles(rawFile('zip-split.epub', w3cBooks['zip-split'].bytes()));
+  await expectBannerSaysWhatToDo(page, testInfo);
+  await expect(page.getByRole('alert')).toContainText('split');
+  await expect(cards(page)).toHaveCount(0);
+});
