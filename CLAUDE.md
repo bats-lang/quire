@@ -2044,6 +2044,51 @@ whichever way the area changes (`e2e/layout.spec.js`, "the place stays
 when the reading area changes"); where the page breaks fall is the
 layout's, as in Kindle and Books.
 
+## Touch selection (#428)
+
+`e2e/touch-selection.spec.js` plays a long press (Chromium's touch
+emulation of the mouse), a handle drag (as the selection it makes: quire
+draws no handles, the browser does), a selection across a column gap and
+an image, the footnote popup, the toolbar's place, and a tap that ends a
+selection. Its header holds the research; the decisions it led to:
+
+* **A selection holds the page.** While text is selected, or was when
+  the pointer went down on the page (`_press_selected`; Chrome clears the
+  selection on the press), a pan does nothing and a commit puts the page
+  back (`_selection_holds`, `_on_gestures`): the finger that drags the
+  selection's handles, or one put down on it, never turns the page.
+* **A tap that began on a selection only ends it.** `_press_selected` is
+  recorded at `pointerdown` on the page; the click that follows turns
+  nothing and brings up no bars (the platform's rule for text selection:
+  a tap outside clears it and does nothing else; Apple Books, Play Books
+  and the Kindle document nothing different).
+* **The toolbar is for the chapter's text.** It shows only when the
+  selection starts in a content node of the page (`annot_selection_in_page`),
+  so text selected in the footnote popup has none: Highlight and Note
+  cannot work there, and a control that cannot work is not shown.
+* **The toolbar lies over neither the text nor the handles.** It is
+  placed from the selection's rectangle on every `selectionchange`
+  (`_toolbar_place`, `ui_toolbar_at`, which writes only two numbers as
+  the custom properties `--seltb-top` and `--seltb-height`): above the
+  selection with an 8 px gap (Flutter's `TextSelectionToolbar` anchors
+  above and falls below only where there is no room), else below the end
+  handle with 20 px clearance (Firefox for Android moves its floating
+  toolbar 20dp off the selection so it does not lie over the bottom
+  handles). The stylesheet's `.seltb` clamps the top to the window and the
+  safe area. Above is chosen only where it clears the safe area's top: wasm
+  cannot read the inset, so a hidden probe (`selection-toolbar-floor`,
+  `.seltbfloor`) is as tall as `max(8px, var(--safe-top))` and is measured.
+* **Edge of the page.** A selection stops at the page: the page does not
+  turn while a handle is held at its edge (Moon+ Reader scrolls on, Kindle
+  and Google Books reportedly flip; nothing found documents Apple Books or
+  Play Books; a quire page is a CSS column and a selection is one range, so
+  a highlight across two pages is two highlights).
+* **Not done, needs bridge (p3).** Tapping a highlight to select it, and
+  Highlight replacing that annotation's range with an Undo offer, need a
+  `select_range` atom (and `clear_selection`, so Highlight can end the
+  selection it made); bridge has `get_selection_*` and `mark_range` only.
+  The two re-selection tests are `test.fixme` until then.
+
 ## A page that stops answering in e2e explains itself (#244)
 
 Every spec takes `test` from `e2e/fixtures.js` (`e2e/global-setup.js`
