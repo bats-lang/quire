@@ -27,6 +27,7 @@ implement $P.dispose<settled>(_) = ()
 #pub datatype offered(offer_life) =
   | MovedToTrash(UntilDismissed) of ()
   | HighlightDeleted(UntilDismissed) of ()
+  | HighlightRangeChanged(UntilDismissed) of ()
   | BookmarkDeleted(UntilDismissed) of ()
   | LibraryTrashed(UntilDismissed) of ()
   | SettingsReset(UntilDismissed) of ()
@@ -45,6 +46,7 @@ fn _offered_text {life:offer_life} (what: offered(life)): [text_len:pos | text_l
   case+ what of
   | MovedToTrash() => "Book moved to the Trash"
   | HighlightDeleted() => "Highlight deleted"
+  | HighlightRangeChanged() => "Highlight changed"
   | BookmarkDeleted() => "Bookmark deleted"
   | LibraryTrashed() => "Library moved to the Trash, settings reset"
   | SettingsReset() => "Settings reset"

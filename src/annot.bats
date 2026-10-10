@@ -877,11 +877,219 @@ fn _index_of (chapter: Int, start_node: Int, start_offset: Int): int = let
   val () = _put(cell)
 in found end
 
+fun _note_at {count:nat} .<count>. (annotations: !annotations(count), i: int): [l:agz][note_len:nat | note_len <= NOTE_MAX] @($A.arr(byte, l, note_len + 1), int note_len) =
+  case+ annotations of
+  | annotations_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, _, note, note_len, _, _, rest) =>
+    if i = 0 then let
+      val note_copy = _copy_prefix(note, note_len)
+      val copy_len = note_len
+      prval () = fold@(annotations)
+    in @(note_copy, copy_len) end
+    else let
+      val found = _note_at(rest, i - 1)
+      prval () = fold@(annotations)
+    in found end
+
+
+(* ============================================================
+   Tapping a highlight selects it (quire#428)
+   ============================================================ *)
+
+(* The highlight a tap selected: its chapter, start node and start
+   offset (a node of -1 when none), kept until the selection ends or
+   Highlight replaces it. It is found again by these when it is used,
+   never by an index, which an insertion or a deletion moves *)
+val _tapped_chapter = ref<Int>(0)
+val _tapped_node = ref<Int>(~1)
+val _tapped_offset = ref<Int>(0)
+
+(* Whether the last annot_highlight replaced the range of a highlight
+   the reader had tapped, instead of making a new one *)
+val _replaced = ref<bool>(false)
+
+(* The tapped highlight is forgotten: the selection it made has ended *)
+#pub fn annot_tap_forget (): void
+implement annot_tap_forget () = !_tapped_node := ~1
+
+(* Whether the last annot_highlight replaced a tapped highlight's range *)
+#pub fn annot_replaced (): bool
+implement annot_replaced () = !_replaced
+
+(* Whether (node_a, offset_a) is at or before (node_b, offset_b) *)
+fn _at_or_before (node_a: int, offset_a: int, node_b: int, offset_b: int): bool =
+  if node_a < node_b then true
+  else if node_a = node_b then offset_a <= offset_b
+  else false
+
+(* The first highlight of chapter shown_chapter that holds the point
+   (node, offset): from its start up to, not including, its end. Its
+   range is returned with whether there is one *)
+fun _holding {count:nat} .<count>. (annotations: !annotations(count), shown_chapter: int, node: int, offset: int): @(bool, Int, Int, Int, Int) =
+  case+ annotations of
+  | annotations_nil() => @(false, 0, 0, 0, 0)
+  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, _, _, _, _, _, _, _, _, _, rest) =>
+    if (if _is_highlight(kind) then (if chapter = shown_chapter then (if start_node >= 0 then (if _at_or_before(start_node, start_offset, node, offset) then ~_at_or_before(end_node, end_offset, node, offset) else false) else false) else false) else false) then let
+      val range = @(true, start_node, start_offset, end_node, end_offset)
+      prval () = fold@(annotations)
+    in range end
+    else let
+      val found = _holding(rest, shown_chapter, node, offset)
+      prval () = fold@(annotations)
+    in found end
+
+(* The range from offset start_offset of content node start_node's text
+   to offset end_offset of end_node's, made the selection *)
+fn _select_range (start_node: Int, start_offset: Int, end_node: Int, end_offset: Int): $DR.range_selection =
+  if start_node < 0 then $DR.NoSuchElement()
+  else if end_node < 0 then $DR.NoSuchElement()
+  else let
+    val @(start_id, start_id_len) = nid_pad3("c", start_node)
+    val @(end_id, end_id_len) = nid_pad3("c", end_node)
+    val @(start_frozen, start_bytes) = $A.freeze<byte>(start_id)
+    val @(end_frozen, end_bytes) = $A.freeze<byte>(end_id)
+    val selected = $DR.select_range(start_bytes, start_id_len, start_offset, end_bytes, end_id_len, end_offset)
+    val () = release_bytes(end_frozen, end_bytes)
+    val () = release_bytes(start_frozen, start_bytes)
+  in selected end
+
+(* A tap on content node node, at offset offset of its text: when it
+   is on a highlight of the chapter shown, that highlight is the
+   selection (so the selection toolbar is up with it) and is
+   remembered, and the answer is true: the tap is the highlight's. A
+   selection the browser refuses is said, and the tap is still the
+   highlight's *)
+#pub fn annot_tap_select (node: int, offset: int): bool
+
+implement annot_tap_select (node, offset) =
+  if ~$DR.selection_available() then false
+  else if node < 0 then false
+  else let
+    val shown_chapter = _chapter()
+    val cell = _take()
+    val+ @AnnotationsCell(annotations, _) = cell
+    val @(found, start_node, start_offset, end_node, end_offset) = _holding(annotations, shown_chapter, node, offset)
+    prval () = fold@(cell)
+    val () = _put(cell)
+  in
+    if ~found then false
+    else (case+ _select_range(start_node, start_offset, end_node, end_offset) of
+      | $DR.RangeSelected() => let
+          val () = !_tapped_chapter := shown_chapter
+          val () = !_tapped_node := start_node
+          val () = !_tapped_offset := start_offset
+        in true end
+      | $DR.NoSuchElement() => let val () = notice_say(HighlightNotSelected()) in true end
+      | $DR.SelectionRefused() => let val () = notice_say(HighlightNotSelected()) in true end)
+  end
+
+(* The selection is ended; said when the platform cannot *)
+#pub fn annot_selection_end (): void
+
+implement annot_selection_end () =
+  case+ $DR.clear_selection() of
+  | $DR.SelectionCleared() => ()
+  | $DR.SelectionUnavailable() => notice_say(SelectionNotEnded())
+
+(* Annotation index's kind, chapter, range and page; false when there
+   is no annotation index *)
+fun _range_at {count:nat} .<count>. (annotations: !annotations(count), i: int): @(bool, annotation_kind, Int, Int, Int, Int, Int, Int) =
+  case+ annotations of
+  | annotations_nil() => @(false, Bookmark(), 0, 0, 0, 0, 0, 0)
+  | @annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, _, _, _, _, _, _, _, _, rest) =>
+    if i = 0 then let
+      val range = @(true, kind, chapter, start_node, start_offset, end_node, end_offset, page)
+      prval () = fold@(annotations)
+    in range end
+    else let
+      val found = _range_at(rest, i - 1)
+      prval () = fold@(annotations)
+    in found end
+
+fun _text_at {count:nat} .<count>. (annotations: !annotations(count), i: int): [l:agz][text_len:nat | text_len <= TEXT_MAX] @($A.arr(byte, l, text_len + 1), int text_len) =
+  case+ annotations of
+  | annotations_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
+  | @annotations_cons(_, _, _, _, _, _, _, _, _, text, text_len, _, _, _, _, rest) =>
+    if i = 0 then let
+      val text_copy = _copy_prefix(text, text_len)
+      val copy_len = text_len
+      prval () = fold@(annotations)
+    in @(text_copy, copy_len) end
+    else let
+      val found = _text_at(rest, i - 1)
+      prval () = fold@(annotations)
+    in found end
+
+(* Annotation index given the range [start, end) in kind, with text as
+   its quoted text and its note kept: the old one is deleted and the new
+   one added, so sync passes on one deletion and one new annotation *)
+fn _reshape {text_loc:agz}{text_len:nat | text_len <= TEXT_MAX}
+  (index: int, kind: annotation_kind, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int,
+   text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len): void = let
+  val cell = _take()
+  val+ @AnnotationsCell(annotations, _) = cell
+  val @(note, note_len) = _note_at(annotations, index)
+  prval () = fold@(cell)
+  val () = _put(cell)
+  val () = _delete(index)
+  val () = _add(kind, chapter, start_node, start_offset, end_node, end_offset, page, text, text_len, note, note_len)
+in annot_marks() end
+
+(* The highlight the tap selected, as an index: when it is still there
+   and the selection (start_node ... end_offset) overlaps it, else -1.
+   The selection a handle took elsewhere is a new highlight *)
+fn _tapped_find (chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int): int =
+  if !_tapped_node < 0 then ~1
+  else if !_tapped_chapter <> chapter then ~1
+  else let
+    val index = _index_of(chapter, !_tapped_node, !_tapped_offset)
+    val cell = _take()
+    val+ @AnnotationsCell(annotations, _) = cell
+    val @(found, kind, _, old_start_node, old_start_offset, old_end_node, old_end_offset, _) = _range_at(annotations, index)
+    prval () = fold@(cell)
+    val () = _put(cell)
+  in
+    if index < 0 then ~1
+    else if ~found then ~1
+    else if ~_is_highlight(kind) then ~1
+    else if _at_or_before(end_node, end_offset, old_start_node, old_start_offset) then ~1
+    else if _at_or_before(old_end_node, old_end_offset, start_node, start_offset) then ~1
+    else index
+  end
+
+(* Highlight index's range replaced by the selection's, its note kept,
+   and an Undo offered that puts the old range back *)
+fn _replace_range {text_loc:agz}{text_len:nat | text_len <= TEXT_MAX}
+  (index: int, style: highlight_style, chapter: Int, start_node: Int, start_offset: Int, end_node: Int, end_offset: Int, page: Int,
+   text: $A.arr(byte, text_loc, text_len + 1), text_len: int text_len): void = let
+  val cell = _take()
+  val+ @AnnotationsCell(annotations, _) = cell
+  val @(_, old_kind, _, old_start_node, old_start_offset, old_end_node, old_end_offset, old_page) = _range_at(annotations, index)
+  val @(old_text, old_text_len) = _text_at(annotations, index)
+  prval () = fold@(cell)
+  val () = _put(cell)
+  val () = _reshape(index, _highlight_of(style), chapter, start_node, start_offset, end_node, end_offset, page, text, text_len)
+in
+  $P.finish<settled>(undo_offer(HighlightRangeChanged()), llam(how) =>
+    case+ how of
+    | Undone() => let
+        (* the highlight, found by the range it has now *)
+        val now = _index_of(chapter, start_node, start_offset)
+      in
+        if (if now >= 0 then _changeable() else false) then let
+          val () = _reshape(now, old_kind, chapter, old_start_node, old_start_offset, old_end_node, old_end_offset, old_page, old_text, old_text_len)
+        in annot_star() end
+        else $A.free<byte>(old_text)
+      end
+    | Final() => $A.free<byte>(old_text))
+end
+
 (* The selection, as a highlight of the chapter shown in style: its index, or -1 when nothing is
    selected in the chapter's text *)
 #pub fn annot_highlight (style: highlight_style): int
 
 implement annot_highlight (style) = let
+  val () = !_replaced := false
   val @(start_blob, end_blob) = $DR.get_selection_range()
   val start_offset = $DR.get_measure_x()
   val end_offset = $DR.get_measure_y()
@@ -900,9 +1108,20 @@ in
         val () = $A.free<byte>(selected)
         val chapter = _chapter()
         val page = (case+ reading_get() of @(shown_page, _, _, _) => shown_page): Int
-        val () = _add(_highlight_of(style), chapter, start_node, start_offset, end_node, end_offset, page, text, text_len, $A.alloc<byte>(1), 0)
-        val () = annot_marks()
-      in _index_of(chapter, start_node, start_offset) end)
+        (* a highlight the reader tapped, then took to another range,
+           is changed, not added to (quire#428) *)
+        val tapped = _tapped_find(chapter, start_node, start_offset, end_node, end_offset)
+        val () = annot_tap_forget()
+      in
+        if tapped >= 0 then let
+          val () = !_replaced := true
+          val () = _replace_range(tapped, style, chapter, start_node, start_offset, end_node, end_offset, page, text, text_len)
+        in _index_of(chapter, start_node, start_offset) end
+        else let
+          val () = _add(_highlight_of(style), chapter, start_node, start_offset, end_node, end_offset, page, text, text_len, $A.alloc<byte>(1), 0)
+          val () = annot_marks()
+        in _index_of(chapter, start_node, start_offset) end
+      end)
 end
 
 (* Whether the selection starts in the chapter's text (a content node of
@@ -962,20 +1181,6 @@ implement annot_note_set (index, text, text_len) =
   prval () = fold@(cell)
   val () = _put(cell)
 in _save() end
-
-fun _note_at {count:nat} .<count>. (annotations: !annotations(count), i: int): [l:agz][note_len:nat | note_len <= NOTE_MAX] @($A.arr(byte, l, note_len + 1), int note_len) =
-  case+ annotations of
-  | annotations_nil() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
-  | @annotations_cons(_, _, _, _, _, _, _, _, _, _, _, note, note_len, _, _, rest) =>
-    if i = 0 then let
-      val note_copy = _copy_prefix(note, note_len)
-      val copy_len = note_len
-      prval () = fold@(annotations)
-    in @(note_copy, copy_len) end
-    else let
-      val found = _note_at(rest, i - 1)
-      prval () = fold@(annotations)
-    in found end
 
 (* The note of annotation index, in the dialog's text area *)
 #pub fn annot_note_show (index: int): void

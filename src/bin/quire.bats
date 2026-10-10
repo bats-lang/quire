@@ -2397,6 +2397,12 @@ fn _toolbar_place (): void = let
   val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
 in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
 
+(* The selection made a highlight in style (or changed the range of the
+   one that was tapped), and ended: Highlight leaves nothing selected *)
+fn _highlight_selection (style: highlight_style): void = let
+  val index = annot_highlight(style)
+in if index >= 0 then annot_selection_end() else () end
+
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
   val listeners = RCons(listeners, OnEl("bookmark-button"), "click", llam(_) => let
       val () = annot_bookmark_toggle(reader_anchor())
@@ -2406,6 +2412,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         (* only text of the chapter can be highlighted or noted: a
            selection in the note's popup has no toolbar (quire#428) *)
         val selected = (if _has_selection() then annot_selection_in_page() else false)
+        (* the selection ended: a highlight the reader tapped is let go *)
+        val () = (if _has_selection() then () else annot_tap_forget())
         val () = ui_show("selection-toolbar", selected)
         val () = (if selected then let val () = _lookup_update(1) in _toolbar_place() end else ())
       in 0 end else 0)
@@ -2415,10 +2423,14 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val () = _target_free(clicked)
       val () = (case+ control of
         | ~$R.none() => ()
-        | ~$R.some(SelectionHighlight()) => let val _ = annot_highlight(Yellow()) in () end
-        | ~$R.some(SelectionOrange()) => let val _ = annot_highlight(Orange()) in () end
-        | ~$R.some(SelectionUnderline()) => let val _ = annot_highlight(Underlined()) in () end
-        | ~$R.some(SelectionNote()) => annot_ask_note(annot_highlight(Yellow()), true)
+        | ~$R.some(SelectionHighlight()) => _highlight_selection(Yellow())
+        | ~$R.some(SelectionOrange()) => _highlight_selection(Orange())
+        | ~$R.some(SelectionUnderline()) => _highlight_selection(Underlined())
+        (* a note on a highlight that was tapped is that highlight's note:
+           cancelling it takes nothing away *)
+        | ~$R.some(SelectionNote()) => let
+            val index = annot_highlight(Yellow())
+          in annot_ask_note(index, ~annot_replaced()) end
         | ~$R.some(SelectionCopy()) => _copy_selection()
         | ~$R.some(SelectionSearch()) => _search_selection()
         | ~$R.some(SelectionDefine()) => dict_show()
@@ -2512,6 +2524,13 @@ fn _wire_search {count:nat} (listeners: regs(count)): regs(count + 4) = let
     in 0 end)
 in listeners end
 
+(* Whether the tap at (x, y) on content node node is on a highlight, now
+   selected *)
+fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
+  case+ $DR.caret_position_from_point(x, y) of
+  | ~$R.none() => false
+  | ~$R.some(offset) => annot_tap_select(node, offset)
+
 fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
@@ -2533,6 +2552,9 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
       else if _has_selection() then 0
       else if !_dragged then 0
       else if (if node >= 0 then reader_link_at(node) else false) then 0
+      (* a tap between the sides' zones on a highlight selects it, with
+         the selection toolbar (quire#428) *)
+      else if (if node >= 0 then (if _in_middle(x) then _highlight_tapped(node, x, y) else false) else false) then 0
       (* a single tap on an image is a tap on the page: the sides turn
          it, the middle brings up the bars; the image is shown full
          screen by a double tap or a long press (quire#365) *)

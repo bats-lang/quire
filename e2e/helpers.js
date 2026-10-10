@@ -335,6 +335,14 @@ export async function showChrome(page) {
     const box = await bookPage(page).boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForTimeout(150);
+    // a tap between the zones on a highlight selects it, with its toolbar
+    // (quire#428), and brings up no bars: the selection is ended and the
+    // t key, which toggles them, brings them up
+    if (!(await prev.isVisible()) && (await page.evaluate(() => getSelection().toString() !== ''))) {
+      await page.evaluate(() => getSelection().removeAllRanges());
+      await page.keyboard.press('t');
+      await page.waitForTimeout(150);
+    }
   }
   await expect(prev).toBeVisible();
 }
