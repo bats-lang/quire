@@ -2061,11 +2061,34 @@ selection. Its header holds the research; the decisions it led to:
   and Google Books reportedly flip; nothing found documents Apple Books or
   Play Books; a quire page is a CSS column and a selection is one range, so
   a highlight across two pages is two highlights).
-* **Not done, needs bridge (p3).** Tapping a highlight to select it, and
-  Highlight replacing that annotation's range with an Undo offer, need a
-  `select_range` atom (and `clear_selection`, so Highlight can end the
-  selection it made); bridge has `get_selection_*` and `mark_range` only.
-  The two re-selection tests are `test.fixme` until then.
+* **Tapping a highlight selects it** (`annot_tap_select`, the page's
+  click in `src/bin/quire.bats`; bridge's `select_range`, `clear_selection`
+  and `selection_available`). A tap between the sides' zones (the side
+  zones keep turning the page) finds the highlight of the chapter shown
+  that holds the tapped point (the tapped content node and the caret's
+  offset there, `caret_position_from_point`), makes its range the selection,
+  so the one selection toolbar is up with it, and remembers it by its
+  chapter, start node and offset (never by index, which an insertion
+  moves). Research: Apple Books and the Kindle apps show a highlight's menu
+  on a tap on it (Apple Books: idownloadblog.com/2020/01/22/highlights-notes-apple-books-app/;
+  Kindle: tomsguide.com/how-to/how-to-highlight-text-and-make-notes-on-your-kindle);
+  a Kobo offers handles on the highlight, which its users call terrible,
+  since they will not move while the menu is up
+  (mobileread.com/forums/showthread.php?p=3803381). Quire has one toolbar,
+  so the tap makes the highlight the selection and the handles are the
+  browser's. Highlight, Orange and Underline then replace that annotation's
+  range when the selection still overlaps it (else the selection is a new
+  highlight, as when a handle was taken elsewhere): `_reshape` deletes and
+  adds, so sync passes on a deletion and a new annotation, and the note is
+  kept; `undo_offer(HighlightRangeChanged())` puts the old range, its text
+  and the kind back (found by the range it has by then). Note on a tapped
+  highlight changes the range the same way and opens that highlight's note,
+  which cancelling does not delete. The remembered highlight is let go when
+  the selection ends. After Highlight, Orange and Underline the selection is
+  cleared (`annot_selection_end`), so the text is not left selected under
+  the page. A `select_range` that is refused or finds no element is said
+  (`HighlightNotSelected`), and a selection that cannot be cleared too
+  (`SelectionNotEnded`): every constructor of both atoms is matched.
 
 ## A page that stops answering in e2e explains itself (#244)
 

@@ -352,6 +352,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | GrantNoAnswer
   | TextNotCopied
   | DetailsNotCopied
+  | HighlightNotSelected
+  | SelectionNotEnded
 
 (* What failed to a file or book that has a name *)
 #pub datatype named_failure =
@@ -387,6 +389,8 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | SetAsideInSettings
   | SetAsideAgain
   | TryNextPhrase
+  | SelectByHand
+  | TapToEndSelection
   | ReadWhereItCameFrom
 
 fn remedy_of (failed: failure): remedy =
@@ -417,6 +421,8 @@ fn remedy_of (failed: failure): remedy =
   | GrantNoAnswer() => RemoveGrantByHand()
   | TextNotCopied() => CopyByHand()
   | DetailsNotCopied() => CopyByHand()
+  | HighlightNotSelected() => SelectByHand()
+  | SelectionNotEnded() => TapToEndSelection()
 
 fn named_remedy_of (failed: named_failure): remedy =
   case+ failed of
@@ -505,6 +511,8 @@ fn _what_put {l:agz}{at:nat | at <= 512}
     (case+ where_ of
     | InBrowser() => _put_text(out, 512, at, "The details could not be copied: the browser did not allow it")
     | InApp() => _put_text(out, 512, at, "The details could not be copied: the device did not allow it"))
+  | HighlightNotSelected() => _put_text(out, 512, at, "That highlight could not be selected, so its range is unchanged")
+  | SelectionNotEnded() => _put_text(out, 512, at, "The highlight was saved, but the selection could not be cleared")
 
 (* What happened to the file or book named, after its name *)
 fn _named_what_put {l:agz}{at:nat | at <= 512}
@@ -548,6 +556,8 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
   | SetAsideAgain() => _put_text(out, 512, at, ". Press Set aside unreadable records in Settings to try those again.")
   | SetAsideInSettings() => _put_text(out, 512, at, ". Settings can set them aside.")
   | TryNextPhrase() => _put_text(out, 512, at, ". Try Next phrase, or read the book without the narration.")
+  | SelectByHand() => _put_text(out, 512, at, ". Press and hold the text to select it yourself, then use the toolbar.")
+  | TapToEndSelection() => _put_text(out, 512, at, ". Tap elsewhere on the page to end the selection.")
   | ReadWhereItCameFrom() => _put_text(out, 512, at, ". Quire opens books without DRM only: read this one in the app it came from, or get a copy without DRM.")
 
 fn _reopens (next: remedy): bool =
@@ -567,6 +577,8 @@ fn _reopens (next: remedy): bool =
   | SetAsideInSettings() => false
   | SetAsideAgain() => false
   | TryNextPhrase() => false
+  | SelectByHand() => false
+  | TapToEndSelection() => false
   | ReadWhereItCameFrom() => false
 
 (* The error banner, saying what failed and what to do next (the one
