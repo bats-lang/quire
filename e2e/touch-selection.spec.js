@@ -270,6 +270,16 @@ async function settled(page) {
 async function open(page, name, opts = {}) {
   await start(page);
   await readBook(page, selectionBooks[name].opts);
+  // hyphenation depends on the browser's dictionaries, which a machine may
+  // or may not have, and a line that begins with the rest of a hyphenated
+  // word moves where a drag to the line's start ends: the text is set
+  // without it, as on every machine
+  await openReadingSettings(page, 'Page');
+  const hyphenation = readingSettings(page).getByRole('button', { name: 'Hyphenation', exact: true });
+  if ((await hyphenation.getAttribute('aria-pressed')) === 'true') await hyphenation.click();
+  await expect(hyphenation).toHaveAttribute('aria-pressed', 'false');
+  await page.keyboard.press('Escape');
+  await expect(readingSettings(page)).toBeHidden();
   if (opts.oneColumn) await oneColumn(page);
   // the bars are up as the book opens, and go in a few seconds
   await expect(control(page, 'Previous page')).toBeHidden({ timeout: 20000 });
