@@ -98,27 +98,47 @@ which does not carry environment secrets.
 
 ### 4. Build
 
-Push to main. When the `check` workflow's `android` job is done,
-download `release-aab` from the run's artifacts.
+Push to main. The `check` workflow's `android` job builds and signs the
+AAB and APK and uploads them as the run's `release-aab` and
+`release-apk` artifacts.
 
 ### 5. Release: internal testing first, then production
 
 Every release goes through Play's **internal testing** track before
-production:
+production, and every push to main that passes the whole check gets
+there by itself (#308): the `check` workflow's `play-internal` job,
+after the e2e groups and the Android build and smoke test pass, sends
+that run's `release-aab` to the internal track as a completed release
+(`scripts/play-release.sh`, the Play Developer API's edits). Play names
+the release by its versionName, the commit's version; its notes are the
+commit's subject (cut to Play's 500 characters). An edit is committed
+with `ERROR_IF_IN_REVIEW`, so a change in review is never cancelled by
+it; that release fails instead, and the next push to main tries again.
+`tests/play-release/run.sh` checks the script against a stub of Play.
 
-1. In the Play Console, under Testing › Internal testing, create a
-   release and upload the `.aab` from `release-aab`.
-2. Install it from Play on a test device, as a tester, not by
+The job signs in by Workload Identity Federation, so no key is stored:
+GitHub's OIDC token is exchanged for a token of the service account
+`quire-play-release` (Google Cloud project "Quire",
+`spring-duality-395520`), which has no Cloud role and only Play's
+**Release apps to testing tracks** for Quire. The provider admits only a
+push to main of bats-lang/quire (`assertion.repository ==
+'bats-lang/quire' && assertion.ref == 'refs/heads/main' &&
+assertion.event_name == 'push'`). Its name and the account's address are
+public, committed in `scripts/play-release.env`.
+
+Then:
+
+1. Install the release from Play on a test device, as a tester, not by
    sideloading. A device that has the production app installed needs no
    uninstall: Play updates it in place.
-3. Check what the release changed on that device. Play signs it with the
+2. Check what the release changed on that device. Play signs it with the
    app signing key, as production is, so Google sign-in, Drive sync and
    anything else tied to the signing certificate behave as they will in
    production. A sideloaded `release-apk` is signed with the upload key
    instead, and Google refuses its sign-in (`DEVELOPER_ERROR`): Quire's
    Android OAuth client is registered with Play's app signing SHA-1
    (`scripts/sync-clients.env`).
-4. Then promote that same release to production, in the Play Console.
+3. Then promote that same release to production, in the Play Console.
 
 The `release-apk` artifact stays for quick checks that don't involve
 anything tied to the signing key.
