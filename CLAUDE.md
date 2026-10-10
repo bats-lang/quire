@@ -610,8 +610,22 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
-### Wide and structured content (#413)
+### Note popups (#414)
 
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+### Wide and structured content (#413)
 A table is its own scroll container (`.caf table`: `overflow: auto`), at
 most as wide as the column and as tall as the reading area
 (`calc(100dvh - var(--page-top) - var(--page-bottom))`, as a picture is):
@@ -625,9 +639,7 @@ indents made of the book's CSS (`text-indent`, `padding-left`, hanging)
 are not kept, since no publisher CSS is applied (#411), and a wrapped
 line of verse is told from a new one only by the text.
 `e2e/wide.spec.js` plays `e2e/wide-books.js`.
-
 ### Position stability and page-turner keys (#412)
-
 The place is a content node (the first paragraph that begins on the page,
 `_anchor_kept`), not a page: `e2e/stability.spec.js` changes each of the
 theme, font, size, line spacing, paragraph spacing, margins and columns,
