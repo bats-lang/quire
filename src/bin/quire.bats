@@ -2032,6 +2032,10 @@ fn _reader_key (pressed: key, held: modifiers): void =
      to the page: down on, up back, and the volume left as it is *)
   | VolumeDown() => if _volume_turns() then let val () = $EV.prevent_default() in _next() end else ()
   | VolumeUp() => if _volume_turns() then let val () = $EV.prevent_default() in _previous() end else ()
+  (* a page turner's multimedia mode sends the media keys (the DuRoBo
+     Moodi's: previous and next track) *)
+  | MediaNext() => let val () = $EV.prevent_default() in _next() end
+  | MediaPrevious() => let val () = $EV.prevent_default() in _previous() end
   | HomeKey() => let val () = $EV.prevent_default() in reader_page(0) end
   | EndKey() => let val () = $EV.prevent_default() in reader_page(1000000) end
   | LetterB() => annot_bookmark_toggle(reader_anchor())
@@ -2329,15 +2333,14 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         | ~$R.some(BookmarksTab()) => _bookmarks_open()
         | ~$R.some(PagesTab()) => _pages_open()
         | ~$R.none() =>
-        if print_page >= 0 then let
-          val () = layer_close(LContents())
-        in reader_goto_page(print_page) end
+        if print_page >= 0 then
+          (* a row that leads nowhere keeps the panel up: nothing moved *)
+          (if reader_goto_page(print_page) then layer_close(LContents()) else ())
         else if bookmark_go >= 0 then let val () = layer_close(LContents()) in _annotation_go(bookmark_go) end
         else if bookmark_delete >= 0 then annot_delete_bookmark(bookmark_delete)
         else if bookmark_note >= 0 then annot_ask_note(bookmark_note, false)
-        else if contents_row >= 0 then let
-          val () = layer_close(LContents())
-        in reader_goto_entry(contents_row) end
+        else if contents_row >= 0 then
+          (if reader_goto_entry(contents_row) then layer_close(LContents()) else ())
         else ())
     in 0 end)
   val listeners = RCons(listeners, OnEl("jump-back"), "click", llam(_) => let val () = reader_back() in 0 end)
