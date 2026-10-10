@@ -358,7 +358,23 @@ fn _of_thousandth (thousandth: Int, total: Int): Int =
 fn _permille (chapter: Int, page: Int, page_count: Int): [thousandth:nat | thousandth <= 1000] int thousandth = let
   val @(size_before, chapter_size, book_size) = book_weights(book_serial(), chapter)
   val page_thousandth = (if page_count > 0 then page * 1000 / page_count else 0): Int
-in _thousandth(size_before + _of_thousandth(page_thousandth, chapter_size), book_size) end
+  (* the last page of the text has its end on it: 100%, whatever the
+     page's start is (#426); the back matter after the text is 100% too,
+     since book_weights gives it no size *)
+  val last_page_of_text = (if book_size > 0 then (if chapter_size > 0 then (if size_before + chapter_size >= book_size then page + 1 >= page_count else false) else false) else false): bool
+in
+  if last_page_of_text then 1000
+  else _thousandth(size_before + _of_thousandth(page_thousandth, chapter_size), book_size)
+end
+
+(* What the library keeps of how far into the book a place is (its
+   progress_weighted): the thousandth plus one, 0 when the chapters' sizes
+   are not known *)
+fn _weighed_stored (chapter: Int, page: Int, page_count: Int): Int = let
+  val @(_, _, book_size) = book_weights(book_serial(), chapter)
+in
+  if book_size <= 0 then 0 else _permille(chapter, page, page_count) + 1
+end
 
 (* The pages of the rest of the book after a chapter (chapter_index), in
    its pages (page_count of them), by the chapters' sizes; -1 when that is not
@@ -1658,7 +1674,11 @@ in
     else if !_dated_chapter < 0 then ()
     else let
       val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
+      val weighed = _weighed_stored(chapter_index, page, page_count)
+      (* the end of the text is the end of the book: its last page, or the
+         back matter after it, finishes it (#426) *)
       val at_end = (if chapter_count > 0 then (if chapter >= chapter_count then page + 1 >= page_count else false) else false): bool
+      val at_end = (if at_end then true else weighed >= 1001): bool
       val minutes_read = !_book_minutes
       val pages_read = !_book_pages
       val () = !_book_minutes := 0
@@ -1687,7 +1707,7 @@ in
         (* finished now: a change sync passes on *)
         finished_modified = (if at_end then (if record.done = 0 then stamp_now() else record.finished_modified) else record.finished_modified),
         minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
-        place_modified = (if moved then stamp_now() else record.place_modified), place_declined = record.place_declined }) end)
+        place_modified = (if moved then stamp_now() else record.place_modified), place_declined = record.place_declined, progress_weighted = weighed }) end)
       val () = lib_touch(book_index)
     in lib_save() end
 end
@@ -1761,7 +1781,8 @@ fun _chapter_at {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (thousandth:
     val @(size_before, chapter_size, book_size) = book_weights(book_serial(), i)
     val position = _of_thousandth(thousandth, book_size)
   in
-    if (if position < size_before + chapter_size then true else i + 1 >= chapter_count) then
+    (* a chapter of no size is back matter, the text's end (#426) *)
+    if (if position < size_before + chapter_size then true else if chapter_size <= 0 then true else i + 1 >= chapter_count) then
       @(i, _thousandth(position - size_before, chapter_size))
     else _chapter_at(thousandth, i + 1, chapter_count)
   end

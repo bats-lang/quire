@@ -665,17 +665,13 @@ async function theAnnotation(page) {
   return { rows, text };
 }
 
-// FIXME (p3, needs bridge): tapping a highlight must make its range the
-// selection, and no atom of bridge's sets a selection (dom_read has
-// get_selection_text, get_selection_rect and get_selection_range, and
-// mark_range draws a highlight without selecting). Needed in bridge: a
-// `select_range` (start node id + offset, end node id + offset) and a
-// `clear_selection`. Then quire's page click finds the annotation at the
-// tapped node, selects its range, remembers its index, and Highlight
-// replaces that annotation's range (note kept) behind an Undo offer
-// (`HighlightRangeChanged`).
+// A tap between the sides' zones on a highlight selects its range (bridge's
+// `select_range`) and brings up the toolbar; the end handle takes the
+// selection to the new range; Highlight replaces that annotation's range (its
+// note kept) behind an Undo offer (`HighlightRangeChanged`), and ends the
+// selection (`clear_selection`).
 for (const how of ['extend', 'shorten']) {
-  test.fixme(`a highlight is re-selected to ${how} it: tapping it shows its toolbar, and the new range replaces the old with its note kept, undoably`, async ({ page }, testInfo) => {
+  test(`a highlight is re-selected to ${how} it: tapping it shows its toolbar, and the new range replaces the old with its note kept, undoably`, async ({ page }, testInfo) => {
     await open(page, 'prose', { oneColumn: true });
     const words = await pageWords(page);
     // the highlight is three words round the page's middle (so a tap on

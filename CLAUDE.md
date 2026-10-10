@@ -1121,6 +1121,69 @@ too); until it commits nothing is saved. "lib" itself is never changed or
 deleted, so an older Quire still finds it; a "lib" that is not a QLB1 to
 6 record is a library that could not be read.
 
+## How far through the book: by the text's size, to the text's end (#426)
+
+`_progress` (the library card and Book info) counted every spine item the
+same, so a book of 3 long chapters and 10 short notes read 23% at the end
+of its text, and a cover, a title page and a copyright page started a
+book at 20%; the reader's footer and scrubber already weighed chapters by
+size (`book_weights`). They are one rule now, written down here first, by
+research:
+
+* **By size, not by spine item.** Readium's positions are a resource's
+  size in 1024-byte steps (the W3C EPUB working group's thread on page
+  lists: Adobe since 2007, Readium-based apps since; some systems divide
+  the zip entry's size, as `book_weights` does), and Kobo's percentage
+  follows the book's words or size, not its pages (MobileRead users on
+  the same book as an EPUB and a KEPUB, where 160 of 405 pages and 812 of
+  2607 differ). Kindle's is a location, which is also size. Nothing
+  comparable counts spine items, except for a fixed-layout book, where
+  every spine item is one page of the same worth and the page indicator
+  counts them: `book_weights` gives each chapter 1 when every chapter is a
+  fixed page (`book_all_fixed`).
+* **The text's end is 100%.** Kindle counts the back matter in the
+  percentage, and its readers say what the Mudita forum's reader said
+  (64% to 100% on the last page of the text) and keep a bookmark where the
+  notes begin; Kindle's own "end of book" is the cure Quire takes. The
+  EPUB 3 landmarks' `backmatter` entry (the same nav `toc_start_dest`
+  reads `bodymatter` from, `PartEnd` in `src/toc.bats`) names the first
+  chapter of the back matter; `toc_build` hands it to
+  `book_text_end_set`, and from that chapter on `book_weights` gives
+  nothing (before = total, own = 0), so the total is the text's, the
+  back matter reads 100%, and the scrubber, the ticks and the time left
+  follow. A book with no such landmark counts all of it. `epub:type` inside
+  a chapter is not read: that is every chapter opened, for one that is
+  not the book's. A `backmatter` landmark at the first chapter is no end.
+* **The page's start, but the last page of the text is 100%.** The
+  footer has always said where the page starts (a first page is 0%, a
+  second "<1%"); the page that holds the text's last line says 100%
+  (`_permille`), so the percentage is not 98% on a finished book. The book
+  is finished (`done`) when the percentage is 100%, which for a book
+  without back matter is the last page, as before, and for one with it is
+  the end of the text (`_weighed_stored` >= 1001 in `_record_position`).
+* **Stored once, carried with the place.** The library cannot weigh a
+  book it has not opened, so the reader keeps the thousandth of the place
+  (`progress_weighted`: the thousandth plus one, 0 when never worked out,
+  decoded once into a `progress_basis`, `ByChapters | Weighed`, by
+  `_progress`) beside the place whenever it saves it. A book not read
+  since keeps the old count by chapters until it is. It is the record's
+  `prog` group (lower case: ancillary, so a Quire without it keeps it and
+  reads the record, as for any unknown chunk; every group before it is
+  capital), the backup's and the sync file's `progressWeighted`, slot
+  `SLOT_PROGRESS_WEIGHTED` taken whenever the place is (`_take_place`),
+  and the 18th number of an orphan record ("QO1"). A file that does not
+  have it gives 0, so a place restored or synced from an older Quire is
+  counted by chapters until the book is read here.
+* The size is the entry's size in the archive, as before: the e2e books
+  store their chapters, so it is their bytes. A book whose chapters
+  compress very unlike each other weighs them by compressed size; the
+  uncompressed size is in the zip's directory and is not carried to the
+  chapters yet.
+
+`e2e/progress.spec.js` (books in `e2e/progress-books.js`, checked by
+epubcheck) plays each of #426's cases, and backup and sync carrying the
+number (`e2e/sync.spec.js`).
+
 ## A library that cannot be read says why, and offers what fits (#374)
 
 Bridge's IndexedDB read says why it failed: `Unreadable(cause)` carries a
@@ -2233,11 +2296,34 @@ selection. Its header holds the research; the decisions it led to:
   and Google Books reportedly flip; nothing found documents Apple Books or
   Play Books; a quire page is a CSS column and a selection is one range, so
   a highlight across two pages is two highlights).
-* **Not done, needs bridge (p3).** Tapping a highlight to select it, and
-  Highlight replacing that annotation's range with an Undo offer, need a
-  `select_range` atom (and `clear_selection`, so Highlight can end the
-  selection it made); bridge has `get_selection_*` and `mark_range` only.
-  The two re-selection tests are `test.fixme` until then.
+* **Tapping a highlight selects it** (`annot_tap_select`, the page's
+  click in `src/bin/quire.bats`; bridge's `select_range`, `clear_selection`
+  and `selection_available`). A tap between the sides' zones (the side
+  zones keep turning the page) finds the highlight of the chapter shown
+  that holds the tapped point (the tapped content node and the caret's
+  offset there, `caret_position_from_point`), makes its range the selection,
+  so the one selection toolbar is up with it, and remembers it by its
+  chapter, start node and offset (never by index, which an insertion
+  moves). Research: Apple Books and the Kindle apps show a highlight's menu
+  on a tap on it (Apple Books: idownloadblog.com/2020/01/22/highlights-notes-apple-books-app/;
+  Kindle: tomsguide.com/how-to/how-to-highlight-text-and-make-notes-on-your-kindle);
+  a Kobo offers handles on the highlight, which its users call terrible,
+  since they will not move while the menu is up
+  (mobileread.com/forums/showthread.php?p=3803381). Quire has one toolbar,
+  so the tap makes the highlight the selection and the handles are the
+  browser's. Highlight, Orange and Underline then replace that annotation's
+  range when the selection still overlaps it (else the selection is a new
+  highlight, as when a handle was taken elsewhere): `_reshape` deletes and
+  adds, so sync passes on a deletion and a new annotation, and the note is
+  kept; `undo_offer(HighlightRangeChanged())` puts the old range, its text
+  and the kind back (found by the range it has by then). Note on a tapped
+  highlight changes the range the same way and opens that highlight's note,
+  which cancelling does not delete. The remembered highlight is let go when
+  the selection ends. After Highlight, Orange and Underline the selection is
+  cleared (`annot_selection_end`), so the text is not left selected under
+  the page. A `select_range` that is refused or finds no element is said
+  (`HighlightNotSelected`), and a selection that cannot be cleared too
+  (`SelectionNotEnded`): every constructor of both atoms is matched.
 
 ## A page that stops answering in e2e explains itself (#244)
 

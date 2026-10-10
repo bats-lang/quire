@@ -25,6 +25,7 @@
       "stability.spec.js",
       "keys.spec.js",
       "landmarks.spec.js",
+      "progress.spec.js",
       "pagelist.spec.js",
       "epub2.spec.js",
       "epubcheck.spec.js",
