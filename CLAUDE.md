@@ -119,7 +119,9 @@ it (`appVersion`), and gen-pwa appends it to the Android project's
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI writes it for a pull request's
 own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
+in `check.yml`, should a queue be switched on) from the group's own
+commit (`github.sha`). `tests/version/same.sh` checks that it is the
 same in other time zones and that the Android project carries it.
 
 ## To do: book memory in a rolling window of page arenas
@@ -608,8 +610,56 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
-### Where a book opens the first time (#409)
+### Note popups (#414)
 
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+### Wide and structured content (#413)
+A table is its own scroll container (`.caf table`: `overflow: auto`), at
+most as wide as the column and as tall as the reading area
+(`calc(100dvh - var(--page-top) - var(--page-bottom))`, as a picture is):
+a block that scrolls cannot be split between columns, so a table taller
+than the page, as it was (`overflow-x` made it scrollable too), lost every
+row past the page's foot (90 rows: the first six were all that could be
+read). `pre` wraps (`white-space: pre-wrap`) and keeps its spaces, tabs
+and blank lines, and, being no scroll container, continues over the pages.
+Verse keeps its `<br/>` lines and the indents made of no-break spaces;
+indents made of the book's CSS (`text-indent`, `padding-left`, hanging)
+are not kept, since no publisher CSS is applied (#411), and a wrapped
+line of verse is told from a new one only by the text.
+`e2e/wide.spec.js` plays `e2e/wide-books.js`.
+### Position stability and page-turner keys (#412)
+The place is a content node (the first paragraph that begins on the page,
+`_anchor_kept`), not a page: `e2e/stability.spec.js` changes each of the
+theme, font, size, line spacing, paragraph spacing, margins and columns,
+and the window (paged, two columns, scrolled, vertical, fixed-layout),
+several in a row, and kills the app after each, and the paragraph is on the
+page shown (the one at the page's middle is not: a page's first
+paragraph is what is kept); a book converted from each of QLB1 to QLB6
+opens at its stored chapter, page and anchor (`e2e/legacy-library.js`
+holds the old record and the store for it, as `library-records.spec.js`
+uses them). Keys: the page turns by the arrows, Page Up and Down, Space
+(Shift for back), the volume keys when the reader chooses (the Android
+app's), and MediaTrackNext and MediaTrackPrevious (a page turner's
+multimedia mode: the DuRoBo Moodi sends previous and next track there, its
+reading mode the volume keys; the others in the field send the arrows or Page
+Up and Down). Enter follows the focused link and is no page key. Keys are not
+the page's while a text field or a panel has the focus, and a volume key is
+the system's while a panel is open. `QUIRE_PORT` in `playwright.config.js` is
+the port the app is served on, so two runs of the suite from two checkouts
+do not serve each other's build.
+### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
 opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
 DAISY's knowledge base and Thorium's "Start of Content" have it), not at
@@ -627,13 +677,11 @@ is the first chapter's first page, no move has been dated
 back at its first page, opens at its kept place. The chapters, contents
 and fonts are made ready first (`_book_prepare`), so the cover is never
 shown before the jump; the jump is not dated, as no open is.
-
 The landmarks are not listed in Contents (issue #409: Apple Books uses
 the bodymatter landmark to open the book and lists none, Calibre's viewer
 shows none, only Thorium has a Landmarks list; publishers put the
 contents page, index and list of illustrations in the table of contents
 too, so the list would repeat it).
-
 `e2e/landmarks.spec.js` plays the books in `e2e/landmark-books.js`
 (`createEpub`'s `landmarks`, `guide` and `epub2`), and
 `e2e/epubcheck.spec.js` checks every book there with epubcheck (5.2.1,
@@ -641,6 +689,51 @@ pinned with its SHA-256 in `check.yml`; `EPUBCHECK_JAR` names the jar
 locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
+### Publisher styling and the reader's settings (#411)
+No part of a book's own styling reaches the page: the CSS (a `<style>`, a
+style attribute, `!important`, a media rule) is dropped with the rest, and
+so are the obsolete presentational attributes (`<font>`, `bgcolor`,
+`width`), so a book's sizes, colours, grounds, margins, alignment, line
+height and font cannot fight the size, theme, margins, Justify, spacing and
+Font settings, and no theme has a light slab. That is the opposite of
+Readium CSS (Thorium), which keeps the publisher's styles unless the reader
+turns advanced settings on, and in which an `!important` in a book can beat
+a setting. What only CSS hid (`display:none` by a rule or a style
+attribute) is shown, there being no CSS to say it; the `hidden` attribute is
+HTML's own word and is kept: `_pass_attrs` gives an element that has it the
+class `hidden-by-book`, which the stylesheet hides. `e2e/publisher.spec.js`
+plays `e2e/publisher-books.js`.
+
+### The print page list and page breaks (#415)
+
+The Pages tab lists the page list's entries as the book gives them (not
+sorted, duplicates kept, each going to its own target); an entry whose chapter
+the book lacks is listed and leads nowhere (the panel stays), one whose fragment
+is missing goes to its chapter, an empty page list shows no tab. The
+footer names the latest page the screen reaches, from the break's `title`, else
+its `aria-label`, whichever of `epub:type="pagebreak"` or `role="doc-pagebreak"`
+the element has, with no page list too; a break with neither is shown and names
+no page. A label in the contents or the page list is decoded as any text is
+(numeric references too) and cut at a whole character.
+`e2e/pagelist.spec.js` plays `e2e/pagelist-books.js`.
+### EPUB 2 packages (#416)
+A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
+an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
+document order, whatever their `playOrder`; one with no `content` is listed
+and leads nowhere, one with no label is "Untitled"), its cover the
+manifest item a `<meta name="cover">` names, its `<guide>`'s `text`
+reference where a first open lands (#409), its author the first
+`dc:creator` as written (`opf:file-as` is not read: books are sorted by
+the name shown). XHTML 1.1's named entities (`&nbsp;`, `&mdash;`) are
+decoded as any text's are. A DTBook or OEB 1 spine item (`application/x-dtbook+xml`,
+`text/x-oeb1-document`, which a package names an XHTML fallback for) is read
+as XML and its text shown. A Hebrew book whose spine names no direction
+reads right to left, as Readium reads it. A row of the contents or the
+page list that leads nowhere keeps the panel up (`reader_goto_entry` and
+`reader_goto_page` say whether they went).
+`e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
+`creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
+under epubcheck 2.0 rules except those invalid on purpose.
 
 ### Found while taking this inventory
 
@@ -670,6 +763,50 @@ entry lists.
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
+
+## Spine items and fallbacks (#419)
+
+The W3C's EPUB 3 test suite (`reports/quire-w3c-epub-tests.md`) found that
+a spine item was read as XHTML whatever its type: a 3 MB PNG as a spine
+item killed the page (`lay-pp-images-in-spine`), a JSON or XML one was
+shown as text and the fallback its manifest names was never followed.
+
+* **A spine item shows a content document** (`find_chapter_shown_href_n`
+  in `src/epub_xml.bats`, used by `_spine_chapters` in `src/reader.bats`):
+  the item itself when its media type is `application/xhtml+xml`,
+  `image/svg+xml`, `text/html`, an OEB 1 or DTBook document (read through,
+  quire#416) or none is given; else the item its `fallback` names, and so on
+  down the chain (at most 16 items, so a loop ends), as EPUB 3.3 §3.3
+  says. An item with the property `scripted` and a fallback is replaced by
+  the fallback too, since Quire runs no scripts (`scr-support-fallback`;
+  one with no fallback is shown, scripts unrun). An itemref none of whose
+  items is a content document is left out of the chapters, so the reader
+  never turns to it and never reads its bytes as XHTML; the book opens at
+  the next. Decided by the spec and the suite's reports: EPUB 3.3 (§3.3,
+  §3.5.1) makes a foreign resource valid in the spine only with a manifest
+  fallback to a content document, and the suite's own pass criterion is
+  that the fallback is shown; the W3C working group's minutes (2022-03-11)
+  found few reading systems that show it, so the suite's reports hold
+  the comparison (`lay-pp-images-in-spine` 2/2, `pub-foreign_json-spine`
+  4/9 pass). No documentation of what Thorium or Readium do with a
+  spine item they cannot render with no fallback was found (searched:
+  the specs, the working group's minutes, Readium's wiki); skipping it is
+  chosen because the alternatives are a page of binary text or refusing the
+  whole book, and no word of the book is lost. The
+  chapters' count is the count kept, not the itemrefs' (`_spine_chapters`
+  returns both).
+* **An `<img>` whose manifest item is a type no browser draws and has a
+  fallback is shown as the fallback** (`pub-foreign_image`): at the
+  spine build the items that are not a core image type and have a
+  `fallback` are found (`find_image_fallback_n`, `find_image_target`: the
+  chain down to a core image, 16 items at most, 256 items at most) and
+  their entry paths kept (`image_fallbacks`, replaced by the next book's),
+  and `_show_image` shows the target's entry when the image's path is a
+  kept one, so the image viewer does too.
+* **The title and author are the first `dc:title` and `dc:creator`**
+  (`_opf_metadata_node`), as EPUB 3.3 §5.4 makes the first title the main
+  one and a reader needs one author (`pkg-title-order`,
+  `pkg-creator-order`). EPUB 3's `title-type` refinement is not read.
 
 ## The platform, in Bats
 
@@ -1289,12 +1426,61 @@ meets the duplicate dialog, so it also says to choose Replace.
 `notice_error` is private; `tests/static/notice.py` (in
 `tests/static/run.sh`) rejects `notice_error(` outside `notice.bats` and
 a wildcard in a match of `ArchiveFailed(_)` (`tests/static/notice/reject`).
-Import's causes are matched one by one (`_archive_named`); no case
-detects DRM, so none is blamed. A sync's result texts, made by
+Import's causes are matched one by one (`_archive_named`); only a book
+that declares its protection is blamed on DRM (below), never a damaged one. A sync's result texts, made by
 `sync.bats` from its `sync_result`, go through `notice_sync_said`.
 `expectBannerSaysWhatToDo` (`e2e/helpers.js`) checks a banner has a
 Reopen Quire button or words naming the step, and in the android project
 no "browser".
+
+## A book that declares its protection is refused, named (#427)
+
+A file that *declares* its encryption is not a guess, so it is refused at
+import, before its container.xml is read (`_protection_check` in
+`src/import.bats`, only for an import, since a stored book was checked
+then), with the scheme named and not added to the library. What it looks
+for, in this order: `META-INF/license.lcpl` (Readium LCP,
+`ProtectedByLcp`), `META-INF/sinf.xml` (Apple FairPlay,
+`ProtectedByFairPlay`), `META-INF/rights.xml` (Adobe ADEPT,
+`ProtectedByAdept`); then `META-INF/encryption.xml` read by
+`encryption_of` (`src/epub_xml.bats`): `ns.adobe.com/adept` (ADEPT),
+`readium.org/2014/01/lcp` (LCP), `kobo.com` or `kobobooks.com` (Kobo,
+`ProtectedByKobo`), else any `EncryptionMethod` whose `Algorithm` is
+neither font obfuscation (IDPF's `http://www.idpf.org/2008/embedding`,
+Adobe's `http://ns.adobe.com/pdf/enc#RC`: undone by a reading system,
+no DRM, and not refused) is `ProtectedUnknown`. Each is a
+`named_failure` and an `archive_failure` (`DrmAdept`, ...), matched with
+`case+`, so a scheme added without words does not type-check. A damaged
+book that declares nothing, or whose encryption.xml cannot be read, stays
+"damaged": DRM is never guessed from damage.
+
+By research (Thorium, Calibre, Readium's docs): Thorium, which has an LCP
+client, only says what is missing ("This publication needs an LCP
+passphrase", and, for an encrypted publication with no licence,
+"Publication is encrypted but lacks an LCP license!"); Calibre, which has
+none for the schemes it cannot open, says the book is locked by DRM and
+points the reader to its manual's DRM page, offering no way round it.
+Quire has no client for any scheme, so its words name the scheme (as
+Thorium names LCP), say it cannot open it and that the book was not
+imported, and give the next step, which is to read it in the app it came
+from or get a copy without DRM (`ReadWhereItCameFrom`); it points to no
+way of removing DRM. A build that one day has a client for a scheme
+changes only that scheme's case. Kobo's check is a guess at its
+namespace (the issue names `http://www.kobo.com/...`; no Kobo book was
+available to look at), written in one place. The books the tests use are
+made by `e2e/drm-books.js` (chapter bytes replaced by random ones, the
+encryption.xml and licence files written), registered in
+`e2e/epubcheck.spec.js`, and played by `e2e/drm.spec.js`.
+
+An OPDS entry whose acquisition link has type
+`application/vnd.adobe.adept+xml` or
+`application/vnd.readium.lcp.license.v1.0+json` is an `acquiring`
+(`AdeptAcquisition`, `LcpAcquisition`, in `src/opds.bats`, kept over the
+entry's other acquisitions): with no EPUB link of the entry's own, the
+row says "Protected by Adobe DRM: Quire cannot open it, so it cannot be
+got here" (or Readium LCP) in place of Get and the licence is never
+fetched; an entry that also has an EPUB is got as ever
+(`e2e/drm-catalogue.spec.js`).
 
 ## Every outcome is said, and the unexpected as such
 
@@ -1424,7 +1610,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   `ui_text_btn`. `labelsShown` and `labelInName` in
   `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
-  least 44px square, text fields use a 16px font (so iOS does not zoom
+  least 48px square (quire#403: Material 3 and Android's accessibility
+  guidance say 48dp, Apple's HIG 44pt, WCAG 2.5.5 44px, which 48 also
+  meets; the app is released on Android; `targetsShort` in
+  `e2e/controls-shown.js` measures it on every screen the layout walks), text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
 * The sheet's size is in its type (`sheet(r, media, open)`: r bytes
   left, and whether an @media block and a rule are open), so it always

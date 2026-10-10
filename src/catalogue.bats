@@ -217,6 +217,25 @@ end
    A page shown
    ============================================================ *)
 
+(* A book whose only acquisition is a licence of a DRM Quire has no
+   client for says so in place of Get (quire#427), before anything is
+   downloaded *)
+fn _protected_say {text_len:pos | text_len < 256}{index:nat} (index: int index, text: string text_len): void = let
+  val @(entry, entry_len) = nid_make("book-entry", index)
+  val @(note, note_len) = nid_make("book-protected", index)
+  val () = ui_add_nn(entry, entry_len, note, note_len, TSpan)
+  val @(note, note_len) = nid_make("book-protected", index)
+  val () = ui_attr_n(note, note_len, AClass, "ba")
+  val @(note, note_len) = nid_make("book-protected", index)
+in ui_text_n(note, note_len, text) end
+
+fn _protected_note {index:nat} (acquired: acquiring, index: int index): void =
+  case+ acquired of
+  | AdeptAcquisition() => _protected_say(index, "Protected by Adobe DRM: Quire cannot open it, so it cannot be got here")
+  | LcpAcquisition() => _protected_say(index, "Protected by Readium LCP: Quire cannot open it, so it cannot be got here")
+  | OtherAcquisition() => ()
+  | NoAcquisition() => ()
+
 (* Each entry's row from index on: a link to another page, or a book
    (its cover, title and author, Get, and the link that downloads it
    where Get cannot) *)
@@ -231,7 +250,7 @@ fun _entry_rows {count:nat}{index:nat} .<count>. (list: !entries(count), index: 
       val () = _entry_rows(rest, index + 1)
       prval () = fold@(list)
     in end
-  | @EntryBook(title, author, cover, epub, rest) => let
+  | @EntryBook(title, author, cover, epub, acquired, rest) => let
       val @(entry, entry_len) = nid_make("book-entry", index)
       val () = ui_add_n("catalogue-list", entry, entry_len, TDiv)
       val @(entry, entry_len) = nid_make("book-entry", index)
@@ -290,7 +309,9 @@ fun _entry_rows {count:nat}{index:nat} .<count>. (list: !entries(count), index: 
           val () = ui_text_n(then_text, then_len, "then import it")
           val @(then_text, then_len) = nid_make("book-then", index)
         in ui_show_n(then_text, then_len, false) end
-        else $A.free<byte>(epub_url))
+        else let
+          val () = $A.free<byte>(epub_url)
+        in _protected_note(acquired, index) end)
       val () = _entry_rows(rest, index + 1)
       prval () = fold@(list)
     in end
@@ -455,7 +476,7 @@ fun _entry_text {count:nat} .<count>. (list: !entries(count), index: int, which:
       val found = _entry_text(rest, index - 1, which)
       prval () = fold@(list)
     in found end
-  | @EntryBook(title, _, _, epub, rest) =>
+  | @EntryBook(title, _, _, epub, _, rest) =>
     if index = 0 then let
       val found = (case+ which of BookEpub() => kept_dup(epub) | EntryTitle() => kept_dup(title) | LinkAddress() => kept_none()): kept
       prval () = fold@(list)

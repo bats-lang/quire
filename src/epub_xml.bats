@@ -159,12 +159,18 @@ and _opf_metadata_node
     var title_chars = @[char][8]('d', 'c', ':', 't', 'i', 't', 'l', 'e')
     var creator_chars = @[char][10]('d', 'c', ':', 'c', 'r', 'e', 'a', 't', 'o', 'r')
   in
-    if xml_name_eq(data, tag_offset, tag_len, title_chars, 8) then let
-      val () = xspan_free(title)
-    in @(_get_first_text(children), author) end
-    else if xml_name_eq(data, tag_offset, tag_len, creator_chars, 10) then let
-      val () = xspan_free(author)
-    in @(title, _get_first_text(children)) end
+    if xml_name_eq(data, tag_offset, tag_len, title_chars, 8) then
+      (* the first dc:title names the book (EPUB 3.3 §5.4: the first
+         title is the main one, w3c/epub-tests pkg-title-order); a later
+         one is left *)
+      (case+ title of
+       | ~xspan_none() => @(_get_first_text(children), author)
+       | ~xspan_at(title_offset, title_len) => @(xspan_at(title_offset, title_len), author))
+    else if xml_name_eq(data, tag_offset, tag_len, creator_chars, 10) then
+      (* and the first dc:creator is the author (pkg-creator-order) *)
+      (case+ author of
+       | ~xspan_none() => @(title, _get_first_text(children))
+       | ~xspan_at(author_offset, author_len) => @(title, xspan_at(author_offset, author_len)))
     else _opf_metadata_nodes(data, children, title, author)
   end
   | $X.xml_text(_, _) => @(title, author)
@@ -179,7 +185,7 @@ and _get_first_text
      | $X.xml_element(_, _, _, _) => xspan_none())
   | $X.xml_nodes_nil() => xspan_none()
 
-(* The text of the OPF's dc:title and dc:creator *)
+(* The text of the OPF's first dc:title and first dc:creator *)
 #pub fn walk_opf_metadata
   {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): @(xspan(n), xspan(n))
@@ -746,6 +752,211 @@ fun _span_has {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{patte
   if position + pattern_len > span_len then false
   else if _match_chars(data, offset + position, pattern, pattern_len, 0) then true
   else _span_has(data, offset, span_len, pattern, pattern_len, position + 1)
+
+(* ============================================================
+   Spine: the manifest item a spine itemref shows (EPUB 3.3 §3.1, §3.3)
+   ============================================================ *)
+
+(* Whether the media type of the manifest item whose id is
+   data[idref_offset, idref_offset + idref_len) is one a content document
+   has: XHTML, SVG, HTML, and the EPUB 2 documents Quire reads through
+   (OEB 1 and DTBook, quire#416); an item with no media-type is taken to
+   be one *)
+fn _type_shown
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len): bool = let
+    var media_type_chars = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+in
+  case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, media_type_chars, 10) of
+  | ~xspan_none() => true
+  | ~xspan_at(type_offset, type_len) => let
+    var xhtml_chars = @[char][21]('a', 'p', 'p', 'l', 'i', 'c', 'a', 't', 'i', 'o', 'n', '/', 'x', 'h', 't', 'm', 'l', '+', 'x', 'm', 'l')
+    var svg_chars = @[char][13]('i', 'm', 'a', 'g', 'e', '/', 's', 'v', 'g', '+', 'x', 'm', 'l')
+    var html_chars = @[char][9]('t', 'e', 'x', 't', '/', 'h', 't', 'm', 'l')
+    var oeb1_chars = @[char][20]('t', 'e', 'x', 't', '/', 'x', '-', 'o', 'e', 'b', '1', '-', 'd', 'o', 'c', 'u', 'm', 'e', 'n', 't')
+    var dtbook_chars = @[char][24]('a', 'p', 'p', 'l', 'i', 'c', 'a', 't', 'i', 'o', 'n', '/', 'x', '-', 'd', 't', 'b', 'o', 'o', 'k', '+', 'x', 'm', 'l')
+    in
+      xml_name_eq(data, type_offset, type_len, xhtml_chars, 21)
+      || xml_name_eq(data, type_offset, type_len, svg_chars, 13)
+      || xml_name_eq(data, type_offset, type_len, html_chars, 9)
+      || xml_name_eq(data, type_offset, type_len, oeb1_chars, 20)
+      || xml_name_eq(data, type_offset, type_len, dtbook_chars, 24)
+    end
+end
+
+(* Whether the manifest item whose id is data[idref_offset, ...) has the
+   property scripted *)
+fn _item_scripted
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len): bool = let
+    var properties_chars = @[char][10]('p', 'r', 'o', 'p', 'e', 'r', 't', 'i', 'e', 's')
+in
+  case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, properties_chars, 10) of
+  | ~xspan_none() => false
+  | ~xspan_at(properties_offset, properties_len) => let
+    var scripted_chars = @[char][8]('s', 'c', 'r', 'i', 'p', 't', 'e', 'd')
+    in _span_has(data, properties_offset, properties_len, scripted_chars, 8, 0) end
+end
+
+(* The href of the item shown for the manifest item whose id is
+   data[idref_offset, ...): the item itself when it is a content
+   document (and not scripted with a fallback to use instead), else the
+   item its fallback names, and so on down the chain for at most steps
+   items (a chain that loops ends there); none when none of them is one.
+   An item that is not a content document is never read as one: a
+   reader that cannot show it shows its fallback (EPUB 3.3 §3.3), else
+   skips it, as Thorium and Readium do *)
+fun _shown_href
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}{steps:nat} .<steps>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len, steps: int steps): xspan(n) =
+  if steps <= 0 then xspan_none()
+  else let
+    val shown = _type_shown(data, data_len, nodes, idref_offset, idref_len)
+    var fallback_chars = @[char][8]('f', 'a', 'l', 'l', 'b', 'a', 'c', 'k')
+  in
+    case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, fallback_chars, 8) of
+    | ~xspan_none() =>
+      if shown then _manifest_href_nodes(data, data_len, nodes, idref_offset, idref_len)
+      else xspan_none()
+    | ~xspan_at(fallback_offset, fallback_len) =>
+      if shown && ~_item_scripted(data, data_len, nodes, idref_offset, idref_len) then
+        _manifest_href_nodes(data, data_len, nodes, idref_offset, idref_len)
+      else _shown_href(data, data_len, nodes, fallback_offset, fallback_len, steps - 1)
+  end
+
+(* The href of the manifest item shown for the chapter_index-th spine
+   itemref (find_chapter_href_n is the itemref's own item), none when
+   neither it nor anything on its fallback chain is a content document *)
+#pub fn find_chapter_shown_href_n
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   nodes: !$X.xml_node_list(n, tree_size), chapter_index: int): xspan(n)
+
+implement find_chapter_shown_href_n(data, data_len, nodes, chapter_index) = let
+  val @(idref, _) = _nth_idref_nodes(data, nodes, chapter_index)
+in
+  case+ idref of
+  | ~xspan_at(idref_offset, idref_len) => _shown_href(data, data_len, nodes, idref_offset, idref_len, 16)
+  | ~xspan_none() => xspan_none()
+end
+
+(* ============================================================
+   Manifest: the fallback of an image the reader cannot show
+   ============================================================ *)
+
+(* Whether the media type data[type_offset, type_offset + type_len) is
+   one of the core image types a browser draws (EPUB 3.3 §3.2 and AVIF) *)
+fn _type_is_core_image
+  {l:agz}{n:pos}{type_offset,type_len:nat | type_offset + type_len <= n}
+  (data: !$A.borrow(byte, l, n), type_offset: int type_offset, type_len: int type_len): bool = let
+    var gif_chars = @[char][9]('i', 'm', 'a', 'g', 'e', '/', 'g', 'i', 'f')
+    var jpeg_chars = @[char][10]('i', 'm', 'a', 'g', 'e', '/', 'j', 'p', 'e', 'g')
+    var png_chars = @[char][9]('i', 'm', 'a', 'g', 'e', '/', 'p', 'n', 'g')
+    var svg_chars = @[char][13]('i', 'm', 'a', 'g', 'e', '/', 's', 'v', 'g', '+', 'x', 'm', 'l')
+    var webp_chars = @[char][10]('i', 'm', 'a', 'g', 'e', '/', 'w', 'e', 'b', 'p')
+    var avif_chars = @[char][10]('i', 'm', 'a', 'g', 'e', '/', 'a', 'v', 'i', 'f')
+in
+  xml_name_eq(data, type_offset, type_len, gif_chars, 9)
+  || xml_name_eq(data, type_offset, type_len, jpeg_chars, 10)
+  || xml_name_eq(data, type_offset, type_len, png_chars, 9)
+  || xml_name_eq(data, type_offset, type_len, svg_chars, 13)
+  || xml_name_eq(data, type_offset, type_len, webp_chars, 10)
+  || xml_name_eq(data, type_offset, type_len, avif_chars, 10)
+end
+
+(* The href of the first item, from the manifest item whose id is
+   data[idref_offset, ...) down its chain of fallbacks (at most steps
+   items), whose media type is a core image type; none when there is no
+   such item *)
+fun _image_target
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}{steps:nat} .<steps>.
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len, steps: int steps): xspan(n) =
+  if steps <= 0 then xspan_none()
+  else let
+    var media_type_chars = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+    var fallback_chars = @[char][8]('f', 'a', 'l', 'l', 'b', 'a', 'c', 'k')
+  in
+    case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, media_type_chars, 10) of
+    | ~xspan_at(type_offset, type_len) =>
+      if _type_is_core_image(data, type_offset, type_len) then _manifest_href_nodes(data, data_len, nodes, idref_offset, idref_len)
+      else (case+ _manifest_attr_nodes(data, data_len, nodes, idref_offset, idref_len, fallback_chars, 8) of
+        | ~xspan_at(fallback_offset, fallback_len) => _image_target(data, data_len, nodes, fallback_offset, fallback_len, steps - 1)
+        | ~xspan_none() => xspan_none())
+    | ~xspan_none() => xspan_none()
+  end
+
+(* An image item of the manifest that has a fallback: the span of its
+   href and of its fallback's id; or how many such items are left to skip *)
+#pub datavtype image_fallback(n:int) =
+  | {item_offset,item_len,fallback_offset,fallback_len:nat | item_offset + item_len <= n; fallback_offset + fallback_len <= n}
+    ImageFallback(n) of (int item_offset, int item_len, int fallback_offset, int fallback_len)
+  | ImageFallbackSkip(n) of (int)
+
+fun _image_fallback_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   nodes: !$X.xml_node_list(n, tree_size), skip: int): image_fallback(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _image_fallback_node(data, data_len, node, skip) of
+     | ~ImageFallbackSkip(left) => _image_fallback_nodes(data, data_len, rest, left)
+     | found => found)
+  | $X.xml_nodes_nil() => ImageFallbackSkip(skip)
+
+and _image_fallback_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   node: !$X.xml_node(n, tree_size), skip: int): image_fallback(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var item_chars = @[char][4]('i', 't', 'e', 'm')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, item_chars, 4) then let
+    var href_chars = @[char][4]('h', 'r', 'e', 'f')
+    var media_type_chars = @[char][10]('m', 'e', 'd', 'i', 'a', '-', 't', 'y', 'p', 'e')
+    var fallback_chars = @[char][8]('f', 'a', 'l', 'l', 'b', 'a', 'c', 'k')
+    in
+      case+ _find_attr_value(data, attrs, href_chars, 4) of
+      | ~xspan_none() => ImageFallbackSkip(skip)
+      | ~xspan_at(href_offset, href_len) =>
+        (case+ _find_attr_value(data, attrs, media_type_chars, 10) of
+         | ~xspan_none() => ImageFallbackSkip(skip)
+         | ~xspan_at(type_offset, type_len) =>
+           if _type_is_core_image(data, type_offset, type_len) then ImageFallbackSkip(skip)
+           else (case+ _find_attr_value(data, attrs, fallback_chars, 8) of
+             | ~xspan_none() => ImageFallbackSkip(skip)
+             | ~xspan_at(fallback_offset, fallback_len) =>
+               if skip <= 0 then ImageFallback(href_offset, href_len, fallback_offset, fallback_len)
+               else ImageFallbackSkip(skip - 1)))
+    end
+    else _image_fallback_nodes(data, data_len, children, skip)
+  end
+  | $X.xml_text(_, _) => ImageFallbackSkip(skip)
+
+(* The skip-th (from 0) manifest item that is not a core image type and
+   has a fallback: an <img> that names it is shown as the image its
+   fallbacks lead to (find_image_target; the suite's pub-foreign_image) *)
+#pub fn find_image_fallback_n
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), data_len: int n,
+   nodes: !$X.xml_node_list(n, tree_size), skip: int): image_fallback(n)
+
+implement find_image_fallback_n(data, data_len, nodes, skip) =
+  _image_fallback_nodes(data, data_len, nodes, skip)
+
+(* The href of the core image the fallbacks of the manifest item whose id
+   is data[idref_offset, ...) lead to, none when they lead to none *)
+#pub fn find_image_target
+  {l:agz}{n:pos}{tree_size:nat}{idref_offset,idref_len:nat | idref_offset + idref_len <= n}
+  (data: !$A.borrow(byte, l, n), data_len: int n, nodes: !$X.xml_node_list(n, tree_size),
+   idref_offset: int idref_offset, idref_len: int idref_len): xspan(n)
+
+implement find_image_target(data, data_len, nodes, idref_offset, idref_len) =
+  _image_target(data, data_len, nodes, idref_offset, idref_len, 16)
 
 (* The href of the first manifest item whose properties have property *)
 fun _item_with_property_nodes
@@ -1480,3 +1691,81 @@ implement itemref_spread_n (data, nodes, item_index) =
         else if _span_has(data, properties_offset, properties_len, center_chars, 18, 0) then SpreadSlotCenter()
         else SpreadSlotAny()
       end)
+
+(* ============================================================
+   META-INF/encryption.xml: what a book declares to be encrypted with
+   (quire#427)
+   ============================================================ *)
+
+(* What an encryption.xml declares. EncryptionNone: nothing, or only
+   the two font obfuscations a reading system undoes itself (IDPF's
+   http://www.idpf.org/2008/embedding and Adobe's
+   http://ns.adobe.com/pdf/enc#RC), which are no DRM. The others are a
+   protection Quire has no client for: Adobe's ADEPT (its namespace),
+   Readium LCP (its profile), Kobo's (kobo.com or kobobooks.com in a namespace), or an
+   EncryptionMethod whose Algorithm is neither obfuscation *)
+#pub datatype encryption_found =
+  | EncryptionNone
+  | EncryptionAdept
+  | EncryptionLcp
+  | EncryptionKobo
+  | EncryptionUnknownAlgorithm
+
+(* Whether the algorithm named at data[offset, offset + name_len) is
+   one of the two font obfuscations *)
+fn _is_obfuscation {l:agz}{n:pos}{offset,name_len:nat | offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, name_len: int name_len): bool = let
+  var idpf_chars = @[char][34]('h', 't', 't', 'p', ':', '/', '/', 'w', 'w', 'w', '.', 'i', 'd', 'p', 'f', '.', 'o', 'r', 'g', '/', '2', '0', '0', '8', '/', 'e', 'm', 'b', 'e', 'd', 'd', 'i', 'n', 'g')
+  var adobe_chars = @[char][30]('h', 't', 't', 'p', ':', '/', '/', 'n', 's', '.', 'a', 'd', 'o', 'b', 'e', '.', 'c', 'o', 'm', '/', 'p', 'd', 'f', '/', 'e', 'n', 'c', '#', 'R', 'C')
+in
+  if xml_name_eq(data, offset, name_len, idpf_chars, 34) then true
+  else xml_name_eq(data, offset, name_len, adobe_chars, 30)
+end
+
+(* Whether an EncryptionMethod anywhere in nodes names an algorithm
+   that is not a font obfuscation (or names none) *)
+fun _unknown_algorithm_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    if _unknown_algorithm_node(data, node) then true
+    else _unknown_algorithm_nodes(data, rest)
+  | $X.xml_nodes_nil() => false
+
+and _unknown_algorithm_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): bool =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var method_chars = @[char][16]('E', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', 'M', 'e', 't', 'h', 'o', 'd')
+  in
+    if _span_has(data, tag_offset, tag_len, method_chars, 16, 0) then let
+      var algorithm_chars = @[char][9]('A', 'l', 'g', 'o', 'r', 'i', 't', 'h', 'm')
+    in
+      case+ _find_attr_value(data, attrs, algorithm_chars, 9) of
+      | ~xspan_at(algorithm_offset, algorithm_len) => ~_is_obfuscation(data, algorithm_offset, algorithm_len)
+      | ~xspan_none() => true
+    end
+    else _unknown_algorithm_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => false
+
+(* What the encryption.xml data[0, n), parsed as nodes, declares *)
+#pub fn encryption_of
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), n: int n, nodes: !$X.xml_node_list(n, tree_size)): encryption_found
+
+implement encryption_of (data, n, nodes) = let
+  var adept_chars = @[char][18]('n', 's', '.', 'a', 'd', 'o', 'b', 'e', '.', 'c', 'o', 'm', '/', 'a', 'd', 'e', 'p', 't')
+  var lcp_chars = @[char][23]('r', 'e', 'a', 'd', 'i', 'u', 'm', '.', 'o', 'r', 'g', '/', '2', '0', '1', '4', '/', '0', '1', '/', 'l', 'c', 'p')
+  var kobo_chars = @[char][8]('k', 'o', 'b', 'o', '.', 'c', 'o', 'm')
+  var kobobooks_chars = @[char][13]('k', 'o', 'b', 'o', 'b', 'o', 'o', 'k', 's', '.', 'c', 'o', 'm')
+in
+  if _span_has(data, 0, n, adept_chars, 18, 0) then EncryptionAdept()
+  else if _span_has(data, 0, n, lcp_chars, 23, 0) then EncryptionLcp()
+  else if _span_has(data, 0, n, kobo_chars, 8, 0) then EncryptionKobo()
+  else if _span_has(data, 0, n, kobobooks_chars, 13, 0) then EncryptionKobo()
+  else if _unknown_algorithm_nodes(data, nodes) then EncryptionUnknownAlgorithm()
+  else EncryptionNone()
+end

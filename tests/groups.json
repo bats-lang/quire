@@ -10,14 +10,27 @@
       "safe-area.spec.js",
       "stats.spec.js",
       "stall-capture.spec.js",
-      "library-records.spec.js"
+      "library-records.spec.js",
+      "drm.spec.js",
+      "drm-catalogue.spec.js"
     ],
     "reader": [
       "reader.spec.js",
       "navigation.spec.js",
+      "footnotes.spec.js",
+      "pagebreak.spec.js",
+      "media.spec.js",
+      "headings.spec.js",
+      "wide.spec.js",
+      "stability.spec.js",
+      "keys.spec.js",
       "landmarks.spec.js",
       "progress.spec.js",
+      "pagelist.spec.js",
+      "epub2.spec.js",
       "epubcheck.spec.js",
+      "w3c-epub-tests.spec.js",
+      "publisher.spec.js",
       "spreads.spec.js",
       "page-turn.spec.js"
     ],
@@ -37,7 +50,8 @@
       "sync-dropbox.spec.js",
       "sync-dropbox-android.spec.js",
       "sync-nextcloud.spec.js",
-      "sync-fastmail.spec.js"
+      "sync-fastmail.spec.js",
+      "sync-idempotent.spec.js"
     ],
     "settings": [
       "backup.spec.js",

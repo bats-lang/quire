@@ -2240,7 +2240,8 @@ fn _starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_
   if span_len < pattern_len then false else xml_name_eq(data, offset, pattern_len, pattern, pattern_len)
 
 (* The attributes of an XHTML element that are kept on its content node:
-   dir, lang (and xml:lang), title, colspan and rowspan *)
+   dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
+   class the stylesheet hides) *)
 fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_count>.
   (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
   case+ attrs of
@@ -2252,6 +2253,7 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
       var _title = @[char][5]('t', 'i', 't', 'l', 'e')
       var _colspan = @[char][7]('c', 'o', 'l', 's', 'p', 'a', 'n')
       var _rowspan = @[char][7]('r', 'o', 'w', 's', 'p', 'a', 'n')
+      var _hidden = @[char][6]('h', 'i', 'd', 'd', 'e', 'n')
       val () = (if value_len >= 65536 then ()
         else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, $D.Dir, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _lang, 4) then _node_attr(doc, node, $D.Lang, data, value_offset, value_len)
@@ -2259,8 +2261,37 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
         else if xml_name_eq(data, name_offset, name_len, _title, 5) then _node_attr(doc, node, $D.Title, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _colspan, 7) then _node_attr(doc, node, $D.Colspan, data, value_offset, value_len)
         else if xml_name_eq(data, name_offset, name_len, _rowspan, 7) then _node_attr(doc, node, $D.Rowspan, data, value_offset, value_len)
+        (* the HTML's own word for hidden content, kept (no CSS is applied) *)
+        else if xml_name_eq(data, name_offset, name_len, _hidden, 6) then _node_attr_literal(doc, node, $D.Class, "hidden-by-book")
         else ())
     in _pass_attrs(doc, data, rest, node) end
+
+(* Whether an element is a note's text: its epub:type names footnote,
+   endnote or rearnote, or its role is doc-footnote or doc-endnote (a note
+   is set smaller than the text it is in, #422) *)
+fn _note_text {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _foot = @[char][4]('f', 'o', 'o', 't')
+  var _endnote = @[char][7]('e', 'n', 'd', 'n', 'o', 't', 'e')
+  var _rearnote = @[char][8]('r', 'e', 'a', 'r', 'n', 'o', 't', 'e')
+  var _doc_foot = @[char][12]('d', 'o', 'c', '-', 'f', 'o', 'o', 't', 'n', 'o', 't', 'e')
+  var _doc_end = @[char][11]('d', 'o', 'c', '-', 'e', 'n', 'd', 'n', 'o', 't', 'e')
+  val typed = (case+ find_attr(data, attrs, _attr_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _endnote, 7) then true
+      else if span_has(data, start, span_len, _rearnote, 8) then true
+      else span_has(data, start, span_len, _foot, 4)): bool
+in
+  if typed then true
+  else (case+ find_attr(data, attrs, _attr_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _doc_foot, 12) then true
+      else span_has(data, start, span_len, _doc_end, 11))
+end
 
 (* Whether an <a> is a note's reference: its epub:type names noteref, or
    its role is doc-noteref *)
@@ -2625,6 +2656,15 @@ and _render_node
       val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      (* an audio or video element is not played (the DOM's attributes have
+         no controls: #424): its fallback content shows, and a line says so,
+         as an empty box would not *)
+      var _tag_audio = @[char][5]('a', 'u', 'd', 'i', 'o')
+      var _tag_video = @[char][5]('v', 'i', 'd', 'e', 'o')
+      val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else ())
+      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
@@ -2698,6 +2738,75 @@ fn _pictures_push {l:agz}{path_len:pos | path_len < 65536} (node: int, path: $A.
   val+ ~PicturesCell(rest) = _pictures_take()
 in _pictures_put(PicturesCell(pictures_cons(node, path, path_len, rest))) end
 
+(* The images of the book that a reader does not show but whose manifest
+   item has a fallback that it does (EPUB 3.3 §3.3, the suite's
+   pub-foreign_image): each one's entry path and the path of the entry
+   its fallbacks lead to. Found once, with the spine (_fallbacks_collect),
+   and forgotten with the next book's *)
+datavtype image_fallbacks(int) =
+  | image_fallbacks_nil(0) of ()
+  | {count:nat}{item_l:agz}{item_len:pos | item_len < 65536}{target_l:agz}{target_len:pos | target_len < 65536}
+    image_fallbacks_cons(count + 1) of ($A.arr(byte, item_l, item_len), int item_len, $A.arr(byte, target_l, target_len), int target_len, image_fallbacks(count))
+
+fun image_fallbacks_free {count:nat} .<count>. (entries: image_fallbacks(count)): void =
+  case+ entries of
+  | ~image_fallbacks_nil() => ()
+  | ~image_fallbacks_cons(item, _, target, _, rest) => let
+      val () = $A.free<byte>(item)
+      val () = $A.free<byte>(target)
+    in image_fallbacks_free(rest) end
+
+datavtype image_fallbacks_cell = {count:nat} ImageFallbacksCell of image_fallbacks(count)
+
+val _image_fallbacks = ref<image_fallbacks_cell>(ImageFallbacksCell(image_fallbacks_nil()))
+
+fn _image_fallbacks_take (): image_fallbacks_cell = let
+  var cell: image_fallbacks_cell = ImageFallbacksCell(image_fallbacks_nil())
+  val () = ref_exch_elt<image_fallbacks_cell>(_image_fallbacks, cell)
+in cell end
+
+fn _image_fallbacks_put (new_cell: image_fallbacks_cell): void = let
+  var cell: image_fallbacks_cell = new_cell
+  val () = ref_exch_elt<image_fallbacks_cell>(_image_fallbacks, cell)
+  val+ ~ImageFallbacksCell(old) = cell
+in image_fallbacks_free(old) end
+
+(* A path of a book's entry, kept; none when there is none *)
+datavtype kept_path =
+  | {l:agz}{path_len:pos | path_len < 65536} KeptPath of ($A.arr(byte, l, path_len), int path_len)
+  | NoKeptPath of ()
+
+(* Whether the first len bytes of the array and of the borrowed path are
+   the same, from byte i *)
+fun _path_same {l1,l2:agz}{n1,n2:pos}{len:nat | len <= n1; len <= n2}{i:nat | i <= len} .<len - i>.
+  (kept: !$A.arr(byte, l1, n1), path: !$A.borrow(byte, l2, n2), len: int len, i: int i): bool =
+  if i >= len then true
+  else if byte2int0($A.get<byte>(kept, i)) <> byte2int0($A.read<byte>(path, i)) then false
+  else _path_same(kept, path, len, i + 1)
+
+(* The path of the entry the fallbacks of the image at path[0, path_len)
+   lead to, copied; none when it has no fallback *)
+fun _image_fallback_find {count:nat}{l:agz}{path_len:pos} .<count>.
+  (entries: !image_fallbacks(count), path: !$A.borrow(byte, l, path_len), path_len: int path_len): kept_path =
+  case+ entries of
+  | image_fallbacks_nil() => NoKeptPath()
+  | @image_fallbacks_cons(item, item_len, target, target_len, rest) =>
+    if item_len = path_len then
+      (if _path_same(item, path, item_len, 0) then let
+         val copy = $A.alloc<byte>(target_len)
+         val () = _fragment_duplicate(target, copy, target_len, 0)
+         val copy_len = target_len
+         prval () = fold@(entries)
+       in KeptPath(copy, copy_len) end
+       else let
+         val found = _image_fallback_find(rest, path, path_len)
+         prval () = fold@(entries)
+       in found end)
+    else let
+      val found = _image_fallback_find(rest, path, path_len)
+      prval () = fold@(entries)
+    in found end
+
 (* A content node's image (or the viewer's, when in_viewer): the n bytes of
    data, of type mime *)
 fn _set_src {node:nat}{l:agz}{n:pos}{mime_len:pos | mime_len <= 24}
@@ -2717,7 +2826,7 @@ in release_bytes(mime_frozen, mime_bytes) end
    file_size-byte file (book serial): shown now when it is stored, once decompressed when it
    is deflated (unless chapter load generation is no longer the latest); not at
    all when it is missing *)
-fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
+fn _show_image_entry {file_size:pos}{node:nat}{l:agz}{path_len:pos}
   (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
    path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
   val mime = mime_of(path, path_len)
@@ -2750,6 +2859,26 @@ in
             val () = $A.drop<byte>(content_frozen, content_bytes)
           in piece_free(content_owner, $A.thaw<byte>(content_frozen)) end)
     end
+end
+
+(* A content node's image, the entry named path[0, path_len): or, when
+   the manifest item of that entry is a type the reader does not show
+   and its fallbacks lead to one it does, that fallback's entry *)
+fn _show_image {file_size:pos}{node:nat}{l:agz}{path_len:pos}
+  (serial: int, file_size: int file_size, node: int node, in_viewer: bool, generation: int,
+   path: !$A.borrow(byte, l, path_len), path_len: int path_len): void = let
+  val cell = _image_fallbacks_take()
+  val+ @ImageFallbacksCell(entries) = cell
+  val found = _image_fallback_find(entries, path, path_len)
+  prval () = fold@(cell)
+  val () = _image_fallbacks_put(cell)
+in
+  case+ found of
+  | ~NoKeptPath() => _show_image_entry(serial, file_size, node, in_viewer, generation, path, path_len)
+  | ~KeptPath(target, target_len) => let
+      val @(target_frozen, target_bytes) = $A.freeze<byte>(target)
+      val () = _show_image_entry(serial, file_size, node, in_viewer, generation, target_bytes, target_len)
+    in release_bytes(target_frozen, target_bytes) end
 end
 
 (* The image of a content node, whose src is data[src_start, src_start + src_len): the
@@ -2844,42 +2973,103 @@ fn _overlay_of {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_of
         Overlay(data_start, data_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len))
       | ~EntryMiss() => NoOverlay())
 
-(* The chapters from spine itemref item down to the first, onto found: each
-   href, after the OPF's directory (prefix_len bytes of the name at
-   opf_name_offset), found in book serial's index, with its layout (its
-   itemref's, else book_layout); the OPF's data checked here, once *)
+(* The path of the entry at the OPF's directory (prefix_len bytes of the
+   name at opf_name_offset) and data[href_start, href_start + href_len),
+   its "." and ".." resolved: the name an <img> that names it resolves to *)
+fn _kept_path {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{href_start,href_len:nat | href_start + href_len <= n}
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   data: !$A.borrow(byte, l, n), n: int n, href_start: int href_start, href_len: int href_len): kept_path =
+  if href_len <= 0 then NoKeptPath()
+  else if href_len >= 65536 then NoKeptPath()
+  else if prefix_len + href_len >= 65536 then NoKeptPath()
+  else let
+    val joined_len = prefix_len + href_len
+    val buf = $A.alloc<byte>(joined_len)
+    val _ = book_read(serial, file_size, opf_name_offset, buf, prefix_len)
+    val () = $S.copy_from_borrow(data, href_start, n, buf, prefix_len, joined_len, href_len)
+    val path_len = path_norm(buf, joined_len)
+  in
+    if path_len <= 0 then let val () = $A.free<byte>(buf) in NoKeptPath() end
+    else let
+      val exact = $A.alloc<byte>(path_len)
+      val buf = $S.copy_arr_region(buf, 0, joined_len, exact, path_len, path_len)
+      val () = $A.free<byte>(buf)
+    in KeptPath(exact, path_len) end
+  end
+
+(* The images the manifest gives a fallback (find_image_fallback_n), from
+   the skip-th on, kept for _show_image: at most 256 of them *)
+fun _fallbacks_collect {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
+  {l:agz}{n:pos}{tree_size:nat}{skip:nat | skip <= 256} .<256 - skip>.
+  (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
+   opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), skip: int skip): void =
+  if skip >= 256 then ()
+  else (case+ find_image_fallback_n(opf_bytes, opf_size, nodes, skip) of
+    | ~ImageFallbackSkip(_) => ()
+    | ~ImageFallback(item_offset, item_len, fallback_offset, fallback_len) => let
+        val item = _kept_path(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, item_offset, item_len)
+        val target = (case+ find_image_target(opf_bytes, opf_size, nodes, fallback_offset, fallback_len) of
+          | ~xspan_none() => NoKeptPath()
+          | ~xspan_at(target_offset, target_len) =>
+            _kept_path(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, target_offset, target_len)): kept_path
+        val () = (case+ item of
+          | ~NoKeptPath() => (case+ target of
+            | ~NoKeptPath() => ()
+            | ~KeptPath(target_path, _) => $A.free<byte>(target_path))
+          | ~KeptPath(item_path, item_path_len) => (case+ target of
+            | ~NoKeptPath() => $A.free<byte>(item_path)
+            | ~KeptPath(target_path, target_path_len) => let
+                val+ ~ImageFallbacksCell(rest) = _image_fallbacks_take()
+              in _image_fallbacks_put(ImageFallbacksCell(
+                   image_fallbacks_cons(item_path, item_path_len, target_path, target_path_len, rest))) end))
+      in _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, skip + 1) end)
+
+(* The chapters from spine itemref item down to the first, onto found
+   (found_total of them): each itemref's item, or the item its fallback
+   chain shows when that is not a content document (find_chapter_shown_href_n),
+   its href after the OPF's directory (prefix_len bytes of the name at
+   opf_name_offset) found in book serial's index, with its layout (its
+   itemref's, else book_layout). An itemref whose item and fallbacks are
+   all not content documents is left out, so the reader never turns to
+   it nor reads its bytes as XHTML (quire#419); the OPF's data checked
+   here, once. The chapters and how many *)
 fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_offset + prefix_len <= file_size; prefix_len < 65536}
   {l:agz}{n:pos}{tree_size:nat}{item:int | item >= ~1}{found_count:nat} .<item + 1>.
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, prefix_len: int prefix_len,
    opf_bytes: !$A.borrow(byte, l, n), opf_size: int n, nodes: !$X.xml_node_list(n, tree_size), book_layout: rendition_layout,
-   item: int item, found: book_chapters(file_size, found_count)): book_chapters(file_size, found_count + item + 1) =
-  if item < 0 then found
-  else let
-    val chapters = (case+ find_chapter_href_n(opf_bytes, opf_size, nodes, item) of
-      | ~xspan_none() => ChapterMissing(found)
-      | ~xspan_at(href_offset, href_len) =>
-        if href_len <= 0 then ChapterMissing(found)
-        else if prefix_len + href_len > 1048576 then ChapterMissing(found)
-        else let
-          val path_len = prefix_len + href_len
-          val path_buf = $A.alloc<byte>(path_len)
-          (* The prefix read from the file at the OPF's name, then the
-             chapter href from the OPF *)
-          val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
-          val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
-                    path_buf, prefix_len, path_len, href_len)
-          val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
-          val hit = book_find_entry(serial, file_size, path_bytes, path_len)
-          val () = release_bytes(path_frozen, path_bytes)
-        in
-          case+ hit of
-          | ~EntryMiss() => ChapterMissing(found)
-          | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
-              Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
-                itemref_layout_n(opf_bytes, nodes, item, book_layout), itemref_spread_n(opf_bytes, nodes, item),
-                _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
-        end): book_chapters(file_size, found_count + 1)
-  in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout, item - 1, chapters) end
+   item: int item, found: book_chapters(file_size, found_count), found_total: int found_count): [total:nat] @(book_chapters(file_size, total), int total) =
+  if item < 0 then @(found, found_total)
+  else (case+ find_chapter_href_n(opf_bytes, opf_size, nodes, item) of
+    | ~xspan_none() => _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+                         item - 1, ChapterMissing(found), found_total + 1)
+    | ~xspan_at(_, _) => (case+ find_chapter_shown_href_n(opf_bytes, opf_size, nodes, item) of
+      | ~xspan_none() => _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+                           item - 1, found, found_total)
+      | ~xspan_at(href_offset, href_len) => let
+          val chapters = (if href_len <= 0 then ChapterMissing(found)
+            else if prefix_len + href_len > 1048576 then ChapterMissing(found)
+            else let
+              val path_len = prefix_len + href_len
+              val path_buf = $A.alloc<byte>(path_len)
+              (* The prefix read from the file at the OPF's name, then the
+                 chapter href from the OPF *)
+              val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
+              val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
+                        path_buf, prefix_len, path_len, href_len)
+              val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
+              val hit = book_find_entry(serial, file_size, path_bytes, path_len)
+              val () = release_bytes(path_frozen, path_bytes)
+            in
+              case+ hit of
+              | ~EntryMiss() => ChapterMissing(found)
+              | ~EntryHit(data_start, compressed_size, method, name_offset, name_len) =>
+                  Chapter(data_start, compressed_size, method, name_offset, name_len, _opf_prefix_len(serial, file_size, name_offset, name_len),
+                    itemref_layout_n(opf_bytes, nodes, item, book_layout), itemref_spread_n(opf_bytes, nodes, item),
+                    _overlay_of(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, item), found)
+            end): book_chapters(file_size, found_count + 1)
+        in _spine_chapters(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, nodes, book_layout,
+             item - 1, chapters, found_total + 1) end))
 
 (* ============================================================
    The book's own font, for the "Book" font setting
@@ -3123,9 +3313,11 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                (* The OPF's directory, e.g. "OEBPS/" of "OEBPS/content.opf",
                   prefixes chapter hrefs *)
                val prefix_len = _opf_prefix_len(serial, file_size, opf_name_offset, opf_name_len)
-               val chapters = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
-                           opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil())
-               val () = book_spine_set(serial, file_size, chapters, total)
+               val @(chapters, chapter_total) = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
+                           opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil(), 0)
+               val () = book_spine_set(serial, file_size, chapters, chapter_total)
+               val () = _image_fallbacks_put(ImageFallbacksCell(image_fallbacks_nil()))
+               val () = _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes, 0)
                (* a book with Media Overlays is read aloud by its narration *)
                val () = _narration_offered(case+ book_narrated_after(serial, ~1) of ~$R.some(_) => true | ~$R.none() => false)
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
@@ -4068,8 +4260,20 @@ fn _snippet {l:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{at,quer
   val () = _ellipsis_if(snippet, ellipsis_before + snippet_len, ellipsis_after)
 in @(snippet, ellipsis_before + snippet_len + ellipsis_after) end
 
+(* The UTF-16 units of text[from, until), as the page counts a text node's
+   offsets: one for each character, two for one past U+FFFF (a 4-byte
+   character) *)
+fun _arr_units {l:agz}{size:pos}{from,until:nat | from <= until; until <= size} .<until - from>.
+  (text: !$A.arr(byte, l, size), from: int from, until: int until, units: Nat): Nat =
+  if from >= until then units
+  else let
+    val code = byte2int0($A.get<byte>(text, from))
+    val more = (if code >= 240 then 2 else if $AR.band_int_int(code, 192) = 128 then 0 else 1): Nat
+  in _arr_units(text, from + 1, until, units + more) end
+
 (* The hits of the query in text[at, text_len), a content node of a chapter,
-   onto found, while there are fewer than HIT_MAX *)
+   onto found, while there are fewer than HIT_MAX; each hit's offset is in
+   UTF-16 units, as the page counts them, not in bytes *)
 fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_len:nat | text_len <= text_size}{query_len:pos | query_len <= query_size}{at:nat}{hit_count:nat | hit_count <= HIT_MAX} .<max(text_len - at, 0)>.
   (text: !$A.arr(byte, text_location, text_size), text_size: int text_size, text_len: int text_len, at: int at, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
    chapter: Int, node: Int, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(hits(new_count), int new_count) =
@@ -4077,7 +4281,7 @@ fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_
   else if at + query_len > text_len then @(found, hit_count)
   else if _match_at(text, at, query, query_len, 0) then let
     val @(snippet, snippet_len) = _snippet(text, text_size, text_len, at, query_len)
-  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, at, snippet, snippet_len, found), hit_count + 1) end
+  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, _arr_units(text, 0, at, 0), snippet, snippet_len, found), hit_count + 1) end
   else _find_all(text, text_size, text_len, at + 1, query, query_len, chapter, node, found, hit_count)
 
 (* The hits in text data[offset, offset + piece_len), a content node's, decoded *)
@@ -4430,23 +4634,27 @@ in
 end
 
 (* Jumps to a row of the contents list, remembering where the reader
-   was *)
-#pub fun reader_goto_entry (row: Int): void
+   was; whether the row leads anywhere (an entry with no href, or one
+   outside the book, does not: nothing moves) *)
+#pub fun reader_goto_entry (row: Int): bool
 implement reader_goto_entry (row) =
   case+ toc_dest_of(row) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
-(* Goes to a print page, remembering where the reader was *)
-#pub fun reader_goto_page (print_page: Int): void
+(* Goes to a print page, remembering where the reader was; whether it
+   leads anywhere *)
+#pub fun reader_goto_page (print_page: Int): bool
 implement reader_goto_page (print_page) =
   case+ toc_page_dest_of(print_page) of
-  | ~TocNoDest() => ()
+  | ~TocNoDest() => false
   | ~TocDest(chapter, fragment, fragment_len) => let
       val () = _push_position()
-    in _jump_checked(_goto_fragment(chapter, fragment, fragment_len)) end
+      val () = _jump_checked(_goto_fragment(chapter, fragment, fragment_len))
+    in true end
 
 (* Jumps to a chapter's element fragment[0, fragment_len), remembering where the reader
    was *)
@@ -4632,6 +4840,68 @@ fn _note_break {l:agz}{at:nat | at <= NOTE_CAPACITY} (buf: !$A.arr(byte, l, NOTE
   else if byte2int0($A.get<byte>(buf, at - 1)) = 32 then at
   else let val () = $A.set<byte>(buf, at, $A.int2byte(32)) in at + 1 end
 
+(* Whether an element is a block (or a line break), where a note's text
+   goes on after a space: an inline element's end is no break, so "cites"
+   and a reference "3" and the "." after it are not pulled apart *)
+fn _note_block {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): bool = let
+  var _t_p = @[char][1]('p')
+  var _t_div = @[char][3]('d', 'i', 'v')
+  var _t_li = @[char][2]('l', 'i')
+  var _t_ul = @[char][2]('u', 'l')
+  var _t_ol = @[char][2]('o', 'l')
+  var _t_dl = @[char][2]('d', 'l')
+  var _t_dt = @[char][2]('d', 't')
+  var _t_dd = @[char][2]('d', 'd')
+  var _t_aside = @[char][5]('a', 's', 'i', 'd', 'e')
+  var _t_section = @[char][7]('s', 'e', 'c', 't', 'i', 'o', 'n')
+  var _t_blockquote = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var _t_pre = @[char][3]('p', 'r', 'e')
+  var _t_br = @[char][2]('b', 'r')
+  var _t_hr = @[char][2]('h', 'r')
+  var _t_tr = @[char][2]('t', 'r')
+  var _t_td = @[char][2]('t', 'd')
+  var _t_th = @[char][2]('t', 'h')
+  var _t_table = @[char][5]('t', 'a', 'b', 'l', 'e')
+  var _t_figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
+  var _t_figcaption = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var _t_article = @[char][7]('a', 'r', 't', 'i', 'c', 'l', 'e')
+  var _t_h1 = @[char][2]('h', '1')
+  var _t_h2 = @[char][2]('h', '2')
+  var _t_h3 = @[char][2]('h', '3')
+  var _t_h4 = @[char][2]('h', '4')
+  var _t_h5 = @[char][2]('h', '5')
+  var _t_h6 = @[char][2]('h', '6')
+in
+  if xml_name_eq(data, name_offset, name_len, _t_p, 1) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_div, 3) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_li, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_ul, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_ol, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dl, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dt, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dd, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_aside, 5) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_section, 7) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_blockquote, 10) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_pre, 3) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_br, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_hr, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_tr, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_td, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_th, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_table, 5) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_figure, 6) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_figcaption, 10) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_article, 7) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h1, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h2, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h3, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h4, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h5, 2) then true
+  else xml_name_eq(data, name_offset, name_len, _t_h6, 2)
+end
+
 (* The text of the element of nodes whose id is fragment[0, fragment_len), gathered into
    buf from at (inside: whether nodes are within it) *)
 fun _note_nodes {data_location,fragment_location,note_location:agz}{data_size:pos}{tree_size:nat}{fragment_len:pos}{at:nat | at <= NOTE_CAPACITY} .<tree_size, 1>.
@@ -4650,17 +4920,54 @@ and _note_node {data_location,fragment_location,note_location:agz}{data_size:pos
    buf: !$A.arr(byte, note_location, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
   case+ node of
   | $X.xml_text(offset, text_len) => if inside then _note_put(data, offset, text_len, 0, buf, at) else at
-  | $X.xml_element(_, _, attrs, children) => let
+  | $X.xml_element(name_offset, name_len, attrs, children) => let
       var _attr_id = @[char][2]('i', 'd')
       val here = (case+ find_attr(data, attrs, _attr_id, 2) of
         | ~xspan_none() => false
         | ~xspan_at(start, span_len) => if span_len = fragment_len then _same(data, start, fragment, span_len, 0) else false): bool
       val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
-    in if inside then _note_break(buf, end_at) else end_at end
+    in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+
+(* buf[at] and the bytes before it back to the first that starts a
+   character (not a continuation byte, 10xxxxxx) *)
+fun _note_boundary {l:agz}{at:nat | at < NOTE_CAPACITY} .<at>.
+  (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at): [start:nat | start <= at] int start =
+  if at <= 0 then 0
+  else if $AR.band_int_int(byte2int0($A.get<byte>(buf, at)), 192) = 128 then _note_boundary(buf, at - 1)
+  else at
+
+(* The start of a character reference the note is cut inside of, looking
+   back at most 8 bytes from at (a '&' with no ';' after it); else at *)
+fun _note_reference {l:agz}{at:nat | at <= NOTE_CAPACITY}{k:nat | k <= 8} .<8 - k>.
+  (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at, k: int k): [start:nat | start <= at] int start =
+  if k >= 8 then at
+  else if at - k - 1 < 0 then at
+  else let
+    val code = byte2int0($A.get<byte>(buf, at - k - 1))
+  in
+    if code = 59 then at
+    else if code = 38 then at - k - 1
+    else _note_reference(buf, at, k + 1)
+  end
+
+(* A note that filled buf (at is NOTE_CAPACITY - 1) was cut: its text ends
+   at a whole character, outside a character reference, with an ellipsis;
+   else at *)
+fn _note_ellipsis {l:agz}{at:nat | at <= NOTE_CAPACITY} (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
+  if at < _NOTE_CAPACITY - 1 then at
+  else let
+    val whole = _note_boundary(buf, at - 3)
+    val cut = _note_reference(buf, whole, 0)
+    val () = $A.set<byte>(buf, cut, $A.int2byte(226))
+    val () = $A.set<byte>(buf, cut + 1, $A.int2byte(128))
+    val () = $A.set<byte>(buf, cut + 2, $A.int2byte(166))
+  in cut + 3 end
 
 (* The note's text, decoded, shown in the note overlay, which opens *)
 fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byte, l, NOTE_CAPACITY), text_len: int text_len): void = let
   val text_len = (if text_len > 0 then (if byte2int0($A.get<byte>(buf, text_len - 1)) = 32 then text_len - 1 else text_len) else text_len): [text_len:nat | text_len <= NOTE_CAPACITY] int text_len
+  (* a note cut where the buffer ended says so *)
+  val text_len = _note_ellipsis(buf, text_len)
   val decoded = $A.alloc<byte>(_NOTE_CAPACITY)
   val @(note_frozen, note_bytes) = $A.freeze<byte>(buf)
   val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
@@ -4912,8 +5219,10 @@ fn _hit (hit: Int): @(Int, Int, Int, Int, Int) =
   | ~SearchNone() => @(~1, 0, 0, 0, 0)
   | ~SearchCell(found, hit_count, query, query_len) => let
       val @(chapter, node, offset) = _hit_at(found, hit)
+      (* the match's length in the units the page counts *)
+      val query_units = _arr_units(query, 0, query_len, 0)
       val () = _search_put(SearchCell(found, hit_count, query, query_len))
-    in @(chapter, node, offset, hit_count, query_len) end
+    in @(chapter, node, offset, hit_count, query_units) end
 
 (* "3 of 12": the hit's number of the hit count, under the results *)
 fn _hit_count (hit: Int, hit_count: Int): void = let

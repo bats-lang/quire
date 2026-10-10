@@ -36,7 +36,7 @@ function toBytes(str) {
  * Create a ZIP file from an array of { name, data, store } entries.
  * If store is true, the entry is stored uncompressed (required for mimetype).
  */
-function createZip(entries) {
+export function createZip(entries) {
   const localHeaders = [];
   const centralEntries = [];
   let offset = 0;
@@ -49,7 +49,12 @@ function createZip(entries) {
 
     let compressedData;
     let method;
-    if (entry.damaged) {
+    if (entry.method) {
+      // data marked as compressed by another method (12 is bzip2), as the zip's headers
+      // say it is, whatever the bytes are
+      compressedData = rawData;
+      method = entry.method;
+    } else if (entry.damaged) {
       // deflated data that cannot be inflated: a block of the reserved
       // type (BTYPE 3), as a damaged file has
       compressedData = Buffer.from([0xff, 0xff, 0xff, 0xff]);
@@ -218,6 +223,11 @@ function loremParagraph(seed) {
  * @param {number[]} opts.damagedChapters - Chapters (from 1) whose data cannot be inflated
  * @param {object[]} opts.rawChapters - Chapters given whole: each {body, images?, lang?,
  *   head? (more of its head, such as a viewport meta), itemref? (its itemref's properties)}
+ * @param {object[]} opts.metaInf - More files of META-INF, each {name, data}: an
+ *   encryption.xml (encryptionXml), a license.lcpl, a sinf.xml, a rights.xml
+ * @param {boolean} opts.encryptedChapters - The chapters' bytes are replaced by random
+ *   ones, as an encrypted chapter's are (named by the encryption.xml of metaInf)
+ * @param {boolean} opts.damagedPackage - The package document (OPF) cannot be inflated
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -253,12 +263,22 @@ export function silentWav(seconds) {
 
 /**
  * A PNG of width by height pixels, all of one colour (r, g, b): a fixed
- * layout's page image, whose shape the tests measure.
+ * layout's page image, whose shape the tests measure; with noise, one that
+ * does not compress.
  */
-export function solidPng(width, height, [r, g, b] = [40, 90, 160]) {
+export function solidPng(width, height, [r, g, b] = [40, 90, 160], { noise = false } = {}) {
   const row = Buffer.alloc(1 + 3 * width);
   for (let x = 0; x < width; x++) { row[1 + 3 * x] = r; row[2 + 3 * x] = g; row[3 + 3 * x] = b; }
-  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  // noise: every byte of every row pseudo-random (the same each time), so the
+  // PNG does not compress and is as large as the photographs of a real book
+  let seed = 12345;
+  const rows = Array.from({ length: height }, () => {
+    if (!noise) return row;
+    const own = Buffer.from(row);
+    for (let k = 1; k < own.length; k++) { seed = (seed * 1103515245 + 12345) >>> 0; own[k] = seed >>> 24; }
+    return own;
+  });
+  const raw = Buffer.concat(rows);
   const chunk = (type, data) => {
     const length = Buffer.alloc(4);
     length.writeUInt32BE(data.length);
@@ -276,6 +296,36 @@ export function solidPng(width, height, [r, g, b] = [40, 90, 160]) {
     Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
     chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+/**
+ * META-INF/encryption.xml (OCF 3.3 section 4.1) for the resources
+ * items names, each {uri, algorithm}; more is inside the first
+ * EncryptedData's KeyInfo (an ADEPT resource, say), and namespaces are
+ * more attributes of the root.
+ */
+export function encryptionXml(items, { keyInfo = '', namespaces = '' } = {}) {
+  const data = items.map(({ uri, algorithm }, k) => `  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="${algorithm}"/>
+${k === 0 && keyInfo ? `    ${keyInfo}\n` : ''}    <enc:CipherData><enc:CipherReference URI="${uri}"/></enc:CipherData>
+  </enc:EncryptedData>
+`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"${namespaces}>
+${data}</encryption>`;
+}
+
+/** n bytes that look random and are the same each time (xorshift32 from seed) */
+export function randomBytes(n, seed = 0x9e3779b9) {
+  const out = Buffer.alloc(n);
+  let x = seed >>> 0 || 1;
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    out[i] = x & 0xff;
+  }
+  return out;
 }
 
 export function createEpub(opts = {}) {
@@ -323,6 +373,10 @@ export function createEpub(opts = {}) {
   }
 
   const effectiveChapters = rawChapters ? rawChapters.length : numChapters;
+  // opts.extraSpine: [{ id, href, mediaType, data, fallback }] spine items
+  // of other kinds (EPUB 2's DTBook or OEB 1 documents, which name an
+  // XHTML fallback by its manifest id), after the chapters
+  const extraSpine = opts.extraSpine || [];
   const overlays = [];
   for (let i = 1; i <= effectiveChapters; i++) {
     const overlay = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].overlay;
@@ -344,7 +398,7 @@ export function createEpub(opts = {}) {
       const langAttrs = lang ? ` xml:lang="${lang}" lang="${lang}"` : '';
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 ${doctype}
-<html xmlns="http://www.w3.org/1999/xhtml"${langAttrs}>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"${langAttrs}>
 <head><title>Chapter ${i}</title>${rawChapters[i - 1].head || ''}</head>
 <body>
 ${rawBody}
@@ -362,7 +416,7 @@ ${rawBody}
       }
       xhtml = `<?xml version="1.0" encoding="UTF-8"?>
 ${doctype}
-<html xmlns="http://www.w3.org/1999/xhtml">
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">
 <head><title>Chapter ${i}</title></head>
 <body>
       ${body}
@@ -373,9 +427,15 @@ ${doctype}
     chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
 
+  for (const item of extraSpine) {
+    manifestItems += `    <item id="${item.id}" href="${item.href}" media-type="${item.mediaType}"${item.fallback ? ` fallback="${item.fallback}"` : ''}/>\n`;
+    spineItems += `    <itemref idref="${item.id}"/>\n`;
+    chapters.push({ name: `OEBPS/${item.href}`, data: item.data });
+  }
+
   // Add cover image if requested (EPUB3: properties="cover-image")
   if (coverImage) {
-    manifestItems += `    <item id="cover-img" href="images/cover.png" media-type="image/png" properties="cover-image"/>\n`;
+    manifestItems += `    <item id="cover-img" href="images/cover.png" media-type="image/png"${epub2 ? '' : ' properties="cover-image"'}/>\n`;
   }
 
   // Build TOC nav document
@@ -400,7 +460,7 @@ ${doctype}
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
 <head><meta name="dtb:uid" content="urn:uuid:${uid}"/></head><docTitle><text>${title}</text></docTitle>
 <navMap>
-${ncxPoints(tocTree)}</navMap>
+${opts.ncxNavMap !== undefined ? opts.ncxNavMap : ncxPoints(tocTree)}</navMap>
 ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}" type="normal" value="${k + 1}">` +
     `<navLabel><text>${e.label}</text></navLabel><content src="${e.href}"/></pageTarget>`).join('\n')}</pageList>\n` : ''}</ncx>`;
 
@@ -413,7 +473,7 @@ ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}"
     <ol>
 ${tocItems}    </ol>
   </nav>
-${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : ''}${landmarks.length ? `  <nav epub:type="landmarks" hidden="">\n    <ol>\n${landmarks.map(e => `<li><a epub:type="${e.type}"${e.href === undefined ? '' : ` href="${e.href}"`}>${e.label}</a></li>\n`).join('')}    </ol>\n  </nav>\n` : ''}</body>
+${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis(pageList)}    </ol>\n  </nav>\n` : opts.emptyPageNav ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n    </ol>\n  </nav>\n` : ''}${landmarks.length ? `  <nav epub:type="landmarks" hidden="">\n    <ol>\n${landmarks.map(e => `<li><a epub:type="${e.type}"${e.href === undefined ? '' : ` href="${e.href}"`}>${e.label}</a></li>\n`).join('')}    </ol>\n  </nav>\n` : ''}</body>
 </html>`;
 
   // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
@@ -424,18 +484,20 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
   // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
   if (useNcx) {
     manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
+    // opts.alsoNav: a nav document too (a package that says 2.0 and has one)
+    if (opts.alsoNav) manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
   } else {
     manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
   }
 
   // content.opf
   const contentOpf = `<?xml version="1.0" encoding="UTF-8"?>
-<package xmlns="http://www.idpf.org/2007/opf" version="${epub2 ? '2.0' : '3.0'}" unique-identifier="uid">
+<package xmlns="http://www.idpf.org/2007/opf" version="${epub2 ? '2.0' : '3.0'}" unique-identifier="uid"${epub2 ? ' xmlns:opf="http://www.idpf.org/2007/opf"' : ''}>
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>${title}</dc:title>
-    <dc:creator>${author}</dc:creator>
+    ${opts.creatorXml || `<dc:creator>${author}</dc:creator>`}
 ${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${uid}</dc:identifier>
-${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${opts.metadata || ''}  </metadata>
+${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${epub2 && coverImage ? '    <meta name="cover" content="cover-img"/>\n' : ''}${opts.metadata || ''}  </metadata>
   <manifest>
 ${manifestItems}  </manifest>
   <spine${useNcx ? ' toc="ncx"' : ''}${opts.rtl ? ' page-progression-direction="rtl"' : ''}>
@@ -448,9 +510,11 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   const zipEntries = [
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
-    { name: 'OEBPS/content.opf', data: contentOpf, store: true },
+    { name: 'OEBPS/content.opf', data: contentOpf, store: true, damaged: !!opts.damagedPackage },
     useNcx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
+  for (const f of (opts.metaInf || [])) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
+  if (opts.alsoNav) zipEntries.push({ name: 'OEBPS/nav.xhtml', data: navXhtml });
   for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
   zipEntries.push(...overlays);
 
@@ -479,6 +543,10 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   // storeChapters: true → store chapters uncompressed (diagnostic: test sync path)
   if (opts.storeChapters) {
     chapters.forEach(ch => { ch.store = true; });
+  }
+  // encryptedChapters: ciphertext in place of each chapter
+  if (opts.encryptedChapters) {
+    chapters.forEach((ch, k) => { ch.data = randomBytes(Buffer.byteLength(ch.data), 1000 + k); ch.store = true; });
   }
   zipEntries.push(...chapters);
 
