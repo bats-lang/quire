@@ -11,6 +11,7 @@
       "stats.spec.js",
       "stall-capture.spec.js",
       "library-records.spec.js",
+      "replace.spec.js",
       "drm.spec.js",
       "drm-catalogue.spec.js"
     ],

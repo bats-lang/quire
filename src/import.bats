@@ -408,14 +408,23 @@ in
       val storing = _store_file(id_high, id_low)
       val () = xspan_free(title)
       val () = xspan_free(author)
-      val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => lib_nums_set(library_index, @{
-        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = OnShelf(), added = record.added, opened = record.opened,
+      (* the reader asked for the book again: one archived or in the Trash is
+         back on the shelf; a hidden one stays hidden, as every other thing
+         the reader made stays (quire#425) *)
+      val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => let
+        val shelf_after = (case+ record.shelf of
+          | Hidden() => Hidden()
+          | OnShelf() => OnShelf()
+          | Archived() => OnShelf()
+          | Trash() => OnShelf()): shelf
+      in lib_nums_set(library_index, @{
+        key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = shelf_after, added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
         file_size = file_size, cover = (if is_image(cover) then cover else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
         (* back on the shelf: a change sync passes on *)
-        shelf_modified = (if same_shelf(record.shelf, OnShelf()) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
+        shelf_modified = (if same_shelf(record.shelf, shelf_after) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
         finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
-    place_modified = record.place_modified, place_declined = record.place_declined, progress_weighted = record.progress_weighted }))
+    place_modified = record.place_modified, place_declined = record.place_declined, progress_weighted = record.progress_weighted }) end)
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
       val key = (case+ lib_nums(library_index) of
         | ~$R.some(record) => record.key

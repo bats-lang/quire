@@ -1184,6 +1184,26 @@ research:
 epubcheck) plays each of #426's cases, and backup and sync carrying the
 number (`e2e/sync.spec.js`).
 
+## Replace keeps what the reader made (#425)
+
+A book's id is the SHA-256 of its file (`_file_id` in `src/import.bats`),
+so the duplicate question (Skip / Replace) is asked only for a file that
+is already in the library, byte for byte, and an archived book is put
+back by importing it with no question. Replace (`import_mode` `Replace`)
+changes the book's file (one `b<id>` entry), size, series and cover (when
+the file has one) and nothing else: the place, collections, finished
+mark, minutes, annotations and notes, order and id stay, and so does a
+hidden book's shelf; only an archived book or one in the Trash comes back
+to the Library, as the reader asked for it. `e2e/replace.spec.js` holds
+the whole record of the library, the file's size and the card, before and
+after, to be the same, and plays a backup, a second device and a second
+tab over it. By research (the issue's comment): Apple Books and Kobo make
+a corrected file a new book and the notes stay with the old one, which is
+what users complain of; so a corrected file of a book in the library
+(same title and author, another id) is to be offered Replace too, with
+the place and each note kept by chapter href and a note whose anchor is
+gone kept in the list as not found. That part is not built yet.
+
 ## A library that cannot be read says why, and offers what fits (#374)
 
 Bridge's IndexedDB read says why it failed: `Unreadable(cause)` carries a
