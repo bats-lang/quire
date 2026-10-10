@@ -17,7 +17,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, readBook, place, indicator, bookPage, showChrome, dialog, openReadingSettings, readingSettings,
-  selectionButton, marks, epubFile, importFiles, toLibrary, control,
+  selectionButton, marks, epubFile, importFiles, toLibrary, control, cards, card,
 } from './helpers.js';
 import { pageMargins } from './page-margins.js';
 import {
@@ -577,6 +577,8 @@ test.describe('ten thousand short paragraphs in one chapter', () => {
   }
 });
 
+const slow = expect.configure({ timeout: 240000 });
+
 test.describe('one paragraph of a megabyte without a space', () => {
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
@@ -585,10 +587,15 @@ test.describe('one paragraph of a megabyte without a space', () => {
       // (six turns instant and six animated, then the search): twice the time
       test.setTimeout(sizedTo(page) < 0.5 ? 420000 : 300000);
       const errors = await start(page);
-      await readBook(page, unbrokenBook());
+      // a hosted runner takes a minute to lay out a megabyte of one word:
+      // the waits of this test are as long as the test itself
+      await importFiles(page, [epubFile(unbrokenBook())], (await cards(page).count()) + 1);
+      await card(page, unbrokenBook().title).click();
+      await slow(bookPage(page)).toBeVisible();
+      await slow(indicator(page)).toContainText('in chapter');
       await arrange(page, mode);
       await settled(page);
-      await expect(bookPage(page)).toContainText('Unbroken chapter');
+      await slow(bookPage(page)).toContainText('Unbroken chapter');
       // the run is broken to the page's width, as a line with no place to
       // break is, so it fills the pages a megabyte of letters should
       expect(await screensOf(page), 'screens').toBeGreaterThan(mode === 'scrolled' ? 100 : 200);
@@ -598,7 +605,7 @@ test.describe('one paragraph of a megabyte without a space', () => {
       expect.soft(turns.animated[2], log).toBeLessThanOrEqual(turns.instant[2] + slack(turns.instant[2]));
       // searched: the word in the middle of the run, which is half way through the chapter
       const found = await searchFor(page, NEEDLE_WORD);
-      await expect(found).toHaveText('1 result');
+      await slow(found).toHaveText('1 result');
       await goToResult(page);
       expect((await marks(page)).text).toBe(NEEDLE_WORD);
       const half = (await where(page)).fraction;
@@ -607,8 +614,8 @@ test.describe('one paragraph of a megabyte without a space', () => {
       await closeSearch(page);
       // and to the end
       await page.keyboard.press('End');
-      await expect.poll(async () => (await where(page)).end).toBe(true);
-      await expect(bookPage(page)).toContainText(TAIL_WORD);
+      await slow.poll(async () => (await where(page)).end).toBe(true);
+      await slow(bookPage(page)).toContainText(TAIL_WORD);
       expect(errors).toEqual([]);
     });
   }
