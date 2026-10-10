@@ -2241,6 +2241,33 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
         else ())
     in _pass_attrs(doc, data, rest, node) end
 
+(* Whether an element is a note's text: its epub:type names footnote,
+   endnote or rearnote, or its role is doc-footnote or doc-endnote (a note
+   is set smaller than the text it is in, #422) *)
+fn _note_text {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _foot = @[char][4]('f', 'o', 'o', 't')
+  var _endnote = @[char][7]('e', 'n', 'd', 'n', 'o', 't', 'e')
+  var _rearnote = @[char][8]('r', 'e', 'a', 'r', 'n', 'o', 't', 'e')
+  var _doc_foot = @[char][12]('d', 'o', 'c', '-', 'f', 'o', 'o', 't', 'n', 'o', 't', 'e')
+  var _doc_end = @[char][11]('d', 'o', 'c', '-', 'e', 'n', 'd', 'n', 'o', 't', 'e')
+  val typed = (case+ find_attr(data, attrs, _attr_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _endnote, 7) then true
+      else if span_has(data, start, span_len, _rearnote, 8) then true
+      else span_has(data, start, span_len, _foot, 4)): bool
+in
+  if typed then true
+  else (case+ find_attr(data, attrs, _attr_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _doc_foot, 12) then true
+      else span_has(data, start, span_len, _doc_end, 11))
+end
+
 (* Whether an <a> is a note's reference: its epub:type names noteref, or
    its role is doc-noteref *)
 fn _noteref {l:agz}{n:pos}{attr_count:nat}
@@ -2604,6 +2631,15 @@ and _render_node
       val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      (* an audio or video element is not played (the DOM's attributes have
+         no controls: #424): its fallback content shows, and a line says so,
+         as an empty box would not *)
+      var _tag_audio = @[char][5]('a', 'u', 'd', 'i', 'o')
+      var _tag_video = @[char][5]('v', 'i', 'd', 'e', 'o')
+      val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else ())
+      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
