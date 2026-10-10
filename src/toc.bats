@@ -13,6 +13,7 @@
 #use zip as Z
 
 staload "epub_xml.sats"
+staload "entity.sats"
 staload "book.sats"
 staload "paths.sats"
 staload "ui.sats"
@@ -205,12 +206,6 @@ datavtype raw(data_size:int, int) =
   | {count:nat}{label_loc:agz}{label_len:pos | label_len <= LABEL_MAX}{level:nat | level <= 3}{href_offset,href_len:nat | href_offset + href_len <= data_size}
     raw_cons(data_size, count + 1) of ($A.arr(byte, label_loc, label_len), int label_len, int level, int href_offset, int href_len, raw(data_size, count))
 
-(* Whether data[offset + i, offset + i + pattern_len) is pattern, within
-   data[offset, offset + text_len) *)
-fn _matches_at {data_loc:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}{i:nat}{pattern_len:pos}
-  (data: !$A.borrow(byte, data_loc, data_size), offset: int offset, text_len: int text_len, i: int i, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
-  if i + pattern_len > text_len then false else xml_name_eq(data, offset + i, pattern_len, pattern, pattern_len)
-
 (* A byte at label_buffer[label_len] (while there is room), unless it is
    a space that would start the label or follow another *)
 fn _label_add {label_loc:agz}{label_len:nat | label_len <= LABEL_MAX}
@@ -224,40 +219,40 @@ fn _label_add {label_loc:agz}{label_len:nat | label_len <= LABEL_MAX}
     val () = $A.set<byte>(label_buffer, label_len, $A.int2byte($AR.low_byte(code)))
   in label_len + 1 end
 
-(* i + width, or text_len when that is past text_len *)
-fn _advance {i,text_len:nat | i < text_len}{width:pos} (i: int i, text_len: int text_len, width: int width): [j:int | i < j; j <= text_len] int j =
-  if i + width <= text_len then i + width else text_len
-
-(* The text data[offset + i, offset + text_len) added to the label
-   label_buffer[0, label_len): white space as one space, and the five
-   XML entities (and &nbsp;) decoded *)
-fun _copy_text {data_loc,label_loc:agz}{data_size:pos}{offset,text_len:nat | offset + text_len <= data_size}{i:nat | i <= text_len}{label_len:nat | label_len <= LABEL_MAX} .<text_len - i>.
-  (data: !$A.borrow(byte, data_loc, data_size), offset: int offset, text_len: int text_len, i: int i,
-   label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len =
-  if i >= text_len then label_len
+(* label_buffer[label_len, label_len + take) := tmp[i, i + take) *)
+fun _copy_run {tmp_loc,label_loc:agz}{tmp_size:pos}{i,take:nat | i + take <= tmp_size}{label_len:nat | label_len + take <= LABEL_MAX}{k:nat | k <= take} .<take - k>.
+  (tmp: !$A.arr(byte, tmp_loc, tmp_size), i: int i, take: int take, label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len, k: int k): void =
+  if k >= take then ()
   else let
-    val code = byte2int0($A.read<byte>(data, offset + i))
+    val () = $A.set<byte>(label_buffer, label_len + k, $A.get<byte>(tmp, i + k))
+  in _copy_run(tmp, i, take, label_buffer, label_len, k + 1) end
+
+(* The decoded text tmp[i, decoded_len), added to the label
+   label_buffer[0, label_len): white space (and U+00A0) as one space, and
+   whole characters only, so a label cut at LABEL_MAX bytes never ends in
+   half of one *)
+fun _copy_decoded {tmp_loc,label_loc:agz}{tmp_size:pos}{decoded_len:nat | decoded_len <= tmp_size}{i:nat | i <= decoded_len}{label_len:nat | label_len <= LABEL_MAX} .<decoded_len - i>.
+  (tmp: !$A.arr(byte, tmp_loc, tmp_size), decoded_len: int decoded_len, i: int i,
+   label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len =
+  if i >= decoded_len then label_len
+  else let
+    val code = byte2int0($A.get<byte>(tmp, i))
+    val is_nbsp = (if code = 194 then (if i + 1 < decoded_len then byte2int0($A.get<byte>(tmp, i + 1)) = 160 else false) else false): bool
+    val after_two = (if i + 2 <= decoded_len then i + 2 else decoded_len): [j:int | i < j; j <= decoded_len] int j
   in
-    if code = 9 then _copy_text(data, offset, text_len, _advance(i, text_len, 1), label_buffer, _label_add(label_buffer, label_len, 32))
-    else if code = 10 then _copy_text(data, offset, text_len, _advance(i, text_len, 1), label_buffer, _label_add(label_buffer, label_len, 32))
-    else if code = 13 then _copy_text(data, offset, text_len, _advance(i, text_len, 1), label_buffer, _label_add(label_buffer, label_len, 32))
-    else if code = 38 then let
-      var amp = @[char][4]('a', 'm', 'p', ';')
-      var lt = @[char][3]('l', 't', ';')
-      var gt = @[char][3]('g', 't', ';')
-      var quot = @[char][5]('q', 'u', 'o', 't', ';')
-      var apos = @[char][5]('a', 'p', 'o', 's', ';')
-      var nbsp = @[char][5]('n', 'b', 's', 'p', ';')
+    if code = 9 then _copy_decoded(tmp, decoded_len, i + 1, label_buffer, _label_add(label_buffer, label_len, 32))
+    else if code = 10 then _copy_decoded(tmp, decoded_len, i + 1, label_buffer, _label_add(label_buffer, label_len, 32))
+    else if code = 13 then _copy_decoded(tmp, decoded_len, i + 1, label_buffer, _label_add(label_buffer, label_len, 32))
+    else if is_nbsp then _copy_decoded(tmp, decoded_len, after_two, label_buffer, _label_add(label_buffer, label_len, 32))
+    else let
+      val width = (if code >= 240 then 4 else if code >= 224 then 3 else if code >= 192 then 2 else 1): [w:pos] int w
+      val take = (if i + width <= decoded_len then width else decoded_len - i): [t:pos | i + t <= decoded_len] int t
     in
-      if _matches_at(data, offset, text_len, i + 1, amp, 4) then _copy_text(data, offset, text_len, _advance(i, text_len, 5), label_buffer, _label_add(label_buffer, label_len, 38))
-      else if _matches_at(data, offset, text_len, i + 1, lt, 3) then _copy_text(data, offset, text_len, _advance(i, text_len, 4), label_buffer, _label_add(label_buffer, label_len, 60))
-      else if _matches_at(data, offset, text_len, i + 1, gt, 3) then _copy_text(data, offset, text_len, _advance(i, text_len, 4), label_buffer, _label_add(label_buffer, label_len, 62))
-      else if _matches_at(data, offset, text_len, i + 1, quot, 5) then _copy_text(data, offset, text_len, _advance(i, text_len, 6), label_buffer, _label_add(label_buffer, label_len, 34))
-      else if _matches_at(data, offset, text_len, i + 1, apos, 5) then _copy_text(data, offset, text_len, _advance(i, text_len, 6), label_buffer, _label_add(label_buffer, label_len, 39))
-      else if _matches_at(data, offset, text_len, i + 1, nbsp, 5) then _copy_text(data, offset, text_len, _advance(i, text_len, 6), label_buffer, _label_add(label_buffer, label_len, 32))
-      else _copy_text(data, offset, text_len, _advance(i, text_len, 1), label_buffer, _label_add(label_buffer, label_len, code))
+      if label_len + take > LABEL_MAX then label_len
+      else let
+        val () = _copy_run(tmp, i, take, label_buffer, label_len, 0)
+      in _copy_decoded(tmp, decoded_len, i + take, label_buffer, label_len + take) end
     end
-    else _copy_text(data, offset, text_len, _advance(i, text_len, 1), label_buffer, _label_add(label_buffer, label_len, code))
   end
 
 (* The text of nodes, added to the label label_buffer[0, label_len) *)
@@ -272,7 +267,17 @@ and _gather_node {data_loc,label_loc:agz}{data_size:pos}{node_size:pos}{label_le
   (data: !$A.borrow(byte, data_loc, data_size), node: !$X.xml_node(data_size, node_size),
    label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len =
   case+ node of
-  | $X.xml_text(text_offset, text_len) => _copy_text(data, text_offset, text_len, 0, label_buffer, label_len)
+  | $X.xml_text(text_offset, text_len) =>
+    if text_len <= 0 then label_len
+    (* a label is 200 bytes: a text over 1 MiB (alloc's bound) adds none *)
+    else if text_len > 1048576 then label_len
+    else let
+      (* its character references decoded (numeric ones too), as the page's text is *)
+      val tmp = $A.alloc<byte>(text_len)
+      val decoded_len = decode_text(data, text_offset, text_len, tmp)
+      val new_len = _copy_decoded(tmp, decoded_len, 0, label_buffer, label_len)
+      val () = $A.free<byte>(tmp)
+    in new_len end
   | $X.xml_element(_, _, _, children) => _gather_nodes(data, children, label_buffer, label_len)
 
 (* The text of the first child element of nodes named element_name,

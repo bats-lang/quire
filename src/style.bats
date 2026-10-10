@@ -2094,7 +2094,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9700] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9800] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2426,6 +2426,16 @@ fn _reader {left:nat | left >= 9700} (sheet: sheet(left, false, false)): [after:
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf figure")
   val sheet = lay(sheet, Margin(), "1em auto")
+  val sheet = close(sheet)
+  (* an audio or video element, not played: a line says so before its
+     fallback content (#424) *)
+  val sheet = rule(sheet, ".caf .media-fallback::before")
+  val () = raw(sheet, "content:\"Audio or video: Quire does not play it.\";display:block;font-style:italic;")
+  val sheet = close(sheet)
+  (* a note's text and a caption are set smaller than the text round them,
+     and scale with it (#422) *)
+  val sheet = rule(sheet, ".caf .note-text,.caf figcaption")
+  val sheet = lay(sheet, FontSize(), ".875em")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf sup,.caf sub")
   val sheet = lay(sheet, LineHeight(), "0")

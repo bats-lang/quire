@@ -119,7 +119,9 @@ it (`appVersion`), and gen-pwa appends it to the Android project's
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI writes it for a pull request's
 own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
+in `check.yml`, should a queue be switched on) from the group's own
+commit (`github.sha`). `tests/version/same.sh` checks that it is the
 same in other time zones and that the Android project carries it.
 
 ## To do: book memory in a rolling window of page arenas
@@ -608,8 +610,22 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
-### Wide and structured content (#413)
+### Note popups (#414)
 
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+### Wide and structured content (#413)
 A table is its own scroll container (`.caf table`: `overflow: auto`), at
 most as wide as the column and as tall as the reading area
 (`calc(100dvh - var(--page-top) - var(--page-bottom))`, as a picture is):
@@ -623,9 +639,7 @@ indents made of the book's CSS (`text-indent`, `padding-left`, hanging)
 are not kept, since no publisher CSS is applied (#411), and a wrapped
 line of verse is told from a new one only by the text.
 `e2e/wide.spec.js` plays `e2e/wide-books.js`.
-
 ### Position stability and page-turner keys (#412)
-
 The place is a content node (the first paragraph that begins on the page,
 `_anchor_kept`), not a page: `e2e/stability.spec.js` changes each of the
 theme, font, size, line spacing, paragraph spacing, margins and columns,
@@ -676,8 +690,19 @@ locally): a valid book must pass, one that is invalid on purpose (a
 landmark naming a file the book lacks) may give only the errors its
 entry lists.
 
-### EPUB 2 packages (#416)
+### The print page list and page breaks (#415)
 
+The Pages tab lists the page list's entries as the book gives them (not
+sorted, duplicates kept, each going to its own target); an entry whose chapter
+the book lacks is listed and leads nowhere (the panel stays), one whose fragment
+is missing goes to its chapter, an empty page list shows no tab. The
+footer names the latest page the screen reaches, from the break's `title`, else
+its `aria-label`, whichever of `epub:type="pagebreak"` or `role="doc-pagebreak"`
+the element has, with no page list too; a break with neither is shown and names
+no page. A label in the contents or the page list is decoded as any text is
+(numeric references too) and cut at a whole character.
+`e2e/pagelist.spec.js` plays `e2e/pagelist-books.js`.
+### EPUB 2 packages (#416)
 A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
 an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
 document order, whatever their `playOrder`; one with no `content` is listed
@@ -692,7 +717,6 @@ as XML and its text shown. A Hebrew book whose spine names no direction
 reads right to left, as Readium reads it. A row of the contents or the
 page list that leads nowhere keeps the panel up (`reader_goto_entry` and
 `reader_goto_page` say whether they went).
-
 `e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
 `creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
 under epubcheck 2.0 rules except those invalid on purpose.

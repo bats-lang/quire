@@ -2356,6 +2356,33 @@ fun _pass_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
         else ())
     in _pass_attrs(doc, data, rest, node) end
 
+(* Whether an element is a note's text: its epub:type names footnote,
+   endnote or rearnote, or its role is doc-footnote or doc-endnote (a note
+   is set smaller than the text it is in, #422) *)
+fn _note_text {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): bool = let
+  var _attr_type = @[char][9]('e', 'p', 'u', 'b', ':', 't', 'y', 'p', 'e')
+  var _attr_role = @[char][4]('r', 'o', 'l', 'e')
+  var _foot = @[char][4]('f', 'o', 'o', 't')
+  var _endnote = @[char][7]('e', 'n', 'd', 'n', 'o', 't', 'e')
+  var _rearnote = @[char][8]('r', 'e', 'a', 'r', 'n', 'o', 't', 'e')
+  var _doc_foot = @[char][12]('d', 'o', 'c', '-', 'f', 'o', 'o', 't', 'n', 'o', 't', 'e')
+  var _doc_end = @[char][11]('d', 'o', 'c', '-', 'e', 'n', 'd', 'n', 'o', 't', 'e')
+  val typed = (case+ find_attr(data, attrs, _attr_type, 9) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _endnote, 7) then true
+      else if span_has(data, start, span_len, _rearnote, 8) then true
+      else span_has(data, start, span_len, _foot, 4)): bool
+in
+  if typed then true
+  else (case+ find_attr(data, attrs, _attr_role, 4) of
+    | ~xspan_none() => false
+    | ~xspan_at(start, span_len) =>
+      if span_has(data, start, span_len, _doc_foot, 12) then true
+      else span_has(data, start, span_len, _doc_end, 11))
+end
+
 (* Whether an <a> is a note's reference: its epub:type names noteref, or
    its role is doc-noteref *)
 fn _noteref {l:agz}{n:pos}{attr_count:nat}
@@ -2719,6 +2746,15 @@ and _render_node
       val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
+      (* an audio or video element is not played (the DOM's attributes have
+         no controls: #424): its fallback content shows, and a line says so,
+         as an empty box would not *)
+      var _tag_audio = @[char][5]('a', 'u', 'd', 'i', 'o')
+      var _tag_video = @[char][5]('v', 'i', 'd', 'e', 'o')
+      val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
+        else ())
+      val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
       val () = (if xml_name_eq(data, name_offset, name_len, _tag_ruby, 4) then _ruby_mark() else ())
@@ -4743,6 +4779,68 @@ fn _note_break {l:agz}{at:nat | at <= NOTE_CAPACITY} (buf: !$A.arr(byte, l, NOTE
   else if byte2int0($A.get<byte>(buf, at - 1)) = 32 then at
   else let val () = $A.set<byte>(buf, at, $A.int2byte(32)) in at + 1 end
 
+(* Whether an element is a block (or a line break), where a note's text
+   goes on after a space: an inline element's end is no break, so "cites"
+   and a reference "3" and the "." after it are not pulled apart *)
+fn _note_block {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): bool = let
+  var _t_p = @[char][1]('p')
+  var _t_div = @[char][3]('d', 'i', 'v')
+  var _t_li = @[char][2]('l', 'i')
+  var _t_ul = @[char][2]('u', 'l')
+  var _t_ol = @[char][2]('o', 'l')
+  var _t_dl = @[char][2]('d', 'l')
+  var _t_dt = @[char][2]('d', 't')
+  var _t_dd = @[char][2]('d', 'd')
+  var _t_aside = @[char][5]('a', 's', 'i', 'd', 'e')
+  var _t_section = @[char][7]('s', 'e', 'c', 't', 'i', 'o', 'n')
+  var _t_blockquote = @[char][10]('b', 'l', 'o', 'c', 'k', 'q', 'u', 'o', 't', 'e')
+  var _t_pre = @[char][3]('p', 'r', 'e')
+  var _t_br = @[char][2]('b', 'r')
+  var _t_hr = @[char][2]('h', 'r')
+  var _t_tr = @[char][2]('t', 'r')
+  var _t_td = @[char][2]('t', 'd')
+  var _t_th = @[char][2]('t', 'h')
+  var _t_table = @[char][5]('t', 'a', 'b', 'l', 'e')
+  var _t_figure = @[char][6]('f', 'i', 'g', 'u', 'r', 'e')
+  var _t_figcaption = @[char][10]('f', 'i', 'g', 'c', 'a', 'p', 't', 'i', 'o', 'n')
+  var _t_article = @[char][7]('a', 'r', 't', 'i', 'c', 'l', 'e')
+  var _t_h1 = @[char][2]('h', '1')
+  var _t_h2 = @[char][2]('h', '2')
+  var _t_h3 = @[char][2]('h', '3')
+  var _t_h4 = @[char][2]('h', '4')
+  var _t_h5 = @[char][2]('h', '5')
+  var _t_h6 = @[char][2]('h', '6')
+in
+  if xml_name_eq(data, name_offset, name_len, _t_p, 1) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_div, 3) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_li, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_ul, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_ol, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dl, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dt, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_dd, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_aside, 5) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_section, 7) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_blockquote, 10) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_pre, 3) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_br, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_hr, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_tr, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_td, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_th, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_table, 5) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_figure, 6) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_figcaption, 10) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_article, 7) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h1, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h2, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h3, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h4, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _t_h5, 2) then true
+  else xml_name_eq(data, name_offset, name_len, _t_h6, 2)
+end
+
 (* The text of the element of nodes whose id is fragment[0, fragment_len), gathered into
    buf from at (inside: whether nodes are within it) *)
 fun _note_nodes {data_location,fragment_location,note_location:agz}{data_size:pos}{tree_size:nat}{fragment_len:pos}{at:nat | at <= NOTE_CAPACITY} .<tree_size, 1>.
@@ -4761,17 +4859,54 @@ and _note_node {data_location,fragment_location,note_location:agz}{data_size:pos
    buf: !$A.arr(byte, note_location, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
   case+ node of
   | $X.xml_text(offset, text_len) => if inside then _note_put(data, offset, text_len, 0, buf, at) else at
-  | $X.xml_element(_, _, attrs, children) => let
+  | $X.xml_element(name_offset, name_len, attrs, children) => let
       var _attr_id = @[char][2]('i', 'd')
       val here = (case+ find_attr(data, attrs, _attr_id, 2) of
         | ~xspan_none() => false
         | ~xspan_at(start, span_len) => if span_len = fragment_len then _same(data, start, fragment, span_len, 0) else false): bool
       val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
-    in if inside then _note_break(buf, end_at) else end_at end
+    in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+
+(* buf[at] and the bytes before it back to the first that starts a
+   character (not a continuation byte, 10xxxxxx) *)
+fun _note_boundary {l:agz}{at:nat | at < NOTE_CAPACITY} .<at>.
+  (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at): [start:nat | start <= at] int start =
+  if at <= 0 then 0
+  else if $AR.band_int_int(byte2int0($A.get<byte>(buf, at)), 192) = 128 then _note_boundary(buf, at - 1)
+  else at
+
+(* The start of a character reference the note is cut inside of, looking
+   back at most 8 bytes from at (a '&' with no ';' after it); else at *)
+fun _note_reference {l:agz}{at:nat | at <= NOTE_CAPACITY}{k:nat | k <= 8} .<8 - k>.
+  (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at, k: int k): [start:nat | start <= at] int start =
+  if k >= 8 then at
+  else if at - k - 1 < 0 then at
+  else let
+    val code = byte2int0($A.get<byte>(buf, at - k - 1))
+  in
+    if code = 59 then at
+    else if code = 38 then at - k - 1
+    else _note_reference(buf, at, k + 1)
+  end
+
+(* A note that filled buf (at is NOTE_CAPACITY - 1) was cut: its text ends
+   at a whole character, outside a character reference, with an ellipsis;
+   else at *)
+fn _note_ellipsis {l:agz}{at:nat | at <= NOTE_CAPACITY} (buf: !$A.arr(byte, l, NOTE_CAPACITY), at: int at): [end_at:nat | end_at <= NOTE_CAPACITY] int end_at =
+  if at < _NOTE_CAPACITY - 1 then at
+  else let
+    val whole = _note_boundary(buf, at - 3)
+    val cut = _note_reference(buf, whole, 0)
+    val () = $A.set<byte>(buf, cut, $A.int2byte(226))
+    val () = $A.set<byte>(buf, cut + 1, $A.int2byte(128))
+    val () = $A.set<byte>(buf, cut + 2, $A.int2byte(166))
+  in cut + 3 end
 
 (* The note's text, decoded, shown in the note overlay, which opens *)
 fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byte, l, NOTE_CAPACITY), text_len: int text_len): void = let
   val text_len = (if text_len > 0 then (if byte2int0($A.get<byte>(buf, text_len - 1)) = 32 then text_len - 1 else text_len) else text_len): [text_len:nat | text_len <= NOTE_CAPACITY] int text_len
+  (* a note cut where the buffer ended says so *)
+  val text_len = _note_ellipsis(buf, text_len)
   val decoded = $A.alloc<byte>(_NOTE_CAPACITY)
   val @(note_frozen, note_bytes) = $A.freeze<byte>(buf)
   val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
