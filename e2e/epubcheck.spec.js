@@ -18,10 +18,11 @@ import { mediaBooks } from './media-books.js';
 import { pagelistBooks } from './pagelist-books.js';
 import { epub2Books } from './epub2-books.js';
 import { wideBooks } from './wide-books.js';
+import { w3cBooks } from './w3c-books.js';
 import { pathologicalBooks } from './pathological-books.js';
 
 const jar = process.env.EPUBCHECK_JAR;
-const registries = { landmarks: landmarkBooks, drm: drmBooks, epub2: epub2Books, notes: noteBooks, sync: syncBooks, media: mediaBooks, pagelist: pagelistBooks, wide: wideBooks, publisher: publisherBooks, pathological: pathologicalBooks };
+const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks, 'w3c epub-tests': w3cBooks, notes: noteBooks, sync: syncBooks, media: mediaBooks, publisher: publisherBooks, drm: drmBooks, pathological: pathologicalBooks };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once
@@ -36,7 +37,7 @@ for (const [group, books] of Object.entries(registries)) {
       const dir = mkdtempSync(join(tmpdir(), 'quire-epubcheck-'));
       const epub = join(dir, `${name}.epub`);
       const report = join(dir, `${name}.json`);
-      writeFileSync(epub, createEpub(entry.opts));
+      writeFileSync(epub, entry.bytes ? entry.bytes() : createEpub(entry.opts));
       try {
         execFileSync('java', ['-jar', jar, epub, '--json', report, '--quiet'], { stdio: 'pipe' });
       } catch (e) {
