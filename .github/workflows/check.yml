@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A merge queue runs the check on its own merge group
+  merge_group:
   # The relock workflow starts it on its relock/<date> branch: a pull
   # request opened with GITHUB_TOKEN starts no workflow by itself
   workflow_dispatch:

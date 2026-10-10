@@ -119,7 +119,9 @@ it (`appVersion`), and gen-pwa appends it to the Android project's
 time in minutes since 2025 (so it grows from release to release, and
 pwa's run-number code is overridden). CI writes it for a pull request's
 own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and `tests/version/same.sh` checks that it is the
+`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
+in `check.yml`, should a queue be switched on) from the group's own
+commit (`github.sha`). `tests/version/same.sh` checks that it is the
 same in other time zones and that the Android project carries it.
 
 ## To do: book memory in a rolling window of page arenas
@@ -608,8 +610,56 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
-### Where a book opens the first time (#409)
+### Note popups (#414)
 
+A note opens as its text, in one popup (`footnote`): an element's text
+is gathered from the chapter's XHTML by its id (so a note marked `aside`,
+`div`, `li` or none, and one `hidden` or not, all open), a block ends in a
+space and an inline element does not (a reference "3" and the "." after it
+stay together), and a note over 4 KiB (`NOTE_CAPACITY`) ends in an ellipsis,
+cut at a whole character and outside a character reference. The popup has no
+links in it: links in a popup are what an iBooks popover collapsed on (Stack
+Overflow 12952352) and Apple advises a note of one paragraph; the note's own
+links, nested notes and backlink work where the note is, which Go to note
+reaches, with the way back. No unmarked footnote is detected (Calibre's
+maintainer does; Apple Books and Kobo ask for markup, and a heuristic opens a
+popup for a "see 3" cross-reference): an unmarked link is a link.
+`e2e/footnotes.spec.js` plays `e2e/note-books.js`.
+### Wide and structured content (#413)
+A table is its own scroll container (`.caf table`: `overflow: auto`), at
+most as wide as the column and as tall as the reading area
+(`calc(100dvh - var(--page-top) - var(--page-bottom))`, as a picture is):
+a block that scrolls cannot be split between columns, so a table taller
+than the page, as it was (`overflow-x` made it scrollable too), lost every
+row past the page's foot (90 rows: the first six were all that could be
+read). `pre` wraps (`white-space: pre-wrap`) and keeps its spaces, tabs
+and blank lines, and, being no scroll container, continues over the pages.
+Verse keeps its `<br/>` lines and the indents made of no-break spaces;
+indents made of the book's CSS (`text-indent`, `padding-left`, hanging)
+are not kept, since no publisher CSS is applied (#411), and a wrapped
+line of verse is told from a new one only by the text.
+`e2e/wide.spec.js` plays `e2e/wide-books.js`.
+### Position stability and page-turner keys (#412)
+The place is a content node (the first paragraph that begins on the page,
+`_anchor_kept`), not a page: `e2e/stability.spec.js` changes each of the
+theme, font, size, line spacing, paragraph spacing, margins and columns,
+and the window (paged, two columns, scrolled, vertical, fixed-layout),
+several in a row, and kills the app after each, and the paragraph is on the
+page shown (the one at the page's middle is not: a page's first
+paragraph is what is kept); a book converted from each of QLB1 to QLB6
+opens at its stored chapter, page and anchor (`e2e/legacy-library.js`
+holds the old record and the store for it, as `library-records.spec.js`
+uses them). Keys: the page turns by the arrows, Page Up and Down, Space
+(Shift for back), the volume keys when the reader chooses (the Android
+app's), and MediaTrackNext and MediaTrackPrevious (a page turner's
+multimedia mode: the DuRoBo Moodi sends previous and next track there, its
+reading mode the volume keys; the others in the field send the arrows or Page
+Up and Down). Enter follows the focused link and is no page key. Keys are not
+the page's while a text field or a panel has the focus, and a volume key is
+the system's while a panel is open. `QUIRE_PORT` in `playwright.config.js` is
+the port the app is served on, so two runs of the suite from two checkouts
+do not serve each other's build.
+### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
 opens at the bodymatter landmark (and as the EPUB 3.3 landmarks section,
 DAISY's knowledge base and Thorium's "Start of Content" have it), not at
@@ -627,13 +677,11 @@ is the first chapter's first page, no move has been dated
 back at its first page, opens at its kept place. The chapters, contents
 and fonts are made ready first (`_book_prepare`), so the cover is never
 shown before the jump; the jump is not dated, as no open is.
-
 The landmarks are not listed in Contents (issue #409: Apple Books uses
 the bodymatter landmark to open the book and lists none, Calibre's viewer
 shows none, only Thorium has a Landmarks list; publishers put the
 contents page, index and list of illustrations in the table of contents
 too, so the list would repeat it).
-
 `e2e/landmarks.spec.js` plays the books in `e2e/landmark-books.js`
 (`createEpub`'s `landmarks`, `guide` and `epub2`), and
 `e2e/epubcheck.spec.js` checks every book there with epubcheck (5.2.1,
@@ -655,6 +703,37 @@ attribute) is shown, there being no CSS to say it; the `hidden` attribute is
 HTML's own word and is kept: `_pass_attrs` gives an element that has it the
 class `hidden-by-book`, which the stylesheet hides. `e2e/publisher.spec.js`
 plays `e2e/publisher-books.js`.
+
+### The print page list and page breaks (#415)
+
+The Pages tab lists the page list's entries as the book gives them (not
+sorted, duplicates kept, each going to its own target); an entry whose chapter
+the book lacks is listed and leads nowhere (the panel stays), one whose fragment
+is missing goes to its chapter, an empty page list shows no tab. The
+footer names the latest page the screen reaches, from the break's `title`, else
+its `aria-label`, whichever of `epub:type="pagebreak"` or `role="doc-pagebreak"`
+the element has, with no page list too; a break with neither is shown and names
+no page. A label in the contents or the page list is decoded as any text is
+(numeric references too) and cut at a whole character.
+`e2e/pagelist.spec.js` plays `e2e/pagelist-books.js`.
+### EPUB 2 packages (#416)
+A package of version 2.0 (OPF 2.0, XHTML 1.1, an NCX, no nav) opens as
+an EPUB 3 one does: its contents are the NCX (`navPoint`s listed in
+document order, whatever their `playOrder`; one with no `content` is listed
+and leads nowhere, one with no label is "Untitled"), its cover the
+manifest item a `<meta name="cover">` names, its `<guide>`'s `text`
+reference where a first open lands (#409), its author the first
+`dc:creator` as written (`opf:file-as` is not read: books are sorted by
+the name shown). XHTML 1.1's named entities (`&nbsp;`, `&mdash;`) are
+decoded as any text's are. A DTBook or OEB 1 spine item (`application/x-dtbook+xml`,
+`text/x-oeb1-document`, which a package names an XHTML fallback for) is read
+as XML and its text shown. A Hebrew book whose spine names no direction
+reads right to left, as Readium reads it. A row of the contents or the
+page list that leads nowhere keeps the panel up (`reader_goto_entry` and
+`reader_goto_page` say whether they went).
+`e2e/epub2.spec.js` plays `e2e/epub2-books.js` (create-epub.js's `epub2`,
+`creatorXml`, `ncxNavMap`, `alsoNav` and `extraSpine`), each book valid
+under epubcheck 2.0 rules except those invalid on purpose.
 
 ### Found while taking this inventory
 
@@ -1375,7 +1454,10 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   `ui_text_btn`. `labelsShown` and `labelInName` in
   `e2e/controls-shown.js` check both on every screen the layout walks.
 * The base rules are the only `!important` ones: every control is at
-  least 44px square, text fields use a 16px font (so iOS does not zoom
+  least 48px square (quire#403: Material 3 and Android's accessibility
+  guidance say 48dp, Apple's HIG 44pt, WCAG 2.5.5 44px, which 48 also
+  meets; the app is released on Android; `targetsShort` in
+  `e2e/controls-shown.js` measures it on every screen the layout walks), text fields use a 16px font (so iOS does not zoom
   in), and focus shows a 2px ring in the text's own colour.
 * The sheet's size is in its type (`sheet(r, media, open)`: r bytes
   left, and whether an @media block and a rule are open), so it always
