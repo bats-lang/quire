@@ -10,9 +10,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEpub } from './create-epub.js';
 import { landmarkBooks } from './landmark-books.js';
-
-const jar = process.env.EPUBCHECK_JAR;
-import { landmarkBooks } from './landmark-books.js';
 import { drmBooks } from './drm-books.js';
 import { publisherBooks } from './publisher-books.js';
 import { noteBooks } from './note-books.js';
