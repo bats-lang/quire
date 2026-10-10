@@ -2058,16 +2058,37 @@ fn _utf8_start {l:agz}{n:pos}{at:nat | at < n}
   (data: !$A.borrow(byte, l, n), at: int at): bool =
   $AR.band_int_int(byte2int0($A.read<byte>(data, at)), 192) <> 128
 
-(* The length of the longest prefix of data[offset, offset + text_len), text_len of 64 KiB
-   or more, under 64 KiB (a text op's limit) that ends before a UTF-8
-   character's start, so no character is split; 65535 when the data is
-   not UTF-8 there *)
+(* The cut after the last white space (a space, a tab or a line feed) at
+   or before data[offset + at], looking back no further than floor; -1
+   when there is none *)
+fun _break_back {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}{at:nat | at <= 65534} .<at>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, at: int at, floor: int): [cut:int | ~1 <= cut; cut <= 65535] int cut =
+  if at <= 0 then ~1
+  else if at <= floor then ~1
+  else let
+    val code = byte2int0($A.read<byte>(data, offset + at))
+  in
+    if code = 32 || code = 10 || code = 9 then at + 1
+    else _break_back(data, offset, text_len, at - 1, floor)
+  end
+
+(* The length of the prefix of data[offset, offset + text_len), text_len of
+   64 KiB or more, that is cut off as a piece: under 64 KiB (a text op's
+   limit), after the last white space in its last 512 bytes, so that the
+   words the pieces are shown as blocks between (below) are not cut; else
+   (a run with no white space, a megabyte of one word) the longest prefix
+   that ends before a UTF-8 character's start, so no character is split:
+   65535 when the data is not UTF-8 there *)
 fn _text_cut {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n; text_len >= 65536}
-  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65533 <= cut; cut <= 65535] int cut =
-  if _utf8_start(data, offset + 65535) then 65535
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): [cut:int | 65000 <= cut; cut <= 65535] int cut = let
+  val back = _break_back(data, offset, text_len, 65534, 65022)
+in
+  if back >= 65000 then back
+  else if _utf8_start(data, offset + 65535) then 65535
   else if _utf8_start(data, offset + 65534) then 65534
   else if _utf8_start(data, offset + 65533) then 65533
   else 65535
+end
 
 (* A content node's attribute name: data[offset, offset + value_len) *)
 fn _node_attr {doc_location,l:agz}{n:pos}{node:nat}{offset,value_len:nat | offset + value_len <= n; value_len < 65536}
@@ -2112,17 +2133,25 @@ in node end
 
 (* Text data[offset, offset + text_len) as spans, the last children of content node
    parent: one span per piece under 64 KiB (a text op's limit), split
-   where a UTF-8 character starts *)
+   where white space is, else where a UTF-8 character starts. The pieces
+   of a text of 64 KiB or more are class run, shown as blocks (style.bats):
+   Chrome draws the one inline run of a paragraph across its columns in
+   time that grows with the square of the columns (a megabyte of one word
+   at 390 px: 17 s a frame; the same text as blocks of 64 KiB: 1 s), so no
+   run is longer than one piece (#423) *)
 fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,text_len:nat | offset + text_len <= n} .<text_len>.
-  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len): void = let
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), parent: int parent, offset: int offset, text_len: int text_len, split: bool): void = let
   val node = _next_content_node()
   val () = _add_node(doc, parent, node, $D.Span)
 in
-  if text_len < 65536 then _node_text(doc, node, data, offset, text_len)
+  if text_len < 65536 then let
+    val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
+  in _node_text(doc, node, data, offset, text_len) end
   else let
     val cut = _text_cut(data, offset, text_len)
+    val () = _node_attr_literal(doc, node, $D.Class, "run")
     val () = _node_text(doc, node, data, offset, cut)
-  in _text_spans(doc, data, parent, offset + cut, text_len - cut) end
+  in _text_spans(doc, data, parent, offset + cut, text_len - cut, true) end
 end
 
 (* Whether data[offset + i, offset + text_len) is all white space *)
@@ -2694,8 +2723,8 @@ and _render_node
       (* white space between the page's blocks takes its numbers but
          makes no element: it would be a line of its own *)
       val () = (if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
-          else _text_spans(doc, data, parent, offset, text_len))
-        else _text_spans(doc, data, parent, offset, text_len))
+          else _text_spans(doc, data, parent, offset, text_len, false))
+        else _text_spans(doc, data, parent, offset, text_len, false))
     in found end
   | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')

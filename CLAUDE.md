@@ -2241,6 +2241,40 @@ length, in the same page, so a slower machine slows both. What it found:
   place's semantics are unchanged (the kept anchor, a layout that does not
   move the place): only how the first node is found. `_show_page_down`
   asks once per page shown (`_record_position` used to ask twice).
+* **A giant run of text was drawn in time that grows with the square of
+  its columns (the megabyte word, 17 s to open on a phone).** Found by
+  profiling and then by taking Chrome alone: the app's own code was
+  negligible (a CPU profile of the click on Two: the wasm under 50 ms, 16.9
+  s in one PrePaint), and a page of plain HTML with the same text, columns
+  and window did the same (30 px text, 1 MB, two columns: 3361 pages, 18 s
+  a frame, 0.7 s of it layout; 2017 pages 5.9 s; 1113 pages 1.7 s). The
+  cost is Chrome's per inline run across columns: one paragraph of 1 MB is
+  one inline formatting context spread over thousands of fragments, and a
+  frame is quadratic in them. The same text as 16 paragraphs of 64 KiB took
+  1.1 s, as 64 of 16 KiB 0.8 s; a real paragraph of 1 MB with spaces took
+  88 s as one. No CSS tried (contain, content-visibility, will-change,
+  translateZ, overflow) changed it. So the app does not give Chrome a run
+  longer than a piece: the pieces `_text_spans` already cut a text of 64
+  KiB or more into (a text op's limit) are class `run`, shown as blocks
+  (`.caf .run`), and are cut after the last white space in their last 512
+  bytes (`_text_cut`; a run with no white space is cut at a character, as
+  before). Complexity: the frame of a run of n columns was O(n squared)
+  and is O(n) in the number of pieces; opening the megabyte word on a
+  390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
+  text node over 64 KiB in mixed content breaks its line at each piece (a
+  paragraph break appearing in a 64 KiB run is the price; search counts
+  pieces with the same `_text_cut`, so its node numbers agree; a note or
+  highlight stored in a text node of 64 KiB or more may find its offset
+  moved by up to 512 bytes into the next piece). The open budget the spec
+  asserts (`expectOpenBudget`): the time from the card's tap to the
+  chapter's indicator, and from the choice of Two, Scroll or One to its
+  page indicator, is at most 3 times Chrome's own time to lay out and
+  draw a copy of that DOM in that window and arrangement (`bareFrameMs`:
+  the copy is put beside the page, laid out, drawn for two frames and
+  removed, so a slow runner is slow for both), plus 1 s for what is not
+  layout. Measured (phone, this machine): the megabyte word opens in 1.0
+  s against 0.8, Two in 1.5 against 1.8, 10,000 paragraphs open in 2.3
+  against 1.7. No timeout was raised to get there.
 * **The spec's long chapters run without Playwright's trace and
   screenshots** (`heavy` in `e2e/pathological.spec.js`): its snapshotter
   walks every node at every action, 2 to 3 s on a chapter of 30,000, which

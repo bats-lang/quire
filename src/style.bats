@@ -2096,7 +2096,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 10350} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10350] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 10450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10450] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2315,6 +2315,13 @@ fn _reader {left:nat | left >= 10350} (sheet: sheet(left, false, false)): [after
   val sheet = lay(sheet, TextAlign(), "center")
   val sheet = lay(sheet, MarginBlock(), "1.5em .5em")
   val sheet = lay(sheet, BreakAfter(), "avoid")
+  val sheet = close(sheet)
+  (* the pieces of a text of 64 KiB or more (reader.bats' _text_spans) are
+     blocks: the inline run of a paragraph drawn across its columns costs
+     time in proportion to the square of them in Chrome, so none is longer
+     than a piece (#423) *)
+  val sheet = rule(sheet, ".caf .run")
+  val sheet = lay(sheet, Display(), "block")
   val sheet = close(sheet)
   (* an element the book marks hidden stays hidden (#411) *)
   val sheet = rule(sheet, ".caf .hidden-by-book")

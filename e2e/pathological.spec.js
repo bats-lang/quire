@@ -27,6 +27,8 @@ import {
 
 const MODES = ['pages', 'scrolled', 'columns'];
 
+const slow = expect.configure({ timeout: 240000 });
+
 /** How much of a long book a window shows as many columns as the desktop's
     1024 x 768 does: its area against that. Chrome's cost of drawing a page
     of a paged chapter grows with its columns times its boxes (a second a
@@ -48,6 +50,7 @@ test.use({ trace: 'off', screenshot: 'off' });
 /** The reading arrangement: Pages (the default), Scroll, or Two columns */
 async function arrange(page, mode) {
   await openReadingSettings(page, 'Page');
+  const started = Date.now();
   if (mode === 'pages') {
     // one page a screen, whatever the window (a wide one shows a spread at Auto)
     await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'One', exact: true }).click();
@@ -59,6 +62,64 @@ async function arrange(page, mode) {
   await page.keyboard.press('Escape');
   await expect(readingSettings(page)).toBeHidden();
   await expect.poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
+  return Date.now() - started;
+}
+
+/** Chrome's own time, in this window and arrangement, to lay out and draw
+    the page's DOM: a copy of it, with the page's styles (the stylesheet
+    applies to a copy as to the page), put beside the page, laid out, drawn
+    for two frames, and removed. A hosted runner that is slow is slow for
+    the copy too, so what the app takes is held to a multiple of it */
+async function bareFrameMs(page) {
+  return page.evaluate(async () => {
+    const doc = document.querySelector('[role=document][aria-label=Page]');
+    const frame = () => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const copy = doc.cloneNode(true);
+    for (const attribute of ['id', 'role', 'aria-label', 'tabindex', 'data-gesture-region']) copy.removeAttribute(attribute);
+    for (const element of copy.querySelectorAll('[id]')) element.removeAttribute('id');
+    const box = doc.getBoundingClientRect();
+    copy.setAttribute('inert', '');
+    copy.style.cssText = `position:fixed;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;max-width:none;max-height:none;margin:0;z-index:-1;pointer-events:none`;
+    await frame();
+    const started = performance.now();
+    doc.parentElement.append(copy);
+    copy.getBoundingClientRect();
+    await frame();
+    const took = performance.now() - started;
+    copy.remove();
+    await frame();
+    return took;
+  });
+}
+
+/** The open budget: what the app takes to show a chapter, or to change
+    how it is laid out, is at most this many times Chrome's own time to
+    lay out and draw that DOM, and a second more for what is not layout
+    (the archive read, parsed and put in the DOM: it has no window to be
+    slow in). Three, by the user's measure of a chapter that opens as
+    the browser would open the same page (#423) */
+const OPEN_TIMES = 3;
+const OPEN_ALLOWANCE_MS = 1000;
+async function expectOpenBudget(page, notes) {
+  // Chrome's time is taken last, after the turns the test times: the copy
+  // it makes is garbage afterwards, and a collection must not fall in a turn
+  const base = await bareFrameMs(page);
+  for (const [what, tookMs] of notes) {
+    const log = `${what}: ${Math.round(tookMs)} ms against Chrome's ${Math.round(base)} ms to lay out and draw the same DOM`;
+    console.log(log);
+    expect.soft(tookMs, log).toBeLessThanOrEqual(OPEN_TIMES * base + OPEN_ALLOWANCE_MS);
+  }
+}
+
+/** Imports a book and opens it from its card: the time from the tap to
+    the chapter's indicator, in ms */
+async function openTimed(page, opts) {
+  await importFiles(page, [epubFile(opts)], (await cards(page).count()) + 1);
+  const started = Date.now();
+  await card(page, opts.title).click();
+  await slow(bookPage(page)).toBeVisible();
+  await slow(indicator(page)).toContainText('in chapter');
+  return Date.now() - started;
 }
 
 /** Where the reader is, in one shape for every arrangement: the chapter,
@@ -425,7 +486,8 @@ test.describe('a single-file book of 5 MB', () => {
 
   for (const mode of MODES) {
     test(`${mode}: opening, the first turn, a jump to the end, a search and a highlight each cost in proportion to the text`, async ({ page }) => {
-      test.setTimeout(85000);
+      // one more layout and frame of the 5 MB chapter, for the open budget
+      test.setTimeout(120000);
       const errors = await start(page);
       // the arrangement is chosen on the small book, and kept for the big one
       await readBook(page, smallBook());
@@ -462,6 +524,7 @@ test.describe('a single-file book of 5 MB', () => {
       within('the highlight', big.highlight, small.highlight);
       // a turn: as soon as an instant one, as page-turn.spec.js holds it
       expect.soft(big.turns.animated[2], log).toBeLessThanOrEqual(big.turns.instant[2] + slack(big.turns.instant[2]));
+      await expectOpenBudget(page, [['opening the 5 MB chapter', bigOpen]]);
       // and as soon as the small chapter's. Scrolled, the first frame is
       // compared. Paged (a scroll across 1800 columns), Chrome itself takes
       // about a second to draw the next page of this chapter whatever the
@@ -473,7 +536,11 @@ test.describe('a single-file book of 5 MB', () => {
       // held to the small chapter's within 30 ms there is the app's own
       // script, which was 200 to 280 ms on this chapter before #423 and is
       // 20 to 30 ms now; the first frame is printed.
-      if (mode === 'scrolled') expect.soft(big.turns.instant[2], log).toBeLessThanOrEqual(small.turns.instant[2] + 30);
+      // (scrolled, a trace of a key on this chapter on the desktop: 19 ms of
+      // the app's script, then 37 ms of Chrome's PrePaint of its 30,000
+      // boxes and 27 ms of paint, which grow with the chapter: the margin is
+      // the 30 ms of the script's and the same again for the browser's)
+      if (mode === 'scrolled') expect.soft(big.turns.instant[2], log).toBeLessThanOrEqual(small.turns.instant[2] + 60);
       else expect.soft(big.turns.instant.scripts[2], log).toBeLessThanOrEqual(small.turns.instant.scripts[2] + 30);
       expect(errors).toEqual([]);
     });
@@ -548,8 +615,8 @@ test.describe('ten thousand short paragraphs in one chapter', () => {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
       test.setTimeout(85000);
       const errors = await start(page);
-      await readBook(page, shortParagraphsBook());
-      await arrange(page, mode);
+      const openMs = await openTimed(page, shortParagraphsBook());
+      const arrangeMs = await arrange(page, mode);
       await settled(page);
       // shown and paged: the first paragraphs are on the page and the chapter fills many screens
       await expect(bookPage(page)).toContainText('Short chapter');
@@ -572,12 +639,11 @@ test.describe('ten thousand short paragraphs in one chapter', () => {
       await goToResult(page);
       expect((await marks(page)).text).toBe(TAIL_WORD);
       await expect.poll(async () => (await where(page)).end).toBe(true);
+      await expectOpenBudget(page, [['opening', openMs], [`choosing ${mode}`, arrangeMs]]);
       expect(errors).toEqual([]);
     });
   }
 });
-
-const slow = expect.configure({ timeout: 240000 });
 
 test.describe('one paragraph of a megabyte without a space', () => {
   for (const mode of MODES) {
@@ -589,11 +655,8 @@ test.describe('one paragraph of a megabyte without a space', () => {
       const errors = await start(page);
       // a hosted runner takes a minute to lay out a megabyte of one word:
       // the waits of this test are as long as the test itself
-      await importFiles(page, [epubFile(unbrokenBook())], (await cards(page).count()) + 1);
-      await card(page, unbrokenBook().title).click();
-      await slow(bookPage(page)).toBeVisible();
-      await slow(indicator(page)).toContainText('in chapter');
-      await arrange(page, mode);
+      const openMs = await openTimed(page, unbrokenBook());
+      const arrangeMs = await arrange(page, mode);
       await settled(page);
       await slow(bookPage(page)).toContainText('Unbroken chapter');
       // the run is broken to the page's width, as a line with no place to
@@ -616,6 +679,7 @@ test.describe('one paragraph of a megabyte without a space', () => {
       await page.keyboard.press('End');
       await slow.poll(async () => (await where(page)).end).toBe(true);
       await slow(bookPage(page)).toContainText(TAIL_WORD);
+      await expectOpenBudget(page, [['opening', openMs], [`choosing ${mode}`, arrangeMs]]);
       expect(errors).toEqual([]);
     });
   }
