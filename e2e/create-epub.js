@@ -36,7 +36,7 @@ function toBytes(str) {
  * Create a ZIP file from an array of { name, data, store } entries.
  * If store is true, the entry is stored uncompressed (required for mimetype).
  */
-function createZip(entries) {
+export function createZip(entries) {
   const localHeaders = [];
   const centralEntries = [];
   let offset = 0;
@@ -49,7 +49,12 @@ function createZip(entries) {
 
     let compressedData;
     let method;
-    if (entry.damaged) {
+    if (entry.method) {
+      // data marked as compressed by another method (12 is bzip2), as the zip's headers
+      // say it is, whatever the bytes are
+      compressedData = rawData;
+      method = entry.method;
+    } else if (entry.damaged) {
       // deflated data that cannot be inflated: a block of the reserved
       // type (BTYPE 3), as a damaged file has
       compressedData = Buffer.from([0xff, 0xff, 0xff, 0xff]);
@@ -258,12 +263,22 @@ export function silentWav(seconds) {
 
 /**
  * A PNG of width by height pixels, all of one colour (r, g, b): a fixed
- * layout's page image, whose shape the tests measure.
+ * layout's page image, whose shape the tests measure; with noise, one that
+ * does not compress.
  */
-export function solidPng(width, height, [r, g, b] = [40, 90, 160]) {
+export function solidPng(width, height, [r, g, b] = [40, 90, 160], { noise = false } = {}) {
   const row = Buffer.alloc(1 + 3 * width);
   for (let x = 0; x < width; x++) { row[1 + 3 * x] = r; row[2 + 3 * x] = g; row[3 + 3 * x] = b; }
-  const raw = Buffer.concat(Array.from({ length: height }, () => row));
+  // noise: every byte of every row pseudo-random (the same each time), so the
+  // PNG does not compress and is as large as the photographs of a real book
+  let seed = 12345;
+  const rows = Array.from({ length: height }, () => {
+    if (!noise) return row;
+    const own = Buffer.from(row);
+    for (let k = 1; k < own.length; k++) { seed = (seed * 1103515245 + 12345) >>> 0; own[k] = seed >>> 24; }
+    return own;
+  });
+  const raw = Buffer.concat(rows);
   const chunk = (type, data) => {
     const length = Buffer.alloc(4);
     length.writeUInt32BE(data.length);
