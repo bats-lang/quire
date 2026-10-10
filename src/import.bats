@@ -22,6 +22,9 @@ staload "epub_xml.sats"
 staload "entity.sats"
 staload "library.sats"
 staload "backup.sats"
+staload "annot.sats"
+staload "chapter_hrefs.sats"
+staload "file_version.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload "app.sats"
@@ -180,12 +183,13 @@ in id end
    ============================================================ *)
 
 (* What to do with the OPF once it is read: nothing (a stored book
-   reopened), add a new book to the library, or replace the stored file
-   of library book library_index *)
-datatype import_mode = Reopen | AddNew | Replace
+   reopened), add a new book to the library, add it as a new book without
+   asking whether it is a newer file of one that is there (the reader said
+   it is not), or replace the stored file of library book library_index *)
+datatype import_mode = Reopen | AddNew | AddAlone | Replace
 
 fn _is_reopen (mode: import_mode): bool =
-  case+ mode of Reopen() => true | AddNew() => false | Replace() => false
+  case+ mode of Reopen() => true | AddNew() => false | AddAlone() => false | Replace() => false
 
 (* Why an archive could not be opened: no container.xml, or one that
    could not be read; no package (OPF) path in it, no package there, or
@@ -196,14 +200,27 @@ datatype archive_failure =
   | DrmAdept | DrmLcp | DrmFairPlay | DrmKobo | DrmUnknown
 
 (* How opening an archive went: a book added or replaced (its key), a
-   stored book reopened, or a failure *)
+   stored book reopened, a file that looks like a newer one of a book in
+   the library (its index there: nothing was changed, the reader is
+   asked), or a failure. A book replaced is the key of the book, with the
+   chapters' hrefs of the new file, for the place and the notes to be
+   found in it. *)
 datavtype archive_outcome =
   | BookAdded of Int
+  | BookReplaced of (Int, hrefs)
+  | BookLooksLike of Int
   | BookReopened of ()
   | ArchiveFailed of archive_failure
 
 implement $P.dispose<archive_outcome>(outcome) =
-  case+ outcome of ~BookAdded(_) => () | ~BookReopened() => () | ~ArchiveFailed(_cause) => ()
+  case+ outcome of
+  | ~BookAdded(_) => ()
+  | ~BookReplaced(_, found) => hrefs_free(found)
+  | ~BookLooksLike(_) => ()
+  | ~BookReopened() => ()
+  | ~ArchiveFailed(_cause) => ()
+
+implement $P.dispose<hrefs>(found) = hrefs_free(found)
 
 (* Why an archive could not be imported, matched case by case *)
 fn _archive_named (cause: archive_failure): named_failure =
@@ -364,10 +381,33 @@ fn _store_file (id_high: Int, id_low: Int): $P.promise($IDB.stored, $P.Chained) 
   val () = release_bytes(key_frozen, key_bytes)
 in storing end
 
-(* After the OPF of book `serial` (file_size bytes) is read: in AddNew
+(* A new book added to the library from the OPF opf_bytes[0, n), whose
+   file is in the book cell (file_size bytes): its file stored under 'b' *)
+fn _opf_add {file_size:pos}{l:agz}{n:pos}{series_offset,series_len:nat | series_offset + series_len <= n}
+  (opf_bytes: !$A.borrow(byte, l, n), n: int n, title: xspan(n), author: xspan(n), cover: image_type,
+   series_offset: int series_offset, series_len: int series_len, series_number: Int, file_size: int file_size,
+   text_directions: Int, id_high: Int, id_low: Int): archive_outcome = let
+  val storing = _store_file(id_high, id_low)
+  val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+  val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+  val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes(), text_directions)
+  val () = _book_store_checked(storing, key)
+  (* the record a backup kept for it, if any *)
+  val () = (if key > 0 then backup_claim(id_high, id_low) else ())
+  (* the storage holds a book of the reader's now: asked to be kept *)
+  val () = (if key > 0 then platform_keep_storage() else ())
+in if key > 0 then BookAdded(key) else ArchiveFailed(NotInLibrary()) end
+
+(* The chapters' hrefs of the package, when a book is replaced by it (none otherwise) *)
+fn _hrefs_when {l:agz}{n:pos}{tree_size:nat}
+  (replacing: bool, opf_bytes: !$A.borrow(byte, l, n), n: int n, nodes: !$X.xml_node_list(n, tree_size)): hrefs =
+  if replacing then hrefs_of_package(opf_bytes, n, nodes) else NoHrefs()
+
+(* After the OPF of book `serial` (file_size bytes) is read: in AddAlone
    adds the book to the library, in Replace updates library book
-   library_index; stores the file under 'b' in both *)
-fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
+   library_index (the file stored is the one of the book's id, the
+   other's when it is a corrected file); stores the file under 'b' in both *)
+fn _opf_store {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
   (serial: int, file_size: int file_size, opf_bytes: !$A.borrow(byte, l, n), n: int n,
    compressed_offset: int compressed_offset, compressed_size: int compressed_size, method: $Z.compression, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
    mode: import_mode, library_index: Int, id_high: Int, id_low: Int): archive_outcome = let
@@ -381,6 +421,9 @@ fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_siz
   (* its accessibility metadata, for Book info *)
   val @(a11y_flags, summary) = opf_a11y(opf_bytes, nodes)
   val () = (if ~_is_reopen(mode) then _store_a11y(opf_bytes, a11y_flags, summary, id_high, id_low) else xspan_free(summary))
+  (* its chapters' names, for the place and the notes of a book it replaces *)
+  val replacing = (case+ mode of Replace() => true | Reopen() => false | AddNew() => false | AddAlone() => false): bool
+  val new_hrefs = _hrefs_when(replacing, opf_bytes, n, nodes)
   val () = $X.free_nodes(nodes)
   val finished = book_finish(serial, file_size, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len)
   val @(series_offset, series_len) = (case+ series of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
@@ -388,30 +431,28 @@ in
   if ~finished then let
     val () = xspan_free(title)
     val () = xspan_free(author)
+    val () = hrefs_free(new_hrefs)
   in ArchiveFailed(NotFinished()) end
   else case+ mode of
   | Reopen() => let
       val () = xspan_free(title)
       val () = xspan_free(author)
+      val () = hrefs_free(new_hrefs)
     in BookReopened() end
   | AddNew() => let
-      val storing = _store_file(id_high, id_low)
-      val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-      val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-      val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes(), text_directions)
-      val () = _book_store_checked(storing, key)
-      (* the record a backup kept for it, if any *)
-      val () = (if key > 0 then backup_claim(id_high, id_low) else ())
-      (* the storage holds a book of the reader's now: asked to be kept *)
-      val () = (if key > 0 then platform_keep_storage() else ())
-    in if key > 0 then BookAdded(key) else ArchiveFailed(NotInLibrary()) end
+      val () = hrefs_free(new_hrefs)
+    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_number, file_size, text_directions, id_high, id_low) end
+  | AddAlone() => let
+      val () = hrefs_free(new_hrefs)
+    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_number, file_size, text_directions, id_high, id_low) end
   | Replace() => let
       val storing = _store_file(id_high, id_low)
       val () = xspan_free(title)
       val () = xspan_free(author)
       (* the reader asked for the book again: one archived or in the Trash is
          back on the shelf; a hidden one stays hidden, as every other thing
-         the reader made stays (quire#425) *)
+         the reader made stays (quire#425). The place and the notes are kept
+         by where their chapters went (_reanchor) *)
       val () = (case+ lib_nums(library_index) of ~$R.none() => () | ~$R.some(record) => let
         val shelf_after = (case+ record.shelf of
           | Hidden() => Hidden()
@@ -431,8 +472,37 @@ in
         | ~$R.some(record) => record.key
         | ~$R.none() => ~21): Int
       val () = _book_store_checked(storing, key)
-    in if key > 0 then BookAdded(key) else ArchiveFailed(NotInLibrary()) end
+    in
+      if key > 0 then BookReplaced(key, new_hrefs)
+      else let val () = hrefs_free(new_hrefs) in ArchiveFailed(NotInLibrary()) end
+    end
 end
+
+(* After the OPF of book `serial` is read. A file whose title and author are
+   those of a book in the library (the same book, or another that is
+   named alike) is not added at once: nothing is changed and the reader
+   is asked (BookLooksLike), since a corrected file of a book is, for the
+   reader, that book; the OPF's own is read again after the answer
+   (quire#425) *)
+fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_size:pos | compressed_offset + compressed_size <= file_size; compressed_size <= 268435456}{opf_name_offset:nat}{opf_name_len:pos | opf_name_offset + opf_name_len <= file_size; opf_name_len < 65536}
+  (serial: int, file_size: int file_size, opf_bytes: !$A.borrow(byte, l, n), n: int n,
+   compressed_offset: int compressed_offset, compressed_size: int compressed_size, method: $Z.compression, opf_name_offset: int opf_name_offset, opf_name_len: int opf_name_len,
+   mode: import_mode, library_index: Int, id_high: Int, id_low: Int): archive_outcome =
+  case+ mode of
+  | AddNew() => let
+      val nodes = $X.parse_document(opf_bytes, n)
+      val @(title, author) = walk_opf_metadata(opf_bytes, nodes)
+      val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+      val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+      val similar = lib_find_similar(opf_bytes, n, title_offset, title_len, author_offset, author_len)
+      val () = $X.free_nodes(nodes)
+    in
+      if similar >= 0 then BookLooksLike(similar)
+      else _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
+    end
+  | Reopen() => _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
+  | AddAlone() => _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
+  | Replace() => _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
 
 (* Reads the container.xml and OPF of book `serial` (the file_size-byte
    file just put in the book cell), then _opf_done; the promise resolves with
@@ -704,6 +774,125 @@ fn _library_changed (): void = let
   val () = lib_save()
 in lib_render() end
 
+(* The book key was replaced by a file whose chapters are those of
+   map's new file: its place is where its chapter went, in that chapter
+   at the same place, else at the start of the chapter of the same number
+   when there are as many, else of the first (quire#425). Nothing changes
+   when the chapters are the same ones in the same order *)
+fn _place_moved (key: Int, map: !chapter_map): void =
+  if chapter_map_unchanged(map) then ()
+  else
+    case+ lib_nums(lib_index_of_key(key)) of
+    | ~$R.none() => ()
+    | ~$R.some(record) => let
+        val kept = (chapter_map_target(map, record.chapter) >= 0): bool
+        val chapter_after = chapter_map_place(map, record.chapter)
+        val chapters_after = chapter_map_new_count(map)
+      in
+        lib_nums_set(lib_index_of_key(key), @{
+          key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = record.opened,
+          chapter = chapter_after, chapters = (if record.chapters > 0 then chapters_after else 0),
+          page = (if kept then record.page else 0), pages = (if kept then record.pages else 0), anchor = (if kept then record.anchor else ~1),
+          file_size = record.file_size, cover = record.cover, done = record.done, series_number = record.series_number, collections = record.collections,
+          minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
+          shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
+          finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
+          (* the weights of the chapters are another file's: counted again as it is read *)
+          place_modified = record.place_modified, place_declined = record.place_declined, progress_weighted = 0, text_directions = record.text_directions })
+      end
+
+(* The book key was replaced by a file with id (file_high, file_low), whose
+   chapters' hrefs are new_hrefs (consumed): the file it is made from is
+   kept (for another tab to find), the hrefs of the old file are read and
+   the chapters of the two compared, the place and the notes are moved to
+   where their chapters went. The promise resolves with how many notes moved. *)
+fn _reanchor (key: Int, new_hrefs: hrefs, file_high: Int, file_low: Int): $P.promise(int, $P.Chained) =
+  case+ lib_nums(lib_index_of_key(key)) of
+  | ~$R.none() => let
+      val () = hrefs_free(new_hrefs)
+    in $P.ret<int>(0) end
+  | ~$R.some(record) => let
+      val id_high = record.id_high
+      val id_low = record.id_low
+      val old_chapters = record.chapters
+      val () = file_version_store(id_high, id_low, file_high, file_low)
+    in
+      $P.and_then<hrefs><int>(hrefs_load(id_high, id_low), llam(old_hrefs) => let
+        val counted = hrefs_count(new_hrefs)
+        val new_chapters = (if counted >= 0 then counted else old_chapters): Int
+        val () = hrefs_store(id_high, id_low, hrefs_copy(new_hrefs))
+        val map = chapter_map_make(old_hrefs, old_chapters, new_hrefs, new_chapters)
+        val () = _place_moved(key, map)
+      in annot_reanchor(id_high, id_low, map) end)
+    end
+
+(* An archive opened and its book put in the library (added, or replaced
+   by the file with id (file_high, file_low)): the import's end, or a
+   failure said *)
+fn _import_added (key: Int): $P.promise(import_outcome, $P.Chained) = let
+  val () = _stage("Adding to library", 90)
+  val () = open_key_set(key)
+  val () = _library_changed()
+  val () = ui_show("import-progress", false)
+  val () = _kept_name_put(NoKeptName())
+in $P.ret<import_outcome>(Added(key)) end
+
+fn _import_finish (outcome: archive_outcome, file_high: Int, file_low: Int): $P.promise(import_outcome, $P.Chained) =
+  case+ outcome of
+  | ~BookAdded(key) => _import_added(key)
+  | ~BookReplaced(key, new_hrefs) =>
+    $P.and_then<int><import_outcome>(_reanchor(key, new_hrefs, file_high, file_low), llam(_) => _import_added(key))
+  (* an import neither reopens nor fails silently, and asks only once *)
+  | ~BookLooksLike(_) => let
+      val () = _error(NotKeptInLibrary())
+    in $P.ret<import_outcome>(Failed()) end
+  | ~BookReopened() => let
+      val () = _error(NotKeptInLibrary())
+    in $P.ret<import_outcome>(Failed()) end
+  | ~ArchiveFailed(cause) => let
+      val () = _error(_archive_named(cause))
+    in $P.ret<import_outcome>(Failed()) end
+
+(* The file just opened (book `serial`, file_size bytes, whose id is
+   (id_high, id_low)) looks like a newer file of the library book at
+   index similar: the reader is asked whether it replaces that book (its
+   place, notes, shelf and collections kept by the chapters' names) or is a
+   book of its own *)
+fn _ask_newer {file_size:pos} (serial: int, file_size: int file_size, similar: Int, id_high: Int, id_low: Int): $P.promise(import_outcome, $P.Chained) = let
+  val similar_key = (case+ lib_nums(similar) of ~$R.some(record) => record.key | ~$R.none() => ~1): Int
+  val @(title, title_len) = lib_text(similar, TitleText())
+  val message = $A.alloc<byte>(512)
+  val () = _copy_into(title, title_len, message, 0, 0)
+  val () = $A.free<byte>(title)
+  val text_end = _put_string(message, title_len, " is in your library, and this file looks like a corrected version of it. Replace keeps your place, highlights and notes where their chapters are still there; Add as new book keeps both.")
+  val asked = modal_open(QNewerFile(), "Newer file of a book?")
+  val () = modal_text(message, text_end)
+in
+  $P.and_then<reply><import_outcome>(asked, llam(reply_given) =>
+    (* another import may have taken the book cell while the question was open *)
+    if book_serial() <> serial then let
+      val () = ui_show("import-progress", false)
+      val () = _error(ReadingNotFinished())
+    in $P.ret<import_outcome>(Failed()) end
+    else
+      case+ reply_given of
+      | Accepted() =>
+        (case+ lib_nums(lib_index_of_key(similar_key)) of
+         | ~$R.none() => let
+             val () = book_abandon(serial)
+             val () = ui_show("import-progress", false)
+             val () = _error(NotKeptInLibrary())
+           in $P.ret<import_outcome>(Failed()) end
+         | ~$R.some(record) =>
+           $P.and_then<archive_outcome><import_outcome>(
+             _open_archive_plain(serial, file_size, Replace(), lib_index_of_key(similar_key), record.id_high, record.id_low),
+             llam(outcome) => _import_finish(outcome, id_high, id_low)))
+      | Declined() =>
+        $P.and_then<archive_outcome><import_outcome>(
+          _open_archive_plain(serial, file_size, AddAlone(), ~1, id_high, id_low),
+          llam(outcome) => _import_finish(outcome, id_high, id_low)))
+end
+
 (* Imports the file_size-byte book_file with id (id_high, id_low) as a
    new book (library_index < 0) or over library book library_index *)
 fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int file_size, id_high: Int, id_low: Int, library_index: Int): $P.promise(import_outcome, $P.Chained) = let
@@ -713,20 +902,8 @@ fn _import_go {file_size:pos} (book_file: $BF.infile(file_size), file_size: int 
 in
   $P.and_then<archive_outcome><import_outcome>(_open_archive(serial, file_size, mode, library_index, id_high, id_low), llam(outcome) =>
     case+ outcome of
-    | ~BookAdded(key) => let
-        val () = _stage("Adding to library", 90)
-        val () = open_key_set(key)
-        val () = _library_changed()
-        val () = ui_show("import-progress", false)
-        val () = _kept_name_put(NoKeptName())
-      in $P.ret<import_outcome>(Added(key)) end
-    (* an import neither reopens nor fails silently *)
-    | ~BookReopened() => let
-        val () = _error(NotKeptInLibrary())
-      in $P.ret<import_outcome>(Failed()) end
-    | ~ArchiveFailed(cause) => let
-        val () = _error(_archive_named(cause))
-      in $P.ret<import_outcome>(Failed()) end)
+    | ~BookLooksLike(similar) => _ask_newer(serial, file_size, similar, id_high, id_low)
+    | other => _import_finish(other, id_high, id_low))
 end
 
 (* Imports book_file, of file_size bytes, whose name is kept *)
@@ -948,6 +1125,8 @@ in
             case+ outcome of
             | ~BookReopened() => let val () = open_key_set(key) in $P.ret<book_opening>(BookOpened()) end
             | ~BookAdded(_) => $P.ret<book_opening>(BookFileMissing())
+            | ~BookReplaced(_, found) => let val () = hrefs_free(found) in $P.ret<book_opening>(BookFileMissing()) end
+            | ~BookLooksLike(_) => $P.ret<book_opening>(BookFileMissing())
             | ~ArchiveFailed(cause) => $P.ret<book_opening>(_reopen_failed(cause)))
         end
       end)

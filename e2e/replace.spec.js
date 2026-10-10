@@ -17,89 +17,9 @@ import { writeFileSync, statSync } from 'node:fs';
 import { librarySettings, settingsButton, restoreInput, exportedBackup } from './helpers.js';
 import { NOON, minutesLater, stores, sync, highlight, shown } from './sync-devices.js';
 import { replaceBook } from './replace-books.js';
+import { panel, note, readMinutes, highlightWithNote, inCollection, fileSizes, replaceWith } from './replace-steps.js';
 
 const FIXED = new Date('2026-06-01T10:00:00Z');
-
-const panel = page => dialog(page, 'Annotations');
-const note = page => dialog(page, 'Note');
-
-/** Turns n pages, a minute apart: the minutes read */
-async function readMinutes(page, n) {
-  for (let k = 0; k < n; k++) {
-    const before = await place(page);
-    await page.clock.fastForward('01:00');
-    await page.keyboard.press('ArrowRight');
-    await placeChanged(page, before);
-  }
-}
-
-/** A highlight of the first words of the chapter shown, with a note */
-async function highlightWithNote(page, text) {
-  await selectText(page, 0, 8);
-  await selectionButton(page, 'Highlight').click();
-  await clickControl(page, 'Annotations');
-  await expect(panel(page)).toBeVisible();
-  await panel(page).getByRole('button', { name: 'Add note' }).first().click();
-  await note(page).getByRole('textbox', { name: 'Note' }).fill(text);
-  await note(page).getByRole('button', { name: 'Save' }).click();
-  await expect(panel(page)).toContainText(text);
-  await panel(page).getByRole('button', { name: 'Close' }).click();
-  await expect(panel(page)).toBeHidden();
-}
-
-/** Puts the open book in a collection of that name, made if it is new */
-async function inCollection(page, title, name) {
-  await bookMenu(page, title);
-  await menuItem(page, 'Collections').click();
-  const collections = dialog(page, 'Collections');
-  await collections.getByRole('button', { name: 'New collection' }).click();
-  const field = dialog(page, 'New collection').getByRole('textbox', { name: 'Name' });
-  await field.fill(name);
-  await field.press('Enter');
-  await expect(collections.getByRole('button', { name, exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await collections.getByRole('button', { name: 'Done' }).click();
-  await expect(collections).toBeHidden();
-}
-
-/** The size in bytes of each book's file as the library keeps it (the
-    entries "b<id>" of the app's store), by id */
-async function fileSizes(page) {
-  return page.evaluate(async () => {
-    const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('bats');
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    const sizes = {};
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction('kv', 'readonly');
-      const cursor = tx.objectStore('kv').openCursor();
-      cursor.onsuccess = () => {
-        const at = cursor.result;
-        if (!at) return;
-        const key = typeof at.key === 'string' ? at.key : new TextDecoder().decode(at.key);
-        if (/^b[0-9a-f]{14}$/.test(key)) {
-          const v = at.value;
-          sizes[key.slice(1)] = v.size ?? v.byteLength ?? v.length;
-        }
-        at.continue();
-      };
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
-    db.close();
-    return sizes;
-  });
-}
-
-/** Imports file again and chooses Replace */
-async function replaceWith(page, file) {
-  await importInput(page).setInputFiles([file]);
-  const ask = dialog(page, 'Already in library');
-  await ask.getByRole('button', { name: 'Replace' }).click();
-  await expect(ask).toBeHidden();
-  await expect(page.getByRole('status').filter({ hasText: /Reading file|Opening archive|Adding/ })).toBeHidden();
-}
 
 test('replacing a book with the identical file changes nothing the reader made', async ({ page }) => {
   await page.clock.install({ time: FIXED });

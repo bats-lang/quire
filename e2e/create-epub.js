@@ -221,7 +221,8 @@ function loremParagraph(seed) {
  * @param {string|null} opts.language - The OPF's dc:language (default "en"; null leaves it out)
  * @param {string} opts.metadata - More of the OPF's metadata, as XML
  * @param {number[]} opts.damagedChapters - Chapters (from 1) whose data cannot be inflated
- * @param {object[]} opts.rawChapters - Chapters given whole: each {body, images?, lang?,
+ * @param {Buffer} opts.coverBytes - The cover image's bytes (a PNG), in place of the tiny default one
+ * @param {object[]} opts.rawChapters - Chapters given whole: each {body, file?, images?, lang?,
  *   head? (more of its head, such as a viewport meta), itemref? (its itemref's properties)}
  * @param {object[]} opts.metaInf - More files of META-INF, each {name, data}: an
  *   encryption.xml (encryptionXml), a license.lcpl, a sinf.xml, a rights.xml
@@ -384,7 +385,10 @@ export function createEpub(opts = {}) {
       manifestItems += `    <item id="mo${i}" href="chapter${i}.smil" media-type="application/smil+xml"/>\n`;
       overlays.push({ name: `OEBPS/chapter${i}.smil`, data: overlay });
     }
-    manifestItems += `    <item id="ch${i}" href="chapter${i}.xhtml" media-type="application/xhtml+xml"${overlay ? ` media-overlay="mo${i}"` : ''}/>\n`;
+    // a raw chapter's own file name (a corrected book names its chapters the same
+    // however it numbers them), else chapter<i>.xhtml
+    const file = (rawChapters && rawChapters[i - 1] && rawChapters[i - 1].file) || `chapter${i}.xhtml`;
+    manifestItems += `    <item id="ch${i}" href="${file}" media-type="application/xhtml+xml"${overlay ? ` media-overlay="mo${i}"` : ''}/>\n`;
     // a raw chapter's itemref properties (rendition:layout-pre-paginated, say)
     const itemref = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].itemref;
     spineItems += `    <itemref idref="ch${i}"${itemref ? ` properties="${itemref}"` : ''}/>\n`;
@@ -424,7 +428,7 @@ ${doctype}
 </html>`;
     }
     // opts.damagedChapters: the chapters (from 1) whose data cannot be read
-    chapters.push({ name: `OEBPS/chapter${i}.xhtml`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
+    chapters.push({ name: `OEBPS/${file}`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
   }
 
   // opts.extraImages are manifest items, as an EPUB must declare what it holds
@@ -538,7 +542,7 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
 </body>
 </html>`;
     zipEntries.push({ name: 'OEBPS/wrap0000.xhtml', data: wrapXhtml });
-    zipEntries.push({ name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true });
+    zipEntries.push({ name: 'OEBPS/images/cover.png', data: opts.coverBytes || TINY_PNG, store: true });
   }
 
   // extraEntries: more files in the archive, e.g. a large one that makes

@@ -27,6 +27,7 @@ staload "toc.sats"
 staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
+staload "chapter_hrefs.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
@@ -44,6 +45,11 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 (* A print page's label's most bytes (the reader's, from the book's
    page-list) *)
 #define LABEL_MAX 16
+(* The chapter an annotation whose place a corrected file lost is kept
+   under (quire#425): LOST_CHAPTER and the chapter it was in, so it is
+   listed after every chapter of the book, with its text and its note, is
+   marked on no page and leads nowhere, and two such annotations are two *)
+#define LOST_CHAPTER 65536
 
 (* A highlight's style *)
 #pub datatype highlight_style = Yellow | Orange | Underlined
@@ -73,6 +79,13 @@ fn _same_mark (kind: annotation_kind, other: annotation_kind): bool =
 fn _kind_of_code (code: int): annotation_kind =
   if code <= 0 then Bookmark() else if code = 2 then OrangeHighlight() else if code = 3 then UnderlinedHighlight()
   else YellowHighlight()
+
+(* Whether an annotation's chapter is one a corrected file lost, and the
+   group of the list it is under: the chapter, or LOST_CHAPTER for all of
+   those *)
+fn _is_lost (chapter: Int): bool = chapter >= LOST_CHAPTER
+
+fn _group_of (chapter: Int): Int = if chapter >= LOST_CHAPTER then LOST_CHAPTER else chapter
 
 (* Each annotation: its kind, chapter, the
    node and offset it starts at and those it ends at, the page it was
@@ -632,9 +645,113 @@ fun _marks {count:nat} .<count>. (annotations: !annotations(count), shown_chapte
       prval () = fold@(annotations)
     in end
 
+(* ============================================================
+   A corrected file takes the book's place (quire#425)
+   ============================================================ *)
+
+(* Where annotations move to: by the map from the old file's chapters to
+   the new file's (a replace), or, for the chapter shown, away from the
+   book's chapters when the chapter has not the nodes they name (it was
+   rendered with content_count of them) *)
+datavtype relocation =
+  | RelocateByMap of chapter_map
+  | RelocateByNodes of (int, int)
+
+fn _relocation_free (rule: relocation): void =
+  case+ rule of
+  | ~RelocateByMap(map) => chapter_map_free(map)
+  | ~RelocateByNodes(_, _) => ()
+
+(* The chapter an annotation of chapter, from start_node to end_node, is
+   kept under by rule: its own when it keeps its place, else LOST_CHAPTER
+   and the chapter it was in. An annotation already lost stays so. *)
+fn _destination (rule: !relocation, chapter: Int, start_node: Int, end_node: Int): Int =
+  if chapter < 0 then chapter
+  else if _is_lost(chapter) then chapter
+  else
+    case+ rule of
+    | RelocateByMap(map) => let
+        val found = chapter_map_target(map, chapter)
+      in if found >= 0 then found else LOST_CHAPTER + chapter end
+    | RelocateByNodes(shown_chapter, content_count) =>
+      if chapter <> shown_chapter then chapter
+      else if content_count <= 0 then chapter
+      else if start_node >= content_count then LOST_CHAPTER + chapter
+      else if end_node >= content_count then LOST_CHAPTER + chapter
+      else chapter
+
+(* annotations, each kept where rule says, put in order onto built; an
+   annotation that moves has its old id deleted at stamp (sync passes the
+   move on as a deletion and a new annotation), and how many moved is
+   counted from moved *)
+fun _relocate {count:nat}{built_count:nat}{tomb_count:nat | built_count + count <= ANNOTATIONS_MAX} .<count>.
+  (annotations: annotations(count), rule: !relocation, built: annotations(built_count), built_count: int built_count,
+   tombs: tombs(tomb_count), stamp: Int, moved: int)
+  : [total:nat | total <= ANNOTATIONS_MAX][tombs_total:nat] @(annotations(total), int total, tombs(tombs_total), int) =
+  case+ annotations of
+  | ~annotations_nil() => @(built, built_count, tombs, moved)
+  | ~annotations_cons(kind, chapter, start_node, start_offset, end_node, end_offset, page, made_at, modified, text, text_len, note, note_len, label, label_len, rest) => let
+      val destination = _destination(rule, chapter, start_node, end_node)
+      val moves = (destination <> chapter): bool
+      val tombs_after = (if moves then let
+          val @(id_high, id_low) = _id_of(kind, chapter, start_node, start_offset, end_node, end_offset, made_at)
+        in _tomb_put(tombs, id_high, id_low, stamp) end
+        else tombs): [total:nat] tombs(total)
+      val inserted = _insert(kind, destination, start_node, start_offset, end_node, end_offset, page, made_at, modified, text, text_len, note, note_len, label, label_len, built)
+    in _relocate(rest, rule, inserted, built_count + 1, tombs_after, stamp, (if moves then moved + 1 else moved)) end
+
+(* The annotations of the book (id_high, id_low), kept in a record, moved
+   by map (consumed) from the chapters of an old file to those of the new
+   one: one that has no chapter in the new file is kept under
+   LOST_CHAPTER. The promise resolves with how many moved (0 when the
+   record has none or could not be read, which is kept as it is) *)
+#pub fn annot_reanchor (id_high: Int, id_low: Int, map: chapter_map): $P.promise(int, $P.Chained)
+
+implement annot_reanchor (id_high, id_low, map) = let
+  val @(key_frozen, key_bytes) = $A.freeze<byte>(lib_key(97, id_high, id_low))
+  val loaded = $IDB.idb_get(key_bytes, 15)
+  val () = release_bytes(key_frozen, key_bytes)
+in
+  $P.and_then<$IDB.lookup><int>(loaded, llam(found) =>
+    case+ lookup_content(found) of
+    | ~NoStoredContent() => let
+        val () = chapter_map_free(map)
+      in $P.ret<int>(0) end
+    (* notes that could not be read are kept as they are, as everywhere *)
+    | ~ContentUnreadable() => let
+        val () = chapter_map_free(map)
+      in $P.ret<int>(0) end
+    | ~StoredContent(owner, stored, stored_size) => let
+        val @(annotations, count, tombs) = _parse_record(stored, stored_size)
+        val () = piece_free(owner, stored)
+        val rule = RelocateByMap(map)
+        val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, tombs, stamp_now(), 0)
+        val () = _relocation_free(rule)
+        val () = (if moved > 0 then _store(id_high, id_low, relocated, relocated_count, relocated_tombs) else ())
+        val () = annotations_free(relocated)
+        val () = _tombs_free(relocated_tombs)
+      in $P.ret<int>(moved) end)
+end
+
 (* The chapter the reader is in (from 0) *)
 fn _chapter (): [chapter:nat] int chapter =
   case+ reading_get() of @(_, _, chapter, _) => (if chapter > 0 then chapter - 1 else 0)
+
+(* The chapter shown has content_count content nodes: an annotation of
+   it that names a node past them is not found in this version of the
+   book, and is kept under LOST_CHAPTER, with its text and its note *)
+#pub fn annot_chapter_shown (content_count: int): void
+
+implement annot_chapter_shown (content_count) =
+  if ~_changeable() then ()
+  else let
+    val+ ~AnnotationsCell(annotations, _) = _take()
+    val rule = RelocateByNodes(_chapter(), content_count)
+    val @(relocated, relocated_count, relocated_tombs, moved) = _relocate(annotations, rule, annotations_nil(), 0, _tombs_take(), stamp_now(), 0)
+    val () = _relocation_free(rule)
+    val () = _put(AnnotationsCell(relocated, relocated_count))
+    val () = _tombs_put(relocated_tombs)
+  in if moved > 0 then _save() else () end
 
 (* Shows the highlights of the chapter shown *)
 #pub fn annot_marks (): void
@@ -1384,7 +1501,9 @@ fun _dest_at {count:nat} .<count>. (annotations: !annotations(count), i: int): @
       val dest_page = page
       val dest_node = start_node
       prval () = fold@(annotations)
-    in @((if dest_chapter >= 0 then dest_chapter else 0), (if dest_page >= 0 then dest_page else 0), (if dest_node >= 0 then dest_node else ~1)) end
+    (* an annotation a corrected file lost leads nowhere *)
+    in if _is_lost(dest_chapter) then @(~1, 0, ~1)
+       else @((if dest_chapter >= 0 then dest_chapter else 0), (if dest_page >= 0 then dest_page else 0), (if dest_node >= 0 then dest_node else ~1)) end
     else let
       val found = _dest_at(rest, i - 1)
       prval () = fold@(annotations)
@@ -1444,9 +1563,13 @@ fn _heading {list_id_len:pos | list_id_len < 256}{chapter:nat} (list_id: string 
   val () = ui_add_n(list_id, group_id, group_id_len, TDiv)
   val @(group_id, group_id_len) = nid_make("annot-group", chapter)
   val () = ui_attr_n(group_id, group_id_len, AClass, "grp")
-  val @(label_bytes, label_len) = toc_label_of(chapter)
   val @(group_id, group_id_len) = nid_make("annot-group", chapter)
-in ui_text_n_buf(group_id, group_id_len, label_bytes, label_len) end
+in
+  if chapter >= LOST_CHAPTER then ui_text_n(group_id, group_id_len, "Not found in this version")
+  else let
+    val @(label_bytes, label_len) = toc_label_of(chapter)
+  in ui_text_n_buf(group_id, group_id_len, label_bytes, label_len) end
+end
 
 (* One row of the annotations list: highlight i *)
 fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_len:nat | text_len < text_size; text_len < 65536}{note_len:nat | note_len < note_size; note_len < 65536}
@@ -1504,10 +1627,11 @@ fun _highlight_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(coun
   | annotations_nil() => i
   | @annotations_cons(kind, chapter, _, _, _, _, _, _, _, text, text_len, note, note_len, _, _, rest) => let
       val shown = _listed(kind)
+      val group = _group_of(chapter)
       val () = (if shown then let
-          val () = (if chapter <> last_chapter then (if chapter >= 0 then _heading("annotations-list", chapter) else ()) else ())
+          val () = (if group <> last_chapter then (if group >= 0 then _heading("annotations-list", group) else ()) else ())
         in _highlight_row(i, _style_of(kind), text, text_len, note, note_len) end else ())
-      val new_last_chapter = (if shown then chapter else last_chapter): Int
+      val new_last_chapter = (if shown then group else last_chapter): Int
       val rows_end = _highlight_rows(rest, i + 1, new_last_chapter)
       prval () = fold@(annotations)
     in rows_end end
@@ -1585,9 +1709,11 @@ fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size
   val () = ui_attr_n(row_id, row_id_len, AClass, "hrow")
   val () = _child_button("bookmark-row", "bookmark-go", i, "hgo")
   val () = _child("bookmark-go", "bookmark-title", i, TSpan, "bt")
-  val @(label_bytes, label_len) = toc_label_of(chapter)
   val @(title_id, title_id_len) = nid_make("bookmark-title", i)
-  val () = ui_text_n_buf(title_id, title_id_len, label_bytes, label_len)
+  val () = (if chapter >= LOST_CHAPTER then ui_text_n(title_id, title_id_len, "Not found in this version")
+    else let
+      val @(label_bytes, label_len) = toc_label_of(chapter)
+    in ui_text_n_buf(title_id, title_id_len, label_bytes, label_len) end)
   val () = (if text_len > 0 then let
       val () = _child("bookmark-go", "bookmark-snippet", i, TSpan, "snip")
     in _text_of("bookmark-snippet", i, text, text_len) end else ())
@@ -1658,6 +1784,7 @@ fun _flat_at {source_loc,out_loc:agz}{arena:addr}{source_size:pos}{count:nat | c
 fn _markdown_heading {l:agz}{arena:addr}{n:int}{position:nat | position + 206 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, chapter: Int): [next:nat | position <= next; next <= position + 206] int next =
   if chapter < 0 then position
+  else if _is_lost(chapter) then _literal(out, position, "### Not found in this version\n\n")
   else let
     val @(label_bytes, label_len) = toc_label_of(chapter)
     val label_at = _literal(out, position, "### ")
@@ -1675,7 +1802,7 @@ fn _markdown_note {out_loc:agz}{arena:addr}{out_size:int}{position:nat | positio
 
 fn _markdown_heading_if_new {l:agz}{arena:addr}{n:int}{position:nat | position + 206 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, chapter: Int, last_chapter: Int): [next:nat | position <= next; next <= position + 206] int next =
-  if chapter <> last_chapter then _markdown_heading(out, position, chapter) else position
+  if _group_of(chapter) <> _group_of(last_chapter) then _markdown_heading(out, position, chapter) else position
 
 (* A highlight's style after its quote, unless yellow, the usual one *)
 fn _markdown_style {l:agz}{arena:addr}{n:int}{position:nat | position + 22 <= n}
@@ -1695,6 +1822,7 @@ fn _markdown_style {l:agz}{arena:addr}{n:int}{position:nat | position + 22 <= n}
 fn _cite_chapter {l:agz}{arena:addr}{n:int}{position:nat | position + 202 <= n}
   (out: !$A.arrx(byte, l, n, arena), position: int position, chapter: Int): [next:nat | position <= next; next <= position + 202] int next =
   if chapter < 0 then position
+  else if _is_lost(chapter) then _literal(out, position, ", not found in this version")
   else let
     val @(chapter_label, chapter_label_len) = toc_label_of(chapter)
     val chapter_label_at = _literal(out, position, ", ")

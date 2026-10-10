@@ -352,6 +352,7 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | AnnotationsNotRead
   | BookFileLost
   | BookStorageFailed
+  | BookReplacedElsewhere
   | PartNotRead
   | StorageFull
   | RecordFromNewerQuire
@@ -402,6 +403,7 @@ fn _host (): host = if $BAPP.is_native_platform() then InApp() else InBrowser()
   | UpdateQuire
   | FreeSpace
   | OpenAgain
+  | ReopenForNewFile
   | RemoveGrantByHand
   | UseDeviceRotation
   | CopyByHand
@@ -423,6 +425,7 @@ fn remedy_of (failed: failure): remedy =
   | AnnotationsNotRead() => ReopenQuire()
   | BookFileLost() => ImportAgain()
   | BookStorageFailed() => OpenAgain()
+  | BookReplacedElsewhere() => ReopenForNewFile()
   | PartNotRead() => OtherChapterOrReplace()
   | StorageFull() => FreeSpace()
   | RecordFromNewerQuire() => UpdateQuire()
@@ -501,6 +504,7 @@ fn _what_put {l:agz}{at:nat | at <= 512}
   | AnnotationsNotRead() => _put_text(out, 512, at, "This book's highlights and notes could not be read, so new ones cannot be made and the old ones are kept")
   | BookFileLost() => _put_text(out, 512, at, "This book's file could not be read")
   | BookStorageFailed() => _put_text(out, 512, at, "This book could not be read from storage")
+  | BookReplacedElsewhere() => _put_text(out, 512, at, "This book was replaced with another file in another tab, so Quire stopped reading the old one and went back to the library")
   | PartNotRead() =>
     if part > 0 then let
       val at = _put_text(out, 512, at, "Chapter ")
@@ -572,6 +576,7 @@ fn _remedy_put {l:agz}{at:nat | at <= 512}
     (case+ where_ of
     | InBrowser() => _put_text(out, 512, at, ". Free some space in the browser and try again.")
     | InApp() => _put_text(out, 512, at, ". Free some space on the device and try again."))
+  | ReopenForNewFile() => _put_text(out, 512, at, ". Reopen Quire to read the new file.")
   | OpenAgain() => _put_text(out, 512, at, ". Quire tried three times; the book is still stored, so try opening it again in a moment.")
   | RemoveGrantByHand() => _put_text(out, 512, at, ": remove it in your Google account, under Security, Your connections to third-party apps.")
   | UseDeviceRotation() => _put_text(out, 512, at, ". Turn the device's own rotation lock on instead.")
@@ -594,6 +599,7 @@ fn _reopens (next: remedy): bool =
   | UpdateQuire() => false
   | FreeSpace() => false
   | OpenAgain() => false
+  | ReopenForNewFile() => true
   | RemoveGrantByHand() => false
   | UseDeviceRotation() => false
   | CopyByHand() => false
