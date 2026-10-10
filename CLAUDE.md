@@ -1363,12 +1363,61 @@ meets the duplicate dialog, so it also says to choose Replace.
 `notice_error` is private; `tests/static/notice.py` (in
 `tests/static/run.sh`) rejects `notice_error(` outside `notice.bats` and
 a wildcard in a match of `ArchiveFailed(_)` (`tests/static/notice/reject`).
-Import's causes are matched one by one (`_archive_named`); no case
-detects DRM, so none is blamed. A sync's result texts, made by
+Import's causes are matched one by one (`_archive_named`); only a book
+that declares its protection is blamed on DRM (below), never a damaged one. A sync's result texts, made by
 `sync.bats` from its `sync_result`, go through `notice_sync_said`.
 `expectBannerSaysWhatToDo` (`e2e/helpers.js`) checks a banner has a
 Reopen Quire button or words naming the step, and in the android project
 no "browser".
+
+## A book that declares its protection is refused, named (#427)
+
+A file that *declares* its encryption is not a guess, so it is refused at
+import, before its container.xml is read (`_protection_check` in
+`src/import.bats`, only for an import, since a stored book was checked
+then), with the scheme named and not added to the library. What it looks
+for, in this order: `META-INF/license.lcpl` (Readium LCP,
+`ProtectedByLcp`), `META-INF/sinf.xml` (Apple FairPlay,
+`ProtectedByFairPlay`), `META-INF/rights.xml` (Adobe ADEPT,
+`ProtectedByAdept`); then `META-INF/encryption.xml` read by
+`encryption_of` (`src/epub_xml.bats`): `ns.adobe.com/adept` (ADEPT),
+`readium.org/2014/01/lcp` (LCP), `kobo.com` or `kobobooks.com` (Kobo,
+`ProtectedByKobo`), else any `EncryptionMethod` whose `Algorithm` is
+neither font obfuscation (IDPF's `http://www.idpf.org/2008/embedding`,
+Adobe's `http://ns.adobe.com/pdf/enc#RC`: undone by a reading system,
+no DRM, and not refused) is `ProtectedUnknown`. Each is a
+`named_failure` and an `archive_failure` (`DrmAdept`, ...), matched with
+`case+`, so a scheme added without words does not type-check. A damaged
+book that declares nothing, or whose encryption.xml cannot be read, stays
+"damaged": DRM is never guessed from damage.
+
+By research (Thorium, Calibre, Readium's docs): Thorium, which has an LCP
+client, only says what is missing ("This publication needs an LCP
+passphrase", and, for an encrypted publication with no licence,
+"Publication is encrypted but lacks an LCP license!"); Calibre, which has
+none for the schemes it cannot open, says the book is locked by DRM and
+points the reader to its manual's DRM page, offering no way round it.
+Quire has no client for any scheme, so its words name the scheme (as
+Thorium names LCP), say it cannot open it and that the book was not
+imported, and give the next step, which is to read it in the app it came
+from or get a copy without DRM (`ReadWhereItCameFrom`); it points to no
+way of removing DRM. A build that one day has a client for a scheme
+changes only that scheme's case. Kobo's check is a guess at its
+namespace (the issue names `http://www.kobo.com/...`; no Kobo book was
+available to look at), written in one place. The books the tests use are
+made by `e2e/drm-books.js` (chapter bytes replaced by random ones, the
+encryption.xml and licence files written), registered in
+`e2e/epubcheck.spec.js`, and played by `e2e/drm.spec.js`.
+
+An OPDS entry whose acquisition link has type
+`application/vnd.adobe.adept+xml` or
+`application/vnd.readium.lcp.license.v1.0+json` is an `acquiring`
+(`AdeptAcquisition`, `LcpAcquisition`, in `src/opds.bats`, kept over the
+entry's other acquisitions): with no EPUB link of the entry's own, the
+row says "Protected by Adobe DRM: Quire cannot open it, so it cannot be
+got here" (or Readium LCP) in place of Get and the licence is never
+fetched; an entry that also has an EPUB is got as ever
+(`e2e/drm-catalogue.spec.js`).
 
 ## Every outcome is said, and the unexpected as such
 

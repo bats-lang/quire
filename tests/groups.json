@@ -10,7 +10,9 @@
       "safe-area.spec.js",
       "stats.spec.js",
       "stall-capture.spec.js",
-      "library-records.spec.js"
+      "library-records.spec.js",
+      "drm.spec.js",
+      "drm-catalogue.spec.js"
     ],
     "reader": [
       "reader.spec.js",
