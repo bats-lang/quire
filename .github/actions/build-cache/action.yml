@@ -1,0 +1,47 @@
+name: Compiler cache
+description: >-
+  Restores or saves a bats build/ directory (#460). Restore only on a pull
+  request; main's pushes build cold and only save, so every state of main
+  is checked from nothing and is the base the pull requests start from.
+  Save runs only after the job's work passed (put it last).
+inputs:
+  mode:
+    description: restore or save
+    required: true
+  name:
+    description: Which cache (build, static), each its own key prefix
+    required: true
+  path:
+    description: The build/ directory, at a path that is the same in every job
+    required: true
+runs:
+  using: composite
+  steps:
+    # The key names everything the compiler's own freshness rules (the
+    # source's SHA-256 for a module's .dats; file times for its C and
+    # objects) do not see: the compiler and ATS2 pins, the lock, the
+    # runner image (its C compiler). The sources are in the key's last
+    # part, so an exact hit is the same sources, and a prefix hit the
+    # newest earlier build under the same toolchain. src/version.bats is
+    # written per commit and changes only its own module.
+    - name: Name the cache
+      id: key
+      shell: bash
+      run: |
+        echo "prefix=quire-${{ inputs.name }}-v1-${{ runner.os }}-${{ runner.arch }}-${ImageVersion:-image}-${{ hashFiles('.github/bats-version', '.github/actions/setup-bats/action.yml', 'bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
+        echo "sources=${{ hashFiles('src/**', '!src/version.bats') }}" >> "$GITHUB_OUTPUT"
+
+    - name: Restore the compiler cache
+      if: inputs.mode == 'restore'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.prefix }}${{ steps.key.outputs.sources }}
+        restore-keys: ${{ steps.key.outputs.prefix }}
+
+    - name: Save the compiler cache
+      if: inputs.mode == 'save'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ steps.key.outputs.prefix }}${{ steps.key.outputs.sources }}

@@ -193,6 +193,22 @@ export const w3cBooks = {
     items: [page('one', '<!-- a <comment> with <tags> and no end tags --><p title="a > b">Both paragraphs<br/> are <![CDATA[ <b> ]]>shown.</p><?pi <x> ?>')],
     spine: [{ idref: 'one' }],
   })),
+  // Internationalization: a title and a creator with a direction of their own, or the package's
+  'directed-title': book(() => packageEpub({
+    title: 'CSS: הרפתקה חדשה!', titleAttributes: 'dir="rtl" xml:lang="he"',
+    creators: ['דוד קרמר'], creatorAttributes: 'dir="rtl" xml:lang="he"',
+    items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+  })),
+  'root-directed-title': book(() => packageEpub({
+    title: 'CSS: הרפתקה חדשה!', packageAttributes: 'dir="rtl"', language: 'ar',
+    creators: ['דוד קרמר'],
+    items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+  })),
+  'own-direction-over-root': book(() => packageEpub({
+    title: 'CSS: הרפתקה חדשה!', titleAttributes: 'dir="ltr"', packageAttributes: 'dir="rtl"', language: 'ar',
+    creators: ['דוד קרמר'], creatorAttributes: 'dir="ltr"',
+    items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+  })),
   // OCF: the zip container
   'zip-bzip2': book(() => packageEpub({
     title: 'Compressed with bzip2',

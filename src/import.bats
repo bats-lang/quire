@@ -373,6 +373,7 @@ fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_siz
    mode: import_mode, library_index: Int, id_high: Int, id_low: Int): archive_outcome = let
   val nodes = $X.parse_document(opf_bytes, n)
   val @(title, author) = walk_opf_metadata(opf_bytes, nodes)
+  val text_directions = opf_text_directions(opf_bytes, nodes)
   val cover = _cover_of(mode, serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, nodes, id_high, id_low)
   (* its series, for the library's order *)
   val @(series, series_number_found) = opf_series(opf_bytes, nodes)
@@ -397,7 +398,7 @@ in
       val storing = _store_file(id_high, id_low)
       val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
       val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-      val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes())
+      val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes(), text_directions)
       val () = _book_store_checked(storing, key)
       (* the record a backup kept for it, if any *)
       val () = (if key > 0 then backup_claim(id_high, id_low) else ())
@@ -424,7 +425,7 @@ in
         (* back on the shelf: a change sync passes on *)
         shelf_modified = (if same_shelf(record.shelf, shelf_after) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
         finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
-    place_modified = record.place_modified, place_declined = record.place_declined, progress_weighted = record.progress_weighted }) end)
+    place_modified = record.place_modified, place_declined = record.place_declined, progress_weighted = record.progress_weighted, text_directions = text_directions }) end)
       val () = lib_series_set(library_index, opf_bytes, n, series_offset, series_len)
       val key = (case+ lib_nums(library_index) of
         | ~$R.some(record) => record.key

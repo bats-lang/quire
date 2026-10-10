@@ -46,8 +46,16 @@
 #        (bats must be on PATH)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+# QUIRE_STATIC_WORK names the working directory (CI, #460): the same path
+# in every job, with the app's build/ there restored from a cache, and
+# kept at the end for it to be saved. Otherwise a temporary one.
+if [ -n "${QUIRE_STATIC_WORK:-}" ]; then
+  TMP=$QUIRE_STATIC_WORK
+  mkdir -p "$TMP"
+else
+  TMP=$(mktemp -d)
+  trap 'rm -rf "$TMP"' EXIT
+fi
 repository=$1
 shift
 all=yes
@@ -90,7 +98,7 @@ if named check || [ -n "$fixtures" ]; then
     if named check; then echo "ok   check"; fi
   elif named check; then echo "FAIL check:"; cat "$TMP/app.log"; fail=1
   else echo "FAIL check (the app, which the fixtures start from):"; cat "$TMP/app.log"; fail=1; fi
-  [ -z "$fixtures" ] || cp -a "$app/build" "$TMP/build-checked"
+  [ -z "$fixtures" ] || { rm -rf "$TMP/build-checked"; cp -a "$app/build" "$TMP/build-checked"; }
 fi
 
 # Element ids (ids.py): the app's own, and the checker's fixtures, each

@@ -41,6 +41,16 @@ jobs:
         with:
           commit: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      # A pull request starts from the newest build of the same toolchain
+      # (main's, or its own earlier push's); main builds cold (#460)
+      - name: Restore the compiler cache
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: restore
+          name: build
+          path: build
+
       - name: Build the app and the PWA generator
         run: bats build --repository $HOME/repository
 
@@ -106,6 +116,15 @@ jobs:
       - name: Codec tests
         run: tests/codec/run.sh $HOME/repository
 
+      # Only after everything above passed: a cache holds no failed build
+      - name: Save the compiler cache
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: save
+          name: build
+          path: build
+
   # The static tests (tests/static/run.sh): bats check of the app, the
   # checkers, and the fixtures, each put into the app checked whole, so
   # each checks only its module again; in groups side by side, each
@@ -128,8 +147,28 @@ jobs:
         with:
           commit: ${{ github.event.pull_request.head.sha || github.sha }}
 
+      # The app's check is kept in a directory of a fixed name (run.sh
+      # checks at the same path in every job, #460)
+      - name: Restore the compiler cache
+        if: github.event_name == 'pull_request'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: restore
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
+
       - name: Static tests
+        env:
+          QUIRE_STATIC_WORK: ${{ runner.temp }}/quire-static
         run: tests/static/run.sh $HOME/repository $(scripts/ci-groups.py members static ${{ matrix.group }})
+
+      - name: Save the compiler cache
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        uses: ./.github/actions/build-cache
+        with:
+          mode: save
+          name: static
+          path: ${{ runner.temp }}/quire-static/app/build
 
   # The e2e suite, in groups by area side by side, each on the PWA built
   # once (quire-android)

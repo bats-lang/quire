@@ -75,6 +75,71 @@ breaking publish shows as a red relock PR. GITHUB_TOKEN cannot change
 workflow files, so without a `RELOCK_TOKEN` secret that PR lists pwa's
 `android.yml` pin as not moved; move it in a PR of its own.
 
+### The compiler's cache (#460)
+
+`build` and the `static` jobs each compiled the whole app from nothing
+(about 10 minutes of the same work four times). A pull request's jobs
+now restore the `build/` directory of the newest earlier build under the
+same toolchain (`.github/actions/build-cache`, `actions/cache` pinned by
+commit), and save theirs once the job passed. What was found:
+
+* What bats keeps (read from the compiler pinned in `.github/bats-version`,
+  `src/build.dats` and `helpers.dats`, and a project's `build/`): per
+  module a `.dats` and the SHA-256 of its source in `<module>.dats.src`
+  (a module is emitted again exactly when the hash, or the target, differs;
+  the compiler's comment says an mtime cannot tell, a relocked
+  dependency's files keep their archive's), then its C (patsopt's output)
+  and objects, which are fresh when newer than the `.dats` and than
+  `build/.sats_changed`, a stamp touched whenever an emitted `.sats`
+  changes. A build of another target or mode (`.bats_target`: native, wasm,
+  and 2 more in check and test mode) is set aside in `build/.stash/<n>`
+  with its mtimes. `check` and `build` therefore never share a cache (check
+  is mode 2 and 3, build 0 and 1), so there are two caches, `build` and
+  `static`. `.bats_cache_id` drops a cache when the compiler's semantics
+  change.
+* Staleness. Nothing in `build/` records the compiler, ATS2 or the C
+  compiler, so the key names them: `.github/bats-version`, the ATS2 pin
+  (`setup-bats/action.yml`), `bats.lock`, `bats.toml`, the runner image and
+  architecture. The sources are the key's end, so an exact hit is the same
+  sources, and a prefix hit is the incremental build the compiler does on a
+  developer's machine: a changed module is re-emitted by its hash (its
+  `.dats` is then newer than its C), a changed `.sats` rebuilds every
+  module that staloads it. A cache is saved only by a job that passed
+  (`actions/cache` saves on success only), so it holds no failed build, and a
+  module that failed to emit has an empty `.src` and is never fresh. The
+  residual risk is a bug of that incremental logic, so main never restores:
+  a push to main (and the merge queue's run, and a dispatched relock) builds
+  and checks from nothing, then saves for the pull requests (GitHub gives a
+  pull request its base branch's caches, and a pull request's own are
+  readable only by that pull request: same repository, no cross-fork
+  writes). The required check on a pull request is incremental, main's is
+  cold, so a stale hit would show on main at the latest.
+* Paths. patsopt names C symbols by the absolute path of the files, so a
+  cache is valid at the path it was made at. `build` is at the checkout,
+  `/home/runner/work/quire/quire` in every job. The static jobs checked in
+  `mktemp -d`, a different path each time; `tests/static/run.sh` now takes
+  `QUIRE_STATIC_WORK`, a fixed directory (CI: `$RUNNER_TEMP/quire-static`),
+  where the app is copied and checked and which is not removed.
+* Sharing. Jobs of one run start together, so none sees what another saves:
+  the gain is from the previous build (main's, or the pull request's earlier
+  push), a few modules instead of 63, in all four jobs at once, and not from
+  a job feeding another (a first job the others wait for would have made the
+  run longer). Each static group saves the same key; the second to finish
+  gets a warning, not a failure. Caches are immutable, 10 GB per repository,
+  evicted by last access and after 7 days unused: a miss is today's cold
+  build.
+* What others do. Swatinem/rust-cache keys on the lockfile, the rustc version
+  and the toolchain's environment, restores the newest older cache for a
+  changed lockfile, caches dependencies only (the workspace's crates are not
+  cached, "generally not effective"), deletes incremental artifacts and
+  anything older than a week before saving, sets `CARGO_INCREMENTAL=0`,
+  and suggests `save-if` main only. ccache and sccache key each result on a
+  hash of the preprocessed source and the compiler and flags, never on a
+  time, and Bazel's remote cache is content-addressed with the toolchain among
+  the inputs: they are right where the key holds every input. bats's
+  own rule for C is a time, which is why the toolchain is in the key, only
+  passed builds are saved, and main is checked cold.
+
 ## Check locally before every push
 
 A session sets up the compiler in its own environment and runs `bats
@@ -848,6 +913,31 @@ shown as text and the fallback its manifest names was never followed.
   too, hiding it would blank the images of books whose manifest is merely
   incomplete, and nothing is gained, the file being in the book's own
   archive.
+
+## The package's directions and language (#419)
+
+* **A title's and an author's direction are the package's** (`opf_text_directions` in
+  `src/epub_xml.bats`; the suite's `pkg-dir_creator-rtl`, `pkg-dir_rtl-root-ltr`,
+  `pkg-dir_rtl-root-unset`, `pkg-dir_unset-root-rtl`): the first `dc:title` and the first
+  `dc:creator` take their own `dir` (`ltr`, `rtl`, `auto`), else the `package` element's.
+  They are kept in the book's record as one number (`text_directions`, title + 4 * author, the
+  optional group `tdir`, lower case so an older Quire keeps it as an unknown chunk), set at
+  import and again by Replace, decoded once into a `text_direction` (`_direction_of_code`), and
+  the library card sets `dir` on its title and author (`ADir`). `dir=auto` is the browser's
+  first-strong-character rule; none leaves the page's. A book imported before this has none
+  until it is replaced. The backup and sync do not carry it (it comes from the package).
+* **The package's language and direction are not the content's, by decision, and the suite's
+  `pkg-lang_but_not_content` and `pkg-dir_but_not_content` stay failures.** A chapter that
+  names no language is shown in the book's (`_page_book_lang`; "und" when the book names none):
+  browsers hyphenate and pick quotation marks only for text whose language is known (MDN on
+  `hyphens`; the CSS specification requires hyphenation only where the content language is
+  known), and the package's `dc:language` is the only language a book declares. A Hebrew or
+  Arabic book whose spine names no direction reads right to left (#416, as Readium reads it): the
+  page is one flow of CSS columns whose order is the page's `direction`, so a list or paragraph
+  in it inherits it. The suite's criterion (a document that names none stays in the reading
+  system's own language and left to right) is met by 11 of the 15 reading systems that answered
+  for language and all 13 for direction, which lay each document out on its own; Quire's flow
+  cannot without giving up one of those two decisions. They stay listed as policy in the report.
 
 ## The platform, in Bats
 
