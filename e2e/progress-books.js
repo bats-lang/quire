@@ -23,12 +23,12 @@ export const backBody = (i, kind, count) =>
 export const progressBooks = {
   /** Three chapters of one size: their ends are about a third, two thirds and all of the book */
   threeEqual: { valid: true, opts: {
-    title: 'Three Equal', author: 'Progress Tests',
+    title: 'Three Equal', author: 'Progress Tests', chapters: 3,
     rawChapters: [1, 2, 3].map(i => ({ body: textBody(i, 40) })) } },
 
   /** Three chapters of text, then notes, an index and a colophon, which the landmarks name as back matter */
   backMatter: { valid: true, opts: {
-    title: 'Back Matter', author: 'Progress Tests',
+    title: 'Back Matter', author: 'Progress Tests', chapters: 6,
     rawChapters: [
       ...[1, 2, 3].map(i => ({ body: textBody(i, 40) })),
       { body: backBody(4, 'notes', 40) }, { body: backBody(5, 'index', 40) }, { body: backBody(6, 'colophon', 40) },
@@ -40,7 +40,7 @@ export const progressBooks = {
 
   /** A cover, a title page and a copyright page before three chapters of text, no landmarks */
   frontMatter: { valid: true, opts: {
-    title: 'Front Matter', author: 'Progress Tests',
+    title: 'Front Matter', author: 'Progress Tests', chapters: 6,
     rawChapters: [
       { body: textBody(0, 0, 'Cover') }, { body: textBody(0, 1, 'Title') }, { body: textBody(0, 1, 'Copyright') },
       ...[1, 2, 3].map(i => ({ body: textBody(i, 40) })),
@@ -48,7 +48,7 @@ export const progressBooks = {
 
   /** The same, its landmarks naming where the text starts, so that it opens there */
   frontMatterLandmarks: { valid: true, opts: {
-    title: 'Front Landmarks', author: 'Progress Tests',
+    title: 'Front Landmarks', author: 'Progress Tests', chapters: 6,
     rawChapters: [
       { body: textBody(0, 0, 'Cover') }, { body: textBody(0, 1, 'Title') }, { body: textBody(0, 1, 'Copyright') },
       ...[1, 2, 3].map(i => ({ body: textBody(i, 40) })),
@@ -57,7 +57,7 @@ export const progressBooks = {
 
   /** One chapter of about 100 KB, then nine of about 1 KB */
   unequal: { valid: true, opts: {
-    title: 'Unequal Chapters', author: 'Progress Tests',
+    title: 'Unequal Chapters', author: 'Progress Tests', chapters: 10,
     rawChapters: [{ body: textBody(1, 300) }, ...Array.from({ length: 9 }, (_, k) => ({ body: textBody(k + 2, 3) }))] } },
 
   /** Five fixed pages, the first with 30 KB of comment in it: bytes would put the second page at 90% */
@@ -74,6 +74,6 @@ function fixedBook(title, count, comment) {
       body: `<div><img src="images/page${k + 1}.png" alt="Page ${k + 1}"/></div>` +
         (k === 0 ? `\n<!-- ${'filler '.repeat(Math.ceil(comment / 7))} -->` : ''),
     })),
-    extraImages: Array.from({ length: count }, (_, k) => ({ name: `images/page${k + 1}.png`, data: solidPng(1200, 1600) })),
+    extraFiles: Array.from({ length: count }, (_, k) => ({ name: `images/page${k + 1}.png`, data: solidPng(1200, 1600), mediaType: 'image/png', store: true })),
   };
 }

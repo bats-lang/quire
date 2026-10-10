@@ -588,6 +588,8 @@ test('how far into the book the place is, weighted by the chapters, travels with
   // A reads to the end of the long first chapter and syncs
   await importFiles(a.page, [file], 1);
   await openBook(a.page, opts.title);
+  // a turn is the reader's first move, which dates the place
+  await a.page.keyboard.press('ArrowRight');
   await a.page.keyboard.press('End');
   await toLibrary(a.page);
   const onCard = async d => /(\d+)%/.exec(await d.page.getByRole('region', { name: /^(Continue reading|Books)$/ }).getByRole('group').first().innerText());

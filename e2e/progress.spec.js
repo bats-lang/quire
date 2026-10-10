@@ -234,6 +234,8 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   await importFiles(page, [file], 1);
   await openBook(page, title);
   await page.keyboard.press('t');
+  // a turn is the reader's first move, which dates the place
+  await page.keyboard.press('ArrowRight');
   await page.keyboard.press('End');
   await expect.poll(() => onLastPage(page)).toBe(true);
   const read = await percent(page);
