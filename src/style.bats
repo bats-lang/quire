@@ -2141,7 +2141,7 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = close(sheet)
 in sheet end
 
-fn _reader {left:nat | left >= 9750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9750] sheet(after, false, false) = let
+fn _reader {left:nat | left >= 9800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9800] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -2351,6 +2351,10 @@ fn _reader {left:nat | left >= 9750} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, TextAlign(), "center")
   val sheet = lay(sheet, MarginBlock(), "1.5em .5em")
   val sheet = lay(sheet, BreakAfter(), "avoid")
+  val sheet = close(sheet)
+  (* an element the book marks hidden stays hidden (#411) *)
+  val sheet = rule(sheet, ".caf .hidden-by-book")
+  val sheet = lay(sheet, Display(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf hr")
   val sheet = no_line(sheet)
