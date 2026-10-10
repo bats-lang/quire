@@ -8,11 +8,11 @@ import { test, expect } from './fixtures.js';
 import { legacyLibrary, hex7, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
-  librarySettings, settingsButton, settingsScreen,
+  librarySettings, settingsButton, settingsScreen, openShelf,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
-const shelf = page => page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ });
+const shelf = page => page.getByRole('button', { name: 'Sort and view' });
 
 const books = [
   { idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer', series: 'First Series', number: 2, chapters: 9, chapter: 3, pages: 40, page: 7 },
@@ -38,8 +38,7 @@ for (let version = 1; version <= 6; version++) {
     expect(await titles(page)).toEqual(expect.arrayContaining(['Alpha Tales', 'Gamma Days']));
     await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
     if (version >= 2) await expect(card(page, 'Alpha Tales')).toContainText('First Series');
-    await shelf(page).click();
-    await expect(shelf(page)).toHaveText('Hidden');
+    await openShelf(page, 'Hidden');
     await expect(card(page, 'Beta Notes')).toBeVisible();
     const kept = await store(page);
     // "lib" is what it was
@@ -162,8 +161,7 @@ test('two tabs changing different parts of a book keep both changes', async ({ p
   await reload(page);
   // hidden (this tab's change) and in the collection (the other's)
   await expect(cards(page)).toHaveCount(1);
-  await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Hidden');
+  await openShelf(page, 'Hidden');
   await bookMenu(page, 'Shared Book');
   await menuItem(page, 'Collections').click();
   await expect(page.getByRole('dialog', { name: 'Collections' }).getByRole('button', { name: 'Both', exact: true })).toHaveAttribute('aria-pressed', 'true');

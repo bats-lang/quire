@@ -7,7 +7,7 @@ import {
   expectBannerSaysWhatToDo, chapterTitle, start, readBook, toLibrary, openBook, chapters, reload, importFiles, epubFile, cards, card,
   selectText, selectionButton, marks, dialog, openSettings, bookPage, librarySearch,
   librarySettings, libraryMenu, menuItem, settingsButton,
-  readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown,
+  readingSettings, openReadingSettings, showChrome, settingsScreen, pageShown, libraryShown,
 } from './helpers.js';
 import { webdav, folder, USER, PASSWORD } from './sync-stores.js';
 import { coveredByBanner } from './controls-shown.js';
@@ -39,7 +39,7 @@ test('a library that cannot be read is said, takes no book, and is not saved ove
   await expect(alert(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(0);
   // a book is not added: the library it would be saved in is not the one stored
-  await page.getByLabel('Import EPUB').setInputFiles([epubFile({ title: 'Not Added', author: 'Storage Tests', rawChapters: chapters(1) })]);
+  await page.locator('#import-file').setInputFiles([epubFile({ title: 'Not Added', author: 'Storage Tests', rawChapters: chapters(1) })]);
   await expect(alert(page)).toContainText('Books cannot be added until Quire can read your library.');
   await expect(cards(page)).toHaveCount(0);
   // once it can be read, it is all there
@@ -207,7 +207,7 @@ test('settings that cannot be read are said, the defaults used, and not saved ov
   await toLibrary(page);
   await healReads(page);
   await reload(page);
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await openBook(page, 'Set Once');
   await expect.poll(fontSize).toBe('28px');
 });
@@ -263,7 +263,7 @@ test('reading aloud\'s speed is not saved over settings that cannot be read', as
   await toLibrary(page);
   await healReads(page);
   await reload(page);
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await openBook(page, 'Spoken Once');
   await openReadingSettings(page, 'Read aloud');
   await expect(speed).toHaveValue('1.5');
@@ -353,6 +353,8 @@ test('a sync and the stored view wait for Try again, and happen once the library
 test('Import looks disabled while the library cannot be read', async ({ page }) => {
   await stubReads(page);
   await start(page);
+  // with a book, so the bar's Import (a plus) is the one shown, as it is while the library cannot be read
+  await importFiles(page, [epubFile({ title: 'Kept For Look', author: 'Storage Tests', rawChapters: chapters(1) })], 1);
   const look = () => page.locator('#import-button').evaluate(e => {
     const s = getComputedStyle(e);
     return { background: s.backgroundColor, color: s.color, cursor: s.cursor, height: e.getBoundingClientRect().height };

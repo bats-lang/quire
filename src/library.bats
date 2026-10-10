@@ -10,6 +10,7 @@
 #use str as S
 
 staload "ui.sats"
+staload "app.sats"
 staload "notice.sats"
 staload "book.sats"
 staload "modal.sats"
@@ -154,14 +155,6 @@ val _next_key = ref<Int>(1)
 
 (* The orders the library sorts its books in *)
 #pub datatype sort_order = LastOpened | ByTitle | ByAuthor | DateAdded | BySeries
-
-(* The next order the sort button gives *)
-#pub fn sort_next (order: sort_order): sort_order
-
-implement sort_next (order) =
-  case+ order of
-  | LastOpened() => ByTitle() | ByTitle() => ByAuthor() | ByAuthor() => DateAdded()
-  | DateAdded() => BySeries() | BySeries() => LastOpened()
 
 (* An order as backups and the settings keep it: 0 last opened, 1 title,
    2 author, 3 date added, 4 series *)
@@ -1426,7 +1419,7 @@ fn _coll_row (): void = let
   val count = collection_count
   prval () = fold@(cell)
   val () = colls_put(cell)
-  val () = ui_show("collection-row", count > 0)
+  val () = ui_show("collection-row", (if count > 0 then same_shelf(!_shelf, OnShelf()) else false))
   val () = ui_show("collection-rename", shown >= 0)
 in ui_show("collection-delete", shown >= 0) end
 
@@ -2905,6 +2898,17 @@ fn _card_series {base_len:pos | base_len <= 16}{index:nat}{l:agz}{size:pos}{seri
   val @(series_id, series_id_len) = nid_make2(base, index, "-series")
 in ui_text_n_buf(series_id, series_id_len, text, text_len) end
 
+(* Where a book stands in being read, one rule for the card's word and
+   the filter's chip (quire#376: the card said New and Done where the
+   chips said Unread and Finished): never opened, opened and not
+   finished, or finished *)
+datatype reading_state = StateUnread | StateReading | StateFinished
+
+fn _reading_state_of (nums: bnums): reading_state =
+  if nums.done > 0 then StateFinished()
+  else if nums.opened <= 0 then StateUnread()
+  else StateReading()
+
 (* The direction the package gives a title or an author (its dir attribute,
    or the package's): none, left to right, right to left, or by the text's
    first strong character (EPUB 3.3 §5.2.1.1) *)
@@ -2991,13 +2995,14 @@ fn _card {index:nat}{base_len,row_len,more_len,parent_len:pos | base_len <= 16; 
   val () = ui_attr_n(progress_id, progress_id_len, AClass, "prog")
   val percent = _progress(nums)
 in
-  if nums.done > 0 then let
+  case+ _reading_state_of(nums) of
+  | StateFinished() => let
     val @(progress_id, progress_id_len) = nid_make2(base, index, "-progress")
-  in ui_text_n(progress_id, progress_id_len, "Done") end
-  else if nums.opened <= 0 then let
+  in ui_text_n(progress_id, progress_id_len, "Finished") end
+  | StateUnread() => let
     val @(progress_id, progress_id_len) = nid_make2(base, index, "-progress")
-  in ui_text_n(progress_id, progress_id_len, "New") end
-  else let
+  in ui_text_n(progress_id, progress_id_len, "Unread") end
+  | StateReading() => let
     val @(parent_id, parent_id_len) = nid_make2(base, index, "-progress")
     val @(bar_id, bar_id_len) = nid_make2(base, index, "-bar")
     val () = ui_add_nn(parent_id, parent_id_len, bar_id, bar_id_len, TDiv)
@@ -3029,12 +3034,14 @@ val _grid = ref<layout>(ListLayout())
 val _filter = ref<book_filter>(AllBooks())
 
 (* Whether a book with numbers nums passes the filter *)
-fn _passes (nums: bnums): bool =
-  case+ !_filter of
-  | Unread() => nums.opened <= 0
-  | BeingRead() => (if nums.opened > 0 then nums.done <= 0 else false)
-  | Finished() => nums.done > 0
-  | AllBooks() => true
+fn _passes (shelf: shelf, nums: bnums): bool =
+  if same_shelf(shelf, OnShelf()) then
+    (case+ !_filter of
+    | Unread() => (case+ _reading_state_of(nums) of StateUnread() => true | StateReading() => false | StateFinished() => false)
+    | BeingRead() => (case+ _reading_state_of(nums) of StateUnread() => false | StateReading() => true | StateFinished() => false)
+    | Finished() => (case+ _reading_state_of(nums) of StateUnread() => false | StateReading() => false | StateFinished() => true)
+    | AllBooks() => true)
+  else true
 
 (* The cards of the books shown, but for the book to continue (index
    continued, or -1), which its own card shows above *)
@@ -3043,7 +3050,7 @@ fun _cards {count:nat}{i:nat} .<count>. (books: !books(count), i: int i, continu
   | books_nil() => shown
   | books_cons(book, rest) => let
       val+ Book(_, _, _, _, _, _, nums) = book
-      val visible = (if i = continued then false else if same_shelf(nums.shelf, shelf) then (if _passes(nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
+      val visible = (if i = continued then false else if same_shelf(nums.shelf, shelf) then (if _passes(shelf, nums) then (if _in_shown(nums) then _matches(book, query) else false) else false) else false): bool
       val () = (if visible then _card(book, i, generation, "book", "book-row", "book-more", "book-list", true) else ())
     in _cards(rest, i + 1, continued, shelf, query, generation, (if visible then shown + 1 else shown)) end
 
@@ -3071,12 +3078,22 @@ fun _continue_card {count:nat}{i:nat} .<count>. (books: !books(count), i: int i,
 fn _pressed {id_len:pos | id_len < 256} (id: string id_len, pressed: bool): void =
   if pressed then ui_attr(id, APressed, "true") else ui_attr(id, APressed, "false")
 
+(* A menu choice, checked as it is the current one *)
+fn _checked {id_len:pos | id_len < 256} (id: string id_len, checked: bool): void =
+  if checked then ui_attr(id, AChecked, "true") else ui_attr(id, AChecked, "false")
+
 fn _view_show (): void = let
   val is_grid = (case+ !_grid of GridLayout() => true | ListLayout() => false): bool
   val filter = !_filter
   val () = (if is_grid then ui_attr("book-list", AClass, "list grid") else ui_attr("book-list", AClass, "list"))
-  val () = _pressed("view-grid", is_grid)
-  val () = _pressed("view-list", ~is_grid)
+  val () = _checked("view-grid", is_grid)
+  val () = _checked("view-list", ~is_grid)
+  val order = !_sort_order
+  val () = _checked("sort-last-opened", (case+ order of LastOpened() => true | _ => false))
+  val () = _checked("sort-title", (case+ order of ByTitle() => true | _ => false))
+  val () = _checked("sort-author", (case+ order of ByAuthor() => true | _ => false))
+  val () = _checked("sort-date-added", (case+ order of DateAdded() => true | _ => false))
+  val () = _checked("sort-series", (case+ order of BySeries() => true | _ => false))
   val () = _pressed("filter-books-all", (case+ filter of AllBooks() => true | _ => false))
   val () = _pressed("filter-unread", (case+ filter of Unread() => true | _ => false))
   val () = _pressed("filter-reading", (case+ filter of BeingRead() => true | _ => false))
@@ -3195,6 +3212,67 @@ implement lib_install_hint_dismiss () = let
   val () = release_bytes(value_frozen, value_bytes)
 in _install_hint_show() end
 
+(* Why a view shows no book (#375): only a library that has never had a
+   book offers to import one or get some; every other reason is said and
+   offers nothing, since an import would not change it *)
+#pub datatype emptiness =
+  | NoBooksYet | NoMatch | NoCollection | NoUnread | NoneReading | NoneFinished
+  | NothingHidden | NothingArchived | TrashEmpty
+
+(* The reason a view of shelf is empty, given whether a search is on, a
+   collection chosen and the filter; a shelf other than the library has
+   no search, collection or filter *)
+fn _emptiness_of (has_query: bool, in_collection: bool, filter: book_filter, shelf: shelf): emptiness =
+  case+ shelf of
+  | Hidden() => NothingHidden()
+  | Archived() => NothingArchived()
+  | Trash() => TrashEmpty()
+  | OnShelf() =>
+    if has_query then NoMatch()
+    else if in_collection then NoCollection()
+    else (case+ filter of
+      | Unread() => NoUnread()
+      | BeingRead() => NoneReading()
+      | Finished() => NoneFinished()
+      | AllBooks() => NoBooksYet())
+
+(* What the screen says for an empty view *)
+fn _emptiness_text (reason: emptiness): void =
+  case+ reason of
+  | NoBooksYet() => ui_text("library-empty", "No books yet. Import an EPUB file to start reading, or get free books from a catalogue.")
+  | NoMatch() => ui_text("library-empty", "No books match")
+  | NoCollection() => ui_text("library-empty", "No books in this collection")
+  | NoUnread() => ui_text("library-empty", "No unread books")
+  | NoneReading() => ui_text("library-empty", "No books being read")
+  | NoneFinished() => ui_text("library-empty", "No finished books")
+  | NothingHidden() => ui_text("library-empty", "No hidden books")
+  | NothingArchived() => ui_text("library-empty", "No archived books")
+  | TrashEmpty() => ui_text("library-empty", "The Trash is empty")
+
+(* Whether the reason offers the call to action: the empty library alone *)
+fn _emptiness_offers (reason: emptiness): bool =
+  case+ reason of
+  | NoBooksYet() => true
+  | NoMatch() => false
+  | NoCollection() => false
+  | NoUnread() => false
+  | NoneReading() => false
+  | NoneFinished() => false
+  | NothingHidden() => false
+  | NothingArchived() => false
+  | TrashEmpty() => false
+
+(* The bar's tools (search, sort and view, the filters) and the import
+   control that fits: with no book to search, sort or filter, the bar
+   keeps only its name and menu, and Import is in the message below
+   (quire#375). Not shown on a shelf's screen, whose bar is its own *)
+fn _tools_show (tools: bool, offers: bool): void = let
+  val () = ui_show("library-search-box", tools)
+  val () = ui_show("sort-menu-button", tools)
+  val () = ui_show("filter-books", tools)
+  val () = ui_show("import-button", ~offers)
+in ui_show("library-empty-actions", offers) end
+
 (* Renders the library view: the cards of the shelf shown whose title
    or author matches the query, in the sort order *)
 #pub fn lib_render (): void
@@ -3230,55 +3308,41 @@ implement lib_render () = let
     | ViewEmpty() => true))
   val () = _coll_row()
   val () = _install_hint_show()
+  val on_shelf = same_shelf(shelf, OnShelf())
 in
   case+ view of
-  | ~ViewBooks() => _readable_shown()
-  | ~ViewUnreadable(kind) => _unreadable_shown(kind)
+  | ~ViewBooks() => let
+    val () = _tools_show(on_shelf, false)
+  in _readable_shown() end
+  | ~ViewUnreadable(kind) => let
+    val () = _tools_show(on_shelf, false)
+  in _unreadable_shown(kind) end
   | ~ViewEmpty() => let
   val () = _readable_shown()
-in
-  if has_query then ui_text("library-empty", "No books match")
-  else if !_coll_shown >= 0 then ui_text("library-empty", "No books in this collection")
-  else (case+ !_filter of
-    | Unread() => ui_text("library-empty", "No unread books")
-    | BeingRead() => ui_text("library-empty", "No books being read")
-    | Finished() => ui_text("library-empty", "No finished books")
-    | AllBooks() => (case+ shelf of
-      | Hidden() => ui_text("library-empty", "No hidden books")
-      | Archived() => ui_text("library-empty", "No archived books")
-      | Trash() => ui_text("library-empty", "The Trash is empty")
-      | OnShelf() => ui_text("library-empty", "Import an EPUB file to start reading.")))
-end
+  val reason = _emptiness_of(has_query, !_coll_shown >= 0, !_filter, shelf)
+  val offers = _emptiness_offers(reason)
+  val () = _tools_show((if offers then false else on_shelf), offers)
+in _emptiness_text(reason) end
 end
 
-(* Shows shelf *)
+(* Shows shelf: the library, or the screen of the shelf (Hidden,
+   Archived, Trash; quire#404), whose bar is its back button and its
+   name in place of the library's. A shelf's screen has no collection
+   chosen (does not render) *)
 #pub fn lib_shelf_set (shelf: shelf): void
 
 implement lib_shelf_set (shelf) = let
   val () = !_shelf := shelf
+  val on_shelf = same_shelf(shelf, OnShelf())
+  val () = ui_show("library-bar", on_shelf)
+  val () = (if on_shelf then () else !_coll_shown := ~1)
 in
   case+ shelf of
-  | Hidden() => ui_text("shelf-button", "Hidden")
-  | Archived() => ui_text("shelf-button", "Archived")
-  | Trash() => ui_text("shelf-button", "Trash")
-  | OnShelf() => ui_text("shelf-button", "Library")
+  | Hidden() => ui_text("shelf-title", "Hidden")
+  | Archived() => ui_text("shelf-title", "Archived")
+  | Trash() => ui_text("shelf-title", "Trash")
+  | OnShelf() => ()
 end
-
-(* The next shelf the shelf button shows *)
-#pub fn shelf_next (shelf: shelf): shelf
-implement shelf_next (shelf) =
-  case+ shelf of OnShelf() => Hidden() | Hidden() => Archived() | Archived() => Trash() | Trash() => OnShelf()
-
-(* The sort button's label for order *)
-#pub fn lib_sort_label (order: sort_order): void
-
-implement lib_sort_label (order) =
-  case+ order of
-  | ByTitle() => ui_text("sort-button", "Sort: Title")
-  | ByAuthor() => ui_text("sort-button", "Sort: Author")
-  | DateAdded() => ui_text("sort-button", "Sort: Date added")
-  | BySeries() => ui_text("sort-button", "Sort: Series")
-  | LastOpened() => ui_text("sort-button", "Sort: Last opened")
 
 (* ============================================================
    Dates and sizes, as text

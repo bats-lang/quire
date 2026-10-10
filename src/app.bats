@@ -15,10 +15,16 @@ fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, fal
 (* Each element made again to reset it is made only here, so each id is
    made at one place (tests/static/ids.py) *)
 
-(* The import button's file input, with no file chosen *)
+(* The import controls' file inputs, with no file chosen: the bar's
+   (an icon button) and the empty library's (a button of words); both
+   are always there and the library shows the one that fits (quire#404,
+   #375), so a picked file is never lost to a control being made again *)
 #pub fn app_import_input (): void
-implement app_import_input () =
-  ui_file_input("import-button", "import-file", "Import EPUB", ".epub,application/epub+zip", true)
+implement app_import_input () = let
+  val () = ui_clear("import-button")
+  val () = ui_clear("empty-import")
+  val () = ui_file_input_icon("import-button", "import-file", IcAdd(), "Import EPUB", ".epub,application/epub+zip", true)
+in ui_file_input("empty-import", "empty-import-file", "Import EPUB", ".epub,application/epub+zip", true) end
 
 (* The Settings screen's backup file input, with no file chosen *)
 #pub fn app_backup_input (): void
@@ -65,13 +71,25 @@ in ui_icon_btn("search-header", "search-close", "ibtn", IcClose, "Close search")
 fn _library (): void = let
   val () = ui_el("bats-root", "library", TDiv, "lib")
   val () = ui_role("library", RMain)
+  (* a shelf's own screen (Hidden, Archived, Trash; quire#404): a back
+     button and its name, in place of the bar while it is shown *)
+  val () = ui_el("library", "shelf-header", TDiv, "bar")
+  val () = ui_icon_btn("shelf-header", "shelf-back", "ibtn", IcBack, "Back")
+  val () = ui_el("shelf-header", "shelf-title", TH1, "ttl")
+  val () = ui_text("shelf-title", "Hidden")
+  (* the same menu as the library's: Empty Trash is asked from the Trash's
+     own screen (as Drive's Trash has its Empty trash), and the other
+     shelves are one entry away *)
+  val () = ui_icon_btn("shelf-header", "shelf-more", "ibtn", IcMore, "More options")
+  val () = _hide("shelf-header")
+  (* one row: the name, Import, the sort and view menu, the overflow
+     menu (quire#376, #404: Material 3's top app bar, a title and up to
+     three actions) *)
   val () = ui_el("library", "library-bar", TDiv, "bar")
   val () = ui_el("library-bar", "library-title", TH1, "ttl")
   val () = ui_text("library-title", "Quire")
-  val () = ui_text_btn("library-bar", "shelf-button", "btn", "Library")
-  val () = ui_text_btn("library-bar", "sort-button", "btn", "Sort: Last opened")
-  val () = ui_el("library-bar", "import-button", TDiv, "btn btn-p")
-  val () = app_import_input()
+  val () = ui_el("library-bar", "import-button", TDiv, "ibtn")
+  val () = ui_icon_btn("library-bar", "sort-menu-button", "ibtn", IcSort, "Sort and view")
   (* the library's other actions, Settings first: Material's overflow
      menu, not a gear, which would say it goes straight to Settings
      (quire#333) *)
@@ -101,10 +119,6 @@ fn _library (): void = let
   val () = ui_text_btn("filter-books", "filter-unread", "sbtn", "Unread")
   val () = ui_text_btn("filter-books", "filter-reading", "sbtn", "Reading")
   val () = ui_text_btn("filter-books", "filter-finished", "sbtn", "Finished")
-  val () = ui_el("library-view", "view-choice", TDiv, "seg vseg")
-  val () = ui_named("view-choice", NGroup, "View")
-  val () = ui_text_btn("view-choice", "view-list", "sbtn", "List")
-  val () = ui_text_btn("view-choice", "view-grid", "sbtn", "Grid")
   (* the reader's collections: shown once there is one *)
   val () = ui_el("library-view", "collection-row", TDiv, "crow")
   val () = ui_el("collection-row", "collection-chips", TDiv, "seg")
@@ -129,11 +143,18 @@ fn _library (): void = let
   val () = ui_el("library", "book-list", TDiv, "list")
   val () = ui_named("book-list", NRegion, "Books")
   val () = ui_el("library", "library-empty", TDiv, "empty")
+  (* an empty library offers what to do (#375): import a book, or get
+     free ones from a catalogue *)
+  val () = ui_el("library", "library-empty-actions", TDiv, "eacts")
+  val () = ui_el("library-empty-actions", "empty-import", TDiv, "btn btn-p")
+  val () = ui_text_btn("library-empty-actions", "empty-catalogues", "btn", "Get free books")
+  val () = _hide("library-empty-actions")
   (* when the library could not be read for a reason a second read could
      change (the failure's HOPE, ui_try_again_show) *)
   val () = ui_text_btn("library", "library-try-again", "btn btn-p", "Try again")
   val () = _hide("library-try-again")
-in ui_text("library-empty", "Import an EPUB file to start reading.") end
+  val () = app_import_input()
+in ui_text("library-empty", "No books yet. Import an EPUB file to start reading, or get free books from a catalogue.") end
 
 (* The book menu (its More button, a right-click or a long press on a
    card) *)
@@ -285,6 +306,10 @@ fn _library_menu (): void = let
   val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
   val () = ui_menuitem("library-menu-box", "menu-stats", "Reading statistics")
+  (* the shelves apart from the library, each a screen of its own (#404) *)
+  val () = ui_menuitem("library-menu-box", "menu-hidden", "Hidden")
+  val () = ui_menuitem("library-menu-box", "menu-archived", "Archived")
+  val () = ui_menuitem("library-menu-box", "menu-trash", "Trash")
   (* shown only while the browser offers to install the app, whose
      offer a click asks for (platform.bats) *)
   val () = ui_menuitem("library-menu-box", "menu-install", "Install Quire")
@@ -292,6 +317,31 @@ fn _library_menu (): void = let
   val () = ui_harm_item("library-menu-box", HEmptyTrash())
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
 in _hide("library-menu") end
+
+(* The sort and view menu (the bar's Sort and view, quire#377, #404):
+   the order the books are in and how they are laid out, each group's
+   current choice checked *)
+fn _sort_menu (): void = let
+  val () = ui_el("bats-root", "sort-menu", TDiv, "ovl")
+  val () = ui_el("sort-menu", "sort-menu-box", TDiv, "menu")
+  val () = ui_named("sort-menu-box", NMenu, "Sort and view")
+  val () = ui_el("sort-menu-box", "sort-by-group", TDiv, "mgroup")
+  val () = ui_named("sort-by-group", NGroup, "Sort by")
+  val () = ui_el("sort-by-group", "sort-by-title", TDiv, "mhead")
+  val () = ui_text("sort-by-title", "Sort by")
+  val () = ui_menu_choice("sort-by-group", "sort-last-opened", "Last opened")
+  val () = ui_menu_choice("sort-by-group", "sort-title", "Title")
+  val () = ui_menu_choice("sort-by-group", "sort-author", "Author")
+  val () = ui_menu_choice("sort-by-group", "sort-date-added", "Date added")
+  val () = ui_menu_choice("sort-by-group", "sort-series", "Series")
+  val () = ui_el("sort-menu-box", "view-as-group", TDiv, "mgroup")
+  val () = ui_named("view-as-group", NGroup, "View as")
+  val () = ui_el("view-as-group", "view-as-title", TDiv, "mhead")
+  val () = ui_text("view-as-title", "View as")
+  val () = ui_menu_choice("view-as-group", "view-list", "List")
+  val () = ui_menu_choice("view-as-group", "view-grid", "Grid")
+  val () = ui_menuitem("sort-menu-box", "sort-menu-done", "Close")
+in _hide("sort-menu") end
 
 (* The Settings screen, opened from the library menu:
    one screen of groups, each complex area a screen of its own opened
@@ -981,6 +1031,7 @@ implement app_build () = let
   val () = _collections()
   val () = _stats()
   val () = _library_menu()
+  val () = _sort_menu()
   val () = _settings_screen()
   val () = _about_screen()
   val () = _info()

@@ -5,7 +5,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import {
   expectBannerSaysWhatToDo, start, readBook, importFiles, epubFile, card, place, chapterTitle, showChrome, control, dialog,
-  librarySearch, selectText, selectionButton, bookPage, chapters,
+  librarySearch, selectText, selectionButton, bookPage, chapters, libraryShown,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -80,7 +80,7 @@ test('a book whose saved place cannot be read goes back to the library, with the
   await card(page, 'Unopenable').click();
   await expect(alert(page)).toContainText(unreadable);
   await expectBannerSaysWhatToDo(page, testInfo);
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 });
 
 test('a failed save shows the storage message once a session', async ({ page }, testInfo) => {

@@ -10,7 +10,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, bookPage,
   libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, topBar,
-  readingSettings, openReadingSettings, selectText, rawFile,
+  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -71,6 +71,19 @@ export async function walkEveryScreen(page, { look, back }) {
     epubFile({ title: 'Short', author: 'S' }),
   ], 2);
   await check('the library');
+  // the sort and view menu, and the shelves' own screens (quire#404)
+  await openSortMenu(page);
+  await check('the sort and view menu');
+  await back();
+  await expect(page.getByRole('menu', { name: 'Sort and view' })).toBeHidden();
+  for (const shelf of ['Hidden', 'Archived', 'Trash']) {
+    await libraryMenu(page);
+    await menuItem(page, shelf).click();
+    await expect(shelfTitle(page)).toHaveText(shelf);
+    await check(`the ${shelf} screen`);
+    await back();
+    await expect(shelfTitle(page)).toBeHidden();
+  }
   await bookMenu(page, 'Short');
   await check('the book menu');
   await menuItem(page, 'Collections').click();

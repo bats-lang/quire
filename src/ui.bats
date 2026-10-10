@@ -351,7 +351,8 @@ in release_bytes(id_frozen, id_bytes) end
    styles are a place (ui_place) and a fixed page's box (ui_fixed_box_n),
    so nothing can set a colour or anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
-  | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy | ADir
+  | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy
+  | AChecked | ADir
 
 fn _attr_name (attribute: attr): $D.attribute =
   case+ attribute of
@@ -359,7 +360,8 @@ fn _attr_name (attribute: attr): $D.attribute =
   | AValue() => $D.Value | AControls() => $D.Aria("controls")
   | ATabindex() => $D.Tabindex | AValueNow() => $D.Aria("valuenow")
   | ACurrent() => $D.Aria("current") | AGestureRegion() => $D.Data("gesture-region")
-  | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby") | ADir() => $D.Dir
+  | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby")
+  | AChecked() => $D.Aria("checked") | ADir() => $D.Dir
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
@@ -637,6 +639,7 @@ in _document_attr(document, id_bytes, id_len, $D.Class, class_name) end
    stylesheet gives the icon face (#295) *)
 #pub datatype icon = IcBack | IcClose | IcGear | IcBookmark | IcBookmarked | IcSearch | IcPrev | IcNext
   | IcContents | IcNotes | IcFont | IcMore | IcSpeak | IcPhrasePrevious | IcPhraseNext
+  | IcAdd | IcSort
 
 fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   case+ the_icon of
@@ -655,6 +658,8 @@ fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   | IcSpeak() => "\xEE\x81\x90"              (* volume_up *)
   | IcPhrasePrevious() => "\xEE\x81\x85"     (* skip_previous *)
   | IcPhraseNext() => "\xEE\x81\x84"         (* skip_next *)
+  | IcAdd() => "\xEE\x85\x85"               (* add *)
+  | IcSort() => "\xEE\x85\xA4"              (* sort *)
 
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
@@ -683,6 +688,7 @@ datavtype control =
   | {class_len,name_len:pos | class_len < 256; name_len < 256} CIcon of (string class_len, icon, string name_len)
   | {class_len:pos | class_len < 256} CNamedByContent of (string class_len)
   | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
+  | {label_len:pos | label_len < 256} CMenuChoice of (string label_len)
   | CHarmItem of harm
   | {label_len,controls_len:pos | label_len < 256; controls_len < 256} CTab of (string label_len, string controls_len, bool)
   (* a link out of the app, named by its text, opened in a new tab and
@@ -727,6 +733,11 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
   | ~CMenuItem(label) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
       val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
+    in _document_text(document, id_bytes, id_len, label) end
+  | ~CMenuChoice(label) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitemradio")
+      val () = _document_attr(document, id_bytes, id_len, $D.Aria("checked"), "false")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CHarmItem(the_harm) => let
       val @(_, label) = _harm_item(the_harm)
@@ -791,6 +802,22 @@ implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, 
   (parent: string parent_len, id: string id_len, class_name: string class_len, the_icon: icon, name: string name_len): void
 
 implement ui_icon_btn(parent, id, class_name, the_icon, name) = _control_literal(parent, id, CIcon(class_name, the_icon, name))
+
+(* An import's file input in the icon button parent, which shows the_icon
+   (the parent is marked data-icon, as an icon button is); the input's
+   name is label, and it lies over the button, invisible, so a tap on the
+   button is a tap on the input (a page cannot open the picker itself) *)
+#pub fn ui_file_input_icon {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len,accept_len:pos | label_len < 256; accept_len < 256}
+  (parent: string parent_len, id: string id_len, the_icon: icon, label: string label_len, accept: string accept_len, multiple: bool): void
+
+implement ui_file_input_icon(parent, id, the_icon, label, accept, multiple) = let
+  val () = _set_attr(parent, $D.Data("icon"), "y")
+  val () = ui_text(parent, _glyph(the_icon))
+  val () = _add_element(parent, id, $D.Input)
+  val () = _set_attr(id, $D.Type, "file")
+  val () = _set_attr(id, $D.Accept, accept)
+  val () = (if multiple then _set_attr(id, $D.Multiple, "multiple") else ())
+in _set_attr(id, $D.Aria("label"), label) end
 
 (* Icon button id shows the_icon instead (its name stays: a state it
    shows, such as being pressed, is said by its own attribute) *)
@@ -917,6 +944,14 @@ implement ui_web_src_n (id, id_len, url, url_len) =
   (parent: string parent_len, id: string id_len, label: string label_len): void
 
 implement ui_menuitem(parent, id, label) = _control_literal(parent, id, CMenuItem(label))
+
+(* A menu item that is one of a group of choices, of which the current
+   one is checked (ui_attr AChecked): WAI-ARIA's menuitemradio, drawn
+   with a check mark by the stylesheet while it is checked *)
+#pub fn ui_menu_choice {parent_len,id_len:pos | parent_len < 256; id_len < 256}{label_len:pos | label_len < 256}
+  (parent: string parent_len, id: string id_len, label: string label_len): void
+
+implement ui_menu_choice(parent, id, label) = _control_literal(parent, id, CMenuChoice(label))
 
 (* The menu item that asks about the_harm, marked as losing what it names: its
    id and label are the_harm's *)
@@ -1516,8 +1551,6 @@ implement ui_settings_control (bytes, n, at) = _settings_control_from(bytes, n, 
   | FilterUnread
   | FilterReading
   | FilterFinished
-  | ViewList
-  | ViewGrid
   | CollectionAll
   | CollectionRename
   | CollectionDelete
@@ -1529,8 +1562,6 @@ implement library_view_control_id (control) =
   | FilterUnread() => "filter-unread"
   | FilterReading() => "filter-reading"
   | FilterFinished() => "filter-finished"
-  | ViewList() => "view-list"
-  | ViewGrid() => "view-grid"
   | CollectionAll() => "collection-all"
   | CollectionRename() => "collection-rename"
   | CollectionDelete() => "collection-delete"
@@ -1541,9 +1572,7 @@ fn _library_view_control_after (control: library_view_control): $R.option(librar
   | FilterBooksAll() => $R.some(FilterUnread())
   | FilterUnread() => $R.some(FilterReading())
   | FilterReading() => $R.some(FilterFinished())
-  | FilterFinished() => $R.some(ViewList())
-  | ViewList() => $R.some(ViewGrid())
-  | ViewGrid() => $R.some(CollectionAll())
+  | FilterFinished() => $R.some(CollectionAll())
   | CollectionAll() => $R.some(CollectionRename())
   | CollectionRename() => $R.some(CollectionDelete())
   | CollectionDelete() => $R.none()
@@ -1746,6 +1775,9 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
   | MenuInstall
   | MenuStats
   | MenuCatalogues
+  | MenuHidden
+  | MenuArchived
+  | MenuTrash
   | MenuClose
   | LibraryMenu
 
@@ -1757,6 +1789,9 @@ implement library_menu_control_id (control) =
   | MenuInstall() => "menu-install"
   | MenuStats() => "menu-stats"
   | MenuCatalogues() => "menu-catalogues"
+  | MenuHidden() => "menu-hidden"
+  | MenuArchived() => "menu-archived"
+  | MenuTrash() => "menu-trash"
   | MenuClose() => "menu-close"
   | LibraryMenu() => "library-menu"
 
@@ -1767,7 +1802,10 @@ fn _library_menu_control_after (control: library_menu_control): $R.option(librar
   | MenuAbout() => $R.some(MenuInstall())
   | MenuInstall() => $R.some(MenuStats())
   | MenuStats() => $R.some(MenuCatalogues())
-  | MenuCatalogues() => $R.some(MenuClose())
+  | MenuCatalogues() => $R.some(MenuHidden())
+  | MenuHidden() => $R.some(MenuArchived())
+  | MenuArchived() => $R.some(MenuTrash())
+  | MenuTrash() => $R.some(MenuClose())
   | MenuClose() => $R.some(LibraryMenu())
   | LibraryMenu() => $R.none()
 
@@ -1785,7 +1823,61 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 7)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 10)
+
+(* The sort and view menu's choices, done, and its backdrop, each by its element's id (sort_menu_control_id) *)
+#pub datatype sort_menu_control =
+  | SortByLastOpened
+  | SortByTitle
+  | SortByAuthor
+  | SortByDateAdded
+  | SortBySeries
+  | ViewList
+  | ViewGrid
+  | SortMenuDone
+  | SortMenu
+
+#pub fn sort_menu_control_id (control: sort_menu_control): [id_len:pos | id_len < 256] string id_len
+implement sort_menu_control_id (control) =
+  case+ control of
+  | SortByLastOpened() => "sort-last-opened"
+  | SortByTitle() => "sort-title"
+  | SortByAuthor() => "sort-author"
+  | SortByDateAdded() => "sort-date-added"
+  | SortBySeries() => "sort-series"
+  | ViewList() => "view-list"
+  | ViewGrid() => "view-grid"
+  | SortMenuDone() => "sort-menu-done"
+  | SortMenu() => "sort-menu"
+
+(* The control after control, in the order the decoder tries them *)
+fn _sort_menu_control_after (control: sort_menu_control): $R.option(sort_menu_control) =
+  case+ control of
+  | SortByLastOpened() => $R.some(SortByTitle())
+  | SortByTitle() => $R.some(SortByAuthor())
+  | SortByAuthor() => $R.some(SortByDateAdded())
+  | SortByDateAdded() => $R.some(SortBySeries())
+  | SortBySeries() => $R.some(ViewList())
+  | ViewList() => $R.some(ViewGrid())
+  | ViewGrid() => $R.some(SortMenuDone())
+  | SortMenuDone() => $R.some(SortMenu())
+  | SortMenu() => $R.none()
+
+(* The first of control and the controls after it (fuel of them at
+   most) whose id is bytes[at, n) *)
+fun _sort_menu_control_from {l:agz}{n:nat}{at:nat}{fuel:nat} .<fuel>. (bytes: !$A.arr(byte, l, n), n: int n, at: int at, control: sort_menu_control, fuel: int fuel): $R.option(sort_menu_control) = let
+  val id = sort_menu_control_id(control)
+in
+  if _id_is(bytes, n, at, id, g1u2i(string1_length(id)), 0) then $R.some(control)
+  else if fuel <= 0 then $R.none()
+  else case+ _sort_menu_control_after(control) of
+    | ~$R.some(next) => _sort_menu_control_from(bytes, n, at, next, fuel - 1)
+    | ~$R.none() => $R.none()
+end
+
+(* The control whose id is bytes[at, n), if it is one *)
+#pub fn ui_sort_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(sort_menu_control)
+implement ui_sort_menu_control (bytes, n, at) = _sort_menu_control_from(bytes, n, at, SortByLastOpened(), 9)
 
 (* The reading statistics' goals, done, and its backdrop, each by its element's id (stats_control_id) *)
 #pub datatype stats_control =

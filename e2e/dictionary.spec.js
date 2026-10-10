@@ -249,16 +249,15 @@ const dictionaryFiles = page => page.evaluate(async () => {
   return keys.filter(key => /^[IDSX]0000000[0-9a-f]{7}$/.test(key)).length;
 });
 
-/** The library's shelf button pressed until the Trash is shown */
+/** The Trash's own screen, opened from the library menu (quire#404) */
 async function showTrash(page) {
-  const shelf = page.locator('#shelf-button');
-  for (let i = 0; i < 4 && (await shelf.textContent()) !== 'Trash'; i++) await shelf.click();
-  await expect(shelf).toHaveText('Trash');
+  await libraryMenu(page);
+  await menuItem(page, 'Trash').click();
+  await expect(page.locator('#shelf-title')).toHaveText('Trash');
 }
 
 test('a removed dictionary is in the Trash with Restore, and only Empty Trash deletes its files', async ({ page }) => {
   await start(page);
-  // the shelf button is there once the library has a book
   await importFiles(page, [epubFile({ title: 'Beside Dictionaries', author: 'A' })], 1);
   await importDictionary(page, english, 'en');
   const files = await dictionaryFiles(page);

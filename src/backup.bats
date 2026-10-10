@@ -1598,7 +1598,6 @@ in
     val () = $A.free<Int>(map)
     val () = !_mode := FromFile()
     val () = lib_sort(sort)
-    val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())
     val () = set_sliders()
     (* the brightness, the rotation lock and full screen restored, set *)

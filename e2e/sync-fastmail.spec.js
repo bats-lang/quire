@@ -9,7 +9,7 @@
 // mock that lets the page's origin in).
 
 import { test, expect, onAndroid } from './fixtures.js';
-import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen } from './helpers.js';
+import { start, dialog, librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown } from './helpers.js';
 
 const SERVER = 'https://myfiles.fastmail.com';
 const FILE = '/quire/quire-sync.json';
@@ -140,7 +140,7 @@ test("in the app, the first sync makes Fastmail's folder, then syncs there; the 
   await expect(syncRow(page)).toContainText('Fastmail · synced');
   // kept across a reload: the next sync reads the file, and makes no folder
   await page.reload();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await expect.poll(() => server.requests.filter(r => r === `GET ${FILE}`).length).toBe(2);
   await openSync(page);
   await expect(panel(page).getByLabel('Fastmail address')).toHaveValue(ADDRESS);

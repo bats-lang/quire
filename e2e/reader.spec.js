@@ -9,7 +9,7 @@ import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
   importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton,
-  readingSettings, openReadingSettings, expectBarFollows,
+  readingSettings, openReadingSettings, expectBarFollows, libraryShown,
 } from './helpers.js';
 
 const book = (title, n = 3, paras = 20) => ({ title, author: 'Reader Tests', rawChapters: chapters(n, paras) });
@@ -102,14 +102,14 @@ test('the back arrow, Escape and the browser\'s back all return to the library',
   await readBook(page, book('Ways Back'));
   await showChrome(page);
   await page.getByRole('button', { name: 'Back to library' }).click();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await openBook(page, 'Ways Back');
   await page.keyboard.press('Escape'); // the bars
   await page.keyboard.press('Escape'); // the library
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await openBook(page, 'Ways Back');
   await page.goBack();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 });
 
 test('the place is kept when the book is opened again, and after a reload', async ({ page }) => {
@@ -557,7 +557,7 @@ test('a card shows how far the book has been read', async ({ page }) => {
   await expect.poll(async () => (await place(page)).ch).toBe(2);
   await toLibrary(page);
   await expect(card(page, 'Progress')).toContainText(/\d+%/);
-  expect(await card(page, 'Progress').innerText()).not.toContain('New');
+  expect(await card(page, 'Progress').innerText()).not.toContain('Unread');
 });
 
 test('the page indicator names the chapter, and a long title is cut before the page numbers are', async ({ page }) => {
@@ -931,7 +931,7 @@ test('a reload in the middle of a book comes back to that page, and one in the l
   // left for the library: a reload stays there
   await toLibrary(page);
   await reload(page);
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await expect(bookPage(page)).toBeHidden();
 });
 

@@ -12,7 +12,7 @@ import { test, expect, clientsServed } from './fixtures.js';
 import { KEY, dropbox } from './dropbox-server.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
-  librarySearch, librarySettings, settingsButton, settingsScreen,
+  librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown,
 } from './helpers.js';
 
 /** The app's Capacitor, played: Browser (when browser is true) and App
@@ -57,7 +57,7 @@ async function device(browser, server, { key = KEY, tab = true, app = true } = {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   return { context, page, errors };
 }
 

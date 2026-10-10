@@ -32,7 +32,7 @@ from pathlib import Path
 # constructor -> the positions of the ids it makes (its parent's is 0)
 MAKERS = {name: (1,) for name in (
     'ui_el', 'ui_add', 'ui_text_btn', 'ui_icon_btn', 'ui_menuitem',
-    'ui_field', 'ui_img', 'ui_file_input', 'ui_link_out', 'ui_link_out_https', 'ui_link_out_path', 'ui_tab',
+    'ui_field', 'ui_img', 'ui_file_input', 'ui_file_input_icon', 'ui_menu_choice', 'ui_link_out', 'ui_link_out_https', 'ui_link_out_path', 'ui_tab',
     'ui_audio',
 )}
 # a range row: its label, its input and its value
