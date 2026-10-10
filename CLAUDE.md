@@ -1854,9 +1854,82 @@ stored, what leaves the device, or the Google scopes asked for.
 The library bar's More options (Material's overflow, ⋮, #333: a gear
 would say it goes straight to Settings) opens the library menu:
 Settings, About Quire (the same About screen, so the library reaches
-it without Settings), Catalogues, Reading statistics, Install Quire
-(while the browser offers it), Empty Trash (the red harm item) and
-Close.
+it without Settings), Catalogues, Reading statistics, Hidden, Archived
+and Trash (each a screen of its own, below), Install Quire (while the
+browser offers it), Empty Trash (the red harm item) and Close.
+
+## The library screen (#375, #376, #377, #404)
+
+One redesign of the library's header and empty state, decided by
+research (what comparable library apps do) and written here:
+
+* **The bar is one row** (`library-bar`): the name, Import (`import-button`,
+  a plus; its file input, named Import EPUB, lies over it, since a page
+  cannot open the picker itself), Sort and view (`sort-menu-button`) and
+  More options, with the search field on a row under them. Material 3's
+  top app bar is a title and up to three trailing actions, the rest in an
+  overflow menu; Apple Books has its view and sort control in the top
+  right of the library, Play Books its sort in a menu. At 320 px the
+  bar used to wrap to five rows (the first book began 53% down); it is
+  one row now and the first card begins in the top 40% of the screen
+  (`e2e/library.spec.js`, "the first book starts in the top 40%"). Import is
+  the screen's main action but an icon, not a chip among chips: it is the
+  only control that adds, and Material's guidance is that chips are for
+  filters and choices, not for actions.
+* **Sort and view is one menu** (`LSortMenu`, `sort-menu`, an `ovl` over the
+  library; Apple Books' Sort By menu offers Recent, Title, Author and
+  Manually in one menu, Material's menus check the current choice): the
+  five orders (`sort_order`: Last opened, Title, Author, Date added,
+  Series) and List or Grid (`layout`) as two groups of
+  `menuitemradio`s (`ui_menu_choice`), the current one `aria-checked`
+  (`_view_show`), the mark drawn by the stylesheet (`.mi[aria-checked=true]::before`).
+  A choice closes the menu and is kept as before (`set_apply`, `set_save`).
+  `sort_next` is gone; `tests/static/next.py` fails a `*_next` function
+  that takes and gives a datatype of more than three constructors (the
+  reader's footer readout, tapped to go round as the Kindle apps' footer
+  does, is the one allowed). The filters (All, Unread, Reading, Finished)
+  stay chips: they are a filter of the collection, which is what Material
+  3 chips are for, and List and Grid, a view, are no longer among them.
+* **Hidden, Archived and Trash are screens of their own** (`LShelf`,
+  `shelf-header`: a back button, the shelf's name and More options, in
+  place of the library's bar while it is open), opened from the library
+  menu, reusing the library's list; there is no shelf selector on the
+  library (the old shelf button cycled four shelves, up to four taps from
+  Trash back to the library, and a prominent Hidden undercut hiding a
+  book). Kindle keeps archived items out of the main library list too, in a
+  menu entry of its own. A shelf is a layer, so Escape, Back and the back
+  button close it as one step (`_escape_overlay`: `Escaped(LShelf())` shows
+  the library again), and the filters, search and collection are the
+  library's alone (`_passes` lets everything on a shelf through; opening a
+  shelf clears the search and the collection). More options stays on a
+  shelf's screen so Empty Trash is asked from the Trash itself, as Drive's
+  Trash has its Empty trash. A book opened from a shelf's screen closes to
+  the library (`_show_reader`). A shelf's rows offer Unhide, Unarchive (it
+  says to import the book's file again: archiving drops the file) and
+  Restore (Trash). A row's actions open on its More button and on a long
+  press or right click (`contextmenu`), as before.
+* **An empty library says what to do, and only that one** (`emptiness`:
+  `NoBooksYet | NoMatch | NoCollection | NoUnread | NoneReading |
+  NoneFinished | NothingHidden | NothingArchived | TrashEmpty`, made by
+  `_emptiness_of`, said by `_emptiness_text`, and `_emptiness_offers` is
+  true for `NoBooksYet` alone, each a total `case+`). NN/g on empty
+  states: communicate system status, provide learning cues, direct
+  pathways for key tasks. With no book to search, sort or filter the bar
+  keeps its name and menu (`_tools_show`), and the message offers Import
+  EPUB (`empty-import`, a primary button, its own file input
+  `empty-import-file`, both inputs always there so a pick is never lost to
+  a control made again) and Get free books (`empty-catalogues`, which opens
+  the Catalogues). Every other reason for an empty view is said and offers
+  nothing, since importing would not change it. The unreadable library
+  (#374) keeps the bar's inert Import and no offer.
+* **One word for a book's state** (`reading_state`: `StateUnread |
+  StateReading | StateFinished`, `_reading_state_of`): the filter and the
+  card use it, so the card says Unread and Finished where it said New and
+  Done beside chips that said Unread and Finished.
+* `e2e/library.spec.js` plays each of these (and `e2e/walk.js` walks the
+  sort and view menu and the three shelf screens, so the layout, safe
+  area, target size and Back specs cover them). The listener table has
+  room for them: the library's wiring grew by four.
 
 The page turns by a horizontal drag, recognized by the gestures package
 (its classifier and drag state machine are proven there). Bridge's

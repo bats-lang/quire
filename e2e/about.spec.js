@@ -7,7 +7,7 @@
 // files, directly in its scope).
 
 import { test, expect, onAndroid } from './fixtures.js';
-import { start, dialog, librarySettings, settingsScreen, settingsButton, libraryMenu, menuItem, librarySearch } from './helpers.js';
+import { start, dialog, librarySettings, settingsScreen, settingsButton, libraryMenu, menuItem, librarySearch, libraryShown } from './helpers.js';
 
 const about = page => dialog(page, 'About Quire');
 // each link's href, and the address it leads to from the app at
@@ -87,7 +87,7 @@ test('the library menu opens About, next to Settings, and Escape goes back to th
   expect(await first.evaluate(a => a.href)).toBe(leads);
   await page.keyboard.press('Escape');
   await expect(about(page)).toBeHidden();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   // and Done, back at the library menu's button (More options)
   await libraryMenu(page);
   await menuItem(page, 'About Quire').click();
@@ -119,7 +119,7 @@ test('the home page goes to the network, not the service worker', async ({ page 
   // the home page leads back to the app beside it
   await page.goto('/homepage/');
   await page.getByRole('link', { name: 'Open Quire in your browser' }).click();
-  await expect(page.getByRole('searchbox', { name: 'Search the library' })).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   // and nothing of them is kept, while the app's files are
   await page.goto('/');
   const kept = await page.evaluate(async () => {

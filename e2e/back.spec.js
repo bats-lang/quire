@@ -11,12 +11,12 @@ import { test, expect, onAndroid } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, chapters, bookPage, libraryMenu, menuItem, dialog,
   librarySettings, settingsScreen, settingsButton, bookMenu, librarySearch, openReadingSettings,
-  readingSettings, card,
+  readingSettings, card, libraryShown,
 } from './helpers.js';
 import { walkEveryScreen, appPlayed } from './walk.js';
 
 /** The overlays shown: each dialog and menu (by id, else name) */
-const overlaysShown = page => page.evaluate(() => [...document.querySelectorAll('[role=dialog],[role=alertdialog],[role=menu]')]
+const overlaysShown = page => page.evaluate(() => [...document.querySelectorAll('[role=dialog],[role=alertdialog],[role=menu],#shelf-header')]
   .filter(e => e.checkVisibility() && e.getClientRects().length > 0)
   .map(e => e.id || e.getAttribute('aria-label')).sort());
 
@@ -47,7 +47,7 @@ async function stepBack(page, testInfo, within) {
     if (reading) await expect(bookPage(page)).toBeVisible();
   } else {
     expect(reading, 'Back pressed with nothing to go back from').toBe(true);
-    await expect(librarySearch(page)).toBeVisible();
+    await expect(libraryShown(page)).toBeVisible();
     await expect(bookPage(page)).toBeHidden();
   }
 }
@@ -61,7 +61,7 @@ async function backAtRoot(page, testInfo) {
     const before = await minimized(page);
     await pressBack(page, testInfo);
     await expect.poll(() => minimized(page)).toBe(before + 1);
-    await expect(librarySearch(page)).toBeVisible();
+    await expect(libraryShown(page)).toBeVisible();
   } else {
     await pressBack(page, testInfo);
     await expect.poll(() => page.url()).toBe('about:blank');
@@ -88,7 +88,20 @@ test('Back from About goes back to the library, and from there leaves', async ({
   await expect(dialog(page, 'About Quire')).toBeVisible();
   await pressBack(page, testInfo);
   await expect(dialog(page, 'About Quire')).toBeHidden();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
+  expect(errors).toEqual([]);
+  await backAtRoot(page, testInfo);
+});
+
+test('Back from a shelf\'s screen goes back to the library, and from there leaves', async ({ page }, testInfo) => {
+  const errors = await start(page);
+  await importFiles(page, [epubFile({ title: 'Shelved', author: 'A' })], 1);
+  await libraryMenu(page);
+  await menuItem(page, 'Hidden').click();
+  await expect(page.locator('#shelf-title')).toHaveText('Hidden');
+  await pressBack(page, testInfo);
+  await expect(page.locator('#shelf-title')).toBeHidden();
+  await expect(card(page, 'Shelved')).toBeVisible();
   expect(errors).toEqual([]);
   await backAtRoot(page, testInfo);
 });
@@ -104,7 +117,7 @@ test('Back from Settings › Sync goes back to Settings, then to the library', a
   await expect(settingsScreen(page)).toBeVisible();
   await pressBack(page, testInfo);
   await expect(settingsScreen(page)).toBeHidden();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -117,7 +130,7 @@ test('Back closes a sheet over the book, then leaves the book for the library', 
   await expect(readingSettings(page)).toBeHidden();
   await expect(bookPage(page)).toBeVisible();
   await pressBack(page, testInfo);
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await expect(bookPage(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -133,10 +146,10 @@ test('Back answers a dialog No: the Trash is not emptied', async ({ page }, test
   await expect(asked).toBeVisible();
   await pressBack(page, testInfo);
   await expect(asked).toBeHidden();
-  // the shelf button goes round the shelves: Library, Hidden, Archived, Trash
-  const shelf = page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ });
-  for (let i = 0; i < 3; i++) await shelf.click();
-  await expect(shelf).toHaveText('Trash');
+  // the Trash is a screen of its own, from the library menu
+  await libraryMenu(page);
+  await menuItem(page, 'Trash').click();
+  await expect(page.locator('#shelf-title')).toHaveText('Trash');
   await expect(card(page, 'Kept From The Trash')).toHaveCount(1);
   expect(errors).toEqual([]);
 });
@@ -151,7 +164,7 @@ test('after a screen is closed by its own button, Back at the library leaves at 
   await readBook(page, { title: 'Closed By Its Button', author: 'B', rawChapters: chapters(1) });
   await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   expect(errors).toEqual([]);
   await backAtRoot(page, testInfo);
 });

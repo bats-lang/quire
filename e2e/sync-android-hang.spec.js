@@ -9,7 +9,7 @@
 // app drops.
 
 import { test, expect, clientsServed } from './fixtures.js';
-import { epubFile, importFiles, chapters, dialog, librarySearch, librarySettings, settingsButton, settingsScreen } from './helpers.js';
+import { epubFile, importFiles, chapters, dialog, librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown } from './helpers.js';
 import { drive, CLIENT, SCOPE, capacitorPlayed } from './sync-stores.js';
 
 async function device(browser, server) {
@@ -24,7 +24,7 @@ async function device(browser, server) {
   // the timers (30 s) are run by the test
   await page.clock.install();
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   return { context, page, google, errors };
 }
 

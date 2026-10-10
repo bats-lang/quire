@@ -5,10 +5,10 @@ import { test, expect } from './fixtures.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
-  selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings,
+  selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings, chooseInSortMenu, sortMenuChecked,
   selectionButton, colours, bookPage, pagedBook, showChrome, control,
   librarySettings, settingsButton, restoreInput, exportedBackup,
-  readingSettings, openReadingSettings,
+  readingSettings, openReadingSettings, importOffered,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -36,7 +36,7 @@ async function factoryReset(page) {
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
-  await expect(importInput(page)).toBeVisible();
+  await expect(importOffered(page)).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
 }
 
@@ -106,27 +106,26 @@ test('a backup restored after a reset brings everything back, and a book importe
   await bookMenu(page, 'Kept One');
   await menuItem(page, 'Hide').click();
   // the last sort order, Series
-  const sort = page.getByRole('button', { name: /^Sort:/ });
-  while (await sort.textContent() !== 'Sort: Series') await sort.click();
+  await chooseInSortMenu(page, 'Series');
   const path = rawFile('quire-backup.json', await exportBackup(page));
 
   await factoryReset(page);
   expect(await bg(page)).not.toBe(sepia);
-  // the library's order is its own, not a setting: changed by hand
-  while (await sort.textContent() !== 'Sort: Title') await sort.click();
   // only book one comes back first
   await importFiles(page, [one], 1);
+  // the library's order is its own, not a setting: changed by hand (an empty library has no sort to change)
+  await chooseInSortMenu(page, 'Title');
   await restoreBackup(page, path);
   await expect(restored(page)).toContainText('Restored 1 book, 1 highlight or bookmark, your settings');
   // the book the library does not have is said, not counted as restored
   await expect(restored(page)).toContainText('1 book in the backup is not in your library');
   await restored(page).getByRole('button', { name: 'OK' }).click();
   await expect.poll(() => bg(page)).toBe(sepia);
-  await expect(sort).toHaveText('Sort: Series');
   // book one is hidden again
   await expect(card(page, 'Kept One')).toHaveCount(0);
   // book two, imported after, takes its place and highlight back
   await importFiles(page, [two], 1);
+  expect((await sortMenuChecked(page))[0]).toBe('Series');
   await openBook(page, 'Kept Two');
   expect(await place(page)).toEqual(left);
   await expect.poll(() => marks(page)).toEqual(hl);

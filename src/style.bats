@@ -1494,7 +1494,7 @@ fn _fonts {left:nat | left >= 1170} (sheet: sheet(left, false, false)): [after:n
   val () = raw(sheet, "@font-face{font-family:'Material Symbols';src:url(material-symbols-subset.woff2) format('woff2');font-weight:400;font-display:block}")
 in sheet end
 
-fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7400] sheet(after, false, false) = let
+fn _shell {left:nat | left >= 8300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8300] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -1554,12 +1554,30 @@ fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:n
      #374): not the accent's call to act but the muted text on the card,
      a pair proven in every theme, with a cursor that says no (Material 3
      draws a disabled button with its container and text faded) *)
-  val sheet = rule(sheet, "#import-button:has(input[inert])")
+  val sheet = rule(sheet, "#import-button:has(input[inert]),#empty-import:has(input[inert])")
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
-  val sheet = line(sheet, AllSides(), 1, RoleLine())
   val sheet = lay(sheet, Cursor(), "not-allowed")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".btn input[type=file]")
+  (* the bar's Import is an icon button (a plus) with the file input
+     over it: a div, since a page cannot open the picker itself (#404) *)
+  val sheet = rule(sheet, "#import-button")
+  val sheet = lay(sheet, Display(), "inline-flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, JustifyContent(), "center")
+  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, MinWidth(), "48px")
+  val sheet = lay(sheet, MinHeight(), "48px")
+  val sheet = lay(sheet, Cursor(), "pointer")
+  val sheet = close(sheet)
+  (* the empty library's message and what it offers, centred *)
+  val sheet = rule(sheet, ".eacts")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = lay(sheet, JustifyContent(), "center")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = lay(sheet, MarginTop(), "8px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Left(), "0")
@@ -1849,7 +1867,7 @@ fn _shell {left:nat | left >= 7400} (sheet: sheet(left, false, false)): [after:n
   val sheet = close(sheet)
 in sheet end
 
-fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5100] sheet(after, false, false) = let
+fn _overlays {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5900] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -1962,6 +1980,25 @@ fn _overlays {left:nat | left >= 5100} (sheet: sheet(left, false, false)): [afte
   val sheet = lay(sheet, Padding(), "12px 14px")
   val sheet = lay(sheet, BorderRadius(), "6px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  (* a menu of choices (the sort and view menu): the group's name, and the
+     current choice checked by a mark drawn in the item's own text colour
+     (the checkbox of Material's menus) *)
+  val sheet = rule(sheet, ".mgroup")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".mhead")
+  val sheet = lay(sheet, FontWeight(), "600")
+  val sheet = lay(sheet, FontSize(), "14px")
+  val sheet = lay(sheet, Padding(), "8px 14px 4px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".mi[role=menuitemradio]")
+  val sheet = lay(sheet, Position(), "relative")
+  val sheet = lay(sheet, PaddingLeft(), "40px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".mi[aria-checked=true]::before")
+  val () = raw(sheet, "content:\"\";position:absolute;left:18px;top:50%;width:6px;height:12px;margin-top:-9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg);")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi:hover")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
@@ -3155,7 +3192,8 @@ fn _under_480px {left:nat | left >= 480} (sheet: sheet(left, false, false)): [af
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ttl")
   val sheet = lay(sheet, FontSize(), "20px")
-  val sheet = lay(sheet, Flex(), "1 1 calc(100% - 60px)")
+  val sheet = lay(sheet, Flex(), "1 1 0")
+  val sheet = lay(sheet, MinWidth(), "0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".bar>.ibtn")
   val sheet = lay(sheet, Order(), "1")

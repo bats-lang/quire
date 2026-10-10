@@ -174,6 +174,11 @@ fn _library_view_control (clicked: !target): $R.option(library_view_control) =
   | Target(bytes, n, _) => ui_library_view_control(bytes, n, 10)
   | NoTarget() => $R.none()
 
+fn _sort_menu_control (clicked: !target): $R.option(sort_menu_control) =
+  case+ clicked of
+  | Target(bytes, n, _) => ui_sort_menu_control(bytes, n, 10)
+  | NoTarget() => $R.none()
+
 fn _card_menu_control (clicked: !target): $R.option(card_menu_control) =
   case+ clicked of
   | Target(bytes, n, _) => ui_card_menu_control(bytes, n, 10)
@@ -425,6 +430,36 @@ fn _query_save {l:agz}{size:nat}{query_len:nat | query_len <= size} (query: !$A.
     else $P.finish<$IDB.stored>($IDB.idb_delete(key_bytes, 5), llam(_) => ()))
 in release_bytes(key_frozen, key_bytes) end
 
+(* The library's search field made empty, its query none and forgotten *)
+fn _search_cleared (): void = let
+  val () = app_library_search()
+  val empty = $A.alloc<byte>(1)
+  val () = _query_save(empty, 0)
+  val () = $A.free<byte>(empty)
+in lib_query_set($A.alloc<byte>(1), 0) end
+
+(* A shelf's screen (Hidden, Archived, Trash; quire#404), over the
+   library: the library menu's entry opens it, its back button, Escape
+   and Back close it (it is a layer, so they are one step like any
+   other screen's). It has no search, filter or collection of the
+   library's, so the search is cleared as it opens *)
+fn _shelf_open (the_shelf: shelf): void = let
+  val () = layer_close(LLibraryMenu())
+  val () = _search_cleared()
+  val () = lib_shelf_set(the_shelf)
+  val () = layer_open(LShelf())
+  val () = _trash_dictionaries()
+  val () = lib_render()
+in ui_focus("shelf-back") end
+
+(* The library shown again after its shelf's screen closed (the layer is
+   already closed) *)
+fn _shelf_left (): void = let
+  val () = lib_shelf_set(OnShelf())
+  val () = _trash_dictionaries()
+  val () = lib_render()
+in ui_focus("library-menu-button") end
+
 (* The search kept by the last run, in its field and the library's *)
 fn _query_restore (): $P.promise(int, $P.Chained) = let
   val @(key_frozen, key_bytes) = $A.freeze<byte>(_query_key())
@@ -594,6 +629,12 @@ fn _show_reader (cause: opening_cause): void = let
   val () = _night_watch_start()
   val () = ui_show("library", false)
   val () = layer_close(LBookInfo())
+  (* a book opened from a shelf's screen: closing it comes back to the
+     library, the shelf's screen closed (nothing is rendered: the
+     library is not shown) *)
+  val () = (if layer_is_open(LShelf()) then let
+      val () = layer_close(LShelf())
+    in lib_shelf_set(OnShelf()) end else ())
   val () = ui_show("reader", true)
   (* A reader does not touch the screen for a page's length: it stays
      awake while the book is open *)
@@ -827,7 +868,7 @@ fn _hide_toggle {book:int} (book: int book): void =
 (* The book actions' labels (in the book menu or the info view) for a
    book on shelf shelf: in the Trash, Restore only (a book leaves the Trash
    for good only when it is emptied); elsewhere Hide or Unhide, Archive
-   or Restore, and Move to Trash *)
+   or Unarchive, and Move to Trash *)
 fn _shelf_labels {hide_len,archive_len,trash_len:pos | hide_len < 256; archive_len < 256; trash_len < 256}
   (hide: string hide_len, archive: string archive_len, trash: string trash_len, shelf: shelf): void =
   case+ shelf of
@@ -838,7 +879,7 @@ fn _shelf_labels {hide_len,archive_len,trash_len:pos | hide_len < 256; archive_l
   | _ => let
     val () = (if same_shelf(shelf, Hidden()) then ui_text(hide, "Unhide") else ui_text(hide, "Hide"))
     val () = ui_show(archive, true)
-    val () = (if same_shelf(shelf, Archived()) then ui_text(archive, "Restore") else ui_text(archive, "Archive"))
+    val () = (if same_shelf(shelf, Archived()) then ui_text(archive, "Unarchive") else ui_text(archive, "Archive"))
   in ui_show(trash, true) end
 
 (* The book menu for the book, its items as its shelf asks *)
@@ -943,8 +984,8 @@ fn _book_action {book:int} (book: int book, action: book_action): void =
     | Archive() =>
       (case+ book_numbers.shelf of
        | Archived() => let
-           val () = modal_inform("Restore")
-         in modal_text_lit("To restore this book, import its file again.") end
+           val () = modal_inform("Unarchive")
+         in modal_text_lit("To unarchive this book, import its file again.") end
        | Trash() => ()
        | _ => _archive(book))
     | MoveToTrash() =>
@@ -1362,9 +1403,32 @@ fn _stats_goal (goal: int): void = let
   val () = stats_goal_set(goal)
 in stats_show() end
 
-fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 26) = let
-  (* import *)
+(* The sort and view menu closed, the focus back on its button *)
+fn _sort_menu_closed (): void = let
+  val () = layer_close(LSortMenu())
+in ui_focus("sort-menu-button") end
+
+(* The books sorted in order, kept in that order: a save the app makes
+   later (a sync as it opens) writes the order it reads back, so it
+   changes nothing (#302) *)
+fn _sorted (order: sort_order): void = let
+  val () = lib_sort(order)
+  val () = lib_save()
+  val () = set_apply(lib_state_get())
+  val () = lib_render()
+in _sort_menu_closed() end
+
+(* The books laid out as chosen, kept with the settings *)
+fn _viewed (chosen: layout): void = let
+  val () = lib_grid_set(chosen)
+  val () = set_save(lib_state_get())
+in _sort_menu_closed() end
+
+fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
+  (* import: from the bar, or from the empty library's message *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
+  val listeners = RCons(listeners, OnEl("empty-import"), "change", llam(_) => let val () = import_picked_empty() in 0 end)
+  val listeners = RCons(listeners, OnEl("empty-catalogues"), "click", llam(_) => let val () = catalogue_panel_open() in 0 end)
   (* drag and drop *)
   val listeners = RCons(listeners, OnEl("library"), "dragover", llam(_) => let
       val () = $EV.prevent_default()
@@ -1404,8 +1468,6 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 26) = let
         | ~$R.some(FilterUnread()) => let val () = lib_filter_set(Unread()) in true end
         | ~$R.some(FilterReading()) => let val () = lib_filter_set(BeingRead()) in true end
         | ~$R.some(FilterFinished()) => let val () = lib_filter_set(Finished()) in true end
-        | ~$R.some(ViewList()) => let val () = lib_grid_set(ListLayout()) in true end
-        | ~$R.some(ViewGrid()) => let val () = lib_grid_set(GridLayout()) in true end
         | ~$R.some(CollectionAll()) => let val () = lib_coll_show(~1) in false end
         | ~$R.some(CollectionRename()) => let val () = _collection_rename() in false end
         | ~$R.some(CollectionDelete()) => let val () = lib_coll_delete(lib_coll_shown()) in false end): bool
@@ -1473,21 +1535,37 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 26) = let
         | ~$R.some(BookInfoArchive()) => (if book < 0 then () else let val () = layer_close(LBookInfo()) in _book_action(book, Archive()) end)
         | ~$R.some(BookInfoTrash()) => (if book < 0 then () else _book_action(book, MoveToTrash())))
     in 0 end)
-  (* sort and shelf *)
-  val listeners = RCons(listeners, OnEl("sort-button"), "click", llam(_) => let
-      val sort_order = sort_next(lib_sort_get())
-      val () = lib_sort(sort_order)
-      (* the library kept in its new order: a save the app makes later
-         (a sync as it opens) writes the order it reads back, so it
-         changes nothing (#302) *)
-      val () = lib_save()
-      val () = lib_sort_label(sort_order)
-      val () = set_apply(lib_state_get())
-    in let val () = lib_render() in 0 end end)
-  val listeners = RCons(listeners, OnEl("shelf-button"), "click", llam(_) => let
-      val () = lib_shelf_set(shelf_next(lib_shelf_get()))
-      val () = _trash_dictionaries()
-    in let val () = lib_render() in 0 end end)
+  (* the sort and view menu (quire#377, #404): the order and the layout
+     are chosen from one menu, each group's current choice checked, and
+     kept with the settings *)
+  val listeners = RCons(listeners, OnEl("sort-menu-button"), "click", llam(_) => let
+      val () = layer_open(LSortMenu())
+    in let val () = ui_focus("sort-last-opened") in 0 end end)
+  val listeners = RCons(listeners, OnEl("sort-menu"), "click", llam(h) => let
+      val clicked = _target(h)
+      val control = _sort_menu_control(clicked)
+      val () = _target_free(clicked)
+      val () = (case+ control of
+        | ~$R.none() => ()
+        | ~$R.some(SortByLastOpened()) => _sorted(LastOpened())
+        | ~$R.some(SortByTitle()) => _sorted(ByTitle())
+        | ~$R.some(SortByAuthor()) => _sorted(ByAuthor())
+        | ~$R.some(SortByDateAdded()) => _sorted(DateAdded())
+        | ~$R.some(SortBySeries()) => _sorted(BySeries())
+        | ~$R.some(ViewList()) => _viewed(ListLayout())
+        | ~$R.some(ViewGrid()) => _viewed(GridLayout())
+        | ~$R.some(SortMenuDone()) => _sort_menu_closed()
+        (* a click outside *)
+        | ~$R.some(SortMenu()) => _sort_menu_closed())
+    in 0 end)
+  (* a shelf's screen: back to the library *)
+  val listeners = RCons(listeners, OnEl("shelf-back"), "click", llam(_) => let
+      val () = layer_close(LShelf())
+      val () = _shelf_left()
+    in 0 end)
+  val listeners = RCons(listeners, OnEl("shelf-more"), "click", llam(_) => let
+      val () = layer_open(LLibraryMenu())
+    in let val () = ui_focus("menu-settings") in 0 end end)
   (* the dictionaries in the Trash, each with a Restore (#396) *)
   val listeners = RCons(listeners, OnEl("trash-dictionaries"), "click", llam(h) => let
       val clicked = _target(h)
@@ -1562,6 +1640,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 26) = let
         | ~$R.some(MenuCatalogues()) => let
           val () = layer_close(LLibraryMenu())
         in catalogue_panel_open() end
+        | ~$R.some(MenuHidden()) => _shelf_open(Hidden())
+        | ~$R.some(MenuArchived()) => _shelf_open(Archived())
+        | ~$R.some(MenuTrash()) => _shelf_open(Trash())
         | ~$R.some(MenuClose()) => layer_close(LLibraryMenu())
         (* a click outside *)
         | ~$R.some(LibraryMenu()) => layer_close(LLibraryMenu()))
@@ -2073,6 +2154,10 @@ fn _escape_overlay (): bool =
      is back *)
   | ~Escaped(LSyncStep()) => let
       val () = sync_step_cancel()
+    in true end
+  (* a shelf's screen: the library is shown again *)
+  | ~Escaped(LShelf()) => let
+      val () = _shelf_left()
     in true end
   | ~Escaped(_) => true
 
@@ -2954,7 +3039,7 @@ implement main0 () = let
      reader who was in a book comes back to it, not to the library *)
   val () = ui_show("library", false)
   val loaded = $P.and_then<int><int>(set_load(), llam(state) => let
-      val () = lib_sort_label(lib_state_sort(state))
+      val () = ()
     in
       $P.and_then<library_reading><int>(_library_read(), llam(reading) => let
         val () = lib_state_set(state)

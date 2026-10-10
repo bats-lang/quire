@@ -9,7 +9,7 @@
 import { test, expect, clientsServed } from './fixtures.js';
 import {
   epubFile, importFiles, openBook, place, toLibrary, chapters, dialog,
-  librarySearch, librarySettings, settingsButton, settingsScreen,
+  librarySearch, librarySettings, settingsButton, settingsScreen, libraryShown,
 } from './helpers.js';
 import { drive, CLIENT, SCOPE, capacitorPlayed, identityServicesPlayed } from './sync-stores.js';
 
@@ -26,7 +26,7 @@ async function device(browser, server, { mode = 'consent', files = [], client = 
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   return { context, page, errors, files: kept, google };
 }
 
@@ -125,7 +125,7 @@ test('Use Android syncs through the app data folder of the device\'s Google acco
 /** The app opened again (a relaunch): its page loaded anew */
 async function reopened(page) {
   await page.reload();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 }
 
 test('opened again, the app syncs with the token it kept, and once its hour is up gets another with nothing shown', async ({ browser }) => {
@@ -221,7 +221,7 @@ test('Use Android is listed only where it can sync, says why it cannot, and Turn
   await clientsServed(web, {});
   const page = await web.newPage();
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   await openSync(page);
   await expect(useAndroid(page)).toBeHidden();
   // nor, in a build with no client, Google Drive
@@ -364,7 +364,7 @@ async function browserDevice(browser, server) {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   return { context, page, errors };
 }
 

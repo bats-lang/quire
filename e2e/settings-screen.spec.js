@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, cards, card, openBook, readBook, toLibrary, chapters, dialog, menuItem, libraryMenu,
   openSettings, colours, showChrome, librarySearch, bookPage, topBar, openReadingSettings, readingSettings,
-  settingsScreen, settingsButton, librarySettings, restoreInput, exportedBackup,
+  settingsScreen, settingsButton, librarySettings, restoreInput, exportedBackup, libraryShown,
 } from './helpers.js';
 
 const bg = async page => (await colours(page)).bg.join(',');
@@ -85,7 +85,7 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await expect(settingsScreen(page)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 });
 
 test('the backup is exported and restored from Settings', async ({ page }, testInfo) => {
