@@ -75,6 +75,8 @@ test('a corrected file of a book in the library replaces it: the place, the note
   const order = await titles(page);
 
   await replaceWithNewer(page, corrected);
+  // the cover is made once the card is drawn, after the answer: wait for it, then for storage
+  await expect.poll(() => card(page, 'Replace Me').locator('img').evaluate(img => img.naturalWidth)).toBe(8);
   await settled(page);
   const after = await stored(page);
 
@@ -92,7 +94,6 @@ test('a corrected file of a book in the library replaces it: the place, the note
   const covers = Object.values(await coverBytes(page));
   expect(covers).toHaveLength(1);
   expect(covers[0]).toEqual([...correctedCover]);
-  await expect.poll(() => card(page, 'Replace Me').locator('img').evaluate(img => img.naturalWidth)).toBe(8);
   await bookMenu(page, 'Replace Me');
   await menuItem(page, 'Collections').click();
   await expect(dialog(page, 'Collections').getByRole('button', { name: 'To keep', exact: true })).toHaveAttribute('aria-pressed', 'true');

@@ -14,7 +14,7 @@ import {
 } from './helpers.js';
 import { stored, settled } from './relaunch.js';
 import { writeFileSync, statSync } from 'node:fs';
-import { librarySettings, settingsButton, restoreInput, exportedBackup } from './helpers.js';
+import { librarySettings, settingsButton, restoreInput, exportedBackup, openShelf, shelfTitle } from './helpers.js';
 import { NOON, minutesLater, stores, sync, highlight, shown } from './sync-devices.js';
 import { replaceBook } from './replace-books.js';
 import { panel, note, readMinutes, highlightWithNote, inCollection, fileSizes, replaceWith } from './replace-steps.js';
@@ -70,8 +70,6 @@ test('replacing a book with the identical file changes nothing the reader made',
   expect(errors).toEqual([]);
 });
 
-const shelfButton = page => page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ });
-
 test('replacing a hidden book keeps it hidden', async ({ page }) => {
   const errors = await start(page);
   const file = epubFile(replaceBook);
@@ -82,8 +80,8 @@ test('replacing a hidden book keeps it hidden', async ({ page }) => {
   await replaceWith(page, file);
   // still not in the Library, and in Hidden
   await expect(cards(page)).toHaveCount(0);
-  await shelfButton(page).click();
-  await expect(shelfButton(page)).toHaveText('Hidden');
+  await openShelf(page, 'Hidden');
+  await expect(shelfTitle(page)).toHaveText('Hidden');
   await expect(cards(page)).toHaveCount(1);
   await openBook(page, 'Replace Me');
   expect(errors).toEqual([]);
