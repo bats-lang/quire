@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 90 | 32 | 17 | 139 |
+| must | 94 | 28 | 17 | 139 |
 | should | 11 | 22 | 5 | 38 |
 | may | 0 | 1 | 0 | 1 |
 | deprecated | 16 | 10 | 1 | 27 |
-| all | 117 | 65 | 23 | 205 |
+| all | 121 | 61 | 23 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -49,12 +49,8 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `nav-spine_in-spine-hidden-toc-css` | must | the navigation document in the spine shows the entry its CSS hides (display:none): the book's CSS is dropped by design; the contents panel lists both, as asked | 1/2 | policy |
 | `nav-spine_in-spine-hidden-toc-html` | must | the navigation document in the spine shows the entry its hidden attribute hides; the contents panel lists both, as asked | 1/2 | next |
 | `ocf-url_link-path-absolute` | must | a path-absolute address ("/images/photograph.jpg") is not resolved from the container root: the image is blanked | 6/16 | next |
-| `pkg-dir_but_not_content` | must | the OPF's language and direction become the content's: the page is rtl and the list right-aligned | 13/13 | next |
-| `pkg-dir_creator-rtl` | must | a dc:creator's dir attribute is not read: the name is shown left to right | 1/12 | next |
-| `pkg-dir_rtl-root-ltr` | must | a dc:title's dir attribute is not read: the title is shown left to right | 3/12 | next |
-| `pkg-dir_rtl-root-unset` | must | a dc:title's dir attribute is not read: the title is shown left to right | 3/12 | next |
-| `pkg-dir_unset-root-rtl` | must | the package's dir attribute is not read for the title: it is shown left to right | 1/11 | next |
-| `pkg-lang_but_not_content` | must | the OPF's language is put on the content (lang=fr), so a q gets French quotation marks | 11/15 | next |
+| `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
+| `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
 | `pub-cmt-mp3` | must | an audio element is not shown (its fallback content is) | 12/14 | next |
 | `pub-cmt-mp4` | must | an audio element is not shown (its fallback content is) | 11/14 | next |
@@ -183,6 +179,10 @@ Caveats of a pass, where there is one:
 * `pkg-creator-order`: the first dc:creator is used
 * `pkg-dir-auto_root-rtl`: the title is shown with a left to right base, as the test says it should be (dir=auto, first letter Latin)
 * `pkg-dir-auto_root-unset`: the title is shown with a left to right base, as the test says it should be
+* `pkg-dir_creator-rtl`: a dc:creator's dir is read and shown on the library card
+* `pkg-dir_rtl-root-ltr`: a dc:title's own dir outranks the package's, on the library card
+* `pkg-dir_rtl-root-unset`: a dc:title's dir is read and shown on the library card
+* `pkg-dir_unset-root-rtl`: the package's dir is the title's and the creator's when they have none, on the library card
 * `pkg-dir_unset-root-unset`: the title is shown left to right, as the test says it should be
 * `pkg-meta-whitespace`: shown with single spaces (HTML collapses them); the title and author are stored with the spaces as written, so a search or sort sees them
 * `pkg-spine-duplicate-item-hyperlink`: a link to the document goes to its first place in the spine

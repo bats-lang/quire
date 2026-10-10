@@ -119,6 +119,32 @@ test('pub-foreign_image (must): an image of a type the reader does not show is r
   expect((await pictures(page))[0].loaded).toBe(true);
 });
 
+// ---- Internationalization ----
+
+/** The direction the first card's text holds is drawn in */
+const cardDirection = (page, text) => cards(page).first().getByText(text).first().evaluate(e => getComputedStyle(e).direction);
+
+test('pkg-dir_creator-rtl, pkg-dir_rtl-root-unset (must): a title and a creator whose dir is rtl are shown right to left', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [rawFile('directed-title.epub', w3cBooks['directed-title'].bytes())], 1);
+  expect(await cardDirection(page, 'הרפתקה')).toBe('rtl');
+  expect(await cardDirection(page, 'דוד')).toBe('rtl');
+});
+
+test('pkg-dir_unset-root-rtl (must): a title and a creator with no dir take the package\'s rtl', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [rawFile('root-directed-title.epub', w3cBooks['root-directed-title'].bytes())], 1);
+  expect(await cardDirection(page, 'הרפתקה')).toBe('rtl');
+  expect(await cardDirection(page, 'דוד')).toBe('rtl');
+});
+
+test('pkg-dir_rtl-root-ltr (must): a dir of its own outranks the package\'s', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [rawFile('own-direction-over-root.epub', w3cBooks['own-direction-over-root'].bytes())], 1);
+  expect(await cardDirection(page, 'הרפתקה')).toBe('ltr');
+  expect(await cardDirection(page, 'דוד')).toBe('ltr');
+});
+
 // ---- Publication Resources: XML that is not well formed ----
 
 test('pub-xml-non-validating_unclosed (must): a content document with an unclosed element is reported as an error', async ({ page }, testInfo) => {
