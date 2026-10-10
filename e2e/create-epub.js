@@ -218,6 +218,11 @@ function loremParagraph(seed) {
  * @param {number[]} opts.damagedChapters - Chapters (from 1) whose data cannot be inflated
  * @param {object[]} opts.rawChapters - Chapters given whole: each {body, images?, lang?,
  *   head? (more of its head, such as a viewport meta), itemref? (its itemref's properties)}
+ * @param {object[]} opts.metaInf - More files of META-INF, each {name, data}: an
+ *   encryption.xml (encryptionXml), a license.lcpl, a sinf.xml, a rights.xml
+ * @param {boolean} opts.encryptedChapters - The chapters' bytes are replaced by random
+ *   ones, as an encrypted chapter's are (named by the encryption.xml of metaInf)
+ * @param {boolean} opts.damagedPackage - The package document (OPF) cannot be inflated
  * @returns {Buffer} EPUB file contents
  */
 // Minimal 1x1 red PNG (68 bytes) for testing image rendering
@@ -276,6 +281,36 @@ export function solidPng(width, height, [r, g, b] = [40, 90, 160]) {
     Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
     chunk('IHDR', header), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
   ]);
+}
+
+/**
+ * META-INF/encryption.xml (OCF 3.3 section 4.1) for the resources
+ * items names, each {uri, algorithm}; more is inside the first
+ * EncryptedData's KeyInfo (an ADEPT resource, say), and namespaces are
+ * more attributes of the root.
+ */
+export function encryptionXml(items, { keyInfo = '', namespaces = '' } = {}) {
+  const data = items.map(({ uri, algorithm }, k) => `  <enc:EncryptedData>
+    <enc:EncryptionMethod Algorithm="${algorithm}"/>
+${k === 0 && keyInfo ? `    ${keyInfo}\n` : ''}    <enc:CipherData><enc:CipherReference URI="${uri}"/></enc:CipherData>
+  </enc:EncryptedData>
+`).join('');
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<encryption xmlns="urn:oasis:names:tc:opendocument:xmlns:container" xmlns:enc="http://www.w3.org/2001/04/xmlenc#"${namespaces}>
+${data}</encryption>`;
+}
+
+/** n bytes that look random and are the same each time (xorshift32 from seed) */
+export function randomBytes(n, seed = 0x9e3779b9) {
+  const out = Buffer.alloc(n);
+  let x = seed >>> 0 || 1;
+  for (let i = 0; i < n; i++) {
+    x ^= x << 13; x >>>= 0;
+    x ^= x >>> 17;
+    x ^= x << 5; x >>>= 0;
+    out[i] = x & 0xff;
+  }
+  return out;
 }
 
 export function createEpub(opts = {}) {
@@ -460,9 +495,10 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   const zipEntries = [
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
-    { name: 'OEBPS/content.opf', data: contentOpf, store: true },
+    { name: 'OEBPS/content.opf', data: contentOpf, store: true, damaged: !!opts.damagedPackage },
     useNcx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
   ];
+  for (const f of (opts.metaInf || [])) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
   if (opts.alsoNav) zipEntries.push({ name: 'OEBPS/nav.xhtml', data: navXhtml });
   for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
   zipEntries.push(...overlays);
@@ -492,6 +528,10 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   // storeChapters: true → store chapters uncompressed (diagnostic: test sync path)
   if (opts.storeChapters) {
     chapters.forEach(ch => { ch.store = true; });
+  }
+  // encryptedChapters: ciphertext in place of each chapter
+  if (opts.encryptedChapters) {
+    chapters.forEach((ch, k) => { ch.data = randomBytes(Buffer.byteLength(ch.data), 1000 + k); ch.store = true; });
   }
   zipEntries.push(...chapters);
 
