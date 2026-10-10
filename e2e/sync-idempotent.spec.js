@@ -157,17 +157,10 @@ test('sync now ten times and the app\'s own sync points a dozen times with nothi
       await openBook(a.page, 'Shared Book');
       await expect.poll(() => store.requests(server)).toBeGreaterThan(requests);
     }
-    if (kind !== 'hidden') {
-      // The book just opened is laid out again for 3 s as its fonts and
-      // images come in (_settle in src/reader.bats), and a sync in that
-      // time sends the pages and place as counted so far: books.0.pages
-      // and books.0.anchor were seen to move (4 to 3, 6 to 5) in a file
-      // written then, the stamp of the place not moving. That is a
-      // finding reported on #429, not asserted here: the file is read
-      // once the layout has settled and the page hidden has synced again
-      await a.page.waitForTimeout(3500);
-      await hiddenSync(store, server, a);
-    }
+    // no waiting for the layout to settle: a sync while the book is
+    // laid out again (_settle in src/reader.bats) sends the pages and
+    // place as left, not as counted so far (#448)
+    if (kind !== 'hidden') await hiddenSync(store, server, a);
     await a.page.waitForTimeout(300);
     const moved = changedPaths(settledFile, server.json());
     expect(moved.filter(path => !allowed.includes(path)), `after ${kind} (${n + 1})`).toEqual([]);
@@ -183,6 +176,23 @@ test('sync now ten times and the app\'s own sync points a dozen times with nothi
   expect(server.json().books[0].annotations).toHaveLength(2);
   expect(unexpected(a)).toEqual([]);
   expect(unexpected(b)).toEqual([]);
+  await closeBoth(a, b);
+});
+
+test('the device named for a place never dated is not changed by the other device syncing (#448)', async ({ browser }) => {
+  test.setTimeout(120000);
+  const store = stores.webdav;
+  const { server, a, b } = await twoDevices(browser, store, epubFile(book));
+  for (const d of [a, b]) await openBook(d.page, 'Shared Book');
+  await hiddenSync(store, server, a);
+  const first = server.json().books[0];
+  expect(first.placeModified, 'the place was never dated').toBe(0);
+  for (const d of [b, a, b, a]) {
+    await hiddenSync(store, server, d);
+    const kept = server.json().books[0];
+    expect(kept.placeModified).toBe(0);
+    expect(kept.placeDevice, 'placeDevice of a place never dated').toBe(first.placeDevice);
+  }
   await closeBoth(a, b);
 });
 
