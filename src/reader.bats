@@ -1649,6 +1649,13 @@ val _dated_chapter = ref<Int>(~1)
 val _dated_page = ref<Int>(0)
 val _dated_pages = ref<Int>(0)
 
+(* Whether the layout of a chapter just shown is still settling (_settle):
+   the pages it counts and the node it keeps are then transient, so a book
+   opened at its place keeps the pages and anchor it was left with until
+   the settle has ended, and a sync in that time sends those, not the
+   transient ones (#448) *)
+val _settling = ref<bool>(false)
+
 (* The position read to the open book's record in the library, which is
    then stored *)
 fn _record_position (): void = let
@@ -1693,6 +1700,11 @@ in
           else if chapter_index <> !_dated_chapter then true
           else if page_count <> !_dated_pages then false
           else page <> !_dated_page): bool
+        (* while the layout settles after a book opens at its place, its
+           pages and anchor stay as they were left, while the reader is still
+           on the page it was left on (#448) *)
+        val holds = (if !_settling then (if ~(!_dating) then (if record.pages > 0 then
+          (if chapter_index = record.chapter then page = record.page else false) else false) else false) else false): bool
         (* while the book opens, the place it opened at stays the one a
            move is told from *)
         val () = (if !_dating then let
@@ -1701,7 +1713,8 @@ in
           in !_dated_pages := page_count end else ())
       in lib_nums_set(book_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
-        chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page, pages = page_count, anchor = anchor,
+        chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page,
+        pages = (if holds then record.pages else page_count), anchor = (if holds then record.anchor else anchor),
         file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
         minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at),
         shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
@@ -3997,7 +4010,10 @@ fn _opening_pages (count: Int): bool =
   if !_dating then false else if count <= 0 then false else count = !_dated_pages
 
 fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
-  if times <= 0 then ()
+  if times <= 0 then (if generation <> !_settle_generation then ()
+    else let
+      val () = !_settling := false
+    in _record_position() end)
   else $P.finish<Int>($P.vow($TM.timer_set(250)), llam(_) =>
     if generation <> !_settle_generation then ()
     else let
@@ -4029,6 +4045,7 @@ fun _settle {times:nat} .<times>. (generation: int, times: int times): void =
 fn _settle_start (anchor: Int): void = let
   val () = !_anchor_kept := anchor
   val () = !_settle_generation := !_settle_generation + 1
+  val () = !_settling := true
 in _settle(!_settle_generation, 12) end
 
 (* Loads a chapter (from 0) and shows its page, or the page of
@@ -4040,6 +4057,8 @@ in
   $P.and_then<load_outcome><load_outcome>(_load_chapter(chapter), llam(result) =>
     if ~load_shown(result) then $P.ret<load_outcome>(result)
     else let
+      (* settling from the first page shown, which records its position *)
+      val () = !_settling := true
       val () = _show_target(page, anchor)
       val () = _settle_start(anchor)
     in $P.ret<load_outcome>(result) end)
@@ -4062,6 +4081,7 @@ fn _goto_fragment {l:agz}{n:pos}{fragment_len:nat | fragment_len < n} (chapter: 
       if ~load_shown(result) then $P.ret<load_outcome>(result)
       else let
         val anchor = !_fragment_node
+        val () = !_settling := true
         val () = _show_target(0, anchor)
         val () = _settle_start(anchor)
       in $P.ret<load_outcome>(result) end
@@ -4858,7 +4878,12 @@ in _ps_put(PsHidden()) end
 implement reader_timer_start () = !_speed_last_minute := $TM.epoch_minutes()
 
 #pub fn reader_timer_stop (): void
-implement reader_timer_stop () = !_speed_last_minute := ~1
+implement reader_timer_stop () = let
+  (* the book is closed: its layout settles no more, and the position it
+     was left with stays (#448) *)
+  val () = !_settle_generation := !_settle_generation + 1
+  val () = !_settling := false
+in !_speed_last_minute := ~1 end
 
 (* The scrubber dragged to x: the thumb there, and the title of the
    chapter there in its tip *)

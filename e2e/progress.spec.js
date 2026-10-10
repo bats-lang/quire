@@ -11,7 +11,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, openBook, card, cards, place, toLibrary, bookMenu, menuItem, dialog, showChrome, titles,
   importFiles, epubFile, rawFile, oneColumn, readFixed, fixedPlace, libraryMenu, importInput,
-  librarySettings, settingsButton, restoreInput, exportedBackup,
+  librarySettings, settingsButton, restoreInput, exportedBackup, importOffered,
 } from './helpers.js';
 import { progressBooks } from './progress-books.js';
 
@@ -35,10 +35,10 @@ async function percent(page) {
   return footer;
 }
 
-/** The library card's percentage ("Done" is 100) */
+/** The library card's percentage ("Finished" is 100) */
 async function cardPercent(page, title) {
   const text = await card(page, title).innerText();
-  if (/\bDone\b/.test(text)) return 100;
+  if (/\bFinished\b/.test(text)) return 100;
   const m = /(\d+)%/.exec(text);
   expect(m, `card "${text}" says how far`).not.toBeNull();
   return +m[1];
@@ -111,7 +111,7 @@ test('three chapters of one size read about a third, two thirds and all at their
   expect(await percent(page)).toBe(100);
   await toLibrary(page);
   expect(await cardPercent(page, title)).toBe(100);
-  await expect(card(page, title)).toContainText('Done');
+  await expect(card(page, title)).toContainText('Finished');
   expect(await infoPercent(page, title)).toBe(100);
   expect(errors).toEqual([]);
 });
@@ -148,7 +148,7 @@ test('back matter after the text weighs nothing: the end of the text reads 100%,
   expect(await percent(page)).toBe(100);
   // reaching the end of the text finished the book
   await toLibrary(page);
-  await expect(card(page, title)).toContainText('Done');
+  await expect(card(page, title)).toContainText('Finished');
   await show(page).getByRole('button', { name: 'Finished' }).click();
   await expect.poll(() => titles(page)).toEqual([title]);
   expect(errors).toEqual([]);
@@ -220,7 +220,7 @@ test('a fixed-layout book counts its spine items as the indicator does, and is f
   await expect.poll(async () => (await fixedPlace(page)).p).toBe(5);
   expect(await percent(page)).toBe(100);
   await toLibrary(page);
-  await expect(card(page, title)).toContainText('Done');
+  await expect(card(page, title)).toContainText('Finished');
   expect(await infoPercent(page, title)).toBe(100);
   await show(page).getByRole('button', { name: 'Finished' }).click();
   await expect.poll(() => titles(page)).toEqual([title]);
@@ -257,9 +257,9 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
-  await expect(importInput(page)).toBeVisible();
+  await expect(importOffered(page)).toBeVisible();
   await importFiles(page, [file], 1);
-  await expect(card(page, title)).toContainText('New');
+  await expect(card(page, title)).toContainText('Unread');
   await librarySettings(page);
   await restoreInput(page).setInputFiles([path]);
   await dialog(page, 'Backup restored').getByRole('button', { name: 'OK' }).click();

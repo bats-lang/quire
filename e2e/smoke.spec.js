@@ -4,7 +4,7 @@
 
 import { test, expect } from './fixtures.js';
 import { createEpub } from './create-epub.js';
-import { importInput, cards, bookPage, librarySearch, reload,
+import { importInput, cards, bookPage, librarySearch, reload, libraryShown, importOffered,
 } from './helpers.js';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -18,7 +18,7 @@ test.describe('Smoke', () => {
     page.on('pageerror', err => errors.push(err.message));
 
     await page.goto('/');
-    await expect(librarySearch(page)).toBeVisible({ timeout: 15000 });
+    await expect(libraryShown(page)).toBeVisible({ timeout: 15000 });
 
     expect(errors.length).toBe(0);
   });
@@ -63,7 +63,7 @@ test.describe('Smoke', () => {
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
     await page.goto('/');
-    await expect(importInput(page)).toBeVisible();
+    await expect(importOffered(page)).toBeVisible();
     const epubPath = join(SCREENSHOT_DIR, `smoke-${Date.now()}.epub`);
     writeFileSync(epubPath, createEpub({ title: 'Smoke Test', author: 'Bot', chapters: 2, storeChapters: true }));
     await importInput(page).setInputFiles(epubPath);
@@ -85,7 +85,7 @@ test.describe('Smoke', () => {
     // the build is checked every 30 seconds: the clock is the test's
     await page.clock.install();
     await page.goto('/');
-    await expect(librarySearch(page)).toBeVisible();
+    await expect(libraryShown(page)).toBeVisible();
     // the page marks itself; a reload is a new page without the mark
     await page.evaluate(() => { window.__before = true; });
     deployed = true;
@@ -112,7 +112,7 @@ test.describe('Smoke', () => {
     });
     await page.clock.install();
     await page.goto('/');
-    await expect(librarySearch(page)).toBeVisible();
+    await expect(libraryShown(page)).toBeVisible();
     await page.evaluate(() => { window.__before = true; });
     deployed = true;
     await page.clock.runFor(31000);
@@ -120,21 +120,21 @@ test.describe('Smoke', () => {
     const reloaded = page.waitForEvent('load');
     await offer.getByRole('button', { name: 'Reload' }).click();
     await reloaded;
-    await expect(librarySearch(page)).toBeVisible();
+    await expect(libraryShown(page)).toBeVisible();
     expect(await page.evaluate(() => window.__before)).toBeUndefined();
   });
 
   test('the app loads offline once it has been opened', async ({ page, context }) => {
     await page.goto('/');
-    await expect(importInput(page)).toBeVisible();
+    await expect(importOffered(page)).toBeVisible();
     await page.evaluate(() => navigator.serviceWorker.ready);
     // a load the worker serves, so it keeps what it fetches
     await reload(page);
-    await expect(importInput(page)).toBeVisible();
+    await expect(importOffered(page)).toBeVisible();
     await expect.poll(() => page.evaluate(() => !!navigator.serviceWorker.controller)).toBe(true);
     await context.setOffline(true);
     await reload(page);
-    await expect(importInput(page)).toBeVisible();
+    await expect(importOffered(page)).toBeVisible();
     await context.setOffline(false);
   });
 });

@@ -5,7 +5,7 @@ import { test, expect, onAndroid } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
-  control, selectionButton, reload, pagedBook, librarySearch,
+  control, selectionButton, reload, pagedBook, librarySearch, libraryShown,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Annotations');
@@ -210,7 +210,7 @@ test('annotations stored before print pages were kept (QA1) still load', async (
   // loader's fetch of app.wasm, which the page reports as an error
   // ("Failed to fetch", bridge.js), and the rewrite would race the
   // app's own reads at startup
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   expect(await storeAsQA1(page)).toBe(1);
   await page.reload();
   await openBook(page, 'Older Notes');

@@ -32,6 +32,8 @@ staload "back.sats"
   | LSettings      (* the Settings screen: sync, dictionaries, backup, goal, resets *)
   | LAbout         (* the About screen: the app's name, and links to its pages and source *)
   | LSyncStep      (* a sync service's own sign-in step, over the Sync screen's list (#331) *)
+  | LSortMenu      (* the sort and view menu (#377, #404) *)
+  | LShelf         (* a shelf's own screen over the library: Hidden, Archived or Trash (#404) *)
 
 fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   case+ overlay of
@@ -44,6 +46,8 @@ fn _element_id (overlay: layer): [id_len:pos | id_len < 128] string id_len =
   | LSync() => "sync-screen" | LSettings() => "settings-screen"
   | LAbout() => "about-screen"
   | LSyncStep() => "sync-step"
+  | LSortMenu() => "sort-menu"
+  | LShelf() => "shelf-header"
 
 fn _number (overlay: layer): int =
   case+ overlay of
@@ -52,7 +56,7 @@ fn _number (overlay: layer): int =
   | LCollections() => 9 | LStats() => 10 | LDictionaries() => 11 | LDictionary() => 12
   | LCatalogues() => 13 | LCatalogue() => 14
   | LSync() => 15 | LSettings() => 16 | LAbout() => 17
-  | LSyncStep() => 18
+  | LSyncStep() => 18 | LSortMenu() => 19 | LShelf() => 20
 
 (* The reader's panels, which are modal (Material 3's modal bottom
    sheet, WAI-ARIA's modal dialog): while one is open, a scrim covers the
@@ -69,7 +73,7 @@ fn _over_reader (overlay: layer): bool =
   | LCollections() => false | LStats() => false | LDictionaries() => false
   | LCatalogues() => false | LCatalogue() => false | LSync() => false
   | LSettings() => false | LAbout() => false
-  | LSyncStep() => false
+  | LSyncStep() => false | LSortMenu() => false | LShelf() => false
 
 (* The open overlays, the last opened first, each with where the focus
    goes back to when it closes *)

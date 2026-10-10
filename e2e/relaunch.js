@@ -23,7 +23,7 @@
 
 import { writeFileSync } from 'node:fs';
 import { test, expect, onAndroid, androidInsets } from './fixtures.js';
-import { indicator, librarySearch } from './helpers.js';
+import { indicator, librarySearch, libraryShown } from './helpers.js';
 
 /** The time the tests' clock stands at */
 export const FIXED_TIME = new Date('2026-06-01T10:00:00Z');
@@ -263,7 +263,7 @@ export async function sameState(page, before, after) {
 export async function launch(context, page) {
   await fixedClock(context);
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 }
 
 /** The chapter shown, by the number in its title ("Chapter 2 · page 3

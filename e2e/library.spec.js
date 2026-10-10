@@ -7,18 +7,124 @@ import {
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
   librarySettings, settingsButton, settingsScreen, continueReading,
+  emptyImportInput, openSortMenu, sortMenu, chooseInSortMenu, sortMenuChecked,
+  openShelf, shelfTitle, shelfBack,
 } from './helpers.js';
 
-// The shelf button is named by the shelf it shows
-const shelf = page => page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ });
-const sort = page => page.getByRole('button', { name: /^Sort:/ });
 const empty = /Import an EPUB file/;
+
+/** Leaves a shelf's screen by its back button: the library is shown */
+async function leaveShelf(page) {
+  await shelfBack(page).click();
+  await expect(shelfTitle(page)).toBeHidden();
+}
 
 test('an empty library says how to start', async ({ page }) => {
   const errors = await start(page);
   await expect(page.getByText(empty)).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+// quire#375 (NN/g on empty states: communicate system status, provide
+// learning cues, direct pathways for key tasks): a library with no book
+// has nothing to search, sort or filter, so the bar keeps its name and
+// menu, and the message offers what to do
+test('an empty library hides search, sort and filters, and offers Import EPUB and Get free books', async ({ page }) => {
+  const errors = await start(page);
+  await expect(librarySearch(page)).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Sort and view' })).toBeHidden();
+  await expect(page.getByRole('group', { name: 'Show' })).toBeHidden();
+  // the empty region holds at least one visible button, and the message is a heading's worth of words
+  const offers = page.locator('#library-empty-actions');
+  await expect(offers).toBeVisible();
+  expect(await offers.getByRole('button').count()).toBeGreaterThan(0);
+  await expect(page.locator('#empty-import')).toBeVisible();
+  await expect(page.locator('#empty-import')).toContainText('Import EPUB');
+  await expect(offers.getByRole('button', { name: 'Get free books' })).toBeVisible();
+  // the bar's own Import (the plus) is not shown beside it
+  await expect(page.locator('#import-button')).toBeHidden();
+  // Get free books opens the catalogues
+  await offers.getByRole('button', { name: 'Get free books' }).click();
+  await expect(dialog(page, 'Catalogues')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page, 'Catalogues')).toBeHidden();
+  // Import EPUB there imports, and then the tools and the bar's Import appear
+  await emptyImportInput(page).setInputFiles([epubFile({ title: 'First Book', author: 'A' })]);
+  await expect(card(page, 'First Book')).toHaveCount(1);
+  await expect(offers).toBeHidden();
+  await expect(librarySearch(page)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sort and view' })).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Show' })).toBeVisible();
+  await expect(page.locator('#import-button')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('only a library with no book yet offers to import; a view that is empty for another reason does not', async ({ page }) => {
+  await start(page);
+  const offers = page.locator('#library-empty-actions');
+  await expect(offers).toBeVisible();
+  await importFiles(page, [epubFile({ title: 'Lone Book', author: 'A' })], 1);
+  const show = page.getByRole('group', { name: 'Show' });
+  // no match, no finished books, an empty shelf: said, with nothing to do there but change the view
+  await librarySearch(page).fill('zzzz');
+  await expect(page.getByText('No books match')).toBeVisible();
+  await expect(offers).toBeHidden();
+  await expect(librarySearch(page)).toBeVisible();
+  await librarySearch(page).fill('');
+  await show.getByRole('button', { name: 'Finished' }).click();
+  await expect(page.getByText('No finished books')).toBeVisible();
+  await expect(offers).toBeHidden();
+  await expect(show).toBeVisible();
+  await show.getByRole('button', { name: 'All' }).click();
+  await openShelf(page, 'Hidden');
+  await expect(page.getByText('No hidden books')).toBeVisible();
+  await expect(offers).toBeHidden();
+  await leaveShelf(page);
+});
+
+// quire#404: the bar is the name, Import, the sort and view menu and the
+// overflow menu, in one row (Material 3's top app bar: a title and up to
+// three actions); no selector of shelves, no chip for sort or import
+test('the library bar is one row: the name, Import, Sort and view, More options', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Bar Book', author: 'A' })], 1);
+  const bar = page.locator('#library-bar');
+  const title = bar.getByRole('heading', { name: 'Quire' });
+  const sortAndView = bar.getByRole('button', { name: 'Sort and view' });
+  const more = bar.getByRole('button', { name: 'More options' });
+  const plus = bar.locator('#import-button');
+  for (const control of [title, sortAndView, more, plus]) await expect(control).toBeVisible();
+  const mid = async l => { const b = await l.boundingBox(); return b.y + b.height / 2; };
+  const row = await mid(title);
+  for (const control of [sortAndView, more, plus]) expect(Math.abs((await mid(control)) - row)).toBeLessThan(8);
+  // Import is an icon button named Import EPUB, one tap from the header (its input lies over it)
+  await expect(plus.locator('input[type=file]')).toHaveAccessibleName('Import EPUB');
+  const box = await plus.boundingBox();
+  expect(box.width).toBeGreaterThanOrEqual(48);
+  expect(box.height).toBeGreaterThanOrEqual(48);
+  // no selector of shelves, no Sort chip: Hidden and Archived are in the overflow menu
+  await expect(page.locator('#shelf-button')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^(Library|Hidden|Archived|Trash)$/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Sort:/ })).toHaveCount(0);
+  // the list and grid choice is not a pair of chips either
+  await expect(page.getByRole('group', { name: 'View' })).toHaveCount(0);
+  await libraryMenu(page);
+  for (const name of ['Hidden', 'Archived', 'Trash']) await expect(menuItem(page, name)).toBeVisible();
+  await page.keyboard.press('Escape');
+  // the filters stay: All, Unread, Reading, Finished
+  const show = page.getByRole('group', { name: 'Show' });
+  for (const name of ['All', 'Unread', 'Reading', 'Finished']) await expect(show.getByRole('button', { name, exact: true })).toBeVisible();
+});
+
+// quire#376: chromeBeforeContent. The first book starts within 40% of the
+// viewport (it was 27% at 412 px and 53% at 320 px with the bar in five rows)
+test('the first book starts in the top 40% of the screen', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Near The Top', author: 'A' }), epubFile({ title: 'Second', author: 'B' })], 2);
+  const top = (await cards(page).first().boundingBox()).y;
+  const viewport = page.viewportSize().height;
+  expect(top / viewport).toBeLessThanOrEqual(0.4);
 });
 
 test('imported books show their title and author, and survive a reload', async ({ page }) => {
@@ -66,23 +172,37 @@ test('importing the same book again asks, and Skip keeps one copy', async ({ pag
   await expect(page.getByRole('status').filter({ hasText: 'Reading file' })).toBeHidden();
 });
 
-test('the sort button cycles the orders, and the order is kept', async ({ page }) => {
+// quire#377 (Apple Books' Sort By menu offers the orders in one menu; Play
+// Books keeps its sort in a menu): the orders are one menu with the current
+// one checked, so any is two activations away (it was four taps to Series
+// and four back)
+test('the sort and view menu offers every order, checks the current one, and keeps it', async ({ page }) => {
   await start(page);
   await importFiles(page, [
     epubFile({ title: 'Mango', author: 'Zed' }),
     epubFile({ title: 'Apple', author: 'Yan' }),
     epubFile({ title: 'Kiwi', author: 'Abe' }),
   ], 3);
-  await expect(sort(page)).toHaveText('Sort: Last opened');
-  await sort(page).click();
-  await expect(sort(page)).toHaveText('Sort: Title');
+  await openSortMenu(page);
+  const choices = sortMenu(page).getByRole('menuitemradio');
+  expect(await choices.allTextContents()).toEqual(['Last opened', 'Title', 'Author', 'Date added', 'Series', 'List', 'Grid']);
+  await page.keyboard.press('Escape');
+  expect(await sortMenuChecked(page)).toEqual(['Last opened', 'List']);
+  await chooseInSortMenu(page, 'Title');
   expect(await titles(page)).toEqual(['Apple', 'Kiwi', 'Mango']);
-  await sort(page).click();
-  await expect(sort(page)).toHaveText('Sort: Author');
+  expect(await sortMenuChecked(page)).toEqual(['Title', 'List']);
+  await chooseInSortMenu(page, 'Author');
   expect(await titles(page)).toEqual(['Kiwi', 'Apple', 'Mango']);
   await reload(page);
-  await expect(sort(page)).toHaveText('Sort: Author');
+  expect(await sortMenuChecked(page)).toEqual(['Author', 'List']);
   expect(await titles(page)).toEqual(['Kiwi', 'Apple', 'Mango']);
+  // from any order to any other in two activations: the button and the choice
+  await chooseInSortMenu(page, 'Last opened');
+  expect(await sortMenuChecked(page)).toEqual(['Last opened', 'List']);
+  // the menu is a menu: Escape closes it, and so does a click outside it
+  await openSortMenu(page);
+  await page.keyboard.press('Escape');
+  await expect(sortMenu(page)).toBeHidden();
 });
 
 test('last opened comes first when sorting by last opened', async ({ page }) => {
@@ -133,19 +253,19 @@ test('a hidden book moves to the hidden shelf and back', async ({ page }) => {
   await menuItem(page, 'Hide').click();
   await expect(cards(page)).toHaveCount(1);
   await expect(card(page, 'Secret Diary')).toHaveCount(0);
-  await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Hidden');
+  // Hidden is a screen of its own, from the overflow menu, with a back button
+  await openShelf(page, 'Hidden');
+  await expect(librarySearch(page)).toBeHidden();
+  await expect(page.getByRole('group', { name: 'Show' })).toBeHidden();
   await expect(cards(page)).toHaveCount(1);
   await bookMenu(page, 'Secret Diary');
   await menuItem(page, 'Unhide').click();
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText('No hidden books')).toBeVisible();
-  // Hidden, then Archived, the Trash and back to the Library
-  await shelf(page).click();
-  await shelf(page).click();
-  await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Library');
+  // back to the library: the unhidden book is there again
+  await leaveShelf(page);
   await expect(cards(page)).toHaveCount(2);
+  await expect(card(page, 'Secret Diary')).toHaveCount(1);
 });
 
 test('an archived book keeps its record, and is read again by importing it', async ({ page }) => {
@@ -155,9 +275,7 @@ test('an archived book keeps its record, and is read again by importing it', asy
   await bookMenu(page, 'Old Volume');
   await menuItem(page, 'Archive').click();
   await expect(cards(page)).toHaveCount(0);
-  await shelf(page).click();
-  await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Archived');
+  await openShelf(page, 'Archived');
   await card(page, 'Old Volume').click();
   const said = dialog(page, 'Archived');
   await expect(said).toBeVisible();
@@ -165,9 +283,7 @@ test('an archived book keeps its record, and is read again by importing it', asy
   await expect(bookPage(page)).toBeHidden();
   // importing it again restores it to the shelf
   await importInput(page).setInputFiles([f]);
-  await shelf(page).click();
-  await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Library');
+  await leaveShelf(page);
   await expect(card(page, 'Old Volume')).toHaveCount(1);
   await openBook(page, 'Old Volume');
 });
@@ -226,8 +342,7 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
   await expect(cards(page)).toHaveCount(1);
   await reload(page);
   await expect(cards(page)).toHaveCount(1);
-  for (let i = 0; i < 3; i++) await shelf(page).click();
-  await expect(shelf(page)).toHaveText('Trash');
+  await openShelf(page, 'Trash');
   await expect(card(page, 'Doomed')).toHaveCount(1);
   // a book in the Trash can only be restored: it leaves for good only
   // when the Trash is emptied
@@ -237,7 +352,7 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
   await expect(menuItem(page, 'Archive')).toBeHidden();
   await menuItem(page, 'Restore').click();
   await expect(page.getByText('The Trash is empty')).toBeVisible();
-  await shelf(page).click();
+  await leaveShelf(page);
   await expect(cards(page)).toHaveCount(2);
   await reload(page);
   await expect(cards(page)).toHaveCount(2);
@@ -267,12 +382,15 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   expect(await colour(ask.getByRole('button', { name: 'Empty' }))).toBe(red);
   expect(await colour(ask.getByRole('button', { name: 'Cancel' }))).not.toBe(red);
   await ask.getByRole('button', { name: 'Cancel' }).click();
-  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await openShelf(page, 'Trash');
   await expect(cards(page)).toHaveCount(2);
+  await leaveShelf(page);
   await libraryMenu(page);
   await menuItem(page, 'Empty Trash').click();
   await ask.getByRole('button', { name: 'Empty' }).click();
+  await openShelf(page, 'Trash');
   await expect(page.getByText('The Trash is empty')).toBeVisible();
+  await leaveShelf(page);
   // what the Trash held can no longer be offered back
   await expect(undo(page)).toBeHidden();
   await reload(page);
@@ -341,17 +459,16 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await expect(card(page, 'Ephemeral')).toHaveCount(1);
   await expect(card(page, 'Lasting')).toHaveCount(0);
   await expect.poll(() => bg(page)).toBe(sepia);
-  await shelf(page).click();
+  await openShelf(page, 'Hidden');
   await expect(card(page, 'Lasting')).toHaveCount(1);
-  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await leaveShelf(page);
   // without Undo, the books wait in the Trash
-  await expect(shelf(page)).toHaveText('Library');
   await librarySettings(page);
   await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
   await reload(page);
   await expect(cards(page)).toHaveCount(0);
-  for (let i = 0; i < 3; i++) await shelf(page).click();
+  await openShelf(page, 'Trash');
   await expect(cards(page)).toHaveCount(2);
 });
 
@@ -423,12 +540,15 @@ test('book info hides, archives and trashes the book it shows', async ({ page })
   await viaInfo('Info Delete', 'Move to Trash');
   await expect(cards(page)).toHaveCount(0);
   // the other shelves hold them
-  await shelf(page).click();
+  await openShelf(page, 'Hidden');
   await expect(card(page, 'Info Hide')).toHaveCount(1);
-  await shelf(page).click();
+  await leaveShelf(page);
+  await openShelf(page, 'Archived');
   await expect(card(page, 'Info Archive')).toHaveCount(1);
-  await shelf(page).click();
+  await leaveShelf(page);
+  await openShelf(page, 'Trash');
   await expect(card(page, 'Info Delete')).toHaveCount(1);
+  await leaveShelf(page);
 });
 
 test('restoring an archived book from its menu says to import it again', async ({ page }) => {
@@ -436,11 +556,10 @@ test('restoring an archived book from its menu says to import it again', async (
   await importFiles(page, [epubFile({ title: 'Stored Away', author: 'A' })], 1);
   await bookMenu(page, 'Stored Away');
   await menuItem(page, 'Archive').click();
-  await shelf(page).click();
-  await shelf(page).click();
+  await openShelf(page, 'Archived');
   await bookMenu(page, 'Stored Away');
-  await menuItem(page, 'Restore').click();
-  const said = dialog(page, 'Restore');
+  await menuItem(page, 'Unarchive').click();
+  const said = dialog(page, 'Unarchive');
   await expect(said).toContainText('import its file again');
   await said.getByRole('button', { name: 'OK' }).click();
   await expect(said).toBeHidden();
@@ -665,11 +784,11 @@ test('the library is a list or a grid of covers, kept with the settings', async 
     epubFile({ title: 'Grid One', author: 'A', coverImage: true, rawChapters: chapters(1) }),
     epubFile({ title: 'Grid Two', author: 'B', rawChapters: chapters(1) }),
   ], 2);
-  const view = page.getByRole('group', { name: 'View' });
   const list = page.getByRole('region', { name: 'Books' });
   expect(await list.evaluate(e => getComputedStyle(e).display)).toBe('flex');
-  await view.getByRole('button', { name: 'Grid' }).click();
-  await expect(view.getByRole('button', { name: 'Grid' })).toHaveAttribute('aria-pressed', 'true');
+  // List and Grid are a view choice in the sort and view menu, not filter chips (quire#376, #404)
+  await chooseInSortMenu(page, 'Grid');
+  expect(await sortMenuChecked(page)).toEqual(['Last opened', 'Grid']);
   await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('grid');
   // the covers stand upright, as tall as 3 to their 2
   const cover = card(page, 'Grid One').locator('img');
@@ -677,7 +796,7 @@ test('the library is a list or a grid of covers, kept with the settings', async 
   expect(box.height / box.width).toBeCloseTo(1.5, 1);
   await reload(page);
   await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('grid');
-  await view.getByRole('button', { name: 'List' }).click();
+  await chooseInSortMenu(page, 'List');
   await expect.poll(() => list.evaluate(e => getComputedStyle(e).display)).toBe('flex');
 });
 
@@ -740,14 +859,14 @@ test('with several books, in each sort, the book to continue is shown exactly on
   await page.keyboard.press('ArrowRight');
   await toLibrary(page);
   const seen = [];
-  for (let i = 0; i < 5; i++) {
-    seen.push(await sort(page).textContent());
+  for (const order of ['Last opened', 'Title', 'Author', 'Date added', 'Series']) {
+    await chooseInSortMenu(page, order);
+    seen.push((await sortMenuChecked(page))[0]);
     await expect(continueReading(page).getByRole('group')).toHaveCount(1);
     await expect(continueReading(page)).toContainText('Mid');
     await expect(named(page, 'Mid')).toHaveCount(1);
     await expect(cards(page)).toHaveCount(3);
     await expect.poll(async () => (await titles(page)).sort()).toEqual(['Alpha', 'Mid', 'Zulu']);
-    await sort(page).click();
   }
   expect(new Set(seen).size).toBe(5);
 });
@@ -769,12 +888,11 @@ test('books of a series are shown with their number, and sorted by series togeth
   ], 3);
   await expect(card(page, 'Foundation and Empire')).toContainText('Foundation · 2');
   await expect(card(page, 'Alone')).not.toContainText('·');
-  const sort = page.getByRole('button', { name: /^Sort:/ });
-  while ((await sort.textContent()) !== 'Sort: Series') await sort.click();
+  await chooseInSortMenu(page, 'Series');
   await expect.poll(() => titles(page)).toEqual(['Foundation', 'Foundation and Empire', 'Alone']);
   // kept, and read back
   await reload(page);
-  await expect(sort).toHaveText('Sort: Series');
+  expect(await sortMenuChecked(page)).toEqual(['Series', 'List']);
   await expect.poll(() => titles(page)).toEqual(['Foundation', 'Foundation and Empire', 'Alone']);
   await expect(cards(page).first()).toContainText('Foundation · 1');
 });
@@ -1008,4 +1126,72 @@ test('an EPUB shared with the installed web app is imported', async ({ page }) =
   await expect(card(page, 'Shared To The App')).toBeVisible({ timeout: 30000 });
   expect(await page.evaluate(() => location.search)).toBe('');
   expect(errors).toEqual([]);
+});
+
+// quire#376: every shelf is reachable in at most two activations (the
+// overflow menu, then the shelf), where the shelf button took up to four
+// taps round Library, Hidden, Archived, Trash
+test('each shelf opens in two activations, and Escape or the back button returns to the library', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'On The Shelf', author: 'A' }), epubFile({ title: 'Stays Out', author: 'B' })], 2);
+  for (const name of ['Hidden', 'Archived', 'Trash']) {
+    await page.getByRole('button', { name: 'More options' }).click();
+    await menuItem(page, name).click();
+    await expect(shelfTitle(page)).toHaveText(name);
+    // a title and a back button; the library's own search, sort and filters are not on this screen
+    await expect(shelfBack(page)).toBeVisible();
+    await expect(librarySearch(page)).toBeHidden();
+    await expect(page.getByRole('button', { name: 'Sort and view' })).toBeHidden();
+    await expect(cards(page)).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(shelfTitle(page)).toBeHidden();
+    await expect(cards(page)).toHaveCount(2);
+  }
+  // the filters are the library's alone: one chosen there does not empty a shelf
+  const show = page.getByRole('group', { name: 'Show' });
+  await bookMenu(page, 'On The Shelf');
+  await menuItem(page, 'Hide').click();
+  await show.getByRole('button', { name: 'Finished' }).click();
+  await openShelf(page, 'Hidden');
+  await expect(card(page, 'On The Shelf')).toHaveCount(1);
+  await leaveShelf(page);
+  await expect(show.getByRole('button', { name: 'Finished' })).toHaveAttribute('aria-pressed', 'true');
+});
+
+// quire#404: the row's actions open on a long press (a touch device's
+// contextmenu) as on the row's own More button
+test('a long press on a row opens the same actions as its menu button', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Pressed Book', author: 'A' })], 1);
+  const items = async () => (await page.getByRole('menu', { name: 'Book menu' }).getByRole('menuitem').allTextContents());
+  await bookMenu(page, 'Pressed Book');
+  const fromButton = await items();
+  expect(fromButton.length).toBeGreaterThan(2);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu', { name: 'Book menu' })).toBeHidden();
+  // what a long press makes of a touch: the contextmenu event on the row (a right click makes the same)
+  await card(page, 'Pressed Book').click({ button: 'right' });
+  await expect(page.getByRole('menu', { name: 'Book menu' })).toBeVisible();
+  expect(await items()).toEqual(fromButton);
+  await page.keyboard.press('Escape');
+  // in a shelf's screen too
+  await bookMenu(page, 'Pressed Book');
+  await menuItem(page, 'Hide').click();
+  await openShelf(page, 'Hidden');
+  await card(page, 'Pressed Book').click({ button: 'right' });
+  await expect(menuItem(page, 'Unhide')).toBeVisible();
+  await page.keyboard.press('Escape');
+});
+
+test('a book opened from a shelf\'s screen closes to the library', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Read From Hidden', author: 'A', rawChapters: chapters(2) })], 1);
+  await bookMenu(page, 'Read From Hidden');
+  await menuItem(page, 'Hide').click();
+  await openShelf(page, 'Hidden');
+  await openBook(page, 'Read From Hidden');
+  await toLibrary(page);
+  await expect(shelfTitle(page)).toBeHidden();
+  await expect(page.locator('#library-title')).toBeVisible();
+  await expect(page.getByText('No hidden books')).toBeHidden();
 });

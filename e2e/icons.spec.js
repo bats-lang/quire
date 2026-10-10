@@ -22,7 +22,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, showChrome, chapters, dialog, menuItem,
   libraryMenu, librarySettings, settingsScreen, settingsButton, bookMenu, clickControl,
-  openReadingSettings, toLibrary, topBar, librarySearch,
+  openReadingSettings, toLibrary, topBar, librarySearch, chooseInSortMenu,
 } from './helpers.js';
 
 const FACE = 'Material Symbols';
@@ -105,10 +105,10 @@ test('every icon of the library, its search, its menu, Settings and a catalogue 
   const list = await iconsDrawn(page, 'the library as a list');
   // each card's Book menu among them
   expect(list.filter(f => f.name === 'Book menu' && f.shown).length).toBe(2);
-  await page.getByRole('button', { name: 'Grid' }).click();
+  await chooseInSortMenu(page, 'Grid');
   const grid = await iconsDrawn(page, 'the library as a grid');
   expect(grid.filter(f => f.name === 'Book menu' && f.shown).length).toBe(2);
-  await page.getByRole('button', { name: 'List' }).click();
+  await chooseInSortMenu(page, 'List');
   await librarySearch(page).fill('Fir');
   await expect(page.getByRole('button', { name: 'Clear search' })).toBeVisible();
   await iconsDrawn(page, 'the library searched');

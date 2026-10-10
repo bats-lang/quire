@@ -8,7 +8,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch,
+  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { checkPageMargins } from './page-margins.js';
@@ -213,9 +213,9 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await collections.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByRole('group', { name: 'Collection' })).toBeVisible();
   await fits(page, 'the library with a collection');
-  await page.getByRole('button', { name: 'Grid' }).click();
+  await chooseInSortMenu(page, 'Grid');
   await fits(page, 'the library as a grid');
-  await page.getByRole('button', { name: 'List' }).click();
+  await chooseInSortMenu(page, 'List');
   await bookMenu(page, 'Short');
   await fits(page, 'the book menu');
   await menuItem(page, 'Book info').click();

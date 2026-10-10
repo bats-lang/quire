@@ -1008,8 +1008,8 @@ implement import_fetched (book_file, file_size, name, name_len) = let
 in _import_file(book_file, file_size) end
 
 (* Where picked files come from: the file input import-file, or the
-   last drop *)
-datatype import_source = FileInput | Dropped
+   empty library's empty-import-file, or the last drop *)
+datatype import_source = FileInput | EmptyFileInput | Dropped
 
 (* Imports files file_index to file_count - 1 of source, one after
    another *)
@@ -1017,7 +1017,7 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
   (source: import_source, file_index: int file_index, file_count: int file_count): void =
   if file_index >= file_count then
     (* the input's files are all read: its choice is cleared *)
-    (case+ source of FileInput() => app_import_input() | Dropped() => ())
+    (case+ source of FileInput() => app_import_input() | EmptyFileInput() => app_import_input() | Dropped() => ())
   else let
     val opened = (case+ source of
       | FileInput() => let
@@ -1025,6 +1025,13 @@ fun _import_seq {file_index,file_count:nat | file_index <= file_count} .<file_co
         val () = $A.write_text(input_id, 0, $A.text_lit("import-file"), 11)
         val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
         val opened = $BF.file_open_at(id_bytes, 11, file_index)
+        val () = release_bytes(id_frozen, id_bytes)
+      in opened end
+      | EmptyFileInput() => let
+        val input_id = $A.alloc<byte>(17)
+        val () = $A.write_text(input_id, 0, $A.text_lit("empty-import-file"), 17)
+        val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
+        val opened = $BF.file_open_at(id_bytes, 17, file_index)
         val () = release_bytes(id_frozen, id_bytes)
       in opened end
       | Dropped() => $BF.dropped_open_at(file_index)): $P.promise($BF.opened, $P.Chained)
@@ -1048,6 +1055,17 @@ implement import_picked () = let
   val file_count = $BF.file_count(id_bytes, 11)
   val () = release_bytes(id_frozen, id_bytes)
 in _import_seq(FileInput(), 0, file_count) end
+
+(* Imports the files picked in the empty library's file input *)
+#pub fn import_picked_empty (): void
+
+implement import_picked_empty () = let
+  val input_id = $A.alloc<byte>(17)
+  val () = $A.write_text(input_id, 0, $A.text_lit("empty-import-file"), 17)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(input_id)
+  val file_count = $BF.file_count(id_bytes, 17)
+  val () = release_bytes(id_frozen, id_bytes)
+in _import_seq(EmptyFileInput(), 0, file_count) end
 
 (* Imports the files of the last drop *)
 #pub fn import_dropped (): void

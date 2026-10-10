@@ -22,6 +22,7 @@ ICONS = {
     'chevron_left': 0xe5cb, 'chevron_right': 0xe5cc, 'toc': 0xe8de,
     'edit_note': 0xe745, 'match_case': 0xf6f1, 'more_vert': 0xe5d4,
     'volume_up': 0xe050, 'skip_previous': 0xe045, 'skip_next': 0xe044,
+    'add': 0xe145, 'sort': 0xe164,
 }
 OUT = os.path.join(os.path.dirname(__file__), '..', 'assets', 'fonts', 'material-symbols-subset.woff2')
 

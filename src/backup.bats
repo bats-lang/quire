@@ -419,6 +419,13 @@ in _take_slots(numbers, other, SLOT_PLACE_MODIFIED, 2) end
 #pub fn backup_numbers_merge {numbers_loc,other_loc:agz}
   (numbers: !$A.arr(Int, numbers_loc, BOOK_NUMBERS), other: !$A.arr(Int, other_loc, BOOK_NUMBERS), keep_place: bool): void
 implement backup_numbers_merge (numbers, other, keep_place) = let
+  (* a place never dated by either keeps the device the file names: it
+     is nobody's change, so it does not follow whichever device syncs
+     last (#448) *)
+  val () = (if $A.get<Int>(numbers, SLOT_PLACE_MODIFIED) > 0 then ()
+    else if $A.get<Int>(other, SLOT_PLACE_MODIFIED) > 0 then ()
+    else if $A.get<Int>(other, SLOT_PLACE_DEVICE) < 0 then ()
+    else $A.set<Int>(numbers, SLOT_PLACE_DEVICE, $A.get<Int>(other, SLOT_PLACE_DEVICE)))
   val () = (if keep_place then () else if backup_numbers_place_later(numbers, other) then _take_place(numbers, other) else ())
   val () = (if _later(numbers, other, SLOT_SHELF, SLOT_SHELF_MODIFIED) then let
       val () = $A.set<Int>(numbers, SLOT_SHELF, $A.get<Int>(other, SLOT_SHELF))
@@ -1591,7 +1598,6 @@ in
     val () = $A.free<Int>(map)
     val () = !_mode := FromFile()
     val () = lib_sort(sort)
-    val () = lib_sort_label(sort)
     val () = set_apply(lib_state_get())
     val () = set_sliders()
     (* the brightness, the rotation lock and full screen restored, set *)

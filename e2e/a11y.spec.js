@@ -88,7 +88,7 @@ test('the library\'s controls are reached with Tab and work with Enter', async (
     await page.keyboard.press('Tab');
     seen.push(await focused());
   }
-  expect(seen.some(t => t.startsWith('Sort:'))).toBe(true);
+  expect(seen.some(t => t === 'Sort and view')).toBe(true);
   expect(seen.some(t => t.includes('Keyboard Only'))).toBe(true);
   await page.keyboard.press('Enter');
   await pageShown(page);

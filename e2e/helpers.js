@@ -74,7 +74,14 @@ export function pagedBook(title, author) {
 // ---- the library ----
 
 /** The input that imports EPUB files */
-export const importInput = page => page.getByLabel('Import EPUB');
+export const importInput = page => page.locator('#import-file');
+
+/** The empty library's own Import EPUB (quire#375): its input and the
+    button over it */
+/** The Import EPUB the reader sees: the bar's, or the empty library's */
+export const importOffered = page => page.locator('input[type=file][aria-label="Import EPUB"]:visible');
+
+export const emptyImportInput = page => page.locator('#empty-import-file');
 
 /** The list of books */
 export const books = page => page.getByRole('region', { name: 'Books' });
@@ -98,6 +105,9 @@ export async function titles(page) {
 }
 
 /** The library's search box, whose presence says the library is shown */
+/** The library is shown: its bar's name (the search box is not there while the library is empty, quire#375) */
+export const libraryShown = page => page.locator('#library-title');
+
 export const librarySearch = page => page.getByRole('searchbox', { name: 'Search the library' });
 
 /** A dialog by its name (the modal dialog is named by its title) */
@@ -136,6 +146,43 @@ export async function libraryMenu(page) {
   await expect(page.getByRole('menu')).toBeVisible();
 }
 
+/** The sort and view menu (quire#377, #404), opened from the bar's Sort
+    and view button */
+export const sortMenu = page => page.getByRole('menu', { name: 'Sort and view' });
+
+export async function openSortMenu(page) {
+  await page.getByRole('button', { name: 'Sort and view', exact: true }).click();
+  await expect(sortMenu(page)).toBeVisible();
+}
+
+/** Chooses an order (Title, Author, ...) or a layout (List, Grid) in the
+    sort and view menu; the menu closes with the choice */
+export async function chooseInSortMenu(page, name) {
+  await openSortMenu(page);
+  await sortMenu(page).getByRole('menuitemradio', { name, exact: true }).click();
+  await expect(sortMenu(page)).toBeHidden();
+}
+
+/** The checked choices of the sort and view menu, by name (the order, then
+    the layout); the menu is opened and closed again */
+export async function sortMenuChecked(page) {
+  await openSortMenu(page);
+  const checked = await sortMenu(page).getByRole('menuitemradio', { checked: true }).allTextContents();
+  await page.keyboard.press('Escape');
+  await expect(sortMenu(page)).toBeHidden();
+  return checked;
+}
+
+/** A shelf's own screen (Hidden, Archived, Trash; quire#404), opened from
+    the library menu, and the controls that show it is open */
+export async function openShelf(page, name) {
+  await libraryMenu(page);
+  await menuItem(page, name).click();
+  await expect(shelfTitle(page)).toHaveText(name);
+}
+export const shelfTitle = page => page.locator('#shelf-title');
+export const shelfBack = page => page.locator('#shelf-back');
+
 /** The Settings screen (sync, dictionaries, backup, the reading goal and
     the resets) */
 export const settingsScreen = page => page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -166,7 +213,7 @@ export async function start(page) {
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('/');
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
   return errors;
 }
 
@@ -323,7 +370,7 @@ export async function toLibrary(page) {
     await showChrome(page);
     await page.getByRole('button', { name: 'Back to library' }).click({ timeout: 2000 });
   }).toPass({ timeout: 20000 });
-  await expect(librarySearch(page)).toBeVisible();
+  await expect(libraryShown(page)).toBeVisible();
 }
 
 /** Opens the reader's bars when they are hidden */

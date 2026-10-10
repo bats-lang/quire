@@ -8,7 +8,7 @@
 import { test, expect, onAndroid } from './fixtures.js';
 import { launch, chapterShown, nextChapter, previousChapter, pagesOn, unchanged, capture, relaunch, sameState } from './relaunch.js';
 import {
-  epubFile, importFiles, openBook, toLibrary, librarySearch, cards, chapters, japaneseChapters, dialog, openReadingSettings, readingSettings, selectText, selectionButton, fixedLayoutBook, readFixed, indicator, bookPage,
+  epubFile, importFiles, openBook, toLibrary, librarySearch, cards, chapters, japaneseChapters, dialog, openReadingSettings, readingSettings, selectText, selectionButton, fixedLayoutBook, readFixed, indicator, bookPage, chooseInSortMenu, sortMenuChecked,
 } from './helpers.js';
 
 const book = { title: 'Kept Book', author: 'Relaunch Tests', chapters: 4, rawChapters: chapters(4, 40) };
@@ -27,15 +27,14 @@ test('the library, in a view, a filter, a sort and a search, is as it was', asyn
   await toLibrary(page);
   page = await unchanged(page);
   // a grid, by title
-  await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Grid' }).click();
-  const sort = page => page.getByRole('button', { name: /^Sort:/ });
-  await sort(page).click();
-  await expect(sort(page)).toHaveText('Sort: Title');
+  await chooseInSortMenu(page, 'Grid');
+  await chooseInSortMenu(page, 'Title');
+  expect(await sortMenuChecked(page)).toEqual(['Title', 'Grid']);
   page = await unchanged(page);
   // the books being read, by author
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'Reading' }).click();
-  await sort(page).click();
-  await expect(sort(page)).toHaveText('Sort: Author');
+  await chooseInSortMenu(page, 'Author');
+  expect(await sortMenuChecked(page)).toEqual(['Author', 'Grid']);
   page = await unchanged(page, 'killed');
   // all of them, searched
   await page.getByRole('group', { name: 'Show' }).getByRole('button', { name: 'All' }).click();

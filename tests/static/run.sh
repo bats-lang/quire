@@ -151,6 +151,18 @@ for d in "$ROOT"/tests/static/glyphs/reject/*/; do
   else echo "FAIL glyphs/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/glyphs-$n.log"; fail=1; fi
 done
 
+# A choice of more than three is not cycled by a button (next.py,
+# quire#377): the app's own, and the checker's fixtures
+if python3 "$ROOT/tests/static/next.py" "$ROOT/src" > "$TMP/next.log" 2>&1; then echo "ok   next: $(tail -1 "$TMP/next.log")"
+else echo "FAIL next:"; cat "$TMP/next.log"; fail=1; fi
+for d in "$ROOT"/tests/static/next/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/next.py" "$d" > "$TMP/next-$n.log" 2>&1; then echo "FAIL next/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/next-$n.log"; then echo "ok   next/reject/$n"
+  else echo "FAIL next/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/next-$n.log"; fail=1; fi
+done
+
 # The error banner is said from a failure (notice.py, quire#360): the
 # app's own, and the checker's fixtures, each a src.bats that must fail
 # it with its `expect`
