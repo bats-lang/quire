@@ -49,6 +49,8 @@ staload CT = "css/src/contrast.sats"
 staload H = "css/src/harmony.sats"
 staload GT = "gestures/src/tracker.sats"
 
+staload "page_size.sats"
+
 (* ============================================================
    Roles and palette
    ============================================================ *)
@@ -2263,6 +2265,9 @@ fn _reader {left:nat | left >= 9800} (sheet: sheet(left, false, false)): [after:
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, Overflow(), "hidden")
   val sheet = lay(sheet, BoxSizing(), "border-box")
+  (* the page's width and height, whole pixels: only a page_extent(1) gives their text (page_size.bats) *)
+  val () = raw(sheet, page_width_rule(RoundedDown()))
+  val () = raw(sheet, page_height_rule(RoundedDown()))
   val sheet = lay(sheet, MarginLeft(), "env(safe-area-inset-left)")
   val sheet = lay(sheet, MarginRight(), "env(safe-area-inset-right)")
   val sheet = lay(sheet, PaddingTop(), "var(--page-top)")
