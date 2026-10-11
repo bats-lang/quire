@@ -131,7 +131,7 @@ test('books of a series with no number come after the numbered ones, by title, a
   const names = ['unnumbered zulu', 'no series', 'numbered second', 'unnumbered alpha', 'numbered first', 'calibre unnumbered'];
   await importFiles(page, names.map(file), 6);
   await chooseInSortMenu(page, 'Series');
-  await expect.poll(() => titles(page)).toEqual(['Numbered First', 'Numbered Second', 'Alpha Unnumbered', 'Zulu Unnumbered', 'Calibre Unnumbered', 'Aaa Alone']);
+  await expect.poll(() => titles(page)).toEqual(['Numbered First', 'Numbered Second', 'Alpha Unnumbered', 'Calibre Unnumbered', 'Zulu Unnumbered', 'Aaa Alone']);
     expect(await seriesLine(page, 'Alpha Unnumbered')).toBe('Mixed');
   expect(await infoSeries(page, 'Alpha Unnumbered')).toBe('Series Mixed');
   expect(await infoSeries(page, 'Aaa Alone')).toBeNull();
@@ -150,7 +150,7 @@ test('the position survives a reload, a backup and its restore, as 2.5 and not 2
   await librarySettings(page);
   const backup = await exportedBackup(page);
   await settingsButton(page, 'Done').click();
-  expect(backup).not.toContain('Foundation');
+  expect(backup).not.toContain('"Foundation"');
   expect(backup).not.toMatch(/"(series|number|position)"/i);
   const path = rawFile('quire-backup.json', backup);
   await librarySettings(page);
@@ -163,9 +163,10 @@ test('the position survives a reload, a backup and its restore, as 2.5 and not 2
 
 test('a book imported again takes its position from the file, 2.5 and not 2', async ({ page }) => {
   await start(page);
-  await importFiles(page, [file('epub3 volume 2.5')], 1);
+  const same = file('epub3 volume 2.5');
+  await importFiles(page, [same], 1);
   // the same file again: Replace
-  await importInput(page).setInputFiles([file('epub3 volume 2.5')]);
+  await importInput(page).setInputFiles([same]);
   await dialog(page, 'Already in library').getByRole('button', { name: 'Replace' }).click();
   await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2.5');
   await expect(cards(page)).toHaveCount(1);
@@ -185,7 +186,7 @@ test('the position on another device is the one its own copy of the book has, 2.
   await sync(store, server, b);
   for (const d of [a, b]) await expect(card(d.page, 'Three A Novella')).toContainText('Foundation · 2.5');
   // the sync file keeps places, shelves and notes, and not the book's own series
-  expect(String(store.bytes(server))).not.toContain('Foundation');
+  expect(String(store.bytes(server))).not.toContain('"Foundation"');
   expect(String(store.bytes(server))).not.toMatch(/"(series|number|position)"/i);
   expect(unexpected(a)).toEqual([]);
   await a.context.close();

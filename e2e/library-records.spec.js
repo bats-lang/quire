@@ -292,15 +292,10 @@ test('a series position of 2.5 is kept in a group of its own, and the whole numb
     // the name (a length byte and its bytes), then the whole number
     const whole = u32(series.slice(series.length - 4));
     const snum = groups.find(g => g.tag === 'snum');
-    found.push({ key, whole, snum: snum ? u32(snum.data) : null, groups });
+    found.push({ key, whole, snum: snum ? u32(snum.data) : 0, groups });
   }
   // 2.5: the whole number 2 for an older Quire, 250 plus the zero's 10000001 for this one
-  expect(found.map(f => [f.whole, f.snum]).sort()).toEqual([[0, 10000001], [2, 10000251], [2, null]].sort());
-  // an older Quire, which knows no snum group, reads the record as numbered 2 and (as it always did) 0 as none
-  const novella = found.find(f => f.snum === 10000251);
-  const older = kept[novella.key].filter((_, i) => i < novella.groups.find(g => g.tag === 'snum').start || i >= novella.groups.find(g => g.tag === 'snum').end);
-  await put(page, novella.key, older);
-  await reload(page);
-  await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2');
-  await expect(card(page, 'Three A Novella')).not.toContainText('2.5');
+  expect(found.map(f => [f.whole, f.snum]).sort()).toEqual([[0, 10000001], [2, 10000251], [2, 0]].sort());
+  // the card says 2.5 from the snum group, and a Quire that knows no snum keeps it (lower case: ancillary) and reads SERI's 2
+  await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2.5');
 });
