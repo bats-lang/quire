@@ -85,6 +85,11 @@ val _resize_generation = ref<int>(0)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
+(* The style Highlight makes, the last one used (Libby: "tap Highlight to
+   use the most recent highlight color"), and the selection toolbar's
+   row shown (quire#378) *)
+val _selection_style = ref<highlight_style>(Yellow())
+val _selection_view = ref<selection_view>(ShowingPrimary())
 (* The gesture recognizer's state and its pointer source (linear, so
    they are taken out of their cell and put back); and whether a drag
    has just ended, so that the click the browser sends after it is not
@@ -2500,10 +2505,25 @@ fn _toolbar_place (): void = let
   val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
 in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
 
+(* The toolbar shows view's row; its height changes, so it is placed again *)
+fn _selection_view_put (view: selection_view): void = let
+  val () = !_selection_view := view
+in selection_view_show(view) end
+
+(* Highlight is drawn with the swatch of the style it makes *)
+fn _highlight_swatch (style: highlight_style): void =
+  case+ style of
+  | Yellow() => ui_attr("selection-highlight", AClass, "btn hlmark hl-yellow")
+  | Orange() => ui_attr("selection-highlight", AClass, "btn hlmark hl-orange")
+  | Underlined() => ui_attr("selection-highlight", AClass, "btn hlmark hl-under")
+
 (* The selection made a highlight in style (or changed the range of the
-   one that was tapped), and ended: Highlight leaves nothing selected *)
+   one that was tapped), and ended: Highlight leaves nothing selected.
+   The style is the one Highlight makes next *)
 fn _highlight_selection (style: highlight_style): void = let
   val index = annot_highlight(style)
+  val () = !_selection_style := style
+  val () = _highlight_swatch(style)
 in if index >= 0 then annot_selection_end() else () end
 
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
@@ -2517,6 +2537,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         val selected = (if _has_selection() then annot_selection_in_page() else false)
         (* the selection ended: a highlight the reader tapped is let go *)
         val () = (if _has_selection() then () else annot_tap_forget())
+        val () = (if selected then () else _selection_view_put(ShowingPrimary()))
         val () = ui_show("selection-toolbar", selected)
         val () = (if selected then let val () = _lookup_update(1) in _toolbar_place() end else ())
       in 0 end else 0)
@@ -2524,22 +2545,34 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val clicked = _target(h)
       val control = _selection_control(clicked)
       val () = _target_free(clicked)
-      val () = (case+ control of
-        | ~$R.none() => ()
-        | ~$R.some(SelectionHighlight()) => _highlight_selection(Yellow())
-        | ~$R.some(SelectionOrange()) => _highlight_selection(Orange())
-        | ~$R.some(SelectionUnderline()) => _highlight_selection(Underlined())
+      (* More turns the toolbar over and stays; any other control acts
+         and ends it *)
+      val keep = (case+ control of
+        | ~$R.none() => true
+        | ~$R.some(SelectionMore()) => let
+            val () = (case+ !_selection_view of
+              | ShowingPrimary() => _selection_view_put(ShowingOverflow())
+              | ShowingOverflow() => _selection_view_put(ShowingPrimary()))
+            val () = _toolbar_place()
+          in true end
+        | ~$R.some(SelectionHighlight()) => let val () = _highlight_selection(!_selection_style) in false end
+        | ~$R.some(SelectionYellow()) => let val () = _highlight_selection(Yellow()) in false end
+        | ~$R.some(SelectionOrange()) => let val () = _highlight_selection(Orange()) in false end
+        | ~$R.some(SelectionUnderlined()) => let val () = _highlight_selection(Underlined()) in false end
         (* a note on a highlight that was tapped is that highlight's note:
            cancelling it takes nothing away *)
         | ~$R.some(SelectionNote()) => let
             val index = annot_highlight(Yellow())
-          in annot_ask_note(index, ~annot_replaced()) end
-        | ~$R.some(SelectionCopy()) => _copy_selection()
-        | ~$R.some(SelectionSearch()) => _search_selection()
-        | ~$R.some(SelectionDefine()) => dict_show()
-        | ~$R.some(SelectionRead()) => aloud_from_selection()
-        | ~$R.some(SelectionShare()) => _share_selection())
-    in let val () = ui_show("selection-toolbar", false) in 0 end end)
+            val () = annot_ask_note(index, ~annot_replaced())
+          in false end
+        | ~$R.some(SelectionCopy()) => let val () = _copy_selection() in false end
+        | ~$R.some(SelectionSearch()) => let val () = _search_selection() in false end
+        | ~$R.some(SelectionDefine()) => let val () = dict_show() in false end
+        | ~$R.some(SelectionLookup()) => false
+        | ~$R.some(SelectionRead()) => let val () = aloud_from_selection() in false end
+        | ~$R.some(SelectionShare()) => let val () = _share_selection() in false end): bool
+      val () = (if keep then () else _selection_view_put(ShowingPrimary()))
+    in let val () = (if keep then () else ui_show("selection-toolbar", false)) in 0 end end)
   (* a word's dictionary entry: closed, or looked up online instead *)
   val listeners = RCons(listeners, OnEl("dictionary-panel"), "click", llam(h) => let
       val clicked = _target(h)

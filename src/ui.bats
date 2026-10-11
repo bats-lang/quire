@@ -352,7 +352,7 @@ in release_bytes(id_frozen, id_bytes) end
    so nothing can set a colour or anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy
-  | AChecked | ADir
+  | AChecked | ADir | AExpanded
 
 fn _attr_name (attribute: attr): $D.attribute =
   case+ attribute of
@@ -361,7 +361,7 @@ fn _attr_name (attribute: attr): $D.attribute =
   | ATabindex() => $D.Tabindex | AValueNow() => $D.Aria("valuenow")
   | ACurrent() => $D.Aria("current") | AGestureRegion() => $D.Data("gesture-region")
   | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby")
-  | AChecked() => $D.Aria("checked") | ADir() => $D.Dir
+  | AChecked() => $D.Aria("checked") | ADir() => $D.Dir | AExpanded() => $D.Aria("expanded")
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
@@ -661,6 +661,15 @@ fn _glyph (the_icon: icon): [glyph_len:pos | glyph_len < 256] string glyph_len =
   | IcAdd() => "\xEE\x85\x85"               (* add *)
   | IcSort() => "\xEE\x85\xA4"              (* sort *)
 
+(* A highlight's style, and its one name (quire#378): the selection's
+   swatches, the annotations' list and its filter all say a style by
+   style_label *)
+#pub datatype highlight_style = Yellow | Orange | Underlined
+
+#pub fn style_label (style: highlight_style): [label_len:pos | label_len < 256] string label_len
+implement style_label (style) =
+  case+ style of Yellow() => "Yellow" | Orange() => "Orange" | Underlined() => "Underlined"
+
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
    so it is the one harm *)
@@ -687,6 +696,8 @@ datavtype control =
   | {class_len,label_len:pos | class_len < 256; label_len < 256} CText of (string class_len, string label_len)
   | {class_len,name_len:pos | class_len < 256; name_len < 256} CIcon of (string class_len, icon, string name_len)
   | {class_len:pos | class_len < 256} CNamedByContent of (string class_len)
+  (* a button that is a colour and no words, named by name (aria-label) *)
+  | {class_len,name_len:pos | class_len < 256; name_len < 256} CSwatch of (string class_len, string name_len)
   | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
   | {label_len:pos | label_len < 256} CMenuChoice of (string label_len)
   | CHarmItem of harm
@@ -717,6 +728,9 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
       val () = _document_attr(document, id_bytes, id_len, $D.Aria("label"), name)
     in _document_text(document, id_bytes, id_len, _glyph(the_icon)) end
   | ~CNamedByContent(class_name) => _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+  | ~CSwatch(class_name, name) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, class_name)
+    in _document_attr(document, id_bytes, id_len, $D.Aria("label"), name) end
   | ~CLinkOut(class_name, label) => let
       val () = $D.add_element(document, parent_bytes, parent_len, id_bytes, id_len, $D.A)
       val () = _document_attr(document, id_bytes, id_len, $D.Class, class_name)
@@ -796,6 +810,13 @@ in _set_attr(id, $D.Class, class_name) end
   (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len): void
 
 implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, id, CText(class_name, label))
+
+(* A button that is a swatch of a colour (the stylesheet draws it by its
+   class) and shows no words: named name *)
+#pub fn ui_swatch_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
+  (parent: string parent_len, id: string id_len, class_name: string class_len, name: string name_len): void
+
+implement ui_swatch_btn(parent, id, class_name, name) = _control_literal(parent, id, CSwatch(class_name, name))
 
 (* A button showing icon the_icon, named name *)
 #pub fn ui_icon_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
@@ -2343,43 +2364,91 @@ end
 #pub fn ui_contents_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(contents_control)
 implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 4)
 
-(* The selection toolbar's buttons, each by its element's id (selection_control_id) *)
+(* The selection toolbar's buttons, each by its element's id
+   (selection_control_id). A colour is a control for each style, flat:
+   a constructor that carried the style would make the control linear
+   (quire#378) *)
 #pub datatype selection_control =
   | SelectionHighlight
+  | SelectionYellow
   | SelectionOrange
-  | SelectionUnderline
+  | SelectionUnderlined
   | SelectionNote
   | SelectionCopy
   | SelectionSearch
   | SelectionDefine
+  | SelectionLookup
   | SelectionRead
   | SelectionShare
+  | SelectionMore
 
 #pub fn selection_control_id (control: selection_control): [id_len:pos | id_len < 256] string id_len
 implement selection_control_id (control) =
   case+ control of
   | SelectionHighlight() => "selection-highlight"
+  | SelectionYellow() => "selection-yellow"
   | SelectionOrange() => "selection-orange"
-  | SelectionUnderline() => "selection-underline"
+  | SelectionUnderlined() => "selection-underlined"
   | SelectionNote() => "selection-note"
   | SelectionCopy() => "selection-copy"
   | SelectionSearch() => "selection-search"
   | SelectionDefine() => "selection-define"
+  | SelectionLookup() => "selection-lookup"
   | SelectionRead() => "selection-read"
   | SelectionShare() => "selection-share"
+  | SelectionMore() => "selection-more"
+
+(* Where a control is: on the toolbar's first row, or behind More. The
+   match is total, so a control added without a tier does not type-check
+   (quire#378) *)
+#pub datatype selection_tier = Primary | Overflow
+
+#pub fn selection_tier_of (control: selection_control): selection_tier
+implement selection_tier_of (control) =
+  case+ control of
+  | SelectionHighlight() => Primary()
+  | SelectionNote() => Primary()
+  | SelectionCopy() => Primary()
+  | SelectionDefine() => Primary()
+  | SelectionLookup() => Primary()
+  | SelectionShare() => Primary()
+  | SelectionMore() => Primary()
+  | SelectionYellow() => Overflow()
+  | SelectionOrange() => Overflow()
+  | SelectionUnderlined() => Overflow()
+  | SelectionSearch() => Overflow()
+  | SelectionRead() => Overflow()
+
+(* The element that holds a tier's controls (More itself is on the toolbar) *)
+#pub fn selection_tier_id (tier: selection_tier): [id_len:pos | id_len < 256] string id_len
+implement selection_tier_id (tier) =
+  case+ tier of Primary() => "selection-primary" | Overflow() => "selection-overflow"
+
+(* Which tier the toolbar shows: More turns one into the other, so the
+   toolbar is never more than the first row's wrap, whichever it shows *)
+#pub datatype selection_view = ShowingPrimary | ShowingOverflow
+
+#pub fn selection_view_show (view: selection_view): void
+implement selection_view_show (view) = let
+  val () = ui_show(selection_tier_id(Primary()), (case+ view of ShowingPrimary() => true | ShowingOverflow() => false))
+  val () = ui_show(selection_tier_id(Overflow()), (case+ view of ShowingPrimary() => false | ShowingOverflow() => true))
+in ui_attr(selection_control_id(SelectionMore()), AExpanded, (case+ view of ShowingPrimary() => "false" | ShowingOverflow() => "true"): [n:pos | n < 256] string n) end
 
 (* The control after control, in the order the decoder tries them *)
 fn _selection_control_after (control: selection_control): $R.option(selection_control) =
   case+ control of
-  | SelectionHighlight() => $R.some(SelectionOrange())
-  | SelectionOrange() => $R.some(SelectionUnderline())
-  | SelectionUnderline() => $R.some(SelectionNote())
+  | SelectionHighlight() => $R.some(SelectionYellow())
+  | SelectionYellow() => $R.some(SelectionOrange())
+  | SelectionOrange() => $R.some(SelectionUnderlined())
+  | SelectionUnderlined() => $R.some(SelectionNote())
   | SelectionNote() => $R.some(SelectionCopy())
   | SelectionCopy() => $R.some(SelectionSearch())
   | SelectionSearch() => $R.some(SelectionDefine())
-  | SelectionDefine() => $R.some(SelectionRead())
+  | SelectionDefine() => $R.some(SelectionLookup())
+  | SelectionLookup() => $R.some(SelectionRead())
   | SelectionRead() => $R.some(SelectionShare())
-  | SelectionShare() => $R.none()
+  | SelectionShare() => $R.some(SelectionMore())
+  | SelectionMore() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -2395,7 +2464,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_selection_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(selection_control)
-implement ui_selection_control (bytes, n, at) = _selection_control_from(bytes, n, at, SelectionHighlight(), 9)
+implement ui_selection_control (bytes, n, at) = _selection_control_from(bytes, n, at, SelectionHighlight(), 11)
 
 (* A word's dictionary entry's buttons, each by its element's id (dictionary_control_id) *)
 #pub datatype dictionary_control =

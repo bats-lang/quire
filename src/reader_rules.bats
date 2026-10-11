@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 10450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10450] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 11850} (sheet: sheet(left, false, false)): [after:nat | after >= left - 11850] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1642} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1642] sheet(after, false, false) = let
@@ -568,7 +568,7 @@ fn reader_rules_scrubber {left:nat | left >= 2218} (sheet: sheet(left, false, fa
 in sheet end
 
 (* The selection toolbar, from .seltb button on *)
-fn reader_rules_selection_toolbar {left:nat | left >= 901} (sheet: sheet(left, false, false)): [after:nat | after >= left - 901] sheet(after, false, false) = let
+fn reader_rules_selection_toolbar {left:nat | left >= 2300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2300] sheet(after, false, false) = let
   val sheet = rule(sheet, ".seltb button,.seltb a")
   val sheet = lay(sheet, Padding(), "8px 14px")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
@@ -577,6 +577,40 @@ fn reader_rules_selection_toolbar {left:nat | left >= 901} (sheet: sheet(left, f
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seltb button:hover,.seltb a:hover")
   val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
+  val sheet = close(sheet)
+  (* a row is not a box: its buttons are the toolbar's own items, which
+     wrap in two rows at most (the second is behind More) *)
+  val sheet = rule(sheet, ".seltbrow")
+  val sheet = lay(sheet, Display(), "contents")
+  val sheet = close(sheet)
+  (* a highlight style as a swatch: its colour (a ground with no text),
+     ringed in the bar's text colour, whose 3:1 against the bar is proven
+     (EDGEP), so it is seen in every theme; the style is also its name.
+     Underlined is a bar-high ground with the underline *)
+  val sheet = rule(sheet, ".seltb button.swatch")
+  val sheet = lay(sheet, Width(), "44px")
+  val sheet = lay(sheet, BorderRadius(), "50%")
+  val sheet = line(sheet, AllSides(), 2, RoleBarText())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seltb button.swatch-yellow,.hl-yellow::before")
+  val sheet = fill(sheet, RoleHighlight())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seltb button.swatch-orange,.hl-orange::before")
+  val sheet = fill(sheet, RoleSecondHighlight())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".seltb button.swatch-under,.hl-under::before")
+  val sheet = fill(sheet, RoleBarHigh())
+  val sheet = underline(E_barfg_bar | sheet, RoleBarText(), RoleBar())
+  val sheet = close(sheet)
+  (* Highlight carries the swatch of the style it makes *)
+  val sheet = rule(sheet, ".hlmark::before")
+  val () = raw(sheet, "content:\"\";")
+  val sheet = lay(sheet, Display(), "inline-block")
+  val sheet = lay(sheet, Width(), "14px")
+  val sheet = lay(sheet, Height(), "14px")
+  val sheet = lay(sheet, MarginRight(), "8px")
+  val sheet = lay(sheet, BorderRadius(), "50%")
+  val sheet = line(sheet, AllSides(), 2, RoleBarText())
   val sheet = close(sheet)
   (* a probe as tall as the least distance the toolbar keeps from the
      window's top (the safe area), for the code to measure (quire#428) *)

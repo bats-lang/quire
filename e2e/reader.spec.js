@@ -8,7 +8,7 @@ import { TINY_PNG } from './create-epub.js';
 import {
   start, openBook, readBook, place, placeChanged, startsOnPage, onPage, visibleText, toLibrary,
   showChrome, chapters, card, bookPage, chapterTitle, control, jumpBack, librarySearch, openSettings, reload, dialog,
-  importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton,
+  importFiles, indicator, chapterBody, oneColumn, selectText, selectionButton, selectionPick,
   readingSettings, openReadingSettings, expectBarFollows, libraryShown,
 } from './helpers.js';
 
@@ -1350,7 +1350,7 @@ test('read aloud goes on into the next chapter, from a selection, at the speed a
   await page.keyboard.press('Escape');
   // from a selection: the sentence it starts in
   await selectText(page, 5, 7);
-  await selectionButton(page, 'Read from here').click();
+  await selectionPick(page, 'Read from here');
   await expect.poll(async () => (await spoken(page)).length).toBe(1);
   expect(await spoken(page)).toEqual([{ text: 'Two!', rate: 1.5, voice: 'Narrator' }]);
   // on into the next chapter
