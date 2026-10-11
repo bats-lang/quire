@@ -1287,6 +1287,80 @@ research:
 epubcheck) plays each of #426's cases, and backup and sync carrying the
 number (`e2e/sync.spec.js`).
 
+## Replace keeps what the reader made (#425)
+
+A book's id is the SHA-256 of its file (`_file_id` in `src/import.bats`),
+so the duplicate question (Skip / Replace) is asked only for a file that
+is already in the library, byte for byte, and an archived book is put
+back by importing it with no question. Replace (`import_mode` `Replace`)
+changes the book's file (one `b<id>` entry), size, series and cover (when
+the file has one) and nothing else: the place, collections, finished
+mark, minutes, annotations and notes, order and id stay, and so does a
+hidden book's shelf; only an archived book or one in the Trash comes back
+to the Library, as the reader asked for it. `e2e/replace.spec.js` holds
+the whole record of the library, the file's size and the card, before and
+after, to be the same, and plays a backup, a second device and a second
+tab over it. By research (the issue's comment): Apple Books and Kobo make
+a corrected file a new book and the notes stay with the old one, which is
+what users complain of; so a corrected file of a book in the library is
+offered Replace too.
+
+**A corrected file** has another id, so it is not the duplicate question's.
+When the OPF of a new file is read (`_opf_done`), its title and author are
+compared with the library's (`lib_find_similar`: case and the white space
+around them ignored, a title that is empty never matches, a book in the
+Trash is not one); a match asks "Newer file of a book?" (`QNewerFile`,
+`_ask_newer`): **Replace** or **Add as new book** (also Escape: nothing is
+lost either way). Nothing has been stored by then (`BookLooksLike`); after
+the answer the OPF is read again as `Replace` (the file, cover and
+accessibility data stored under the *book's* id, the id kept) or as
+`AddAlone`.
+
+**Chapters are found by name.** The hrefs of a book's chapters (`src/chapter_hrefs.bats`,
+the chapters as `_spine_chapters` numbers them, an empty line for one that
+names no file) are kept under the key `h<id>`, written when a book is
+opened and by every replace. A replace reads the old record, makes a
+`chapter_map` with the new file's hrefs (`MapByHref`; `MapByNumber` when
+the old file's were not kept, a book not opened since: the same number
+when the count is the same) and:
+
+* the place (`_place_moved`): the chapter of its href, at the same page and
+  anchor; else the chapter of the same number if there are as many, else
+  the first, at its start; the progress weights are counted anew. Nothing
+  changes when the hrefs are the same in the same order.
+* each note (`annot_reanchor`, `_relocate`): its chapter's new number; one
+  whose chapter is not in the new file is kept under `LOST_CHAPTER` + its old
+  chapter, which is listed after every chapter under "Not found in this
+  version" with its words and note, painted nowhere, leading nowhere,
+  exported with that heading. A note's id contains its chapter, so a moved
+  note has its old id deleted (a tombstone) and sync passes on a deletion
+  and a new note. A note of a chapter that exists but has not the node it
+  names is lost the same way when the chapter is shown
+  (`annot_chapter_shown`, from the chapter's count of content nodes): the
+  nodes of a chapter are known only when it is rendered, and a changed
+  word is not noticed (a note is lost when its nodes are gone, not when
+  its text changed).
+
+By research for the annotation rule: Kobo keeps an annotation of a
+restructured book in the list when it no longer shows in the text; Apple
+Books and Kobo lose them when the corrected file is a new book. No
+documentation was found of how Thorium or Moon+ match annotations of a
+replaced file (searched), so nothing is taken from them.
+
+**Another tab** (`src/file_version.bats`): bridge has no channel between tabs,
+so a tab that has a book open asks, when it is shown again
+(`visibilitychange`, the moment sync runs; web apps refetch stale data when
+a tab regains focus, as TanStack Query does by default with
+`refetchOnWindowFocus`), which
+file the book is made from: the key `v<id>` holds the file's id when it is
+not the book's own (a corrected file; deleted when the book's own file comes
+back). If it is not the file the tab opened, the tab goes to the library and
+the banner says "This book was replaced with another file in another tab"
+with Reopen Quire (`BookReplacedElsewhere`). A tab in a second window
+side by side is told when it is shown again, not at once. An identical file
+changes nothing, so nothing is said. `e2e/replace-corrected.spec.js` plays
+all of it with fixtures that pass epubcheck (`e2e/replace-books.js`).
+
 ## A library that cannot be read says why, and offers what fits (#374)
 
 Bridge's IndexedDB read says why it failed: `Unreadable(cause)` carries a
@@ -1716,7 +1790,24 @@ Sync screen:
 
 ## What the types guarantee about the interface
 
-The stylesheet is built in `src/style.bats`, not written as CSS:
+The stylesheet is built in Bats, not written as CSS, in modules that each
+have their own `.sats`, so a change to one (or a static fixture put into
+it) re-checks that module and what stages after it, not all of it
+(#462; `style.bats` was 3478 lines and 7 to 18 minutes a change). In
+order: `src/palette.bats` (the roles, `PAL`, and the statements `SURF`,
+`EDGEP`, `HARMONY`, `VEILED`), `src/palette_proofs.bats` (their proofs,
+written by `scripts/gen-harmony.py`, each an exported `prval` with a
+`primplement`: the costly part), `src/sheet.bats` (the builder, rules,
+layout declarations, the spacing scale), `src/declarations.bats` (the
+declarations that name a colour, under their proofs),
+`src/theme_rules.bats` (the themes and the base rules), the screens'
+rules (`shell_rules`, `overlay_rules`, `reader_rules`, `page_turn_rules`,
+`panel_rules`, `reading_settings_rules`, `adaptive_rules`) and
+`src/style.bats`, which puts them in order (`app_style`). A fixture goes
+into the module of its area, not into one that holds proofs
+(`reject/role-unmatched` is in `palette.bats`). Keep each module's `#pub`
+declarations stable: bats re-checks what staloads a `.sats` only when
+more than line positions change in it (bats-lang/bats#243):
 
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
@@ -1760,12 +1851,12 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   and the layout walk (`insetsShort` in `e2e/controls-shown.js`, run
   by `fits` on every screen it walks) fails any control nearer its
   container's padding box than that. A full screen's rows and notes
-  are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
+  are cards inset 8 / 16 px (`spacing_rules`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
 * The page's width and height are a whole number of pixels (`page_extent`,
   indexed by whether it is whole; `page_width_rule` and `page_height_rule`
   (`src/page_size.bats`, a module of its own so its fixtures check in a
-  minute, where a snippet in `style.bats` costs 7 to 18) give the `.caf`
+  minute, where a snippet in the old `style.bats` cost 7 to 18) give the `.caf`
   rule's `max-width` and `max-height` from a `page_extent(1)` only,
   so an extent that is a fraction does not type-check:
   `tests/static/reject/page-width-fraction`, `page-height-fraction`). The reader
@@ -2150,7 +2241,7 @@ WebView is given the cutout's insets by Capacitor's SystemBars (pwa's
 `insetsHandling: native`: a WebView from 140 on reads them out, an
 older one is padded natively instead). Every other screen, panel,
 sheet, dialog, toast and bar pads the sides it can touch by `--safe-*`
-(`_spacing` in `src/style.bats`): that side's inset and the spacing
+(`spacing_rules` in `src/adaptive_rules.bats`): that side's inset and the spacing
 scale's least inset beyond it, so none of its controls or text comes
 near a system bar (#341, `e2e/safe-area.spec.js`). A spread's columns are at least
 40vw, so two fit beside a cutout. A sheet's height is in `dvh`, and the
@@ -2158,7 +2249,7 @@ typography sheet's head (`.shead`), with Close, is held at its top as
 it scrolls. `e2e/layout.spec.js` sets the insets through DevTools.
 
 The visible reading area is given once, as the reader view's (`.rv`)
-variables in `src/style.bats` (#296): the running footer sits 8px above
+variables in `src/reader_rules.bats` (#296): the running footer sits 8px above
 the screen's bottom inset (`--footer-bottom`, Android's navigation bar,
 which the app is drawn over edge to edge), 16px tall
 (`--footer-height`), and the page's paddings (`--page-top`,
@@ -2299,6 +2390,16 @@ job). Every spec and every static fixture is in exactly one group, or
 `scripts/ci-groups.py` fails the run: a new one is put in a group, by
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
+
+The specs that measure time (`pathological.spec.js`, `page-turn.spec.js`)
+are the `perf` group alone, run with one worker (`--workers=1`), and no
+spec that loads the machine joins it (`stall-capture.spec.js` spins a
+page on purpose): a budget that is measured beside another worker's load
+is flaky, and a flaky budget is relaxed until it stops catching anything.
+A budget keeps headroom over what a loaded runner has been seen to give
+(a turn's animated time against its instant time was 1.27 times once, on
+CI, against a quarter's slack), and still fails a turn that costs twice
+as much.
 
 Each group runs every project of `playwright.config.js`: `desktop` and
 `mobile-portrait` every spec, `narrow` (320 px, WCAG's reflow width),

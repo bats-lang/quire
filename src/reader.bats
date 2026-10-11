@@ -29,6 +29,7 @@ staload "wellformed.sats"
 staload "settings.sats"
 staload "stats.sats"
 staload "annot.sats"
+staload "chapter_hrefs.sats"
 staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -3440,6 +3441,12 @@ fn _vertical_set (vertical: writing_mode): void = let
   val () = !_vertical := vertical
 in _rows_set() end
 
+(* Keeps found as the chapter names of the open book (quire#425) *)
+fn _hrefs_keep (found: hrefs): void =
+  case+ lib_nums(lib_index_of_key(open_key_get())) of
+  | ~$R.none() => hrefs_free(found)
+  | ~$R.some(book_numbers) => hrefs_store(book_numbers.id_high, book_numbers.id_low, found)
+
 (* Whether a book's chapters were found from its OPF *)
 datatype spine_built = SpineBuilt | SpineNotBuilt
 
@@ -3474,6 +3481,8 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val @(chapters, chapter_total) = _spine_chapters(serial, file_size, opf_name_offset, prefix_len,
                            opf_bytes, opf_size, opf_nodes, opf_layout(opf_bytes, opf_nodes), total - 1, ChaptersNil(), 0)
                val () = book_spine_set(serial, file_size, chapters, chapter_total)
+               (* the chapters' names are kept, to find them again in a corrected file *)
+               val () = _hrefs_keep(hrefs_of_package(opf_bytes, opf_size, opf_nodes))
                val () = _image_fallbacks_put(ImageFallbacksCell(image_fallbacks_nil()))
                val () = _fallbacks_collect(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes, 0)
                (* a book with Media Overlays is read aloud by its narration *)
@@ -3768,6 +3777,8 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = toc_title(chapter_index)
                   val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
                   val () = _measure_pagination()
+                  (* an annotation that names a node this chapter has not is not found in it *)
+                  val () = annot_chapter_shown(!_content_count)
                   val () = annot_marks()
                 in
                   (* the facing page, on the other side; the page is

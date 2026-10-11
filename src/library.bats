@@ -758,6 +758,8 @@ fn _delete_book {index:int} (index: int index): void =
       val () = _idb_delete(99, nums.id_high, nums.id_low)
       val () = _idb_delete(97, nums.id_high, nums.id_low)
       val () = _idb_delete(121, nums.id_high, nums.id_low)
+      val () = _idb_delete(104, nums.id_high, nums.id_low)
+      val () = _idb_delete(118, nums.id_high, nums.id_low)
     in _remove(index) end
 
 (* The index of the first book in the Trash from i on, or -1 *)
@@ -890,6 +892,90 @@ fun _less {first_loc,second_loc:agz}{first_len,second_len:nat}
      else _less(first, first_len, second, second_len, i + 1) end
 
 fn _is_before (c: comparison): bool = case+ c of Before() => true | _ => false
+
+(* ============================================================
+   A book that looks like another (quire#425)
+   ============================================================ *)
+
+fn _is_space (byte_value: int): bool =
+  if byte_value = 32 then true else if byte_value = 9 then true else if byte_value = 10 then true else byte_value = 13
+
+(* The first of text[0, n) from i on that is not white space; n when none is *)
+fun _spaces_before {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
+  (text: !$A.arr(byte, l, n), n: int n, i: int i): [start:nat | start <= n] int start =
+  if i >= n then n
+  else if _is_space(byte2int0($A.get<byte>(text, i))) then _spaces_before(text, n, i + 1)
+  else i
+
+(* The end of text[0, stop) without the white space that ends it *)
+fun _spaces_after {l:agz}{n:pos}{stop:nat | stop <= n} .<stop>.
+  (text: !$A.arr(byte, l, n), n: int n, stop: int stop): [kept:nat | kept <= stop] int kept =
+  if stop <= 0 then 0
+  else if _is_space(byte2int0($A.get<byte>(text, stop - 1))) then _spaces_after(text, n, stop - 1)
+  else stop
+
+(* first[first_start, first_start + len) and second[second_start, second_start + len)
+   are the same letters in any case *)
+fun _same_letters {first_loc,second_loc:agz}{first_size,second_size:pos}{first_start,second_start,len:nat | first_start + len <= first_size; second_start + len <= second_size}{j:nat | j <= len} .<len - j>.
+  (first: !$A.arr(byte, first_loc, first_size), first_start: int first_start,
+   second: !$A.arr(byte, second_loc, second_size), second_start: int second_start, len: int len, j: int j): bool =
+  if j >= len then true
+  else if _lower(byte2int0($A.get<byte>(first, first_start + j))) <> _lower(byte2int0($A.get<byte>(second, second_start + j))) then false
+  else _same_letters(first, first_start, second, second_start, len, j + 1)
+
+(* Whether two texts are the same title (or author) as the library shows
+   them: the same letters, case and the white space around them ignored *)
+fn _same_text {first_loc,second_loc:agz}{first_size,second_size:pos}
+  (first: !$A.arr(byte, first_loc, first_size), first_size: int first_size,
+   second: !$A.arr(byte, second_loc, second_size), second_size: int second_size): bool = let
+  val first_start = _spaces_before(first, first_size, 0)
+  val first_stop = _spaces_after(first, first_size, first_size)
+  val second_start = _spaces_before(second, second_size, 0)
+  val second_stop = _spaces_after(second, second_size, second_size)
+in
+  if first_stop < first_start then second_stop <= second_start
+  else if second_stop < second_start then false
+  else if first_stop - first_start <> second_stop - second_start then false
+  else _same_letters(first, first_start, second, second_start, first_stop - first_start, 0)
+end
+
+fun _similar_at {count:nat}{title_loc,author_loc:agz}{title_size,author_size:pos}{i:nat} .<count>.
+  (books: !books(count), title: !$A.arr(byte, title_loc, title_size), title_size: int title_size,
+   author: !$A.arr(byte, author_loc, author_size), author_size: int author_size, i: int i): [found:int | found >= ~1] int found =
+  case+ books of
+  | books_nil() => ~1
+  | books_cons(book, rest) => let
+      val+ Book(book_title, book_title_len, book_author, book_author_len, _, _, nums) = book
+      val same = (if same_shelf(nums.shelf, Trash()) then false
+        else if _same_text(book_title, book_title_len, title, title_size) then _same_text(book_author, book_author_len, author, author_size)
+        else false): bool
+    in if same then i else _similar_at(rest, title, title_size, author, author_size, i + 1) end
+
+(* The index of a book in the library that looks like the one whose title
+   is data[title_start, title_start + title_span) and author
+   data[author_start, author_start + author_span): the same title and
+   author, as the library shows them (case and the white space around
+   them ignored), a book not in the Trash. None (-1) when the title is
+   empty (every book that names none would be taken for another), and
+   the author is compared as the library shows it ("Unknown Author" when
+   there is none) *)
+#pub fn lib_find_similar {data_loc:agz}{data_len:pos}{title_start,title_span,author_start,author_span:nat | title_start + title_span <= data_len; author_start + author_span <= data_len}
+  (data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len, title_start: int title_start, title_span: int title_span,
+   author_start: int author_start, author_span: int author_span): [found:int | found >= ~1] int found
+
+implement lib_find_similar (data, data_len, title_start, title_span, author_start, author_span) =
+  if title_span <= 0 then ~1
+  else let
+    val @(title, title_len) = _span_arr(data, data_len, title_start, title_span, "Imported Book")
+    val @(author, author_len) = _span_arr(data, data_len, author_start, author_span, "Unknown Author")
+    val cell = lib_take()
+    val+ @LibCell(books, _) = cell
+    val found = _similar_at(books, title, title_len, author, author_len, 0)
+    prval () = fold@(cell)
+    val () = lib_put(cell)
+    val () = $A.free<byte>(title)
+    val () = $A.free<byte>(author)
+  in found end
 
 (* Whether a book comes before another whose dates are the same (books
    imported in one minute): by title (as by_title compares them), then
