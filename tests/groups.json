@@ -1,6 +1,7 @@
 {
   "e2e": {
     "library": [
+      "folders.spec.js",
       "keys.spec.js",
       "media.spec.js",
       "relaunch.spec.js",
