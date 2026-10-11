@@ -194,6 +194,7 @@ implement reading_settings_rules (sheet) = let
   val sheet = close(sheet)
   val sheet = rule(sheet, ".navrow>.navbtn")
   val sheet = lay(sheet, GridArea(), "1/1/3/2")
+  val sheet = lay(sheet, AlignSelf(), "stretch")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "flex-start")
   val sheet = lay(sheet, JustifyContent(), "space-between")

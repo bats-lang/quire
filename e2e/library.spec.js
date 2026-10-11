@@ -279,7 +279,7 @@ test('an archived book keeps its record, and is read again by importing it', asy
   await card(page, 'Old Volume').click();
   const said = dialog(page, 'Archived');
   await expect(said).toBeVisible();
-  await said.getByRole('button', { name: 'OK' }).click();
+  await said.getByRole('button', { name: 'Done' }).click();
   await expect(bookPage(page)).toBeHidden();
   // importing it again restores it to the shelf
   await importInput(page).setInputFiles([f]);
@@ -575,7 +575,7 @@ test('restoring an archived book from its menu says to import it again', async (
   await menuItem(page, 'Unarchive').click();
   const said = dialog(page, 'Unarchive');
   await expect(said).toContainText('import its file again');
-  await said.getByRole('button', { name: 'OK' }).click();
+  await said.getByRole('button', { name: 'Done' }).click();
   await expect(said).toBeHidden();
 });
 

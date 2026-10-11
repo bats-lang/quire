@@ -618,7 +618,7 @@ export async function exportedBackup(page) {
   }
   const saved = dialog(page, 'Backup saved');
   await expect(saved).toContainText(inApp ? 'quire-backup.json was shared' : 'quire-backup.json is in your downloads');
-  await saved.getByRole('button', { name: 'OK' }).click();
+  await saved.getByRole('button', { name: 'Done' }).click();
   return text;
 }
 
