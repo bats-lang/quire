@@ -12,7 +12,7 @@ import {
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { checkPageMargins } from './page-margins.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -50,6 +50,7 @@ async function fits(page, screen) {
   expect(await rowIsTarget(page), `rows that open a screen whose button is not the whole row on ${screen}`).toEqual([]);
   expect(await toastClear(page), `controls under a toast on ${screen}`).toEqual([]);
   expect(await peekAbove(page), `sheets covering more than 60% of the window on ${screen}`).toEqual([]);
+  expect(await sheetReach(page), `controls of a sheet that cannot be scrolled into reach on ${screen}`).toEqual([]);
   expect(await offScale(page), `gaps and tab paddings off the spacing scale on ${screen}`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
@@ -423,8 +424,12 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   await panel.evaluate(e => { e.scrollTop = 0; });
   await expect(close).toBeInViewport({ ratio: 1 });
   const box = await panel.boundingBox();
-  // over the rows' names, not a control
-  await page.mouse.move(box.x + 24, box.y + box.height / 2);
+  // over the rows' names, not a control, in the sheet's upper part: the
+  // headless Chromium, on the tablet's 1024 px window, delivered a wheel
+  // at the sheet's middle (736 px down) to the DOM without scrolling it
+  // (observed with the sheet at 55%, where it must scroll; at its upper
+  // part the same wheel scrolls)
+  await page.mouse.move(box.x + 24, box.y + box.height * 0.2);
   for (let i = 0; i < 20; i++) await page.mouse.wheel(0, 400);
   await expect.poll(() => panel.evaluate(e => e.scrollTop + e.clientHeight >= e.scrollHeight - 1)).toBe(true);
   await expect(last).toBeInViewport({ ratio: 1 });

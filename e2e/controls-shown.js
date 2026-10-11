@@ -52,6 +52,11 @@
  * - offScale: the gaps of a sheet, and the padding of its tabs, are
  *   steps of the spacing scale (4, 8, 12, 16, 24 px), none under the
  *   least inset on a side (#379).
+ * - sheetReach: every control of a visible sheet can be reached by
+ *   scrolling within the sheet: centred in the sheet's scrolling area, the
+ *   topmost thing at its centre is the control, not the sticky head or
+ *   foot (a bottom sheet capped to a short window left its body no room
+ *   and Playwright could not click Layout; #379).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -635,7 +640,7 @@ export async function toastClear(page) {
 }
 
 /** Each visible fixed sheet that covers more than 60% of the window's
-    height (the page keeps at least 40%; #379). Named with the share it
+    area (a side sheet in a short window covers half of it) (the page keeps at least 40%; #379). Named with the share it
     covers */
 export async function peekAbove(page) {
   return page.evaluate(() => {
@@ -643,7 +648,7 @@ export async function peekAbove(page) {
     for (const sheet of document.querySelectorAll('.sheet')) {
       if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
       const box = sheet.getBoundingClientRect();
-      const covered = Math.max(0, Math.min(box.bottom, innerHeight) - Math.max(box.top, 0)) / innerHeight;
+      const covered = Math.max(0, Math.min(box.bottom, innerHeight) - Math.max(box.top, 0)) * Math.max(0, Math.min(box.right, innerWidth) - Math.max(box.left, 0)) / (innerHeight * innerWidth);
       if (covered > 0.6) bad.push(`${(sheet.getAttribute('aria-label') || sheet.id || 'sheet')} covers ${Math.round(covered * 100)}% of the window`);
     }
     return bad;
@@ -675,6 +680,36 @@ export async function offScale(page) {
           }
         }
       }
+    }
+    return bad;
+  });
+}
+
+
+/** Each control of a visible sheet that, scrolled to the middle of the
+    sheet, still has something else at its centre (a sticky head or
+    foot over it), or that cannot be scrolled into the sheet's view */
+export async function sheetReach(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const controls = 'button, a[href], select, input:not([type=hidden]):not([type=file]), [role=tab], [role=switch], [role=slider]';
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      const own = sheet.getBoundingClientRect();
+      for (const control of sheet.querySelectorAll(controls)) {
+        if (!control.checkVisibility({ visibilityProperty: true }) || control.closest('[inert]')) continue;
+        if (control.getClientRects().length === 0 || control.getBoundingClientRect().width <= 1) continue;
+        const sticky = control.closest('.shead, .sfoot');
+        if (sticky) continue;
+        const box = control.getBoundingClientRect();
+        sheet.scrollTop += box.top + box.height / 2 - (own.top + own.height / 2);
+        const now = control.getBoundingClientRect();
+        const hit = document.elementFromPoint(now.left + now.width / 2, now.top + now.height / 2);
+        if (!hit || !(hit === control || control.contains(hit))) {
+          bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is covered by ${hit ? (hit.id || hit.className || hit.tagName) : 'nothing'}`);
+        }
+      }
+      sheet.scrollTop = 0;
     }
     return bad;
   });
