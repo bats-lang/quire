@@ -27,6 +27,7 @@ staload "image_viewer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
+staload "locator.sats"
 staload "wellformed.sats"
 staload "dataurl.sats"
 staload "settings.sats"
@@ -4556,19 +4557,19 @@ end
 
 datavtype hits(int) =
   | hits_nil(0) of ()
-  | {count:nat}{l:agz}{snippet_len:nat | snippet_len <= 206}
-    hits_cons(count + 1) of (Int, Int, Int, Int, Int, $A.arr(byte, l, snippet_len + 1), int snippet_len, hits(count))
+  | {count:nat}{l:agz}{snippet_len:nat | snippet_len <= 206}{hit_at,hit_len:nat | hit_at + hit_len <= snippet_len}
+    hits_cons(count + 1) of (Int, Int, Int, Int, Int, $A.arr(byte, l, snippet_len + 1), int snippet_len, int hit_at, int hit_len, locator_kind, Int, hits(count))
 
 fun hits_free {count:nat} .<count>. (entries: hits(count)): void =
   case+ entries of
   | ~hits_nil() => ()
-  | ~hits_cons(_, _, _, _, _, snippet, _, rest) => let val () = $A.free<byte>(snippet) in hits_free(rest) end
+  | ~hits_cons(_, _, _, _, _, snippet, _, _, _, _, _, rest) => let val () = $A.free<byte>(snippet) in hits_free(rest) end
 
 fun hits_reverse {count,reversed_count:nat} .<count>. (remaining: hits(count), reversed: hits(reversed_count)): hits(count + reversed_count) =
   case+ remaining of
   | ~hits_nil() => reversed
-  | ~hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, rest) =>
-    hits_reverse(rest, hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, reversed))
+  | ~hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, hit_at, hit_len, place, number, rest) =>
+    hits_reverse(rest, hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, hit_at, hit_len, place, number, reversed))
 
 (* The hits so far (the latest first while a search runs), their count,
    the query query[0, query_len) (lower case) and the search's number *)
@@ -4648,23 +4649,35 @@ fn _ellipsis_if {l:agz}{n:pos}{at:nat}{width:int | width == 0 || width == 3; at 
 fn _span200 {start,end_at:nat | start <= end_at} (start: int start, end_at: int end_at): [span:nat | span <= 200; start + span <= end_at] int span =
   if end_at - start <= 200 then end_at - start else 200
 
+(* How much of the query's length lies inside a snippet's span, from before
+   bytes into it *)
+fn _hit_span {span,before,query:nat | before <= span} (span: int span, before: int before, query: int query): [hit_len:nat | before + hit_len <= span] int hit_len =
+  if query <= span - before then query else span - before
+
 (* The text around text[at, at + query_len) in text[0, text_len): some 40
    bytes before it and 80 after, whole characters, its line breaks as spaces, with an
-   ellipsis on a side where the text goes on *)
+   ellipsis on a side where the text goes on; and where the match is in it,
+   snippet[hit_at, hit_at + hit_len), inside the snippet by its type (cut
+   short when the snippet's 200 bytes end inside it) *)
 fn _snippet {l:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{at,query_len:nat | at + query_len <= text_len}
-  (text: !$A.arr(byte, l, text_size), text_size: int text_size, text_len: int text_len, at: int at, query_len: int query_len): [snippet_location:agz][snippet_len:nat | snippet_len <= 206] @($A.arr(byte, snippet_location, snippet_len + 1), int snippet_len) = let
+  (text: !$A.arr(byte, l, text_size), text_size: int text_size, text_len: int text_len, at: int at, query_len: int query_len)
+  : [snippet_location:agz][snippet_len,hit_at,hit_len:nat | snippet_len <= 206; hit_at + hit_len <= snippet_len] @($A.arr(byte, snippet_location, snippet_len + 1), int snippet_len, int hit_at, int hit_len) = let
   val start_guess = (if at > 40 then at - 40 else 0): [start:nat | start <= at] int start
   val start = _char_forward(text, start_guess, at)
   val end_guess = (if at + query_len + 80 < text_len then at + query_len + 80 else text_len): [end_at:nat | at + query_len <= end_at; end_at <= text_len] int end_at
   val end_at = _char_back_loop(text, text_size, end_guess, at + query_len)
   val snippet_len = _span200(start, end_at)
-  val ellipsis_before = (if start > 0 then 3 else 0): [width:int | width == 0 || width == 3] int width
-  val ellipsis_after = (if start + snippet_len < text_len then 3 else 0): [width:int | width == 0 || width == 3] int width
+  val ellipsis_before = (if start > 0 then 3 else 0): [width:nat | width == 0 || width == 3] int width
+  val ellipsis_after = (if start + snippet_len < text_len then 3 else 0): [width:nat | width == 0 || width == 3] int width
   val snippet = $A.alloc<byte>(ellipsis_before + snippet_len + ellipsis_after + 1)
   val () = _ellipsis_if(snippet, 0, ellipsis_before)
   val () = _snippet_copy(text, start, snippet, ellipsis_before, snippet_len, 0)
   val () = _ellipsis_if(snippet, ellipsis_before + snippet_len, ellipsis_after)
-in @(snippet, ellipsis_before + snippet_len + ellipsis_after) end
+  val before_hit = at - start
+in
+  if before_hit <= snippet_len then @(snippet, ellipsis_before + snippet_len + ellipsis_after, ellipsis_before + before_hit, _hit_span(snippet_len, before_hit, query_len))
+  else @(snippet, ellipsis_before + snippet_len + ellipsis_after, 0, 0)
+end
 
 (* The UTF-16 units of text[from, until), as the page counts a text node's
    offsets: one for each character, two for one past U+FFFF (a 4-byte
@@ -4686,10 +4699,10 @@ fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_
   if hit_count >= HIT_MAX then @(found, hit_count)
   else if at + query_len > text_len then @(found, hit_count)
   else if _match_at(text, at, query, query_len, 0) then let
-    val @(snippet, snippet_len) = _snippet(text, text_size, text_len, at, query_len)
+    val @(snippet, snippet_len, hit_at, hit_len) = _snippet(text, text_size, text_len, at, query_len)
     val start_units = _arr_units(text, 0, at, 0)
     val end_units = start_units + _arr_units(text, at, at + query_len, 0)
-  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, start_units, node, end_units, snippet, snippet_len, found), hit_count + 1) end
+  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, start_units, node, end_units, snippet, snippet_len, hit_at, hit_len, ByPercent(), 0, found), hit_count + 1) end
   else _find_all(text, text_size, text_len, at + 1, query, query_len, chapter, node, found, hit_count)
 
 (* The tail of a block's text: the last bytes of the text so far, up to one
@@ -4783,10 +4796,10 @@ fun _cross_find {bytes_location,nodes_location,units_location,text_location,quer
   else if start + query_len > tail_len + text_len then @(found, hit_count, 0)
   else if _match_joined(tail, tail_len, text, text_len, query, query_len, start, 0) then let
     val joined = _joined_make(tail, tail_len, text, text_len)
-    val @(snippet, snippet_len) = _snippet(joined, tail_len + text_len, tail_len + text_len, start, query_len)
+    val @(snippet, snippet_len, hit_at, hit_len) = _snippet(joined, tail_len + text_len, tail_len + text_len, start, query_len)
     val () = $A.free<byte>(joined)
     val end_in_text = start + query_len - tail_len
-  in @(hits_cons(chapter, g1ofg0($A.get<int>(nodes, start)), g1ofg0($A.get<int>(units, start)), node, _arr_units(text, 0, end_in_text, 0), snippet, snippet_len, found), hit_count + 1, end_in_text) end
+  in @(hits_cons(chapter, g1ofg0($A.get<int>(nodes, start)), g1ofg0($A.get<int>(units, start)), node, _arr_units(text, 0, end_in_text, 0), snippet, snippet_len, hit_at, hit_len, ByPercent(), 0, found), hit_count + 1, end_in_text) end
   else _cross_find(tail, nodes, units, tail_len, text, text_len, query, query_len, chapter, node, start + 1, found, hit_count)
 
 (* text[from, text_len) added to the tail from at on, in the content node
@@ -5019,20 +5032,58 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{
 (* The results list, or its state *)
 fn _search_status {text_len:pos | text_len < 256} (text: string text_len): void = ui_text("search-status", text)
 
-(* The heading of a chapter's results *)
-fn _hit_heading {chapter:nat} (chapter: int chapter): void = let
+(* The hits in a row from the head of the list that are in chapter *)
+fun _chapter_run {count:nat} .<count>. (found: !hits(count), chapter: Int): Nat =
+  case+ found of
+  | hits_nil() => 0
+  | @hits_cons(this_chapter, _, _, _, _, _, _, _, _, _, _, rest) => let
+      val run = (if this_chapter = chapter then 1 + _chapter_run(rest, chapter) else 0): Nat
+      prval () = fold@(found)
+    in run end
+
+(* The heading of a chapter's results: its title, and how many of the hits
+   are in it ("3 results") *)
+fn _hit_heading {chapter:nat} (chapter: int chapter, hits_in_chapter: Nat): void = let
   val @(group_id, group_id_len) = nid_make("search-group", chapter)
   val () = ui_add_n("search-results", group_id, group_id_len, TDiv)
   val @(group_id, group_id_len) = nid_make("search-group", chapter)
   val () = ui_attr_n(group_id, group_id_len, AClass, "grp")
-  val @(label, label_len) = toc_label_of(chapter)
   val @(group_id, group_id_len) = nid_make("search-group", chapter)
-in ui_text_n_buf(group_id, group_id_len, label, label_len) end
+  val @(title_id, title_id_len) = nid_make("search-heading", chapter)
+  val () = ui_add_nn(group_id, group_id_len, title_id, title_id_len, TSpan)
+  val @(label, label_len) = toc_label_of(chapter)
+  val @(title_id, title_id_len) = nid_make("search-heading", chapter)
+  val () = ui_text_n_buf(title_id, title_id_len, label, label_len)
+  val @(group_id, group_id_len) = nid_make("search-group", chapter)
+  val @(tally_id, tally_id_len) = nid_make("search-tally", chapter)
+  val () = ui_add_nn(group_id, group_id_len, tally_id, tally_id_len, TSpan)
+  val @(tally_id, tally_id_len) = nid_make("search-tally", chapter)
+  val () = ui_attr_n(tally_id, tally_id_len, AClass, "cnt")
+  val tally = $A.alloc<byte>(32)
+  val offset = _put(tally, 0, " \xC2\xB7 ")
+  val offset = $S.int_to_str(tally, offset, 32, hits_in_chapter)
+  val offset = _put(tally, offset, " result")
+  val plural = (if hits_in_chapter = 1 then 0 else 1): [e:nat | e <= 1] int e
+  val () = (if plural = 1 then $A.set<byte>(tally, offset, $A.int2byte(115)) else ())
+  val offset = offset + plural
+  val @(tally_id, tally_id_len) = nid_make("search-tally", chapter)
+in ui_text_n_buf(tally_id, tally_id_len, tally, offset) end
 
-(* One row of the results: a hit, with its text (its chapter is the
-   heading above it) *)
-fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_len < 65536}
-  (hit: int hit, snippet: !$A.arr(byte, l, n), snippet_len: int snippet_len): void = let
+(* snippet[from, from + length) as a new array of length + 1 bytes *)
+fn _snippet_slice {l:agz}{n:pos}{from,length:nat | from + length <= n}
+  (snippet: !$A.arr(byte, l, n), from: int from, length: int length): [slice_location:agz] $A.arr(byte, slice_location, length + 1) = let
+  fun copy {source_location,target_location:agz}{source_size,target_size:pos}{start,count:nat | start + count <= source_size; count < target_size}{j:nat | j <= count} .<count - j>.
+    (source: !$A.arr(byte, source_location, source_size), start: int start, target: !$A.arr(byte, target_location, target_size), count: int count, j: int j): void =
+    if j >= count then ()
+    else let val () = $A.set<byte>(target, j, $A.get<byte>(source, start + j)) in copy(source, start, target, count, j + 1) end
+  val slice = $A.alloc<byte>(length + 1)
+  val () = copy(snippet, from, slice, length, 0)
+in slice end
+
+(* One row of the results: a hit, with its text, the match in bold, and its
+   place in the book under it (its chapter is the heading above it) *)
+fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_len < 65536}{hit_at,hit_len:nat | hit_at + hit_len <= snippet_len}
+  (hit: int hit, snippet: !$A.arr(byte, l, n), snippet_len: int snippet_len, hit_at: int hit_at, hit_len: int hit_len, place: locator_kind, number: Int): void = let
   val @(row_id, row_id_len) = nid_make("search-hit", hit)
   val () = ui_btn_n("search-results", row_id, row_id_len, "pi hgo")
   val @(row_id, row_id_len) = nid_make("search-hit", hit)
@@ -5040,20 +5091,44 @@ fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_l
   val () = ui_add_nn(row_id, row_id_len, text_id, text_id_len, TSpan)
   val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
   val () = ui_attr_n(text_id, text_id_len, AClass, "snip")
-  val text = $A.alloc<byte>(snippet_len + 1)
-  val () = _fragment_duplicate(snippet, text, snippet_len, 0)
+  (* the words before the match, the match, and the words after it *)
   val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
-in ui_text_n_buf(text_id, text_id_len, text, snippet_len) end
+  val @(lead_id, lead_id_len) = nid_make("search-hit-lead", hit)
+  val () = ui_add_nn(text_id, text_id_len, lead_id, lead_id_len, TSpan)
+  val @(lead_id, lead_id_len) = nid_make("search-hit-lead", hit)
+  val () = ui_text_n_buf(lead_id, lead_id_len, _snippet_slice(snippet, 0, hit_at), hit_at)
+  val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
+  val @(match_id, match_id_len) = nid_make("search-hit-mark", hit)
+  val () = ui_add_nn(text_id, text_id_len, match_id, match_id_len, TSpan)
+  val @(match_id, match_id_len) = nid_make("search-hit-mark", hit)
+  val () = ui_attr_n(match_id, match_id_len, AClass, "mk")
+  val @(match_id, match_id_len) = nid_make("search-hit-mark", hit)
+  val () = ui_text_n_buf(match_id, match_id_len, _snippet_slice(snippet, hit_at, hit_len), hit_len)
+  val @(text_id, text_id_len) = nid_make("search-hit-text", hit)
+  val @(trail_id, trail_id_len) = nid_make("search-hit-trail", hit)
+  val () = ui_add_nn(text_id, text_id_len, trail_id, trail_id_len, TSpan)
+  val @(trail_id, trail_id_len) = nid_make("search-hit-trail", hit)
+  val () = ui_text_n_buf(trail_id, trail_id_len, _snippet_slice(snippet, hit_at + hit_len, snippet_len - hit_at - hit_len), snippet_len - hit_at - hit_len)
+  (* where in the book it is *)
+  val @(row_id, row_id_len) = nid_make("search-hit", hit)
+  val @(place_id, place_id_len) = nid_make("search-hit-place", hit)
+  val () = ui_add_nn(row_id, row_id_len, place_id, place_id_len, TSpan)
+  val @(place_id, place_id_len) = nid_make("search-hit-place", hit)
+  val () = ui_attr_n(place_id, place_id_len, AClass, "hstyle")
+  val place_text = $A.alloc<byte>(32)
+  val place_end = locator_put(place_text, 0, place, number)
+  val @(place_id, place_id_len) = nid_make("search-hit-place", hit)
+in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
 
 (* The rows of the hits found, from a hit on, under a heading wherever the chapter
    changes from last *)
 fun _hit_rows {count:nat}{hit:nat} .<count>. (found: !hits(count), hit: int hit, last: Int): void =
   case+ found of
   | hits_nil() => ()
-  | @hits_cons(chapter, _, _, _, _, snippet, snippet_len, rest) => let
+  | @hits_cons(chapter, _, _, _, _, snippet, snippet_len, hit_at, hit_len, place, number, rest) => let
       val () = (if chapter >= 0 then let
-          val () = (if chapter <> last then _hit_heading(chapter) else ())
-        in _hit_row(hit, snippet, snippet_len) end else ())
+          val () = (if chapter <> last then _hit_heading(chapter, 1 + _chapter_run(rest, chapter)) else ())
+        in _hit_row(hit, snippet, snippet_len, hit_at, hit_len, place, number) end else ())
       val this_chapter = chapter
       val () = _hit_rows(rest, hit + 1, this_chapter)
       prval () = fold@(found)
@@ -5078,20 +5153,46 @@ fn _search_done (generation: int): void =
           in ui_text_buf("search-status", buf, offset) end)
       in _search_put(SearchCell(found, hit_count, query, query_len)) end)
 
+(* Where a hit is in the book: the page it is on in a fixed-layout book,
+   where a spine item is a page, else how far into the book, by the chapters'
+   sizes and how far into the chapter's content nodes (total of them) the
+   hit's node is *)
+fn _hit_locator (chapter: Int, node: Int, total: Int, layout: rendition_layout): @(locator_kind, Int) =
+  case+ layout of
+  | PrePaginated() => @(ByPage(), chapter + 1)
+  | Reflowable() => let
+      val @(size_before, chapter_size, book_size) = book_weights(book_serial(), chapter)
+      val within = (if total > 0 then _clamp1000(node * 1000 / total) else 0): [within:nat | within <= 1000] int within
+    in @(ByPercent(), _thousandth(size_before + _of_thousandth(within, chapter_size), book_size)) end
+
+(* The first fresh hits of the list (the latest found) take their place in the book *)
+fun _hits_locate {count:nat} .<count>. (found: !hits(count), fresh: Int, chapter: Int, total: Int, layout: rendition_layout): void =
+  if fresh <= 0 then ()
+  else (case+ found of
+    | hits_nil() => ()
+    | @hits_cons(_, node, _, _, _, _, _, _, _, place, number, rest) => let
+        val @(found_kind, found_number) = _hit_locator(chapter, node, total, layout)
+        val () = place := found_kind
+        val () = number := found_number
+        val () = _hits_locate(rest, fresh - 1, chapter, total, layout)
+        prval () = fold@(found)
+      in end)
+
 (* The hits of the chapter data[0, n) (the chapter given), added *)
 fn _search_add {l:agz}{n:pos}{tree_size:nat}
-  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int): void =
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
       val () = _tail_begin()
-      val @(_, found_after, count_after) = _scan_nodes(data, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
+      val @(total_nodes, found_after, count_after) = _scan_nodes(data, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
       val () = _tail_end()
+      val () = _hits_locate(found_after, count_after - hit_count, chapter, total_nodes, layout)
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
 fn _search_add_if {l:agz}{n:pos}{tree_size:nat}
-  (generation: int, data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int): void =
-  if generation = !_search_generation then _search_add(data, nodes, chapter) else ()
+  (generation: int, data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Int, layout: rendition_layout): void =
+  if generation = !_search_generation then _search_add(data, nodes, chapter, layout) else ()
 
 fn _search_full (): bool =
   case+ _search_take() of
@@ -5110,7 +5211,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
   else (case+ book_chapter_get(serial, chapter) of
     | ~ChaptersUnknown() => _search_done(generation)
     | ~ChapterNone(_) => _search_chapters(serial, chapter + 1, chapter_count, generation)
-    | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
+    | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, layout, _) =>
       (case+ piece_new(compressed_size) of
        | ~NoPiece() => _search_chapters(serial, chapter + 1, chapter_count, generation)
        | ~Piece(compressed_owner, compressed) => let
@@ -5126,7 +5227,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                    val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
                    val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
-                   val () = _search_add_if(generation, xhtml_bytes, nodes, chapter)
+                   val () = _search_add_if(generation, xhtml_bytes, nodes, chapter, layout)
                    val () = $X.free_nodes(nodes)
                    val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
                  in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
@@ -5847,7 +5948,7 @@ end
 fun _hit_at {count:nat} .<count>. (found: !hits(count), i: int): @(Int, Int, Int, Int, Int) =
   case+ found of
   | hits_nil() => @(~1, 0, 0, 0, 0)
-  | @hits_cons(chapter, node, offset, end_node, end_offset, _, _, rest) =>
+  | @hits_cons(chapter, node, offset, end_node, end_offset, _, _, _, _, _, _, rest) =>
     if i = 0 then let
       val hit = @(chapter, node, offset, end_node, end_offset)
       prval () = fold@(found)

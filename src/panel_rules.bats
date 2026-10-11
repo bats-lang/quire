@@ -10,7 +10,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 7500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7500] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 7700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7700] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
 fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1536] sheet(after, false, false) = let
@@ -97,7 +97,7 @@ fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left
 in sheet end
 
 (* The contents and highlights, from .pi[aria-current=true] on *)
-fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1558] sheet(after, false, false) = let
+fn panel_rules_contents_and_highlights {left:nat | left >= 1750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1750] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
@@ -116,6 +116,15 @@ fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(l
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = lay(sheet, MarginTop(), "2px")
+  val sheet = close(sheet)
+  (* the match in a search result, in bold *)
+  val sheet = rule(sheet, ".mk")
+  val sheet = lay(sheet, FontWeight(), "bold")
+  val sheet = close(sheet)
+  (* the count beside a chapter's heading in the results *)
+  val sheet = rule(sheet, ".cnt")
+  val sheet = lay(sheet, FontWeight(), "normal")
+  val sheet = lay(sheet, TextTransform(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hq")
   val sheet = lay(sheet, Display(), "block")
