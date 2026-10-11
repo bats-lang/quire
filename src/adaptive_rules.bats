@@ -17,7 +17,7 @@ staload "declarations.sats"
    its content. And the Sync screen's parts: its status card (where,
    how it went, its actions), its footer note, and its sign-in step,
    which hides the screen's list while it is shown *)
-#pub fn spacing_rules {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false)
+#pub fn spacing_rules {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1700] sheet(after, false, false)
 
 implement spacing_rules (sheet) = let
   val sheet = rule(sheet, ":root")
@@ -47,6 +47,9 @@ implement spacing_rules (sheet) = let
      the whole width of the row *)
   val sheet = rule(sheet, ".info .srow>.sabout")
   val sheet = lay(sheet, Flex(), "1 1 100%")
+  (* under the name, closer than the row's gap: five rows with a line each
+     must not outgrow a phone's window (the Sync screen, #389) *)
+  val sheet = lay(sheet, MarginTop(), "-8px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.sabout,.info-in>.cnone,.scard")
   val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
