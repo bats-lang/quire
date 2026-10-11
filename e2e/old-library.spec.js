@@ -13,17 +13,17 @@
 
 import { test, expect } from './fixtures.js';
 import { readFileSync } from 'node:fs';
-import { store, put, bookKey } from './legacy-library.js';
+import { store, put, bookKey, syncEnded, reloadSettled } from './legacy-library.js';
 import {
   start, card, cards, reload, librarySettings, settingsButton, openBook, bookPage, openShelf, marks, toLibrary, bookMenu, menuItem,
 } from './helpers.js';
 
 // the groups each table added to the first one, in the order they were added
 const SHAPES = [
-  { name: 'the first table (twelve groups)', groups: [] },
-  { name: 'with prog (bb473e5)', groups: ['prog'] },
-  { name: 'with prog and tdir (04dcf63, the build 9ce1ae3 and aaa5dce)', groups: ['prog', 'tdir'] },
-  { name: 'with prog, tdir and snum (6002bcf, this build)', groups: ['prog', 'tdir', 'snum'] },
+  { name: 'the first table, twelve groups', groups: [] },
+  { name: 'the table with prog (bb473e5)', groups: ['prog'] },
+  { name: 'the table with prog and tdir (04dcf63, builds 9ce1ae3 and aaa5dce)', groups: ['prog', 'tdir'] },
+  { name: 'the table with prog, tdir and snum (6002bcf, this build)', groups: ['prog', 'tdir', 'snum'] },
 ];
 const ADDED = ['prog', 'snum', 'tdir'];
 
@@ -77,16 +77,17 @@ const libraryOf = groups => Object.fromEntries(Object.entries(real).map(([key, b
 /** The app started with exactly the keys of an old build's store */
 async function startWithOld(page, old) {
   await start(page);
+  await syncEnded(page);
   for (const key of Object.keys(await store(page))) await put(page, key, null);
   for (const [key, bytes] of Object.entries(old)) await put(page, key, bytes);
-  await reload(page);
+  await reloadSettled(page);
 }
 
 for (const { name, groups } of SHAPES) {
   const old = libraryOf(groups);
   const bookKeys = Object.keys(old).filter(key => key.startsWith('library/book/'));
 
-  test(`a library written by the table ${name} opens with every book, nothing said, and nothing to set aside`, async ({ page }) => {
+  test(`a library written by ${name} opens with every book, nothing said, and nothing to set aside`, async ({ page }) => {
     expect(bookKeys).toHaveLength(3);
     if (groups.join() === 'prog,tdir') expect(old, 'the real build\'s library, cut and put back as it was').toEqual(real);
     for (const key of bookKeys) expect(tagsOf(old[key]).filter(tag => ADDED.includes(tag)).sort(), key).toEqual([...groups].sort());
@@ -105,7 +106,7 @@ for (const { name, groups } of SHAPES) {
     expect(Object.keys(opened).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
   });
 
-  test(`a save of a library written by the table ${name} writes the current groups, and the books are as they were`, async ({ page }) => {
+  test(`a save of a library written by ${name} writes the current groups, and the books are as they were`, async ({ page }) => {
     await startWithOld(page, old);
     await expect(cards(page)).toHaveCount(2);
     await bookMenu(page, 'Old Gamma');

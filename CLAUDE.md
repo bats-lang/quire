@@ -1367,6 +1367,16 @@ open, and a save writes the current groups. The QLB1 to QLB6 formats of
 the old whole-library record are in `e2e/library-records.spec.js`. The
 Settings row "Set aside unreadable records" is absent for every record
 that reads (even with loss), in each of those specs.
+The flake of the set aside spec (#515) was the specs', not the app's:
+on the android project the app syncs as it opens (Auto Backup's file is
+merged), and the records it writes (`library/index`, and the books'
+`ORDR` renumbered by the save after a merge once a record is missing)
+land when that sync ends, not when the books show, so they landed over a
+spec's change to the store or after the snapshot it compared with.
+`syncEnded` / `reloadSettled` (`e2e/legacy-library.js`) take
+"sync-state" away before a reload and wait for the sync's end to write
+it (`_end`, after the saves), so a spec changes and snapshots the store
+only when the app has stopped writing it.
 
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
