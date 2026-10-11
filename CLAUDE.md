@@ -1479,6 +1479,29 @@ order is the writer's, not the format's.
   record is repaired and the old bytes kept); one that changes nothing
   writes nothing. `e2e/old-library.spec.js` removes a real book's title
   and author groups and opens it.
+* **The version before (stage 2d).** `library/previous/<id>` holds a
+  book's record as it was before a save, and `library/stamp/<id>` when
+  the record was last written (4 bytes, seconds since 2025; read once at
+  the library's load into memory, `_stamps` in `src/libstore.bats`). A
+  save keeps the record it replaces as the previous version only when
+  that record was last written 60 seconds ago or more (an unknown stamp
+  counts as old) and decodes whole, and writes the stamp on every save,
+  in one batch with the record: KOReader's rule (its `.old` is not
+  rotated until 60 seconds old, so a crash loop cannot overwrite the good
+  copy with a bad one), on the age of the file replaced, so saves a few
+  seconds apart never rotate and a bug that damages a record at each save
+  leaves the version from before the first. A book whose record is broken
+  beyond recovery (`UnusableDamaged`, the framing) and that has a
+  previous version is read from it (`_recover`, a `LossyBook`); the save
+  of a book whose stored record is not whole writes the library's image
+  as a new record and keeps the bytes under `library/damaged` (it used to
+  be refused; `NotQuire` and `Newer` still are). Emptying the Trash
+  deletes the record, its previous version and its stamp together. The
+  stamp is a key of its own, not a group: a group would be a field of
+  every image and record, and it is the library's bookkeeping, not the
+  book's. Not done: salvaging the chunks before a cut in a record's
+  framing, and offering the sync file or Auto Backup copy for a record
+  whose reader state is lost (a notice action: #507's).
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with
@@ -1865,9 +1888,13 @@ read of storage changed: each still folds, as #174 says.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
   record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
-  the end, no end chunk; every other damage is used, #510): it is shown
-  nowhere and never written over, so the book cannot be imported again and
-  no collection can be made. Settings shows a row then (`settings-aside`,
+  the end, no end chunk; every other damage is used, #510, and a book with
+  a version before it is read from it, 2d) is shown nowhere and not
+  written over by a read; the collections' record, and a book's of a newer
+  Quire or not Quire's, are never written over, so no collection can be made
+  while the collections' is one of them, and a book of those cannot be
+  imported again (a book whose framing is broken can: its import writes the
+  library's image over the record, the bytes kept, 2d). Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
   `settings-set-aside`), and only then. Pressing it
   (`lib_aside_run`, `lib_set_aside`) reads the library again and, for each
@@ -2516,9 +2543,10 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer, not Quire's or broken in its framing is
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer or not Quire's is
 shown nowhere, said once and never written over; one that lost a group, or
-that is under other ids than its key, is used (#510). A backup that could not
+that is under other ids than its key, is used, and one broken in its framing
+is read from the version before it when there is one, else shown nowhere (#510). A backup that could not
 read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
