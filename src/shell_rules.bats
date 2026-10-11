@@ -98,7 +98,7 @@ fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 1366} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1366] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 1387} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1387] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -162,11 +162,15 @@ fn shell_rules_fields_and_banners {left:nat | left >= 1366} (sheet: sheet(left, 
      known to it (the app bar wraps to five rows at 320px). The base
      rule's left 50% and translateX(-50%) still centre it when it is
      relative instead of fixed. Over the reader it stays fixed at the
-     top while the bars are away (the reader's own bars hide) *)
+     top while the bars are away (the reader's own bars hide). It starts
+     below the status bar and the spacing scale's least inset like the
+     fixed one (#508: its margin was 8px, so on a phone its first line
+     was drawn under the clock and the icons), as Material 3's banner
+     sits under the system bar and the top app bar *)
   val sheet = rule(sheet, ".banner.in-library")
   val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Top(), "auto")
-  val sheet = lay(sheet, Margin(), "8px 0 0")
+  val sheet = lay(sheet, Margin(), "max(8px,var(--safe-top)) 0 0")
   val sheet = close(sheet)
   (* While the reader's bars are up the banner sits under the top bar
      (#374): the bar is the top app bar, and Material 3 puts a banner
