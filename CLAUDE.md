@@ -170,11 +170,36 @@ and no flag (the flag wins). Nothing is written first: bats writes the
 version's facts from HEAD (above). A check takes 6 to 10 minutes on a
 cold build: run it in the background and wait for it, never push on the
 hope that it passes. Two bats in one checkout take turns (bats holds a
-lock on `bats.toml` and says it waits); two checkouts or worktrees do not
-lock each other (bats-lang/bats#252), so a machine shared by sessions
-runs one heavy build at a time by a lock of its own, `flock
-/tmp/quire-build.lock bats check ...` (and the same lock around `gen-pwa
-test`), until bats has a machine-wide limit.
+lock on `bats.toml` and says it waits). Two checkouts or worktrees take
+turns by bats's machine-wide slots (bats-lang/bats#252), which are opt-in:
+with `BATS_SLOTS=N` (1 to 64) in the environment, `check`, `build`,
+`test` and `run`'s build each hold one of N slots, after the project's
+lock, so a bats waiting for its project holds none. A slot is a file,
+`<BATS_LOCK_DIR>/slot-<i>.lock` (`BATS_LOCK_DIR` defaults to
+`~/.cache/bats`), locked by the kernel's `flock`: it is released however
+bats ends, even killed, and no file is ever stale. Free slots are taken
+without waiting; when all are busy bats says so and who last took slot 0
+("waiting for another bats on this machine ... was last taken by bats
+build in /path"). What bats starts runs in its slot (`BATS_SLOT_HELD`
+names the file), so a nested bats takes none. These are the same files
+`gen-pwa test` uses for `PWA_TEST_SLOTS` in `PWA_TEST_LOCK_DIR`, so
+pointing `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` at one directory makes
+builds and e2e runs one pool, and separate directories two (bats reads no
+`PWA_TEST_*`). A machine shared by sessions sets, in the shell's profile,
+`BATS_SLOTS=1`, `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` (one directory),
+`PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` (below) and `BATS_REPOSITORY`, and
+runs `bats check` and `gen-pwa test` with no wrapper of its own.
+
+A shell that reads no profile (an agent's, a CI-like step) gets the same
+from a machine-specific env file that is not in the repo (say
+`~/quire.env`, holding those variables), through `scripts/with-env
+<env-file> <command> [args...]`: it sources the file (every variable
+exported) and `exec`s the command exactly as given, so its arguments and
+exit status are the command's own: `scripts/with-env ~/quire.env bats
+check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
+<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
+`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
+static groups).
 
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
