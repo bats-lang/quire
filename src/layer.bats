@@ -75,6 +75,25 @@ fn _over_reader (overlay: layer): bool =
   | LSettings() => false | LAbout() => false
   | LSyncStep() => false | LSortMenu() => false | LShelf() => false
 
+(* Whether a reader panel dims the reader behind it. A panel that explains
+   a place in the text (a note, a word looked up) does not: the scrim
+   would dim the very words it is about, so it leaves the reader as it
+   is and places itself clear of them (ui_sheet_place; quire#387, HIG:
+   "a popover doesn't cover the element that revealed it") *)
+datatype scrim = Veils | Clear
+
+fn _scrim_of (overlay: layer): scrim =
+  case+ overlay of
+  | LNote() => Clear()
+  | LDictionary() => Clear()
+  | LContents() => Veils() | LTypography() => Veils() | LSearch() => Veils()
+  | LAnnotations() => Veils() | LImage() => Veils()
+  | LBookMenu() => Veils() | LLibraryMenu() => Veils() | LBookInfo() => Veils()
+  | LCollections() => Veils() | LStats() => Veils() | LDictionaries() => Veils()
+  | LCatalogues() => Veils() | LCatalogue() => Veils() | LSync() => Veils()
+  | LSettings() => Veils() | LAbout() => Veils()
+  | LSyncStep() => Veils() | LSortMenu() => Veils() | LShelf() => Veils()
+
 (* The open overlays, the last opened first, each with where the focus
    goes back to when it closes *)
 datavtype layers(int) =
@@ -110,7 +129,10 @@ fn _blocked {count:nat} (overlays: !layers(count)): bool =
    focus-wrap-end) take the focus only then *)
 fn _modality_show {count:nat} (overlays: !layers(count)): void = let
   val blocked = _blocked(overlays)
-  val () = ui_show("panel-scrim", blocked)
+  val veiled = (case+ _top_panel(overlays) of
+    | ~NoPanel() => false
+    | ~PanelOnTop(top) => (case+ _scrim_of(top) of Veils() => true | Clear() => false)): bool
+  val () = ui_show("panel-scrim", veiled)
   val () = ui_inert("reader", blocked)
 in
   if blocked then let

@@ -10,7 +10,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 6700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6700] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 7500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7500] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
 fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1536] sheet(after, false, false) = let
@@ -185,7 +185,7 @@ fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(l
 in sheet end
 
 (* The settings sheet, from .grp on *)
-fn panel_rules_settings_sheet {left:nat | left >= 1612} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1612] sheet(after, false, false) = let
+fn panel_rules_settings_sheet {left:nat | left >= 2400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2400] sheet(after, false, false) = let
   val sheet = rule(sheet, ".grp")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = lay(sheet, Padding(), "12px 12px 4px")
@@ -217,6 +217,20 @@ fn panel_rules_settings_sheet {left:nat | left >= 1612} (sheet: sheet(left, fals
   (* a sheet's head, its Close in it: held at the sheet's top as the
      rest scrolls, so Close is always in reach (as Apple Books' sheet
      keeps its close at its top) *)
+  (* a sheet that explains a place in the text (a note, a word looked up)
+     keeps to one half of the window, the half the place is not in:
+     at the foot, or at the head (quire#387) *)
+  val sheet = rule(sheet, ".sheet[data-side=top]")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = lay(sheet, Bottom(), "auto")
+  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) 0 max(16px,var(--safe-left))")
+  val sheet = lay(sheet, BorderRadius(), "0 0 12px 12px")
+  val sheet = lay(sheet, BoxShadow(), "0 2px 16px rgba(0,0,0,.3)")
+  val sheet = lay(sheet, MaxHeight(), "45dvh")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".sheet[data-side=bottom]")
+  val sheet = lay(sheet, MaxHeight(), "45dvh")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".shead")
   val sheet = lay(sheet, Position(), "sticky")
   val sheet = lay(sheet, Top(), "-12px")

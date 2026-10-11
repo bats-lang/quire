@@ -5418,6 +5418,8 @@ fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byt
   val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
   val () = release_bytes(note_frozen, note_bytes)
   val () = ui_text_buf("footnote-text", decoded, decoded_len)
+  (* clear of the reference it explains *)
+  val () = ui_sheet_place(NoteSheet())
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
 

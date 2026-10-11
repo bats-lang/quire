@@ -1213,6 +1213,10 @@ implement dict_show () =
           val () = $A.free<byte>(types)
           val () = ui_text_buf("dictionary-source", name, name_len)
           val () = ui_text("dictionary-article", "-")
+          (* clear of the selection it is about *)
+          val () = $DR.get_selection_rect()
+          val () = ui_reference_set($DR.get_measure_y() + $DR.get_measure_h() / 2)
+          val () = ui_sheet_place(DictionarySheet())
           val () = layer_open(LDictionary())
           val () = ui_focus("dictionary-close")
         in _article(id, form, offset, size) end
