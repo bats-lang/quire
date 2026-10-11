@@ -134,7 +134,7 @@ in Sheet(builder) end
   | Width | MaxWidth | MinWidth | Height | MaxHeight | MinHeight | BoxSizing
   | FontFamily | FontSize | FontWeight | FontStyle | Font | LineHeight
   | LetterSpacing | TextTransform | TextAlign | TextOverflow | TextDecoration
-  | WhiteSpace | Hyphens | Direction | WritingMode | OverflowWrap
+  | WhiteSpace | Hyphens | Direction | WritingMode | TextCombineUpright | OverflowWrap
   | Overflow | OverflowX | Position | Top | Bottom | Left | Right | Inset
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
@@ -162,7 +162,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | TextTransform() => "text-transform" | TextAlign() => "text-align"
   | TextOverflow() => "text-overflow" | TextDecoration() => "text-decoration"
   | WhiteSpace() => "white-space" | Hyphens() => "hyphens" | Direction() => "direction"
-  | WritingMode() => "writing-mode" | OverflowWrap() => "overflow-wrap"
+  | WritingMode() => "writing-mode" | TextCombineUpright() => "text-combine-upright" | OverflowWrap() => "overflow-wrap"
   | Overflow() => "overflow" | OverflowX() => "overflow-x" | Position() => "position"
   | Top() => "top" | Bottom() => "bottom" | Left() => "left" | Right() => "right"
   | Inset() => "inset" | ZIndex() => "z-index" | Cursor() => "cursor"

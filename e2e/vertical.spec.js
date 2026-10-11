@@ -7,7 +7,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, importFiles, epubFile, openBook, readBook, toLibrary, reload, bookPage, dialog,
   place, indicator, chapters, japaneseChapters,
-  readingSettings, openReadingSettings, expectBarFollows,
+  readingSettings, openReadingSettings, expectBarFollows, marks, selectionButton,
 } from './helpers.js';
 
 const verticalBook = (title) => ({ title, author: 'Vertical Tests', language: 'ja', rtl: true, rawChapters: japaneseChapters(2, 40) });
@@ -187,4 +187,77 @@ test.describe('on a touch screen', () => {
     await swipe(mid + 60, mid - 60, 22);
     await expect.poll(async () => (await place(page)).p).toBe(1);
   });
+});
+
+// quire#391: digits lie on their side in vertical text (the default
+// text-orientation: mixed turns Latin and digits). JLREQ sets a short
+// number upright in one cell (tate-chu-yoko) and a longer number or a
+// Latin word turned; `text-combine-upright: digits` is supported by no
+// browser, so each run of one or two digits is wrapped in a text part (an
+// element of the class tcy and the attribute data-part, which bridge counts
+// as part of its content node's text) and set `text-combine-upright: all`.
+
+test('a run of one or two digits in vertical text is set upright in one cell; a longer number, a word and a character reference are not', async ({ page }) => {
+  await start(page);
+  await readBook(page, {
+    title: '縦書きの数', author: 'Vertical Tests', language: 'ja', rtl: true,
+    rawChapters: [{ body: '<h1>第1章</h1><p id="numbers">令和5年12月 2024年 A4判 &#49;&#50;&#51; 3.5</p>' }],
+  });
+  const style = await bookPage(page).locator('.tcy').first().evaluate(e => getComputedStyle(e).textCombineUpright);
+  expect(style).toBe('all');
+  // the runs wrapped: 1 of the heading; 5 and 12; and 3 and 5 of "3.5"
+  const wrapped = await bookPage(page).locator('.tcy').allTextContents();
+  expect(wrapped).toEqual(['1', '5', '12', '3', '5']);
+  // a part is a part of its content node, which holds the whole text
+  const heading = await bookPage(page).locator('h1').evaluate(e => {
+    const node = e.querySelector('[id^=c]');
+    return { id: node.id, text: node.textContent, parts: [...node.children].map(c => [c.dataset.part, c.className, c.textContent]) };
+  });
+  expect(heading.text).toBe('第1章');
+  expect(heading.parts).toEqual([['1', '', '第'], ['1', 'tcy', '1'], ['1', '', '章']]);
+  // the parts take no content node number of their own: the next text is
+  // the very next number
+  const next = await bookPage(page).locator('#numbers').evaluate(e => e.querySelector('[id^=c]').id);
+  expect(Number(next.slice(1))).toBe(Number(heading.id.slice(1)) + 1);
+  // upright: the run stands in a cell as tall as a character's, where a digit
+  // on its side is about half as tall as one
+  const heights = await bookPage(page).locator('h1').evaluate(e => {
+    const [before, run] = [...e.querySelectorAll('[data-part]')];
+    return { character: before.getBoundingClientRect().height, run: run.getBoundingClientRect().height };
+  });
+  expect(heights.run).toBeGreaterThan(heights.character * 0.8);
+  expect(heights.run).toBeLessThan(heights.character * 1.2);
+  // the text is as it was: a copy of the paragraph, character references decoded
+  expect(await bookPage(page).locator('#numbers').evaluate(e => e.textContent)).toBe('令和5年12月 2024年 A4判 123 3.5');
+});
+
+test('a mark over the text of a vertical heading with digits in it covers the text', async ({ page }) => {
+  await start(page);
+  await readBook(page, verticalBook('縦書き検索'));
+  await page.keyboard.press('/');
+  const panel = dialog(page, 'Search in book');
+  await expect(panel).toBeVisible();
+  await panel.getByRole('searchbox', { name: 'Search in book' }).fill('第1章');
+  await expect(panel.getByRole('status')).toHaveText('1 result');
+  // the match crosses the heading's three parts and is one range of text
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: '第1章' });
+});
+
+test('a selection over the digits of a vertical heading is kept with the whole text\'s offsets', async ({ page }) => {
+  await start(page);
+  await readBook(page, verticalBook('縦書き選択'));
+  // select "1章" from the heading's second part to the end of its third
+  await bookPage(page).locator('h1').evaluate(e => {
+    const [, run, tail] = [...e.querySelectorAll('[data-part]')];
+    const range = document.createRange();
+    range.setStart(run.firstChild, 0);
+    range.setEnd(tail.firstChild, 1);
+    const selection = getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  });
+  await expect(page.getByRole('toolbar', { name: 'Selection' })).toBeVisible();
+  await selectionButton(page, 'Highlight').click();
+  // the highlight is painted over exactly "1章", across two parts
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: '1章' });
 });

@@ -764,6 +764,10 @@ end
 (* Content nodes are numbered from 0 in each chapter *)
 val _content_count = ref<[count:nat] int count>(0)
 
+(* How many text parts (_tcy_parts) the chapter has made: each one's id is
+   "t" and its number, apart from the content nodes' *)
+val _part_count = ref<[count:nat] int count>(0)
+
 (* Whether a content node has a box: an element, and not one that is not
    drawn (display none, as a ruby's rp is, measures 0 by 0) *)
 fn _drawn {node:nat} (node: int node): bool =
@@ -2145,6 +2149,107 @@ fn _next_content_node(): [node:nat] int node = let
   val () = !_content_count := node + 1
 in node end
 
+(* ASCII digits and letters: text parts are found among them *)
+fn _is_digit (code: int): bool = code >= 48 && code <= 57
+fn _is_letter (code: int): bool = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+
+(* The end of the run of ASCII digits that begins at data[offset + at] *)
+fun _digit_run_end {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{at:nat | at <= text_len} .<text_len - at>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, at: int at): [stop:nat | at <= stop; stop <= text_len] int stop =
+  if at >= text_len then at
+  else if _is_digit(byte2int0($A.read<byte>(data, offset + at))) then _digit_run_end(data, offset, text_len, at + 1)
+  else at
+
+(* Where a character reference that begins at data[offset + at] (an
+   ampersand) ends: after its semicolon when there is one within 32
+   bytes, else after the ampersand *)
+fun _reference_end {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{at:nat | at < text_len}{reach:nat | reach <= 32} .<32 - reach>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, at: int at, reach: int reach): [stop:nat | at < stop; stop <= text_len] int stop =
+  if at + 1 + reach >= text_len then at + 1
+  else if reach >= 32 then at + 1
+  else if byte2int0($A.read<byte>(data, offset + at + 1 + reach)) = 59 then at + 2 + reach
+  else _reference_end(data, offset, text_len, at, reach + 1)
+
+(* The first run of one or two ASCII digits at or after data[offset + at]
+   that is not part of a Latin word (JLREQ: a short number stands upright
+   as one cell, tate-chu-yoko; a longer number and a word are turned),
+   as its start and end; both text_len when there is none. Character
+   references are stepped over whole, so a digit in "&#49;" is not one *)
+fun _tcy_find {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{at:nat | at <= text_len} .<text_len - at>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, at: int at): [start,stop:nat | start <= stop; stop <= text_len] @(int start, int stop) =
+  if at >= text_len then @(text_len, text_len)
+  else let
+    val code = byte2int0($A.read<byte>(data, offset + at))
+  in
+    if code = 38 then _tcy_find(data, offset, text_len, _reference_end(data, offset, text_len, at, 0))
+    else if _is_digit(code) then let
+      val stop = _digit_run_end(data, offset, text_len, at)
+      val before_word = (if at > 0 then _is_letter(byte2int0($A.read<byte>(data, offset + at - 1))) else false): bool
+      val after_word = (if stop < text_len then _is_letter(byte2int0($A.read<byte>(data, offset + stop))) else false): bool
+    in
+      if stop - at > 2 then _tcy_find(data, offset, text_len, stop)
+      else if before_word then _tcy_find(data, offset, text_len, stop)
+      else if after_word then _tcy_find(data, offset, text_len, stop)
+      else @(at, stop)
+    end
+    else _tcy_find(data, offset, text_len, at + 1)
+  end
+
+(* A text part of content node node: the last child of its element, a
+   span with the id "t" and its number and the attribute data-part, so
+   that bridge counts its text as the content node's (its offsets, its
+   selection and its marks), and the class tcy when it is a run of digits
+   to be set upright; its text data[offset, offset + text_len) decoded *)
+fn _part_add {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset + text_len <= n; text_len < 65536; text_len > 0}
+  (doc: !$D.document(doc_location), node: int node, data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, upright: bool): void = let
+  val part = !_part_count
+  val () = !_part_count := part + 1
+  val @(part_id, part_id_len) = _number_id("t", part, 3)
+  val @(node_id, node_id_len) = _node_id(node)
+  val @(part_frozen, part_bytes) = $A.freeze<byte>(part_id)
+  val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+  val () = $D.add_element(doc, node_bytes, node_id_len, part_bytes, part_id_len, $D.Span)
+  val () = release_bytes(node_frozen, node_bytes)
+  val marker = $A.alloc<byte>(1)
+  val () = $A.set<byte>(marker, 0, $A.int2byte(49))
+  val @(marker_frozen, marker_bytes) = $A.freeze<byte>(marker)
+  val () = $D.set_attr(doc, part_bytes, part_id_len, $D.Data("part"), marker_bytes, 0, 1)
+  val () = release_bytes(marker_frozen, marker_bytes)
+  val () = (if upright then let
+      val class_buf = $A.alloc<byte>(3)
+      val () = $A.write_text(class_buf, 0, $A.text_lit("tcy"), 3)
+      val @(class_frozen, class_bytes) = $A.freeze<byte>(class_buf)
+      val () = $D.set_attr(doc, part_bytes, part_id_len, $D.Class, class_bytes, 0, 3)
+    in release_bytes(class_frozen, class_bytes) end else ())
+  val () = (if has_reference(data, offset, text_len) then _set_decoded(doc, part_bytes, part_id_len, data, offset, text_len)
+    else $D.set_text(doc, part_bytes, part_id_len, data, offset, text_len))
+in release_bytes(part_frozen, part_bytes) end
+
+(* Content node node's text data[offset, offset + text_len), as parts:
+   the text between the runs of digits, and each run *)
+fun _tcy_parts {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset + text_len <= n; text_len < 65536}{from:nat | from <= text_len} .<text_len - from>.
+  (doc: !$D.document(doc_location), node: int node, data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len, from: int from): void =
+  if from >= text_len then ()
+  else let
+    val @(start, stop) = _tcy_find(data, offset, text_len, from)
+    val () = (if start > from then _part_add(doc, node, data, offset + from, start - from, false) else ())
+    val () = (if stop > start then _part_add(doc, node, data, offset + start, stop - start, true) else ())
+  in if stop <= from then () else _tcy_parts(doc, node, data, offset, text_len, stop) end
+
+(* Content node node's text: when the book is set vertically and the text
+   holds runs of one or two digits, in parts (the digits upright, one cell
+   each: JLREQ's rule, written by the stylesheet's .tcy); else as it is.
+   The content node, its number and its offsets are the same either way *)
+fn _text_into {doc_location,l:agz}{n:pos}{node:nat}{offset,text_len:nat | offset + text_len <= n; text_len < 65536}
+  (doc: !$D.document(doc_location), node: int node, data: !$A.borrow(byte, l, n), offset: int offset, text_len: int text_len): void =
+  if ~_is_vertical() then _node_text(doc, node, data, offset, text_len)
+  else let
+    val @(start, _) = _tcy_find(data, offset, text_len, 0)
+  in
+    if start < text_len then _tcy_parts(doc, node, data, offset, text_len, 0)
+    else _node_text(doc, node, data, offset, text_len)
+  end
+
 (* Text data[offset, offset + text_len) as spans, the last children of content node
    parent: one span per piece under 64 KiB (a text op's limit), split
    where white space is, else where a UTF-8 character starts. The pieces
@@ -2160,11 +2265,11 @@ fun _text_spans {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{offset,te
 in
   if text_len < 65536 then let
     val () = (if split then _node_attr_literal(doc, node, $D.Class, "run") else ())
-  in _node_text(doc, node, data, offset, text_len) end
+  in _text_into(doc, node, data, offset, text_len) end
   else let
     val cut = _text_cut(data, offset, text_len)
     val () = _node_attr_literal(doc, node, $D.Class, "run")
-    val () = _node_text(doc, node, data, offset, cut)
+    val () = _text_into(doc, node, data, offset, cut)
   in _text_spans(doc, data, parent, offset + cut, text_len - cut, true) end
 end
 
@@ -3728,6 +3833,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = $D.remove_children(doc, page_id_bytes, page_id_len)
                   val () = release_bytes(page_id_frozen, page_id_bytes)
                   val () = !_content_count := 0
+                  val () = !_part_count := 0
                   val () = _links_put(LinksCell(links_nil()))
                   val () = _pictures_put(PicturesCell(pictures_nil()))
                   val () = _breaks_put(BreaksCell(breaks_nil()))
