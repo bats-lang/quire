@@ -40,6 +40,8 @@ staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
 staload "back.sats"
+staload "image_viewer.sats"
+staload "overlay_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -2257,6 +2259,9 @@ in ui_show("pages-list", true) end
 (* The page turn's region: .caf (page), region 1 *)
 #define PAGE_REGION 1
 
+(* The image viewer's pinch region: its scroller, region 2 *)
+#define IMAGE_REGION 2
+
 (* A drag has ended: the click that follows it is not a tap. The flag
    drops once the click has had its turn *)
 fn _drag_ended (): void = let
@@ -2298,8 +2303,10 @@ fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): voi
           if region <> PAGE_REGION then ()
           else let val () = _drag_ended() in reader_pan_back() end
         | ~$GT.GLongPress(_, _, _) => ()
-        | ~$GT.GPinch(_, _, _, _) => ()
-        | ~$GT.GPinchEnd(_) => ()
+        | ~$GT.GPinch(region, scale, mid_x, mid_y) =>
+          if region = IMAGE_REGION then viewer_pinch(scale, mid_x, mid_y) else ()
+        | ~$GT.GPinchEnd(region) =>
+          if region = IMAGE_REGION then viewer_pinch_end() else ()
         | ~$GT.GScrollEnd(_, _) => ()
         | ~$GT.GTransitionEnd(_) => ()
         | ~$GT.GTransitionCancel(_) => ())
@@ -2371,6 +2378,24 @@ fn _gesture_record (h: $EV.event_payload): void =
         in _gestures_act(asked, FRAME_ROUNDS) end
       | ~GNone() => $A.free<byte>(record))
 
+(* A pointer record from the image viewer: the viewer's drag reads it,
+   and the recognizer sees a pinch in it *)
+fn _viewer_record (h: $EV.event_payload): void =
+  case+ take_blob(h) of
+  | ~NoBlobBytes() => ()
+  | ~BlobBytes(record, record_len) =>
+    if record_len < 48 then $A.free<byte>(record)
+    else if ~layer_is_open(LImage()) then $A.free<byte>(record)
+    else (case+ _gestures_take() of
+      | ~GSome(state, source) => let
+          val () = viewer_pointer(_int32_at(record, 0), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), _int32_at(record, 20))
+          val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
+          val () = $A.free<byte>(record)
+          val () = _gestures_put(GSome(state, source))
+          val () = _gestures_show(events)
+        in _gestures_act(asked, FRAME_ROUNDS) end
+      | ~GNone() => $A.free<byte>(record))
+
 (* A pointer record from the reader view while a panel is over it:
    dropped *)
 fn _gesture_drop (h: $EV.event_payload): void =
@@ -2383,6 +2408,7 @@ fn _gesture_drop (h: $EV.event_payload): void =
 fn _gestures_start (): void = let
   val state = $GT.gestures_new()
   val () = $GT.gestures_region(state, PAGE_REGION, $GP.NoRegion(), page_turn_axes(), false, false, $GT.DevTouch())
+  val () = $GT.gestures_region(state, IMAGE_REGION, $GP.NoRegion(), image_zoom_axes(), true, false, $GT.DevTouch())
 in _gestures_put(GSome(state, $GS.gestures_source_new())) end
 
 (* The page's scrolls, numbered, so only the last one's rest counts *)
@@ -2671,7 +2697,7 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
   | ~$R.none() => false
   | ~$R.some(offset) => annot_tap_select(node, offset)
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 19) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
@@ -2734,15 +2760,31 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
     end)
   val listeners = RCons(listeners, OnEl("image-viewer"), "click", llam(h) => let
       val clicked = _target(h)
-      val close = (case+ _image_viewer_control(clicked) of ~$R.some(ImageClose()) => true | ~$R.none() => false): bool
+      val () = (case+ _image_viewer_control(clicked) of
+        (* the focus goes back where it was (layer.bats) *)
+        | ~$R.some(ImageClose()) => layer_close(LImage())
+        | ~$R.some(ImageZoomIn()) => viewer_zoom_in()
+        | ~$R.some(ImageZoomOut()) => viewer_zoom_out()
+        | ~$R.none() => ())
+      val () = _target_free(clicked)
+    in 0 end)
+  (* a double tap on the picture zooms it in there, or back to the fit
+     (a double click is the same for a mouse) *)
+  val listeners = RCons(listeners, OnEl("image-viewer"), "dblclick", llam(h) => let
+      val clicked = _target(h)
+      val on_picture = (if _is(clicked, "image-full") then true else _is(clicked, "image-box")): bool
+      val x = _target_x(clicked)
+      val y = _target_y(clicked)
       val () = _target_free(clicked)
     in
-      (* the focus goes back where it was (layer.bats) *)
-      if close then let
-        val () = layer_close(LImage())
-      in 0 end
+      if on_picture then let val () = viewer_double_tap(x, y) in 0 end
       else 0
     end)
+  (* the pointers on the picture: a pinch is the gestures package's, a
+     finger's drag is the viewer's own *)
+  val listeners = RCons(listeners, OnPointer("image-viewer"), "pointer", llam(h) => let
+      val () = _viewer_record(h)
+    in 0 end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
   val listeners = RCons(listeners, OnEl("page"), "focusin", llam(h) => let
@@ -2816,6 +2858,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
+      val () = viewer_resized()
       val () = _relayout_settled()
     in 0 end)
   (* the browser's Back: it took the guard back.bats pushes once there

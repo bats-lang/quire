@@ -22,6 +22,7 @@ staload "overlay.sats"
 staload "ui.sats"
 staload "notice.sats"
 staload "layer.sats"
+staload "image_viewer.sats"
 staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
@@ -5527,6 +5528,7 @@ in
          val () = _show_image(book_serial(), file_size, 0, true, !_load_generation, path_bytes, path_len)
          val () = release_bytes(path_frozen, path_bytes)
          val () = layer_open(LImage())
+         val () = viewer_open()
          val () = ui_focus("image-close")
        in true end)
 end
