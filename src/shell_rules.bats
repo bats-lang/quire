@@ -12,7 +12,7 @@ staload "declarations.sats"
 #pub fn shell_rules {left:nat | left >= 8750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8750] sheet(after, false, false)
 
 (* The library page, from body on *)
-fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1831] sheet(after, false, false) = let
+fn shell_rules_library_page {left:nat | left >= 1832} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1832] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
