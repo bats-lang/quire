@@ -5922,6 +5922,12 @@ implement reader_search_close () = let
   val () = reader_search_stop()
 in if jumped then _pop_position() else () end
 
+(* The digits set upright laid out anew: asked a moment after a face
+   arrived, since the browser lays its text out with the face only after
+   the event that says it came *)
+#pub fun reader_tcy_refit (): void
+implement reader_tcy_refit () = _tcy_refit()
+
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()
 
