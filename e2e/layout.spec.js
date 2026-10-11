@@ -8,11 +8,12 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
+  reload, readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
+import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort, cardMoreBoxes } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -203,6 +204,8 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
     epubFile({ title: 'Short', author: 'S' }),
   ], 2);
   await fits(page, 'the library');
+  const listBoxes = await cardMoreBoxes(page);
+  expect(listBoxes.length, 'a book menu button on each card of the list').toBe(2);
   // a collection, so its row shows
   await bookMenu(page, 'Short');
   await menuItem(page, 'Collections').click();
@@ -219,6 +222,11 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await fits(page, 'the library with a collection');
   await chooseInSortMenu(page, 'Grid');
   await fits(page, 'the library as a grid');
+  // quire#495: the book menu button is one box, in the list and in the grid
+  // (not stretched to the card's height, nor under 48 px)
+  const gridBoxes = await cardMoreBoxes(page);
+  expect(gridBoxes.length, 'a book menu button on each card of the grid').toBe(2);
+  expect([...new Set([...listBoxes, ...gridBoxes])], 'the book menu button differs between list and grid').toHaveLength(1);
   await chooseInSortMenu(page, 'List');
   await bookMenu(page, 'Short');
   await fits(page, 'the book menu');
@@ -725,3 +733,42 @@ for (const [name, text, button, banner] of [
     await healReads(page);
   });
 }
+
+// #507: the notice of records that cannot be used has Copy details and
+// Report, which wrap under its message on a phone and make it tall; the
+// menus opened from the library are over it, not under it, and it is over
+// none of the library's controls
+test('the library menu is reachable under the banner of records that cannot be used', async ({ page }) => {
+  await start(page);
+  await forgetRecords(page);
+  const unreadable = { idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer' };
+  await put(page, 'lib', [...legacyLibrary(6, [], [unreadable, { idHigh: 0x2345678, idLow: 0x1bcdef0, title: 'Beta Notes', author: 'Bo Author' }])]);
+  await reload(page);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(unreadable)].slice();
+  record[10] ^= 0x5a;
+  await put(page, bookKey(unreadable), record);
+  await reload(page);
+  await expect(page.getByRole('alert')).toContainText('Some books in your library could not be read');
+  await expect(page.getByRole('alert').getByRole('button', { name: 'Copy details' })).toBeVisible();
+  expect(await coveredByBanner(page)).toEqual([]);
+  await libraryMenu(page);
+  for (const name of ['Settings', 'About Quire', 'Close']) await menuItem(page, name).click({ trial: true });
+  await page.keyboard.press('Escape');
+  await fits(page, 'the library with the banner of records that cannot be used');
+  // a screen opened over the library does not hide the banner's buttons
+  // (an error of a sync is said there): Settings, then Sync
+  const banner = page.getByRole('alert');
+  const reachable = async () => {
+    for (const control of [banner.getByRole('button', { name: 'Copy details' }), banner.getByRole('link', { name: 'Report' }), banner.getByRole('button', { name: 'Dismiss' })]) {
+      await control.click({ trial: true });
+    }
+  };
+  await librarySettings(page);
+  await reachable();
+  // (on a phone the tall banner is over the Sync row: the reader dismisses
+  // the banner first, so the screen is opened here by its own handler)
+  await page.evaluate(() => document.getElementById('settings-sync').click());
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await reachable();
+});

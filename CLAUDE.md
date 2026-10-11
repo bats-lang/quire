@@ -2215,6 +2215,33 @@ got here" (or Readium LCP) in place of Get and the licence is never
 fetched; an entry that also has an EPUB is got as ever
 (`e2e/drm-catalogue.spec.js`).
 
+**Copy details and Report on every read failure (#507).** A failure
+whose banner is about stored data or a book that could not be read
+offers Copy details and a Report link, as `notice_unexpected` does, and
+keeps the details for About's Copy last error details. The details are
+data built in one place (`_report_make` in `src/notice.bats`): Quire's
+version, the platform, the failure's name (`_failure_name`, a total
+match), a chapter's number or the length of a file's name, a line saying
+what the details hold ("no book text, titles or passwords") so the
+reader sees it before sending (Firefox's about:support and Signal's
+debug log both say what they hold, and hold none of the user's content),
+and, for a failure of records, how many the last read could not use and a
+line for each of the first 16 (`record_note`: the record's id, which is
+the hash of a file and not a title, why it cannot be used, its size and
+its first 12 bytes, which are the format's magic, kind and versions, as
+a crash report keeps a file's header and not its content). The library's
+read notes them (`libstore_read`) and the failure that says so takes
+them. Which failures have details is `detail_source_of`, a total match
+(`FromFailureAlone`, `FromRecordNotes`, `NothingToReport`, the last for a
+platform's refusal of a copy, a selection, a rotation lock, a grant or a
+narration, which leaves the details of the failure before it in
+place), so a failure added without saying does not type-check
+(`tests/static/reject/notice-without-details`). A later field (the groups
+lost, each one's CRC: #510) is one more field of `record_note` and one
+more line of `_put_note`. `e2e/notice-details.spec.js` checks each kind
+of record, annotations and settings: the buttons, the fields, no book
+text, and About.
+
 ## Every outcome is said, and the unexpected as such
 
 After #334, where a Google error that ended the consent screen reached
@@ -2478,6 +2505,14 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
   Trash holds something. Nothing is purged by itself: that would be an
   irreversible action the reader did not take. A book in the Trash has
   Restore first in its menu.
+  Restore all books (`trash-restore-all`, quire#494; Windows' Recycle Bin
+  has "Restore all items" beside its empty button, Drive and Gmail only
+  select-all then restore) comes before Empty Trash, plain since nothing is
+  lost: `lib_restore_all` puts every book of the Trash on the shelf, as a
+  single Restore does, and returns the Trashed books' shelves, so the offer
+  `BooksRestored` (Undo) puts exactly those books back in the Trash
+  (`lib_untrash_all`) and its end lets them go (`lib_shelved_free`). It
+  says "books": the dictionaries in the Trash have their own Restore.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
@@ -2674,6 +2709,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and
