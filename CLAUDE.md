@@ -170,11 +170,36 @@ and no flag (the flag wins). Nothing is written first: bats writes the
 version's facts from HEAD (above). A check takes 6 to 10 minutes on a
 cold build: run it in the background and wait for it, never push on the
 hope that it passes. Two bats in one checkout take turns (bats holds a
-lock on `bats.toml` and says it waits); two checkouts or worktrees do not
-lock each other (bats-lang/bats#252), so a machine shared by sessions
-runs one heavy build at a time by a lock of its own, `flock
-/tmp/quire-build.lock bats check ...` (and the same lock around `gen-pwa
-test`), until bats has a machine-wide limit.
+lock on `bats.toml` and says it waits). Two checkouts or worktrees take
+turns by bats's machine-wide slots (bats-lang/bats#252), which are opt-in:
+with `BATS_SLOTS=N` (1 to 64) in the environment, `check`, `build`,
+`test` and `run`'s build each hold one of N slots, after the project's
+lock, so a bats waiting for its project holds none. A slot is a file,
+`<BATS_LOCK_DIR>/slot-<i>.lock` (`BATS_LOCK_DIR` defaults to
+`~/.cache/bats`), locked by the kernel's `flock`: it is released however
+bats ends, even killed, and no file is ever stale. Free slots are taken
+without waiting; when all are busy bats says so and who last took slot 0
+("waiting for another bats on this machine ... was last taken by bats
+build in /path"). What bats starts runs in its slot (`BATS_SLOT_HELD`
+names the file), so a nested bats takes none. These are the same files
+`gen-pwa test` uses for `PWA_TEST_SLOTS` in `PWA_TEST_LOCK_DIR`, so
+pointing `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` at one directory makes
+builds and e2e runs one pool, and separate directories two (bats reads no
+`PWA_TEST_*`). A machine shared by sessions sets, in the shell's profile,
+`BATS_SLOTS=1`, `BATS_LOCK_DIR` and `PWA_TEST_LOCK_DIR` (one directory),
+`PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` (below) and `BATS_REPOSITORY`, and
+runs `bats check` and `gen-pwa test` with no wrapper of its own.
+
+A shell that reads no profile (an agent's, a CI-like step) gets the same
+from a machine-specific env file that is not in the repo (say
+`~/quire.env`, holding those variables), through `scripts/with-env
+<env-file> <command> [args...]`: it sources the file (every variable
+exported) and `exec`s the command exactly as given, so its arguments and
+exit status are the command's own: `scripts/with-env ~/quire.env bats
+check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
+<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
+`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
+static groups).
 
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
@@ -1176,6 +1201,24 @@ failing by #411 above), its links and scripts do nothing, it uses system fonts, 
 book's, and a dark theme does not recolour its black text (an image is not themed; the
 image dimming setting applies to it). Its text is kept in the page, hidden, so a search hit can
 still be counted.
+
+## MathML is the browser's (#419, #408)
+
+A `math` element of a chapter is made element for element in the MathML namespace
+(`_math_add`, `_math_attrs` in `src/reader.bats`: dom's `add_math_element` and
+`set_math_attr`, which write bridge's `math:` tag, `createElementNS`), so the browser sets the
+equation and its accessibility tree has the MathML (no `role`, no text copy), the
+one rendering both #419's `cnt-mathml-support` and #408 need. The elements are
+MathML Core's presentation ones; `maction` and `annotation-xml` (they can carry behaviour
+or foreign content) are refused, as are any colour or background attribute (the page's colours are the
+theme's: the text's own colour, so each equation reaches the contrast the proofs hold for text) and any link or handler. A
+refused element makes none and its children go to its parent; elements and texts take
+their content-node numbers as everywhere, so search and read aloud count the same tree.
+A token's (`mi`, `mn`, `mo`, `ms`, `mtext`) text is its own; text anywhere else in a math element is not shown. A
+display equation wider than the column scrolls along it (`math[display=block]`).
+By research: every reader that shows a content document in a browser engine (Thorium,
+Readium Mobile on Android, Calibre's viewer, Foliate) leaves MathML to the engine, and Chromium
+has set MathML Core since 109; Apple Books' WebKit too. Where an engine has no math font the text falls back.
 
 ## The platform, in Bats
 

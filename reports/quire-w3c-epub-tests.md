@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 112 | 11 | 16 | 139 |
+| must | 113 | 10 | 16 | 139 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
 | deprecated | 17 | 9 | 1 | 27 |
-| all | 149 | 34 | 22 | 205 |
+| all | 150 | 33 | 22 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -29,7 +29,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 
 | test | level | why | others | e2e |
 | --- | --- | --- | ---: | --- |
-| `cnt-mathml-support` | must | a math element is made a div: its tokens are shown as plain text ("x / = / a / + / b / 2"), not an equation | 14/17 | next |
 | `cnt-svg-css-inclusion` | must | the svg is drawn, but the page's own <style> does not reach it (by decision: the book's CSS is dropped, quire#411; the svg is a picture of its own, so a style outside it cannot change it, as for an img (cnt-svg-css-reference)) | 12/18 | policy |
 | `lay-pp-xhtml-icb` | must | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi` | must | each page's own viewport is read (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
@@ -103,6 +102,7 @@ Caveats of a pass, where there is one:
 * `cnt-css-fonts_tt`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
 * `cnt-css-fonts_woff`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
 * `cnt-css-fonts_woff2`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-mathml-support`: a math element is made element for element in the MathML namespace (dom's add_math_element, bridge's math: tag), so the browser sets the equation; maction, annotation-xml and colours are refused
 * `cnt-svg-css`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
 * `cnt-svg-css-reference`: an SVG referenced by img is shown, and the page's CSS does not change it
 * `cnt-svg-embedded`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
