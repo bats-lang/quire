@@ -5511,6 +5511,8 @@ fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byt
   val () = ui_text_buf("footnote-text", decoded, decoded_len)
   val () = ui_show("footnote-go", true)
   val () = ui_show("footnote-open", false)
+  (* clear of the reference it explains *)
+  val () = ui_sheet_place(NoteSheet())
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
 
@@ -5526,6 +5528,7 @@ fn _external_ask {l:agz}{url_len:pos | url_len <= 2048} (url: $A.arr(byte, l, ur
   val () = ui_url_href("footnote-open", url, url_len)
   val () = ui_show("footnote-go", false)
   val () = ui_show("footnote-open", true)
+  val () = ui_sheet_place(NoteSheet())
   val () = layer_open(LNote())
 in ui_focus("footnote-open") end
 

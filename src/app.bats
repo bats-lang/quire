@@ -996,7 +996,7 @@ fn _note (): void = let
   val () = ui_named("footnote", NModal, "Footnote")
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
-  val () = ui_text_btn("footnote-bar", "footnote-go", "link", "Go to note")
+  val () = ui_text_btn("footnote-bar", "footnote-go", "btn", "Go to note")
   (* a link out of the book asks first: this opens it, in another tab *)
   val () = ui_link_out("footnote-bar", "footnote-open", "btn linkout", "Open link")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")

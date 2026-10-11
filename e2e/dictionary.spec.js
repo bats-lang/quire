@@ -345,3 +345,30 @@ test('the backup lists the dictionaries, by name and language', async ({ page })
     { name: 'Petit Larousse', language: 'fr' },
   ]);
 });
+
+test('Look up leaves the word uncovered: no scrim, and the sheet in the half the word is not in (#387)', async ({ page }) => {
+  const errors = await start(page);
+  await importDictionary(page, english, 'en');
+  await readBook(page, book('Words', 'en-GB'));
+  await select(page, 'Ephemeral');
+  await lookUpHere(page).click();
+  await expect(entry(page)).toBeVisible();
+  await expect(page.locator('#panel-scrim')).toBeHidden();
+  const seen = await page.evaluate(() => {
+    const range = getSelection().getRangeAt(0).getBoundingClientRect();
+    const x = range.x + range.width / 2, y = range.y + range.height / 2;
+    const sheet = document.getElementById('dictionary-panel');
+    const hit = document.elementFromPoint(x, y);
+    const box = sheet.getBoundingClientRect();
+    return {
+      side: sheet.dataset.side, half: y * 2 < innerHeight ? 'upper' : 'lower',
+      underSheet: !!hit && sheet.contains(hit), underScrim: !!hit && document.getElementById('panel-scrim').contains(hit),
+      insideSheet: x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height,
+    };
+  });
+  expect(seen.underSheet).toBe(false);
+  expect(seen.underScrim).toBe(false);
+  expect(seen.insideSheet).toBe(false);
+  expect(seen.side).toBe(seen.half === 'upper' ? 'bottom' : 'top');
+  expect(errors).toEqual([]);
+});
