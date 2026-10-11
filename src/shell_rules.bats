@@ -276,7 +276,7 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1354} (sheet: sheet(lef
 in sheet end
 
 (* The book cards, from .conth on *)
-fn shell_rules_book_cards {left:nat | left >= 1500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1500] sheet(after, false, false) = let
+fn shell_rules_book_cards {left:nat | left >= 1503} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1503] sheet(after, false, false) = let
   val sheet = rule(sheet, ".conth")
   val sheet = lay(sheet, FontWeight(), "600")
   val sheet = lay(sheet, MarginTop(), "8px")
