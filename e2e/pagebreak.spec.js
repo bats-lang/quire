@@ -55,9 +55,12 @@ test('text inside a page-break span is shown, selectable and searchable, and the
   // the footer names the print page from the title, with the text there
   await page.keyboard.press('t');
   await expect(footerPage(page)).toHaveText(' · page 10 in print');
-  // searchable: the break's own words, and those after it (a hit is
-  // inside one text, so a phrase across the break's end is not found:
-  // quire#437)
+  // searchable: the break's own words, those after it, and a phrase from
+  // inside the break into the text after it (#437)
+  await search(page, '\u2018But of course', 1);
+  await searchResults(page).first().click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: '\u2018But of course' });
+  await page.getByRole('button', { name: 'Close search' }).click();
   await search(page, 'But', 1);
   await searchResults(page).first().click();
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'But' });
@@ -108,6 +111,15 @@ test('a block-level page break neither hides nor duplicates the text round it, a
   await search(page, 'believable', 1);
   await searchResults(page).first().click();
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'believable' });
+  await page.getByRole('button', { name: 'Close search' }).click();
+  // a word split by a break is found whole (#437), also inside <em>
+  await search(page, 'unbelievable', 1);
+  await searchResults(page).first().click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'unbelievable' });
+  await page.getByRole('button', { name: 'Close search' }).click();
+  await search(page, 'emphasis inside', 1);
+  await searchResults(page).first().click();
+  await expect.poll(() => marks(page)).toEqual({ size: 1, text: 'emphasis inside' });
   expect(errors).toEqual([]);
 });
 
@@ -160,5 +172,35 @@ test('read aloud says the words inside a page-break span, with those round it', 
   const said = await page.evaluate(() => window.spoken);
   expect(said.join(' ')).toContain('\u2018But of course!\u2019 said the first.');
   expect(said.join(' ')).toContain('Wait what? asked the second.');
+  expect(errors).toEqual([]);
+});
+
+// A phrase may cross inline elements (#437): a drop cap, emphasis inside a
+// word, a break's span. A block ends it, a ruby's reading is not searched,
+// and what follows keeps its content node numbers.
+test('search finds a phrase across inline elements, not across blocks, and not a ruby reading', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, pagebreakBooks.inline.opts);
+  const found = async (text, count, marked = text) => {
+    await search(page, text, count);
+    if (count > 0) {
+      await searchResults(page).first().click();
+      await expect.poll(() => marks(page)).toEqual({ size: 1, text: marked });
+    }
+    await page.getByRole('button', { name: 'Close search' }).click();
+  };
+  await found('The drop cap', 1);
+  await found('emphasis', 1);
+  await found('the phrase across two inline elements', 1);
+  await found('one and a half', 1);
+  // a block ends a phrase, a ruby's reading is not searched
+  await search(page, 'ends here. Next block', 0);
+  await page.getByRole('button', { name: 'Close search' }).click();
+  await search(page, 'kan', 0);
+  await page.getByRole('button', { name: 'Close search' }).click();
+  // the mark runs over the ruby's reading, which is in the page
+  await found('\u6f22\u5b57 after', 1, '\u6f22(kan)\u5b57 after');
+  // after all of them, a hit keeps its place in the text
+  await found('needle at the end', 1);
   expect(errors).toEqual([]);
 });
