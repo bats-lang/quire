@@ -27,6 +27,7 @@ staload "indeximage.sats"
 staload "book.sats"
 staload "unreadable.sats"
 staload "mem.sats"
+staload "notice.sats"
 
 implement $P.dispose<$IDB.stored>(_) = ()
 
@@ -555,6 +556,51 @@ fun _recover {count,kept:nat} .<count>. (books: stored_books(count), previous: s
          val @(recovered, left) = _recover(rest, previous)
        in @(StoredSome(LossyBook(id_high, id_low, image), recovered), left) end)
 
+(* The byte at piece[at + i] when i is inside the record's len bytes, else 0 *)
+fn _head_byte {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}{i:int}
+  (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, i: int i): int =
+  if i < 0 then 0
+  else if i >= len then 0
+  else $AR.low_byte(byte2int0($A.get<byte>(piece, at + i)))
+
+(* Three bytes of a record's head from first on, as one number *)
+fn _head_word {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}{first:int}
+  (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, first: int first): int =
+  _head_byte(piece, at, len, first) + 256 * (_head_byte(piece, at, len, first + 1) + 256 * _head_byte(piece, at, len, first + 2))
+
+fn _fault_of (why: unusable): record_fault =
+  case+ why of
+  | UnusableDamaged() => FaultDamaged()
+  | UnusableNewer() => FaultNewer()
+  | UnusableNotQuire() => FaultNotQuire()
+
+(* A record that could not be used is noted for the details of the
+   notice that says so (quire#507): its id, why, its size and its first
+   12 bytes (the format's magic, kind and versions) *)
+fn _note_record {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
+  (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, which: record_which, id_high: Int, id_low: Int, why: unusable): void =
+  notice_record_note(RecordNote(which, id_high, id_low, _fault_of(why), len,
+    _head_word(piece, at, len, 0), _head_word(piece, at, len, 3), _head_word(piece, at, len, 6), _head_word(piece, at, len, 9)))
+
+fn _book_noted {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
+  (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, book: stored_book): stored_book =
+  case+ book of
+  | ~UnusableBook(id_high, id_low, why) => let
+      val () = _note_record(piece, at, len, NoteBook(), id_high, id_low, why)
+    in UnusableBook(id_high, id_low, why) end
+  | ~WholeBook(id_high, id_low, image) => WholeBook(id_high, id_low, image)
+  | ~LossyBook(id_high, id_low, image) => LossyBook(id_high, id_low, image)
+
+fn _index_noted {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
+  (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, index: stored_index): stored_index =
+  case+ index of
+  | ~UnusableIndex(why) => let
+      val () = _note_record(piece, at, len, NoteIndex(), 0, 0, why)
+    in UnusableIndex(why) end
+  | ~IndexNone() => IndexNone()
+  | ~WholeIndex(image) => WholeIndex(image)
+  | ~LossyIndex(image) => LossyIndex(image)
+
 (* The entries of the blob get_prefix gave, from at on: the collections'
    record and the books', each key checked. The books are read onto
    books, count of them *)
@@ -581,10 +627,10 @@ fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count,kept:nat | 
         | ~KeyBook(id_high, id_low) =>
           if count >= 100000 then @(index, books, count, previous)
           else let
-            val book = _read_book(piece, value_at, value_len, id_high, id_low)
+            val book = _book_noted(piece, value_at, value_len, _read_book(piece, value_at, value_len, id_high, id_low))
           in _read_entries(piece, size, next, index, StoredSome(book, books), count + 1, previous) end
         | ~KeyIndex() => let
-            val read = _read_index(piece, value_at, value_len)
+            val read = _index_noted(piece, value_at, value_len, _read_index(piece, value_at, value_len))
             val () = stored_index_free(index)
           in _read_entries(piece, size, next, read, books, count, previous) end
         (* a book's previous version: read as a record is, kept to be read from when the record is lost *)
@@ -641,6 +687,7 @@ in
     | ~LibraryNone() => $P.ret<library_read>(ReadNothing())
     | ~LibraryFailed(why) => $P.ret<library_read>(ReadFailed(why))
     | ~LibraryContent(owner, piece, size) => let
+        val () = notice_notes_clear()
         val @(index, found, count, previous) = _read_entries(piece, size, 0, IndexNone(), StoredNone(), 0, StoredNone())
         val () = piece_free(owner, piece)
         (* a book whose record is broken beyond recovery is read from its previous version, when it has one (#510) *)

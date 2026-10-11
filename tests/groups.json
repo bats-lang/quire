@@ -36,6 +36,7 @@
     "sync": [
       "footnotes.spec.js",
       "headings.spec.js",
+      "notice-details.spec.js",
       "notices.spec.js",
       "pagelist.spec.js",
       "safe-area.spec.js",
@@ -116,6 +117,7 @@
       "reject/library-reading-unmatched",
       "reject/library-view-unmatched",
       "reject/link-unmatched",
+      "reject/notice-without-details",
       "reject/notice-without-remedy",
       "reject/page-turn-copy-marked",
       "reject/page-turn-forged-copy",

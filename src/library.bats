@@ -1056,6 +1056,47 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved_list(count)): void =
     place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions })) else ())
     in _unshelve(rest) end
 
+(* The key and shelf of each book in the Trash from i on, added to shelved *)
+fun _trashed_shelves {i,count:nat | i <= count}{so_far:nat} .<count - i>. (i: int i, count: int count, shelved: shelved_list(so_far))
+  : [total:nat] shelved_list(total) =
+  if i >= count then shelved
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _trashed_shelves(i + 1, count, shelved)
+    | ~$R.some(nums) =>
+      if same_shelf(nums.shelf, Trash()) then _trashed_shelves(i + 1, count, ShelvedCons(nums.key, nums.shelf, shelved))
+      else _trashed_shelves(i + 1, count, shelved))
+
+(* Every book in the Trash put on the shelf, as a single Restore does *)
+fun _restore_trashed {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count): void =
+  if i >= count then ()
+  else let
+    val () = (case+ lib_nums(i) of
+      | ~$R.none() => ()
+      | ~$R.some(nums) =>
+        if same_shelf(nums.shelf, Trash()) then lib_nums_set(i, @{
+          key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = OnShelf(), added = nums.added, opened = nums.opened,
+          chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+          shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
+          minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
+          place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions })
+        else ())
+  in _restore_trashed(i + 1, count) end
+
+(* The Trash's Restore all books (quire#494): every book in the Trash back
+   on the shelf at once, nothing lost. What it returns is the books it
+   moved and the shelf each was on (the Trash), which lib_untrash_all
+   puts back if the reader undoes it, or lib_shelved_free lets go *)
+#pub fn lib_restore_all (): shelved
+
+implement lib_restore_all () = let
+  val count = lib_count()
+  val moved = _trashed_shelves(0, count, ShelvedNil())
+  val () = _restore_trashed(0, count)
+  val () = lib_save()
+  val () = lib_render()
+in moved end
+
 (* A factory reset's part in the library: every book moved to the Trash,
    where it can still be restored. What it returns is each book's shelf
    before, which lib_untrash_all puts back, or lib_shelved_free lets go *)
@@ -3732,6 +3773,9 @@ fn _trash_head (): void =
       val ended = _trash_summary(buffer, books, dictionaries, _trashed_sum(0, lib_count(), TrashBytes(), 0))
       val () = ui_text_buf("trash-summary", buffer, ended)
       val () = ui_clear("trash-head-actions")
+      (* Restore all books first, as Restore is first in a Trashed book's
+         menu, and plain: nothing is lost (quire#494) *)
+      val () = (if books > 0 then ui_text_btn("trash-head-actions", "trash-restore-all", "btn", "Restore all books") else ())
       val () = ui_harm_button("trash-head-actions", (HEmptyTrash(): harm(things)))
     in ui_show("trash-head", true) end
     else ui_show("trash-head", false)
