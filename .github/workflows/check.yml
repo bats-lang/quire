@@ -25,6 +25,11 @@ jobs:
         id: groups
         run: scripts/ci-groups.py matrix
 
+      # The release to Play's internal track (play-internal, below) runs on
+      # main only; its script is checked here against a stub of Play
+      - name: The Play release script
+        run: tests/play-release/run.sh
+
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
   build:
@@ -227,9 +232,22 @@ jobs:
           listed=$(npx playwright test --list $specs | tail -1)
           echo "$listed"
           echo "$listed" | grep -q " in $(echo "$specs" | wc -l) files$" || { echo "::error::the group's filters do not name exactly its $(echo "$specs" | wc -l) specs"; exit 1; }
-          npx playwright test --reporter=list,html $specs
+          npx playwright test --reporter=list,html,json $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-timings.json
+
+      # Each test's time per project and spec (#461), kept for every run
+      # so the groups are balanced by measurement, not guessing: sum
+      # `duration` of the report's tests by spec file (tests/groups.json)
+      - name: Upload the spec timings
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-timings-${{ matrix.group }}
+          path: ${{ runner.temp }}/e2e-timings.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload the Playwright report
         if: failure()
@@ -301,3 +319,57 @@ jobs:
       smoke-share-file: android/smoke-share.epub
       smoke-share-type: application/epub+zip
       smoke-share-text: Shared With Quire
+
+  # Every push to main that passed the whole check (the e2e groups and the
+  # Android build and smoke test) goes to Google Play's internal testing
+  # track (#308): the AAB this run built and signed, its versionName and
+  # versionCode the commit's (scripts/version.sh), the commit's subject as
+  # its release notes. Production stays a promotion made in the Play
+  # Console (ANDROID.md). It signs in by Workload Identity Federation
+  # (scripts/play-release.env): no key is stored, and Google admits only
+  # a push to main of this repository, so no other run can release.
+  play-internal:
+    needs: [check, android]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # One release at a time: two edits committed together would conflict
+    concurrency:
+      group: play-internal
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download the AAB
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-aab
+          path: release-aab
+
+      - name: Read the sign-in
+        id: play
+        run: sed -n 's/^\(PLAY_[A-Z_]*\)=\(.*\)$/\1=\2/p' scripts/play-release.env >> "$GITHUB_OUTPUT"
+
+      - name: Sign in to Google Play
+        id: google
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ steps.play.outputs.PLAY_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ steps.play.outputs.PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+
+      - name: Release to internal testing
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.google.outputs.access_token }}
+          PLAY_PACKAGE: ${{ steps.play.outputs.PLAY_PACKAGE }}
+        run: |
+          set -- release-aab/*.aab
+          [ $# -eq 1 ] && [ -f "$1" ] || { echo "::error::release-aab holds no single AAB: $*"; exit 1; }
+          # The commit's subject (a pull request's title and number), cut
+          # to Play's 500 characters at a whole character
+          git log -1 --format=%s | python3 -c 'import sys; sys.stdout.write(sys.stdin.read().strip()[:500])' > "$RUNNER_TEMP/notes"
+          scripts/play-release.sh "$1" "$RUNNER_TEMP/notes"
