@@ -7,7 +7,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {
   importFiles, epubFile, start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
-  librarySettings, settingsButton, settingsScreen, exportedBackup,
+  librarySettings, settingsButton, settingsScreen, exportedBackup, askEmptyTrash, emptyTrashDialog,
 } from './helpers.js';
 import { createStardict } from './create-stardict.js';
 
@@ -281,15 +281,14 @@ test('a removed dictionary is in the Trash with Restore, and only Empty Trash de
   await page.getByRole('status').filter({ hasText: 'Dictionary removed' }).getByRole('button', { name: 'Dismiss' }).click();
   await closeDictionaries(page);
   // Empty Trash asks, names the dictionaries, and deletes the files with the books'
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  const ask = dialog(page, 'Empty the Trash?');
-  await expect(ask).toContainText('every dictionary in it, with its files');
+  await askEmptyTrash(page);
+  const ask = emptyTrashDialog(page);
+  await expect(ask).toHaveAccessibleName('Delete 1 dictionary forever?');
+  await expect(ask).toContainText('1 dictionary will be deleted for good, with their reading positions, annotations and files');
   await ask.getByRole('button', { name: 'Cancel' }).click();
   expect(await dictionaryFiles(page), 'declined: nothing deleted').toBe(files);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await askEmptyTrash(page);
+  await emptyTrashDialog(page).getByRole('button', { name: 'Delete forever' }).click();
   await expect(listed).toBeHidden();
   expect(await dictionaryFiles(page)).toBe(0);
   await reload(page);

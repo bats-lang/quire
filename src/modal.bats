@@ -30,7 +30,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
    dialog names, and nothing else is red. *)
 datavtype ask =
   | Harmless of question
-  | Harmful of harm
+  | Harmful of harm_asked
 
 fn _ask_free (asked: ask): void =
   case+ asked of
@@ -89,9 +89,9 @@ in open end
 typedef lit = [length:pos | length < 256] string length
 
 (* A harm's title, text and the verb of the button that does it *)
-fn _harm_words (the_harm: harm): @(lit, lit, lit) =
+fn _harm_words (the_harm: harm_asked): @(lit, lit, lit) =
   case+ the_harm of
-  | HEmptyTrash() => @("Empty the Trash?", "Every book in the Trash is deleted, with its reading position and annotations. This cannot be undone.", "Empty")
+  | HEmptyTrash() => @("Delete forever?", "Everything in the Trash is deleted, with reading positions, annotations and files. This cannot be undone.", "Delete forever")
 
 (* The buttons' labels and the second one's tone for question asked:
    Danger(the_harm) exactly when asked is Harmful(the_harm) *)
@@ -136,16 +136,17 @@ implement modal_open (asked, title) = _show(Harmless(asked), title)
 (* its one button, OK, answers nothing: the answer is let go *)
 implement modal_inform (title) = $P.finish<reply>(_show(Harmless(QInform()), title), llam(_) => ())
 
-(* Asks whether to do the_harm (dictionaries: how many the Trash holds, for the words that name them): the_harm's title, text and red button.
-   The promise resolves Accepted only from that button *)
-#pub fn modal_confirm (the_harm: harm, dictionaries: int): $P.promise(reply, $P.Pending)
-implement modal_confirm (the_harm, dictionaries) = let
-  val @(title, text, _) = _harm_words(the_harm)
-  val answered = _show(Harmful(the_harm), title)
-  val () = (if dictionaries > 0 then
-    (case+ the_harm of
-     | HEmptyTrash() => ui_text("dialog-text", "Every book in the Trash is deleted, with its reading position and annotations, and so is every dictionary in it, with its files. This cannot be undone."))
-    else ui_text("dialog-text", text))
+(* Asks whether to do the_harm, in the words title[0, title_len) and
+   text[0, text_len) (they say what goes: its count and names, quire#385)
+   and the red button the_harm names. The promise resolves Accepted only
+   from that button *)
+#pub fn modal_confirm {title_loc,text_loc:agz}{title_size,text_size:pos}{title_len:nat | title_len <= title_size; title_len < 65536}{text_len:nat | text_len <= text_size; text_len < 65536}
+  (the_harm: harm_asked, title: $A.arr(byte, title_loc, title_size), title_len: int title_len, text: $A.arr(byte, text_loc, text_size), text_len: int text_len): $P.promise(reply, $P.Pending)
+implement modal_confirm (the_harm, title, title_len, text, text_len) = let
+  val @(shown_title, _, _) = _harm_words(the_harm)
+  val answered = _show(Harmful(the_harm), shown_title)
+  val () = ui_text_buf("dialog-title", title, title_len)
+  val () = ui_text_buf("dialog-text", text, text_len)
 in answered end
 
 (* The dialog's text: buf[0, text_len) *)

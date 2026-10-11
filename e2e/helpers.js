@@ -181,6 +181,24 @@ export async function openShelf(page, name) {
   await expect(shelfTitle(page)).toHaveText(name);
 }
 export const shelfTitle = page => page.locator('#shelf-title');
+
+/** The question that empties the Trash (quire#385): its title counts what
+    goes ("Delete 2 books forever?") */
+export const emptyTrashDialog = page => page.getByRole('dialog', { name: /^Delete .* forever\?$/ });
+
+/** The Trash's own screen, with its Empty Trash pressed: the question is up */
+export async function askEmptyTrash(page) {
+  await openShelf(page, 'Trash');
+  await page.getByRole('button', { name: 'Empty Trash' }).click();
+  await expect(emptyTrashDialog(page)).toBeVisible();
+}
+
+/** The Trash emptied, and back at the library */
+export async function emptyTrash(page) {
+  await askEmptyTrash(page);
+  await emptyTrashDialog(page).getByRole('button', { name: 'Delete forever' }).click();
+  await page.locator('#shelf-back').click();
+}
 export const shelfBack = page => page.locator('#shelf-back');
 
 /** The Settings screen (sync, dictionaries, backup, the reading goal and

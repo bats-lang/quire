@@ -8,6 +8,7 @@
 
 staload "ui.sats"
 staload "book.sats"
+staload "titles.sats"
 
 (* How an offer ended: undone from the toast's button (Undone), or made
    final, once the toast went or another offer took its place (Final) *)
@@ -24,8 +25,12 @@ implement $P.dispose<settled>(_) = ()
 
 (* What is offered back, each by its own words: the toast says what an
    Undo would undo. Its life is in its type *)
-#pub datatype offered(offer_life) =
-  | MovedToTrash(UntilDismissed) of ()
+#pub datavtype offered(offer_life) =
+  (* the book's title (an empty one is said as "Book"): the toast names
+     what was moved (quire#385: Material 3's snackbar says what
+     happened; Gmail's says which conversation) *)
+  | {title_loc:agz}{title_len:nat | title_len < 256}
+    MovedToTrash(UntilDismissed) of ($A.arr(byte, title_loc, title_len + 1), int title_len)
   | HighlightDeleted(UntilDismissed) of ()
   | HighlightRangeChanged(UntilDismissed) of ()
   | BookmarkDeleted(UntilDismissed) of ()
@@ -41,24 +46,34 @@ implement $P.dispose<settled>(_) = ()
   | BackupRestored(UntilDismissed) of ()
   | PlainMessage(Brief) of ()
 
-(* What the toast says of an offer *)
-fn _offered_text {life:offer_life} (what: offered(life)): [text_len:pos | text_len < 256] string text_len =
+(* "'" title "' moved to Trash", the title cut when it is long *)
+fn _moved_text {title_loc:agz}{title_len:nat | title_len < 256}
+  (title: !$A.arr(byte, title_loc, title_len + 1), title_len: int title_len): void = let
+  val buf = $A.alloc<byte>(81)
+  val ended = title_put(title, title_len, buf, 0)
+  val () = $A.write_text(buf, ended, $A.text_lit(" moved to Trash"), 15)
+in ui_text_buf("undo-text", buf, ended + 15) end
+
+(* What the toast says of an offer, and the offer consumed *)
+fn _offered_show {life:offer_life} (what: offered(life)): void =
   case+ what of
-  | MovedToTrash() => "Book moved to the Trash"
-  | HighlightDeleted() => "Highlight deleted"
-  | HighlightRangeChanged() => "Highlight changed"
-  | BookmarkDeleted() => "Bookmark deleted"
-  | LibraryTrashed() => "Library moved to the Trash, settings reset"
-  | SettingsReset() => "Settings reset"
-  | SyncTurnedOff() => "Sync turned off"
-  | CatalogueRemoved() => "Catalogue removed"
-  | DictionaryRemoved() => "Dictionary removed"
-  | CollectionDeleted() => "Collection deleted"
-  | BookArchived() => "Book archived"
-  | BookHidden() => "Book hidden"
-  | BookUnhidden() => "Book unhidden"
-  | BackupRestored() => "Backup restored"
-  | PlainMessage() => "Done"
+  | ~MovedToTrash(title, title_len) => let
+      val () = _moved_text(title, title_len)
+    in $A.free<byte>(title) end
+  | ~HighlightDeleted() => ui_text("undo-text", "Highlight deleted")
+  | ~HighlightRangeChanged() => ui_text("undo-text", "Highlight changed")
+  | ~BookmarkDeleted() => ui_text("undo-text", "Bookmark deleted")
+  | ~LibraryTrashed() => ui_text("undo-text", "Library moved to the Trash, settings reset")
+  | ~SettingsReset() => ui_text("undo-text", "Settings reset")
+  | ~SyncTurnedOff() => ui_text("undo-text", "Sync turned off")
+  | ~CatalogueRemoved() => ui_text("undo-text", "Catalogue removed")
+  | ~DictionaryRemoved() => ui_text("undo-text", "Dictionary removed")
+  | ~CollectionDeleted() => ui_text("undo-text", "Collection deleted")
+  | ~BookArchived() => ui_text("undo-text", "Book archived")
+  | ~BookHidden() => ui_text("undo-text", "Book hidden")
+  | ~BookUnhidden() => ui_text("undo-text", "Book unhidden")
+  | ~BackupRestored() => ui_text("undo-text", "Backup restored")
+  | ~PlainMessage() => ui_text("undo-text", "Done")
 
 (* The offer shown: the resolver of the promise undo_offer returned. An action that can be undone is done at once
    and offered here; Undone comes only from the toast's own button,
@@ -103,7 +118,7 @@ implement undo_offer (what) = let
   val () = _settle()
   val @(settling, resolver) = $P.create<settled>()
   val () = _settle_previous(_offer_swap(Offer(resolver)))
-  val () = ui_text("undo-text", _offered_text(what))
+  val () = _offered_show(what)
   val () = ui_show("undo-toast", true)
 in settling end
 

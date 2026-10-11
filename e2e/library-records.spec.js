@@ -8,7 +8,7 @@ import { test, expect } from './fixtures.js';
 import { legacyLibrary, hex7, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
-  librarySettings, settingsButton, settingsScreen, openShelf,
+  librarySettings, settingsButton, settingsScreen, openShelf, emptyTrash,
 } from './helpers.js';
 
 const alert = page => page.getByRole('alert');
@@ -77,9 +77,7 @@ test('a change to a book is saved in its own record, only where it changed', asy
 test('removing the Trash\'s books deletes their records', async ({ page }) => {
   await startWithLegacy(page, 6, [books[0], { ...books[1], shelf: 3 }, books[2]]);
   await expect(cards(page)).toHaveCount(2);
-  await page.getByRole('button', { name: 'More options' }).click();
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: /^Empty/ }).click();
+  await emptyTrash(page);
   await reload(page);
   const after = await store(page);
   expect(after[bookKey(books[1])]).toBeUndefined();

@@ -25,8 +25,8 @@ test('Settings opens from the library menu, which no longer holds what it took',
     await expect(menuItem(page, gone)).toHaveCount(0);
   }
   await expect(page.getByRole('menu').getByLabel('Restore backup')).toHaveCount(0);
-  // what stays: the Trash's one irreversible action among them
-  await expect(menuItem(page, 'Empty Trash')).toBeVisible();
+  // Empty Trash is on the Trash's own screen, not here (quire#385)
+  await expect(menuItem(page, 'Empty Trash')).toHaveCount(0);
   await expect(menuItem(page, 'Reading statistics')).toBeVisible();
   await expect(menuItem(page, 'Catalogues')).toBeVisible();
   await menuItem(page, 'Settings').click();

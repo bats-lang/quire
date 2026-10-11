@@ -8,7 +8,7 @@ import {
   openSettings, colours, reload, place, pageShown,
   librarySettings, settingsButton, settingsScreen, continueReading,
   emptyImportInput, openSortMenu, sortMenu, chooseInSortMenu, sortMenuChecked,
-  openShelf, shelfTitle, shelfBack,
+  openShelf, shelfTitle, shelfBack, emptyTrash, emptyTrashDialog,
 } from './helpers.js';
 
 const empty = /Import an EPUB file/;
@@ -302,7 +302,7 @@ test('an Undo offer stays until it is used, dismissed or replaced, and says what
   const toast = page.getByRole('status').filter({ has: undo(page) });
   await bookMenu(page, 'First');
   await menuItem(page, 'Move to Trash').click();
-  await expect(toast).toContainText('Book moved to the Trash');
+  await expect(toast).toContainText("'First' moved to Trash");
   await page.clock.runFor(15000);
   await expect(toast).toBeVisible();
   await page.clock.runFor(60000);
@@ -371,25 +371,34 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
     // the offer stays until it is used or dismissed (#364): it would cover the next card
     await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
   }
+  // Empty Trash is not in the library menu (nor on any shelf but the Trash's)
   await libraryMenu(page);
-  // the one irreversible action is the one marked: red, unlike the
-  // items and the button beside it
+  await expect(menuItem(page, 'Empty Trash')).toHaveCount(0);
+  await menuItem(page, 'Trash').click();
+  // the Trash says what it holds and that it is kept, with Empty beside it
+  const summary = page.locator('#trash-summary');
+  await expect(summary).toContainText(/^2 books · .* MB?\. Kept until you empty the Trash\.$/);
   const colour = l => l.evaluate(e => getComputedStyle(e).color);
-  const red = await colour(menuItem(page, 'Empty Trash'));
-  expect(red).not.toBe(await colour(menuItem(page, 'Close')));
-  await menuItem(page, 'Empty Trash').click();
-  const ask = dialog(page, 'Empty the Trash?');
-  expect(await colour(ask.getByRole('button', { name: 'Empty' }))).toBe(red);
+  // the one irreversible action is the one marked: red, unlike the
+  // button beside it
+  const emptyButton = page.getByRole('button', { name: 'Empty Trash' });
+  const red = await colour(emptyButton);
+  expect(red).not.toBe(await colour(page.locator('#shelf-back')));
+  await emptyButton.click();
+  const ask = emptyTrashDialog(page);
+  // the question counts what goes and names it
+  await expect(ask).toHaveAccessibleName('Delete 2 books forever?');
+  await expect(ask).toContainText("'Trash One' and 'Trash Two' will be deleted for good");
+  expect(await colour(ask.getByRole('button', { name: 'Delete forever' }))).toBe(red);
   expect(await colour(ask.getByRole('button', { name: 'Cancel' }))).not.toBe(red);
   await ask.getByRole('button', { name: 'Cancel' }).click();
-  await openShelf(page, 'Trash');
   await expect(cards(page)).toHaveCount(2);
   await leaveShelf(page);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await ask.getByRole('button', { name: 'Empty' }).click();
+  await emptyTrash(page);
   await openShelf(page, 'Trash');
   await expect(page.getByText('The Trash is empty')).toBeVisible();
+  // an empty Trash is not asked to be emptied
+  await expect(page.getByRole('button', { name: 'Empty Trash' })).toHaveCount(0);
   await leaveShelf(page);
   // what the Trash held can no longer be offered back
   await expect(undo(page)).toBeHidden();
