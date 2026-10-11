@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Writes the palette's proofs into src/style.bats, between the BEGIN and
-END proofs markers: SURF and EDGEP for the text/ground and edge pairs
+"""Writes the palette's proofs into src/palette_proofs.bats, between the BEGIN
+and END proofs markers: SURF and EDGEP for the text/ground and edge pairs
 the sheet uses, and HARMONY for each theme. The colours are read from
-PAL in the same file. This script only picks which constructor applies
+PAL in src/palette.bats. This script only picks which constructor applies
 to each colour, and writes one even for a colour that breaks a rule:
 the constraint solver checks every proof, so such a palette does not
 type-check, whatever this script writes."""
 import os, re
 root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-path = os.path.join(root, "src", "style.bats")
+palette_path = os.path.join(root, "src", "palette.bats")
+path = os.path.join(root, "src", "palette_proofs.bats")
 src = open(path).read()
+palette_src = open(palette_path).read()
 
 pal = {}
-for t, role, c in re.findall(r"PAL(\d)_(\w+)\(\w+, \w+, 0x([0-9a-f]{6})\)", src):
+for t, role, c in re.findall(r"PAL(\d)_(\w+)\(\w+, \w+, 0x([0-9a-f]{6})\)", palette_src):
     pal[(int(t), role)] = int(c, 16)
 THEMES = (0, 1, 2, 3, 4)
 NAMES = {0: "light", 1: "sepia", 2: "dark", 3: "night", 4: "grey"}
@@ -92,10 +94,10 @@ for f, b in SURFS:
     for t in THEMES:
         fc, bc = pal[(t, f)], pal[(t, b)]
         parts.append(f"PAL{t}_{f}(), PAL{t}_{b}(), {contrast(fc, bc)},\n    {novib(fc, bc)}")
-    out.append(f"prval S_{f}_{b} = SURFc(\n  " + ",\n  ".join(parts) + ")")
+    out.append(f"#pub prval S_{f}_{b}: SURF({f.upper()}, {b.upper()})\n\nprimplement S_{f}_{b} = SURFc(\n  " + ",\n  ".join(parts) + ")")
 for e, b in EDGES:
     parts = [f"PAL{t}_{e}(), PAL{t}_{b}(), {contrast(pal[(t, e)], pal[(t, b)])}" for t in THEMES]
-    out.append(f"prval E_{e}_{b} = EDGEc(\n  " + ",\n  ".join(parts) + ")")
+    out.append(f"#pub prval E_{e}_{b}: EDGEP({e.upper()}, {b.upper()})\n\nprimplement E_{e}_{b} = EDGEc(\n  " + ",\n  ".join(parts) + ")")
 
 for t in THEMES:
     P = lambda r: pal[(t, r)]
@@ -126,7 +128,7 @@ for t in THEMES:
                     f"$H.CALMc({mxmn(P('accent'))}), $H.CALMc({mxmn(P('danger'))}), $H.CALMc({mxmn(P('edge'))}))")
     else:
         args.append(f"MODE_light($H.LIGHTERc({L(P('bg'))}, {L(P('fg'))}))")
-    out.append(f"prval H_{NAMES[t]}: HARMONY({PALETTES[t]}) = HARMONYc(\n  " + ",\n  ".join(args) + ")")
+    out.append(f"#pub prval H_{NAMES[t]}: HARMONY({PALETTES[t]})\n\nprimplement H_{NAMES[t]} = HARMONYc(\n  " + ",\n  ".join(args) + ")")
 
 # The page turn's shade: black at each strength over the page (its
 # four levels' strengths, the strongest last) leaves every pair the
@@ -148,10 +150,10 @@ for t in THEMES:
             side = "first" if lum(fs) > lum(bs) else "second"
             parts.append(f"SHADEDc(PAL{t}_{f}(), PAL{t}_{b}(),\n    {shade_proof(pal[(t, f)], strength)},\n    "
                          f"{shade_proof(pal[(t, b)], strength)},\n    $CT.CONTRAST_lighter_{side}({lum_of(fs)}, {lum_of(bs)}))")
-        out.append(f"prval V_{NAMES[t]}_{strength}: VEILED({PALETTES[t]}, {strength}) = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
+        out.append(f"#pub prval V_{NAMES[t]}_{strength}: VEILED({PALETTES[t]}, {strength})\n\nprimplement V_{NAMES[t]}_{strength} = VEILEDc(\n  " + ",\n  ".join(parts) + ")")
 
 begin = "(* BEGIN proofs: written by scripts/gen-harmony.py *)"
 end = "(* END proofs *)"
 i, j = src.index(begin), src.index(end)
-src = src[:i + len(begin)] + "\n" + "\n".join(out) + "\n" + src[j:]
+src = src[:i + len(begin)] + "\n\n" + "\n\n".join(out) + "\n" + src[j:]
 open(path, "w").write(src)

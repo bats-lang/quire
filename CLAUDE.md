@@ -1674,7 +1674,24 @@ Sync screen:
 
 ## What the types guarantee about the interface
 
-The stylesheet is built in `src/style.bats`, not written as CSS:
+The stylesheet is built in Bats, not written as CSS, in modules that each
+have their own `.sats`, so a change to one (or a static fixture put into
+it) re-checks that module and what stages after it, not all of it
+(#462; `style.bats` was 3478 lines and 7 to 18 minutes a change). In
+order: `src/palette.bats` (the roles, `PAL`, and the statements `SURF`,
+`EDGEP`, `HARMONY`, `VEILED`), `src/palette_proofs.bats` (their proofs,
+written by `scripts/gen-harmony.py`, each an exported `prval` with a
+`primplement`: the costly part), `src/sheet.bats` (the builder, rules,
+layout declarations, the spacing scale), `src/declarations.bats` (the
+declarations that name a colour, under their proofs),
+`src/theme_rules.bats` (the themes and the base rules), the screens'
+rules (`shell_rules`, `overlay_rules`, `reader_rules`, `page_turn_rules`,
+`panel_rules`, `reading_settings_rules`, `adaptive_rules`) and
+`src/style.bats`, which puts them in order (`app_style`). A fixture goes
+into the module of its area, not into one that holds proofs
+(`reject/role-unmatched` is in `palette.bats`). Keep each module's `#pub`
+declarations stable: bats re-checks what staloads a `.sats` only when
+more than line positions change in it (bats-lang/bats#243):
 
 * A text colour and its background are only ever set together
   (`surf`), with a proof (`SURF`) that the pair reaches 4.5:1 in each
@@ -1718,12 +1735,12 @@ The stylesheet is built in `src/style.bats`, not written as CSS:
   and the layout walk (`insetsShort` in `e2e/controls-shown.js`, run
   by `fits` on every screen it walks) fails any control nearer its
   container's padding box than that. A full screen's rows and notes
-  are cards inset 8 / 16 px (`_spacing`), a panel opened as a dialog
+  are cards inset 8 / 16 px (`spacing_rules`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
 * The page's width and height are a whole number of pixels (`page_extent`,
   indexed by whether it is whole; `page_width_rule` and `page_height_rule`
   (`src/page_size.bats`, a module of its own so its fixtures check in a
-  minute, where a snippet in `style.bats` costs 7 to 18) give the `.caf`
+  minute, where a snippet in the old `style.bats` cost 7 to 18) give the `.caf`
   rule's `max-width` and `max-height` from a `page_extent(1)` only,
   so an extent that is a fraction does not type-check:
   `tests/static/reject/page-width-fraction`, `page-height-fraction`). The reader
@@ -2108,7 +2125,7 @@ WebView is given the cutout's insets by Capacitor's SystemBars (pwa's
 `insetsHandling: native`: a WebView from 140 on reads them out, an
 older one is padded natively instead). Every other screen, panel,
 sheet, dialog, toast and bar pads the sides it can touch by `--safe-*`
-(`_spacing` in `src/style.bats`): that side's inset and the spacing
+(`spacing_rules` in `src/adaptive_rules.bats`): that side's inset and the spacing
 scale's least inset beyond it, so none of its controls or text comes
 near a system bar (#341, `e2e/safe-area.spec.js`). A spread's columns are at least
 40vw, so two fit beside a cutout. A sheet's height is in `dvh`, and the
@@ -2116,7 +2133,7 @@ typography sheet's head (`.shead`), with Close, is held at its top as
 it scrolls. `e2e/layout.spec.js` sets the insets through DevTools.
 
 The visible reading area is given once, as the reader view's (`.rv`)
-variables in `src/style.bats` (#296): the running footer sits 8px above
+variables in `src/reader_rules.bats` (#296): the running footer sits 8px above
 the screen's bottom inset (`--footer-bottom`, Android's navigation bar,
 which the app is drawn over edge to edge), 16px tall
 (`--footer-height`), and the page's paddings (`--page-top`,
