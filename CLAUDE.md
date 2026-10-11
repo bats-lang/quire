@@ -1460,10 +1460,25 @@ order is the writer's, not the format's.
   (on #510): SQLite's `.recover` keeps what it cannot place in a
   `lost_and_found` table and calls the result a salvage, and Calibre
   rebuilds a lost `metadata.db` from the book folders, so the record
-  is salvaged and the book files stay the source of truth (the next
-  stage reads the title and author from the file again).
+  is salvaged and the book files stay the source of truth (stage 2c, below,
+  reads the title and author from the file again).
   `tests/codec` and `e2e/library-records.spec.js` lose each of AUTH, BOOK
   and TITL, absent and damaged.
+* **What a record lost and the book's file can say is read again from
+  the file (stage 2c).** As a book is reopened from storage (`Reopen` in
+  `_opf_store`, `src/import.bats`), where its OPF is parsed anyway,
+  `lib_rebuild` (`src/library.bats`) takes from it what a field holds only
+  as a placeholder: the title "Untitled", the author "Unknown", a series
+  with no name or no position, no direction of the text, no file size. A
+  field holding any other value is never changed (the file is the source
+  of what a record lost, not of what it holds), and what the reader made
+  (place, shelf, collections, finished, minutes, order, notes) is never
+  read from a file. Not rebuilt: the cover, the progress weights (the
+  reader works them out as the chapters are laid out), the accessibility
+  summary. A rebuild that changes something saves the library at once (the
+  record is repaired and the old bytes kept); one that changes nothing
+  writes nothing. `e2e/old-library.spec.js` removes a real book's title
+  and author groups and opens it.
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with

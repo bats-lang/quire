@@ -147,3 +147,32 @@ test('a book of build 9ce1ae3 opens, its chapters read, its highlight and place 
   expect(Object.keys(saved).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
   await expect(alert(page)).toBeHidden();
 });
+
+/** The text of a string group (its length, then its bytes) of a record: the group's first string */
+const textOf = (record, tag) => {
+  const data = chunksOf(record).find(one => one.tag === tag).bytes.slice(8);
+  return String.fromCharCode(...data.slice(1, 1 + data[0]));
+};
+
+test('a record that lost its title and author is rebuilt from the book\'s file when the book is opened (#510)', async ({ page }) => {
+  const alphaKey = Object.keys(old).find(key => key.startsWith('library/book/') && textOf(old[key], 'TITL') === 'Old Alpha');
+  const gammaKey = Object.keys(old).find(key => key.startsWith('library/book/') && textOf(old[key], 'TITL') === 'Old Gamma');
+  expect(alphaKey).toBeDefined();
+  const lacking = old[alphaKey].slice(0, 7).concat(chunksOf(old[alphaKey]).filter(one => one.tag !== 'TITL' && one.tag !== 'AUTH').flatMap(one => one.bytes));
+  await startWithOld(page, { ...old, [alphaKey]: lacking });
+  // the record is used with the substitutes of what it lost, and said
+  await expect(card(page, 'Untitled')).toBeVisible();
+  await expect(card(page, 'Old Gamma')).toContainText('Cy Old');
+  // opening the book reads its file again: what stood for the title and the author is theirs again
+  await openBook(page, 'Untitled');
+  await expect(bookPage(page)).toContainText('Para');
+  await toLibrary(page);
+  await expect(card(page, 'Old Alpha')).toContainText('Ann Old');
+  await expect(card(page, 'Untitled')).toHaveCount(0);
+  // and the record says so
+  await expect.poll(async () => textOf((await store(page))[alphaKey], 'TITL')).toBe('Old Alpha');
+  const saved = await store(page);
+  expect(textOf(saved[alphaKey], 'AUTH')).toBe('Ann Old');
+  // the other book was not touched
+  expect(saved[gammaKey]).toEqual(old[gammaKey]);
+});
