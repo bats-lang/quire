@@ -35,6 +35,11 @@
  *   Material and Android's accessibility guidance give a touch target
  *   (Apple's is 44 pt, WCAG 2.5.5's 44 CSS px), so the stylesheet's
  *   base rule is checked on the screen, not only written (quire#403).
+ * - strayGrounds: a text element's own ground is the ground behind it
+ *   unless it is a control, or a card (a box with an edge, a radius or a
+ *   shadow of its own), so a class proven on the card's ground, reused on
+ *   the page's, does not leave a strip of the card's colour behind its text
+ *   (quire#386: Book info's author).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -537,4 +542,38 @@ export async function targetsShort(page) {
     }
     return short;
   }, TARGET_PX);
+}
+
+/** The visible elements with text of their own whose background is a
+    ground other than the one behind them, and that are neither a control
+    nor a card (a box with a border, a radius or a shadow): a strip of one
+    ground in another. Each is named with both colours */
+export async function strayGrounds(page) {
+  return page.evaluate(() => {
+    const shown = e => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.getClientRects().length > 0;
+    const paint = e => {
+      const m = getComputedStyle(e).backgroundColor.match(/rgba?\(([^)]+)\)/);
+      if (!m) return null;
+      const [r, g, b, a = 1] = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number);
+      return a > 0 ? `${r},${g},${b}` : null;
+    };
+    const control = e => !!e.closest('button,a,input,select,textarea,summary,label,[role=button],[role=menuitem],[role=menuitemradio],[role=tab],[role=switch],[role=slider]');
+    const card = e => {
+      const style = getComputedStyle(e);
+      const edge = ['Top', 'Right', 'Bottom', 'Left'].some(side => parseFloat(style[`border${side}Width`]) > 0 && style[`border${side}Style`] !== 'none');
+      return edge || parseFloat(style.borderTopLeftRadius) > 0 || style.boxShadow !== 'none';
+    };
+    const bad = [];
+    for (const e of document.querySelectorAll('body *')) {
+      if (!shown(e) || e.closest('#page,#page-turn,.caf')) continue;
+      if (![...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim())) continue;
+      const own = paint(e);
+      if (!own) continue;
+      let behind = null;
+      for (let a = e.parentElement; a && !behind; a = a.parentElement) behind = paint(a);
+      if (!behind || behind === own || control(e) || card(e)) continue;
+      bad.push(`${e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + e.className}: rgb(${own}) on rgb(${behind})`);
+    }
+    return bad;
+  });
 }

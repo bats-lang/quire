@@ -1363,7 +1363,8 @@ implement dict_trash_render (shown) = let
   val count = _dicts_count(list)
   val () = _trash_rows(list, 0)
   val () = _trash_put(TrashCell(list))
-in ui_show("trash-dictionaries", shown && count > 0) end
+  val () = ui_show("trash-dictionaries", shown && count > 0)
+in lib_trash_dictionaries_set(count) end
 
 (* The dictionary at index of the Trash's list put back in Look up *)
 #pub fn dict_trash_restore (index: int): void

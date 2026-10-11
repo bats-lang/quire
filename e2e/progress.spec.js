@@ -11,7 +11,7 @@ import { test, expect } from './fixtures.js';
 import {
   start, readBook, openBook, card, cards, place, toLibrary, bookMenu, menuItem, dialog, showChrome, titles,
   importFiles, epubFile, rawFile, oneColumn, readFixed, fixedPlace, libraryMenu, importInput,
-  librarySettings, settingsButton, restoreInput, exportedBackup, importOffered,
+  librarySettings, settingsButton, restoreInput, exportedBackup, importOffered, emptyTrash,
 } from './helpers.js';
 import { progressBooks } from './progress-books.js';
 
@@ -254,9 +254,7 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   // a reset with its Trash emptied, the book imported again: new, until the backup is restored
   await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();
   await importFiles(page, [file], 1);
   await expect(card(page, title)).toContainText('Unread');

@@ -8,7 +8,7 @@ import {
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings, chooseInSortMenu, sortMenuChecked,
   selectionButton, selectionPick, colours, bookPage, pagedBook, showChrome, control,
   librarySettings, settingsButton, restoreInput, exportedBackup,
-  readingSettings, openReadingSettings, importOffered,
+  readingSettings, openReadingSettings, importOffered, emptyTrash,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -33,9 +33,7 @@ async function factoryReset(page) {
   await librarySettings(page);
   await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
 }

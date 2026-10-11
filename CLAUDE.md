@@ -1637,6 +1637,44 @@ read of storage changed: each still folds, as #174 says.
   button, an unlisted name's details, Try again showing the books and a
   later import being kept, and a retry that fails.
 
+## Encodings and languages (#436)
+
+**Text documents are read as UTF-8 whatever they are encoded in**
+(`src/text_encoding.bats`, tables in `src/text_tables.bats` made by
+`scripts/gen-encodings.py`). Every document that is text (the container, the
+package, the navigation document, a content document, an overlay,
+encryption.xml; not an image, font or audio) goes through `take_text`
+(`src/book.bats`) instead of `take_decompressed`: a byte order mark says the
+encoding (UTF-8's is dropped, UTF-16 either way becomes UTF-8), so does `<` and
+a null byte; else the XML declaration's `encoding` by the WHATWG labels
+(`iso-8859-1`, `latin1` and `us-ascii` are windows-1252, as in a browser) for
+UTF-8 or a single-byte encoding with a table here (windows-1250 to 1257,
+ISO-8859-2, 5, 7, 8, 15, KOI8-R); else UTF-8. UTF-8 that is not UTF-8, or an
+encoding with no table (Shift_JIS, GBK) in a document that is not ASCII only,
+refuses the document ("Chapter N of this book could not be read", a
+`PlanRefused`): XML calls it fatal, and a guess is mojibake. A document that
+says a single-byte encoding but is valid UTF-8 with non-ASCII characters is read
+as UTF-8 (it is wrong about itself). A plain UTF-8 document is not copied
+(`PlanAsIs`). The research is in the issue: Thorium and Apple Books use a
+browser's XML parser, Calibre the mark and the declaration and then a guess.
+A title, author or series in the package has its references decoded
+(`_span_arr`), and the library sorts by letters (`_fold`: Latin letters without
+their accents, so Łukasz is under L; other scripts by code point).
+
+**Languages.** Quire does not guess a book's language from its text (no reading
+system researched does): no `dc:language` is `und`, with the voice automatic,
+Look up in English and the direction the package's; the text is set by the
+Unicode bidirectional algorithm. `dc:language` and `xml:lang` are normalised
+to BCP 47 by `language_normalize` (`src/language.bats`): `EN-us` and `en_US` are
+`en-US`, `eng` is `en`, `heb` and `iw` are `he`, the first of several is the
+book's; the page's `lang`, the voice and Look up go by it (primary subtag).
+A chapter's own `xml:lang` or `lang` on its html or body (`_chapter_lang`, cleared
+as each chapter is shown) is the language in force there, for the page, the
+voice and Look up (`_lang_take`). In the text read aloud an element that says a
+language other than the one in force, inside a block, is a block of its own
+(`_runs_node`, `_block_lang_add`): a sentence of its own, said in its language
+(`SentenceOf`'s `book_lang`, `script_lang`). `e2e/encodings.spec.js`,
+`e2e/languages.spec.js` and their `*-books.js` test it.
 ## A book's place in its series is a position in hundredths (#434)
 
 `opf_series` (`src/epub_xml.bats`) reads a book's series and position: the
@@ -2093,21 +2131,42 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
   2.2.1): `undo_offer` takes an `offered(UntilDismissed)`, a datatype
   indexed by its `offer_life`, so an offer with a `Brief` life does not
   type-check (`tests/static/reject/undo-offer-brief`), and each
-  constructor says what an Undo would undo.
+  constructor says what an Undo would undo. `offered` is a `datavtype`:
+  `MovedToTrash` carries the book's title, and the toast names it
+  (`'Keep Me' moved to Trash`, a title over 60 bytes cut at a character
+  and ended with an ellipsis, `title_put` in `src/titles.bats`; quire#385,
+  Material 3's snackbar says what was done).
 * A factory reset moves every book to the Trash and resets the
   settings (`lib_trash_all`, `set_reset_undoable`), with one Undo that
   puts back each book's shelf and the settings.
 * Emptying the Trash is the one irreversible action, and the one
   question with a red button: the dialog (`src/modal.bats`) asks a
-  `harm` (`src/ui.bats`), which has only `HEmptyTrash`. It closes any
-  Undo offer first, since what that would put back is gone.
+  `harm` (`src/ui.bats`), which has only `HEmptyTrash`, made of the
+  number of things the Trash holds, `{things:pos}`: the Trash cannot be
+  asked about when it is empty (`tests/static/reject/harm-empty-zero`).
+  The question counts and names what goes (quire#385, M3's dialogs pose a
+  specific question; Gmail and Drive say "Delete forever"): "Delete 2
+  books forever?", the text naming at most 3 titles and the dictionaries
+  ("'A', 'B' and 'C' will be deleted for good ..."), the red button
+  "Delete forever". It closes any Undo offer first, since what that would
+  put back is gone.
 * Red is the stylesheet's rule for `[data-harm=y]`, which only
-  `src/ui.bats` sets, and only from a harm: on the harm's menu item
-  (`ui_harm_item`, whose id and label are the harm's) and on a button
-  whose tone is `Danger(h)` (the dialog's, for `Harmful(h)`). A click
-  on a harm's item is dispatched by the harm its id belongs to
-  (`_harm_clicked` in `src/bin/quire.bats`) to `lib_ask_harm`, which
-  asks that same harm, so a red item always asks about what it names.
+  `src/ui.bats` sets, and only from a harm: on the harm's button
+  (`ui_harm_button`, whose id and label are the harm's; the Trash's
+  Empty Trash, beside its summary) and on a button whose tone is
+  `Danger(h)` (the dialog's, for `Harmful(h)`). A click on a harm's
+  button is dispatched by the harm its id belongs to (`_harm_clicked` in
+  `src/bin/quire.bats`, which counts what the Trash holds first) to
+  `lib_ask_harm`, which asks that same harm, so a red button always asks
+  about what it names.
+* The Trash's screen says what it holds (quire#385): under its title a
+  line "1 book · 4.0 MB. Kept until you empty the Trash." (the books
+  and the dictionaries in it, the books' file sizes; `_trash_head` in
+  `src/library.bats`, `lib_trash_dictionaries_set` from
+  `dict_trash_render`) with Empty Trash beside it, there only while the
+  Trash holds something. Nothing is purged by itself: that would be an
+  irreversible action the reader did not take. A book in the Trash has
+  Restore first in its menu.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
@@ -2216,7 +2275,8 @@ would say it goes straight to Settings) opens the library menu:
 Settings, About Quire (the same About screen, so the library reaches
 it without Settings), Catalogues, Reading statistics, Hidden, Archived
 and Trash (each a screen of its own, below), Install Quire (while the
-browser offers it), Empty Trash (the red harm item) and Close.
+browser offers it) and Close. Empty Trash is not in it: it is on the
+Trash's own screen.
 
 ## The library screen (#375, #376, #377, #404)
 
@@ -2262,12 +2322,32 @@ research (what comparable library apps do) and written here:
   the library again), and the filters, search and collection are the
   library's alone (`_passes` lets everything on a shelf through; opening a
   shelf clears the search and the collection). More options stays on a
-  shelf's screen so Empty Trash is asked from the Trash itself, as Drive's
-  Trash has its Empty trash. A book opened from a shelf's screen closes to
+  shelf's screen (the other shelves are one entry away). Empty Trash is on
+  the Trash's screen, beside what it holds, as Drive's Trash has its Empty
+  trash (quire#385). A book opened from a shelf's screen closes to
   the library (`_show_reader`). A shelf's rows offer Unhide, Unarchive (it
   says to import the book's file again: archiving drops the file) and
   Restore (Trash). A row's actions open on its More button and on a long
   press or right click (`contextmenu`), as before.
+* **A book's menu is grouped, and Book info reads** (quire#386; Material
+  3: "Vertical menu items can be grouped by adding a divider or small
+  gap"). The menu is Read (Continue once opened, Read again once
+  finished: `lib_reading_state`, the one rule behind the card's word and
+  the filter chips; none for a book in the Trash or archived), Book info,
+  Collections, a divider (`role=separator`, `.msep`), Hide, Archive, and
+  Move to Trash, which is made by `ui_removal_item` from a `removal` (as
+  `ui_harm_button` is from a `harm`) and drawn by the stylesheet's
+  `[data-removal]` rule with a line above it; it is not red, since Undo
+  and Restore bring the book back. Book info has the same Read as its
+  primary button, Move to Trash apart from Hide and Archive
+  (`ui_removal_button`), and the author in `.info-author`, proven on the
+  page's ground (`.ba` is proven on the card's: reusing it left a strip of
+  the card's colour behind the author). `strayGrounds` in
+  `e2e/controls-shown.js` fails a text element whose own ground is not the
+  one behind it unless it is a control or a card. A book whose metadata
+  says nothing of its accessibility is told so once ("This book gives no
+  accessibility information.") instead of a "No information" line under
+  each heading.
 * **An empty library says what to do, and only that one** (`emptiness`:
   `NoBooksYet | NoMatch | NoCollection | NoUnread | NoneReading |
   NoneFinished | NothingHidden | NothingArchived | TrashEmpty`, made by
