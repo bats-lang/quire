@@ -15,6 +15,7 @@ staload "notice.sats"
 staload "book.sats"
 staload "modal.sats"
 staload "undo.sats"
+staload "titles.sats"
 staload "epub_xml.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -81,7 +82,7 @@ implement shelf_of_code (code) =
   file_size = Int,      (* the file's bytes *)
   cover = image_type,   (* the cover image's type, NotAnImage when none *)
   done = Int,           (* 1 when the last page was reached *)
-  series_number = Int,  (* its number in its series, 0 when none is given *)
+  series_position = Int,  (* its position in its series: 0 when none is given, else its hundredths plus 10000001 (epub_xml's series_position_of) *)
   collections = Int,    (* the collections it is in: collection j is bit j *)
   minutes_read = Int,   (* the minutes it has been read (a page turned on
                            within 3 minutes of the one before counts its
@@ -398,7 +399,7 @@ in
         val () = lib_nums_set(book_index, @{
           key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections,
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections,
           minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
           shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
           finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
@@ -416,7 +417,7 @@ fun _elsewhere_clear {count:nat} .<count>. (books: !books(count)): void =
       val () = nums := @{
         key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
         finished_modified = nums.finished_modified, minutes_elsewhere = 0, pages_elsewhere = 0,
         place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions }
@@ -441,7 +442,7 @@ implement lib_elsewhere_add (index, minutes, pages) =
   else (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = nums.shelf_modified, collections_modified = nums.collections_modified,
     finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere + minutes,
     pages_elsewhere = nums.pages_elsewhere + ((if pages > 0 then pages else 0): Int),
@@ -513,17 +514,37 @@ fun _series_copy {data_loc,series_loc:agz}{data_len,series_size:pos}{start:nat}
 
 (* A series' name from data[start, start + span_len), at most 255 bytes,
    in an array one longer; empty when there is none *)
-(* " · N" after the name at text[0, name_len) *)
-fn _series_num {l:agz}{name_len:nat} (text: !$A.arr(byte, l, name_len + 20), name_len: int name_len, number: Int)
+(* " · N" after the name at text[0, name_len): the position as it was
+   written, without a trailing zero ("2", "2.5", "1.25", "0", "-1"); the
+   name alone when there is none *)
+fn _series_num {l:agz}{name_len:nat} (text: !$A.arr(byte, l, name_len + 20), name_len: int name_len, position: Int)
   : [text_len:nat | text_len <= name_len + 20] int text_len =
-  if number <= 0 then name_len
-  else if number > 99999 then name_len
+  if position <= 0 then name_len
   else let
-  val () = $A.set<byte>(text, name_len, $A.int2byte(32))
-  val () = $A.set<byte>(text, name_len + 1, $A.int2byte(194))
-  val () = $A.set<byte>(text, name_len + 2, $A.int2byte(183))
-  val () = $A.set<byte>(text, name_len + 3, $A.int2byte(32))
-in $S.int_to_str(text, name_len + 4, name_len + 20, number) end
+    val hundredths: int = $AR.sub_int_int(position, 10000001)
+    val negative = $AR.lt_int_int(hundredths, 0)
+    val magnitude: int = (if negative then $AR.sub_int_int(0, hundredths) else hundredths)
+    val whole: int = $AR.div_int_int(magnitude, 100)
+    val fraction: int = $AR.sub_int_int(magnitude, $AR.mul_int_int(whole, 100))
+    val () = $A.set<byte>(text, name_len, $A.int2byte(32))
+    val () = $A.set<byte>(text, name_len + 1, $A.int2byte(194))
+    val () = $A.set<byte>(text, name_len + 2, $A.int2byte(183))
+    val () = $A.set<byte>(text, name_len + 3, $A.int2byte(32))
+    val () = (if negative then $A.set<byte>(text, name_len + 4, $A.int2byte(45)) else ())
+    val start = (if negative then name_len + 5 else name_len + 4): [p:int | name_len + 4 <= p; p <= name_len + 5] int p
+    val after = $S.int_to_str(text, start, name_len + 20, g1ofg0(whole))
+  in
+    if fraction <= 0 then after
+    else let
+      val () = $A.set<byte>(text, after, $A.int2byte(46))
+      val tens: int = $AR.div_int_int(fraction, 10)
+      val units: int = $AR.sub_int_int(fraction, $AR.mul_int_int(tens, 10))
+      val () = $A.set<byte>(text, after + 1, $A.int2byte($AR.low_byte($AR.add_int_int(48, tens))))
+    in
+      if units <= 0 then after + 2
+      else let val () = $A.set<byte>(text, after + 2, $A.int2byte($AR.low_byte($AR.add_int_int(48, units)))) in after + 3 end
+    end
+  end
 
 fn _series_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_len <= data_len}
   (data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len, start: int start, span_len: int span_len)
@@ -532,6 +553,36 @@ fn _series_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_le
   val name = $A.alloc<byte>(name_len + 1)
   val () = _series_copy(data, start, name, name_len, 0)
 in @(name, name_len) end
+
+(* The series line of the book at index, "Name · 2.5": its bytes and their
+   count (0 when it has no series or there is no such book) *)
+fun _series_line_at {count:nat}{index:nat} .<count>. (books: !books(count), index: int index)
+  : [l:agz][size:pos | size <= 300][n:nat | n <= size] @($A.arr(byte, l, size), int n) =
+  case+ books of
+  | books_nil() => let val empty = $A.alloc<byte>(20) in @(empty, 0) end
+  | books_cons(book, rest) =>
+    if index = 0 then let
+      val+ Book(_, _, _, _, series, series_len, nums) = book
+      val text = $A.alloc<byte>(series_len + 20)
+      val () = _copy(series, series_len, text, 0, 0)
+    in
+      if series_len > 0 then let val text_len = _series_num(text, series_len, nums.series_position) in @(text, text_len) end
+      else @(text, 0)
+    end
+    else _series_line_at(rest, index - 1)
+
+#pub fn lib_series_line {index:int} (index: int index): [l:agz][size:pos | size <= 300][n:nat | n <= size] @($A.arr(byte, l, size), int n)
+
+implement lib_series_line (index) =
+  if index < 0 then let val empty = $A.alloc<byte>(20) in @(empty, 0) end
+  else let
+    val cell = lib_take()
+    val+ @LibCell(books, _) = cell
+    val line = _series_line_at(books, index)
+    prval () = fold@(cell)
+    val () = lib_put(cell)
+  in line end
+
 
 fn _span_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_len <= data_len}{fallback_len:pos | fallback_len < 256}
   (data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len, start: int start, span_len: int span_len,
@@ -578,7 +629,7 @@ in
     val nums = @{
       key = key, id_high = id_high, id_low = id_low, shelf = OnShelf(), added = now, opened = 0,
       chapter = 0, chapters = 0, page = 0, pages = 0, anchor = ~1, file_size = file_size, cover = cover, done = 0,
-      series_number = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
+      series_position = series_index, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
       shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0,
       place_modified = 0, place_declined = 0, progress_weighted = 0, text_directions = text_directions
     }: bnums
@@ -671,7 +722,7 @@ implement lib_set_shelf (index, shelf) = let
   val () = (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
     key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
     chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+    file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
     shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
     minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
     place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions }))
@@ -689,9 +740,11 @@ implement lib_trash (index) =
   | ~$R.some(nums) => let
       val key = nums.key
       val old_shelf = nums.shelf
+      (* the toast names the book *)
+      val @(title, title_len) = lib_text(index, TitleText())
       val () = lib_set_shelf(index, Trash())
     in
-      $P.finish<settled>(undo_offer(MovedToTrash()), llam(how) =>
+      $P.finish<settled>(undo_offer(MovedToTrash(title, title_len)), llam(how) =>
         case+ how of
         | Undone() => let
             val index_now = lib_index_of_key(key)
@@ -728,24 +781,137 @@ fun _empty_trash {left:nat} .<left>. (left: int left): void =
     if index < 0 then () else let val () = _delete_book(index) in _empty_trash(left - 1) end
   end
 
+(* What of the Trash's books is counted: how many, or their bytes *)
+datatype trash_sum = TrashBooks | TrashBytes
+
+(* The sum over the books of the Trash from i on, added to so_far *)
+fun _trashed_sum {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count, what: trash_sum, so_far: Int): Int =
+  if i >= count then so_far
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _trashed_sum(i + 1, count, what, so_far)
+    | ~$R.some(nums) =>
+      if same_shelf(nums.shelf, Trash()) then let
+        val step: Int = (case+ what of TrashBooks() => 1 | TrashBytes() => nums.file_size)
+      in _trashed_sum(i + 1, count, what, g1ofg0($AR.add_int_int(so_far, step))) end
+      else _trashed_sum(i + 1, count, what, so_far))
+
+(* The index of the Trash's book after skip others, or -1 *)
+fun _nth_trashed {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count, skip: int): [found:int | found >= ~1] int found =
+  if i >= count then ~1
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _nth_trashed(i + 1, count, skip)
+    | ~$R.some(nums) =>
+      if same_shelf(nums.shelf, Trash()) then (if skip <= 0 then i else _nth_trashed(i + 1, count, skip - 1))
+      else _nth_trashed(i + 1, count, skip))
+
+(* How many things the Trash holds: its books and dictionaries *)
+#pub fn lib_trash_things (dictionaries: int): [things:nat] int things
+
+implement lib_trash_things (dictionaries) = let
+  val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+  val held = g1ofg0(dictionaries)
+  val others = (if held > 0 then held else 0)
+  val things = g1ofg0($AR.add_int_int(books, others))
+in if things >= 0 then things else 0 end
+
+(* A place in a sentence's buffer: the sentences are well under 300
+   bytes, so a place past that is the last, and every write below has room *)
+fn _place (at: int): [place:nat | place <= 300] int place = let
+  val here = g1ofg0(at)
+in if here < 0 then 0 else if here > 300 then 300 else here end
+
+(* text at buffer[at, at + len) *)
+fn _put {l:agz}{size:nat}{at:nat}{len:pos | at + len <= size; len < 256}
+  (buffer: !$A.arr(byte, l, size), at: int at, text: string len, len: int len): int(at + len) = let
+  val () = $A.write_text(buffer, at, $A.text_lit(text), len)
+in at + len end
+
+(* "N one" or "N many" at buffer[at, ...) *)
+fn _counted {l:agz}{size:pos | size >= 400}{at:nat | at <= 300}{one_len,many_len:pos | one_len < 20; many_len < 20}
+  (buffer: !$A.arr(byte, l, size), size_value: int size, at: int at, count: Int, one: string one_len, one_len: int one_len, many: string many_len, many_len: int many_len): int = let
+  val after = $S.int_to_str(buffer, at, size_value, count)
+  val after = _place(after)
+  val spaced = _put(buffer, after, " ", 1)
+in if count = 1 then _put(buffer, spaced, one, one_len) else _put(buffer, spaced, many, many_len) end
+
+(* "N books", "N dictionaries" or both, as the Trash holds them *)
+fn _things_phrase {l:agz}{size:pos | size >= 400}{at:nat | at <= 300}
+  (buffer: !$A.arr(byte, l, size), size_value: int size, at: int at, books: Int, dictionaries: Int): int =
+  if books > 0 then let
+    val after = _place(_counted(buffer, size_value, at, books, "book", 4, "books", 5))
+  in
+    if dictionaries > 0 then let
+      val joined = _place(_put(buffer, after, " and ", 5))
+    in _counted(buffer, size_value, joined, dictionaries, "dictionary", 10, "dictionaries", 12) end
+    else after
+  end
+  else _counted(buffer, size_value, at, dictionaries, "dictionary", 10, "dictionaries", 12)
+
+(* "Delete 2 books forever?" *)
+fn _empty_title {l:agz} (buffer: !$A.arr(byte, l, 400), books: Int, dictionaries: Int): [ended:nat | ended <= 400] int ended = let
+  val after = _place(_put(buffer, 0, "Delete ", 7))
+  val after = _place(_things_phrase(buffer, 400, after, books, dictionaries))
+in _put(buffer, after, " forever?", 9) end
+
+(* The first shown of the Trash's books by their titles, quoted, joined
+   by commas and a last "and" (and "and N more" when others are not
+   named), from the book after k others *)
+fun _titles_list {l:agz}{shown,k:nat | k <= shown} .<shown - k>.
+  (buffer: !$A.arr(byte, l, 700), at: int, k: int k, shown: int shown, more: int): int =
+  if k >= shown then at
+  else let
+    val index = _nth_trashed(0, lib_count(), k)
+    val joined: int = (if k <= 0 then at
+      else if k + 1 = shown then (if more > 0 then _put(buffer, _place(at), ", ", 2) else _put(buffer, _place(at), " and ", 5))
+      else _put(buffer, _place(at), ", ", 2))
+    val @(title, title_len) = lib_text(index, TitleText())
+    val ended = title_put(title, title_len, buffer, _place(joined))
+    val () = $A.free<byte>(title)
+  in _titles_list(buffer, ended, k + 1, shown, more) end
+
+(* "'A', 'B' and 'C' will be deleted for good, ..." *)
+fn _empty_text {l:agz} (buffer: !$A.arr(byte, l, 700), books: Int, dictionaries: Int): [ended:nat | ended <= 700] int ended = let
+  val counted = books
+  val shown = (if counted > 3 then 3 else if counted > 0 then counted else 0): [shown:nat] int shown
+  val named = _titles_list(buffer, 0, 0, shown, counted - shown)
+  val named: int = (if counted > shown then let
+      val after = _place(_put(buffer, _place(named), " and ", 5))
+      val after = _place($S.int_to_str(buffer, after, 700, counted - shown))
+    in _put(buffer, after, " more", 5) end
+    else named)
+  val named: int = (if books > 0 then (if dictionaries > 0 then let
+        val after = _place(_put(buffer, _place(named), " and ", 5))
+      in _counted(buffer, 700, after, dictionaries, "dictionary", 10, "dictionaries", 12) end
+      else named)
+    else _counted(buffer, 700, 0, dictionaries, "dictionary", 10, "dictionaries", 12))
+in _put(buffer, _place(named), " will be deleted for good, with their reading positions, annotations and files. This cannot be undone.", 102) end
+
 (* Asks about harm, with the action that does it; if the answer is yes
    (Accepted), it is done. The promise resolves with the answer once
    that is done. HEmptyTrash: every book in the Trash and everything
    stored for it go (and any Undo offer, which could only put back what
-   is gone) *)
-#pub fn lib_ask_harm (harm: harm, dictionaries: int): $P.promise(reply, $P.Chained)
+   is gone). The question names what goes: how many books, their titles
+   (at most 3) and the dictionaries (quire#385) *)
+#pub fn lib_ask_harm (harm: harm_asked, dictionaries: int): $P.promise(reply, $P.Chained)
 
 implement lib_ask_harm (harm, dictionaries) =
   case+ harm of
-  | HEmptyTrash() => $P.and_then<reply><reply>(modal_confirm(harm, dictionaries), llam(answer) =>
-    case+ answer of
-    | Accepted() => let
-        val () = undo_close()
-        val () = _empty_trash(lib_count())
-        (* the records of the books gone are deleted *)
-        val () = lib_save()
-      in $P.ret<reply>(Accepted()) end
-    | Declined() => $P.ret<reply>(Declined()))
+  | HEmptyTrash() => let
+      val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+      val others = g1ofg0(dictionaries)
+      val title = $A.alloc<byte>(400)
+      val title_len = _empty_title(title, books, others)
+      val text = $A.alloc<byte>(700)
+      val text_len = _empty_text(text, books, others)
+    in $P.and_then<reply><reply>(modal_confirm(harm, title, title_len, text, text_len), llam(answer) =>
+      case+ answer of
+      | Accepted() => let
+          val () = undo_close()
+          val () = _empty_trash(lib_count())
+          (* the records of the books gone are deleted *)
+          val () = lib_save()
+        in $P.ret<reply>(Accepted()) end
+      | Declined() => $P.ret<reply>(Declined())) end
 
 (* Each book's key and the shelf it was on *)
 #pub datavtype shelved_list(int) =
@@ -768,7 +934,7 @@ fun _trash_all {i,count:nat | i <= count} .<count - i>. (i: int i, count: int co
     val () = (case+ lib_nums(i) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(i, @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = Trash(), added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
       minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
     place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions }))
@@ -783,7 +949,7 @@ fun _unshelve {count:nat} .<count>. (shelved: shelved_list(count)): void =
       val () = (if index >= 0 then (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
           key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = shelf, added = nums.added, opened = nums.opened,
           chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+          file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
           shelf_modified = stamp_now(), collections_modified = nums.collections_modified, finished_modified = nums.finished_modified,
           minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
     place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions })) else ())
@@ -951,7 +1117,11 @@ in
        | Before() => true
        | After() => false
        | Same() =>
-         if first_nums.series_number <> second_nums.series_number then first_nums.series_number < second_nums.series_number
+         (* a book of no position after those that have one *)
+         if first_nums.series_position <> second_nums.series_position then
+           (if first_nums.series_position = 0 then false
+            else if second_nums.series_position = 0 then true
+            else first_nums.series_position < second_nums.series_position)
          else _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0)))
       else true)
     else (if second_series_len > 0 then false else _is_before(_less(first_title, first_title_len, second_title, second_title_len, 0))))
@@ -1129,7 +1299,7 @@ fun _stamp_members {count:nat} .<count>. (books: !books(count), collection: int)
       val () = (if $AR.band_int_int(nums.collections, $AR.bsl_int_int(1, collection)) <> 0 then nums := @{
         key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = nums.collections, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified, collections_modified = stamp_now(),
         finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
     place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions } else ())
@@ -1214,7 +1384,7 @@ fun _map_collections {count:nat} .<count>. (books: !books(count), change: !regro
       val () = nums := @{
         key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
         chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
+        file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position, collections = membership, minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
         shelf_modified = nums.shelf_modified,
         collections_modified = (if membership <> nums.collections then stamp_now() else nums.collections_modified),
         finished_modified = nums.finished_modified, minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
@@ -1403,7 +1573,7 @@ implement lib_coll_toggle (index, collection) =
     val () = (case+ lib_nums(index) of ~$R.none() => () | ~$R.some(nums) => lib_nums_set(index, @{
       key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added, opened = nums.opened,
       chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages, anchor = nums.anchor,
-      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_number = nums.series_number,
+      file_size = nums.file_size, cover = nums.cover, done = nums.done, series_position = nums.series_position,
       collections = (if on then nums.collections - _collection_bit(collection) else nums.collections + _collection_bit(collection)), minutes_read = nums.minutes_read, pages_read = nums.pages_read, finished_at = nums.finished_at,
       shelf_modified = nums.shelf_modified, collections_modified = stamp_now(), finished_modified = nums.finished_modified,
       minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere,
@@ -1601,6 +1771,27 @@ fn _copy_plus {l:agz}{size,n:nat | n < 256; n <= size} (source: !$A.arr(byte, l,
   val () = _copy_from(source, 0, len, copy, 0)
 in copy end
 
+(* The whole number of a series position that an older Quire reads in the
+   SERI group (series_position_of's number: 0 when none, below one or
+   over 99999) *)
+fn _series_whole (position: Int): Int =
+  if position <= 10000001 then 0
+  else (position - 10000001) / 100
+
+(* What a record keeps in the snum group for a position: 0 when the whole
+   number in SERI says it already (2, not 2.5, 0 or -1), so a record
+   written for an older Quire is not changed by being read and saved *)
+fn _series_stored (position: Int): Int = let
+  val whole = _series_whole(position)
+in if whole > 0 then (if series_position_of(whole * 100) = position then 0 else position) else position end
+
+(* The position a record holds: its snum group, else the whole number of
+   its SERI group (an older Quire's, or a book numbered 2) *)
+fn _series_read (whole: Int, stored: Int): Int =
+  if stored <> 0 then stored
+  else if whole > 0 then (if whole > 99999 then 0 else series_position_of(whole * 100))
+  else 0
+
 (* A book as the values its record holds; position is its place in the
    library's order, kept so that the order is the same when it is read again *)
 fn _image_of_book (book: !book, position: Int): [x:bookx] book_imaged(x) = let
@@ -1609,7 +1800,7 @@ fn _image_of_book (book: !book, position: Int): [x:bookx] book_imaged(x) = let
     id_high = nums.id_high, id_low = nums.id_low, collections = nums.collections, collections_modified = nums.collections_modified,
     minutes_elsewhere = nums.minutes_elsewhere, pages_elsewhere = nums.pages_elsewhere, finished_at = nums.finished_at,
     finished_modified = nums.finished_modified, position = position, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
-    anchor = nums.anchor, place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions, series_number = nums.series_number,
+    anchor = nums.anchor, place_modified = nums.place_modified, place_declined = nums.place_declined, progress_weighted = nums.progress_weighted, text_directions = nums.text_directions, series_number = _series_whole(nums.series_position), series_position = _series_stored(nums.series_position),
     shelf = shelf_code(nums.shelf), added = nums.added, opened = nums.opened, shelf_modified = nums.shelf_modified,
     file_size = nums.file_size, cover = image_code(nums.cover), done = nums.done, minutes_read = nums.minutes_read,
     pages_read = nums.pages_read
@@ -1661,7 +1852,7 @@ fn _book_of_image {x:bookx} (image: !book_image(x)): book = let
     key = key, id_high = stored.id_high, id_low = stored.id_low, shelf = shelf_of_code(stored.shelf), added = stored.added,
     opened = stored.opened, chapter = stored.chapter, chapters = stored.chapters, page = stored.page, pages = stored.pages,
     anchor = stored.anchor, file_size = stored.file_size, cover = image_of_code(stored.cover), done = stored.done,
-    series_number = stored.series_number, collections = stored.collections, minutes_read = stored.minutes_read,
+    series_position = _series_read(stored.series_number, stored.series_position), collections = stored.collections, minutes_read = stored.minutes_read,
     pages_read = stored.pages_read, finished_at = stored.finished_at, shelf_modified = stored.shelf_modified,
     collections_modified = stored.collections_modified, finished_modified = stored.finished_modified,
     minutes_elsewhere = stored.minutes_elsewhere, pages_elsewhere = stored.pages_elsewhere,
@@ -2098,7 +2289,7 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
           chapter = _int32_at(buf, numbers_at + 12), chapters = _int32_at(buf, numbers_at + 16), page = _int32_at(buf, numbers_at + 20),
           pages = _int32_at(buf, numbers_at + 24), anchor = _int32_at(buf, numbers_at + 28), file_size = _int32_at(buf, numbers_at + 32),
           cover = image_of_code($AR.low_byte(cover_done)), done = $AR.band_g1($AR.low_byte($AR.bsr_int_int(cover_done, 8)), 1),
-          series_number = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
+          series_position = 0, collections = 0, minutes_read = 0, pages_read = 0, finished_at = 0,
           shelf_modified = 0, collections_modified = 0, finished_modified = 0, minutes_elsewhere = 0, pages_elsewhere = 0,
           place_modified = 0, place_declined = 0, progress_weighted = 0, text_directions = 0
         }: bnums
@@ -2121,7 +2312,7 @@ fun _parse_books {l:agz}{owner:addr}{n:nat}{start:nat | start <= n}{parsed:nat |
             key = nums.key, id_high = nums.id_high, id_low = nums.id_low, shelf = nums.shelf, added = nums.added,
             opened = nums.opened, chapter = nums.chapter, chapters = nums.chapters, page = nums.page, pages = nums.pages,
             anchor = nums.anchor, file_size = nums.file_size, cover = nums.cover, done = nums.done,
-            series_number = _int32_at(buf, series_at + 1 + series_len),
+            series_position = _series_read(_int32_at(buf, series_at + 1 + series_len), 0),
             collections = (if version >= 3 then (if series_at + 9 + series_len <= n then g1ofg0($AR.band_int_int(_int32_at(buf, series_at + 5 + series_len), 255)) else 0) else 0): Int,
             (* QLB4: how long it has been read, and when it was finished *)
             minutes_read = (if version >= 4 then (if series_at + 21 + series_len <= n then _int32_at(buf, series_at + 9 + series_len) else 0) else 0): Int,
@@ -3085,7 +3276,7 @@ fn _card {index:nat}{base_len,row_len,more_len,parent_len:pos | base_len <= 16; 
   val @(author_id, author_id_len) = nid_make2(base, index, "-author")
   val () = ui_text_n_buf(author_id, author_id_len, author_text, author_len)
   (* its series, and its number in it: "Foundation · 2" *)
-  val () = (if series_len > 0 then _card_series(base, index, series, series_len, nums.series_number) else ())
+  val () = (if series_len > 0 then _card_series(base, index, series, series_len, nums.series_position) else ())
   (* progress *)
   val @(parent_id, parent_id_len) = nid_make2(base, index, "-info")
   val @(progress_id, progress_id_len) = nid_make2(base, index, "-progress")
@@ -3361,6 +3552,59 @@ fn _emptiness_offers (reason: emptiness): bool =
   | NothingArchived() => false
   | TrashEmpty() => false
 
+(* How many dictionaries the Trash holds, as dictionary.bats last said:
+   they are in the Trash's count and the question of emptying it *)
+val _trash_dictionaries = ref<int>(0)
+
+(* " · 4.0 MB" at buffer[at, ...): the middle dot between spaces, then
+   the size of bytes *)
+fn _trash_size {l:agz}{at:nat | at <= 300} (buffer: !$A.arr(byte, l, 400), at: int at, bytes: Int): [place:nat | place <= 300] int place = let
+  val dotted = _place(_put(buffer, at, " ", 1))
+  val () = $A.set<byte>(buffer, dotted, $A.int2byte(194))
+  val () = $A.set<byte>(buffer, dotted + 1, $A.int2byte(183))
+  val spaced = _place(_put(buffer, dotted + 2, " ", 1))
+  val size = $A.alloc<byte>(32)
+  val size_len = size_text(size, bytes)
+  val ended = bytes_put(size, size_len, buffer, spaced)
+  val () = $A.free<byte>(size)
+in _place(ended) end
+
+(* "2 books · 4.0 MB. Kept until you empty the Trash." *)
+fn _trash_summary {l:agz} (buffer: !$A.arr(byte, l, 400), books: Int, dictionaries: Int, bytes: Int): [ended:nat | ended <= 400] int ended = let
+  val after = _place(_things_phrase(buffer, 400, 0, books, dictionaries))
+  val after = (if books > 0 then _trash_size(buffer, after, bytes) else after): [place:nat | place <= 300] int place
+in _put(buffer, after, ". Kept until you empty the Trash.", 33) end
+
+(* The Trash's heading (quire#385): what it holds, how much room it
+   takes, that it is kept until emptied, and Empty beside it, shown on
+   the Trash's screen while it holds anything. Empty is made here, from
+   a harm that cannot be built for an empty Trash *)
+fn _trash_head (): void =
+  if same_shelf(!_shelf, Trash()) then let
+    val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+    val listed = g1ofg0(!_trash_dictionaries)
+    val dictionaries = (if listed > 0 then listed else 0)
+    val [things:int] held = g1ofg0($AR.add_int_int(books, dictionaries))
+  in
+    if held > 0 then let
+      val buffer = $A.alloc<byte>(400)
+      val ended = _trash_summary(buffer, books, dictionaries, _trashed_sum(0, lib_count(), TrashBytes(), 0))
+      val () = ui_text_buf("trash-summary", buffer, ended)
+      val () = ui_clear("trash-head-actions")
+      val () = ui_harm_button("trash-head-actions", (HEmptyTrash(): harm(things)))
+    in ui_show("trash-head", true) end
+    else ui_show("trash-head", false)
+  end
+  else ui_show("trash-head", false)
+
+(* The dictionaries in the Trash are count (dictionary.bats says it as
+   it shows them), so the Trash's heading counts them *)
+#pub fn lib_trash_dictionaries_set (count: int): void
+
+implement lib_trash_dictionaries_set (count) = let
+  val () = !_trash_dictionaries := count
+in _trash_head() end
+
 (* The bar's tools (search, sort and view, the filters) and the import
    control that fits: with no book to search, sort or filter, the bar
    keeps only its name and menu, and Import is in the message below
@@ -3401,10 +3645,13 @@ implement lib_render () = let
   val () = ui_show("continue-reading", want >= 0)
   val () = query_put(query)
   val view = _view_of(shown)
+  (* a Trash with only dictionaries in it is not said to be empty: they are listed *)
+  val only_dictionaries = same_shelf(shelf, Trash()) && !_trash_dictionaries > 0
   val () = ui_show("library-empty", (case+ view of
     | ViewBooks() => false
     | ViewUnreadable(_) => true
-    | ViewEmpty() => true))
+    | ViewEmpty() => ~only_dictionaries))
+  val () = _trash_head()
   val () = _coll_row()
   val () = _install_hint_show()
   val on_shelf = same_shelf(shelf, OnShelf())

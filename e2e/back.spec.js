@@ -11,7 +11,7 @@ import { test, expect, onAndroid } from './fixtures.js';
 import {
   start, epubFile, importFiles, readBook, chapters, bookPage, libraryMenu, menuItem, dialog,
   librarySettings, settingsScreen, settingsButton, bookMenu, librarySearch, openReadingSettings,
-  readingSettings, card, libraryShown,
+  readingSettings, card, libraryShown, askEmptyTrash, emptyTrashDialog,
 } from './helpers.js';
 import { walkEveryScreen, appPlayed } from './walk.js';
 
@@ -140,15 +140,11 @@ test('Back answers a dialog No: the Trash is not emptied', async ({ page }, test
   await importFiles(page, [epubFile({ title: 'Kept From The Trash', author: 'B' })], 1);
   await bookMenu(page, 'Kept From The Trash');
   await menuItem(page, 'Move to Trash').click();
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  const asked = dialog(page, 'Empty the Trash?');
-  await expect(asked).toBeVisible();
+  // the Trash is a screen of its own, from the library menu, with its Empty
+  await askEmptyTrash(page);
+  const asked = emptyTrashDialog(page);
   await pressBack(page, testInfo);
   await expect(asked).toBeHidden();
-  // the Trash is a screen of its own, from the library menu
-  await libraryMenu(page);
-  await menuItem(page, 'Trash').click();
   await expect(page.locator('#shelf-title')).toHaveText('Trash');
   await expect(card(page, 'Kept From The Trash')).toHaveCount(1);
   expect(errors).toEqual([]);

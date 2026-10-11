@@ -244,3 +244,14 @@ implement audio_type_of (path, path_len) = _audio_type(path, path_len)
 #pub fn audio_mime (kind: audio_type): [type_len:pos | type_len <= 24] string type_len
 
 implement audio_mime (kind) = _audio_mime(kind)
+
+(* Whether the href or src data[offset, offset + len) is a path-absolute
+   one, starting with '/': resolved from the container's root, not from
+   the document's directory (EPUB 3.3 §4.2.4; the suite's
+   ocf-url_link-path-absolute) *)
+#pub fn href_rooted {l:agz}{n:pos}{offset,len:nat | offset + len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, len: int len): bool
+
+implement href_rooted (data, offset, len) =
+  if len <= 0 then false
+  else byte2int0($A.read<byte>(data, offset)) = 47

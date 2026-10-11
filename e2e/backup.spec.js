@@ -6,9 +6,9 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, rawFile, importFiles, card, cards, openBook, readBook, place, toLibrary,
   selectText, marks, chapters, dialog, menuItem, libraryMenu, bookMenu, importInput, openSettings, chooseInSortMenu, sortMenuChecked,
-  selectionButton, colours, bookPage, pagedBook, showChrome, control,
+  selectionButton, selectionPick, colours, bookPage, pagedBook, showChrome, control,
   librarySettings, settingsButton, restoreInput, exportedBackup,
-  readingSettings, openReadingSettings, importOffered,
+  readingSettings, openReadingSettings, importOffered, emptyTrash,
 } from './helpers.js';
 
 const restored = page => dialog(page, 'Backup restored');
@@ -33,9 +33,7 @@ async function factoryReset(page) {
   await librarySettings(page);
   await settingsButton(page, 'Factory reset').click();
   await expect(cards(page)).toHaveCount(0);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();
   await expect(cards(page)).toHaveCount(0);
 }
@@ -50,7 +48,7 @@ test('a backup holds the settings, the books, their places and annotations', asy
   await dialog(page, 'Note').getByRole('textbox', { name: 'Note' }).fill('Line one\nwith "quotes" and ünïcode');
   await dialog(page, 'Note').getByRole('button', { name: 'Save' }).click();
   await selectText(page, 9, 14);
-  await selectionButton(page, 'Underline').click();
+  await selectionPick(page, 'Underlined');
   await openSettings(page);
   await page.getByRole('slider', { name: 'Size' }).fill('24');
   await openReadingSettings(page, 'Look');
@@ -87,7 +85,7 @@ test('a backup restored after a reset brings everything back, and a book importe
   await expect.poll(async () => (await place(page)).p).toBe(4);
   const at = await place(page);
   await selectText(page, 0, 8);
-  await selectionButton(page, 'Orange').click();
+  await selectionPick(page, 'Orange');
   const hl = await marks(page);
   await openSettings(page);
   const plain = await bg(page);

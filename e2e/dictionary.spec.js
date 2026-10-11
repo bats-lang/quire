@@ -7,7 +7,7 @@ import AxeBuilder from '@axe-core/playwright';
 import { readFileSync } from 'node:fs';
 import {
   importFiles, epubFile, start, readBook, toLibrary, openBook, selectText, dialog, libraryMenu, menuItem, reload, rawFile, bookPage,
-  librarySettings, settingsButton, settingsScreen, exportedBackup,
+  librarySettings, settingsButton, settingsScreen, exportedBackup, askEmptyTrash, emptyTrashDialog,
 } from './helpers.js';
 import { createStardict } from './create-stardict.js';
 
@@ -58,7 +58,7 @@ const dictionaries = page => dialog(page, 'Dictionaries');
 const entry = page => dialog(page, 'Dictionary');
 const selection = page => page.getByRole('toolbar', { name: 'Selection' });
 const lookUpHere = page => selection(page).getByRole('button', { name: 'Look up', exact: true });
-const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up' });
+const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up online', exact: true });
 
 /** Opens the dictionaries from Settings (opened from the library menu
     unless it is open) */
@@ -281,15 +281,14 @@ test('a removed dictionary is in the Trash with Restore, and only Empty Trash de
   await page.getByRole('status').filter({ hasText: 'Dictionary removed' }).getByRole('button', { name: 'Dismiss' }).click();
   await closeDictionaries(page);
   // Empty Trash asks, names the dictionaries, and deletes the files with the books'
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  const ask = dialog(page, 'Empty the Trash?');
-  await expect(ask).toContainText('every dictionary in it, with its files');
+  await askEmptyTrash(page);
+  const ask = emptyTrashDialog(page);
+  await expect(ask).toHaveAccessibleName('Delete 1 dictionary forever?');
+  await expect(ask).toContainText('1 dictionary will be deleted for good, with their reading positions, annotations and files');
   await ask.getByRole('button', { name: 'Cancel' }).click();
   expect(await dictionaryFiles(page), 'declined: nothing deleted').toBe(files);
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await dialog(page, 'Empty the Trash?').getByRole('button', { name: 'Empty' }).click();
+  await askEmptyTrash(page);
+  await emptyTrashDialog(page).getByRole('button', { name: 'Delete forever' }).click();
   await expect(listed).toBeHidden();
   expect(await dictionaryFiles(page)).toBe(0);
   await reload(page);
@@ -344,4 +343,31 @@ test('the backup lists the dictionaries, by name and language', async ({ page })
     { name: 'Pocket English', language: 'en' },
     { name: 'Petit Larousse', language: 'fr' },
   ]);
+});
+
+test('Look up leaves the word uncovered: no scrim, and the sheet in the half the word is not in (#387)', async ({ page }) => {
+  const errors = await start(page);
+  await importDictionary(page, english, 'en');
+  await readBook(page, book('Words', 'en-GB'));
+  await select(page, 'Ephemeral');
+  await lookUpHere(page).click();
+  await expect(entry(page)).toBeVisible();
+  await expect(page.locator('#panel-scrim')).toBeHidden();
+  const seen = await page.evaluate(() => {
+    const range = getSelection().getRangeAt(0).getBoundingClientRect();
+    const x = range.x + range.width / 2, y = range.y + range.height / 2;
+    const sheet = document.getElementById('dictionary-panel');
+    const hit = document.elementFromPoint(x, y);
+    const box = sheet.getBoundingClientRect();
+    return {
+      side: sheet.dataset.side, half: y * 2 < innerHeight ? 'upper' : 'lower',
+      underSheet: !!hit && sheet.contains(hit), underScrim: !!hit && document.getElementById('panel-scrim').contains(hit),
+      insideSheet: x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height,
+    };
+  });
+  expect(seen.underSheet).toBe(false);
+  expect(seen.underScrim).toBe(false);
+  expect(seen.insideSheet).toBe(false);
+  expect(seen.side).toBe(seen.half === 'upper' ? 'bottom' : 'top');
+  expect(errors).toEqual([]);
 });

@@ -1213,6 +1213,10 @@ implement dict_show () =
           val () = $A.free<byte>(types)
           val () = ui_text_buf("dictionary-source", name, name_len)
           val () = ui_text("dictionary-article", "-")
+          (* clear of the selection it is about *)
+          val () = $DR.get_selection_rect()
+          val () = ui_reference_set($DR.get_measure_y() + $DR.get_measure_h() / 2)
+          val () = ui_sheet_place(DictionarySheet())
           val () = layer_open(LDictionary())
           val () = ui_focus("dictionary-close")
         in _article(id, form, offset, size) end
@@ -1359,7 +1363,8 @@ implement dict_trash_render (shown) = let
   val count = _dicts_count(list)
   val () = _trash_rows(list, 0)
   val () = _trash_put(TrashCell(list))
-in ui_show("trash-dictionaries", shown && count > 0) end
+  val () = ui_show("trash-dictionaries", shown && count > 0)
+in lib_trash_dictionaries_set(count) end
 
 (* The dictionary at index of the Trash's list put back in Look up *)
 #pub fn dict_trash_restore (index: int): void
