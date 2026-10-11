@@ -252,7 +252,7 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   await librarySettings(page);
   const path = rawFile('quire-backup.json', JSON.stringify(backup));
   // a reset with its Trash emptied, the book imported again: new, until the backup is restored
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();

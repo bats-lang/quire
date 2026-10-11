@@ -3533,7 +3533,7 @@ implement sync_screen_make () = let
   (* Cancel, then the service's own button (Material's dialog: the
      confirming action last, at the end) *)
   val () = ui_el("sync-step", "sync-step-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", "Cancel")
+  val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", dismiss_label(DismissQuestion()))
   val () = ui_text_btn("sync-step-buttons", "sync-android", "btn btn-p", sign_in_label(ServiceGoogle()))
   val () = ui_text_btn("sync-step-buttons", "sync-google", "btn btn-p", sign_in_label(ServiceGoogle()))
   val () = ui_text_btn("sync-step-buttons", "sync-dropbox", "btn btn-p", sign_in_label(ServiceDropbox()))
@@ -3572,7 +3572,7 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-about", TDiv, "snote")
   val () = ui_text_long("sync-about", "Keeps places, shelves, collections, highlights, notes and reading time the same on your devices. Books' files are not synced, and sign-ins stay on this device.")
   val () = ui_el("sync-box", "sync-done-row", TDiv, "mbtns")
-  val () = ui_text_btn("sync-done-row", "sync-done", "btn", "Done")
+  val () = ui_text_btn("sync-done-row", "sync-done", "btn", dismiss_label(DismissScreen()))
   val () = ui_show("sync-screen", false)
   (* the offer of the place another device read: a row of the reader's
      bottom bar, over its progress, so it covers no text the bars do

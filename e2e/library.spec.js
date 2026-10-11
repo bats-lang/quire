@@ -460,7 +460,7 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   const sepia = await bg(page);
   // it asks nothing, and offers Undo
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText(empty)).toBeVisible();
@@ -475,7 +475,7 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await leaveShelf(page);
   // without Undo, the books wait in the Trash
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   await reload(page);
   await expect(cards(page)).toHaveCount(0);

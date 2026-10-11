@@ -40,6 +40,12 @@
  *   shadow of its own), so a class proven on the card's ground, reused on
  *   the page's, does not leave a strip of the card's colour behind its text
  *   (quire#386: Book info's author).
+ * - rowIsTarget: a row that opens a screen (its button ends in a
+ *   chevron) is one target: its button spans at least 90% of the row's
+ *   width, not a small button in a wide card (#380).
+ * - toastClear: while a toast is up, no control of the screen under it
+ *   is beneath the toast (the Sync-off toast covered the About card,
+ *   #380).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -573,6 +579,50 @@ export async function strayGrounds(page) {
       for (let a = e.parentElement; a && !behind; a = a.parentElement) behind = paint(a);
       if (!behind || behind === own || control(e) || card(e)) continue;
       bad.push(`${e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + e.className}: rgb(${own}) on rgb(${behind})`);
+    }
+    return bad;
+  });
+}
+
+
+/** Each visible row with a button that opens a screen (a chevron) whose
+    button covers under 90% of the row's width or height (#380) */
+export async function rowIsTarget(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    for (const row of document.querySelectorAll('.srow')) {
+      if (!row.checkVisibility({ visibilityProperty: true }) || row.getClientRects().length === 0) continue;
+      for (const button of row.querySelectorAll(':scope > button.chev')) {
+        const r = row.getBoundingClientRect();
+        const b = button.getBoundingClientRect();
+        if (b.width < 0.9 * r.width || b.height < 0.9 * r.height) {
+          bad.push(`${button.textContent.trim()}: ${Math.round(100 * b.width / r.width)}% of the row's width, ${Math.round(100 * b.height / r.height)}% of its height`);
+        }
+      }
+    }
+    return bad;
+  });
+}
+
+/** Each visible control that a visible toast is drawn over */
+export async function toastClear(page) {
+  return page.evaluate(() => {
+    const toasts = [...document.querySelectorAll('.toast')].filter(t => t.checkVisibility({ visibilityProperty: true }) && t.getClientRects().length > 0);
+    const bad = [];
+    for (const toast of toasts) {
+      const t = toast.getBoundingClientRect();
+      for (const control of document.querySelectorAll('button, a[href], select, input:not([type=hidden]), [role=button], [role=menuitem], [role=tab], [role=switch]')) {
+        if (toast.contains(control) || !control.checkVisibility({ visibilityProperty: true })) continue;
+        const r = control.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0 || r.bottom < t.top || r.top > t.bottom || r.right < t.left || r.left > t.right) continue;
+        const x = Math.min(Math.max(r.left + r.width / 2, t.left + 1), t.right - 1);
+        const y = Math.min(Math.max(r.top + r.height / 2, t.top + 1), t.bottom - 1);
+        if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+        const stack = document.elementsFromPoint(x, y);
+        if (stack.length > 0 && toast.contains(stack[0]) && stack.includes(control)) {
+          bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is under the toast`);
+        }
+      }
     }
     return bad;
   });

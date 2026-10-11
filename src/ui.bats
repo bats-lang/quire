@@ -880,11 +880,46 @@ implement ui_el(parent, id, element_tag, class_name) = let
   val () = ui_add(parent, id, element_tag)
 in _set_attr(id, $D.Class, class_name) end
 
+(* ============================================================
+   The words of leaving (#380): one place says what a button that
+   dismisses is called, by what it dismisses, so a layer is not left
+   with a word of its own. A screen is left with Done, a sheet, a panel
+   or a menu with Close, a question that can be turned down with Cancel,
+   a notice whose one button only acknowledges it with Done
+   ============================================================ *)
+
+#pub datatype dismiss_kind = DismissScreen | DismissSheet | DismissQuestion | DismissNotice
+
+#pub fn dismiss_label (kind: dismiss_kind): [label_len:pos | label_len < 64] string label_len
+
+implement dismiss_label (kind) =
+  case+ kind of
+  | DismissScreen() => "Done"
+  | DismissSheet() => "Close"
+  | DismissQuestion() => "Cancel"
+  | DismissNotice() => "Done"
+
 (* A button named by the text it shows *)
 #pub fn ui_text_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
   (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len): void
 
 implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, id, CText(class_name, label))
+
+(* A row that opens a screen (#380; Android's settings: the whole row is
+   the target, its name, a line that says what it is or its state, and a
+   chevron the stylesheet draws). The row is a group named title; its
+   button is named title alone (the chevron is drawn, not a character,
+   and the line is not part of the name), and the line is the element
+   summary_id, which is never empty: an empty one does not type-check *)
+#pub fn ui_nav_row {parent_len,row_len,button_len,summary_id_len,title_len,summary_len:pos | parent_len < 256; row_len < 256; button_len < 256; summary_id_len < 256; title_len < 256; summary_len < 256}
+  (parent: string parent_len, row: string row_len, button: string button_len, summary_id: string summary_id_len, title: string title_len, summary: string summary_len): void
+
+implement ui_nav_row(parent, row, button, summary_id, title, summary) = let
+  val () = ui_el(parent, row, TDiv, "srow navrow")
+  val () = ui_named(row, NGroup, title)
+  val () = ui_text_btn(row, button, "btn navbtn chev", title)
+  val () = ui_el(row, summary_id, TSpan, "sabout navsum")
+in ui_text(summary_id, summary) end
 
 (* A button that is a swatch of a colour (the stylesheet draws it by its
    class) and shows no words: named name *)
