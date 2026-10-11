@@ -190,6 +190,17 @@ builds and e2e runs one pool, and separate directories two (bats reads no
 `PWA_TEST_SLOTS=1`, `BATS_CACHE_DIR` (below) and `BATS_REPOSITORY`, and
 runs `bats check` and `gen-pwa test` with no wrapper of its own.
 
+A shell that reads no profile (an agent's, a CI-like step) gets the same
+from a machine-specific env file that is not in the repo (say
+`~/quire.env`, holding those variables), through `scripts/with-env
+<env-file> <command> [args...]`: it sources the file (every variable
+exported) and `exec`s the command exactly as given, so its arguments and
+exit status are the command's own: `scripts/with-env ~/quire.env bats
+check`, `scripts/with-env ~/quire.env ./dist/debug/gen-pwa test --
+<spec>`. `tests/with-env/run.sh` tests it (a step of check.yml, like
+`tests/play-release/run.sh`; `tests/groups.json` holds only the e2e and
+static groups).
+
 `BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
 what patsopt reads (the toolchain, its arguments and every file a
 module's staloads reach, by SHA-256), and the C names no checkout's
