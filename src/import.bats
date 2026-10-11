@@ -435,8 +435,12 @@ in
   in ArchiveFailed(NotFinished()) end
   else case+ mode of
   | Reopen() => let
-      val () = xspan_free(title)
-      val () = xspan_free(author)
+      (* a record that lost its title, author, series, direction of text or size is rebuilt from the file it is
+         read from (quire#510): what the book's own file says stands where a placeholder stood *)
+      val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+      val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
+      val rebuilt = lib_rebuild(lib_index_of_id(id_high, id_low), opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_position, file_size, text_directions)
+      val () = (if rebuilt then lib_save() else ())
       val () = hrefs_free(new_hrefs)
     in BookReopened() end
   | AddNew() => let
