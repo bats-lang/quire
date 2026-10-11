@@ -973,6 +973,29 @@ shown as text and the fallback its manifest names was never followed.
   for language and all 13 for direction, which lay each document out on its own; Quire's flow
   cannot without giving up one of those two decisions. They stay listed as policy in the report.
 
+## Addresses and labels in a book (#419)
+
+* **A path-absolute address is the container's** (`href_rooted` in `src/paths.bats`, used by
+  `book_find_relative` and `_load_image` in `src/reader.bats`; the suite's
+  `ocf-url_link-path-absolute`, "MUST ... resolved from the container's root"): an image's `src`
+  or a link's `href` that starts with `/` names the entry of that name from the root of the
+  zip, not from the document's directory, so `/OEBPS/images/a.png` in OEBPS/ch1.xhtml is
+  OEBPS/images/a.png, not OEBPS/OEBPS/images/a.png. epubcheck calls such an address a
+  warning (RSC-026); the reading system still shows it.
+* **An image given as a data URL is shown** (`src/dataurl.bats`; `pub-data-urls_browsing-context`
+  and `pub-data-urls_top-level-content`, "must display the image rather than opening it in a new
+  top-level browsing context"): `data:image/<png|jpeg|gif|webp|svg+xml>;base64,...` is decoded
+  by Quire (`base64_decode`) and given to the image as any entry's bytes are (`_load_data_image`),
+  because the dom package refuses a `data:` URL as an attribute (a script cannot run from one).
+  One over 512 KiB of text (alloc's bound is 1 MiB) or of another type is not shown, and it is not
+  offered to the image viewer (it is not an entry).
+* **A navigation link holding an image is labelled by the image's alt text, else its title**
+  (`_gather_image` in `src/toc.bats`; `nav-non-text_img`, `nav-non-text_img_title`): EPUB 3.3
+  asks for alternative text on a link's image, and the label was "Untitled".
+* `nav-spine_in-spine-hidden-toc-html` passes: the navigation document in the spine hides an
+  entry marked `hidden` (the attribute is kept, #411) and the contents panel, made from the
+  nav, lists all.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
@@ -1520,6 +1543,35 @@ read of storage changed: each still folds, as #174 says.
   of each name (`failLibrary`), once or always: each kind's text and
   button, an unlisted name's details, Try again showing the books and a
   later import being kept, and a retry that fails.
+
+## A book's place in its series is a position in hundredths (#434)
+
+`opf_series` (`src/epub_xml.bats`) reads a book's series and position: the
+first `belongs-to-collection` that is a series (one another meta refines as
+`collection-type` `set` is not), and the `group-position` that **refines it**
+(any, when the collection has no id); else Calibre's `calibre:series` and
+`calibre:series_index`. A position is a number with an optional sign, digits
+and a `.` or `,` with digits after it, spaces around it ignored (`_number_scan`),
+kept to two places (3.125 is 3.12), `-99999.99` to `99999.99`; anything else
+("II", "Part Two", "2 5", "1e2", empty) is no position, never a refusal. Calibre
+keeps `series_index` as a float, so 0 is a prequel and 2.5 a novella between
+volumes 2 and 3: the library sorts a series by the number, 0 and negatives
+included, and a book of the series with no number after those that have one,
+by title.
+
+`bnums.series_position` is `series_position_of(hundredths)`: 0 for none, else
+the hundredths plus 10000001 (as `progress_weighted` is the thousandth plus one),
+so the order of the ints is the order of the positions. The card and Book info
+(a Series row, `lib_series_line`) show it as written without a trailing zero
+(`Foundation · 2.5`, `· 2`, `· 1.25`, `· 0`, `· -1`). A record keeps it in an
+ancillary group `snum` (`series_position`), written only when SERI's whole number
+does not already say it; SERI keeps the **whole number** (`_series_whole`: 2 for
+2.5, 0 for none or below 1), so an older Quire reads 2 and keeps `snum` as it
+keeps `prog`, and a record with no `snum` reads as SERI's whole number
+(`_series_read`), as the records written before it do. Neither the backup nor the
+sync file holds a book's series (it is the book's own, read from its file, so a
+second device or a restore shows what the file says). `e2e/series.spec.js`,
+`e2e/series-books.js` and `e2e/library-records.spec.js` test it.
 
 ## What allocates is linear
 
@@ -2198,6 +2250,38 @@ the page or the page between two places (`tests/static`'s
 (`VEILED`, written by `scripts/gen-harmony.py`): under it the text
 keeps 7:1 and the links, highlights and marks 4.5:1, so Night has
 none.
+
+A book's picture is shown full screen in the viewer (#382; opened by a
+double tap on it or a long press, #365; `src/image_viewer.bats`). It is
+fitted whole to the screen on the bars' dark ground (`RoleBar`, dark in
+every theme; a picture is best seen on a dark ground, and the Close and
+Zoom buttons are `RoleBarText` on `RoleBarHigh`, proven), not shown at its
+inline size. The picture's box is the scroller's own size (`ui_picture_box`,
+the one inline style besides a place and a fixed page's box:
+`ui_fixed_box_n` with literal ids) at a zoom in thousandths of the fit;
+`object-fit: contain` fits the picture in it, so the fit needs no
+knowledge of the picture's size, and a zoomed box is larger than the
+scroller, which scrolls it: a pan is a scroll (`ui_scroll_set`). The zoom
+is held to 1 to 4 times the fit by `viewer_clamp`, whose result type is
+`[zoom | 1000 <= zoom <= 4000]`, and every zoom reaching the page passes
+through it (a zoom of 0 or a box past `ui_fixed_box_n`'s limits does not
+type-check). A pinch is the gestures package's own (`GPinch`, a pinch
+region 2 on the scroller, `image_zoom_axes`: none, so its `touch-action`
+is none and the browser's pinch is not used; the scale is of the zoom
+the pinch began at, the point of the picture under the fingers' middle
+stays under it); one finger's drag is the viewer's own, read from the
+raw pointer records (`viewer_pointer`: nothing to classify, every move
+is a pan, a mouse is not dragged: its wheel and scroll bars are), and a
+second finger ends it. A double tap (`dblclick`) zooms to 2.5 times the
+fit where it is made, and the next goes back to the fit; it is instant,
+so it is the same under reduced motion. The Zoom in and Zoom out buttons
+(1.5 times, about the middle) are the single-pointer way (WCAG 2.5.1).
+Resizing fits the picture again. By research (issue #382): Apple Books
+and Kobo zoom a picture by pinch and double tap; PhotoSwipe, the web's
+usual viewer, fits the picture, zooms to 2.5 times the fit on a double
+tap and at most 4 times the fit (photoswipe.com/adjusting-zoom-level).
+`e2e/image-viewer.spec.js` plays each, the pinch and the pan as touch
+pointer events on the scroller.
 
 The reading settings' sheet (`typography-panel`, opened by the bottom
 bar's Reading settings) holds every reading setting in named tabs

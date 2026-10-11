@@ -4,11 +4,13 @@
       "keys.spec.js",
       "media.spec.js",
       "relaunch.spec.js",
+      "series.spec.js",
       "spreads.spec.js",
       "sync-fastmail.spec.js"
     ],
     "reader": [
       "backup.spec.js",
+      "image-viewer.spec.js",
       "landmarks.spec.js",
       "relaunch-sync.spec.js",
       "smoke.spec.js",
@@ -107,6 +109,7 @@
       "reject/page-turn-forged-sheet",
       "reject/page-turn-held-lifted",
       "reject/page-turn-left-unfinished",
+      "reject/picture-box-zoom-zero",
       "reject/restored-bare-count",
       "reject/role-unmatched",
       "reject/shelf-unmatched",
