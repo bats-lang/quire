@@ -4,7 +4,7 @@
 # internal track to a completed release of its version code with these
 # release notes, then commit (or, for a dry run, validate). The release
 # is named by Play, from the bundle's versionName (the commit's version,
-# scripts/version.sh). Committing with ERROR_IF_IN_REVIEW: a change in
+# src/version.bats). Committing with ERROR_IF_IN_REVIEW: a change in
 # review is never cancelled by this one, which then fails instead. An
 # edit that does not commit is deleted, so nothing is left half made.
 #

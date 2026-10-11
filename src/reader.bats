@@ -2365,6 +2365,9 @@ fn _tag_of
   var ruby_text = @[char][2]('r', 't')
   var ruby_text_container = @[char][3]('r', 't', 'c')
   var ruby_parenthesis = @[char][2]('r', 'p')
+  var audio = @[char][5]('a', 'u', 'd', 'i', 'o')
+  var video = @[char][5]('v', 'i', 'd', 'e', 'o')
+  var source = @[char][6]('s', 'o', 'u', 'r', 'c', 'e')
 in
   if is(data, p_, 1) then $D.P
   else if is(data, h1, 2) then $D.H1 else if is(data, h2, 2) then $D.H2
@@ -2396,6 +2399,9 @@ in
   else if is(data, ruby, 4) then $D.Ruby else if is(data, ruby_base, 2) then $D.Rb
   else if is(data, ruby_text, 2) then $D.Rt else if is(data, ruby_text_container, 3) then $D.Rtc
   else if is(data, ruby_parenthesis, 2) then $D.Rp
+  else if is(data, audio, 5) then $D.Audio
+  else if is(data, video, 5) then $D.Video
+  else if is(data, source, 6) then $D.Source
   else $D.Div
 end
 
@@ -3344,14 +3350,31 @@ and _render_node
       val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
-      (* an audio or video element is not played (the DOM's attributes have
-         no controls: #424): its fallback content shows, and a line says so,
-         as an empty box would not *)
+      (* an audio or video element is played, with the browser's own
+         controls and never by itself; its source (or its <source>
+         children's) is the book's entry, given once the chapter is shown
+         (quire#424) *)
       var _tag_audio = @[char][5]('a', 'u', 'd', 'i', 'o')
       var _tag_video = @[char][5]('v', 'i', 'd', 'e', 'o')
-      val () = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
-        else if xml_name_eq(data, name_offset, name_len, _tag_video, 5) then _node_attr_literal(doc, content_node, $D.Class, "media-fallback")
-        else ())
+      var _tag_source = @[char][6]('s', 'o', 'u', 'r', 'c', 'e')
+      var _attr_src = @[char][3]('s', 'r', 'c')
+      val is_media = (if xml_name_eq(data, name_offset, name_len, _tag_audio, 5) then true
+        else xml_name_eq(data, name_offset, name_len, _tag_video, 5)): bool
+      val () = (if is_media then _node_attr_literal(doc, content_node, $D.Controls, "controls") else ())
+      val is_source = xml_name_eq(data, name_offset, name_len, _tag_source, 6)
+      (* a <source>'s file is given to the media element itself: a source
+         given its src after it is inserted is not looked at again *)
+      val found = (if is_media then
+          (case+ find_attr(data, attrs, _attr_src, 3) of
+           | ~xspan_at(src_start, src_len) => images_cons(content_node, src_start, src_len, found)
+           | ~xspan_none() => found)
+        else if is_source then
+          (if parent >= 0 then
+            (case+ find_attr(data, attrs, _attr_src, 3) of
+             | ~xspan_at(src_start, src_len) => images_cons(parent, src_start, src_len, found)
+             | ~xspan_none() => found)
+           else found)
+        else found): [new_count:nat] images(n, new_count)
       val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')

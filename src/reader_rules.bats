@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 12050} (sheet: sheet(left, false, false)): [after:nat | after >= left - 12050] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 12300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 12300] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1642} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1642] sheet(after, false, false) = let
@@ -299,7 +299,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)
-fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1330} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1330] sheet(after, false, false) = let
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1580} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1580] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -384,10 +384,17 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1330} (sheet: sheet
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, MaxWidth(), "100%")
   val sheet = close(sheet)
-  (* an audio or video element, not played: a line says so before its
-     fallback content (#424) *)
-  val sheet = rule(sheet, ".caf .media-fallback::before")
-  val () = raw(sheet, "content:\"Audio or video: Quire does not play it.\";display:block;font-style:italic;")
+  (* an audio or video element is played, with the browser's controls: no
+     wider than the column; a video no taller than the page, as a picture *)
+  val sheet = rule(sheet, ".caf audio,.caf video")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, MaxWidth(), "100%")
+  val sheet = lay(sheet, Margin(), "0.5em auto")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".caf video")
+  val sheet = lay(sheet, MaxHeight(), "calc(100dvh - var(--page-top) - var(--page-bottom))")
+  val sheet = lay(sheet, Height(), "auto")
+  val sheet = lay(sheet, BreakInside(), "avoid")
   val sheet = close(sheet)
   (* a note's text and a caption are set smaller than the text round them,
      and scale with it (#422) *)

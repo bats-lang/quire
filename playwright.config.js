@@ -12,14 +12,30 @@ const chromiumArgs = [
 const ANDROID_USER_AGENT = 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP4A.250105.002; wv) '
   + 'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/140.0.7339.207 Mobile Safari/537.36';
 
-// QUIRE_PORT: the port the app is served on, so two runs of the suite from two
-// checkouts do not share (and serve each other's) build
-const port = Number(process.env.QUIRE_PORT || 3748);
+// Where the app is served. `gen-pwa test` (pwa's test_run, pwa#82, #499)
+// serves dist/pwa itself on 127.0.0.1, at a port the kernel picks
+// (PWA_TEST_BASE_URL, PWA_TEST_PORT); a bare `npx playwright test` serves
+// it here, at QUIRE_PORT, so two runs of the suite from two checkouts do
+// not share (and serve each other's) build. Either way the page is at
+// localhost, the host the specs that keep every other host away let
+// through
+const served = process.env.PWA_TEST_BASE_URL && process.env.PWA_TEST_PORT;
+const port = Number(process.env.PWA_TEST_PORT || process.env.QUIRE_PORT || 3748);
+
+// `gen-pwa test` runs the suite twice, the @serial tests alone on one
+// worker and then the others; with --timings each run's JSON report is
+// named for it (serial.json, parallel.json, run.json). Playwright clears
+// its output directory as a run starts, so each run keeps its outputs (the
+// screenshots, traces and stall captures, and the HTML report) under its
+// own name, or the second run would delete the first's
+const run = (process.env.PLAYWRIGHT_JSON_OUTPUT_NAME || '').match(/(?:^|[\\/])(serial|parallel|run)\.json$/)?.[1];
+if (run && !process.env.PLAYWRIGHT_HTML_OUTPUT_DIR) process.env.PLAYWRIGHT_HTML_OUTPUT_DIR = `playwright-report/${run}`;
 
 export default defineConfig({
   testDir: './e2e',
   // every spec's test carries the stall watch (e2e/stall-capture.js, #244)
   globalSetup: './e2e/global-setup.js',
+  outputDir: run ? `test-results/${run}` : 'test-results',
   timeout: 90000,
   expect: { timeout: 15000 },
   use: {
@@ -28,7 +44,7 @@ export default defineConfig({
     trace: 'on',
     headless: true,
   },
-  webServer: {
+  webServer: served ? undefined : {
     command: `npx serve dist/pwa -l ${port} --no-clipboard`,
     port,
     reuseExistingServer: !process.env.CI,
