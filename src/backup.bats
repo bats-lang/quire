@@ -1406,7 +1406,7 @@ in
         val () = (if value >= 0 then (if value <= 2 then set_cols_set(cols_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "scrolled") then let
-        val () = (if value >= 0 then (if value <= 1 then set_flow_set(flow_of_code(value)) else ()) else ())
+        val () = (if value >= 0 then (if value <= 2 then set_flow_set(flow_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "footerReadout") then let
         val () = (if value >= 0 then (if value <= 4 then set_rd_set(rd_of_code(value)) else ()) else ())

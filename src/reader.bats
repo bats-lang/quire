@@ -268,7 +268,7 @@ fn _is_vertical (): bool =
    fixed page, are never scrolled *)
 fn _scrolled (): bool =
   if _is_vertical() then false else if _is_fixed() then false
-  else (case+ set_flow_get() of Scrolled() => true | Paged() => false)
+  else flow_scrolled(set_flow_get())
 
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
@@ -2367,7 +2367,7 @@ datavtype images(n:int, int) =
    reference (epub:type noteref, or role doc-noteref) *)
 datavtype links(int) =
   | links_nil(0) of ()
-  | {count:nat}{l:agz}{fragment_len:nat | fragment_len <= 200}
+  | {count:nat}{l:agz}{fragment_len:nat | fragment_len <= 2048}
     links_cons(count + 1) of (Int, Int, Int, $A.arr(byte, l, fragment_len + 1), int fragment_len, bool, links(count))
 
 fun links_free {count:nat} .<count>. (entries: links(count)): void =
@@ -2390,7 +2390,7 @@ fn _links_put (new_cell: links_cell): void = let
   val+ ~LinksCell(old) = cell
 in links_free(old) end
 
-fn _links_push {l:agz}{fragment_len:nat | fragment_len <= 200} (first_node: Int, end_node: Int, chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len, note: bool): void = let
+fn _links_push {l:agz}{fragment_len:nat | fragment_len <= 2048} (first_node: Int, end_node: Int, chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len, note: bool): void = let
   val+ ~LinksCell(rest) = _links_take()
 in _links_put(LinksCell(links_cons(first_node, end_node, chapter, fragment, fragment_len, note, rest))) end
 
@@ -2398,6 +2398,22 @@ in _links_put(LinksCell(links_cons(first_node, end_node, chapter, fragment, frag
 fn _starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}
   (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
   if span_len < pattern_len then false else xml_name_eq(data, offset, pattern_len, pattern, pattern_len)
+
+(* text[at, at + len) := url[0, len) *)
+fun _fragment_keep_arr {lu,lt:agz}{u,t:pos}{len,at:nat | len < u; at + len < t}{k:nat | k <= len} .<len - k>.
+  (url: !$A.arr(byte, lu, u), len: int len, text: !$A.arr(byte, lt, t), at: int at, k: int k): void =
+  if k >= len then ()
+  else let
+    val () = $A.set<byte>(text, at + k, $A.get<byte>(url, k))
+  in _fragment_keep_arr(url, len, text, at, k + 1) end
+
+(* url[0, len) := data[start, start + len) *)
+fun _fragment_keep {l,lu:agz}{n:pos}{start,len:nat | start + len <= n}{k:nat | k <= len}{u:pos | len < u} .<len - k>.
+  (data: !$A.borrow(byte, l, n), start: int start, len: int len, url: !$A.arr(byte, lu, u), k: int k): void =
+  if k >= len then ()
+  else let
+    val () = $A.set<byte>(url, k, $A.read<byte>(data, start + k))
+  in _fragment_keep(data, start, len, url, k + 1) end
 
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
@@ -2490,11 +2506,16 @@ in
         else _starts(data, href_start, href_len, _mailto, 7)): bool
     in
       if outside then
-        (if href_len < 65536 then let
-           val () = _node_url(doc, first_node, $D.Href, data, href_start, href_len)
-           val () = _node_attr_literal(doc, first_node, $D.Target, "_blank")
-           val () = _node_attr_literal(doc, first_node, $D.Rel, "noopener noreferrer")
-           val () = _links_push(first_node, end_node, ~1, $A.alloc<byte>(1), 0, false)
+        (* a link out of the book is asked about before it opens (the
+           suite's pub-external-links and pub-external-links_consent):
+           the page's link is no anchor to follow, its address is kept for
+           the question *)
+        (if href_len <= 2048 then let
+           val () = _node_attr_literal(doc, first_node, $D.Role, "link")
+           val () = _node_attr_literal(doc, first_node, $D.Tabindex, "0")
+           val url = $A.alloc<byte>(href_len + 1)
+           val () = _fragment_keep(data, href_start, href_len, url, 0)
+           val () = _links_push(first_node, end_node, ~1, url, href_len, false)
          in found end
          else found)
       else let
@@ -3545,6 +3566,9 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = _direction_set(if spine_rtl(opf_bytes, opf_nodes) then RightToLeft() else LeftToRight())
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
+               (* a book that asks to be scrolled (rendition:flow, roll layout) is, until the reader chooses Pages *)
+               val () = set_book_scrolls_set(opf_scroll_preferred(opf_bytes, opf_nodes))
+               val () = set_show()
                (* a new book's fixed pages take no size from another's *)
                val () = _size_put(_page_size, NoViewport())
                val () = !_book_spread := opf_spread(opf_bytes, opf_nodes)
@@ -3946,6 +3970,10 @@ in
                  val () = $X.free_nodes(nodes)
                  val () = $A.drop<byte>(smil_frozen, smil_bytes)
                  val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
+                 (* a SMIL with no audio has nothing to play: the text is read
+                    by speech, where the platform speaks (the suite's mol-tts_single
+                    and mol-tts_multi), as for a book with no narration *)
+                 val () = _narration_offered(false)
                in $P.ret<int>(0) end
                else (case+ clip_table_new(count) of
                  | ~ClipTableNone() => let
@@ -3954,6 +3982,7 @@ in
                      val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
                    in $P.ret<int>(0) end
                  | ~ClipTableMade(table) => let
+                     val () = _narration_offered(true)
                      val _ = overlay_fill(smil_bytes, nodes, table, count)
                      val () = $X.free_nodes(nodes)
                      val () = _audio_resolve(serial, file_size, name_offset, dir_len, smil_bytes, smil_size, table, count, 0, ~1, 0, 0, 0, $Z.Stored(), AudioOther())
@@ -5232,7 +5261,7 @@ implement reader_anchor () = _anchor_now()
 datavtype link_found =
   | NoLink of ()
   | {l:agz}{fragment_len:nat} InBook of (Int, bool, $A.arr(byte, l, fragment_len + 1), int fragment_len)
-  | OutOfBook of ()
+  | {l:agz}{url_len:nat | url_len <= 2048} OutOfBook of ($A.arr(byte, l, url_len + 1), int url_len)
 
 fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_found =
   case+ entries of
@@ -5246,7 +5275,7 @@ fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_f
       val copy_len = fragment_len
       prval () = fold@(entries)
     in
-      if found_chapter < 0 then let val () = $A.free<byte>(copy) in OutOfBook() end
+      if found_chapter < 0 then OutOfBook(copy, copy_len)
       else InBook(found_chapter, found_note, copy, copy_len)
     end
     else let
@@ -5422,11 +5451,17 @@ and _note_node {data_location,fragment_location,note_location:agz}{data_size:pos
   | $X.xml_text(offset, text_len) => if inside then _note_put(data, offset, text_len, 0, buf, at) else at
   | $X.xml_element(name_offset, name_len, attrs, children) => let
       var _attr_id = @[char][2]('i', 'd')
+      var _t_head = @[char][4]('h', 'e', 'a', 'd')
       val here = (case+ find_attr(data, attrs, _attr_id, 2) of
         | ~xspan_none() => false
         | ~xspan_at(start, span_len) => if span_len = fragment_len then _same(data, start, fragment, span_len, 0) else false): bool
-      val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
-    in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+    in
+      (* the head is not the page: a title with the id is no note (the suite's pss-support_ignore-title) *)
+      if (if inside then false else xml_name_eq(data, name_offset, name_len, _t_head, 4)) then at
+      else let
+        val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
+      in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+    end
 
 (* buf[at] and the bytes before it back to the first that starts a
    character (not a continuation byte, 10xxxxxx) *)
@@ -5473,8 +5508,25 @@ fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byt
   val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
   val () = release_bytes(note_frozen, note_bytes)
   val () = ui_text_buf("footnote-text", decoded, decoded_len)
+  val () = ui_show("footnote-go", true)
+  val () = ui_show("footnote-open", false)
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
+
+(* A link out of the book, url[0, url_len), asked about in the note's
+   overlay: where it goes, and a link that opens it in another tab (a tap
+   on a link is never blocked, as a script's window.open is) *)
+fn _external_ask {l:agz}{url_len:pos | url_len <= 2048} (url: $A.arr(byte, l, url_len + 1), url_len: int url_len): void = let
+  val text = $A.alloc<byte>(url_len + 40)
+  val () = $A.write_text(text, 0, $A.text_lit("This link leaves the book. It goes to "), 38)
+  val () = _fragment_keep_arr(url, url_len, text, 38, 0)
+  val () = $A.write_text(text, 38 + url_len, $A.text_lit("."), 1)
+  val () = ui_text_buf("footnote-text", text, url_len + 39)
+  val () = ui_url_href("footnote-open", url, url_len)
+  val () = ui_show("footnote-go", false)
+  val () = ui_show("footnote-open", true)
+  val () = layer_open(LNote())
+in ui_focus("footnote-open") end
 
 (* The note kept in _note_target, found in its chapter's XHTML data[0, n):
    shown over the page, and kept for "Go to note"; when it has no text
@@ -5639,7 +5691,9 @@ in
   case+ found of
   | ~NoLink() => false
   (* followed by the browser *)
-  | ~OutOfBook() => true
+  | ~OutOfBook(url, url_len) =>
+    (if url_len > 0 then let val () = _external_ask(url, url_len) in true end
+     else let val () = $A.free<byte>(url) in true end)
   | ~InBook(chapter, note, fragment, fragment_len) =>
     (* a note's reference to a note it names opens the note over the
        page; any other link is followed *)

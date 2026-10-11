@@ -996,6 +996,71 @@ shown as text and the fallback its manifest names was never followed.
   entry marked `hidden` (the attribute is kept, #411) and the contents panel, made from the
   nav, lists all.
 
+## Links out, scrolled books, fonts and speech for the W3C suite (#419)
+
+* **A link out of the book asks first** (`_external_ask` in `src/reader.bats`;
+  `pub-external-links`, `pub-external-links_consent`: "should open it in a new
+  browser instance after the reader's consent"): the page's `<a>` no longer carries
+  the address (it would open at once); the address is kept (`links_cons`, up to
+  2048 bytes) and a tap or Enter on it opens the note overlay with "This link leaves
+  the book. It goes to <address>." and a real link, Open link (`footnote-open`, `rel=noopener`,
+  `target=_blank`), that the reader taps (a tap is never blocked, a script's
+  `window.open` after an answer is); Close ends it. The same overlay as a note's
+  (`LNote`), with Go to note hidden. By research: the suite's reports have 7 of 15 reading systems
+  passing `pub-external-links` and 4 of 12 `pub-external-links_consent`, and the test is
+  "should open it ... after the reader's consent"; a link that opens at once cannot be told from one the page did not mean to
+  follow, and nothing is lost by one more tap.
+* **A book can ask to be scrolled** (`opf_scroll_preferred`, `flow_scrolled`,
+  `_book_scrolls` in `src/settings.bats`; `lay-pkg-flow-scrolled-doc`,
+  `-continuous`): the setting Pages | Scroll starts as `ByBook` (the default of a new
+  install; a kept setting keeps its value): a book whose OPF has `rendition:flow`
+  `scrolled-doc` or `scrolled-continuous`, or `rendition:layout` `roll` (EPUB 3.4's
+  draft roll layout, webtoons; `lay-roll-embedded-images*`), is scrolled until the reader
+  chooses Pages or Scroll; any other is in pages. The reader's choice outranks the
+  book's (EPUB RS 3.3 lets a reading system override `rendition:flow`; Readium can
+  scroll any book on the reader's word). A roll is not one strip across documents:
+  each document scrolls and the next follows at its end. Reset to defaults puts `ByBook` back.
+* **A SMIL with no audio is read by speech** (`_overlay_load`; `mol-tts_single`,
+  `mol-tts_multi`, "falls back on Text-to-Speech when no audio file is present"):
+  a chapter whose SMIL has no clip to play (`overlay_count` is 0) does not offer
+  the narration's controls, so reading aloud by speech (where the platform speaks)
+  takes its place and reads the chapter from the page; the SMIL's order and its
+  `media:active-class` highlight are not used.
+* **The package's fonts are the Book font** (`cnt-css-fonts_ot`, `_tt`, `_woff`,
+  `_woff2`): the book's CSS is dropped (#411), so which text uses a font is the
+  reader's: Font: Book loads the first font of the manifest (`font/otf`, `font/ttf`,
+  `font/woff`, `font/woff2`) for the text. An obfuscated font (`ocf-font_obfuscation`,
+  a should) is not undone: IDPF's obfuscation needs SHA-1, which Quire has no package for.
+
+### Settled by research, kept failing (#419)
+
+A must test stays failing only where two documented behaviours conflict, and the one
+that wins is named:
+
+* **The book's CSS is not applied (#411) wins over the suite's CSS tests**
+  (`cnt-svg-css-inclusion`, `nav-spine_in-spine-hidden-toc-css`, `lay-pp-xhtml-icb`,
+  `_multi`, `_multi_declarations`, `_repeated-in-meta`, `_units`, the deprecated
+  `lay-fxl-*` copies, `css-epub-*` (ten should, vendor-prefixed properties),
+  `mol-css`, `ocf-font_obfuscation`): each asks that a rule of the book's own style
+  sheet change how its text is drawn. The stylesheet's colours are the app's, each text and
+  ground pair proven to reach 4.5:1 in each theme (`SURF`), and the reader's size, margins, spacing,
+  Justify, Hyphenation and Font settings are the reader's (accessibility is what a
+  reading app is for); a book's colours or sizes would break the proofs and
+  the settings. Readium CSS (Thorium) keeps the publisher's styles by default and
+  offers a switch to turn them off (its docs: "publisher styles"); Quire is the other way
+  round, on purpose. The icb tests' viewport is read and measured (`lay-pp-viewport-*`
+  passes); their pass criterion is a grid the book draws, which no reading system of the suite's
+  reports answered (0 of 0).
+* **The package's language and direction (#416, the book's language on its chapters)
+  win over `pkg-lang_but_not_content` and `pkg-dir_but_not_content`**, above.
+* **`pub-cmt-jxl`** is the platform's: Chromium and Android's WebView have no
+  JPEG XL decoder (Chrome removed its own in 2023), so the image is not drawn. A
+  fallback is followed when the manifest names one (`pub-foreign_image`).
+* **`pkg-manifest-unlisted-resource`**: see above.
+* **Deprecated tests** (`fxl-spine-overrides_duplicate`, `lay-fxl-orientation-landscape`):
+  the suite itself files them as deprecated (the `fxl-*` and `lay-fxl-*` copies
+  that the `lay-pp-*` tests replace), and `rendition:orientation` is not read.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading

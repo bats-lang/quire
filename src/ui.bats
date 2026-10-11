@@ -875,6 +875,14 @@ fn _is_https {l:agz}{n:pos}{url_len:nat | url_len <= n} (url: !$A.arr(byte, l, n
 implement ui_https_href (id, url, url_len) =
   if _is_https(url, url_len) then _set_url_buf(id, $D.Href, url, url_len) else $A.free<byte>(url)
 
+(* The href of a link out (ui_link_out) id: url[0, url_len), as the dom
+   package takes a URL: an http:, https: or mailto: one (a script's is
+   refused there); otherwise the link is left as it was *)
+#pub fn ui_url_href {id_len:pos | id_len < 256}{l:agz}{n:pos}{url_len:pos | url_len <= n; url_len < 65536}
+  (id: string id_len, url: $A.arr(byte, l, n), url_len: int url_len): void
+
+implement ui_url_href (id, url, url_len) = _set_url_buf(id, $D.Href, url, url_len)
+
 (* A link out of the app (ui_link_out) to a fixed https address:
    https:// and then address, set by dom's set_url_literal, whose
    scheme is its constructor's *)
@@ -2481,18 +2489,21 @@ implement ui_annotations_control (bytes, n, at) = _annotations_control_from(byte
 (* A note over the page's buttons, each by its element's id (footnote_control_id) *)
 #pub datatype footnote_control =
   | FootnoteGo
+  | FootnoteOpen
   | FootnoteClose
 
 #pub fn footnote_control_id (control: footnote_control): [id_len:pos | id_len < 256] string id_len
 implement footnote_control_id (control) =
   case+ control of
   | FootnoteGo() => "footnote-go"
+  | FootnoteOpen() => "footnote-open"
   | FootnoteClose() => "footnote-close"
 
 (* The control after control, in the order the decoder tries them *)
 fn _footnote_control_after (control: footnote_control): $R.option(footnote_control) =
   case+ control of
-  | FootnoteGo() => $R.some(FootnoteClose())
+  | FootnoteGo() => $R.some(FootnoteOpen())
+  | FootnoteOpen() => $R.some(FootnoteClose())
   | FootnoteClose() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
@@ -2509,7 +2520,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_footnote_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(footnote_control)
-implement ui_footnote_control (bytes, n, at) = _footnote_control_from(bytes, n, at, FootnoteGo(), 2)
+implement ui_footnote_control (bytes, n, at) = _footnote_control_from(bytes, n, at, FootnoteGo(), 3)
 
 (* The search panel's close, each by its element's id (search_panel_control_id) *)
 #pub datatype search_panel_control =
