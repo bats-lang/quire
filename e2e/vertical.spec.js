@@ -201,7 +201,7 @@ test('a run of one or two digits in vertical text is set upright in one cell; a 
   await start(page);
   await readBook(page, {
     title: '縦書きの数', author: 'Vertical Tests', language: 'ja', rtl: true,
-    rawChapters: [{ body: '<h1>第1章</h1><p id="numbers">令和5年12月 2024年 A4判 &#49;&#50;&#51; 3.5</p>' }],
+    rawChapters: [{ body: '<h1>第1章</h1><p>令和5年12月 2024年 A4判 &#49;&#50;&#51; 3.5</p>' }],
   });
   const style = await bookPage(page).locator('.tcy').first().evaluate(e => getComputedStyle(e).textCombineUpright);
   expect(style).toBe('all');
@@ -215,20 +215,23 @@ test('a run of one or two digits in vertical text is set upright in one cell; a 
   });
   expect(heading.text).toBe('第1章');
   expect(heading.parts).toEqual([['1', '', '第'], ['1', 'tcy', '1'], ['1', '', '章']]);
-  // the parts take no content node number of their own: the next text is
-  // the very next number
-  const next = await bookPage(page).locator('#numbers').evaluate(e => e.querySelector('[id^=c]').id);
-  expect(Number(next.slice(1))).toBe(Number(heading.id.slice(1)) + 1);
-  // upright: the run stands in a cell as tall as a character's, where a digit
-  // on its side is about half as tall as one
-  const heights = await bookPage(page).locator('h1').evaluate(e => {
-    const [before, run] = [...e.querySelectorAll('[data-part]')];
-    return { character: before.getBoundingClientRect().height, run: run.getBoundingClientRect().height };
+  // the parts take no content node number of their own: after the heading's
+  // text comes the paragraph (one number) and its text (the next)
+  const next = await bookPage(page).locator('p').first().evaluate(e => e.querySelector('[id^=c]').id);
+  expect(Number(next.slice(1))).toBe(Number(heading.id.slice(1)) + 2);
+  // upright: the run stands in a cell one em tall (its width: the digits side
+  // by side), where a digit on its side is about half an em tall, and a
+  // run of three digits is not combined
+  const cell = await bookPage(page).locator('h1').evaluate(e => {
+    const run = e.querySelector('.tcy');
+    const range = document.createRange();
+    range.selectNodeContents(run);
+    return { run: range.getBoundingClientRect().height, em: parseFloat(getComputedStyle(e).fontSize) };
   });
-  expect(heights.run).toBeGreaterThan(heights.character * 0.8);
-  expect(heights.run).toBeLessThan(heights.character * 1.2);
+  expect(cell.run).toBeGreaterThan(cell.em * 0.9);
+  expect(cell.run).toBeLessThan(cell.em * 1.1);
   // the text is as it was: a copy of the paragraph, character references decoded
-  expect(await bookPage(page).locator('#numbers').evaluate(e => e.textContent)).toBe('令和5年12月 2024年 A4判 123 3.5');
+  expect(await bookPage(page).locator('p').first().evaluate(e => e.textContent)).toBe('令和5年12月 2024年 A4判 123 3.5');
 });
 
 test('a mark over the text of a vertical heading with digits in it covers the text', async ({ page }) => {
@@ -239,6 +242,7 @@ test('a mark over the text of a vertical heading with digits in it covers the te
   await expect(panel).toBeVisible();
   await panel.getByRole('searchbox', { name: 'Search in book' }).fill('第1章');
   await expect(panel.getByRole('status')).toHaveText('1 result');
+  await panel.getByRole('region', { name: 'Results' }).getByRole('button').first().click();
   // the match crosses the heading's three parts and is one range of text
   await expect.poll(() => marks(page)).toEqual({ size: 1, text: '第1章' });
 });
