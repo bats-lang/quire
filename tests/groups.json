@@ -138,6 +138,7 @@
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
       "accept/nav-row-with-summary",
+      "accept/sheet-scrolls-most",
       "accept/try-again-transient",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
@@ -147,6 +148,7 @@
       "reject/fixed-box-zoom-zero",
       "reject/nav-row-without-summary",
       "reject/page-height-fraction",
+      "reject/sheet-scrolls-over-share",
       "reject/page-width-fraction"
     ]
   }

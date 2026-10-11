@@ -12,7 +12,7 @@ import {
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { checkPageMargins } from './page-margins.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -49,6 +49,8 @@ async function fits(page, screen) {
   expect(await targetsShort(page), `touch targets under 48 px on ${screen}`).toEqual([]);
   expect(await rowIsTarget(page), `rows that open a screen whose button is not the whole row on ${screen}`).toEqual([]);
   expect(await toastClear(page), `controls under a toast on ${screen}`).toEqual([]);
+  expect(await peekAbove(page), `sheets covering more than 60% of the window on ${screen}`).toEqual([]);
+  expect(await offScale(page), `gaps and tab paddings off the spacing scale on ${screen}`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
 }

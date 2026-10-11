@@ -205,14 +205,13 @@ fn panel_rules_settings_sheet {left:nat | left >= 2400} (sheet: sheet(left, fals
   val sheet = lay(sheet, BoxShadow(), "0 -2px 16px rgba(0,0,0,.3)")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Gap(), "10px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = lay(sheet, MaxWidth(), "520px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, BorderRadius(), "12px 12px 0 0")
   (* taller than a short screen allows: it scrolls, within the height
      shown (dvh: in full screen, and in a WebView, vh can be more) *)
-  val sheet = lay(sheet, MaxHeight(), "85dvh")
-  val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = scrolls(sheet, ShareMost())
   val sheet = close(sheet)
   (* a sheet's head, its Close in it: held at the sheet's top as the
      rest scrolls, so Close is always in reach (as Apple Books' sheet
@@ -288,11 +287,11 @@ fn panel_rules_settings_sheet {left:nat | left >= 2400} (sheet: sheet(left, fals
 in sheet end
 
 (* The setting rows, from .srow on *)
-fn panel_rules_setting_rows {left:nat | left >= 1521} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1521] sheet(after, false, false) = let
+fn panel_rules_setting_rows {left:nat | left >= 1522} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1522] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, Gap(), "10px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".slabel")
   val sheet = lay(sheet, Width(), "7em")
@@ -304,13 +303,13 @@ fn panel_rules_setting_rows {left:nat | left >= 1521} (sheet: sheet(left, false,
   val sheet = accent(E_accent_card | sheet, RoleAccent(), RoleCard())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".sval")
-  val sheet = lay(sheet, Width(), "3em")
+  val sheet = lay(sheet, Width(), "5em")
   val sheet = lay(sheet, TextAlign(), "right")
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seg")
   val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, Gap(), "6px")
+  val sheet = spaced(sheet, Gap(), SpaceTight())
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)

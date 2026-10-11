@@ -133,12 +133,12 @@ implement reading_settings_rules (sheet) = let
   val sheet = close(sheet)
   val sheet = rule(sheet, ".shead .tab")
   val sheet = lay(sheet, Flex(), "1 1 auto")
-  val sheet = lay(sheet, Padding(), "8px 4px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tabpanel")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Gap(), "10px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   (* the panels, one over another in one cell, as tall as the tallest
      (#301): the one not chosen keeps its room, unseen, and so is
@@ -223,7 +223,7 @@ implement reading_settings_rules (sheet) = let
   val sheet = rule(sheet, ".seg button.tapbtn")
   val sheet = lay(sheet, Display(), "grid")
   val sheet = lay(sheet, GridTemplate(), "\"m n\" auto \"m a\" auto/32px 1fr")
-  val sheet = lay(sheet, Gap(), "2px 12px")
+  val sheet = spaced_pair(sheet, Gap(), SpaceTight(), SpaceMedium())
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, TextAlign(), "start")
   val sheet = lay(sheet, Padding(), "8px 12px")

@@ -46,6 +46,12 @@
  * - toastClear: while a toast is up, no control of the screen under it
  *   is beneath the toast (the Sync-off toast covered the About card,
  *   #380).
+ * - peekAbove: a sheet over the page leaves at least 40% of the window
+ *   to the page, so a setting that changes the page can be judged on
+ *   it (Material 3's standard sheet; #379).
+ * - offScale: the gaps of a sheet, and the padding of its tabs, are
+ *   steps of the spacing scale (4, 8, 12, 16, 24 px), none under the
+ *   least inset on a side (#379).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -621,6 +627,45 @@ export async function toastClear(page) {
         const stack = document.elementsFromPoint(x, y);
         if (stack.length > 0 && toast.contains(stack[0]) && stack.includes(control)) {
           bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is under the toast`);
+/** Each visible fixed sheet that covers more than 60% of the window's
+    height (the page keeps at least 40%; #379). Named with the share it
+    covers */
+export async function peekAbove(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      const box = sheet.getBoundingClientRect();
+      const covered = Math.max(0, Math.min(box.bottom, innerHeight) - Math.max(box.top, 0)) / innerHeight;
+      if (covered > 0.6) bad.push(`${(sheet.getAttribute('aria-label') || sheet.id || 'sheet')} covers ${Math.round(covered * 100)}% of the window`);
+    }
+    return bad;
+  });
+}
+
+/** In each visible sheet: a gap (row or column) that is not a step of
+    the spacing scale, and a tab whose padding is not one, or is under
+    the least inset at a side (#379) */
+export async function offScale(page) {
+  return page.evaluate(() => {
+    const scale = [0, 4, 8, 12, 16, 24];
+    const least = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-inset'));
+    const bad = [];
+    const named = e => (e.getAttribute('aria-label') || e.id || e.className || e.tagName).toString().trim().slice(0, 40);
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      for (const element of [sheet, ...sheet.querySelectorAll('*')]) {
+        const style = getComputedStyle(element);
+        for (const property of ['rowGap', 'columnGap']) {
+          const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
+          if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
+        }
+        if (element.getAttribute('role') === 'tab') {
+          for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+            const value = parseFloat(style[`padding${side}`]);
+            if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
+            if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
+          }
         }
       }
     }

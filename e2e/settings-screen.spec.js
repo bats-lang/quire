@@ -94,7 +94,7 @@ test('a row that ends in a chevron opens a screen, never a dialog, and a service
   await librarySettings(page);
   for (const row of ['Sync', 'Dictionaries', 'About Quire']) {
     await settingsButton(page, row).click();
-    const opened = page.locator('[role=dialog]:visible').last();
+    const opened = dialog(page, row);
     await expect(opened, `${row} opens a screen`).toHaveClass(/\binfo\b/);
     if (row === 'Sync') {
       // each service says, under its name, what it is
