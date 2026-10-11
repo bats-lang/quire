@@ -1719,7 +1719,7 @@ in
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = now,
         chapter = chapter_index, chapters = (if chapter_count > 0 then (chapter_count: Int) else record.chapters), page = page,
         pages = (if holds then record.pages else page_count), anchor = (if holds then record.anchor else anchor),
-        file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_number = record.series_number, collections = record.collections,
+        file_size = record.file_size, cover = record.cover, done = (if at_end then 1 else record.done), series_position = record.series_position, collections = record.collections,
         minutes_read = record.minutes_read + minutes_read, pages_read = record.pages_read + pages_read, finished_at = (if at_end then (if record.finished_at > 0 then record.finished_at else now) else record.finished_at),
         shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
         (* finished now: a change sync passes on *)

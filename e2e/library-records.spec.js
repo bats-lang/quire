@@ -10,6 +10,7 @@ import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
   librarySettings, settingsButton, settingsScreen, openShelf,
 } from './helpers.js';
+import { seriesBooks } from './series-books.js';
 
 const alert = page => page.getByRole('alert');
 const shelf = page => page.getByRole('button', { name: 'Sort and view' });
@@ -37,7 +38,7 @@ for (let version = 1; version <= 6; version++) {
     await expect(cards(page)).toHaveCount(2);
     expect(await titles(page)).toEqual(expect.arrayContaining(['Alpha Tales', 'Gamma Days']));
     await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
-    if (version >= 2) await expect(card(page, 'Alpha Tales')).toContainText('First Series');
+    if (version >= 2) await expect(card(page, 'Alpha Tales')).toContainText('First Series · 2');
     await openShelf(page, 'Hidden');
     await expect(card(page, 'Beta Notes')).toBeVisible();
     const kept = await store(page);
@@ -260,4 +261,41 @@ test('a set aside that is aborted midway leaves the old record byte for byte, an
   const copies = damagedKeys(done, `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`);
   expect(copies).toHaveLength(1);
   expect(same(done[copies[0]], damaged)).toBe(true);
+});
+
+// The chunks of a record, by tag: "QREC", the kind, the version and the
+// oldest that reads it, then each chunk as a u32 length, its tag, its
+// data and a CRC-32 (a record's layout is in CLAUDE.md)
+function chunks(record) {
+  const out = [];
+  for (let at = 7; at + 8 <= record.length;) {
+    const length = record[at] + record[at + 1] * 256 + record[at + 2] * 65536 + record[at + 3] * 16777216;
+    const tag = String.fromCharCode(...record.slice(at + 4, at + 8));
+    out.push({ tag, start: at, end: at + 8 + length + 4, data: record.slice(at + 8, at + 8 + length) });
+    at += 8 + length + 4;
+  }
+  return out;
+}
+const u32 = bytes => bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
+
+test('a series position of 2.5 is kept in a group of its own, and the whole number in the group an older Quire reads (#434)', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile(seriesBooks['epub3 volume 2.5'].opts), epubFile(seriesBooks['written two point zero'].opts), epubFile(seriesBooks['written zero'].opts)], 3);
+  await reload(page);
+  const kept = await store(page);
+  const records = Object.keys(kept).filter(key => key.startsWith('library/book/'));
+  expect(records).toHaveLength(3);
+  const found = [];
+  for (const key of records) {
+    const groups = chunks(kept[key]);
+    const series = groups.find(g => g.tag === 'SERI').data;
+    // the name (a length byte and its bytes), then the whole number
+    const whole = u32(series.slice(series.length - 4));
+    const snum = groups.find(g => g.tag === 'snum');
+    found.push({ key, whole, snum: snum ? u32(snum.data) : 0, groups });
+  }
+  // 2.5: the whole number 2 for an older Quire, 250 plus the zero's 10000001 for this one
+  expect(found.map(f => [f.whole, f.snum]).sort()).toEqual([[0, 10000001], [2, 10000251], [2, 0]].sort());
+  // the card says 2.5 from the snum group, and a Quire that knows no snum keeps it (lower case: ancillary) and reads SERI's 2
+  await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2.5');
 });
