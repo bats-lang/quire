@@ -157,6 +157,10 @@
       "reject/back-other-timeout",
       "reject/clip-past-end",
       "reject/fixed-box-zoom-zero",
+      "reject/lay-writes-gap",
+      "reject/lay-writes-max-height",
+      "reject/lay-writes-overflow",
+      "reject/lay-writes-padding",
       "reject/page-height-fraction",
       "reject/sheet-scrolls-over-share",
       "reject/page-width-fraction"

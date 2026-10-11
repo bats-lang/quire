@@ -22,7 +22,7 @@ staload "declarations.sats"
    stacked row puts a label, its
    control the whole width (a select is never cut to "Syste...") and a
    line saying what it does, one under another *)
-#pub fn switch_rules {left:nat | left >= 2000} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2000] sheet(after, false, false)
+#pub fn switch_rules {left:nat | left >= 2006} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2006] sheet(after, false, false)
 
 implement switch_rules (sheet) = let
   prval _ = E_edge_card
@@ -30,12 +30,12 @@ implement switch_rules (sheet) = let
   val sheet = rule(sheet, ".sgroup")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = spaced(sheet, Gap(), SpaceMedium())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".srow.stack")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, AlignItems(), "stretch")
-  val sheet = lay(sheet, Gap(), "4px")
+  val sheet = spaced(sheet, Gap(), SpaceTight())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".stack .slabel")
   val sheet = lay(sheet, Width(), "auto")
@@ -66,9 +66,9 @@ implement switch_rules (sheet) = let
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, JustifyContent(), "space-between")
-  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = spaced(sheet, Gap(), SpaceMedium())
   val sheet = lay(sheet, Width(), "100%")
-  val sheet = lay(sheet, Padding(), "8px 0")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceNone())
   val sheet = lay(sheet, TextAlign(), "start")
   val sheet = lay(sheet, FontSize(), "15px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
@@ -180,7 +180,7 @@ implement reading_settings_rules (sheet) = let
   val sheet = spaced_pair(sheet, Gap(), SpaceTight(), SpaceMedium())
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = lay(sheet, TextAlign(), "start")
-  val sheet = lay(sheet, Padding(), "8px 12px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceMedium())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".tapmap")
   val sheet = lay(sheet, GridArea(), "m")
@@ -190,7 +190,7 @@ implement reading_settings_rules (sheet) = let
   val sheet = lay(sheet, Height(), "48px")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, BorderRadius(), "4px")
-  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = clips(sheet)
   val sheet = lay(sheet, FontSize(), "0")
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = fill(sheet, RoleGround())
