@@ -2411,7 +2411,7 @@ browser has (MDN); Manabi Reader normalises a book's legacy
 `-webkit-text-combine` the same way; a book's own CSS is dropped here,
 so there is none to honour. Not wrapped: a number of 3 or more digits, a
 decimal's digits are each a run ("3.5" is two), and a fullwidth digit
-is upright already. Chrome scales a run to its cell by the font it was laid out in and does not do it again when the reading face arrives after, so a page opened again looked different from the page it was (`e2e/relaunch.spec.js`): `_relayout` switches combining off and on again (`_tcy_refit`, the style `style-tcy`, a layout between) once the place is read, for a vertical book. `e2e/vertical.spec.js` plays it, and bridge's
+is upright already. Chrome scales a run to its cell by the font it was laid out in and does not do it again when the reading face arrives after, so a page opened again looked different from the page it was (`e2e/relaunch.spec.js`): a vertical book switches combining off and on again (`_tcy_refit`, the style `style-tcy`, a layout between) as a chapter is rendered and in `_relayout`. `e2e/vertical.spec.js` plays it, and bridge's
 `tests/dynamic/decoders` the offsets and targets.
 
 A fixed-layout book (EPUB 3.3 §8.2, `rendition:layout` pre-paginated)

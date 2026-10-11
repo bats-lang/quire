@@ -2151,6 +2151,21 @@ fn _next_content_node(): [node:nat] int node = let
   val () = !_content_count := node + 1
 in node end
 
+(* The runs of digits set upright (text-combine-upright: all, _tcy_parts)
+   are scaled to their cell by the font they were laid out in: a reading
+   face that arrives after the first layout (a page opened again with the
+   fonts not yet loaded) leaves them scaled by the fallback's, so the
+   book opened again looked different (e2e/relaunch.spec.js). Chrome lays
+   them out anew when their style changes: combining switched off and on
+   again, a layout between, makes them as the face now there makes them *)
+fn _tcy_refit (): void =
+  if ~_is_vertical() then ()
+  else let
+    val () = ui_text("style-tcy", ".caf .tcy{text-combine-upright:none}")
+    val () = _measure_literal("page")
+    val () = ui_clear("style-tcy")
+  in _measure_literal("page") end
+
 (* ASCII digits and letters: text parts are found among them *)
 fn _is_digit (code: int): bool = code >= 48 && code <= 57
 fn _is_letter (code: int): bool = (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
@@ -3939,6 +3954,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   (* The chapter's title in the top bar *)
                   val () = toc_title(chapter_index)
                   val () = (case+ reading_get() of @(_, _, _, chapter_count) => _ticks_show(chapter_count))
+                  val () = _tcy_refit()
                   val () = _measure_pagination()
                   (* an annotation that names a node this chapter has not is not found in it *)
                   val () = annot_chapter_shown(!_content_count)
@@ -4470,21 +4486,6 @@ end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
-(* The runs of digits set upright (text-combine-upright: all, _tcy_parts)
-   are scaled to their cell by the font they were laid out in: a reading
-   face that arrives after the first layout (a page opened again with the
-   fonts not yet loaded) leaves them scaled by the fallback's, so the
-   book opened again looked different (e2e/relaunch.spec.js). Chrome lays
-   them out anew when their style changes: combining switched off and on
-   again, a layout between, makes them as the face now there makes them *)
-fn _tcy_refit (): void =
-  if ~_is_vertical() then ()
-  else let
-    val () = ui_text("style-tcy", ".caf .tcy{text-combine-upright:none}")
-    val () = _measure_literal("page")
-    val () = ui_clear("style-tcy")
-  in _measure_literal("page") end
-
 fn _relayout (): void = let
   (* a turn under way ends where it was going, the page laid out anew *)
   val () = _turn_settle()
