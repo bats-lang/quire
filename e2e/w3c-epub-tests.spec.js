@@ -9,7 +9,7 @@
 import { test, expect } from './fixtures.js';
 import { w3cBooks, W3C_TEXT } from './w3c-books.js';
 import {
-  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo,
+  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog,
 } from './helpers.js';
 
 /** Imports the book of that name from w3c-books.js (what makes it the
@@ -143,6 +143,45 @@ test('pkg-dir_rtl-root-ltr (must): a dir of its own outranks the package\'s', as
   await importFiles(page, [rawFile('own-direction-over-root.epub', w3cBooks['own-direction-over-root'].bytes())], 1);
   expect(await cardDirection(page, 'הרפתקה')).toBe('ltr');
   expect(await cardDirection(page, 'דוד')).toBe('ltr');
+});
+
+// ---- Publication Resources: addresses ----
+
+test('ocf-url_link-path-absolute (must): a path-absolute address in the content is resolved from the container\'s root', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'path-absolute-image', 'Image by an absolute path');
+  await expect.poll(async () => (await pictures(page))[0]?.settled).toBe(true);
+  expect((await pictures(page))[0].loaded).toBe(true);
+});
+
+test('pub-data-urls_browsing-context, pub-data-urls_top-level-content (must): an image given as a data URL is shown in the page', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'data-url-image', 'Image as a data URL');
+  await expect.poll(async () => (await pictures(page))[0]?.settled).toBe(true);
+  expect((await pictures(page))[0].loaded).toBe(true);
+});
+
+// ---- Navigation Documents ----
+
+test('nav-non-text_img, nav-non-text_img_title (should): a navigation link that holds an image is labelled by the image\'s alt text', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'nav-image-label', 'Image in a navigation label');
+  await clickControl(page, 'Contents');
+  const contents = dialog(page, 'Contents');
+  await expect(contents).toBeVisible();
+  const rows = await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button').allInnerTexts();
+  expect(rows.map(row => row.trim())).toEqual(['Start page', 'Description of the Abbey']);
+});
+
+test('nav-spine_in-spine-hidden-toc-html (must): a navigation document in the spine is shown without the entries its hidden attribute hides, and the table of contents lists all', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'nav-in-spine-hidden', 'Navigation document in the spine, an entry hidden');
+  await expect.poll(() => visibleText(page)).toContain('Contents');
+  expect(await bookPage(page).innerText()).toContain('The first link');
+  expect(await bookPage(page).innerText(), 'the entry marked hidden is not shown in the page').not.toContain('The second link');
+  await clickControl(page, 'Contents');
+  const rows = await dialog(page, 'Contents').getByRole('tabpanel', { name: 'Contents' }).getByRole('button').allInnerTexts();
+  expect(rows.map(row => row.trim())).toEqual(['The first link', 'The second link']);
 });
 
 // ---- Publication Resources: XML that is not well formed ----

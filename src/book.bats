@@ -981,7 +981,10 @@ in
   | _ => let val () = book_put(book) in @(0, 0, 0) end
 end
 
-implement book_find_relative (serial, file_size, dir_name_offset, dir_len, data, n, href_offset, href_len) =
+(* The entry named dir + href, normalised (dir the first dir_len bytes of
+   the name at dir_name_offset) *)
+fn _find_joined {file_size:pos}{dir_name_offset,dir_len:nat | dir_name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{href_offset,href_len:nat | href_offset + href_len <= n}
+  (serial: int, file_size: int file_size, dir_name_offset: int dir_name_offset, dir_len: int dir_len, data: !$A.borrow(byte, l, n), n: int n, href_offset: int href_offset, href_len: int href_len): entry_hit(file_size) =
   if href_len <= 0 then EntryMiss()
   (* a path of 64 KiB or more names no zip entry: the book's data,
      checked here *)
@@ -1003,6 +1006,13 @@ implement book_find_relative (serial, file_size, dir_name_offset, dir_len, data,
       val () = release_bytes(exact_frozen, exact_bytes)
     in hit end
   end
+
+implement book_find_relative (serial, file_size, dir_name_offset, dir_len, data, n, href_offset, href_len) =
+  (* a path-absolute href names an entry from the container's root *)
+  if href_rooted(data, href_offset, href_len) then
+    (if href_len <= 1 then EntryMiss()
+     else _find_joined(serial, file_size, dir_name_offset, 0, data, n, href_offset + 1, href_len - 1))
+  else _find_joined(serial, file_size, dir_name_offset, dir_len, data, n, href_offset, href_len)
 
 implement book_abandon (serial) =
   if serial = !_book_serial then let
