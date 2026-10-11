@@ -82,6 +82,23 @@ for (const [name, apply] of Object.entries(changes)) {
   });
 }
 
+/** Swaps the window to size, and waits for the app to lay the chapter out
+    for it. The app lays it out again 200 ms after the last resize (a
+    debounce: `_relayout_settled`), keeping the place it had, so a step
+    taken in those 200 ms is laid over a moment later (a scroll at once
+    after a swap was put back, and the paragraph the swap was to keep
+    was not the one the reader had moved to), and a check made then
+    passes before the layout it is meant to check was made. The fake
+    clock (installed before the page opens) runs that debounce now, once
+    the page has had the resize */
+async function swapWindow(page, size) {
+  // listening before the window changes, so the resize is never missed
+  await page.evaluate(() => { window.resized = new Promise(done => window.addEventListener('resize', () => done(), { once: true })); });
+  await page.setViewportSize(size);
+  await page.evaluate(() => window.resized);
+  await page.clock.runFor(250);
+}
+
 test('several changes in a row, a rotation among them, end on the same paragraph', async ({ page }) => {
   await page.goto('/');
   await readFar(page, paged);
@@ -99,15 +116,16 @@ test('several changes in a row, a rotation among them, end on the same paragraph
 });
 
 test('a window swap keeps the paragraph when scrolled, in two columns, and vertically', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/');
   const size = page.viewportSize();
   // two columns
   await readFar(page, paged);
   await change(page, 'Page', changes.columns);
   let top = await middleParagraph(page);
-  await page.setViewportSize({ width: size.height, height: size.width });
+  await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
-  await page.setViewportSize(size);
+  await swapWindow(page, size);
   await expect.poll(() => onScreen(page, top)).toBe(true);
   // scrolled
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
@@ -115,9 +133,9 @@ test('a window swap keeps the paragraph when scrolled, in two columns, and verti
   // the place follows a scroll once the page rests a moment
   await page.waitForTimeout(1500);
   top = await middleParagraph(page);
-  await page.setViewportSize({ width: size.height, height: size.width });
+  await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
-  await page.setViewportSize(size);
+  await swapWindow(page, size);
   await expect.poll(() => onScreen(page, top)).toBe(true);
 });
 
