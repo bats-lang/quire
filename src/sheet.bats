@@ -139,7 +139,7 @@ in Sheet(builder) end
   | ZIndex | Cursor | PointerEvents | TouchAction | ObjectFit
   | BorderRadius | BorderCollapse | BoxShadow | Outline | OutlineOffset
   | ColumnFill | ColumnGap | ColumnWidth | BreakAfter | BreakInside | GridTemplate | AspectRatio
-  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea
+  | Appearance | ContainerType | UserSelect | Transition | Visibility | GridArea | Zoom
   (* the reader's own variables: the page's top and bottom paddings and
      the running footer's place, each given once (reader_rules) *)
   | PageTopVariable | PageBottomVariable | FooterBottomVariable | FooterHeightVariable
@@ -175,7 +175,7 @@ fn _property_name (property: prop): [length:pos | length <= 16] string length =
   | BreakInside() => "break-inside" | Appearance() => "appearance" | ContainerType() => "container-type" | UserSelect() => "user-select"
   | Transition() => "transition" | Visibility() => "visibility"
   | GridTemplate() => "grid-template" | AspectRatio() => "aspect-ratio"
-  | GridArea() => "grid-area"
+  | GridArea() => "grid-area" | Zoom() => "zoom"
   | PageTopVariable() => "--page-top" | PageBottomVariable() => "--page-bottom"
   | FooterBottomVariable() => "--footer-bottom" | FooterHeightVariable() => "--footer-height"
 

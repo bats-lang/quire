@@ -3195,9 +3195,13 @@ fun _math_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_cou
   case+ attrs of
   | $X.xml_attrs_nil() => ()
   | $X.xml_attrs_cons(name_offset, name_len, value_offset, value_len, rest) => let
+      var _dir = @[char][3]('d', 'i', 'r')
       val () = (if name_len <= 0 then ()
         else if name_len >= 32 then ()
         else if value_len >= 65536 then ()
+        (* dir is the page's own attribute (MathML Core takes it on any math
+           element): an equation reads from the left unless it says rtl *)
+        else if xml_name_eq(data, name_offset, name_len, _dir, 3) then _node_attr(doc, node, $D.Dir, data, value_offset, value_len)
         else let
           val name = $A.alloc<byte>(name_len)
           val () = $S.copy_from_borrow(data, name_offset, data_len, name, 0, name_len, name_len)

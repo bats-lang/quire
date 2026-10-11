@@ -300,6 +300,42 @@ export function solidPng(width, height, [r, g, b] = [40, 90, 160], { noise = fal
 }
 
 /**
+ * A PNG of width by height pixels with an alpha channel: a black bar along
+ * the foot of the left half and a black bar down the right half's middle,
+ * the rest fully transparent, as a typeset equation's image is (black ink,
+ * no ground). `inked` is the count of its black pixels.
+ */
+export function blackOnTransparentPng(width, height) {
+  const rows = [];
+  let inked = 0;
+  for (let y = 0; y < height; y++) {
+    const row = Buffer.alloc(1 + 4 * width); // filter 0, then RGBA: black, alpha 0 or 255
+    for (let x = 0; x < width; x++) {
+      const ink = (y >= height - 3 && x < width / 2) || (x >= width / 2 && x < width / 2 + 3);
+      if (ink) { row[1 + 4 * x + 3] = 255; inked++; }
+    }
+    rows.push(row);
+  }
+  const chunk = (type, data) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([length, body, crc]);
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header[8] = 8; // bit depth
+  header[9] = 6; // colour type: RGBA
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+    chunk('IHDR', header), chunk('IDAT', deflateSync(Buffer.concat(rows))), chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/**
  * META-INF/encryption.xml (OCF 3.3 section 4.1) for the resources
  * items names, each {uri, algorithm}; more is inside the first
  * EncryptedData's KeyInfo (an ADEPT resource, say), and namespaces are
@@ -388,7 +424,9 @@ export function createEpub(opts = {}) {
     // a raw chapter's own file name (a corrected book names its chapters the same
     // however it numbers them), else chapter<i>.xhtml
     const file = (rawChapters && rawChapters[i - 1] && rawChapters[i - 1].file) || `chapter${i}.xhtml`;
-    manifestItems += `    <item id="ch${i}" href="${file}" media-type="application/xhtml+xml"${overlay ? ` media-overlay="mo${i}"` : ''}/>\n`;
+    // a raw chapter's manifest properties (mathml, svg: EPUB 3.3 section 3.4.4)
+    const properties = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].properties;
+    manifestItems += `    <item id="ch${i}" href="${file}" media-type="application/xhtml+xml"${properties ? ` properties="${properties}"` : ''}${overlay ? ` media-overlay="mo${i}"` : ''}/>\n`;
     // a raw chapter's itemref properties (rendition:layout-pre-paginated, say)
     const itemref = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].itemref;
     spineItems += `    <itemref idref="ch${i}"${itemref ? ` properties="${itemref}"` : ''}/>\n`;
