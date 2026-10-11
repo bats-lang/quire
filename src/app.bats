@@ -1072,6 +1072,8 @@ implement app_build () = let
   val () = ui_text_buf("style-sheet", css, css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
+  (* for a moment, as fonts arrive: reader.bats's _tcy_refit *)
+  val () = ui_add("bats-root", "style-tcy", TStyle)
   val () = _notices()
   val () = _library()
   val () = _context_menu()
