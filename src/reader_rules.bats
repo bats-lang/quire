@@ -328,7 +328,8 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1130} (sheet: sheet
   (* a run of one or two digits (reader.bats's _tcy_parts wraps it in a
      part of the class tcy), set upright in one cell *)
   val sheet = rule(sheet, ".caf.vertical .tcy,.caf.vertical-lr .tcy")
-  val sheet = lay(sheet, TextCombineUpright(), "all")
+  (* written as it is: the property's name is longer than lay takes *)
+  val () = raw(sheet, "text-combine-upright:all;")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.vertical-lr")
   val sheet = lay(sheet, WritingMode(), "vertical-lr")
