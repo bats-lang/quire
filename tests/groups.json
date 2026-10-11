@@ -10,6 +10,7 @@
     ],
     "reader": [
       "backup.spec.js",
+      "encodings.spec.js",
       "image-viewer.spec.js",
       "landmarks.spec.js",
       "relaunch-sync.spec.js",
@@ -21,6 +22,7 @@
     "reading-tools": [
       "annotations.spec.js",
       "drm-catalogue.spec.js",
+      "languages.spec.js",
       "progress.spec.js",
       "publisher.spec.js",
       "settings.spec.js",

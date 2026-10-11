@@ -15,6 +15,7 @@
 
 staload "epub_xml.sats"
 staload "xhtml_parse.sats"
+staload "language.sats"
 staload "book.sats"
 staload "pages.sats"
 staload "paths.sats"
@@ -2507,6 +2508,159 @@ in
 end
 
 (* Whether data[offset + i, offset + tag_len) is letters, digits and hyphens *)
+(* The book's language (its OPF's dc:language), when it is a plausible
+   language tag: 1 to 35 letters, digits and hyphens *)
+#pub datavtype book_lang =
+  | {l:agz}{lang_len:pos | lang_len <= 35} BookLang of ($A.arr(byte, l, 35), int lang_len)
+  | NoBookLang of ()
+
+val _book_lang = ref<book_lang>(NoBookLang())
+
+fn _book_lang_put (lang: book_lang): void = let
+  var cell: book_lang = lang
+  val () = ref_exch_elt<book_lang>(_book_lang, cell)
+in case+ cell of ~BookLang(tag, _) => $A.free<byte>(tag) | ~NoBookLang() => () end
+
+fn _book_lang_take (): book_lang = let
+  var cell: book_lang = NoBookLang()
+  val () = ref_exch_elt<book_lang>(_book_lang, cell)
+in cell end
+
+(* lang[j, lang_len) := data[offset + j, offset + lang_len) *)
+fun _lang_copy {data_location,lang_location:agz}{data_size:pos}{offset,lang_len:nat | offset + lang_len <= data_size; lang_len <= 35}{j:nat | j <= lang_len} .<lang_len - j>.
+  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, lang: !$A.arr(byte, lang_location, 35), lang_len: int lang_len, j: int j): void =
+  if j >= lang_len then ()
+  else let
+    val () = $A.set<byte>(lang, j, $A.read<byte>(data, offset + j))
+  in _lang_copy(data, offset, lang, lang_len, j + 1) end
+
+
+(* The language of the chapter shown, when its html or body says one (xml:lang, else lang): it is the
+   language of the page, so of its hyphenation, and of what is said aloud and looked up there, in place
+   of the book's. Cleared as each chapter is shown. *)
+val _chapter_lang = ref<book_lang>(NoBookLang())
+
+fn _chapter_lang_put (lang: book_lang): void = let
+  var cell: book_lang = lang
+  val () = ref_exch_elt<book_lang>(_chapter_lang, cell)
+in case+ cell of ~BookLang(tag, _) => $A.free<byte>(tag) | ~NoBookLang() => () end
+
+fn _chapter_lang_take (): book_lang = let
+  var cell: book_lang = NoBookLang()
+  val () = ref_exch_elt<book_lang>(_chapter_lang, cell)
+in cell end
+
+(* The language in force, the chapter's if it has one, else the book's, and whether it is the chapter's *)
+fn _lang_take (): @(book_lang, bool) = let
+  val chapter = _chapter_lang_take()
+in
+  case+ chapter of
+  | @BookLang(_, _) => let prval () = fold@(chapter) in @(chapter, true) end
+  | ~NoBookLang() => @(_book_lang_take(), false)
+end
+
+fn _lang_put (lang: book_lang, from_chapter: bool): void =
+  if from_chapter then _chapter_lang_put(lang) else _book_lang_put(lang)
+
+(* A language dropped *)
+fn _lang_drop (lang: book_lang): void =
+  case+ lang of
+  | ~BookLang(tag, _) => $A.free<byte>(tag)
+  | ~NoBookLang() => ()
+
+(* Whether a language is one *)
+fn _has_lang (lang: !book_lang): bool =
+  case+ lang of
+  | @BookLang(_, _) => let prval () = fold@(lang) in true end
+  | NoBookLang() => false
+
+(* A copy of a language *)
+fn _lang_copy_of (lang: !book_lang): book_lang =
+  case+ lang of
+  | @BookLang(tag, tag_len) => let
+      val copy = $A.alloc<byte>(35)
+      fun copy_into {from_loc,to_loc:agz}{len:nat | len <= 35}{i:nat | i <= len} .<len - i>.
+        (from: !$A.arr(byte, from_loc, 35), to: !$A.arr(byte, to_loc, 35), len: int len, i: int i): void =
+        if i >= len then ()
+        else let val () = $A.set<byte>(to, i, $A.get<byte>(from, i)) in copy_into(from, to, len, i + 1) end
+      val () = copy_into(tag, copy, tag_len, 0)
+      val length = tag_len
+      prval () = fold@(lang)
+    in BookLang(copy, length) end
+  | NoBookLang() => NoBookLang()
+
+(* The language in force as the text read aloud is walked: the nearest element's that says one *)
+val _run_lang = ref<book_lang>(NoBookLang())
+
+fn _run_lang_swap (lang: book_lang): book_lang = let
+  var cell: book_lang = lang
+  val () = ref_exch_elt<book_lang>(_run_lang, cell)
+in cell end
+
+(* The languages of the blocks of the script being made, by their numbers: a block that has a language of
+   its own, or inside an element that has one (a phrase in another language is a block of its own) *)
+datavtype block_langs(n:int) =
+  | BlockLangsNone(0) of ()
+  | {n:nat}{l:agz}{len:pos | len <= 35} BlockLangs(n + 1) of (Nat, $A.arr(byte, l, 35), int len, block_langs(n))
+
+(* a list of any length, as the cell holds it *)
+datavtype langs_box =
+  | {n:nat} LangsBox of block_langs(n)
+
+val _block_langs = ref<langs_box>(LangsBox(BlockLangsNone()))
+
+fn _block_langs_swap (langs: langs_box): langs_box = let
+  var cell: langs_box = langs
+  val () = ref_exch_elt<langs_box>(_block_langs, cell)
+in cell end
+
+fun _block_langs_free_list {n:nat} .<n>. (langs: block_langs(n)): void =
+  case+ langs of
+  | ~BlockLangsNone() => ()
+  | ~BlockLangs(_, tag, _, rest) => let val () = $A.free<byte>(tag) in _block_langs_free_list(rest) end
+
+fn _block_langs_free (langs: langs_box): void =
+  case+ langs of ~LangsBox(list) => _block_langs_free_list(list)
+
+fn _block_langs_empty (): langs_box = LangsBox(BlockLangsNone())
+
+(* The language in force, for block *)
+fn _block_lang_add (block: Nat): void = let
+  val current = _run_lang_swap(NoBookLang())
+  val ~LangsBox(list) = _block_langs_swap(_block_langs_empty())
+in
+  case+ current of
+  | ~BookLang(tag, tag_len) => let
+      val copy = $A.alloc<byte>(35)
+      fun copy_into {from_loc,to_loc:agz}{len:nat | len <= 35}{i:nat | i <= len} .<len - i>.
+        (from: !$A.arr(byte, from_loc, 35), to: !$A.arr(byte, to_loc, 35), len: int len, i: int i): void =
+        if i >= len then ()
+        else let val () = $A.set<byte>(to, i, $A.get<byte>(from, i)) in copy_into(from, to, len, i + 1) end
+      val () = copy_into(tag, copy, tag_len, 0)
+      val back = _run_lang_swap(BookLang(tag, tag_len))
+      val () = _lang_drop(back)
+      val blank = _block_langs_swap(LangsBox(BlockLangs(block, copy, tag_len, list)))
+    in _block_langs_free(blank) end
+  | ~NoBookLang() => let
+      val blank = _block_langs_swap(LangsBox(list))
+    in _block_langs_free(blank) end
+end
+
+(* The language of block, as a language (none when it has none of its own) *)
+fun _block_lang_find {n:nat} .<n>. (langs: !block_langs(n), block: Nat): book_lang =
+  case+ langs of
+  | BlockLangsNone() => NoBookLang()
+  | BlockLangs(found, tag, tag_len, rest) =>
+    if found = block then let
+        val copy = $A.alloc<byte>(35)
+        fun copy_into {from_loc,to_loc:agz}{len:nat | len <= 35}{i:nat | i <= len} .<len - i>.
+          (from: !$A.arr(byte, from_loc, 35), to: !$A.arr(byte, to_loc, 35), len: int len, i: int i): void =
+          if i >= len then ()
+          else let val () = $A.set<byte>(to, i, $A.get<byte>(from, i)) in copy_into(from, to, len, i + 1) end
+        val () = copy_into(tag, copy, tag_len, 0)
+      in BookLang(copy, tag_len) end
+    else _block_lang_find(rest, block)
+
 fun _tag_chars {l:agz}{n:pos}{offset,tag_len:nat | offset + tag_len <= n}{i:nat | i <= tag_len} .<tag_len - i>.
   (data: !$A.borrow(byte, l, n), offset: int offset, tag_len: int tag_len, i: int i): bool =
   if i >= tag_len then true
@@ -2541,7 +2695,17 @@ fn _root_lang {doc_location,l:agz}{n:pos}{attr_count:nat}
 in
   case+ span of
   | ~xspan_none() => ()
-  | ~xspan_at(start, span_len) => if _lang_ok(data, start, span_len) then (if span_len < 65536 then _page_lang(doc, data, start, span_len) else ()) else ()
+  | ~xspan_at(start, span_len) => let
+      val lang = $A.alloc<byte>(35)
+      val written = language_normalize(data, start, span_len, lang)
+    in
+      if written >= 1 then let
+          val @(lang_frozen, lang_bytes) = $A.freeze<byte>(lang)
+          val () = _page_lang(doc, lang_bytes, 0, written)
+          val () = $A.drop<byte>(lang_frozen, lang_bytes)
+        in _chapter_lang_put(BookLang($A.thaw<byte>(lang_frozen), written)) end
+      else $A.free<byte>(lang)
+    end
 end
 
 (* ============================================================
@@ -3291,50 +3455,26 @@ fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_na
    ============================================================ *)
 
 
-(* The book's language (its OPF's dc:language), when it is a plausible
-   language tag: 1 to 35 letters, digits and hyphens *)
-datavtype book_lang =
-  | {l:agz}{lang_len:pos | lang_len <= 35} BookLang of ($A.arr(byte, l, 35), int lang_len)
-  | NoBookLang of ()
-
-val _book_lang = ref<book_lang>(NoBookLang())
-
-fn _book_lang_put (lang: book_lang): void = let
-  var cell: book_lang = lang
-  val () = ref_exch_elt<book_lang>(_book_lang, cell)
-in case+ cell of ~BookLang(tag, _) => $A.free<byte>(tag) | ~NoBookLang() => () end
-
-fn _book_lang_take (): book_lang = let
-  var cell: book_lang = NoBookLang()
-  val () = ref_exch_elt<book_lang>(_book_lang, cell)
-in cell end
-
-(* lang[j, lang_len) := data[offset + j, offset + lang_len) *)
-fun _lang_copy {data_location,lang_location:agz}{data_size:pos}{offset,lang_len:nat | offset + lang_len <= data_size; lang_len <= 35}{j:nat | j <= lang_len} .<lang_len - j>.
-  (data: !$A.borrow(byte, data_location, data_size), offset: int offset, lang: !$A.arr(byte, lang_location, 35), lang_len: int lang_len, j: int j): void =
-  if j >= lang_len then ()
-  else let
-    val () = $A.set<byte>(lang, j, $A.read<byte>(data, offset + j))
-  in _lang_copy(data, offset, lang, lang_len, j + 1) end
-
-(* Keeps the book's language, from its OPF opf_bytes's nodes *)
+(* Keeps the book's language, from its OPF opf_bytes's nodes: its first dc:language, as a BCP 47 tag
+   (language.bats: "EN-us" and "en_US" are en-US, "heb" is he) *)
 fn _lang_locate {l:agz}{n:pos}{tree_size:nat}
   (opf_bytes: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): void =
   case+ opf_language(opf_bytes, nodes) of
   | ~xspan_none() => _book_lang_put(NoBookLang())
-  | ~xspan_at(offset, lang_len) =>
-    if _lang_ok(opf_bytes, offset, lang_len) then
-      (if lang_len >= 1 then (if lang_len <= 35 then let
-         val lang = $A.alloc<byte>(35)
-         val () = _lang_copy(opf_bytes, offset, lang, lang_len, 0)
-       in _book_lang_put(BookLang(lang, lang_len)) end
-       else _book_lang_put(NoBookLang()))
-       else _book_lang_put(NoBookLang()))
-    else _book_lang_put(NoBookLang())
+  | ~xspan_at(offset, lang_len) => let
+      val lang = $A.alloc<byte>(35)
+      val written = language_normalize(opf_bytes, offset, lang_len, lang)
+    in
+      if written >= 1 then _book_lang_put(BookLang(lang, written))
+      else let val () = $A.free<byte>(lang) in _book_lang_put(NoBookLang()) end
+    end
 
 (* The page's lang, before a chapter is shown: the book's, else "und"
    (undetermined: the app's own "en" is not the book's) *)
-fn _page_book_lang {doc_location:agz} (doc: !$D.document(doc_location)): void =
+fn _page_book_lang {doc_location:agz} (doc: !$D.document(doc_location)): void = let
+  (* the chapter's own language, if its html or body says one, is found as it is rendered *)
+  val () = _chapter_lang_put(NoBookLang())
+in
   case+ _book_lang_take() of
   | ~NoBookLang() => let
       val undetermined = $A.alloc<byte>(3)
@@ -3348,6 +3488,7 @@ fn _page_book_lang {doc_location:agz} (doc: !$D.document(doc_location)): void =
       val () = _page_lang(doc, lang_bytes, 0, lang_len)
       val () = $A.drop<byte>(lang_frozen, lang_bytes)
     in _book_lang_put(BookLang($A.thaw<byte>(lang_frozen), lang_len)) end
+end
 
 datavtype font_source =
   | {file_size:pos}{data_start:nat}{compressed_size:pos | data_start + compressed_size <= file_size; compressed_size <= 268435456}
@@ -3525,7 +3666,7 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><spine_built>(decompressing, llam(inflated) =>
-           case+ take_decompressed(inflated) of
+           case+ take_text(inflated) of
            | ~NoContentBytes() => $P.ret<spine_built>(SpineNotBuilt())
            | ~ContentBytes(opf_owner, opf_buf, opf_size) => let
                val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_buf)
@@ -3698,7 +3839,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) =>
-           case+ take_decompressed(inflated) of
+           case+ take_text(inflated) of
            | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
@@ -3752,7 +3893,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
             in
               (* Stage 3: parse HTML and render *)
               $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) => let
-                val content = take_decompressed(inflated)
+                val content = take_text(inflated)
               in
                 case+ content of
                 | ~NoContentBytes() => let
@@ -3935,7 +4076,7 @@ in
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
-           case+ take_decompressed(inflated) of
+           case+ take_text(inflated) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(smil_owner, smil, smil_size) => let
                val @(smil_frozen, smil_bytes) = $A.freeze<byte>(smil)
@@ -4980,7 +5121,7 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
          in
            $P.finish<decompressed>(decompressing, llam(inflated) => let
-             val () = (case+ take_decompressed(inflated) of
+             val () = (case+ take_text(inflated) of
                | ~NoContentBytes() => ()
                | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                    val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
@@ -5534,7 +5675,7 @@ in
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.finish<decompressed>(decompressing, llam(inflated) => let
-           val () = (case+ take_decompressed(inflated) of
+           val () = (case+ take_text(inflated) of
              | ~NoContentBytes() => _note_follow()
              | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                  val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
@@ -5607,7 +5748,7 @@ fn _lower_letter {l:agz}{n:pos}{i:nat | i < n} (lang: !$A.arr(byte, l, n), i: in
 in if lower < 97 then ~1 else if lower > 122 then ~1 else lower end
 
 implement reader_lang_code () = let
-  val cell = _book_lang_take()
+  val @(cell, from_chapter) = _lang_take()
   (* the primary subtag's letters, lower case, and how many; 0 when it is
      not 2 or 3 letters *)
   val @(code_len, letter0, letter1, letter2) = (case+ cell of
@@ -5625,7 +5766,7 @@ implement reader_lang_code () = let
         prval () = fold@(cell)
       in letters end
     | NoBookLang() => @(0, 0, 0, 0)): @(int, int, int, int)
-  val () = _book_lang_put(cell)
+  val () = _lang_put(cell, from_chapter)
   val code = $A.alloc<byte>(3)
   val () = $A.set<byte>(code, 0, $A.int2byte($AR.low_byte(if code_len >= 2 then letter0 else 101)))
   val () = $A.set<byte>(code, 1, $A.int2byte($AR.low_byte(if code_len >= 2 then letter1 else 110)))
@@ -5886,10 +6027,11 @@ implement reader_scrolls () = _scrolled()
 
 implement reader_lang_tag () = let
   val tag = $A.alloc<byte>(36)
+  val @(taken, from_chapter) = _lang_take()
 in
-  case+ _book_lang_take() of
+  case+ taken of
   | ~NoBookLang() => let
-      val () = _book_lang_put(NoBookLang())
+      val () = _lang_put(NoBookLang(), from_chapter)
     in @(tag, 0) end
   | ~BookLang(lang, lang_len) => let
       fun copy {lang_loc,tag_loc:agz}{lang_len:nat | lang_len <= 35}{i:nat | i <= lang_len} .<lang_len - i>.
@@ -5899,7 +6041,7 @@ in
           val () = $A.set<byte>(tag, i, $A.get<byte>(lang, i))
         in copy(lang, tag, lang_len, i + 1) end
       val () = copy(lang, tag, lang_len, 0)
-      val () = _book_lang_put(BookLang(lang, lang_len))
+      val () = _lang_put(BookLang(lang, lang_len), from_chapter)
     in @(tag, lang_len) end
 end
 
@@ -5950,6 +6092,65 @@ and _block_within {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
   | $X.xml_text(_, _) => false
   | $X.xml_element(name_offset, name_len, _, children) =>
     if _block_tag(data, name_offset, name_len) then true else _blocks_within(data, children)
+
+(* The language an element says, xml:lang else lang, as a BCP 47 tag *)
+fn _element_lang {l:agz}{n:pos}{attr_count:nat}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count)): book_lang = let
+  var _attr_xml_lang = @[char][8]('x', 'm', 'l', ':', 'l', 'a', 'n', 'g')
+  var _attr_lang = @[char][4]('l', 'a', 'n', 'g')
+  val span = (case+ find_attr(data, attrs, _attr_xml_lang, 8) of
+    | ~xspan_none() => find_attr(data, attrs, _attr_lang, 4)
+    | span => span): xspan(n)
+in
+  case+ span of
+  | ~xspan_none() => NoBookLang()
+  | ~xspan_at(start, span_len) => let
+      val lang = $A.alloc<byte>(35)
+      val written = language_normalize(data, start, span_len, lang)
+    in
+      if written >= 1 then BookLang(lang, written)
+      else let val () = $A.free<byte>(lang) in NoBookLang() end
+    end
+end
+
+fun _tag_same {a_loc,b_loc:agz}{len:nat | len <= 35}{i:nat | i <= len} .<len - i>.
+  (a: !$A.arr(byte, a_loc, 35), b: !$A.arr(byte, b_loc, 35), len: int len, i: int i): bool =
+  if i >= len then true
+  else if byte2int0($A.get<byte>(a, i)) <> byte2int0($A.get<byte>(b, i)) then false
+  else _tag_same(a, b, len, i + 1)
+
+(* Whether two languages are the same tag *)
+fn _tags_same (first: !book_lang, second: !book_lang): bool =
+  case+ first of
+  | @BookLang(first_tag, first_len) =>
+    (case+ second of
+     | @BookLang(second_tag, second_len) => let
+         val same = (if first_len = second_len then _tag_same(first_tag, second_tag, first_len, 0) else false)
+         prval () = fold@(second)
+         prval () = fold@(first)
+       in same end
+     | NoBookLang() => let prval () = fold@(first) in false end)
+  | NoBookLang() =>
+    (case+ second of
+     | @BookLang(_, _) => let prval () = fold@(second) in false end
+     | NoBookLang() => true)
+
+(* Whether language own is not the language in force: that of the element round it that says one, else the chapter's, else the book's *)
+fn _lang_differs (own: !book_lang): bool = let
+  val current = _run_lang_swap(NoBookLang())
+in
+  if _has_lang(current) then let
+      val same = _tags_same(own, current)
+      val back = _run_lang_swap(current)
+      val () = _lang_drop(back)
+    in ~same end
+  else let
+      val () = _lang_drop(current)
+      val @(base, from_chapter) = _lang_take()
+      val same = _tags_same(own, base)
+      val () = _lang_put(base, from_chapter)
+    in ~same end
+end
 
 (* The text read aloud, as the chapter's XHTML of n bytes has it: each
    text content node's text data[offset, offset + length) (not yet
@@ -6009,7 +6210,7 @@ and _runs_node {l:agz}{n:pos}{tree_size:pos}{count:nat} .<tree_size, 0>.
       val @(next_node, found_after) = _runs_text(data, offset, text_len, (if block >= 0 then block else 0): Nat, content_node, found)
     in @(next_node, blocks, found_after) end
     else @(_text_count(data, offset, text_len, content_node), blocks, found)
-  | $X.xml_element(name_offset, name_len, _, children) => let
+  | $X.xml_element(name_offset, name_len, attrs, children) => let
     var _tag_head = @[char][4]('h', 'e', 'a', 'd')
     var _tag_title = @[char][5]('t', 'i', 't', 'l', 'e')
     var _tag_meta = @[char][4]('m', 'e', 't', 'a')
@@ -6046,13 +6247,23 @@ and _runs_node {l:agz}{n:pos}{tree_size:pos}{count:nat} .<tree_size, 0>.
     else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, blocks, found)
     else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then @(content_node + 1, blocks, found)
     else let
+      (* its language, if it says one, is the language of what is in it; a phrase in another language
+         inside a block is a block of its own, so a sentence of its own, said in its language *)
+      val own = _element_lang(data, attrs)
+      val has_own = _has_lang(own)
+      val phrase = (if has_own then (if block >= 0 then _lang_differs(own) else false) else false): bool
+      val previous = (if has_own then _run_lang_swap(own) else let val () = _lang_drop(own) in NoBookLang() end): book_lang
       (* a block holding no other block starts one of its own *)
       val starts = (if block >= 0 then false
         else if _block_tag(data, name_offset, name_len) then ~_blocks_within(data, children)
         else false): bool
-      val inner_block = (if starts then (blocks: Int) else block): Int
-      val inner_blocks = (if starts then blocks + 1 else blocks): Nat
-    in _runs_nodes(data, children, false, (if annotation then false else readable), inner_block, inner_blocks, content_node + 1, found) end
+      val separate = (if starts then true else phrase): bool
+      val inner_block = (if separate then (blocks: Int) else block): Int
+      val inner_blocks = (if separate then blocks + 1 else blocks): Nat
+      val () = (if separate then _block_lang_add(blocks) else ())
+      val result = _runs_nodes(data, children, false, (if annotation then false else readable), inner_block, inner_blocks, content_node + 1, found)
+      val () = (if has_own then _lang_drop(_run_lang_swap(previous)) else _lang_drop(previous))
+    in result end
   end
 
 (* The runs' text placed in the script's text of size bytes: each run's
@@ -6173,19 +6384,19 @@ fun _point_until {l:agz}{owner:addr}{size:int}{count:nat} .<count>.
 #pub datavtype sentences_of(size:int, int) =
   | SentencesNone(size, 0) of ()
   | {count:nat}{start,length:nat | start + length <= size; length > 0}
-    SentenceOf(size, count + 1) of (int start, int length, Int, Int, Int, Int, sentences_of(size, count))
+    SentenceOf(size, count + 1) of (int start, int length, Int, Int, Int, Int, book_lang, sentences_of(size, count))
 
 fun _sentences_of_free {size:int}{count:nat} .<count>. (sentences: sentences_of(size, count)): void =
   case+ sentences of
   | ~SentencesNone() => ()
-  | ~SentenceOf(_, _, _, _, _, _, rest) => _sentences_of_free(rest)
+  | ~SentenceOf(_, _, _, _, _, _, lang, rest) => let val () = _lang_drop(lang) in _sentences_of_free(rest) end
 
 fun _sentences_of_reverse {size:int}{count,reversed_count:nat} .<count>.
   (sentences: sentences_of(size, count), reversed: sentences_of(size, reversed_count)): sentences_of(size, count + reversed_count) =
   case+ sentences of
   | ~SentencesNone() => reversed
-  | ~SentenceOf(start, length, start_node, start_offset, end_node, end_offset, rest) =>
-    _sentences_of_reverse(rest, SentenceOf(start, length, start_node, start_offset, end_node, end_offset, reversed))
+  | ~SentenceOf(start, length, start_node, start_offset, end_node, end_offset, lang, rest) =>
+    _sentences_of_reverse(rest, SentenceOf(start, length, start_node, start_offset, end_node, end_offset, lang, reversed))
 
 (* Whether a byte is white space *)
 fn _white (code: int): bool = if code = 32 then true else if code = 9 then true else if code = 10 then true else code = 13
@@ -6223,7 +6434,14 @@ fn _sentence_add {l:agz}{owner:addr}{size:nat}{runs_count,count:nat}
     in
       if start_node < 0 then @(found, count)
       else if end_node < 0 then @(found, count)
-      else @(SentenceOf(first, last - first, start_node, start_offset, end_node, end_offset, found), count + 1)
+      else let
+        (* the language its block has of its own, if it has one *)
+        val block = (case+ runs of PlacedRun(block, _, _, _, _) => block | PlacedEnd() => 0): Nat
+        val ~LangsBox(langs) = _block_langs_swap(_block_langs_empty())
+        val lang = _block_lang_find(langs, block)
+        val blank = _block_langs_swap(LangsBox(langs))
+        val () = _block_langs_free(blank)
+      in @(SentenceOf(first, last - first, start_node, start_offset, end_node, end_offset, lang, found), count + 1) end
     end
   end
 
@@ -6318,14 +6536,17 @@ implement $P.dispose<script>(script) = script_free(script)
    index chapter *)
 fn _script_make {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
+  val () = _lang_drop(_run_lang_swap(NoBookLang()))
+  val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
   val @(_, _, found) = _runs_nodes(data, nodes, true, true, ~1, 0, 0, TextRunsEnd())
+  val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val runs = _text_runs_reverse(found, TextRunsEnd())
   val total = _runs_total(runs, 0)
 in
-  if total <= 0 then let val () = _text_runs_free(runs) in NoScript() end
-  else if total > 268435456 then let val () = _text_runs_free(runs) in NoScript() end
+  if total <= 0 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
+  else if total > 268435456 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
   else case+ piece_new(total) of
-  | ~NoPiece() => let val () = _text_runs_free(runs) in NoScript() end
+  | ~NoPiece() => let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
   | ~Piece(owner, text) => let
       val placed = _placed_reverse(_runs_write(data, runs, text, total, 0, PlacedEnd()), PlacedEnd())
       val @(lang, lang_len) = reader_lang_tag()
@@ -6333,6 +6554,7 @@ in
       val @(found_sentences, count) = _blocks_sentences(placed, text, total, lang_bytes, lang_len, SentencesNone(), 0)
       val () = release_bytes(lang_frozen, lang_bytes)
       val sentences = _sentences_of_reverse(found_sentences, SentencesNone())
+      val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
     in
       if count <= 0 then let
         val () = _sentences_of_free(sentences)
@@ -6364,7 +6586,7 @@ in
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><script>(decompressing, llam(inflated) =>
-           case+ take_decompressed(inflated) of
+           case+ take_text(inflated) of
            | ~NoContentBytes() => $P.ret<script>(NoScript())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
                val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
@@ -6383,7 +6605,7 @@ end
 fun _sentence_place {size:int}{count:nat} .<count>. (sentences: !sentences_of(size, count), index: int): @(Int, Int, Int, Int) =
   case+ sentences of
   | SentencesNone() => @(~1, 0, ~1, 0)
-  | SentenceOf(_, _, start_node, start_offset, end_node, end_offset, rest) =>
+  | SentenceOf(_, _, start_node, start_offset, end_node, end_offset, _, rest) =>
     if index <= 0 then @(start_node, start_offset, end_node, end_offset)
     else _sentence_place(rest, index - 1)
 
@@ -6411,8 +6633,35 @@ fun _sentence_span {size:nat}{count:nat} .<count>. (sentences: !sentences_of(siz
   : [start,length:nat | start + length <= size] @(int start, int length) =
   case+ sentences of
   | SentencesNone() => @(0, 0)
-  | SentenceOf(start, length, _, _, _, _, rest) =>
+  | SentenceOf(start, length, _, _, _, _, _, rest) =>
     if index <= 0 then @(start, length) else _sentence_span(rest, index - 1)
+
+(* The language of sentence index: its own, when the element it is in says one other than the chapter's or the
+   book's, else the chapter's or the book's. In tag[0, tag_len) of 36 bytes; 0 when there is none *)
+fun _sentence_lang {size:int}{count:nat} .<count>. (sentences: !sentences_of(size, count), index: int): book_lang =
+  case+ sentences of
+  | SentencesNone() => NoBookLang()
+  | SentenceOf(_, _, _, _, _, _, lang, rest) =>
+    if index <= 0 then _lang_copy_of(lang) else _sentence_lang(rest, index - 1)
+
+#pub fun script_lang (script: !script, index: int): [l:agz][tag_len:nat | tag_len <= 35] @($A.arr(byte, l, 36), int tag_len)
+implement script_lang (script, index) = let
+  val own = (case+ script of
+    | NoScript() => NoBookLang()
+    | Script(_, _, sentences, _, _) => _sentence_lang(sentences, index)): book_lang
+in
+  case+ own of
+  | ~BookLang(tag, tag_len) => let
+      val copy = $A.alloc<byte>(36)
+      fun copy_into {from_loc,to_loc:agz}{len:nat | len <= 35}{i:nat | i <= len} .<len - i>.
+        (from: !$A.arr(byte, from_loc, 35), to: !$A.arr(byte, to_loc, 36), len: int len, i: int i): void =
+        if i >= len then ()
+        else let val () = $A.set<byte>(to, i, $A.get<byte>(from, i)) in copy_into(from, to, len, i + 1) end
+      val () = copy_into(tag, copy, tag_len, 0)
+      val () = $A.free<byte>(tag)
+    in @(copy, tag_len) end
+  | ~NoBookLang() => reader_lang_tag()
+end
 
 (* Sentence index's text, in a piece of its own (book content), and its
    length; none when there is no such sentence or no memory for it *)

@@ -1544,6 +1544,44 @@ read of storage changed: each still folds, as #174 says.
   button, an unlisted name's details, Try again showing the books and a
   later import being kept, and a retry that fails.
 
+## Encodings and languages (#436)
+
+**Text documents are read as UTF-8 whatever they are encoded in**
+(`src/text_encoding.bats`, tables in `src/text_tables.bats` made by
+`scripts/gen-encodings.py`). Every document that is text (the container, the
+package, the navigation document, a content document, an overlay,
+encryption.xml; not an image, font or audio) goes through `take_text`
+(`src/book.bats`) instead of `take_decompressed`: a byte order mark says the
+encoding (UTF-8's is dropped, UTF-16 either way becomes UTF-8), so does `<` and
+a null byte; else the XML declaration's `encoding` by the WHATWG labels
+(`iso-8859-1`, `latin1` and `us-ascii` are windows-1252, as in a browser) for
+UTF-8 or a single-byte encoding with a table here (windows-1250 to 1257,
+ISO-8859-2, 5, 7, 8, 15, KOI8-R); else UTF-8. UTF-8 that is not UTF-8, or an
+encoding with no table (Shift_JIS, GBK) in a document that is not ASCII only,
+refuses the document ("Chapter N of this book could not be read", a
+`PlanRefused`): XML calls it fatal, and a guess is mojibake. A document that
+says a single-byte encoding but is valid UTF-8 with non-ASCII characters is read
+as UTF-8 (it is wrong about itself). A plain UTF-8 document is not copied
+(`PlanAsIs`). The research is in the issue: Thorium and Apple Books use a
+browser's XML parser, Calibre the mark and the declaration and then a guess.
+A title, author or series in the package has its references decoded
+(`_span_arr`), and the library sorts by letters (`_fold`: Latin letters without
+their accents, so Łukasz is under L; other scripts by code point).
+
+**Languages.** Quire does not guess a book's language from its text (no reading
+system researched does): no `dc:language` is `und`, with the voice automatic,
+Look up in English and the direction the package's; the text is set by the
+Unicode bidirectional algorithm. `dc:language` and `xml:lang` are normalised
+to BCP 47 by `language_normalize` (`src/language.bats`): `EN-us` and `en_US` are
+`en-US`, `eng` is `en`, `heb` and `iw` are `he`, the first of several is the
+book's; the page's `lang`, the voice and Look up go by it (primary subtag).
+A chapter's own `xml:lang` or `lang` on its html or body (`_chapter_lang`, cleared
+as each chapter is shown) is the language in force there, for the page, the
+voice and Look up (`_lang_take`). In the text read aloud an element that says a
+language other than the one in force, inside a block, is a block of its own
+(`_runs_node`, `_block_lang_add`): a sentence of its own, said in its language
+(`SentenceOf`'s `book_lang`, `script_lang`). `e2e/encodings.spec.js`,
+`e2e/languages.spec.js` and their `*-books.js` test it.
 ## A book's place in its series is a position in hundredths (#434)
 
 `opf_series` (`src/epub_xml.bats`) reads a book's series and position: the
