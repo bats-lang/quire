@@ -155,6 +155,7 @@ implement app_style () = let
   val sheet = spacing_rules(sheet)
   val sheet = under_480px_rules(sheet)
   val sheet = under_600px_rules(sheet)
+  val sheet = short_screen_rules(sheet)
   val sheet = rule(sheet, ".caf")
   val sheet = lay(sheet, TouchAction(), $GT.touch_action(page_turn_axes(), false))
   val sheet = close(sheet)
