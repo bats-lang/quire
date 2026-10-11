@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn overlay_rules {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5900] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 6700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6700] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 1674} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1674] sheet(after, false, false) = let
@@ -102,7 +102,7 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 1674} (sheet: sheet
 in sheet end
 
 (* The menus, from .ovl on *)
-fn overlay_rules_menus {left:nat | left >= 1721} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1721] sheet(after, false, false) = let
+fn overlay_rules_menus {left:nat | left >= 2100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2100] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
@@ -152,6 +152,18 @@ fn overlay_rules_menus {left:nat | left >= 1721} (sheet: sheet(left, false, fals
   val sheet = rule(sheet, ".mi:hover")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
   val sheet = close(sheet)
+  (* the divider between a menu's groups, and the item that takes a book
+     out of view, set apart by one of its own (Material 3 groups a menu's
+     items by a divider or a small gap, quire#386) *)
+  val sheet = rule(sheet, ".msep")
+  val sheet = lay(sheet, Height(), "1px")
+  val sheet = lay(sheet, Margin(), "4px 0")
+  val sheet = fill(sheet, RoleLine())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".mi[data-removal=y]")
+  val sheet = line(sheet, TopSide(), 1, RoleLine())
+  val sheet = lay(sheet, MarginTop(), "4px")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".mi[data-harm=y]")
   val sheet = surf(S_danger_card | sheet, RoleDanger(), RoleCard())
   val sheet = close(sheet)
@@ -186,7 +198,7 @@ fn overlay_rules_menus {left:nat | left >= 1721} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 1601} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1601] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2100] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -226,6 +238,14 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 1601} (sheet: s
   val sheet = lay(sheet, JustifyContent(), "flex-end")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)
+  (* Book info's Move to Trash, apart from the buttons that only file the
+     book *)
+  val sheet = rule(sheet, ".btn[data-removal=y]")
+  val sheet = lay(sheet, MarginLeft(), "16px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".info-in>.mbtns")
+  val sheet = spaced(sheet, MarginTop(), SpaceLarge())
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".btn[data-harm=y]")
   val sheet = surf(S_danger_card | sheet, RoleDanger(), RoleCard())
   val sheet = line(sheet, AllSides(), 1, RoleDanger())
@@ -247,6 +267,12 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 1601} (sheet: s
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.btn")
   val sheet = lay(sheet, AlignSelf(), "flex-start")
+  val sheet = close(sheet)
+  (* the author under the title, on Book info's own ground (the page's,
+     not the card's that .ba is proven on) *)
+  val sheet = rule(sheet, ".info-author")
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
+  val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".icov")
   val sheet = lay(sheet, Width(), "160px")

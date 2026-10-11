@@ -1670,7 +1670,7 @@ in _pressed("filter-underlined", _same_filter(shown, OnlyUnderlined())) end
 (* The list's message when it shows no highlight *)
 fn _annotations_empty {n:pos | n < 256} (message: string n): void = let
   val () = ui_add("annotations-list", "annotations-empty", TDiv)
-  val () = ui_class("annotations-empty", "empty")
+  val () = ui_class("annotations-empty", "cnone")
 in ui_text("annotations-empty", message) end
 
 (* Fills the annotations list: the highlights of the style shown, by

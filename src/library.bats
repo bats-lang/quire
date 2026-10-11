@@ -2905,6 +2905,13 @@ fun _summary_copy {source_loc,dest_loc:agz}{owner:addr}{source_size:nat}{count:n
     val () = $A.set<byte>(dest, j, $A.get<byte>(source, 6 + j))
   in _summary_copy(source, dest, count, j + 1) end
 
+(* The statements for a book with flags and a summary of summary_len bytes: a
+   book that says nothing of its accessibility is told so once, not by a
+   "No information" line under each heading (quire#386) *)
+fn _a11y_body (flags: int, summary_len: int): [next:nat] int next =
+  if flags = 0 then (if summary_len <= 0 then _a11y_line(0, "This book gives no accessibility information.") else _a11y_lines(flags, 0))
+  else _a11y_lines(flags, 0)
+
 (* Fills Book info's accessibility section for book (id_high, id_low) *)
 #pub fn lib_a11y_show (id_high: int, id_low: int): void
 
@@ -2927,8 +2934,10 @@ in
       if n < 6 then piece_free(owner, buf)
       else let
         val flags = _int32_at(buf, 2)
-        val line = _a11y_lines(flags, 0)
         val summary_len = n - 6
+        (* a book that says nothing of its accessibility is told so once,
+           not by a "No information" line under each heading (quire#386) *)
+        val line = _a11y_body(flags, summary_len)
         val () = (if summary_len > 0 then (if summary_len < 65536 then let
             val line = _a11y_group(line, "Accessibility summary")
             val summary = $A.alloc<byte>(summary_len)
@@ -2988,12 +2997,16 @@ in ui_text_n_buf(series_id, series_id_len, text, text_len) end
    the filter's chip (quire#376: the card said New and Done where the
    chips said Unread and Finished): never opened, opened and not
    finished, or finished *)
-datatype reading_state = StateUnread | StateReading | StateFinished
+#pub datatype reading_state = StateUnread | StateReading | StateFinished
 
-fn _reading_state_of (nums: bnums): reading_state =
+#pub fn lib_reading_state (nums: bnums): reading_state
+
+implement lib_reading_state (nums) =
   if nums.done > 0 then StateFinished()
   else if nums.opened <= 0 then StateUnread()
   else StateReading()
+
+fn _reading_state_of (nums: bnums): reading_state = lib_reading_state(nums)
 
 (* The direction the package gives a title or an author (its dir attribute,
    or the package's): none, left to right, right to left, or by the text's

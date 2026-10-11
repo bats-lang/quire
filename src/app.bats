@@ -162,11 +162,17 @@ fn _context_menu (): void = let
   val () = ui_el("bats-root", "card-menu", TDiv, "ovl")
   val () = ui_el("card-menu", "card-menu-box", TDiv, "menu")
   val () = ui_named("card-menu-box", NMenu, "Book menu")
+  (* grouped, as Material 3's menus group by a divider: reading and what
+     is known of the book; filing it; and, set apart, taking it out of
+     view (quire#386) *)
+  val () = ui_menuitem("card-menu-box", "card-menu-read", "Read")
   val () = ui_menuitem("card-menu-box", "card-menu-info", "Book info")
   val () = ui_menuitem("card-menu-box", "card-menu-collections", "Collections")
+  val () = ui_el("card-menu-box", "card-menu-divider", TDiv, "msep")
+  val () = ui_role("card-menu-divider", RSeparator)
   val () = ui_menuitem("card-menu-box", "card-menu-hide", "Hide")
   val () = ui_menuitem("card-menu-box", "card-menu-archive", "Archive")
-  val () = ui_menuitem("card-menu-box", "card-menu-trash", "Move to Trash")
+  val () = ui_removal_item("card-menu-box", "card-menu-trash", RemoveToTrash())
 in _hide("card-menu") end
 
 (* A book's collections: a toggle for each, and a new one *)
@@ -525,7 +531,9 @@ fn _info (): void = let
   val () = ui_text_btn("book-info-inner", "book-info-back", "btn", "\xE2\x86\x90 Library")
   val () = ui_img("book-info-inner", "book-info-cover", "icov")
   val () = ui_el("book-info-inner", "book-info-title", TDiv, "it")
-  val () = ui_el("book-info-inner", "book-info-author", TDiv, "ba")
+  (* the author on the page's own ground, not .ba's, which is the card's *)
+  val () = ui_el("book-info-inner", "book-info-author", TDiv, "info-author")
+  val () = ui_text_btn("book-info-inner", "book-info-read", "btn btn-p", "Read")
   val () = _row("info-progress-row", "info-progress-label", "Progress")
   val () = ui_add("info-progress-row", "info-progress", TB)
   val () = _row("info-added-row", "info-added-label", "Added")
@@ -547,7 +555,7 @@ fn _info (): void = let
   val () = ui_el("book-info-inner", "book-info-buttons", TDiv, "mbtns")
   val () = ui_text_btn("book-info-buttons", "book-info-hide", "btn", "Hide")
   val () = ui_text_btn("book-info-buttons", "book-info-archive", "btn", "Archive")
-  val () = ui_text_btn("book-info-buttons", "book-info-trash", "btn", "Move to Trash")
+  val () = ui_removal_button("book-info-buttons", "book-info-trash", RemoveToTrash())
 in _hide("book-info") end
 
 (* The reader: its bars, the content, the scrubber, the selection

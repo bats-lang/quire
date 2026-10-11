@@ -530,6 +530,9 @@ test('book info hides, archives and trashes the book it shows', async ({ page })
   const viaInfo = async (title, button) => {
     await bookMenu(page, title);
     await menuItem(page, 'Book info').click();
+    // the earlier action's Undo offer stays until dismissed (#364) and, on a short screen, is over the buttons
+    const offer = page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Dismiss' }) });
+    if (await offer.isVisible()) await offer.getByRole('button', { name: 'Dismiss' }).click();
     await info.getByRole('button', { name: button, exact: true }).click();
   };
   await viaInfo('Info Hide', 'Hide');
@@ -742,11 +745,45 @@ test('Book info reads EPUB 2\'s accessibility metadata too, and says when there 
   await expect(a11y).toContainText('No flashing hazards');
   await dialog(page, 'Book info').getByRole('button', { name: /Library/ }).click();
   a11y = await infoOf(page, 'Bare');
-  await expect(a11y.locator('div div')).toHaveText([
-    'Ways of reading', 'No information about appearance modifiability is available',
-    'No information about nonvisual reading is available',
-    'Conformance', 'No information is available',
-  ]);
+  // a book that says nothing is told so once, not by a "No information" under each heading (quire#386)
+  await expect(a11y.locator('div div')).toHaveText(['This book gives no accessibility information.']);
+});
+
+// quire#386 (Material 3: a menu's items are grouped by a divider or a small
+// gap): reading first, filing apart from taking out of view, and Read or
+// Continue in Book info, whose author is on the page's own ground
+test('the book menu leads with Read, groups its items and sets Move to Trash apart', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Menu Book', author: 'M', rawChapters: chapters(2) })], 1);
+  await bookMenu(page, 'Menu Book');
+  const menu = page.getByRole('menu', { name: 'Book menu' });
+  await expect(menu.getByRole('menuitem')).toHaveText(['Read', 'Book info', 'Collections', 'Hide', 'Archive', 'Move to Trash']);
+  await expect(menu.getByRole('separator')).toHaveCount(1);
+  expect(await menuItem(page, 'Move to Trash').evaluate(e => getComputedStyle(e).borderTopWidth)).toBe('1px');
+  expect(await menuItem(page, 'Archive').evaluate(e => getComputedStyle(e).borderTopWidth)).toBe('0px');
+  // Book info: Read, and the author on the page's ground, not a card's
+  await menuItem(page, 'Book info').click();
+  const info = dialog(page, 'Book info');
+  await expect(info.getByRole('button', { name: 'Read', exact: true })).toBeVisible();
+  const ground = l => l.evaluate(e => getComputedStyle(e).backgroundColor);
+  expect(await ground(info.getByText('M', { exact: true }))).toBe(await ground(info));
+  await info.getByRole('button', { name: 'Read', exact: true }).click();
+  await expect(bookPage(page)).toBeVisible();
+  await toLibrary(page);
+  // opened, it is Continue
+  await bookMenu(page, 'Menu Book');
+  await expect(menuItem(page, 'Continue')).toBeVisible();
+  await menuItem(page, 'Continue').click();
+  await expect(bookPage(page)).toBeVisible();
+  await toLibrary(page);
+  // a book in the Trash cannot be read: no Read there
+  await bookMenu(page, 'Menu Book');
+  await menuItem(page, 'Move to Trash').click();
+  await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
+  await openShelf(page, 'Trash');
+  await bookMenu(page, 'Menu Book');
+  await expect(menuItem(page, 'Read')).toHaveCount(0);
+  await expect(menuItem(page, 'Continue')).toHaveCount(0);
 });
 
 // A larger library: which books, as a list or a grid, and the one to

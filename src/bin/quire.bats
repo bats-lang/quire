@@ -891,6 +891,20 @@ fn _shelf_labels {hide_len,archive_len,trash_len:pos | hide_len < 256; archive_l
     val () = (if same_shelf(shelf, Archived()) then ui_text(archive, "Unarchive") else ui_text(archive, "Archive"))
   in ui_show(trash, true) end
 
+(* Read (never opened), Continue (opened) or Read again (finished) for the
+   book on shelf shelf, in the element id: shown for the books that can be
+   opened, not for one in the Trash or archived (quire#386) *)
+fn _read_show {id_len:pos | id_len < 256} (id: string id_len, book_numbers: bnums): void =
+  case+ book_numbers.shelf of
+  | Trash() => ui_show(id, false)
+  | Archived() => ui_show(id, false)
+  | _ => let
+      val () = (case+ lib_reading_state(book_numbers) of
+        | StateUnread() => ui_text(id, "Read")
+        | StateReading() => ui_text(id, "Continue")
+        | StateFinished() => ui_text(id, "Read again"))
+    in ui_show(id, true) end
+
 (* The book menu for the book, its items as its shelf asks *)
 fn _menu_open {book:int} (book: int book): void =
   case+ lib_nums(book) of
@@ -898,6 +912,7 @@ fn _menu_open {book:int} (book: int book): void =
   | ~$R.some(book_numbers) => let
       val () = !_menu_index := book
       val () = _shelf_labels("card-menu-hide", "card-menu-archive", "card-menu-trash", book_numbers.shelf)
+      val () = _read_show("card-menu-read", book_numbers)
       val () = layer_open(LBookMenu())
     in ui_focus("card-menu-info") end
 
@@ -970,6 +985,7 @@ fn _info_open {book:int} (book: int book): void =
         else ())
       val () = ui_show("info-speed-row", minutes_read > 0)
       val () = _shelf_labels("book-info-hide", "book-info-archive", "book-info-trash", book_numbers.shelf)
+      val () = _read_show("book-info-read", book_numbers)
       val () = ui_src_empty("book-info-cover")
       val () = (if is_image(book_numbers.cover) then lib_show_cover_in("book-info-cover", book_numbers.id_high, book_numbers.id_low, book_numbers.cover) else ())
       (* a book without a cover shows none, not a broken image *)
@@ -1508,6 +1524,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = _target_free(clicked)
       val () = (if book >= 0 then
           (case+ control of
+           | ~$R.some(CardMenuRead()) => _open_book(book, ReaderChose())
            | ~$R.some(CardMenuInfo()) => _info_open(book)
            | ~$R.some(CardMenuCollections()) => _collections_open(book)
            | ~$R.some(CardMenuHide()) => _book_action(book, HideOrRestore())
@@ -1540,6 +1557,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = (case+ control of
         | ~$R.none() => ()
         | ~$R.some(BookInfoBack()) => layer_close(LBookInfo())
+        | ~$R.some(BookInfoRead()) => (if book < 0 then () else let val () = layer_close(LBookInfo()) in _open_book(book, ReaderChose()) end)
         | ~$R.some(BookInfoHide()) => (if book < 0 then () else let val () = layer_close(LBookInfo()) in _book_action(book, HideOrRestore()) end)
         | ~$R.some(BookInfoArchive()) => (if book < 0 then () else let val () = layer_close(LBookInfo()) in _book_action(book, Archive()) end)
         | ~$R.some(BookInfoTrash()) => (if book < 0 then () else _book_action(book, MoveToTrash())))

@@ -2102,6 +2102,25 @@ research (what comparable library apps do) and written here:
   says to import the book's file again: archiving drops the file) and
   Restore (Trash). A row's actions open on its More button and on a long
   press or right click (`contextmenu`), as before.
+* **A book's menu is grouped, and Book info reads** (quire#386; Material
+  3: "Vertical menu items can be grouped by adding a divider or small
+  gap"). The menu is Read (Continue once opened, Read again once
+  finished: `lib_reading_state`, the one rule behind the card's word and
+  the filter chips; none for a book in the Trash or archived), Book info,
+  Collections, a divider (`role=separator`, `.msep`), Hide, Archive, and
+  Move to Trash, which is made by `ui_removal_item` from a `removal` (as
+  `ui_harm_button` is from a `harm`) and drawn by the stylesheet's
+  `[data-removal]` rule with a line above it; it is not red, since Undo
+  and Restore bring the book back. Book info has the same Read as its
+  primary button, Move to Trash apart from Hide and Archive
+  (`ui_removal_button`), and the author in `.info-author`, proven on the
+  page's ground (`.ba` is proven on the card's: reusing it left a strip of
+  the card's colour behind the author). `strayGrounds` in
+  `e2e/controls-shown.js` fails a text element whose own ground is not the
+  one behind it unless it is a control or a card. A book whose metadata
+  says nothing of its accessibility is told so once ("This book gives no
+  accessibility information.") instead of a "No information" line under
+  each heading.
 * **An empty library says what to do, and only that one** (`emptiness`:
   `NoBooksYet | NoMatch | NoCollection | NoUnread | NoneReading |
   NoneFinished | NothingHidden | NothingArchived | TrashEmpty`, made by

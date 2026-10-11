@@ -682,6 +682,17 @@ implement ui_harm_id (the_harm) = let val @(id, _) = _harm_item(the_harm) in id 
    the button that does the_harm (ui_tone) *)
 #pub datavtype tone = Plain | Danger of harm
 
+(* Taking a book out of the library's view (quire#386): moved to the
+   Trash, which Undo and Restore bring back. It is drawn apart from the
+   actions that only file the book (Material 3: a menu's items are
+   grouped by a divider or a small gap), by the stylesheet's rule for
+   [data-removal], which only this module sets, and only from a removal *)
+#pub datatype removal = RemoveToTrash
+
+fn _removal_label (the_removal: removal): [label_len:pos | label_len < 256] string label_len =
+  case+ the_removal of
+  | RemoveToTrash() => "Move to Trash"
+
 (* The kinds of control, each carrying what names it *)
 datavtype control =
   | {class_len,label_len:pos | class_len < 256; label_len < 256} CText of (string class_len, string label_len)
@@ -690,6 +701,8 @@ datavtype control =
   | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
   | {label_len:pos | label_len < 256} CMenuChoice of (string label_len)
   | CHarmItem of harm
+  | CRemovalItem of removal
+  | CRemovalButton of removal
   | {label_len,controls_len:pos | label_len < 256; controls_len < 256} CTab of (string label_len, string controls_len, bool)
   (* a link out of the app, named by its text, opened in a new tab and
      told nothing of the app; its href is set by ui_https_href *)
@@ -745,6 +758,15 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
       val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
       val () = _document_attr(document, id_bytes, id_len, $D.Data("harm"), "y")
     in _document_text(document, id_bytes, id_len, label) end
+  | ~CRemovalItem(the_removal) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
+      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
+      val () = _document_attr(document, id_bytes, id_len, $D.Data("removal"), "y")
+    in _document_text(document, id_bytes, id_len, _removal_label(the_removal)) end
+  | ~CRemovalButton(the_removal) => let
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "btn")
+      val () = _document_attr(document, id_bytes, id_len, $D.Data("removal"), "y")
+    in _document_text(document, id_bytes, id_len, _removal_label(the_removal)) end
   | ~CTab(label, controls, selected) => let
       val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "tab")
       val () = _document_attr(document, id_bytes, id_len, $D.Role, "tab")
@@ -953,6 +975,17 @@ implement ui_menuitem(parent, id, label) = _control_literal(parent, id, CMenuIte
 
 implement ui_menu_choice(parent, id, label) = _control_literal(parent, id, CMenuChoice(label))
 
+(* The menu item that takes a book out of view, set apart from the items
+   above it by the stylesheet *)
+#pub fn ui_removal_item {parent_len,id_len:pos | parent_len < 256; id_len < 256} (parent: string parent_len, id: string id_len, the_removal: removal): void
+
+implement ui_removal_item(parent, id, the_removal) = _control_literal(parent, id, CRemovalItem(the_removal))
+
+(* The same as a button, in Book info *)
+#pub fn ui_removal_button {parent_len,id_len:pos | parent_len < 256; id_len < 256} (parent: string parent_len, id: string id_len, the_removal: removal): void
+
+implement ui_removal_button(parent, id, the_removal) = _control_literal(parent, id, CRemovalButton(the_removal))
+
 (* The menu item that asks about the_harm, marked as losing what it names: its
    id and label are the_harm's *)
 #pub fn ui_harm_item {parent_len:pos | parent_len < 256} (parent: string parent_len, the_harm: harm): void
@@ -1127,7 +1160,7 @@ implement ui_option(select_id, id, id_len, value, value_len, label, label_len, s
 in release_bytes(select_frozen, select_bytes) end
 
 (* Roles that need no name *)
-#pub datatype role = RMain | RStatus | RAlert | RTooltip | RHeading
+#pub datatype role = RMain | RStatus | RAlert | RTooltip | RHeading | RSeparator
 
 #pub fn ui_role {id_len:pos | id_len < 256} (id: string id_len, the_role: role): void
 
@@ -1137,6 +1170,7 @@ implement ui_role(id, the_role) =
   | RStatus() => _set_attr(id, $D.Role, "status")
   | RAlert() => _set_attr(id, $D.Role, "alert")
   | RTooltip() => _set_attr(id, $D.Role, "tooltip")
+  | RSeparator() => _set_attr(id, $D.Role, "separator")
   | RHeading() => let
       val () = _set_attr(id, $D.Role, "heading")
     in _set_attr(id, $D.Aria("level"), "1") end
@@ -1623,6 +1657,7 @@ implement ui_try_again_hide () = ui_show("library-try-again", false)
 
 (* A book's menu's items, each by its element's id (card_menu_control_id) *)
 #pub datatype card_menu_control =
+  | CardMenuRead
   | CardMenuInfo
   | CardMenuCollections
   | CardMenuHide
@@ -1632,6 +1667,7 @@ implement ui_try_again_hide () = ui_show("library-try-again", false)
 #pub fn card_menu_control_id (control: card_menu_control): [id_len:pos | id_len < 256] string id_len
 implement card_menu_control_id (control) =
   case+ control of
+  | CardMenuRead() => "card-menu-read"
   | CardMenuInfo() => "card-menu-info"
   | CardMenuCollections() => "card-menu-collections"
   | CardMenuHide() => "card-menu-hide"
@@ -1641,6 +1677,7 @@ implement card_menu_control_id (control) =
 (* The control after control, in the order the decoder tries them *)
 fn _card_menu_control_after (control: card_menu_control): $R.option(card_menu_control) =
   case+ control of
+  | CardMenuRead() => $R.some(CardMenuInfo())
   | CardMenuInfo() => $R.some(CardMenuCollections())
   | CardMenuCollections() => $R.some(CardMenuHide())
   | CardMenuHide() => $R.some(CardMenuArchive())
@@ -1661,7 +1698,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_card_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(card_menu_control)
-implement ui_card_menu_control (bytes, n, at) = _card_menu_control_from(bytes, n, at, CardMenuInfo(), 5)
+implement ui_card_menu_control (bytes, n, at) = _card_menu_control_from(bytes, n, at, CardMenuRead(), 5)
 
 (* A book's collections' menu: a new one, done, or its backdrop, each by its element's id (collections_control_id) *)
 #pub datatype collections_control =
@@ -1702,6 +1739,7 @@ implement ui_collections_control (bytes, n, at) = _collections_control_from(byte
 (* Book info's buttons, each by its element's id (book_info_control_id) *)
 #pub datatype book_info_control =
   | BookInfoBack
+  | BookInfoRead
   | BookInfoHide
   | BookInfoArchive
   | BookInfoTrash
@@ -1710,6 +1748,7 @@ implement ui_collections_control (bytes, n, at) = _collections_control_from(byte
 implement book_info_control_id (control) =
   case+ control of
   | BookInfoBack() => "book-info-back"
+  | BookInfoRead() => "book-info-read"
   | BookInfoHide() => "book-info-hide"
   | BookInfoArchive() => "book-info-archive"
   | BookInfoTrash() => "book-info-trash"
@@ -1717,7 +1756,8 @@ implement book_info_control_id (control) =
 (* The control after control, in the order the decoder tries them *)
 fn _book_info_control_after (control: book_info_control): $R.option(book_info_control) =
   case+ control of
-  | BookInfoBack() => $R.some(BookInfoHide())
+  | BookInfoBack() => $R.some(BookInfoRead())
+  | BookInfoRead() => $R.some(BookInfoHide())
   | BookInfoHide() => $R.some(BookInfoArchive())
   | BookInfoArchive() => $R.some(BookInfoTrash())
   | BookInfoTrash() => $R.none()
@@ -1736,7 +1776,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_book_info_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(book_info_control)
-implement ui_book_info_control (bytes, n, at) = _book_info_control_from(bytes, n, at, BookInfoBack(), 4)
+implement ui_book_info_control (bytes, n, at) = _book_info_control_from(bytes, n, at, BookInfoBack(), 5)
 
 (* The library search's clear button, each by its element's id (library_search_control_id) *)
 #pub datatype library_search_control =
