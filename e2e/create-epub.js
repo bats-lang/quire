@@ -5,6 +5,7 @@
  * using Node.js zlib for deflate compression. No external dependencies.
  */
 
+import { posix } from 'node:path';
 import { deflateRawSync, deflateSync, inflateRawSync } from 'node:zlib';
 
 // CRC-32 lookup table
@@ -224,10 +225,15 @@ function loremParagraph(seed) {
  * @param {Buffer} opts.coverBytes - The cover image's bytes (a PNG), in place of the tiny default one
  * @param {object[]} opts.rawChapters - Chapters given whole: each {body, file?, images?, lang?,
  *   head? (more of its head, such as a viewport meta), itemref? (its itemref's properties)}
+ *   absent? (the manifest names it, the archive has no entry for it), entry? (the archive's
+ *   entry name, when it is not the file's href resolved against the package)
  * @param {object[]} opts.metaInf - More files of META-INF, each {name, data}: an
  *   encryption.xml (encryptionXml), a license.lcpl, a sinf.xml, a rights.xml
  * @param {boolean} opts.encryptedChapters - The chapters' bytes are replaced by random
  *   ones, as an encrypted chapter's are (named by the encryption.xml of metaInf)
+ * @param {string} opts.opfDir - Where the package document is (default "OEBPS"); the manifest's hrefs are relative to it
+ * @param {string} opts.opfName - The package document's name (default "content.opf")
+ * @param {string} opts.navHref - The nav document's href (default "nav.xhtml")
  * @param {boolean} opts.damagedPackage - The package document (OPF) cannot be inflated
  * @returns {Buffer} EPUB file contents
  */
@@ -349,6 +355,15 @@ export function createEpub(opts = {}) {
     ? '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
     : '<!DOCTYPE html>';
   const uid = crypto.randomUUID();
+  // opts.opfDir / opts.opfName: where the package document is (default
+  // OEBPS/content.opf); every href of the manifest is relative to it, and
+  // opts.navHref is the nav document's (default nav.xhtml). The zip entry of
+  // an href is its URL decoded and normalised ("./", "../", "%20"), as a
+  // reader that follows the URL standard names it.
+  const opfDir = opts.opfDir === undefined ? 'OEBPS' : opts.opfDir;
+  const opfName = opts.opfName || 'content.opf';
+  const navHref = opts.navHref || 'nav.xhtml';
+  const inBook = href => posix.join(opfDir, decodeURIComponent(href));
 
   // mimetype must be first entry, stored uncompressed
   const mimetype = 'application/epub+zip';
@@ -357,7 +372,7 @@ export function createEpub(opts = {}) {
   const containerXml = `<?xml version="1.0" encoding="UTF-8"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
   <rootfiles>
-    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+    <rootfile full-path="${posix.join(opfDir, opfName)}" media-type="application/oebps-package+xml"/>
   </rootfiles>
 </container>`;
 
@@ -383,7 +398,7 @@ export function createEpub(opts = {}) {
     const overlay = rawChapters && rawChapters[i - 1] && rawChapters[i - 1].overlay;
     if (overlay) {
       manifestItems += `    <item id="mo${i}" href="chapter${i}.smil" media-type="application/smil+xml"/>\n`;
-      overlays.push({ name: `OEBPS/chapter${i}.smil`, data: overlay });
+      overlays.push({ name: inBook(`chapter${i}.smil`), data: overlay });
     }
     // a raw chapter's own file name (a corrected book names its chapters the same
     // however it numbers them), else chapter<i>.xhtml
@@ -428,7 +443,10 @@ ${doctype}
 </html>`;
     }
     // opts.damagedChapters: the chapters (from 1) whose data cannot be read
-    chapters.push({ name: `OEBPS/${file}`, data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
+    // a raw chapter that is absent is named by the manifest and has no entry in the archive
+    if (!(rawChapters && rawChapters[i - 1] && rawChapters[i - 1].absent)) {
+      chapters.push({ name: (rawChapters && rawChapters[i - 1] && rawChapters[i - 1].entry) || inBook(file), data: xhtml, damaged: (opts.damagedChapters || []).includes(i) });
+    }
   }
 
   // opts.extraImages are manifest items, as an EPUB must declare what it holds
@@ -439,7 +457,7 @@ ${doctype}
   for (const item of extraSpine) {
     manifestItems += `    <item id="${item.id}" href="${item.href}" media-type="${item.mediaType}"${item.fallback ? ` fallback="${item.fallback}"` : ''}/>\n`;
     spineItems += `    <itemref idref="${item.id}"/>\n`;
-    chapters.push({ name: `OEBPS/${item.href}`, data: item.data });
+    chapters.push({ name: inBook(item.href), data: item.data });
   }
 
   // Add cover image if requested (EPUB3: properties="cover-image")
@@ -494,9 +512,9 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
   if (useNcx) {
     manifestItems += `    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>\n`;
     // opts.alsoNav: a nav document too (a package that says 2.0 and has one)
-    if (opts.alsoNav) manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
+    if (opts.alsoNav) manifestItems += `    <item id="nav" href="${navHref}" media-type="application/xhtml+xml" properties="nav"/>\n`;
   } else {
-    manifestItems += `    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>\n`;
+    manifestItems += `    <item id="nav" href="${navHref}" media-type="application/xhtml+xml" properties="nav"/>\n`;
   }
 
   // content.opf
@@ -519,12 +537,12 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   const zipEntries = [
     { name: 'mimetype', data: mimetype, store: true },
     { name: 'META-INF/container.xml', data: containerXml, store: true },
-    { name: 'OEBPS/content.opf', data: contentOpf, store: true, damaged: !!opts.damagedPackage },
-    useNcx ? { name: 'OEBPS/toc.ncx', data: tocNcx } : { name: 'OEBPS/nav.xhtml', data: navXhtml },
+    { name: posix.join(opfDir, opfName), data: contentOpf, store: true, damaged: !!opts.damagedPackage },
+    useNcx ? { name: inBook('toc.ncx'), data: tocNcx } : { name: inBook(navHref), data: navXhtml },
   ];
   for (const f of (opts.metaInf || [])) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
-  if (opts.alsoNav) zipEntries.push({ name: 'OEBPS/nav.xhtml', data: navXhtml });
-  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: 'OEBPS/' + f.name, data: f.data, store: !!f.store });
+  if (opts.alsoNav) zipEntries.push({ name: inBook(navHref), data: navXhtml });
+  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: inBook(f.name), data: f.data, store: !!f.store });
   zipEntries.push(...overlays);
 
   // SVG cover wrap page (emulates real-world pattern: <svg><image xlink:href="...">)
@@ -541,8 +559,8 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
   </div>
 </body>
 </html>`;
-    zipEntries.push({ name: 'OEBPS/wrap0000.xhtml', data: wrapXhtml });
-    zipEntries.push({ name: 'OEBPS/images/cover.png', data: TINY_PNG, store: true });
+    zipEntries.push({ name: inBook('wrap0000.xhtml'), data: wrapXhtml });
+    zipEntries.push({ name: inBook('images/cover.png'), data: TINY_PNG, store: true });
   }
 
   // extraEntries: more files in the archive, e.g. a large one that makes
@@ -561,13 +579,13 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
 
   // Add cover image as stored (uncompressed) entry for synchronous reading
   if (coverImage) {
-    zipEntries.push({ name: 'OEBPS/images/cover.png', data: opts.coverBytes || TINY_PNG, store: true });
+    zipEntries.push({ name: inBook('images/cover.png'), data: opts.coverBytes || TINY_PNG, store: true });
   }
 
   // Add extra images (for rawChapters that reference images)
   if (opts.extraImages) {
     for (const img of opts.extraImages) {
-      zipEntries.push({ name: `OEBPS/${img.name}`, data: img.data, store: true });
+      zipEntries.push({ name: inBook(img.name), data: img.data, store: true });
     }
   }
 
