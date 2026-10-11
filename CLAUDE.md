@@ -896,6 +896,24 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+* A search result row (#381) shows the hit in its snippet, the match in
+  bold (`.mk`; no new colour pair), and where it is in the book. The
+  snippet is cut into three spans (`search-hit-lead`, `-mark`, `-trail`)
+  by `hit_at` and `hit_len`, which `hits_cons` carries with the proof
+  `hit_at + hit_len <= snippet_len` (`_snippet`, `_hit_in`), so a row
+  cannot take a span outside its snippet. The place is a `locator_kind`
+  and a number (`src/locator.bats`, shared with Contents in #383):
+  `ByPercent`, the thousandths of the book at the hit by the chapters'
+  sizes and the hit's content node among the chapter's (`_hit_locator`,
+  the footer's scale and `book_weights`), or `ByPage`, the spine item,
+  for a fixed-layout book. A page of the current layout is not used: it
+  is unknown for a chapter that is not laid out and changes with the
+  font (Kindle's Location is fixed for the same reason). Each chapter's
+  heading counts its hits ("3 results"). Decided by research (comment on
+  #381): Material 3's list item has a trailing supporting text for a
+  position; no help page of Apple Books, Kindle or Play Books documents
+  the layout of its results.
+
 * Search finds a phrase across inline elements (#437): un<span/>believable,
   a drop cap, `<em>emph</em>asis`, a phrase running out of a page-break
   span. The text of a block's inline nodes is searched as one text
