@@ -43,14 +43,6 @@ implement spacing_rules (sheet) = let
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = lay(sheet, AlignItems(), "center")
   val sheet = close(sheet)
-  (* a row's supporting line (a sync service's summary) under its name,
-     the whole width of the row *)
-  val sheet = rule(sheet, ".info .srow>.sabout")
-  val sheet = lay(sheet, Flex(), "1 1 100%")
-  (* under the name, closer than the row's gap: five rows with a line each
-     must not outgrow a phone's window (the Sync screen, #389) *)
-  val sheet = lay(sheet, MarginTop(), "-8px")
-  val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.sabout,.info-in>.cnone,.scard")
   val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
   val sheet = lay(sheet, BorderRadius(), "12px")
