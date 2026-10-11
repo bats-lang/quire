@@ -732,7 +732,7 @@ test('the time the chapter and the book take to finish is learned from the reade
   for (let k = 0; k < 3; k++) await readout.click();
   // the book's time, with the bars up, by the scrubber
   await page.keyboard.press('t');
-  await expect(page.getByText(/^\d+% · (\d+ h )?\d+ min left$/)).toBeVisible();
+  await expect(page.getByText(/^\d+% of book · (\d+ h )?\d+ min left$/)).toBeVisible();
   // a long pause is not reading: the speed stays a page a minute
   await page.keyboard.press('t');
   const before = await place(page);
