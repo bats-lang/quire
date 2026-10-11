@@ -921,6 +921,26 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+* Where a place is (#383): the footer, the bar's label (`scrubber-percent`)
+  and its tip say how far into the book in one wording, "6% of book"
+  (`_put_book_percent`, over `_put_percent`; "<1%" once reading has begun),
+  where the label said "6%" beside the footer's "6% of book". A Contents
+  row and an annotation's chapter (its heading in the list, a bookmark's
+  row) say where the chapter starts, by `toc_place_of` over src/locator.bats
+  (the same `locator_kind` and number as a search hit; `ByPage` in a
+  fixed-layout book, `book_fixed`; `locator_thousandth` is the one rule of
+  the percent, shared with `_thousandth`). The Contents place is a span
+  over the row's right end (`toc-place`, in `toc-line`), not text of the
+  button, so a row's name stays its label. The `place_text` datatype of
+  the issue's "Prevent" is not made: a flat datatype cannot carry the
+  number, and the number's wording is written in one place instead
+  (`_put_book_percent`, `locator_put`). An annotation's row goes to its
+  place by the whole row (`.hgo`, with a chevron at its end), Delete is
+  quiet (`.quiet`: no edge, muted; it has Undo, so it is no equal of Add
+  note), and each style's filter has a swatch. `e2e/places.spec.js`.
+  Not done, filed as a follow-up: a place for each annotation row (the
+  chapter's is shown, not the annotation's own page).
+
 * A search result row (#381) shows the hit in its snippet, the match in
   bold (`.mk`; no new colour pair), and where it is in the book. The
   snippet is cut into three spans (`search-hit-lead`, `-mark`, `-trail`)
@@ -1369,9 +1389,10 @@ reader's `READER`), then chunks as PNG has them: a u32le length under
 2 to the 20, a 4-byte tag, the data and a CRC-32 (IEEE, 0xEDB88320, the
 check value of "123456789" is 0xCBF43926) as its low 16 bits and then
 its high 16 bits, little endian, over the tag and the data; the last
-chunk is `IEND`. A record is a set of groups, one chunk each, in
-ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
-SIZE TIME TITL`, the index's `LEGA NAMS`); each group is required (its
+chunk is `IEND`. A record is a set of groups, one chunk each, written
+in ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
+SIZE TIME TITL`, the index's `LEGA NAMS`) and read by tag, in any order
+(#510, below); each group is required (its
 loss makes the record `Undecodable`) or optional (its loss gives its
 defaults and `DecodedWithLoss`). A chunk of a tag this version does not
 know is kept as it is, at the end, when its first letter is lower case
@@ -1381,6 +1402,60 @@ the record `Newer`, and a first four bytes that are not `QREC` make it
 `NotQuire`. What a record is decoded to is one of those five outcomes
 (`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
 a decode never fails to say which.
+
+**Chunks are looked up by tag, in any order, a tag twice is a loss that
+is used** (#510). Research (written on the issue): protobuf "parsers must
+be able to parse fields in any order" and take the last value of a field
+twice; PNG fixes the order only of its critical chunks and lets a
+decoder pass over an unknown ancillary one; EBML has no order among the
+children of an element, ignores what it does not know and reads an absent
+element as its default; CBOR leaves a map with a key twice to the
+decoder. So the format is a set of chunks found by their tags, and the
+order is the writer's, not the format's.
+
+* `CANON` (`src/schema.bats`) puts the chunks of a record in the order of
+  the groups before they are read: for each group in turn, `EXT` takes
+  every chunk of its tag out of the list wherever it stands and chooses
+  the last whole one (else a damaged one, else none); what is left
+  follows, as the chunks a newer Quire added. `SDEC` then reads that
+  list as it always did. `canon_functional`, `ext_functional` and
+  `lostcat_functional` make the result one, `canon_read` is the run time
+  one (`ext_read` per group), and `record_read` is total as before.
+* A tag twice is damaged but recoverable, not `Damaged`: the later
+  whole chunk wins (a later one whose CRC is bad does not hide an earlier
+  whole one: protobuf and CBOR take the last because they have no
+  checksum to tell which is whole), the earlier ones are dropped from the
+  value and their tag is among the `lost` of `rr_loss`, so the book is a
+  `LossyBook`, said once, and the next save writes one chunk of each tag
+  and keeps the old bytes under `library/damaged/<id>/<crc>`. `JOIN`
+  joins the dropped tags to the groups' own losses (`LOSTCAT`).
+* A chunk this version does not know (a lower case first letter) is kept
+  whole and in order, twice if it was there twice: it is opaque, and a
+  repeat can be the newer writer's list (PNG allows several tEXt chunks),
+  so it is not for this version to drop one. They are written after the
+  groups. One whose tag is a group's is not kept (`NOTKNOWN`).
+* What makes the written chunks read back as they were is a proof the
+  writer carries: the tags of the groups are all different
+  (`SPECSOK`, from each `SPV_cons`, generated by `scripts/gen-record.py`)
+  and the tag of a kept chunk is none of the groups' (`extrasv` carries
+  it: `EXV_cons(ANC, NOTKNOWN | ...)`), so `senc_canon` shows that the
+  chunks written are their own canonical ones (`tests/static/reject/
+  codec-group-twice-earlier-wins`, `codec-group-twice-not-said`).
+* By the principle for any record that does not decode cleanly (the user's
+  rule for #510): recover fanatically; if a bug in Quire damages a record
+  the reader must still read the book. In order: (1) usable with
+  defaults or substitutes (a lost or absent group, a tag twice, a bad
+  CRC, and, from the next stage, a lost required group); (2) said, once,
+  in the notice (#507: Copy details with the record's id and what was
+  lost); (3) the old bytes kept under `library/damaged/<id>/<crc>` when a
+  save repairs it; (4) `Unusable` only for what cannot be read as a
+  record at all (`NotQuire`) or is a newer Quire's (`Newer`, not
+  damaged). A bug that leaves a record unusable is fixed by widening the
+  recovery, not by setting the record aside.
+* Tests: `tests/codec` (the chunks in the opposite order, a group twice
+  either way), `e2e/library-records.spec.js` (every rotation, the
+  reverse and seeded shuffles open as the same book and are not written
+  by opening; a group twice; an unknown chunk twice).
 
 **A group added later is not loss when it is absent** (#497).
 A group is one of three modes in `scripts/record_tables.py`: `req`
@@ -1452,11 +1527,19 @@ and its result (`DECODES(sp, kind, bs, res)`, built of `CK`, `SEQ`,
 `CKENC`, `CHAINS`, `SENC`), and the laws are lemmas the compiler checks,
 so a codec that is not the inverse of itself does not type-check:
 
-* `decodes_encodes`: if the bytes decode to a record x, encoding x gives
-  exactly those bytes (so a record is never altered by being read and
-  saved: no padding is accepted, no unknown chunk is lost);
-* `encodes_decodes`: what is encoded decodes to what was encoded;
+* `encodes_decodes`: what is encoded decodes to what was encoded, as
+  exactly that record (no padding is accepted, no kept chunk is lost:
+  `tests/static/reject/codec-drops-unknown-chunk`);
 * `decodes_functional`: bytes decode to one result;
+* a record read and saved is never changed in meaning: whatever the
+  chunks' order or repeats were, `record_write` of the very values a
+  read gave (`vals`, `extras`) is `ENCODES` of the same record, and
+  `encodes_decodes` makes that decode to `rr_ok` of it, so
+  decode(encode(decode(x))) = decode(x) on the value. The first law of
+  an earlier version, `decodes_encodes` (the bytes decode to x, so
+  encoding x gives the same bytes), no longer holds and is gone: out of
+  order bytes decode to x and are written in ascending order (#510,
+  below);
 * `record_read` is total: it answers every list of bytes with a result
   and its `DECODES` proof, and `record_write` returns the `ENCODES`
   proof of the bytes it made. The CRC's tables are `CRCP`, a relation
