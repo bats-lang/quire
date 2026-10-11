@@ -1014,6 +1014,8 @@ fn _note (): void = let
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
   val () = ui_text_btn("footnote-bar", "footnote-go", "btn", "Go to note")
+  (* a link out of the book asks first: this opens it, in another tab *)
+  val () = ui_link_out("footnote-bar", "footnote-open", "btn linkout", "Open link")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")
   val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
 in _hide("footnote") end

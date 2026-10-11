@@ -24,16 +24,16 @@ T, F, N = True, False, 'n/a'
 # id: (result, why). A failure's why is the cause, a pass has none but a caveat.
 VERDICTS = {
     # Content Documents
-    'cnt-css-fonts_ot': (F, "the book's own CSS is dropped by design, so its @font-face is never loaded"),
-    'cnt-css-fonts_tt': (F, "the book's own CSS is dropped by design, so its @font-face is never loaded"),
-    'cnt-css-fonts_woff': (F, "the book's own CSS is dropped by design, so its @font-face is never loaded"),
-    'cnt-css-fonts_woff2': (F, "the book's own CSS is dropped by design, so its @font-face is never loaded"),
+    'cnt-css-fonts_ot': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
+    'cnt-css-fonts_tt': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
+    'cnt-css-fonts_woff': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
+    'cnt-css-fonts_woff2': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
     'cnt-mathml-support': (F, 'a math element is made a div: its tokens are shown as plain text ("x / = / a / + / b / 2"), not an equation'),
-    'cnt-svg-css': (F, 'an SVG content document is shown as its text only: no drawing, no CSS applied to it'),
-    'cnt-svg-css-inclusion': (F, 'an SVG included in the XHTML is not drawn (svg elements are made divs)'),
+    'cnt-svg-css': (T, "an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen"),
+    'cnt-svg-css-inclusion': (F, "the svg is drawn, but the page's own <style> does not reach it (by decision: the book's CSS is dropped, quire#411; the svg is a picture of its own, so a style outside it cannot change it, as for an img (cnt-svg-css-reference))"),
     'cnt-svg-css-reference': (T, 'an SVG referenced by img is shown, and the page\'s CSS does not change it'),
-    'cnt-svg-embedded': (F, 'an inline svg is not drawn (made a div; no graphics)'),
-    'cnt-svg-support': (F, 'an SVG spine document shows its text but not its drawing'),
+    'cnt-svg-embedded': (T, "an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen"),
+    'cnt-svg-support': (T, "an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen"),
     'cnt-xhtml-support': (T, ''),
     'css-epub-hyphens': (F, "the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's)"),
     'css-epub-line-break': (F, "the book's own CSS is dropped by design"),
@@ -66,7 +66,7 @@ VERDICTS = {
     'lay-fxl-spread-default': (T, ''),
     'lay-fxl-spread-landscape': (T, 'in a landscape window'),
     'lay-fxl-spread-none': (T, 'one page a screen, measured'),
-    'lay-fxl-svg-icb_multi': (F, 'SVG spine documents are not drawn, nor sized by their viewBox'),
+    'lay-fxl-svg-icb_multi': (T, 'an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it'),
     'lay-fxl-xhtml-icb': (F, "the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design"),
     'lay-fxl-xhtml-icb_device_sizes': (F, "device-width/device-height fill the view, but the pass criterion is drawn by the book's CSS, dropped by design"),
     'lay-fxl-xhtml-icb_invalid_meta': (F, "an invalid viewport meta is read as 900x600 (measured) but the pass criterion is drawn by the book's CSS, dropped by design"),
@@ -77,8 +77,8 @@ VERDICTS = {
     'lay-page-layout-both': (T, ''),
     'lay-page-layout-both-spread': (T, 'the reflowable item with page-spread-left starts on the left; page-spread-right on a reflowable item is not placed on the right (not tested by the suite)'),
     'lay-pkg-flow-paginated': (T, 'paginated is the default'),
-    'lay-pkg-flow-scrolled-continuous': (F, "rendition:flow is not read: the reader's own Pages | Scroll setting decides"),
-    'lay-pkg-flow-scrolled-doc': (F, "rendition:flow is not read: the reader's own Pages | Scroll setting decides"),
+    'lay-pkg-flow-scrolled-continuous': (T, 'a book that asks for scrolled flow is scrolled until the reader chooses Pages (the Page setting starts as the book\'s)'),
+    'lay-pkg-flow-scrolled-doc': (T, 'a book that asks for scrolled flow is scrolled until the reader chooses Pages (the Page setting starts as the book\'s)'),
     'lay-pp-embedded-images': (T, 'measured: each image fills its page'),
     'lay-pp-embedded-images-svg': (T, 'the images inside the SVG are shown'),
     'lay-pp-images-in-spine': (T, 'an image in the spine is replaced by its fallback and never read as text; no crash (the 3 MB PNG)'),
@@ -96,7 +96,7 @@ VERDICTS = {
     'lay-pp-spine-overrides_image-spine-pp': (T, 'the PNG spine item is replaced by its fallback'),
     'lay-pp-spine-overrides_image-spine-reflow': (T, 'the PNG spine item is replaced by its fallback'),
     'lay-pp-spread-none': (T, 'one page a screen, measured'),
-    'lay-pp-svg-icb_multi': (F, 'SVG spine documents are not drawn, nor sized by their viewBox'),
+    'lay-pp-svg-icb_multi': (T, 'an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it'),
     'lay-pp-xhtml-icb': (F, "the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design"),
     'lay-pp-xhtml-icb_invalid_meta': (F, "an invalid viewport meta is read as 900x600 (measured) but the pass criterion is drawn by the book's CSS, dropped by design"),
     'lay-pp-xhtml-icb_multi': (F, "each page's own viewport is read (measured) but the pass criterion is drawn by the book's CSS, dropped by design"),
@@ -105,10 +105,10 @@ VERDICTS = {
     'lay-pp-xhtml-icb_units': (F, "units are ignored, values in pixels (measured) but the pass criterion is drawn by the book's CSS, dropped by design"),
     'lay-reflow-align-x-center': (N, 'rendition:align-x-center is optional for reflowable content ("reading systems that support it") and Quire does not'),
     'lay-rendition-flow-pre-pag': (T, 'rendition:flow is ignored everywhere'),
-    'lay-roll-embedded-images': (F, 'roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document'),
-    'lay-roll-embedded-images-svg': (F, 'roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document'),
-    'lay-roll-images-in-spine': (T, 'an image in the spine is replaced by its fallback, no crash (roll layout itself is not implemented, as lay-roll-embedded-images says)'),
-    'lay-roll-images-mixed': (T, 'an image in the spine is replaced by its fallback, no hang (roll layout itself is not implemented)'),
+    'lay-roll-embedded-images': (T, 'a roll layout (EPUB 3.4 draft) is read scrolled down: each document scrolls, and the next follows at its end; not one strip across documents'),
+    'lay-roll-embedded-images-svg': (T, 'a roll layout is read scrolled down (as lay-roll-embedded-images)'),
+    'lay-roll-images-in-spine': (T, 'an image in the spine is replaced by its fallback, no crash'),
+    'lay-roll-images-mixed': (T, 'an image in the spine is replaced by its fallback, no hang'),
     'lay-viewport-meta-prop': (T, 'only the dimensions of the viewport are read (measured)'),
     # Media Overlays
     'mol-audio': (T, 'clipBegin/clipEnd obeyed (MP3)'),
@@ -130,8 +130,8 @@ VERDICTS = {
     'mol-timing-synchronization_multiple_audio-fxl': (T, 'MP3'),
     'mol-timing-synchronization_svg': (T, 'the text of the SVG is read and marked (the drawing is not shown); MP3'),
     'mol-timing-synchronization_svg-fxl': (T, 'the text of the SVG is read and marked (the drawing is not shown); MP3'),
-    'mol-tts_multi': (F, 'a SMIL with no audio is not read by speech synthesis: nothing plays'),
-    'mol-tts_single': (F, 'a SMIL with no audio is not read by speech synthesis: nothing plays'),
+    'mol-tts_multi': (T, 'a SMIL with no audio hands the chapter to reading aloud by speech synthesis, from the page; the SMIL\'s order and its highlight are not used'),
+    'mol-tts_single': (T, 'a SMIL with no audio hands the chapter to reading aloud by speech synthesis, from the page; the SMIL\'s order and its highlight are not used'),
     # Navigation Documents
     'nav-access': (T, ''),
     'nav-activation': (T, ''),
@@ -191,8 +191,8 @@ VERDICTS = {
     'pkg-unique-id_duplicate': (T, 'two books with the one identifier are two cards'),
     'pkg-version-backward': (T, ''),
     # Structural Semantics
-    'pss-support': (F, 'no footnote popup: a note link is followed as a link'),
-    'pss-support_ignore-title': (N, 'only for reading systems with a footnote popup'),
+    'pss-support': (T, 'a note link opens the note in a popup (#414)'),
+    'pss-support_ignore-title': (T, 'a title element marked as a footnote is not a note: the link to it opens no popup (the head is not searched)'),
     # Core Media Types
     'pub-cmt-avif': (T, ''),
     'pub-cmt-gif': (T, ''),
@@ -207,8 +207,8 @@ VERDICTS = {
     # Publication Resources, Manifest Fallbacks
     'pub-data-urls_browsing-context': (T, 'an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer'),
     'pub-data-urls_top-level-content': (T, 'an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)'),
-    'pub-external-links': (F, 'a link out opens a new tab at once, with no consent step'),
-    'pub-external-links_consent': (F, 'a mailto: link opens the mail application at once, with no consent step'),
+    'pub-external-links': (T, 'a link out asks first, in the note overlay, and opens in a new tab on the reader\'s word'),
+    'pub-external-links_consent': (T, 'a mailto: link asks first, in the note overlay, and opens the mail application on the reader\'s word'),
     'pub-file-urls': (T, 'iframes are not shown, so no file: URL is loaded'),
     'pub-foreign_bad-fallback': (T, 'an item and a fallback that are both foreign are left out of the spine, never shown as text'),
     'pub-foreign_image': (T, 'an img of a foreign type is shown as its manifest fallback'),
@@ -276,7 +276,7 @@ def others(clone):
 
 
 # failures left for the maintainer's decision, not bugs to fix
-DECISIONS = {'pub-external-links', 'pub-external-links_consent', 'mol-tts_single', 'mol-tts_multi', 'mol-css'}
+DECISIONS = {'mol-css'}
 
 
 def covered(spec):
@@ -363,10 +363,8 @@ def main(clone):
     lines += [
         '',
         'A failure marked `next` is a bug whose e2e test is written with its fix, in the area of fixes it belongs to (so a branch',
-        'carries only tests that pass). The `should` failures marked `decision` are left for a decision: `pub-external-links` and `pub-external-links_consent`',
-        '(a link out opens at once: a consent step is a design to choose, with what Thorium, Apple Books and Kobo do, in the "Others" column',
-        'and on the results page), `mol-tts_single` and `mol-tts_multi` (a SMIL with no audio read by speech synthesis: Quire has both',
-        'narration and speech, but not the one through the other) and `mol-css` (the book\'s own highlight CSS, dropped by design).',
+        'carries only tests that pass). A `decision` is a failure settled in CLAUDE.md (#419) and kept: `mol-css` (the book\'s own highlight CSS,',
+        'dropped by design, #411).',
     ]
     lines += ['', '## Not applicable', '', '| test | level | why |', '| --- | --- | --- |']
     for id in sorted(tests):
