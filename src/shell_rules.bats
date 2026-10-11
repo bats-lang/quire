@@ -29,7 +29,10 @@ fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false,
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, MaxWidth(), "800px")
   val sheet = lay(sheet, Margin(), "0 auto")
-  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(24px,var(--safe-bottom)) max(16px,var(--safe-left))")
+  (* the room under the last card is the Undo toast's (it stays until it
+     is dismissed, 112 px up and 56 tall): the list scrolls clear of it,
+     as a list leaves room for a FAB (#380) *)
+  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(176px,var(--safe-bottom)) max(16px,var(--safe-left))")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MinHeight(), "100vh")
   val sheet = close(sheet)
