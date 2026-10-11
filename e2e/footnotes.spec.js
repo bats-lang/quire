@@ -145,3 +145,55 @@ test('a note longer than the popup holds ends in an ellipsis, and Go to note has
   await expect.poll(() => visibleText(page)).toContain('Long note paragraph');
   expect(errors).toEqual([]);
 });
+
+// A note and a word looked up explain a place in the text, so they leave
+// it as it is (quire#387; HIG: a popover "doesn't cover the element that
+// revealed it or any essential content"): no scrim dims it and the sheet
+// is on the half of the window the place is not in.
+test('a note leaves its reference uncovered: no scrim, and the sheet in the half it is not in', async ({ page }) => {
+  const errors = await start(page);
+  const count = 14;
+  const paragraph = k => `<p>Paragraph ${k} ${'lorem ipsum dolor sit amet '.repeat(5)}<a epub:type="noteref" href="#n${k}">${k}</a>.</p>`;
+  const notes = k => `<aside epub:type="footnote" id="n${k}"><p>Note ${k} text.</p></aside>`;
+  const all = Array.from({ length: count }, (_, i) => i + 1);
+  await readBook(page, { title: 'Clear notes', author: 'Notes',
+    rawChapters: [{ body: all.map(paragraph).join('') + all.map(notes).join('') }] });
+  const halves = new Set();
+  for (const k of all) {
+    const reference = link(page, String(k));
+    if ((await reference.count()) === 0) continue;
+    const at = await reference.evaluate(el => {
+      const box = el.getBoundingClientRect();
+      if (box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth) return null;
+      // reachable: nothing (a bar) lies over it
+      const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+      return hit && (el === hit || el.contains(hit)) ? { x: box.x + box.width / 2, y: box.y + box.height / 2 } : null;
+    });
+    if (!at) continue;
+    await page.mouse.click(at.x, at.y);
+    await expect(note(page)).toBeVisible();
+    await expect(page.locator('#panel-scrim')).toBeHidden();
+    const seen = await reference.evaluate(el => {
+      const box = el.getBoundingClientRect();
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      const sheet = document.getElementById('footnote').getBoundingClientRect();
+      return {
+        half: y * 2 < innerHeight ? 'upper' : 'lower',
+        side: document.getElementById('footnote').dataset.side,
+        underSheet: !!hit && document.getElementById('footnote').contains(hit),
+        underScrim: !!hit && document.getElementById('panel-scrim').contains(hit),
+        insideSheet: x >= sheet.x && x <= sheet.x + sheet.width && y >= sheet.y && y <= sheet.y + sheet.height,
+      };
+    });
+    halves.add(seen.half);
+    expect(seen.underSheet, `note ${k}'s reference is under the sheet`).toBe(false);
+    expect(seen.underScrim, `note ${k}'s reference is under a scrim`).toBe(false);
+    expect(seen.insideSheet, `note ${k}'s reference is inside the sheet`).toBe(false);
+    expect(seen.side, `note ${k} in the ${seen.half} half`).toBe(seen.half === 'upper' ? 'bottom' : 'top');
+    await close(page).click();
+    await expect(note(page)).toBeHidden();
+  }
+  expect([...halves].sort(), 'references in both halves of the window were tried').toEqual(['lower', 'upper']);
+  expect(errors).toEqual([]);
+});

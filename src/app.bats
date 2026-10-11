@@ -608,28 +608,39 @@ fn _reader (): void = let
   val () = ui_el("reader", "selection-toolbar-floor", TDiv, "seltbfloor")
   val () = ui_el("reader", "selection-toolbar", TDiv, "seltb")
   val () = ui_named("selection-toolbar", NToolbar, "Selection")
-  val () = ui_text_btn("selection-toolbar", "selection-highlight", "btn", "Highlight")
-  (* the other highlight styles, each one tap *)
-  val () = ui_text_btn("selection-toolbar", "selection-orange", "btn", "Orange")
-  val () = ui_text_btn("selection-toolbar", "selection-underline", "btn", "Underline")
-  val () = ui_text_btn("selection-toolbar", "selection-note", "btn", "Note")
-  val () = ui_text_btn("selection-toolbar", "selection-copy", "btn", "Copy")
-  (* read aloud from the selection (read_aloud.bats), where the
-     platform speaks *)
-  val () = ui_text_btn("selection-toolbar", "selection-read", "btn", "Read from here")
-  val () = _hide("selection-read")
-  (* shared, cited by the book (sharing.bats), where the platform
-     shares *)
-  val () = ui_text_btn("selection-toolbar", "selection-share", "btn", "Share")
-  val () = _hide("selection-share")
+  (* the first row: Highlight (in the style last used, drawn as a
+     swatch), then what is used most; More turns it into the second
+     (quire#378) *)
+  val () = ui_el("selection-toolbar", "selection-primary", TDiv, "seltbrow")
+  val () = ui_text_btn("selection-primary", "selection-highlight", "btn hlmark hl-yellow", "Highlight")
+  val () = ui_text_btn("selection-primary", "selection-note", "btn", "Note")
+  val () = ui_text_btn("selection-primary", "selection-copy", "btn", "Copy")
   (* the selection looked up in a dictionary the reader imported, shown
      instead of the online one below when it has the word *)
-  val () = ui_text_btn("selection-toolbar", "selection-define", "btn", "Look up")
+  val () = ui_text_btn("selection-primary", "selection-define", "btn", "Look up")
   val () = _hide("selection-define")
   (* the selection looked up in a dictionary of the book's language (its
      href follows the selection) *)
-  val () = ui_link_out("selection-toolbar", "selection-lookup", "btn linkout", "Look up")
-  val () = ui_text_btn("selection-toolbar", "selection-search", "btn", "Search")
+  val () = ui_link_out("selection-primary", "selection-lookup", "btn linkout", "Look up online")
+  (* shared, cited by the book (sharing.bats), where the platform
+     shares *)
+  val () = ui_text_btn("selection-primary", "selection-share", "btn", "Share")
+  val () = _hide("selection-share")
+  (* the second row: a swatch for each highlight style, each one tap
+     (named by style_label, as the annotations list names it), then
+     Search and, where the platform speaks, Read aloud *)
+  val () = ui_el("selection-toolbar", "selection-overflow", TDiv, "seltbrow")
+  val () = ui_swatch_btn("selection-overflow", "selection-yellow", "swatch swatch-yellow", style_label(Yellow()))
+  val () = ui_swatch_btn("selection-overflow", "selection-orange", "swatch swatch-orange", style_label(Orange()))
+  val () = ui_swatch_btn("selection-overflow", "selection-underlined", "swatch swatch-under", style_label(Underlined()))
+  val () = ui_text_btn("selection-overflow", "selection-search", "btn", "Search")
+  (* read aloud from the selection (read_aloud.bats), where the
+     platform speaks *)
+  val () = ui_text_btn("selection-overflow", "selection-read", "btn", "Read from here")
+  val () = _hide("selection-read")
+  val () = _hide("selection-overflow")
+  val () = ui_icon_btn("selection-toolbar", "selection-more", "btn", IcMore, "More")
+  val () = ui_attr("selection-more", AExpanded, "false")
   val () = _hide("selection-toolbar")
   (* the bottom bar, in two rows (#274): the progress row (where the
      page is, "6 of 40 in chapter · 1%", over the scrubber, with the
@@ -972,9 +983,9 @@ fn _annotations (): void = let
   val () = ui_el("annotations-panel", "annotations-filter", TDiv, "seg afilter")
   val () = ui_named("annotations-filter", NGroup, "Show")
   val () = ui_text_btn("annotations-filter", "filter-all", "sbtn", "All")
-  val () = ui_text_btn("annotations-filter", "filter-yellow", "sbtn", "Yellow")
-  val () = ui_text_btn("annotations-filter", "filter-orange", "sbtn", "Orange")
-  val () = ui_text_btn("annotations-filter", "filter-underlined", "sbtn", "Underlined")
+  val () = ui_text_btn("annotations-filter", "filter-yellow", "sbtn", style_label(Yellow()))
+  val () = ui_text_btn("annotations-filter", "filter-orange", "sbtn", style_label(Orange()))
+  val () = ui_text_btn("annotations-filter", "filter-underlined", "sbtn", style_label(Underlined()))
   val () = ui_el("annotations-panel", "annotations-list", TDiv, "plist")
 in _hide("annotations-panel") end
 
@@ -985,19 +996,27 @@ fn _note (): void = let
   val () = ui_named("footnote", NModal, "Footnote")
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
-  val () = ui_text_btn("footnote-bar", "footnote-go", "link", "Go to note")
+  val () = ui_text_btn("footnote-bar", "footnote-go", "btn", "Go to note")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")
   val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
 in _hide("footnote") end
 
-(* A book's image, full screen: it can be zoomed with the fingers, and
-   scrolled; the image is the page's, whose alt says what it shows *)
+(* A book's image, full screen: fitted, zoomed with the fingers or the
+   Zoom buttons, and scrolled (image_viewer.bats); the image is the page's, whose alt says what it shows *)
 fn _image_viewer (): void = let
   val () = ui_el("bats-root", "image-viewer", TDiv, "imview")
   val () = ui_named("image-viewer", NModal, "Image")
   val () = ui_el("image-viewer", "image-box", TDiv, "imbox")
+  (* the zoom's gesture region (quire.bats's IMAGE_REGION): a pinch *)
+  val () = ui_attr("image-box", AGestureRegion, "2")
   val () = ui_img("image-box", "image-full", "imimg")
   val () = ui_icon_btn("image-viewer", "image-close", "ibtn imclose", IcClose, "Close")
+  (* the single-pointer way to zoom (WCAG 2.5.1: a pinch is a path the
+     fingers draw, and a mouse or the keyboard has none) *)
+  val () = ui_el("image-viewer", "image-zoom-bar", TDiv, "imzoom")
+  val () = ui_named("image-zoom-bar", NToolbar, "Zoom")
+  val () = ui_text_btn("image-zoom-bar", "image-zoom-out", "btn", "Zoom out")
+  val () = ui_text_btn("image-zoom-bar", "image-zoom-in", "btn", "Zoom in")
 in _hide("image-viewer") end
 
 (* What makes the reader's panels modal (layer.bats): the scrim over the
