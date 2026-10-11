@@ -18,7 +18,7 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 7000} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7000] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 7600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7600] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
