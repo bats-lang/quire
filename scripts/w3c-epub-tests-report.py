@@ -28,7 +28,7 @@ VERDICTS = {
     'cnt-css-fonts_tt': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
     'cnt-css-fonts_woff': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
     'cnt-css-fonts_woff2': (T, "the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design"),
-    'cnt-mathml-support': (F, 'a math element is made a div: its tokens are shown as plain text ("x / = / a / + / b / 2"), not an equation'),
+    'cnt-mathml-support': (T, 'a math element is made element for element in the MathML namespace (dom\'s add_math_element, bridge\'s math: tag), so the browser sets the equation; maction, annotation-xml and colours are refused'),
     'cnt-svg-css': (T, "an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen"),
     'cnt-svg-css-inclusion': (F, "the svg is drawn, but the page's own <style> does not reach it (by decision: the book's CSS is dropped, quire#411; the svg is a picture of its own, so a style outside it cannot change it, as for an img (cnt-svg-css-reference))"),
     'cnt-svg-css-reference': (T, 'an SVG referenced by img is shown, and the page\'s CSS does not change it'),

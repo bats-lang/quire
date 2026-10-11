@@ -316,6 +316,19 @@ export const w3cBooks = {
     spine: [{ idref: 'scene' }],
     toc: [{ href: 'scene.svg', label: 'Scene' }],
   })),
+  // MathML
+  'mathml': book(() => packageEpub({
+    title: 'MathML in a page',
+    items: [page('one', `<p>Test passes if you see an equation.</p>
+    <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+      <mi mathvariant="bold">x</mi><mo>=</mo>
+      <mfrac><mn>1</mn><mn>2</mn></mfrac>
+      <mo>+</mo><msqrt><mi>y</mi></msqrt>
+      <maction actiontype="toggle"><mi>hidden</mi></maction>
+    </math>
+    <p>After the equation.</p>`, {}, { properties: 'mathml' })],
+    spine: [{ idref: 'one' }],
+  })),
   'zip-bzip2': book(() => packageEpub({
     title: 'Compressed with bzip2',
     items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],

@@ -3,6 +3,9 @@
 // stability.spec.js).
 
 
+import { test, expect } from './fixtures.js';
+import { reload } from './helpers.js';
+
 /* ---------------- the old record, as each version of it wrote it ---------------- */
 
 const int32 = n => { const b = new Uint8Array(4); new DataView(b.buffer).setInt32(0, n, true); return [...b]; };
@@ -86,3 +89,22 @@ export async function forgetRecords(page) {
   for (const key of Object.keys(await store(page))) if (key.startsWith('library/')) await put(page, key, null);
 }
 
+/** On the android project the app syncs as it opens (nothing chosen: Android's Auto Backup file is merged
+    and written), and it writes the library's records, "rlog-elsewhere" and last "sync-state" as it ends.
+    Those writes land when the sync does, not when the books show, so a spec that changes the store
+    straight after the books show can have them land over its change (#515: the library/index the first
+    load wrote after forgetRecords, so the next load found an index and no books and did not convert;
+    and the renumbering of the books' ORDR the merge's save writes once a record is missing, after the
+    snapshot a spec compares with). "sync-state" is written by the sync's end, after its saves, so a spec
+    takes it away before it reloads and waits for it to be written again. Other projects do not sync. */
+export async function syncEnded(page) {
+  if (test.info().project.name !== 'android') return;
+  await expect.poll(async () => 'sync-state' in await store(page), { message: 'the sync as the app opens has ended' }).toBe(true);
+}
+
+/** reload, and wait until the sync the app makes as it opens has ended */
+export async function reloadSettled(page) {
+  await put(page, 'sync-state', null);
+  await reload(page);
+  await syncEnded(page);
+}

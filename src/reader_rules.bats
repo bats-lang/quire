@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 12150} (sheet: sheet(left, false, false)): [after:nat | after >= left - 12150] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 13300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 13300] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1642} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1642] sheet(after, false, false) = let
@@ -105,7 +105,7 @@ fn reader_rules_bars_and_title {left:nat | left >= 1642} (sheet: sheet(left, fal
 in sheet end
 
 (* The page indicator and footer, from .pinfo on *)
-fn reader_rules_page_indicator_and_footer {left:nat | left >= 1675} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1675] sheet(after, false, false) = let
+fn reader_rules_page_indicator_and_footer {left:nat | left >= 2400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2400] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pinfo")
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = lay(sheet, Flex(), "0 1 auto")
@@ -175,6 +175,27 @@ fn reader_rules_page_indicator_and_footer {left:nat | left >= 1675} (sheet: shee
   val sheet = close(sheet)
   val sheet = rule(sheet, ".chrome-off .foot")
   val sheet = lay(sheet, Display(), "flex")
+  val sheet = close(sheet)
+  (* a bookmarked page's mark, a ribbon in the page's top-right corner,
+     inside the band the text keeps clear of (--page-top), shown with
+     the bars away (Kindle and Kobo draw theirs in that corner; the star
+     in the top bar says it while the bars are up); the accent is proven
+     on the ground as text is (S_accent_bg), and a tap goes through it
+     to the page (#388) *)
+  val sheet = rule(sheet, ".bmk")
+  val sheet = lay(sheet, Display(), "none")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Top(), "env(safe-area-inset-top)")
+  val sheet = lay(sheet, Right(), "calc(env(safe-area-inset-right) + 12px)")
+  val sheet = lay(sheet, Width(), "14px")
+  val sheet = lay(sheet, Height(), "20px")
+  val sheet = lay(sheet, ClipPath(), "polygon(0 0,100% 0,100% 100%,50% 70%,0 100%)")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = fill(sheet, RoleAccent())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".chrome-off .bmk-on")
+  val sheet = lay(sheet, Display(), "block")
   val sheet = close(sheet)
   (* the page keeps out of the screen's cutouts and rounded corners
      (the safe area) on every side, in or out of full screen: above and
@@ -299,7 +320,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)
-fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1430} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1430] sheet(after, false, false) = let
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1580} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1580] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -378,6 +399,12 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1430} (sheet: sheet
   val sheet = rule(sheet, ".caf figure")
   val sheet = lay(sheet, Margin(), "1em auto")
   val sheet = close(sheet)
+  (* a display equation wider than the column scrolls along it (the page's
+     colours are the text's own: a math element sets none) *)
+  val sheet = rule(sheet, ".caf math[display=block]")
+  val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = lay(sheet, MaxWidth(), "100%")
+  val sheet = close(sheet)
   (* an audio or video element is played, with the browser's controls: no
      wider than the column; a video no taller than the page, as a picture *)
   val sheet = rule(sheet, ".caf audio,.caf video")
@@ -398,7 +425,7 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1430} (sheet: sheet
 in sheet end
 
 (* The marks and bottom bar, from .caf sup on *)
-fn reader_rules_marks_and_bottom_bar {left:nat | left >= 1358} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1358] sheet(after, false, false) = let
+fn reader_rules_marks_and_bottom_bar {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false) = let
   val sheet = rule(sheet, ".caf sup,.caf sub")
   val sheet = lay(sheet, LineHeight(), "0")
   val sheet = close(sheet)
@@ -469,17 +496,23 @@ fn reader_rules_marks_and_bottom_bar {left:nat | left >= 1358} (sheet: sheet(lef
   val sheet = lay(sheet, Left(), "auto")
   val sheet = lay(sheet, Right(), "0")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".bot.rtl .pnext")
+  val sheet = rule(sheet, ".bot.rtl .pchnext")
   val sheet = lay(sheet, Order(), "1")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".bot.rtl .scr")
+  val sheet = rule(sheet, ".bot.rtl .pnext")
   val sheet = lay(sheet, Order(), "2")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".bot.rtl .pprev")
+  val sheet = rule(sheet, ".bot.rtl .scr")
   val sheet = lay(sheet, Order(), "3")
   val sheet = close(sheet)
-  val sheet = rule(sheet, ".bot.rtl .tools")
+  val sheet = rule(sheet, ".bot.rtl .pprev")
   val sheet = lay(sheet, Order(), "4")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".bot.rtl .pchprev")
+  val sheet = lay(sheet, Order(), "5")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".bot.rtl .tools")
+  val sheet = lay(sheet, Order(), "6")
   val sheet = close(sheet)
 in sheet end
 
