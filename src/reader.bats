@@ -4333,25 +4333,45 @@ end
 (* A search walks each chapter as _render_nodes shows it, numbering its
    content nodes the same way (the two must stay in step), and finds the
    query in each text node's text as the page shows it (its references
-   decoded), letters in any case. A hit is its chapter, content node and
-   offset, with the text around it. *)
+   decoded), letters in any case. A hit is its chapter, the content node and
+   offset where it starts, the content node and offset where it ends, and
+   the text around it.
+
+   A phrase may cross inline elements (un<span/>believable, a drop cap
+   <span>T</span>he, <em>emph</em>asis, '<span>But</span> of course): the
+   text of the inline nodes of a block is searched as one text (#437). It
+   is done with a tail, the last query_len - 1 bytes of the block's text so
+   far, each byte with the content node and offset it came from; the next
+   text node is searched for the hits that start in the tail and end in
+   it, then for those inside it. An element the page shows as a block (and
+   a br, hr or image) ends the block and empties the tail; a ruby's
+   annotations are neither searched nor a break, so a base reads on
+   through them. Research (#437): foliate-js joins the strings its text
+   walker gives (`strs.join('')`, search.js) and maps a match back to a
+   start and an end in different entries, so a phrase crosses inline
+   markup, as a range with two ends does here; the Calibre viewer's
+   documentation says nothing about tags (a 2016 MobileRead thread asks
+   its editor for it), and Readium's and Thorium's search were not
+   checked: what was searched is said here, not assumed. A block still
+   ends a phrase: a match across paragraphs is not one a reader sees. *)
 
 #define HIT_MAX 500
 
 datavtype hits(int) =
   | hits_nil(0) of ()
   | {count:nat}{l:agz}{snippet_len:nat | snippet_len <= 206}
-    hits_cons(count + 1) of (Int, Int, Int, $A.arr(byte, l, snippet_len + 1), int snippet_len, hits(count))
+    hits_cons(count + 1) of (Int, Int, Int, Int, Int, $A.arr(byte, l, snippet_len + 1), int snippet_len, hits(count))
 
 fun hits_free {count:nat} .<count>. (entries: hits(count)): void =
   case+ entries of
   | ~hits_nil() => ()
-  | ~hits_cons(_, _, _, snippet, _, rest) => let val () = $A.free<byte>(snippet) in hits_free(rest) end
+  | ~hits_cons(_, _, _, _, _, snippet, _, rest) => let val () = $A.free<byte>(snippet) in hits_free(rest) end
 
 fun hits_reverse {count,reversed_count:nat} .<count>. (remaining: hits(count), reversed: hits(reversed_count)): hits(count + reversed_count) =
   case+ remaining of
   | ~hits_nil() => reversed
-  | ~hits_cons(chapter, node, offset, snippet, snippet_len, rest) => hits_reverse(rest, hits_cons(chapter, node, offset, snippet, snippet_len, reversed))
+  | ~hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, rest) =>
+    hits_reverse(rest, hits_cons(chapter, node, offset, end_node, end_offset, snippet, snippet_len, reversed))
 
 (* The hits so far (the latest first while a search runs), their count,
    the query query[0, query_len) (lower case) and the search's number *)
@@ -4470,8 +4490,179 @@ fun _find_all {text_location,query_location:agz}{text_size,query_size:pos}{text_
   else if at + query_len > text_len then @(found, hit_count)
   else if _match_at(text, at, query, query_len, 0) then let
     val @(snippet, snippet_len) = _snippet(text, text_size, text_len, at, query_len)
-  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, _arr_units(text, 0, at, 0), snippet, snippet_len, found), hit_count + 1) end
+    val start_units = _arr_units(text, 0, at, 0)
+    val end_units = start_units + _arr_units(text, at, at + query_len, 0)
+  in _find_all(text, text_size, text_len, at + query_len, query, query_len, chapter, node, hits_cons(chapter, node, start_units, node, end_units, snippet, snippet_len, found), hit_count + 1) end
   else _find_all(text, text_size, text_len, at + 1, query, query_len, chapter, node, found, hit_count)
+
+(* The tail of a block's text: the last bytes of the text so far, up to one
+   fewer than the query's, each with the content node it is in and the
+   UTF-16 offset of its character there. The arrays hold TAIL_CAPACITY. *)
+#define TAIL_CAPACITY 200
+
+datavtype tail_state =
+  | TailNone of ()
+  | {bytes_location,nodes_location,units_location:agz}
+    Tail of ($A.arr(byte, bytes_location, TAIL_CAPACITY), $A.arr(int, nodes_location, TAIL_CAPACITY), $A.arr(int, units_location, TAIL_CAPACITY), [tail_len:nat | tail_len <= TAIL_CAPACITY] int tail_len)
+
+val _tail = ref<tail_state>(TailNone())
+
+fn _tail_free (state: tail_state): void =
+  case+ state of
+  | ~TailNone() => ()
+  | ~Tail(bytes, nodes, units, _) => let
+      val () = $A.free<byte>(bytes)
+      val () = $A.free<int>(nodes)
+    in $A.free<int>(units) end
+
+fn _tail_take (): tail_state = let
+  var state: tail_state = TailNone()
+  val () = ref_exch_elt<tail_state>(_tail, state)
+in state end
+
+fn _tail_put (new_state: tail_state): void = let
+  var state: tail_state = new_state
+  val () = ref_exch_elt<tail_state>(_tail, state)
+in _tail_free(state) end
+
+(* A block ends: the tail is empty *)
+fn _tail_reset (): void =
+  case+ _tail_take() of
+  | ~TailNone() => ()
+  | ~Tail(bytes, nodes, units, _) => _tail_put(Tail(bytes, nodes, units, 0))
+
+(* A chapter's search begins: an empty tail *)
+fn _tail_begin (): void =
+  _tail_put(Tail($A.alloc<byte>(TAIL_CAPACITY), $A.alloc<int>(TAIL_CAPACITY), $A.alloc<int>(TAIL_CAPACITY), 0))
+
+(* A chapter's search is done *)
+fn _tail_end (): void = _tail_put(TailNone())
+
+(* The byte at p of tail[0, tail_len) followed by text[0, text_len) *)
+fn _joined_byte {bytes_location,text_location:agz}{text_size:pos}{tail_len:nat | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}{p:nat | p < tail_len + text_len}
+  (tail: !$A.arr(byte, bytes_location, TAIL_CAPACITY), tail_len: int tail_len, text: !$A.arr(byte, text_location, text_size), text_len: int text_len, p: int p): int =
+  if p < tail_len then byte2int0($A.get<byte>(tail, p)) else byte2int0($A.get<byte>(text, p - tail_len))
+
+(* Whether the tail followed by the text has the query at start *)
+fun _match_joined {bytes_location,text_location,query_location:agz}{text_size,query_size:pos}{tail_len:nat | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}{query_len:nat | query_len <= query_size}{start:nat | start + query_len <= tail_len + text_len}{i:nat | i <= query_len} .<query_len - i>.
+  (tail: !$A.arr(byte, bytes_location, TAIL_CAPACITY), tail_len: int tail_len, text: !$A.arr(byte, text_location, text_size), text_len: int text_len,
+   query: !$A.arr(byte, query_location, query_size), query_len: int query_len, start: int start, i: int i): bool =
+  if i >= query_len then true
+  else if _lower(_joined_byte(tail, tail_len, text, text_len, start + i)) <> byte2int0($A.get<byte>(query, i)) then false
+  else _match_joined(tail, tail_len, text, text_len, query, query_len, start, i + 1)
+
+(* source[0, len) into target from at, from i on *)
+fun _bytes_copy {source_location,target_location:agz}{source_size,target_size:pos}{len:nat | len <= source_size}{at:nat | at + len <= target_size}{i:nat | i <= len} .<len - i>.
+  (source: !$A.arr(byte, source_location, source_size), target: !$A.arr(byte, target_location, target_size), at: int at, len: int len, i: int i): void =
+  if i >= len then ()
+  else let val () = $A.set<byte>(target, at + i, $A.get<byte>(source, i)) in _bytes_copy(source, target, at, len, i + 1) end
+
+(* tail[0, tail_len) then text[0, text_len), as one text *)
+fn _joined_make {bytes_location,text_location:agz}{text_size:pos | text_size < 65536}{tail_len:pos | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}
+  (tail: !$A.arr(byte, bytes_location, TAIL_CAPACITY), tail_len: int tail_len, text: !$A.arr(byte, text_location, text_size), text_len: int text_len)
+  : [joined_location:agz] $A.arr(byte, joined_location, tail_len + text_len) = let
+  val joined = $A.alloc<byte>(tail_len + text_len)
+  val () = _bytes_copy(tail, joined, 0, tail_len, 0)
+  val () = _bytes_copy(text, joined, tail_len, text_len, 0)
+in joined end
+
+(* Where the hits that start in a tail of tail_len bytes begin: the first
+   start from which a query of query_len bytes reaches past the tail *)
+fn _cross_start {tail_len:nat}{query_len:pos} (tail_len: int tail_len, query_len: int query_len): [start:nat | start <= tail_len; start + query_len > tail_len] int start =
+  if tail_len >= query_len then tail_len - query_len + 1 else 0
+
+(* The hit of the query that starts in tail[start, tail_len) (the first one
+   that does) and ends in text[0, text_len), the content node given; the
+   hits so far with it, and where in the text the search of the text goes on
+   (the end of that hit, else 0). A query that starts at start or later
+   ends in the text. *)
+fun _cross_find {bytes_location,nodes_location,units_location,text_location,query_location:agz}{text_size,query_size:pos | text_size < 65536}{tail_len:nat | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}{query_len:pos | query_len <= query_size}{start:nat | start <= tail_len; start + query_len > tail_len}{hit_count:nat | hit_count <= HIT_MAX} .<tail_len - start>.
+  (tail: !$A.arr(byte, bytes_location, TAIL_CAPACITY), nodes: !$A.arr(int, nodes_location, TAIL_CAPACITY), units: !$A.arr(int, units_location, TAIL_CAPACITY), tail_len: int tail_len,
+   text: !$A.arr(byte, text_location, text_size), text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+   chapter: Int, node: Int, start: int start, found: hits(hit_count), hit_count: int hit_count)
+  : [new_count:nat | new_count <= HIT_MAX][resume:nat | resume <= text_len] @(hits(new_count), int new_count, int resume) =
+  if hit_count >= HIT_MAX then @(found, hit_count, 0)
+  else if start >= tail_len then @(found, hit_count, 0)
+  else if start + query_len > tail_len + text_len then @(found, hit_count, 0)
+  else if _match_joined(tail, tail_len, text, text_len, query, query_len, start, 0) then let
+    val joined = _joined_make(tail, tail_len, text, text_len)
+    val @(snippet, snippet_len) = _snippet(joined, tail_len + text_len, tail_len + text_len, start, query_len)
+    val () = $A.free<byte>(joined)
+    val end_in_text = start + query_len - tail_len
+  in @(hits_cons(chapter, g1ofg0($A.get<int>(nodes, start)), g1ofg0($A.get<int>(units, start)), node, _arr_units(text, 0, end_in_text, 0), snippet, snippet_len, found), hit_count + 1, end_in_text) end
+  else _cross_find(tail, nodes, units, tail_len, text, text_len, query, query_len, chapter, node, start + 1, found, hit_count)
+
+(* text[from, text_len) added to the tail from at on, in the content node
+   given; offset is the UTF-16 offset of the character at text[from] *)
+fun _tail_append {bytes_location,nodes_location,units_location,text_location:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{from:nat | from <= text_len}{at:nat | at + (text_len - from) <= TAIL_CAPACITY} .<text_len - from>.
+  (bytes: !$A.arr(byte, bytes_location, TAIL_CAPACITY), nodes: !$A.arr(int, nodes_location, TAIL_CAPACITY), units: !$A.arr(int, units_location, TAIL_CAPACITY),
+   text: !$A.arr(byte, text_location, text_size), text_len: int text_len, from: int from, at: int at, node: int, offset: int): void =
+  if from >= text_len then ()
+  else let
+    val code = byte2int0($A.get<byte>(text, from))
+    val () = $A.set<byte>(bytes, at, $A.get<byte>(text, from))
+    val () = $A.set<int>(nodes, at, node)
+    val () = $A.set<int>(units, at, offset)
+    val more = (if code >= 240 then 2 else if $AR.band_int_int(code, 192) = 128 then 0 else 1): Nat
+  in _tail_append(bytes, nodes, units, text, text_len, from + 1, at + 1, node, offset + more) end
+
+(* The last keep entries of tail[0, tail_len), moved to its start *)
+fun _tail_shift {bytes_location,nodes_location,units_location:agz}{tail_len:nat | tail_len <= TAIL_CAPACITY}{keep:nat | keep <= tail_len}{i:nat | i <= keep} .<keep - i>.
+  (bytes: !$A.arr(byte, bytes_location, TAIL_CAPACITY), nodes: !$A.arr(int, nodes_location, TAIL_CAPACITY), units: !$A.arr(int, units_location, TAIL_CAPACITY),
+   tail_len: int tail_len, keep: int keep, i: int i): void =
+  if i >= keep then ()
+  else let
+    val source = tail_len - keep + i
+    val () = $A.set<byte>(bytes, i, $A.get<byte>(bytes, source))
+    val () = $A.set<int>(nodes, i, $A.get<int>(nodes, source))
+    val () = $A.set<int>(units, i, $A.get<int>(units, source))
+  in _tail_shift(bytes, nodes, units, tail_len, keep, i + 1) end
+
+(* How many bytes the tail keeps: one fewer than the query's, 199 at most *)
+fn _tail_cap {query_len:pos} (query_len: int query_len): [cap:nat | cap <= 199] int cap =
+  if query_len > 200 then 199 else query_len - 1
+
+(* Where in a text of text_len bytes the part the tail keeps starts *)
+fn _tail_from {text_len,cap:nat} (text_len: int text_len, cap: int cap): [from:nat | from <= text_len; text_len - from <= cap] int from =
+  if text_len > cap then text_len - cap else 0
+
+(* The tail after text[0, text_len), the last cap bytes of the old tail and
+   text[from, text_len) *)
+fn _tail_push_from {bytes_location,nodes_location,units_location,text_location:agz}{text_size:pos}{tail_len:nat | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}{cap:nat | cap <= 199}{from:nat | from <= text_len; text_len - from <= cap}
+  (bytes: !$A.arr(byte, bytes_location, TAIL_CAPACITY), nodes: !$A.arr(int, nodes_location, TAIL_CAPACITY), units: !$A.arr(int, units_location, TAIL_CAPACITY), tail_len: int tail_len,
+   text: !$A.arr(byte, text_location, text_size), text_len: int text_len, cap: int cap, from: int from, node: int): [new_len:nat | new_len <= TAIL_CAPACITY] int new_len = let
+  val keep = (if tail_len + (text_len - from) > cap then cap - (text_len - from) else tail_len): [keep:nat | keep <= tail_len; keep + (text_len - from) <= cap] int keep
+  val () = _tail_shift(bytes, nodes, units, tail_len, keep, 0)
+  val () = _tail_append(bytes, nodes, units, text, text_len, from, keep, node, _arr_units(text, 0, from, 0))
+in keep + (text_len - from) end
+
+(* The tail after text[0, text_len) of a content node: the last bytes (one
+   fewer than the query's, 199 at most) of the tail followed by the text.
+   Its length *)
+fn _tail_push {bytes_location,nodes_location,units_location,text_location:agz}{text_size:pos}{tail_len:nat | tail_len <= TAIL_CAPACITY}{text_len:nat | text_len <= text_size}{query_len:pos}
+  (bytes: !$A.arr(byte, bytes_location, TAIL_CAPACITY), nodes: !$A.arr(int, nodes_location, TAIL_CAPACITY), units: !$A.arr(int, units_location, TAIL_CAPACITY), tail_len: int tail_len,
+   text: !$A.arr(byte, text_location, text_size), text_len: int text_len, query_len: int query_len, node: int): [new_len:nat | new_len <= TAIL_CAPACITY] int new_len = let
+  val cap = _tail_cap(query_len)
+  val from = _tail_from(text_len, cap)
+in _tail_push_from(bytes, nodes, units, tail_len, text, text_len, cap, from, node) end
+
+(* The hits in text[0, text_len), a content node's: those that start in the
+   block's text before it, then those inside it; the block's tail goes on
+   with it *)
+fn _find_in_block {text_location,query_location:agz}{text_size:pos | text_size < 65536}{text_len:nat | text_len <= text_size}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX}
+  (text: !$A.arr(byte, text_location, text_size), text_size: int text_size, text_len: int text_len, query: !$A.arr(byte, query_location, query_size), query_len: int query_len,
+   chapter: Int, node: Int, found: hits(hit_count), hit_count: int hit_count): [new_count:nat | new_count <= HIT_MAX] @(hits(new_count), int new_count) =
+  case+ _tail_take() of
+  | ~TailNone() => let
+      val () = _tail_put(TailNone())
+    in _find_all(text, text_size, text_len, 0, query, query_len, chapter, node, found, hit_count) end
+  | ~Tail(bytes, nodes, units, tail_len) => let
+      val start = _cross_start(tail_len, query_len)
+      val @(found_cross, count_cross, resume) = _cross_find(bytes, nodes, units, tail_len, text, text_len, query, query_len, chapter, node, start, found, hit_count)
+      val @(found_after, new_count) = _find_all(text, text_size, text_len, resume, query, query_len, chapter, node, found_cross, count_cross)
+      val new_len = _tail_push(bytes, nodes, units, tail_len, text, text_len, query_len, node)
+      val () = _tail_put(Tail(bytes, nodes, units, new_len))
+    in @(found_after, new_count) end
 
 (* The hits in text data[offset, offset + piece_len), a content node's, decoded *)
 fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_len:nat | offset + piece_len <= data_size; piece_len < 65536}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX}
@@ -4481,7 +4672,7 @@ fn _scan_piece {data_location,query_location:agz}{data_size:pos}{offset,piece_le
   else let
     val text = $A.alloc<byte>(piece_len)
     val text_len = decode_text(data, offset, piece_len, text)
-    val result = _find_all(text, piece_len, text_len, 0, query, query_len, chapter, node, found, hit_count)
+    val result = _find_in_block(text, piece_len, text_len, query, query_len, chapter, node, found, hit_count)
     val () = $A.free<byte>(text)
   in result end
 
@@ -4510,6 +4701,58 @@ fun _text_count {data_location:agz}{data_size:pos}{offset,text_len:nat | offset 
 (* The numbers _skip_spans takes for text_len bytes *)
 fun _skip_count {text_len:nat} .<text_len>. (text_len: int text_len, node: Nat): Nat =
   if text_len < 65536 then node + 1 else _skip_count(text_len - 65533, node + 1)
+
+(* Whether an element is shown inside a line, as _tag_of makes it: the
+   text on both sides of it is one text to search. A ruby's annotations
+   count as inline too: they are neither searched nor a break. Any other
+   element (a div, a paragraph, a list item) is a block. *)
+fn _inline_element {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): bool = let
+  fn is {pattern_len:pos} (data: !$A.borrow(byte, l, n), pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
+    xml_name_eq(data, name_offset, name_len, pattern, pattern_len)
+  var span = @[char][4]('s', 'p', 'a', 'n')
+  var em = @[char][2]('e', 'm')
+  var strong = @[char][6]('s', 't', 'r', 'o', 'n', 'g')
+  var code = @[char][4]('c', 'o', 'd', 'e')
+  var small = @[char][5]('s', 'm', 'a', 'l', 'l')
+  var mark = @[char][4]('m', 'a', 'r', 'k')
+  var del = @[char][3]('d', 'e', 'l')
+  var ins = @[char][3]('i', 'n', 's')
+  var sub = @[char][3]('s', 'u', 'b')
+  var sup = @[char][3]('s', 'u', 'p')
+  var a_ = @[char][1]('a')
+  var b_ = @[char][1]('b')
+  var i_ = @[char][1]('i')
+  var u_ = @[char][1]('u')
+  var s_ = @[char][1]('s')
+  var q_ = @[char][1]('q')
+  var cite = @[char][4]('c', 'i', 't', 'e')
+  var abbr = @[char][4]('a', 'b', 'b', 'r')
+  var kbd = @[char][3]('k', 'b', 'd')
+  var samp = @[char][4]('s', 'a', 'm', 'p')
+  var var_ = @[char][3]('v', 'a', 'r')
+  var big = @[char][3]('b', 'i', 'g')
+  var ruby = @[char][4]('r', 'u', 'b', 'y')
+  var ruby_base = @[char][2]('r', 'b')
+  var ruby_text = @[char][2]('r', 't')
+  var ruby_text_container = @[char][3]('r', 't', 'c')
+  var ruby_parenthesis = @[char][2]('r', 'p')
+in
+  if is(data, span, 4) then true else if is(data, em, 2) then true
+  else if is(data, strong, 6) then true else if is(data, code, 4) then true
+  else if is(data, small, 5) then true else if is(data, mark, 4) then true
+  else if is(data, del, 3) then true else if is(data, ins, 3) then true
+  else if is(data, sub, 3) then true else if is(data, sup, 3) then true
+  else if is(data, a_, 1) then true else if is(data, b_, 1) then true
+  else if is(data, i_, 1) then true else if is(data, u_, 1) then true
+  else if is(data, s_, 1) then true else if is(data, q_, 1) then true
+  else if is(data, cite, 4) then true else if is(data, abbr, 4) then true
+  else if is(data, kbd, 3) then true else if is(data, samp, 4) then true
+  else if is(data, var_, 3) then true else if is(data, big, 3) then true
+  else if is(data, ruby, 4) then true else if is(data, ruby_base, 2) then true
+  else if is(data, ruby_text, 2) then true else if is(data, ruby_text_container, 3) then true
+  else is(data, ruby_parenthesis, 2)
+end
 
 fun _scan_nodes {data_location,query_location:agz}{data_size:pos}{tree_size:nat}{query_size:pos}{query_len:pos | query_len <= query_size}{hit_count:nat | hit_count <= HIT_MAX} .<tree_size, 1>.
   (data: !$A.borrow(byte, data_location, data_size), nodes: !$X.xml_node_list(data_size, tree_size), top: bool, searched: bool,
@@ -4563,11 +4806,17 @@ and _scan_node {data_location,query_location:agz}{data_size:pos}{tree_size:pos}{
       _scan_nodes(data, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
     else if xml_name_eq(data, name_offset, name_len, _tag_body, 4) then
       _scan_nodes(data, children, top, searched, query, query_len, chapter, content_node, found, hit_count)
-    else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then @(content_node + 1, found, hit_count)
-    else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then @(content_node + 1, found, hit_count)
-    else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then @(content_node + 1, found, hit_count)
-    else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then @(content_node + 1, found, hit_count)
-    else _scan_nodes(data, children, false, (if annotation then false else searched), query, query_len, chapter, content_node + 1, found, hit_count)
+    else if xml_name_eq(data, name_offset, name_len, _tag_br, 2) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
+    else if xml_name_eq(data, name_offset, name_len, _tag_hr, 2) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
+    else if xml_name_eq(data, name_offset, name_len, _tag_img, 3) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
+    else if xml_name_eq(data, name_offset, name_len, _tag_image, 5) then let val () = _tail_reset() in @(content_node + 1, found, hit_count) end
+    else let
+      (* a block ends the text before it and the text after it *)
+      val inline = _inline_element(data, name_offset, name_len)
+      val () = (if inline then () else _tail_reset())
+      val @(next_node, found_after, new_count) = _scan_nodes(data, children, false, (if annotation then false else searched), query, query_len, chapter, content_node + 1, found, hit_count)
+      val () = (if inline then () else _tail_reset())
+    in @(next_node, found_after, new_count) end
   end
 
 (* The results list, or its state *)
@@ -4604,7 +4853,7 @@ in ui_text_n_buf(text_id, text_id_len, text, snippet_len) end
 fun _hit_rows {count:nat}{hit:nat} .<count>. (found: !hits(count), hit: int hit, last: Int): void =
   case+ found of
   | hits_nil() => ()
-  | @hits_cons(chapter, _, _, snippet, snippet_len, rest) => let
+  | @hits_cons(chapter, _, _, _, _, snippet, snippet_len, rest) => let
       val () = (if chapter >= 0 then let
           val () = (if chapter <> last then _hit_heading(chapter) else ())
         in _hit_row(hit, snippet, snippet_len) end else ())
@@ -4638,7 +4887,9 @@ fn _search_add {l:agz}{n:pos}{tree_size:nat}
   case+ _search_take() of
   | ~SearchNone() => ()
   | ~SearchCell(found, hit_count, query, query_len) => let
+      val () = _tail_begin()
       val @(_, found_after, count_after) = _scan_nodes(data, nodes, true, true, query, query_len, chapter, 0, found, hit_count)
+      val () = _tail_end()
     in _search_put(SearchCell(found_after, count_after, query, query_len)) end
 
 fn _search_add_if {l:agz}{n:pos}{tree_size:nat}
@@ -5393,12 +5644,12 @@ in
   end
 end
 
-fun _hit_at {count:nat} .<count>. (found: !hits(count), i: int): @(Int, Int, Int) =
+fun _hit_at {count:nat} .<count>. (found: !hits(count), i: int): @(Int, Int, Int, Int, Int) =
   case+ found of
-  | hits_nil() => @(~1, 0, 0)
-  | @hits_cons(chapter, node, offset, _, _, rest) =>
+  | hits_nil() => @(~1, 0, 0, 0, 0)
+  | @hits_cons(chapter, node, offset, end_node, end_offset, _, _, rest) =>
     if i = 0 then let
-      val hit = @(chapter, node, offset)
+      val hit = @(chapter, node, offset, end_node, end_offset)
       prval () = fold@(found)
     in hit end
     else let
@@ -5406,17 +5657,16 @@ fun _hit_at {count:nat} .<count>. (found: !hits(count), i: int): @(Int, Int, Int
       prval () = fold@(found)
     in hit end
 
-(* A hit, its count and the query's length; a chapter of -1 when there
-   is none *)
-fn _hit (hit: Int): @(Int, Int, Int, Int, Int) =
+(* A hit (where it starts and where it ends, each a content node and an
+   offset in the units the page counts) and the hit count; a chapter of -1
+   when there is none *)
+fn _hit (hit: Int): @(Int, Int, Int, Int, Int, Int) =
   case+ _search_take() of
-  | ~SearchNone() => @(~1, 0, 0, 0, 0)
+  | ~SearchNone() => @(~1, 0, 0, 0, 0, 0)
   | ~SearchCell(found, hit_count, query, query_len) => let
-      val @(chapter, node, offset) = _hit_at(found, hit)
-      (* the match's length in the units the page counts *)
-      val query_units = _arr_units(query, 0, query_len, 0)
+      val @(chapter, node, offset, end_node, end_offset) = _hit_at(found, hit)
       val () = _search_put(SearchCell(found, hit_count, query, query_len))
-    in @(chapter, node, offset, hit_count, query_units) end
+    in @(chapter, node, offset, end_node, end_offset, hit_count) end
 
 (* "3 of 12": the hit's number of the hit count, under the results *)
 fn _hit_count (hit: Int, hit_count: Int): void = let
@@ -5430,7 +5680,7 @@ in ui_text_buf("search-count", buf, offset) end
    the reader was *)
 #pub fun reader_search_go (hit: Int): void
 implement reader_search_go (hit) = let
-  val @(chapter, node, offset, hit_count, query_len) = _hit(hit)
+  val @(chapter, node, offset, end_node, end_offset, hit_count) = _hit(hit)
 in
   if chapter < 0 then ()
   else let
@@ -5444,15 +5694,15 @@ in
     (* the hit is marked only once its chapter is shown; a failure is
        told by _jump_checked *)
     _jump_checked($P.and_then<load_outcome><load_outcome>(_goto(chapter, 0, node), llam(result) => let
-      val () = (if load_shown(result) then (if node >= 0 then let
+      val () = (if load_shown(result) then (if node >= 0 then (if end_node >= 0 then let
           val () = $BDOM.clear_marks(2)
           val @(start_id, start_id_len) = nid_pad3("c", node)
-          val @(end_id, end_id_len) = nid_pad3("c", node)
+          val @(end_id, end_id_len) = nid_pad3("c", end_node)
           val @(start_frozen, start_bytes) = $A.freeze<byte>(start_id)
           val @(end_frozen, end_bytes) = $A.freeze<byte>(end_id)
-          val () = $BDOM.mark_range(2, start_bytes, start_id_len, offset, end_bytes, end_id_len, offset + query_len)
+          val () = $BDOM.mark_range(2, start_bytes, start_id_len, offset, end_bytes, end_id_len, end_offset)
           val () = release_bytes(end_frozen, end_bytes)
-        in release_bytes(start_frozen, start_bytes) end else ()) else ())
+        in release_bytes(start_frozen, start_bytes) end else ()) else ()) else ())
     in $P.ret<load_outcome>(result) end))
   end
 end
@@ -5460,7 +5710,7 @@ end
 (* The next (direction = 1) or previous (direction = -1) hit *)
 #pub fun reader_search_step (direction: Int): void
 implement reader_search_step (direction) = let
-  val @(_, _, _, hit_count, _) = _hit(0)
+  val @(_, _, _, _, _, hit_count) = _hit(0)
 in
   if hit_count <= 0 then ()
   else let
