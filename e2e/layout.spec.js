@@ -8,11 +8,11 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
+  readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { checkPageMargins } from './page-margins.js';
-import { cutOff, statesUnseen, insetsShort, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -45,6 +45,7 @@ async function fits(page, screen) {
   expect(await onOffPairs(page), `two-state settings on ${screen} that are not switches`).toEqual([]);
   expect(await labelsShown(page), `fields without a visible label on ${screen}`).toEqual([]);
   expect(await labelInName(page), `buttons whose name is not their words on ${screen}`).toEqual([]);
+  expect(await strayGrounds(page), `text on a ground other than the one behind it on ${screen}`).toEqual([]);
   expect(await targetsShort(page), `touch targets under 48 px on ${screen}`).toEqual([]);
   expect(await insetsShort(page), `controls nearer their container's edge than the spacing scale's least inset on ${screen}`).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${screen} is wider than the window`).toBe(true);
@@ -251,10 +252,14 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await menuItem(page, 'Move to Trash').click();
   // the offer stays until it is dismissed (quire#364), over the menu on a short screen
   await page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) }).getByRole('button', { name: 'Dismiss' }).click();
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
+  await openShelf(page, 'Trash');
+  await fits(page, 'the Trash with its heading and Empty');
+  await page.getByRole('button', { name: 'Empty Trash' }).click();
+  await expect(emptyTrashDialog(page)).toBeVisible();
   await fits(page, 'the Empty the Trash dialog');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await expect(shelfTitle(page)).toBeHidden();
 });
 
 test('nothing is cut off in the reader, its bars and its panels', async ({ page }) => {

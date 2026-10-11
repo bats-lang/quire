@@ -77,9 +77,10 @@ fn _library (): void = let
   val () = ui_icon_btn("shelf-header", "shelf-back", "ibtn", IcBack, "Back")
   val () = ui_el("shelf-header", "shelf-title", TH1, "ttl")
   val () = ui_text("shelf-title", "Hidden")
-  (* the same menu as the library's: Empty Trash is asked from the Trash's
-     own screen (as Drive's Trash has its Empty trash), and the other
-     shelves are one entry away *)
+  (* the same menu as the library's: the other shelves are one entry
+     away. Empty Trash is on the Trash's own screen, beside its heading,
+     and only while it holds something (as Drive's Trash has its Empty
+     trash, quire#385) *)
   val () = ui_icon_btn("shelf-header", "shelf-more", "ibtn", IcMore, "More options")
   val () = _hide("shelf-header")
   (* one row: the name, Import, the sort and view menu, the overflow
@@ -119,6 +120,13 @@ fn _library (): void = let
   val () = ui_text_btn("filter-books", "filter-unread", "sbtn", "Unread")
   val () = ui_text_btn("filter-books", "filter-reading", "sbtn", "Reading")
   val () = ui_text_btn("filter-books", "filter-finished", "sbtn", "Finished")
+  (* the Trash's heading: what it holds and how much room, that it is
+     kept until emptied, and Empty beside it (quire#385) *)
+  val () = ui_el("library-view", "trash-panel", TDiv, "tpanel")
+  val () = ui_el("trash-panel", "trash-head", TDiv, "thead")
+  val () = ui_el("trash-head", "trash-summary", TDiv, "tsum")
+  val () = ui_el("trash-head", "trash-head-actions", TDiv, "tacts")
+  val () = _hide("trash-head")
   (* the reader's collections: shown once there is one *)
   val () = ui_el("library-view", "collection-row", TDiv, "crow")
   val () = ui_el("collection-row", "collection-chips", TDiv, "seg")
@@ -127,7 +135,7 @@ fn _library (): void = let
   val () = ui_text_btn("collection-row", "collection-delete", "btn", "Delete collection")
   val () = _hide("collection-row")
   (* the dictionaries in the Trash, under its books (dictionary.bats) *)
-  val () = ui_el("library-view", "trash-dictionaries", TDiv, "sfields")
+  val () = ui_el("trash-panel", "trash-dictionaries", TDiv, "sfields")
   val () = ui_el("trash-dictionaries", "trash-dictionaries-title", TDiv, "a11yg")
   val () = ui_text("trash-dictionaries-title", "Dictionaries in the Trash")
   val () = ui_add("trash-dictionaries", "trash-dictionaries-list", TDiv)
@@ -162,11 +170,19 @@ fn _context_menu (): void = let
   val () = ui_el("bats-root", "card-menu", TDiv, "ovl")
   val () = ui_el("card-menu", "card-menu-box", TDiv, "menu")
   val () = ui_named("card-menu-box", NMenu, "Book menu")
+  (* a book in the Trash is restored from its first item (quire#385) *)
+  val () = ui_menuitem("card-menu-box", "card-menu-restore", "Restore")
+  (* grouped, as Material 3's menus group by a divider: reading and what
+     is known of the book; filing it; and, set apart, taking it out of
+     view (quire#386) *)
+  val () = ui_menuitem("card-menu-box", "card-menu-read", "Read")
   val () = ui_menuitem("card-menu-box", "card-menu-info", "Book info")
   val () = ui_menuitem("card-menu-box", "card-menu-collections", "Collections")
+  val () = ui_el("card-menu-box", "card-menu-divider", TDiv, "msep")
+  val () = ui_role("card-menu-divider", RSeparator)
   val () = ui_menuitem("card-menu-box", "card-menu-hide", "Hide")
   val () = ui_menuitem("card-menu-box", "card-menu-archive", "Archive")
-  val () = ui_menuitem("card-menu-box", "card-menu-trash", "Move to Trash")
+  val () = ui_removal_item("card-menu-box", "card-menu-trash", RemoveToTrash())
 in _hide("card-menu") end
 
 (* A book's collections: a toggle for each, and a new one *)
@@ -314,7 +330,6 @@ fn _library_menu (): void = let
      offer a click asks for (platform.bats) *)
   val () = ui_menuitem("library-menu-box", "menu-install", "Install Quire")
   val () = _hide("menu-install")
-  val () = ui_harm_item("library-menu-box", HEmptyTrash())
   val () = ui_menuitem("library-menu-box", "menu-close", "Close")
 in _hide("library-menu") end
 
@@ -525,7 +540,9 @@ fn _info (): void = let
   val () = ui_text_btn("book-info-inner", "book-info-back", "btn", "\xE2\x86\x90 Library")
   val () = ui_img("book-info-inner", "book-info-cover", "icov")
   val () = ui_el("book-info-inner", "book-info-title", TDiv, "it")
-  val () = ui_el("book-info-inner", "book-info-author", TDiv, "ba")
+  (* the author on the page's own ground, not .ba's, which is the card's *)
+  val () = ui_el("book-info-inner", "book-info-author", TDiv, "info-author")
+  val () = ui_text_btn("book-info-inner", "book-info-read", "btn btn-p", "Read")
   val () = _row("info-series-row", "info-series-label", "Series")
   val () = ui_add("info-series-row", "info-series", TB)
   val () = _row("info-progress-row", "info-progress-label", "Progress")
@@ -549,7 +566,7 @@ fn _info (): void = let
   val () = ui_el("book-info-inner", "book-info-buttons", TDiv, "mbtns")
   val () = ui_text_btn("book-info-buttons", "book-info-hide", "btn", "Hide")
   val () = ui_text_btn("book-info-buttons", "book-info-archive", "btn", "Archive")
-  val () = ui_text_btn("book-info-buttons", "book-info-trash", "btn", "Move to Trash")
+  val () = ui_removal_button("book-info-buttons", "book-info-trash", RemoveToTrash())
 in _hide("book-info") end
 
 (* The reader: its bars, the content, the scrubber, the selection
