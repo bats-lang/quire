@@ -97,13 +97,13 @@ fn _harm_words (the_harm: harm_asked): @(lit, lit, lit) =
    Danger(the_harm) exactly when asked is Harmful(the_harm) *)
 fn _buttons (asked: !ask): @(lit, lit, tone) =
   case+ asked of
-  | Harmless(QInform()) => @("OK", "-", Plain)
+  | Harmless(QInform()) => @(dismiss_label(DismissNotice()), "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
   | Harmless(QNewerFile()) => @("Add as new book", "Replace", Plain)
-  | Harmless(QNote()) => @("Cancel", "Save", Plain)
-  | Harmless(QNewCollection()) => @("Cancel", "Create", Plain)
-  | Harmless(QRenameCollection()) => @("Cancel", "Rename", Plain)
-  | Harmful(the_harm) => let val @(_, _, verb) = _harm_words(the_harm) in @("Cancel", verb, Danger(the_harm)) end
+  | Harmless(QNote()) => @(dismiss_label(DismissQuestion()), "Save", Plain)
+  | Harmless(QNewCollection()) => @(dismiss_label(DismissQuestion()), "Create", Plain)
+  | Harmless(QRenameCollection()) => @(dismiss_label(DismissQuestion()), "Rename", Plain)
+  | Harmful(the_harm) => let val @(_, _, verb) = _harm_words(the_harm) in @(dismiss_label(DismissQuestion()), verb, Danger(the_harm)) end
 
 fn _show {title_len:pos | title_len < 256} (asked: ask, title: string title_len): $P.promise(reply, $P.Pending) = let
   val @(first_label, second_label, second_tone) = _buttons(asked)

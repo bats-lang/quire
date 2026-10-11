@@ -227,7 +227,7 @@ test('a backup that could not read a book\'s notes is not made', async ({ page }
   await settingsButton(page, 'Export backup').click();
   const said = dialog(page, 'Backup');
   await expect(said).toContainText('The backup could not be made: a book\'s notes could not be read. Try again.');
-  await said.getByRole('button', { name: 'OK' }).click();
+  await said.getByRole('button', { name: 'Done' }).click();
   expect(downloaded).toBe(false);
 });
 

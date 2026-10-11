@@ -17,7 +17,7 @@ staload CT = "css/src/contrast.sats"
    whether a rule or an @media block is open
    ============================================================ *)
 
-#pub stadef BUDGET = 60000
+#pub stadef BUDGET = 64000
 
 (* sheet(left, media, open): left bytes left; whether an @media block is
    open, and whether a rule is *)
@@ -416,14 +416,17 @@ implement prose_margin (sheet, property, block, inline) = let
 in sheet end
 
 (* Room a padding keeps for something drawn in it: a chevron, a page
-   number, an outline's indent, a menu's check mark *)
+   number, an outline's indent, a menu's check mark or a row's chevron *)
 #pub datatype room =
-  | RoomChevron | RoomPageNumber | RoomOutlineFirst | RoomOutlineSecond | RoomOutlineThird | RoomMenuMark
+  | RoomChevron | RoomPageNumber | RoomOutlineFirst | RoomOutlineSecond | RoomOutlineThird | RoomIndicator
+  (* a screen's last card scrolls clear of the Undo toast *)
+  | RoomToastClear
 
-fn _room_length (room: room): [text_len:pos | text_len <= 4] string text_len =
+fn _room_length (room: room): [text_len:pos | text_len <= 5] string text_len =
   case+ room of
   | RoomChevron() => "32px" | RoomPageNumber() => "72px" | RoomOutlineFirst() => "30px"
-  | RoomOutlineSecond() => "46px" | RoomOutlineThird() => "62px" | RoomMenuMark() => "40px"
+  | RoomOutlineSecond() => "46px" | RoomOutlineThird() => "62px" | RoomIndicator() => "40px"
+  | RoomToastClear() => "176px"
 
 (* prop:<room>; *)
 #pub fn reserve {left:nat | left >= 22}{media:bool}
@@ -434,6 +437,19 @@ implement reserve (sheet, property, room) = let
   val () = raw(sheet, ":")
   val () = raw(sheet, _room_length(room))
   val () = raw(sheet, ";")
+in sheet end
+
+(* prop:max(<room>,var(--safe-<edge>)); the room, or the inset where it is larger *)
+#pub fn reserve_safe {left:nat | left >= 52}{media:bool}
+  (sheet: sheet(left, media, true), property: spacing_prop, room: room, edge: safe_edge): [after:nat | after >= left - 52] sheet(after, media, true)
+
+implement reserve_safe (sheet, property, room, edge) = let
+  val () = raw(sheet, _spacing_name(property))
+  val () = raw(sheet, ":max(")
+  val () = raw(sheet, _room_length(room))
+  val () = raw(sheet, ",var(--safe-")
+  val () = raw(sheet, _edge_name(edge))
+  val () = raw(sheet, "));")
 in sheet end
 
 (* The edges the reader's page is kept in from, by its own variables *)

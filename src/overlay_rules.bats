@@ -18,7 +18,7 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 7937} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7937] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 7929} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7929] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
@@ -178,7 +178,7 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi[role=menuitemradio]")
   val sheet = lay(sheet, Position(), "relative")
-  val sheet = reserve(sheet, PaddingLeft(), RoomMenuMark())
+  val sheet = reserve(sheet, PaddingLeft(), RoomIndicator())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".mi[aria-checked=true]::before")
   val () = raw(sheet, "content:\"\";position:absolute;left:18px;top:50%;width:6px;height:12px;margin-top:-9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg);")
@@ -226,7 +226,7 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2239} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2239] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2431} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2431] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -283,18 +283,32 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2239} (sheet: s
   val sheet = lay(sheet, Inset(), "0")
   val sheet = lay(sheet, ZIndex(), "15")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
-  val sheet = scrolling(sheet)
+  (* the screen's ground and its padding (the system bars' room) stay
+     put; what scrolls is its content, inside that padding, so it is
+     cut at the bars' edge and never drawn under one (#380: a screen
+     taller than the window had its last rows under the navigation bar) *)
+  val sheet = clips(sheet)
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = spaced_safe(sheet, PaddingTop(), SpaceMedium(), SafeTop())
   val sheet = spaced_safe(sheet, PaddingRight(), SpaceLarge(), SafeRight())
   val sheet = spaced_safe(sheet, PaddingBottom(), SpaceExtraLarge(), SafeBottom())
   val sheet = spaced_safe(sheet, PaddingLeft(), SpaceLarge(), SafeLeft())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in")
+  val sheet = scrolling(sheet)
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, MinHeight(), "0")
+  val sheet = lay(sheet, Width(), "100%")
   val sheet = lay(sheet, MaxWidth(), "600px")
   val sheet = centred(sheet)
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  (* a column that scrolls keeps each child its height, none shrinks *)
+  val sheet = rule(sheet, ".info-in>*")
+  val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.btn")
   val sheet = lay(sheet, AlignSelf(), "flex-start")

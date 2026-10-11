@@ -1308,7 +1308,7 @@ in let
   (* focus goes to Done at the screen's foot, which scrolls it flush to the
      window's edge, under the bars; the screen is shown from its top *)
   val () = ui_focus("dictionaries-done")
-in ui_scroll_to_top("dictionaries-panel") end end
+in ui_scroll_to_top("dictionaries-box") end end
 
 (* ============================================================
    The Trash's dictionaries (#396)

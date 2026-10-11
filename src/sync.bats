@@ -3466,11 +3466,10 @@ in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-passwor
    state beside it *)
 fn _row_make {row_len,button_len,state_len,hint_len:pos | row_len < 256; button_len < 256; state_len < 256; hint_len < 256}
   (row: string row_len, button: string button_len, state: string state_len, hint: string hint_len, service: sync_service): void = let
-  val () = ui_el("sync-services", row, TDiv, "srow")
-  val () = ui_text_btn(row, button, "btn rowbtn chev", service_title(service))
-  val () = ui_add(row, state, TSpan)
-  val () = ui_el(row, hint, TSpan, "sabout")
-  val () = ui_text(hint, service_summary(service))
+  (* the whole row is the button (#380); the state is a word on its
+     right, taking no tap of its own *)
+  val () = ui_nav_row("sync-services", row, button, hint, service_title(service), service_summary(service))
+  val () = ui_el(row, state, TSpan, "navstate")
 in ui_show(state, false) end
 
 (* The sync screen (#331, from Material's settings and Android's own
@@ -3533,7 +3532,7 @@ implement sync_screen_make () = let
   (* Cancel, then the service's own button (Material's dialog: the
      confirming action last, at the end) *)
   val () = ui_el("sync-step", "sync-step-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", "Cancel")
+  val () = ui_text_btn("sync-step-buttons", "sync-step-cancel", "btn", dismiss_label(DismissQuestion()))
   val () = ui_text_btn("sync-step-buttons", "sync-android", "btn btn-p", sign_in_label(ServiceGoogle()))
   val () = ui_text_btn("sync-step-buttons", "sync-google", "btn btn-p", sign_in_label(ServiceGoogle()))
   val () = ui_text_btn("sync-step-buttons", "sync-dropbox", "btn btn-p", sign_in_label(ServiceDropbox()))
@@ -3572,7 +3571,7 @@ implement sync_screen_make () = let
   val () = ui_el("sync-box", "sync-about", TDiv, "snote")
   val () = ui_text_long("sync-about", "Keeps places, shelves, collections, highlights, notes and reading time the same on your devices. Books' files are not synced, and sign-ins stay on this device.")
   val () = ui_el("sync-box", "sync-done-row", TDiv, "mbtns")
-  val () = ui_text_btn("sync-done-row", "sync-done", "btn", "Done")
+  val () = ui_text_btn("sync-done-row", "sync-done", "btn", dismiss_label(DismissScreen()))
   val () = ui_show("sync-screen", false)
   (* the offer of the place another device read: a row of the reader's
      bottom bar, over its progress, so it covers no text the bars do
@@ -3658,7 +3657,7 @@ in let
      window's edge, under the bars (#389: the rows grew taller); the
      screen is shown from its top *)
   val () = ui_focus("sync-done")
-in ui_scroll_to_top("sync-screen") end end
+in ui_scroll_to_top("sync-box") end end
 
 (* A service's own sign-in step, opened from its row over the list:
    only its part, its button and Cancel shown, its fields as kept *)
@@ -3716,7 +3715,7 @@ in let
      window's edge, under the bars (#389: the rows grew taller); the
      screen is shown from its top *)
   val () = ui_focus("sync-done")
-in ui_scroll_to_top("sync-screen") end end
+in ui_scroll_to_top("sync-box") end end
 
 (* What the step says: a field left empty *)
 fn _step_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-step-status", text)

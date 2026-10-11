@@ -63,7 +63,16 @@ async function arrange(page, mode) {
     await readingSettings(page).getByRole('group', { name: 'Pages on screen' }).getByRole('button', { name: 'Two', exact: true }).click();
   }
   await page.keyboard.press('Escape');
-  await expect(readingSettings(page)).toBeHidden();
+  // the dialog is hidden at once (#522: its data-hide flips within a few
+  // milliseconds of the key, measured), but whether Playwright finds it
+  // hidden needs the page laid out, and the columns just chosen are laid
+  // out in the next frame: a megabyte of one word on a phone takes Chrome
+  // over 15 s of one task on a loaded runner, with the answer waiting
+  // behind it. So the app's part, the hide, is asserted by its attribute
+  // (no layout needed), and the dialog gone from the screen waits as long
+  // as the layout it follows
+  await expect(page.locator('#typography-panel')).toHaveAttribute('data-hide', '1');
+  await slow(readingSettings(page)).toBeHidden();
   await expect.poll(() => indicator(page).textContent()).toMatch(mode === 'scrolled' ? /% of chapter/ : mode === 'columns' ? /pages 1–2 of/ : / page 1 of/);
   return Date.now() - started;
 }
@@ -651,6 +660,28 @@ test.describe('ten thousand short paragraphs in one chapter', { tag: '@serial' }
 });
 
 test.describe('one paragraph of a megabyte without a space', { tag: '@serial' }, () => {
+  // #522: Close does not wait for the layout of what was just chosen. The
+  // click on Two and the Escape are one script, so no frame (and so no
+  // layout of the columns) lies between them: the dialog's hide must
+  // already be made when the script ends, and the layout then follows
+  test('Close takes effect before the layout of the columns just chosen', async ({ page }) => {
+    test.setTimeout(sizedTo(page) < 0.5 ? 420000 : 300000);
+    const errors = await start(page);
+    await openTimed(page, unbrokenBook());
+    await settled(page);
+    await openReadingSettings(page, 'Page');
+    const hide = await page.evaluate(() => {
+      const two = [...document.querySelectorAll('#typography-panel [aria-label="Pages on screen"] button')].find(button => button.textContent === 'Two');
+      two.click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      return document.getElementById('typography-panel').getAttribute('data-hide');
+    });
+    expect(hide, 'the dialog is hidden when the script that chose the columns and pressed Escape ends').toBe('1');
+    await slow(readingSettings(page)).toBeHidden();
+    await slow.poll(() => indicator(page).textContent()).toMatch(/pages 1–2 of/);
+    expect(errors).toEqual([]);
+  });
+
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
       // a phone fits a third of the text a page, so a megabyte is three
