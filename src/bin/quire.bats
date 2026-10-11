@@ -2696,6 +2696,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
           val () = layer_close(LNote())
           val () = reader_note_go()
         in ui_focus("page") end
+        (* the link opens in its own tab; the question is answered *)
+        | ~$R.some(FootnoteOpen()) => layer_close(LNote())
         (* the focus goes back where it was (layer.bats) *)
         | ~$R.some(FootnoteClose()) => layer_close(LNote()))
     in 0 end)
