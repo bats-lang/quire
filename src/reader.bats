@@ -3659,7 +3659,8 @@ fn _load_image_from {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_
     val buf = $A.alloc<byte>(joined_len)
     val _ = book_read(serial, file_size, name_offset, buf, dir_len)
     val () = $S.copy_from_borrow(data, src_start, n, buf, dir_len, joined_len, path_end)
-    val path_len = path_norm(buf, joined_len)
+    val decoded_len = path_unescape(buf, joined_len, dir_len)
+    val path_len = path_norm_in(buf, joined_len, decoded_len)
   in
     if path_len <= 0 then $A.free<byte>(buf)
     else let
@@ -3801,7 +3802,8 @@ fn _kept_path {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_name_off
     val buf = $A.alloc<byte>(joined_len)
     val _ = book_read(serial, file_size, opf_name_offset, buf, prefix_len)
     val () = $S.copy_from_borrow(data, href_start, n, buf, prefix_len, joined_len, href_len)
-    val path_len = path_norm(buf, joined_len)
+    val decoded_len = path_unescape(buf, joined_len, prefix_len)
+    val path_len = path_norm_in(buf, joined_len, decoded_len)
   in
     if path_len <= 0 then let val () = $A.free<byte>(buf) in NoKeptPath() end
     else let
@@ -3861,18 +3863,10 @@ fun _spine_chapters {file_size:pos}{opf_name_offset:nat}{prefix_len:nat | opf_na
                            item - 1, found, found_total)
       | ~xspan_at(href_offset, href_len) => let
           val chapters = (if href_len <= 0 then ChapterMissing(found)
-            else if prefix_len + href_len > 1048576 then ChapterMissing(found)
             else let
-              val path_len = prefix_len + href_len
-              val path_buf = $A.alloc<byte>(path_len)
-              (* The prefix read from the file at the OPF's name, then the
-                 chapter href from the OPF *)
-              val _ = book_read(serial, file_size, opf_name_offset, path_buf, prefix_len)
-              val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size,
-                        path_buf, prefix_len, path_len, href_len)
-              val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buf)
-              val hit = book_find_entry(serial, file_size, path_bytes, path_len)
-              val () = release_bytes(path_frozen, path_bytes)
+              (* the href is a URL relative to the OPF's directory: "./", "../" and
+                 percent-escapes resolved, a path-absolute one from the container's root *)
+              val hit = book_find_relative(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, href_offset, href_len)
             in
               case+ hit of
               | ~EntryMiss() => ChapterMissing(found)
