@@ -352,7 +352,7 @@ in release_bytes(id_frozen, id_bytes) end
    so nothing can set a colour or anything else the stylesheet proves *)
 #pub datatype attr = AClass | ASelected | APressed | AValue | AControls
   | ATabindex | AValueNow | ACurrent | AGestureRegion | AHidden | ADescribedBy
-  | AChecked | ADir
+  | AChecked | ADir | ASheetSide
 
 fn _attr_name (attribute: attr): $D.attribute =
   case+ attribute of
@@ -361,7 +361,7 @@ fn _attr_name (attribute: attr): $D.attribute =
   | ATabindex() => $D.Tabindex | AValueNow() => $D.Aria("valuenow")
   | ACurrent() => $D.Aria("current") | AGestureRegion() => $D.Data("gesture-region")
   | AHidden() => $D.Aria("hidden") | ADescribedBy() => $D.Aria("describedby")
-  | AChecked() => $D.Aria("checked") | ADir() => $D.Dir
+  | AChecked() => $D.Aria("checked") | ADir() => $D.Dir | ASheetSide() => $D.Data("side")
 
 (* The attribute of element id: the literal value (non-empty) *)
 #pub fn ui_attr {id_len:pos | id_len < 256}{value_len:pos | value_len < 256}
@@ -414,6 +414,31 @@ implement ui_place_n (id, id_len, placement, tenths) = let
   val style = $A.alloc<byte>(32)
   val style_len = _place_style(style, placement, tenths)
 in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
+
+(* The sheets that explain a place in the text, and where that place is
+   (quire#387): the tap on a note's reference, or the selection a word
+   was looked up from. A sheet is placed on the side of the window
+   the place is not in, and is never taller than half of it, so it never
+   covers what it explains. -1 when it is not known (a key), the sheet
+   then at the bottom as any sheet is *)
+#pub datatype place_sheet = NoteSheet | DictionarySheet
+
+val _reference_y = ref<int>(~1)
+
+#pub fn ui_reference_set (y: int): void
+implement ui_reference_set (y) = !_reference_y := y
+
+#pub fn ui_sheet_place (sheet: place_sheet): void
+implement ui_sheet_place (sheet) = let
+  val y = !_reference_y
+  val () = !_reference_y := ~1
+  val () = ui_measure("reader")
+  val window_height = $DR.get_measure_h()
+  val sheet_id = (case+ sheet of NoteSheet() => "footnote" | DictionarySheet() => "dictionary-panel"): [n:pos | n < 256] string n
+in
+  if y >= 0 then (if y + y >= window_height then ui_attr(sheet_id, ASheetSide, "top") else ui_attr(sheet_id, ASheetSide, "bottom"))
+  else ui_attr(sheet_id, ASheetSide, "bottom")
+end
 
 (* The selection toolbar's place (quire#428): where its top is and how
    tall it is, in CSS pixels, as the custom properties the stylesheet's

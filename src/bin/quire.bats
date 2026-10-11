@@ -2654,7 +2654,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
       if !_press_selected then 0
       else if _has_selection() then 0
       else if !_dragged then 0
-      else if (if node >= 0 then reader_link_at(node) else false) then 0
+      else if (if node >= 0 then let val () = ui_reference_set(y) in reader_link_at(node) end else false) then 0
       (* a tap between the sides' zones on a highlight selects it, with
          the selection toolbar (quire#428) *)
       else if (if node >= 0 then (if _in_middle(x) then _highlight_tapped(node, x, y) else false) else false) then 0
