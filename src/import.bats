@@ -385,12 +385,12 @@ in storing end
    file is in the book cell (file_size bytes): its file stored under 'b' *)
 fn _opf_add {file_size:pos}{l:agz}{n:pos}{series_offset,series_len:nat | series_offset + series_len <= n}
   (opf_bytes: !$A.borrow(byte, l, n), n: int n, title: xspan(n), author: xspan(n), cover: image_type,
-   series_offset: int series_offset, series_len: int series_len, series_number: Int, file_size: int file_size,
+   series_offset: int series_offset, series_len: int series_len, series_position: Int, file_size: int file_size,
    text_directions: Int, id_high: Int, id_low: Int): archive_outcome = let
   val storing = _store_file(id_high, id_low)
   val @(title_offset, title_len) = (case+ title of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
   val @(author_offset, author_len) = (case+ author of ~xspan_at(offset, span_len) => @(offset, span_len) | ~xspan_none() => @(0, 0)): [offset,span_len:nat | offset + span_len <= n] @(int offset, int span_len)
-  val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_number, file_size, cover, $TM.epoch_minutes(), text_directions)
+  val key = lib_add(id_high, id_low, opf_bytes, n, title_offset, title_len, author_offset, author_len, series_offset, series_len, series_position, file_size, cover, $TM.epoch_minutes(), text_directions)
   val () = _book_store_checked(storing, key)
   (* the record a backup kept for it, if any *)
   val () = (if key > 0 then backup_claim(id_high, id_low) else ())
@@ -416,8 +416,8 @@ fn _opf_store {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_si
   val text_directions = opf_text_directions(opf_bytes, nodes)
   val cover = _cover_of(mode, serial, file_size, opf_name_offset, opf_name_len, opf_bytes, n, nodes, id_high, id_low)
   (* its series, for the library's order *)
-  val @(series, series_number_found) = opf_series(opf_bytes, nodes)
-  val series_number = g1ofg0(series_number_found)
+  val @(series, series_position_found) = opf_series(opf_bytes, nodes)
+  val series_position = g1ofg0(series_position_found)
   (* its accessibility metadata, for Book info *)
   val @(a11y_flags, summary) = opf_a11y(opf_bytes, nodes)
   val () = (if ~_is_reopen(mode) then _store_a11y(opf_bytes, a11y_flags, summary, id_high, id_low) else xspan_free(summary))
@@ -441,10 +441,10 @@ in
     in BookReopened() end
   | AddNew() => let
       val () = hrefs_free(new_hrefs)
-    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_number, file_size, text_directions, id_high, id_low) end
+    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_position, file_size, text_directions, id_high, id_low) end
   | AddAlone() => let
       val () = hrefs_free(new_hrefs)
-    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_number, file_size, text_directions, id_high, id_low) end
+    in _opf_add(opf_bytes, n, title, author, cover, series_offset, series_len, series_position, file_size, text_directions, id_high, id_low) end
   | Replace() => let
       val storing = _store_file(id_high, id_low)
       val () = xspan_free(title)
@@ -462,7 +462,7 @@ in
       in lib_nums_set(library_index, @{
         key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = shelf_after, added = record.added, opened = record.opened,
         chapter = record.chapter, chapters = record.chapters, page = record.page, pages = record.pages, anchor = record.anchor,
-        file_size = file_size, cover = (if is_image(cover) then cover else record.cover), done = record.done, series_number = series_number, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
+        file_size = file_size, cover = (if is_image(cover) then cover else record.cover), done = record.done, series_position = series_position, collections = record.collections, minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
         (* back on the shelf: a change sync passes on *)
         shelf_modified = (if same_shelf(record.shelf, shelf_after) then record.shelf_modified else stamp_now()), collections_modified = record.collections_modified,
         finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
@@ -793,7 +793,7 @@ fn _place_moved (key: Int, map: !chapter_map): void =
           key = record.key, id_high = record.id_high, id_low = record.id_low, shelf = record.shelf, added = record.added, opened = record.opened,
           chapter = chapter_after, chapters = (if record.chapters > 0 then chapters_after else 0),
           page = (if kept then record.page else 0), pages = (if kept then record.pages else 0), anchor = (if kept then record.anchor else ~1),
-          file_size = record.file_size, cover = record.cover, done = record.done, series_number = record.series_number, collections = record.collections,
+          file_size = record.file_size, cover = record.cover, done = record.done, series_position = record.series_position, collections = record.collections,
           minutes_read = record.minutes_read, pages_read = record.pages_read, finished_at = record.finished_at,
           shelf_modified = record.shelf_modified, collections_modified = record.collections_modified,
           finished_modified = record.finished_modified, minutes_elsewhere = record.minutes_elsewhere, pages_elsewhere = record.pages_elsewhere,
