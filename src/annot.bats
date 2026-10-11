@@ -808,16 +808,26 @@ fn _here (): int = let
   val () = _put(cell)
 in found end
 
-(* The bookmark button: "added" when the page shown has a bookmark *)
+(* Whether the page shown has a bookmark *)
+datatype bookmark_state = Marked | Unmarked
+
+fn _state_here (): bookmark_state = if _here() >= 0 then Marked() else Unmarked()
+
+(* The bookmark button: "added" when the page shown has a bookmark, and
+   the mark in the page's corner, which shows once the bars hide (Kindle
+   and Kobo draw it there; #388) *)
 #pub fn annot_star (): void
 
 implement annot_star () =
-  if _here() >= 0 then let
-    val () = ui_icon_set("bookmark-button", IcBookmarked)
-  in ui_attr("bookmark-button", APressed, "true") end
-  else let
-    val () = ui_icon_set("bookmark-button", IcBookmark)
-  in ui_attr("bookmark-button", APressed, "false") end
+  case+ _state_here() of
+  | Marked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmarked)
+      val () = ui_attr("bookmark-mark", AClass, "bmk bmk-on")
+    in ui_attr("bookmark-button", APressed, "true") end
+  | Unmarked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmark)
+      val () = ui_attr("bookmark-mark", AClass, "bmk")
+    in ui_attr("bookmark-button", APressed, "false") end
 
 (* annotations without its i-th annotation *)
 fun _remove {count:nat} .<count>. (annotations: annotations(count), i: int): [kept_count:nat | kept_count <= count] @(annotations(kept_count), int kept_count) =
