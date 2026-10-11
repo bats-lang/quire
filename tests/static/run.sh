@@ -12,7 +12,7 @@
 #
 # With members named, it runs only those (CI's static groups, in
 # tests/groups.json, each run by a job of its own): `check` (bats check of
-# the app itself), `checkers` (ids.py and case_plus.py, with their
+# the app itself), `checkers` (ids.py, case_plus.py, groups.py, with their
 # fixtures), and fixtures, `accept/<name>` or `reject/<name>`. With none,
 # it runs the checkers and every fixture.
 #
@@ -125,6 +125,20 @@ if python3 "$ROOT/tests/static/literals.py" "$ROOT/src" > "$TMP/literals.log" 2>
 else echo "FAIL literals:"; cat "$TMP/literals.log"; fail=1; fi
 if python3 "$ROOT/tests/static/keys.py" "$ROOT/src" > "$TMP/keys.log" 2>&1; then echo "ok   keys: $(tail -1 "$TMP/keys.log")"
 else echo "FAIL keys:"; cat "$TMP/keys.log"; fail=1; fi
+
+# A group added to the records is "added", with the library of the table
+# before it (groups.py, quire#515): the app's own, and the checker's fixtures,
+# each a checkout's scripts/record_tables.py and e2e/old-library.spec.js
+# that must fail it with its `expect`
+if python3 "$ROOT/tests/static/groups.py" "$ROOT" > "$TMP/groups.log" 2>&1; then echo "ok   groups: $(tail -1 "$TMP/groups.log")"
+else echo "FAIL groups:"; cat "$TMP/groups.log"; fail=1; fi
+for d in "$ROOT"/tests/static/groups/reject/*/; do
+  [ -d "$d" ] || continue
+  n=$(basename "$d")
+  if python3 "$ROOT/tests/static/groups.py" "$d" > "$TMP/groups-$n.log" 2>&1; then echo "FAIL groups/reject/$n: should be rejected"; fail=1
+  elif grep -qF -- "$(cat "$d/expect")" "$TMP/groups-$n.log"; then echo "ok   groups/reject/$n"
+  else echo "FAIL groups/reject/$n: rejected, but not with: $(cat "$d/expect")"; cat "$TMP/groups-$n.log"; fail=1; fi
+done
 
 # Every match a case+ (case_plus.py): the app's own, and the checker's
 # fixtures, each a src.bats that must fail it with its `expect`

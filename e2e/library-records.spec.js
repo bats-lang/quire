@@ -27,6 +27,16 @@ async function startWithLegacy(page, version, library = books) {
   await forgetRecords(page);
   await put(page, 'lib', [...legacyLibrary(version, ['To read', 'Shared'], library)]);
   await reload(page);
+  await recordsWritten(page, library);
+}
+
+/** The records the conversion of "lib" makes are in the store. The books are shown before they are
+    written ("until it commits nothing is saved", #354), so a spec that changes a record straight
+    after the books show would otherwise put its change first and have the conversion's commit
+    land over it, or read a record that is not there yet (#515: the flake of the set aside spec,
+    which failed on the android project while the machine was loaded). */
+async function recordsWritten(page, library) {
+  for (const book of library) await expect.poll(async () => (await store(page))[bookKey(book)] !== undefined, { message: `the record of ${book.title} is written` }).toBe(true);
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
