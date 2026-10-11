@@ -130,7 +130,7 @@ in sheet end
    is 360 to 412 px high). It becomes a side sheet: the
    right half of the window, the whole of its height, scrolling
    inside, and the page stays in view beside it *)
-#pub fn short_screen_rules {left:nat | left >= 560} (sheet: sheet(left, false, false)): [after:nat | after >= left - 560] sheet(after, false, false)
+#pub fn short_screen_rules {left:nat | left >= 490} (sheet: sheet(left, false, false)): [after:nat | after >= left - 490] sheet(after, false, false)
 
 implement short_screen_rules (sheet) = let
   val sheet = media(sheet, "(max-height:500px) and (orientation:landscape)")
