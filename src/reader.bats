@@ -270,7 +270,7 @@ fn _is_vertical (): bool =
    fixed page, are never scrolled *)
 fn _scrolled (): bool =
   if _is_vertical() then false else if _is_fixed() then false
-  else (case+ set_flow_get() of Scrolled() => true | Paged() => false)
+  else flow_scrolled(set_flow_get())
 
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
@@ -2471,6 +2471,123 @@ fn _fragment_check {l:agz}{n:pos}{attr_count:nat}{node:nat}
       | ~xspan_none() => ()
     end
 
+(* The index just past the '>' that ends the tag whose inside begins at
+   data[position]; n when there is none. A '>' inside a quoted value does not end it *)
+fun _svg_tag_end {l:agz}{n:pos}{position:nat | position < n} .<n - position>.
+  (data: !$A.borrow(byte, l, n), n: int n, position: int position, quote: int): [after:int | position < after; after <= n] int after = let
+  val c = byte2int0($A.read<byte>(data, position))
+in
+  if position + 1 >= n then n
+  else if quote > 0 then (if c = quote then _svg_tag_end(data, n, position + 1, 0) else _svg_tag_end(data, n, position + 1, quote))
+  else if c = 34 || c = 39 then _svg_tag_end(data, n, position + 1, c)
+  else if c = 62 then position + 1
+  else _svg_tag_end(data, n, position + 1, 0)
+end
+
+(* The index just past the first run of the three bytes first, second, third
+   at or after position; n when there is none *)
+fun _svg_past_three {l:agz}{n:pos}{position:nat | position < n} .<n - position>.
+  (data: !$A.borrow(byte, l, n), n: int n, position: int position, first: int, second: int, third: int): [after:int | position < after; after <= n] int after =
+  if position + 3 > n then n
+  else if byte2int0($A.read<byte>(data, position)) = first
+    && byte2int0($A.read<byte>(data, position + 1)) = second
+    && byte2int0($A.read<byte>(data, position + 2)) = third then position + 3
+  else if position + 1 >= n then n
+  else _svg_past_three(data, n, position + 1, first, second, third)
+
+(* The same for two bytes *)
+fun _svg_past_two {l:agz}{n:pos}{position:nat | position < n} .<n - position>.
+  (data: !$A.borrow(byte, l, n), n: int n, position: int position, first: int, second: int): [after:int | position < after; after <= n] int after =
+  if position + 2 > n then n
+  else if byte2int0($A.read<byte>(data, position)) = first
+    && byte2int0($A.read<byte>(data, position + 1)) = second then position + 2
+  else if position + 1 >= n then n
+  else _svg_past_two(data, n, position + 1, first, second)
+
+(* Whether data[position, position + 3) is "svg" and ends the name *)
+fn _svg_named {l:agz}{n:pos}{position:nat | position + 4 <= n}
+  (data: !$A.borrow(byte, l, n), position: int position): bool = let
+  val after = byte2int0($A.read<byte>(data, position + 3))
+in
+  byte2int0($A.read<byte>(data, position)) = 115
+  && byte2int0($A.read<byte>(data, position + 1)) = 118
+  && byte2int0($A.read<byte>(data, position + 2)) = 103
+  && (after = 62 || after = 47 || after = 32 || after = 9 || after = 10 || after = 13)
+end
+
+(* The index just past the end of the svg element whose "<" is data[position],
+   depth the svg elements open so far; ~1 when it is not closed. Comments,
+   CDATA sections, processing instructions and quoted values are passed
+   over, so a "</svg>" in one does not end it *)
+fun _svg_end {l:agz}{n:pos}{position:nat | position <= n} .<n - position>.
+  (data: !$A.borrow(byte, l, n), n: int n, position: int position, depth: int): [after:int | after >= ~1; after <= n] int after =
+  if position >= n then ~1
+  else if byte2int0($A.read<byte>(data, position)) <> 60 then _svg_end(data, n, position + 1, depth)
+  else if position + 2 >= n then ~1
+  else let
+    val next = byte2int0($A.read<byte>(data, position + 1))
+  in
+    if next = 33 then let
+      val second = byte2int0($A.read<byte>(data, position + 2))
+    in
+      if second = 45 then (if position + 4 >= n then ~1 else _svg_end(data, n, _svg_past_three(data, n, position + 4, 45, 45, 62), depth))
+      else if second = 91 then (if position + 9 >= n then ~1 else _svg_end(data, n, _svg_past_three(data, n, position + 9, 93, 93, 62), depth))
+      else _svg_end(data, n, _svg_tag_end(data, n, position + 2, 0), depth)
+    end
+    else if next = 63 then _svg_end(data, n, _svg_past_two(data, n, position + 2, 63, 62), depth)
+    else if next = 47 then let
+      val after = _svg_tag_end(data, n, position + 2, 0)
+    in
+      if position + 6 <= n && _svg_named(data, position + 2) then
+        (if depth <= 1 then after else _svg_end(data, n, after, depth - 1))
+      else _svg_end(data, n, after, depth)
+    end
+    else let
+      val after = _svg_tag_end(data, n, position + 1, 0)
+      val self_closing = byte2int0($A.read<byte>(data, after - 2)) = 47
+    in
+      if position + 5 <= n && _svg_named(data, position + 1) then
+        (if self_closing then (if depth = 0 then after else _svg_end(data, n, after, depth))
+         else _svg_end(data, n, after, depth + 1))
+      else _svg_end(data, n, after, depth)
+    end
+  end
+
+(* Whether data[position, position + 6) is "<image" and ends the name:
+   the svg that holds one is not drawn as a picture of its own, since the
+   picture it names is a part of the book that a picture of the svg's
+   bytes could not reach *)
+fun _svg_has_image {l:agz}{n:pos}{stop:nat | stop <= n}{position:nat | position <= stop} .<stop - position>.
+  (data: !$A.borrow(byte, l, n), stop: int stop, position: int position): bool =
+  if position + 7 > stop then false
+  else if byte2int0($A.read<byte>(data, position)) = 60
+    && byte2int0($A.read<byte>(data, position + 1)) = 105
+    && byte2int0($A.read<byte>(data, position + 2)) = 109
+    && byte2int0($A.read<byte>(data, position + 3)) = 97
+    && byte2int0($A.read<byte>(data, position + 4)) = 103
+    && byte2int0($A.read<byte>(data, position + 5)) = 101
+    && (let val after = byte2int0($A.read<byte>(data, position + 6)) in after = 62 || after = 47 || after = 32 || after = 9 || after = 10 || after = 13 end) then true
+  else _svg_has_image(data, stop, position + 1)
+
+(* The svg elements being drawn: one inside another is a part of the
+   picture, not a picture *)
+val _svg_inside = ref<int>(0)
+
+(* The index just past the svg element whose name is data[name_offset, name_offset + 3), when it is
+   drawn as a picture: closed, under 512 KiB, and holding no <image>; else ~1 *)
+fn _svg_extent {l:agz}{n:pos}{name_offset:nat | name_offset + 3 <= n}
+  (data: !$A.borrow(byte, l, n), n: int n, name_offset: int name_offset): [after:int | after >= ~1; after <= n; after == ~1 || after >= name_offset + 3] int after =
+  if !_svg_inside > 0 then ~1
+  else if name_offset < 1 then ~1
+  else let
+    val after = _svg_end(data, n, name_offset - 1, 0)
+  in
+    if after < name_offset + 3 then ~1
+    else if after - name_offset > 524288 then ~1
+    else if _svg_has_image(data, after, name_offset) then ~1
+    else after
+  end
+
 (* The <img> elements of a chapter being rendered, count of them: each one's
    content node and its src attribute, the span [src_start, src_start + src_len) of the
    chapter's n bytes *)
@@ -2483,6 +2600,12 @@ datavtype images(n:int, int) =
      is a note's reference *)
   | {count:nat}{first_node,end_node:nat}{src_start,src_len:nat | src_start + src_len <= n}
     images_link(n, count + 1) of (int first_node, int end_node, int src_start, int src_len, bool, images(n, count))
+  (* An inline svg drawn as a picture: its content node, the span
+     [body_start, body_end) of the element after its "<svg", and whether it
+     needs the namespaces it takes from its page (svg's, xlink's) written
+     into the picture's own copy *)
+  | {count:nat}{node,body_start,body_end:nat | body_start <= body_end; body_end <= n}
+    images_svg(n, count + 1) of (int node, int body_start, int body_end, bool, bool, images(n, count))
 
 (* The links of the chapter shown: the content nodes [first_node, end_node) each covers,
    the chapter (-1 for a link out of the book, which the browser opens)
@@ -2490,7 +2613,7 @@ datavtype images(n:int, int) =
    reference (epub:type noteref, or role doc-noteref) *)
 datavtype links(int) =
   | links_nil(0) of ()
-  | {count:nat}{l:agz}{fragment_len:nat | fragment_len <= 200}
+  | {count:nat}{l:agz}{fragment_len:nat | fragment_len <= 2048}
     links_cons(count + 1) of (Int, Int, Int, $A.arr(byte, l, fragment_len + 1), int fragment_len, bool, links(count))
 
 fun links_free {count:nat} .<count>. (entries: links(count)): void =
@@ -2513,7 +2636,7 @@ fn _links_put (new_cell: links_cell): void = let
   val+ ~LinksCell(old) = cell
 in links_free(old) end
 
-fn _links_push {l:agz}{fragment_len:nat | fragment_len <= 200} (first_node: Int, end_node: Int, chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len, note: bool): void = let
+fn _links_push {l:agz}{fragment_len:nat | fragment_len <= 2048} (first_node: Int, end_node: Int, chapter: Int, fragment: $A.arr(byte, l, fragment_len + 1), fragment_len: int fragment_len, note: bool): void = let
   val+ ~LinksCell(rest) = _links_take()
 in _links_put(LinksCell(links_cons(first_node, end_node, chapter, fragment, fragment_len, note, rest))) end
 
@@ -2521,6 +2644,22 @@ in _links_put(LinksCell(links_cons(first_node, end_node, chapter, fragment, frag
 fn _starts {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}{pattern_len:pos}
   (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
   if span_len < pattern_len then false else xml_name_eq(data, offset, pattern_len, pattern, pattern_len)
+
+(* text[at, at + len) := url[0, len) *)
+fun _fragment_keep_arr {lu,lt:agz}{u,t:pos}{len,at:nat | len < u; at + len < t}{k:nat | k <= len} .<len - k>.
+  (url: !$A.arr(byte, lu, u), len: int len, text: !$A.arr(byte, lt, t), at: int at, k: int k): void =
+  if k >= len then ()
+  else let
+    val () = $A.set<byte>(text, at + k, $A.get<byte>(url, k))
+  in _fragment_keep_arr(url, len, text, at, k + 1) end
+
+(* url[0, len) := data[start, start + len) *)
+fun _fragment_keep {l,lu:agz}{n:pos}{start,len:nat | start + len <= n}{k:nat | k <= len}{u:pos | len < u} .<len - k>.
+  (data: !$A.borrow(byte, l, n), start: int start, len: int len, url: !$A.arr(byte, lu, u), k: int k): void =
+  if k >= len then ()
+  else let
+    val () = $A.set<byte>(url, k, $A.read<byte>(data, start + k))
+  in _fragment_keep(data, start, len, url, k + 1) end
 
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
@@ -2613,11 +2752,16 @@ in
         else _starts(data, href_start, href_len, _mailto, 7)): bool
     in
       if outside then
-        (if href_len < 65536 then let
-           val () = _node_url(doc, first_node, $D.Href, data, href_start, href_len)
-           val () = _node_attr_literal(doc, first_node, $D.Target, "_blank")
-           val () = _node_attr_literal(doc, first_node, $D.Rel, "noopener noreferrer")
-           val () = _links_push(first_node, end_node, ~1, $A.alloc<byte>(1), 0, false)
+        (* a link out of the book is asked about before it opens (the
+           suite's pub-external-links and pub-external-links_consent):
+           the page's link is no anchor to follow, its address is kept for
+           the question *)
+        (if href_len <= 2048 then let
+           val () = _node_attr_literal(doc, first_node, $D.Role, "link")
+           val () = _node_attr_literal(doc, first_node, $D.Tabindex, "0")
+           val url = $A.alloc<byte>(href_len + 1)
+           val () = _fragment_keep(data, href_start, href_len, url, 0)
+           val () = _links_push(first_node, end_node, ~1, url, href_len, false)
          in found end
          else found)
       else let
@@ -3098,8 +3242,19 @@ and _render_node
         | ~xspan_none() => found)
     end
     else let
+      (* an inline svg is drawn as a picture of its own bytes (an <img> whose
+         source is a blob: no script, no outside load, its own style scope),
+         and its children are still made, numbered as ever, but never seen:
+         the page's own style must not reach into it (#411) and its <style>
+         must not reach out *)
+      var _tag_svg = @[char][3]('s', 'v', 'g')
+      val svg_end = (if name_len = 3 then (if xml_name_eq(data, name_offset, name_len, _tag_svg, 3) then _svg_extent(data, data_len, name_offset) else ~1) else ~1): [after:int | after >= ~1; after <= n] int after
       val content_node = _next_content_node()
-      val () = _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len))
+      val () = (if svg_end > 0 then _add_node(doc, parent, content_node, $D.Img) else _add_node(doc, parent, content_node, _tag_of(data, name_offset, name_len)))
+      val () = (if svg_end > 0 then let
+          val () = _node_src_empty(doc, content_node)
+        in _node_attr_literal(doc, content_node, $D.Alt, "image") end else ())
+      val () = (if svg_end > 0 then !_svg_inside := !_svg_inside + 1 else ())
       val () = _fragment_check(data, attrs, fragment, content_node)
       val () = _pass_attrs(doc, data, attrs, content_node)
       (* an audio or video element is not played (the DOM's attributes have
@@ -3122,6 +3277,14 @@ and _render_node
       (* the clip of the chapter's overlay that reads this element, by its
          id: its content nodes, this one's and its children's *)
       val () = _clip_match(data, attrs, content_node, !_content_count)
+      val () = (if svg_end > 0 then !_svg_inside := !_svg_inside - 1 else ())
+      var _attr_xmlns = @[char][5]('x', 'm', 'l', 'n', 's')
+      var _attr_xmlns_xlink = @[char][11]('x', 'm', 'l', 'n', 's', ':', 'x', 'l', 'i', 'n', 'k')
+      val found = (if svg_end >= name_offset + 3 then let
+          val add_xmlns = (case+ find_attr(data, attrs, _attr_xmlns, 5) of ~xspan_at(_, _) => false | ~xspan_none() => true): bool
+          val add_xlink = (case+ find_attr(data, attrs, _attr_xmlns_xlink, 11) of ~xspan_at(_, _) => false | ~xspan_none() => true): bool
+        in images_svg(content_node, name_offset + 3, svg_end, add_xmlns, add_xlink, found) end
+        else found): [new_count:nat] images(n, new_count)
     in found end
   end
 
@@ -3443,6 +3606,37 @@ in
   if chapter >= 0 then _links_push(first_node, end_node, chapter, fragment, fragment_len, note) else $A.free<byte>(fragment)
 end
 
+(* A content node's picture, an inline svg: the bytes of opening then the
+   body data[body_start, body_end) (what follows the element's "<svg"),
+   shown as an svg image *)
+fn _load_svg_with {l:agz}{n:pos}{body_start,body_end:nat | body_start <= body_end; body_end <= n; body_end - body_start <= 524288}{prefix_len:pos | prefix_len <= 128}{node:nat}
+  (node: int node, data: !$A.borrow(byte, l, n), data_len: int n, body_start: int body_start, body_end: int body_end,
+   opening: string prefix_len, prefix_len: int prefix_len): void = let
+  val body_len = body_end - body_start
+  val total = prefix_len + body_len
+  val buf = $A.alloc<byte>(total)
+  val _ = _put(buf, 0, opening)
+  val () = $S.copy_from_borrow(data, body_start, data_len, buf, prefix_len, total, body_len)
+  val @(frozen, bytes) = $A.freeze<byte>(buf)
+  val () = _set_src(node, false, bytes, total, "image/svg+xml")
+  val () = _copy_stale()
+  val () = $A.drop<byte>(frozen, bytes)
+in $A.free<byte>($A.thaw<byte>(frozen)) end
+
+(* An inline svg's picture: its own copy of the element, with the
+   namespaces it was given by its page written in *)
+fn _load_svg {l:agz}{n:pos}{body_start,body_end:nat | body_end <= n}{node:nat}
+  (node: int node, data: !$A.borrow(byte, l, n), data_len: int n, body_start: int body_start, body_end: int body_end,
+   add_xmlns: bool, add_xlink: bool): void =
+  if body_end - body_start > 524288 then ()
+  else if body_end < body_start then ()
+  else if add_xmlns then
+    (if add_xlink then _load_svg_with(node, data, data_len, body_start, body_end, "<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\"", 82)
+     else _load_svg_with(node, data, data_len, body_start, body_end, "<svg xmlns=\"http://www.w3.org/2000/svg\"", 39))
+  else
+    (if add_xlink then _load_svg_with(node, data, data_len, body_start, body_end, "<svg xmlns:xlink=\"http://www.w3.org/1999/xlink\"", 47)
+     else _load_svg_with(node, data, data_len, body_start, body_end, "<svg", 4))
+
 (* The images found of the chapter data[0, n), chapter current, and its links *)
 fun _load_images {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{count:nat} .<count>.
   (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
@@ -3451,6 +3645,9 @@ fun _load_images {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len
   | ~images_nil() => ()
   | ~images_cons(node, src_start, src_len, rest) => let
       val () = _load_image(serial, file_size, name_offset, dir_len, data, n, node, src_start, src_len, generation)
+    in _load_images(serial, file_size, name_offset, dir_len, data, n, rest, generation, current) end
+  | ~images_svg(node, body_start, body_end, add_xmlns, add_xlink, rest) => let
+      val () = _load_svg(node, data, n, body_start, body_end, add_xmlns, add_xlink)
     in _load_images(serial, file_size, name_offset, dir_len, data, n, rest, generation, current) end
   | ~images_link(first_node, end_node, src_start, src_len, note, rest) => let
       val () = _link_resolve(serial, file_size, name_offset, dir_len, current, data, n, first_node, end_node, src_start, src_len, note)
@@ -3808,6 +4005,9 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val () = toc_locate(serial, file_size, opf_name_offset, prefix_len, opf_bytes, opf_size, opf_nodes)
                val () = _direction_set(if spine_rtl(opf_bytes, opf_nodes) then RightToLeft() else LeftToRight())
                val () = _vertical_set(spine_vertical(opf_bytes, opf_nodes))
+               (* a book that asks to be scrolled (rendition:flow, roll layout) is, until the reader chooses Pages *)
+               val () = set_book_scrolls_set(opf_scroll_preferred(opf_bytes, opf_nodes))
+               val () = set_show()
                (* a new book's fixed pages take no size from another's *)
                val () = _size_put(_page_size, NoViewport())
                val () = !_book_spread := opf_spread(opf_bytes, opf_nodes)
@@ -4211,6 +4411,10 @@ in
                  val () = $X.free_nodes(nodes)
                  val () = $A.drop<byte>(smil_frozen, smil_bytes)
                  val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
+                 (* a SMIL with no audio has nothing to play: the text is read
+                    by speech, where the platform speaks (the suite's mol-tts_single
+                    and mol-tts_multi), as for a book with no narration *)
+                 val () = _narration_offered(false)
                in $P.ret<int>(0) end
                else (case+ clip_table_new(count) of
                  | ~ClipTableNone() => let
@@ -4219,6 +4423,7 @@ in
                      val () = piece_free(smil_owner, $A.thaw<byte>(smil_frozen))
                    in $P.ret<int>(0) end
                  | ~ClipTableMade(table) => let
+                     val () = _narration_offered(true)
                      val _ = overlay_fill(smil_bytes, nodes, table, count)
                      val () = $X.free_nodes(nodes)
                      val () = _audio_resolve(serial, file_size, name_offset, dir_len, smil_bytes, smil_size, table, count, 0, ~1, 0, 0, 0, $Z.Stored(), AudioOther())
@@ -5499,7 +5704,7 @@ implement reader_anchor () = _anchor_now()
 datavtype link_found =
   | NoLink of ()
   | {l:agz}{fragment_len:nat} InBook of (Int, bool, $A.arr(byte, l, fragment_len + 1), int fragment_len)
-  | OutOfBook of ()
+  | {l:agz}{url_len:nat | url_len <= 2048} OutOfBook of ($A.arr(byte, l, url_len + 1), int url_len)
 
 fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_found =
   case+ entries of
@@ -5513,7 +5718,7 @@ fun _link_find {count:nat} .<count>. (entries: !links(count), node: int): link_f
       val copy_len = fragment_len
       prval () = fold@(entries)
     in
-      if found_chapter < 0 then let val () = $A.free<byte>(copy) in OutOfBook() end
+      if found_chapter < 0 then OutOfBook(copy, copy_len)
       else InBook(found_chapter, found_note, copy, copy_len)
     end
     else let
@@ -5689,11 +5894,17 @@ and _note_node {data_location,fragment_location,note_location:agz}{data_size:pos
   | $X.xml_text(offset, text_len) => if inside then _note_put(data, offset, text_len, 0, buf, at) else at
   | $X.xml_element(name_offset, name_len, attrs, children) => let
       var _attr_id = @[char][2]('i', 'd')
+      var _t_head = @[char][4]('h', 'e', 'a', 'd')
       val here = (case+ find_attr(data, attrs, _attr_id, 2) of
         | ~xspan_none() => false
         | ~xspan_at(start, span_len) => if span_len = fragment_len then _same(data, start, fragment, span_len, 0) else false): bool
-      val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
-    in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+    in
+      (* the head is not the page: a title with the id is no note (the suite's pss-support_ignore-title) *)
+      if (if inside then false else xml_name_eq(data, name_offset, name_len, _t_head, 4)) then at
+      else let
+        val end_at = _note_nodes(data, children, fragment, fragment_len, (if inside then true else here), buf, at)
+      in if inside then (if _note_block(data, name_offset, name_len) then _note_break(buf, end_at) else end_at) else end_at end
+    end
 
 (* buf[at] and the bytes before it back to the first that starts a
    character (not a continuation byte, 10xxxxxx) *)
@@ -5740,10 +5951,28 @@ fn _note_show {l:agz}{text_len:nat | text_len <= NOTE_CAPACITY} (buf: $A.arr(byt
   val decoded_len = decode_text(note_bytes, 0, text_len, decoded)
   val () = release_bytes(note_frozen, note_bytes)
   val () = ui_text_buf("footnote-text", decoded, decoded_len)
+  val () = ui_show("footnote-go", true)
+  val () = ui_show("footnote-open", false)
   (* clear of the reference it explains *)
   val () = ui_sheet_place(NoteSheet())
   val () = layer_open(LNote())
 in ui_focus("footnote-close") end
+
+(* A link out of the book, url[0, url_len), asked about in the note's
+   overlay: where it goes, and a link that opens it in another tab (a tap
+   on a link is never blocked, as a script's window.open is) *)
+fn _external_ask {l:agz}{url_len:pos | url_len <= 2048} (url: $A.arr(byte, l, url_len + 1), url_len: int url_len): void = let
+  val text = $A.alloc<byte>(url_len + 40)
+  val () = $A.write_text(text, 0, $A.text_lit("This link leaves the book. It goes to "), 38)
+  val () = _fragment_keep_arr(url, url_len, text, 38, 0)
+  val () = $A.write_text(text, 38 + url_len, $A.text_lit("."), 1)
+  val () = ui_text_buf("footnote-text", text, url_len + 39)
+  val () = ui_url_href("footnote-open", url, url_len)
+  val () = ui_show("footnote-go", false)
+  val () = ui_show("footnote-open", true)
+  val () = ui_sheet_place(NoteSheet())
+  val () = layer_open(LNote())
+in ui_focus("footnote-open") end
 
 (* The note kept in _note_target, found in its chapter's XHTML data[0, n):
    shown over the page, and kept for "Go to note"; when it has no text
@@ -5909,7 +6138,9 @@ in
   case+ found of
   | ~NoLink() => false
   (* followed by the browser *)
-  | ~OutOfBook() => true
+  | ~OutOfBook(url, url_len) =>
+    (if url_len > 0 then let val () = _external_ask(url, url_len) in true end
+     else let val () = $A.free<byte>(url) in true end)
   | ~InBook(chapter, note, fragment, fragment_len) =>
     (* a note's reference to a note it names opens the note over the
        page; any other link is followed *)
