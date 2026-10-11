@@ -1,2 +1,3 @@
-prfn _static_reencode_differs {sp:specs}{kind:int}{x:rx}{bs,other:bytes}
-  (decoded: DECODES(sp, kind, bs, rr_ok(x))): ENCODES(sp, kind, x, other) = decodes_encodes(decoded)
+(* what is written reads back as exactly the record written, not as another *)
+prfn _static_reads_as_another {sp:specs}{kind:int}{x,y:rx}{bs:bytes}
+  (encoded: ENCODES(sp, kind, x, bs)): DECODES(sp, kind, bs, rr_ok(y)) = encodes_decodes(encoded)
