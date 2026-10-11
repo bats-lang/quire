@@ -11,8 +11,8 @@ staload "declarations.sats"
 
 #pub fn overlay_rules {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5900] sheet(after, false, false)
 
-(* The first part: the rules from .imview on *)
-fn overlay_rules_first_part {left:nat | left >= 1674} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1674] sheet(after, false, false) = let
+(* The image viewer and toasts, from .imview on *)
+fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 1674} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1674] sheet(after, false, false) = let
   (* a book's image, full screen, on the page's ground; the fingers zoom
      and pan it *)
   val sheet = rule(sheet, ".imview")
@@ -101,8 +101,8 @@ fn overlay_rules_first_part {left:nat | left >= 1674} (sheet: sheet(left, false,
   val sheet = close(sheet)
 in sheet end
 
-(* The second part: the rules from .ovl on *)
-fn overlay_rules_second_part {left:nat | left >= 1721} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1721] sheet(after, false, false) = let
+(* The menus, from .ovl on *)
+fn overlay_rules_menus {left:nat | left >= 1721} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1721] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ovl")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Inset(), "0")
@@ -185,8 +185,8 @@ fn overlay_rules_second_part {left:nat | left >= 1721} (sheet: sheet(left, false
   val sheet = close(sheet)
 in sheet end
 
-(* The third part: the rules from .sfields on *)
-fn overlay_rules_third_part {left:nat | left >= 1601} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1601] sheet(after, false, false) = let
+(* The dialog fields and book info, from .sfields on *)
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 1601} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1601] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -271,8 +271,8 @@ fn overlay_rules_third_part {left:nat | left >= 1601} (sheet: sheet(left, false,
   val sheet = close(sheet)
 in sheet end
 
-(* The fourth part: the rules from .a11yg on *)
-fn overlay_rules_fourth_part {left:nat | left >= 347} (sheet: sheet(left, false, false)): [after:nat | after >= left - 347] sheet(after, false, false) = let
+(* The accessibility rows, from .a11yg on *)
+fn overlay_rules_accessibility_rows {left:nat | left >= 347} (sheet: sheet(left, false, false)): [after:nat | after >= left - 347] sheet(after, false, false) = let
   val sheet = rule(sheet, ".a11yg")
   val sheet = lay(sheet, FontWeight(), "600")
   val sheet = lay(sheet, MarginTop(), "10px")
@@ -291,10 +291,10 @@ fn overlay_rules_fourth_part {left:nat | left >= 347} (sheet: sheet(left, false,
 in sheet end
 
 implement overlay_rules (sheet) = let
-  val sheet = overlay_rules_first_part(sheet)
-  val sheet = overlay_rules_second_part(sheet)
-  val sheet = overlay_rules_third_part(sheet)
-  val sheet = overlay_rules_fourth_part(sheet)
+  val sheet = overlay_rules_image_viewer_and_toasts(sheet)
+  val sheet = overlay_rules_menus(sheet)
+  val sheet = overlay_rules_dialog_fields_and_book_info(sheet)
+  val sheet = overlay_rules_accessibility_rows(sheet)
 in sheet end
 
 end
