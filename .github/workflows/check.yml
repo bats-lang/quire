@@ -70,8 +70,6 @@ jobs:
       # The same commit always gives the same version, whatever the clock
       # or time zone, and the Android project carries it (#219)
       - name: Check the version
-        env:
-          QUIRE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: tests/version/same.sh
 
       - name: Verify PWA output
@@ -103,6 +101,14 @@ jobs:
           path: |
             dist/android
             dist/pwa
+          retention-days: 1
+
+      # The generator, whose `test` runs the e2e groups' suites (#499)
+      - name: Upload the PWA generator
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: quire-gen-pwa
+          path: dist/debug/gen-pwa
           retention-days: 1
 
       - name: Install Node.js
@@ -194,6 +200,16 @@ jobs:
           name: quire-android
           path: dist
 
+      # gen-pwa, for `gen-pwa test` (an artifact keeps no file mode)
+      - name: Download the PWA generator
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: quire-gen-pwa
+          path: dist/debug
+
+      - name: Make the generator runnable
+        run: chmod +x dist/debug/gen-pwa
+
       # The home page beside the app, as deploy.yml publishes it, for the
       # e2e test that the service worker leaves it to the network
       - name: Add the home page
@@ -232,14 +248,14 @@ jobs:
           listed=$(npx playwright test --list $specs | tail -1)
           echo "$listed"
           echo "$listed" | grep -q " in $(echo "$specs" | wc -l) files$" || { echo "::error::the group's filters do not name exactly its $(echo "$specs" | wc -l) specs"; exit 1; }
-          # the timing specs (the `perf` group) run one at a time: a second
-          # worker's load is what their budgets would otherwise measure
-          workers=""
-          [ "${{ matrix.group }}" = perf ] && workers="--workers=1"
-          npx playwright test $workers --reporter=list,html,json $specs
+          # through gen-pwa test (pwa#82, #499): dist/pwa served at a port
+          # the kernel picks, the tests that measure time (tagged @serial)
+          # alone on one worker first, then the others; each run's JSON
+          # report in the timings directory (serial.json, parallel.json)
+          mkdir -p "$RUNNER_TEMP/e2e-timings"
+          ./dist/debug/gen-pwa test --timings "$RUNNER_TEMP/e2e-timings" -- --reporter=list,html,json $specs
         env:
           PLAYWRIGHT_HTML_OPEN: never
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/e2e-timings.json
 
       # Each test's time per project and spec (#461), kept for every run
       # so the groups are balanced by measurement, not guessing: sum
@@ -249,7 +265,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-timings-${{ matrix.group }}
-          path: ${{ runner.temp }}/e2e-timings.json
+          path: ${{ runner.temp }}/e2e-timings/
           if-no-files-found: ignore
           retention-days: 30
 
@@ -327,7 +343,7 @@ jobs:
   # Every push to main that passed the whole check (the e2e groups and the
   # Android build and smoke test) goes to Google Play's internal testing
   # track (#308): the AAB this run built and signed, its versionName and
-  # versionCode the commit's (scripts/version.sh), the commit's subject as
+  # versionCode the commit's (src/version.bats), the commit's subject as
   # its release notes. Production stays a promotion made in the Play
   # Console (ANDROID.md). It signs in by Workload Identity Federation
   # (scripts/play-release.env): no key is stored, and Google admits only

@@ -14,10 +14,11 @@ staload "fields.sats"
 staload "schema.sats"
 
 (* the identity of a record: the version of the format it was written
-   in, the least version that can read it, its groups' values and the
-   chunks kept *)
+   in, the least version that can read it, its groups' values, the
+   chunks kept and the groups it did not hold (added to the format after
+   it was written: their values are their defaults) *)
 #pub datasort rx =
-  | rx_mk of (int, int, gvals, extras)
+  | rx_mk of (int, int, gvals, extras, absent)
 
 (* what reading a record comes to *)
 #pub datasort recres =
@@ -37,10 +38,10 @@ staload "schema.sats"
    kind: "QREC", the kind, the version and the least version, then the
    chunks, then the end chunk *)
 #pub dataprop ENCODES(specs, int, rx, bytes) =
-  | {spec_list:specs}{kind,format_version,least_version:int | 0 <= kind; kind < 256; 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}
-    {vals:gvals}{kept_extras:extras}{chunks:pchunks}{chunk_count:nat}{body,octets:bytes}
-    ENCODES_mk(spec_list, kind, rx_mk(format_version, least_version, vals, kept_extras), octets)
-    of (SENC(spec_list, vals, kept_extras, chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks), CHAINS(chunk_count, chunks, body),
+  | {spec_list:specs}{spec_n:nat}{kind,format_version,least_version:int | 0 <= kind; kind < 256; 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}
+    {vals:gvals}{kept_extras:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat}{body,octets:bytes}
+    ENCODES_mk(spec_list, kind, rx_mk(format_version, least_version, vals, kept_extras, missing), octets)
+    of (SPECN(spec_list, spec_n), SENC(spec_list, spec_n, vals, kept_extras, missing, chunks), ALLGOOD(chunk_count, chunks), PCN(chunk_count, chunks), CHAINS(chunk_count, chunks, body),
         APPEND(bcons(81, bcons(82, bcons(69, bcons(67, bcons(kind, bcons(format_version, bcons(least_version, bnil()))))))), body, octets))
 
 
@@ -64,18 +65,18 @@ primplement pcn_functional {chunks}{first_count,second_count} (first_count_proof
 (* FIN(spec_list, format_version, least_version, seq_outcome, outcome): the chunks read come to outcome *)
 #pub dataprop FIN(specs, int, int, seqres, recres) =
   | {spec_list:specs}{format_version,least_version:int}{cause:seqcause} FIN_seq(spec_list, format_version, least_version, sq_fail(cause), rr_damaged())
-  | {spec_list:specs}{format_version,least_version:int}{vals:gvals}{kept_extras:extras}{chunks:pchunks}{chunk_count:nat}
-    FIN_ok(spec_list, format_version, least_version, sq_ok(chunks), rr_ok(rx_mk(format_version, least_version, vals, kept_extras)))
-    of (PCN(chunk_count, chunks), SDEC(spec_list, spec_list, chunks, sd_ok(vals, kept_extras)))
-  | {spec_list:specs}{format_version,least_version:int}{vals:gvals}{kept_extras:extras}{lost_groups:lost}{chunks:pchunks}{chunk_count:nat}
-    FIN_loss(spec_list, format_version, least_version, sq_ok(chunks), rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups))
-    of (PCN(chunk_count, chunks), SDEC(spec_list, spec_list, chunks, sd_loss(vals, kept_extras, lost_groups)))
-  | {spec_list:specs}{format_version,least_version:int}{chunks:pchunks}{chunk_count:nat}
+  | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{vals:gvals}{kept_extras:extras}{missing:absent}{chunks:pchunks}{chunk_count:nat}
+    FIN_ok(spec_list, format_version, least_version, sq_ok(chunks), rr_ok(rx_mk(format_version, least_version, vals, kept_extras, missing)))
+    of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), SDEC(spec_list, spec_list, spec_n, chunks, sd_ok(vals, kept_extras, missing)))
+  | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{vals:gvals}{kept_extras:extras}{lost_groups:lost}{missing:absent}{chunks:pchunks}{chunk_count:nat}
+    FIN_loss(spec_list, format_version, least_version, sq_ok(chunks), rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing), lost_groups))
+    of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), SDEC(spec_list, spec_list, spec_n, chunks, sd_loss(vals, kept_extras, lost_groups, missing)))
+  | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{chunks:pchunks}{chunk_count:nat}
     FIN_damaged(spec_list, format_version, least_version, sq_ok(chunks), rr_damaged())
-    of (PCN(chunk_count, chunks), SDEC(spec_list, spec_list, chunks, sd_fail(cause_damaged())))
-  | {spec_list:specs}{format_version,least_version:int}{chunks:pchunks}{chunk_count:nat}
+    of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), SDEC(spec_list, spec_list, spec_n, chunks, sd_fail(cause_damaged())))
+  | {spec_list:specs}{spec_n:nat}{format_version,least_version:int}{chunks:pchunks}{chunk_count:nat}
     FIN_newer(spec_list, format_version, least_version, sq_ok(chunks), rr_newer())
-    of (PCN(chunk_count, chunks), SDEC(spec_list, spec_list, chunks, sd_fail(cause_newer())))
+    of (SPECN(spec_list, spec_n), PCN(chunk_count, chunks), SDEC(spec_list, spec_list, spec_n, chunks, sd_fail(cause_newer())))
 
 #pub prfun falsep_eqrr {first_outcome,second_outcome:recres} (FALSEP()): EQRR(first_outcome, second_outcome)
 
@@ -86,58 +87,72 @@ primplement falsep_eqrr {first_outcome,second_outcome} (falsity) = case+ falsity
 primplement fin_functional {spec_list}{format_version,least_version}{seq_outcome}{first_outcome,second_outcome} (first_fin, second_fin) =
   case+ first_fin of
   | FIN_seq() => (case+ second_fin of FIN_seq() => EQRR_refl())
-  | FIN_ok(first_count, first_sdec) =>
+  | FIN_ok(first_specn, first_count, first_sdec) =>
     (case+ second_fin of
-     | FIN_ok(second_count, second_sdec) => let
+     | FIN_ok(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() => EQRR_refl()) end
-     | FIN_loss(second_count, second_sdec) => let
+     | FIN_loss(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_damaged(second_count, second_sdec) => let
+     | FIN_damaged(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_newer(second_count, second_sdec) => let
+     | FIN_newer(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end)
-  | FIN_loss(first_count, first_sdec) =>
+  | FIN_loss(first_specn, first_count, first_sdec) =>
     (case+ second_fin of
-     | FIN_ok(second_count, second_sdec) => let
+     | FIN_ok(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_loss(second_count, second_sdec) => let
+     | FIN_loss(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() => EQRR_refl()) end
-     | FIN_damaged(second_count, second_sdec) => let
+     | FIN_damaged(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_newer(second_count, second_sdec) => let
+     | FIN_newer(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end)
-  | FIN_damaged(first_count, first_sdec) =>
+  | FIN_damaged(first_specn, first_count, first_sdec) =>
     (case+ second_fin of
-     | FIN_ok(second_count, second_sdec) => let
+     | FIN_ok(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_loss(second_count, second_sdec) => let
+     | FIN_loss(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_damaged(_, _) => EQRR_refl()
-     | FIN_newer(second_count, second_sdec) => let
+     | FIN_damaged(_, _, _) => EQRR_refl()
+     | FIN_newer(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end)
-  | FIN_newer(first_count, first_sdec) =>
+  | FIN_newer(first_specn, first_count, first_sdec) =>
     (case+ second_fin of
-     | FIN_ok(second_count, second_sdec) => let
+     | FIN_ok(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_loss(second_count, second_sdec) => let
+     | FIN_loss(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_damaged(second_count, second_sdec) => let
+     | FIN_damaged(second_specn, second_count, second_sdec) => let
+         prval EQI_refl() = specn_functional(first_specn, second_specn)
          prval EQI_refl() = pcn_functional(first_count, second_count)
        in (case+ sdec_functional(first_count, first_sdec, second_sdec) of EQSD_refl() =/=> ()) end
-     | FIN_newer(_, _) => EQRR_refl())
+     | FIN_newer(_, _, _) => EQRR_refl())
 
 
 (* DECODES(spec_list, kind, octets, outcome): reading octets as a record of this kind and these
@@ -278,7 +293,7 @@ primplement decodes_functional {spec_list}{kind}{octets}{byte_count}{first_outco
 
 primplement encodes_decodes {spec_list}{kind}{record_value}{octets} (encoded) =
   case+ encoded of
-  | ENCODES_mk(senc, good, count, chains, appended) => let
+  | ENCODES_mk(specn, senc, good, count, chains, appended) => let
       prval APPEND_cons(append1) = appended
       prval APPEND_cons(append2) = append1
       prval APPEND_cons(append3) = append2
@@ -289,7 +304,7 @@ primplement encodes_decodes {spec_list}{kind}{record_value}{octets} (encoded) =
       prval APPEND_nil() = append7
       prval magic = TAKE_succ(TAKE_succ(TAKE_succ(TAKE_succ(TAKE_zero()))))
       prval header = TAKE_succ(TAKE_succ(TAKE_succ(TAKE_zero())))
-    in DECODES_body(magic, header, chains_seq(chains), FIN_ok(count, senc_sdec(count, senc))) end
+    in DECODES_body(magic, header, chains_seq(chains), FIN_ok(specn, count, senc_sdec(count, senc))) end
 
 
 (* and a record read is a record written *)
@@ -297,7 +312,7 @@ primplement encodes_decodes {spec_list}{kind}{record_value}{octets} (encoded) =
 
 primplement decodes_encodes {spec_list}{kind}{record_value}{octets} (decoded) =
   case+ decoded of
-  | DECODES_body(magic_take, header_take, seq_proof, FIN_ok(count, sdec)) => let
+  | DECODES_body(magic_take, header_take, seq_proof, FIN_ok(specn, count, sdec)) => let
       prval senc = sdec_senc(count, sdec)
       prval good = senc_allgood(count, senc)
       prval chains = seq_chains(good, seq_proof)
@@ -306,15 +321,15 @@ primplement decodes_encodes {spec_list}{kind}{record_value}{octets} (decoded) =
       prval (front, whole) = append_assoc_rev(app_header, app_magic)
       prval literal = APPEND_cons(APPEND_cons(APPEND_cons(APPEND_cons(APPEND_nil()))))
       prval EQB_refl() = append_functional(literal, front)
-    in ENCODES_mk(senc, good, count, chains, whole) end
+    in ENCODES_mk(specn, senc, good, count, chains, whole) end
 
 
 (* A record read, at run time *)
 #pub datavtype recread(recres, specs) =
-  | {spec_list:specs}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{vals:gvals}{kept_extras:extras}{value_count,extra_count:nat}
-    RR_ok(rr_ok(rx_mk(format_version, least_version, vals, kept_extras)), spec_list) of (int format_version, int least_version, gvalsv(spec_list, vals, value_count), extrasv(kept_extras, extra_count))
-  | {spec_list:specs}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{vals:gvals}{kept_extras:extras}{lost_groups:lost}{value_count,extra_count,lost_count:nat}
-    RR_loss(rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups), spec_list) of (int format_version, int least_version, gvalsv(spec_list, vals, value_count), extrasv(kept_extras, extra_count), lostv(lost_groups, lost_count))
+  | {spec_list:specs}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{vals:gvals}{kept_extras:extras}{missing:absent}{spec_count,value_count,extra_count:nat}
+    RR_ok(rr_ok(rx_mk(format_version, least_version, vals, kept_extras, missing)), spec_list) of (int format_version, int least_version, gvalsv(spec_list, vals, value_count), extrasv(kept_extras, extra_count), absentv(missing, spec_list, spec_count))
+  | {spec_list:specs}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{vals:gvals}{kept_extras:extras}{lost_groups:lost}{missing:absent}{spec_count,value_count,extra_count,lost_count:nat}
+    RR_loss(rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing), lost_groups), spec_list) of (int format_version, int least_version, gvalsv(spec_list, vals, value_count), extrasv(kept_extras, extra_count), lostv(lost_groups, lost_count), absentv(missing, spec_list, spec_count))
   | {spec_list:specs} RR_notquire(rr_notquire(), spec_list)
   | {spec_list:specs} RR_newer(rr_newer(), spec_list)
   | {spec_list:specs} RR_damaged(rr_damaged(), spec_list)
@@ -323,16 +338,17 @@ primplement decodes_encodes {spec_list}{kind}{record_value}{octets} (decoded) =
 #pub fun record_write {spec_list:specs}{kind,format_version,least_version:int | 0 <= kind; kind < 256; 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}
   {vals:gvals}{kept_extras:extras}{spec_count,value_count,extra_count:nat}
   (specs: !specsv(spec_list, spec_count), kind: int kind, format_version: int format_version, least_version: int least_version, vals: !gvalsv(spec_list, vals, value_count), extras: !extrasv(kept_extras, extra_count))
-  : [octets:bytes][written_len:nat] (ENCODES(spec_list, kind, rx_mk(format_version, least_version, vals, kept_extras), octets) | blist(octets, written_len))
+  : [octets:bytes][written_len:nat] (ENCODES(spec_list, kind, rx_mk(format_version, least_version, vals, kept_extras, ab_nil()), octets) | blist(octets, written_len))
 
 implement record_write {spec_list}{kind,format_version,least_version}{vals}{kept_extras}{spec_count,value_count,extra_count} (specs, kind, format_version, least_version, vals, extras) = let
+  val (specn | ()) = specsv_specn(specs)
   val (senc, good, count | chunk_list) = schema_write(specs, vals, extras)
   val (chains | body) = seq_write(good | chunk_list)
   val () = chunklist_free(chunk_list)
   val header = blist_cons(81, blist_cons(82, blist_cons(69, blist_cons(67,
                blist_cons(kind, blist_cons(format_version, blist_cons(least_version, blist_nil())))))))
   val (appended | record_bytes) = blist_append(header, body)
-in (ENCODES_mk(senc, good, count, chains, appended) | record_bytes) end
+in (ENCODES_mk(specn, senc, good, count, chains, appended) | record_bytes) end
 
 
 prfn _not_quire_proof {spec_list:specs}{kind:int}{octets,magic_bytes,rest:bytes} (magic_take: TAKE(4, octets, magic_bytes, rest), magic_diff: MAGICDIFF(magic_bytes))
@@ -372,13 +388,14 @@ implement record_read {spec_list}{kind}{spec_count}{octets}{byte_count} (specs, 
                  case+ seq_result of
                  | ~SR_fail() => (DECODES_body(magic_take, header_take, seq_proof, FIN_seq()) | RR_damaged())
                  | ~SR_ok(count | chunk_list) => let
+                     val (specn | ()) = specsv_specn(specs)
                      val (schema_decode | schema_outcome) = schema_read(count, specs, chunk_list)
                    in
                      case+ schema_outcome of
-                     | ~SDR_ok(vals, extras) => (DECODES_body(magic_take, header_take, seq_proof, FIN_ok(count, schema_decode)) | RR_ok(format_version, least_version, vals, extras))
-                     | ~SDR_loss(vals, extras, lost) => (DECODES_body(magic_take, header_take, seq_proof, FIN_loss(count, schema_decode)) | RR_loss(format_version, least_version, vals, extras, lost))
-                     | ~SDR_fail(CausDamaged()) => (DECODES_body(magic_take, header_take, seq_proof, FIN_damaged(count, schema_decode)) | RR_damaged())
-                     | ~SDR_fail(CausNewer()) => (DECODES_body(magic_take, header_take, seq_proof, FIN_newer(count, schema_decode)) | RR_newer())
+                     | ~SDR_ok(vals, extras, missing) => (DECODES_body(magic_take, header_take, seq_proof, FIN_ok(specn, count, schema_decode)) | RR_ok(format_version, least_version, vals, extras, missing))
+                     | ~SDR_loss(vals, extras, lost, missing) => (DECODES_body(magic_take, header_take, seq_proof, FIN_loss(specn, count, schema_decode)) | RR_loss(format_version, least_version, vals, extras, lost, missing))
+                     | ~SDR_fail(CausDamaged()) => (DECODES_body(magic_take, header_take, seq_proof, FIN_damaged(specn, count, schema_decode)) | RR_damaged())
+                     | ~SDR_fail(CausNewer()) => (DECODES_body(magic_take, header_take, seq_proof, FIN_newer(specn, count, schema_decode)) | RR_newer())
                    end
                end))
        else _not_quire(magic_take, MAGICDIFF_mk(), rest)

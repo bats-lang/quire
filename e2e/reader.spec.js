@@ -309,10 +309,18 @@ test('links: out of the book open outside it, inside it jump and can go back', a
       { body: filler + '<p id="far">FAR-TARGET</p>' },
     ],
   });
+  // a link out of the book asks first (the W3C suite's pub-external-links, #419): where it goes, and a link that opens it in its own tab
   const out = bookPage(page).getByRole('link', { name: 'the web' });
-  await expect(out).toHaveAttribute('href', 'https://example.com/');
-  await expect(out).toHaveAttribute('target', '_blank');
-  await expect(out).toHaveAttribute('rel', /noopener/);
+  await out.click();
+  const asked = page.getByRole('dialog', { name: 'Footnote' });
+  await expect(asked).toContainText('This link leaves the book. It goes to https://example.com/.');
+  await expect(asked.getByRole('button', { name: 'Go to note' })).toBeHidden();
+  const open = asked.getByRole('link', { name: 'Open link' });
+  await expect(open).toHaveAttribute('href', 'https://example.com/');
+  await expect(open).toHaveAttribute('target', '_blank');
+  await expect(open).toHaveAttribute('rel', /noopener/);
+  await asked.getByRole('button', { name: 'Close', exact: true }).click();
+  await expect(asked).toBeHidden();
   await bookPage(page).getByRole('link', { name: 'the far place' }).click();
   await expect(chapterTitle(page)).toHaveText('Chapter 2');
   expect(await visibleText(page)).toContain('FAR-TARGET');
@@ -378,33 +386,42 @@ test('a note\'s reference opens the note over the page, which can be gone to', a
   await expect(note).toBeHidden();
 });
 
-test('a reading face that arrives late has the chapter\'s pages counted again', async ({ page }) => {
-  // Literata, the reading face, held back past the reader's own
-  // re-checks of a chapter just shown (3 s): it was laid out with a
-  // fallback, and only the face's arrival can say the count is stale
-  let release;
-  const held = new Promise(r => { release = r; });
-  await page.route('**/literata-latin.woff2', async route => { await held; await route.continue(); });
-  await start(page);
-  const filler = Array.from({ length: 60 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
-  await readBook(page, { title: 'Late face', author: 'Bot', rawChapters: [{ body: filler }] });
-  await page.waitForTimeout(3500);
-  const fallback = await place(page);
-  release();
-  await expect.poll(() => page.evaluate(() => document.fonts.check('16px Literata'))).toBe(true);
-  await expect.poll(() => page.evaluate(() => document.fonts.status)).toBe('loaded');
-  // the count the chapter has in its face: a resize counts it afresh
-  const size = page.viewportSize();
-  const counted = async () => {
-    await page.setViewportSize({ width: size.width + 40, height: size.height });
-    await expect.poll(async () => (await place(page)).t).not.toBe(0);
-    await page.setViewportSize(size);
-    await expect.poll(() => page.evaluate(() => innerWidth)).toBe(size.width);
-  };
-  await expect.poll(async () => (await place(page)).t).not.toBe(fallback.t);
-  const arrived = await place(page);
-  await counted();
-  await expect.poll(async () => (await place(page)).t).toBe(arrived.t);
+test.describe('a late reading face', () => {
+  // The face is held by a route, and a route never sees a request the
+  // app's service worker answers (it fetches same-origin files itself
+  // once it controls the page; Playwright's route documentation advises
+  // blocking service workers), so the hold held only when the face was
+  // asked for before the worker took the page: the worker is blocked here
+  test.use({ serviceWorkers: 'block' });
+
+  test('a reading face that arrives late has the chapter\'s pages counted again', async ({ page }) => {
+    // Literata, the reading face, held back past the reader's own
+    // re-checks of a chapter just shown (3 s): it was laid out with a
+    // fallback, and only the face's arrival can say the count is stale
+    let release;
+    const held = new Promise(r => { release = r; });
+    await page.route('**/literata-latin.woff2', async route => { await held; await route.continue(); });
+    await start(page);
+    const filler = Array.from({ length: 60 }, (_, k) => `<p>Filler ${k} ` + 'lorem ipsum dolor sit amet '.repeat(12) + '</p>').join('');
+    await readBook(page, { title: 'Late face', author: 'Bot', rawChapters: [{ body: filler }] });
+    await page.waitForTimeout(3500);
+    const fallback = await place(page);
+    release();
+    await expect.poll(() => page.evaluate(() => document.fonts.check('16px Literata'))).toBe(true);
+    await expect.poll(() => page.evaluate(() => document.fonts.status)).toBe('loaded');
+    // the count the chapter has in its face: a resize counts it afresh
+    const size = page.viewportSize();
+    const counted = async () => {
+      await page.setViewportSize({ width: size.width + 40, height: size.height });
+      await expect.poll(async () => (await place(page)).t).not.toBe(0);
+      await page.setViewportSize(size);
+      await expect.poll(() => page.evaluate(() => innerWidth)).toBe(size.width);
+    };
+    await expect.poll(async () => (await place(page)).t).not.toBe(fallback.t);
+    const arrived = await place(page);
+    await counted();
+    await expect.poll(async () => (await place(page)).t).toBe(arrived.t);
+  });
 });
 
 /** A w by h PNG of one grey */

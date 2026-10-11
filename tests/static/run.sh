@@ -90,6 +90,10 @@ fail=0
 # fetched modules, not its outputs): as `check`, and as what the fixtures
 # start from, its build kept aside to be put back after each
 app="$TMP/app"
+# The copy has no .git, and bats writes the commit's facts (the version,
+# src/version.bats) from git: it reads the checkout's repository
+GIT_DIR=$(git -C "$ROOT" rev-parse --absolute-git-dir)
+export GIT_DIR
 if named check || [ -n "$fixtures" ]; then
   mkdir -p "$app"
   (cd "$ROOT" && tar cf - --exclude=./node_modules --exclude=./dist \
