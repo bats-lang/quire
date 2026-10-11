@@ -2737,6 +2737,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and

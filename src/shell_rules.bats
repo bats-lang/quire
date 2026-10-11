@@ -286,7 +286,7 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1354} (sheet: sheet(lef
 in sheet end
 
 (* The book cards, from .conth on *)
-fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1479] sheet(after, false, false) = let
+fn shell_rules_book_cards {left:nat | left >= 1503} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1503] sheet(after, false, false) = let
   val sheet = rule(sheet, ".conth")
   val sheet = lay(sheet, FontWeight(), "600")
   val sheet = lay(sheet, MarginTop(), "8px")
@@ -345,7 +345,11 @@ fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, f
   val sheet = rule(sheet, ".card *")
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
+  (* the same box in the list and the grid (quire#495): in the list the
+     card row stretches its children, which made this button as tall as
+     the card; centred, it is its own 48px square, as in the grid *)
   val sheet = rule(sheet, ".cmore")
+  val sheet = lay(sheet, AlignSelf(), "center")
   val sheet = lay(sheet, FontSize(), "22px")
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
