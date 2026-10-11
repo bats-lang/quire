@@ -419,6 +419,10 @@ export async function showChrome(page) {
     const box = await bookPage(page).boundingBox();
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForTimeout(150);
+    // the bars may be slow to come up on a loaded machine: a tap made
+    // again before they have would take them down (a toggle), so they are
+    // waited for before it is decided that the tap brought up none
+    await prev.waitFor({ state: 'visible', timeout: 1500 }).catch(() => {});
     // a tap between the zones on a highlight selects it, with its toolbar
     // (quire#428), and brings up no bars: the selection is ended and the
     // t key, which toggles them, brings them up
