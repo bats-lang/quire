@@ -156,7 +156,7 @@ test('the position survives a reload, a backup and its restore, as 2.5 and not 2
   await librarySettings(page);
   await restoreInput(page).setInputFiles([path]);
   await expect(dialog(page, 'Backup restored')).toBeVisible();
-  await dialog(page, 'Backup restored').getByRole('button', { name: 'OK' }).click();
+  await dialog(page, 'Backup restored').getByRole('button', { name: 'Done' }).click();
   await expect(card(page, novella)).toContainText('Foundation · 2.5');
   await expect(card(page, 'Cal Foundation Vol 10')).toContainText('Foundation · 10');
 });

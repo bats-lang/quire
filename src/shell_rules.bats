@@ -12,7 +12,7 @@ staload "declarations.sats"
 #pub fn shell_rules {left:nat | left >= 8750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8750] sheet(after, false, false)
 
 (* The library page, from body on *)
-fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1831] sheet(after, false, false) = let
+fn shell_rules_library_page {left:nat | left >= 1832} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1832] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -29,7 +29,10 @@ fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false,
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, MaxWidth(), "800px")
   val sheet = lay(sheet, Margin(), "0 auto")
-  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(24px,var(--safe-bottom)) max(16px,var(--safe-left))")
+  (* the room under the last card is the Undo toast's (it stays until it
+     is dismissed, 112 px up and 56 tall): the list scrolls clear of it,
+     as a list leaves room for a FAB (#380) *)
+  val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(176px,var(--safe-bottom)) max(16px,var(--safe-left))")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MinHeight(), "100vh")
   val sheet = close(sheet)

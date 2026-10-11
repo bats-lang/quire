@@ -252,7 +252,7 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   await librarySettings(page);
   const path = rawFile('quire-backup.json', JSON.stringify(backup));
   // a reset with its Trash emptied, the book imported again: new, until the backup is restored
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   await emptyTrash(page);
   await expect(importOffered(page)).toBeVisible();
@@ -260,7 +260,7 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   await expect(card(page, title)).toContainText('Unread');
   await librarySettings(page);
   await restoreInput(page).setInputFiles([path]);
-  await dialog(page, 'Backup restored').getByRole('button', { name: 'OK' }).click();
+  await dialog(page, 'Backup restored').getByRole('button', { name: 'Done' }).click();
   await expect.poll(() => cardPercent(page, title)).toBe(read);
   expect(errors).toEqual([]);
 });

@@ -143,7 +143,7 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   expect(parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
   // the sheet scrolls on a short window to its last row
   await openReadingSettings(page, 'Look');
-  const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
+  const reset = more(page).getByRole('button', { name: 'Reset reading settings', exact: true });
   await reset.scrollIntoViewIfNeeded();
   await expect(reset).toBeInViewport();
   expect(errors).toEqual([]);
@@ -288,7 +288,7 @@ test('reset puts the defaults back', async ({ page }) => {
   // resetting (at the end of the sheet, under every tab) asks nothing,
   // and can be undone
   await openReadingSettings(page, 'Page');
-  const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
+  const reset = more(page).getByRole('button', { name: 'Reset reading settings', exact: true });
   await reset.click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await page.getByRole('button', { name: 'Undo' }).click();
@@ -663,7 +663,7 @@ test('reset puts reading aloud\'s speed and voice, the brightness and the rotati
   await brightness.fill('25');
   await lock.click();
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
-  await more(page).getByRole('button', { name: 'Reset to defaults', exact: true }).click();
+  await more(page).getByRole('button', { name: 'Reset reading settings', exact: true }).click();
   await expect(device).toHaveAttribute('aria-pressed', 'true');
   await expect(brightness).toHaveValue('50');
   await expect(lock).toHaveAttribute('aria-pressed', 'false');

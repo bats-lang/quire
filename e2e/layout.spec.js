@@ -13,7 +13,7 @@ import {
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort, cardMoreBoxes } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort, cardMoreBoxes } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -48,6 +48,8 @@ async function fits(page, screen) {
   expect(await labelInName(page), `buttons whose name is not their words on ${screen}`).toEqual([]);
   expect(await strayGrounds(page), `text on a ground other than the one behind it on ${screen}`).toEqual([]);
   expect(await targetsShort(page), `touch targets under 48 px on ${screen}`).toEqual([]);
+  expect(await rowIsTarget(page), `rows that open a screen whose button is not the whole row on ${screen}`).toEqual([]);
+  expect(await toastClear(page), `controls under a toast on ${screen}`).toEqual([]);
   expect(await peekAbove(page), `sheets covering more than 60% of the window on ${screen}`).toEqual([]);
   expect(await sheetReach(page), `controls of a sheet that cannot be scrolled into reach on ${screen}`).toEqual([]);
   expect(await offScale(page), `gaps and tab paddings off the spacing scale on ${screen}`).toEqual([]);
@@ -420,7 +422,7 @@ test('the reading settings sheet scrolls within the window, Close always in reac
   const panel = dialog(page, 'Reading settings');
   const close = panel.getByRole('button', { name: 'Close', exact: true });
   const tabs = panel.getByRole('tablist', { name: 'Reading settings' });
-  const last = panel.getByRole('button', { name: 'Reset to defaults', exact: true });
+  const last = panel.getByRole('button', { name: 'Reset reading settings', exact: true });
   const within = () => panel.evaluate(e => {
     const r = e.getBoundingClientRect();
     return r.top >= -1 && r.bottom <= innerHeight + 1;

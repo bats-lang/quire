@@ -220,7 +220,7 @@ fn overlay_rules_menus {left:nat | left >= 2100} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2100} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2100] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2300] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -277,15 +277,29 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2100} (sheet: s
   val sheet = lay(sheet, Inset(), "0")
   val sheet = lay(sheet, ZIndex(), "15")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
-  val sheet = lay(sheet, Overflow(), "auto")
+  (* the screen's ground and its padding (the system bars' room) stay
+     put; what scrolls is its content, inside that padding, so it is
+     cut at the bars' edge and never drawn under one (#380: a screen
+     taller than the window had its last rows under the navigation bar) *)
+  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = lay(sheet, Padding(), "max(12px,var(--safe-top)) max(16px,var(--safe-right)) max(24px,var(--safe-bottom)) max(16px,var(--safe-left))")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in")
+  val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, MinHeight(), "0")
+  val sheet = lay(sheet, Width(), "100%")
   val sheet = lay(sheet, MaxWidth(), "600px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
   val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = close(sheet)
+  (* a column that scrolls keeps each child its height, none shrinks *)
+  val sheet = rule(sheet, ".info-in>*")
+  val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.btn")
   val sheet = lay(sheet, AlignSelf(), "flex-start")
