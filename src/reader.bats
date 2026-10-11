@@ -620,6 +620,11 @@ fn _show_indicator {current_page,total,chapter,chapter_count:nat} (current_page:
   val buf = $A.alloc<byte>(96)
   val offset = _put_place(buf, current_page, total)
   val () = _set_text_of("indicator-pages", buf, offset)
+  (* the chapter steps are there where there is a chapter to go to; a
+     fixed-layout book's chapters are its pages, which the page turns step *)
+  val stepping = ~(_is_fixed())
+  val () = ui_show("chapter-previous", stepping && chapter > 1)
+  val () = ui_show("chapter-next", stepping && chapter < chapter_count)
 in _show_footer(current_page, total, chapter, chapter_count) end
 
 (* A tap on the footer's readout: the next one, which is kept with the
@@ -5762,6 +5767,23 @@ in _page_next() end
 implement page_prev() = let
   val () = reader_stack_clear()
 in _page_previous() end
+
+(* The chapter before (direction -1) or after (1) the one shown, from its
+   first page; nothing when there is none *)
+#pub fun reader_chapter_step (direction: Int): void
+implement reader_chapter_step (direction) = let
+  val () = reader_stack_clear()
+in
+  case+ reading_get() of
+  | @(_, _, chapter, chapter_count) => let
+      val target = chapter - 1 + direction
+    in
+      if target >= 0 then (if target < chapter_count then let
+          val () = !_dating := true
+        in _jump_checked(_goto(target, 0, ~1)) end else ())
+      else ()
+    end
+end
 
 #pub fun load_chapter {chapter_index:nat} (chapter_index: int chapter_index): $P.promise(load_outcome, $P.Chained)
 implement load_chapter(chapter_index) = _load_chapter(chapter_index)

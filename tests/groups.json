@@ -24,6 +24,7 @@
       "drm-catalogue.spec.js",
       "languages.spec.js",
       "places.spec.js",
+      "page-marks.spec.js",
       "progress.spec.js",
       "publisher.spec.js",
       "settings.spec.js",

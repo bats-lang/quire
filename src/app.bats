@@ -606,6 +606,11 @@ fn _reader (): void = let
   val () = ui_el("page-turn", "turn-gap", TDiv, "tgap")
   (* the running footer, shown while the bars are hidden; what it says
      the page indicator (a status) says too, so it is not read out *)
+  (* a bookmarked page's mark in the page's top-right corner, which
+     shows while the bars are hidden (annot_star, #388): drawn, not read
+     out (the star in the top bar says it) *)
+  val () = ui_el("reader", "bookmark-mark", TDiv, "bmk")
+  val () = ui_attr("bookmark-mark", AHidden, "true")
   val () = ui_el("reader", "footer", TDiv, "foot")
   val () = ui_attr("footer", AHidden, "true")
   val () = ui_el("footer", "footer-title", TSpan, "pgt")
@@ -680,6 +685,9 @@ fn _reader (): void = let
   val () = ui_attr("progress-separator", AHidden, "true")
   val () = ui_text("progress-separator", "\xC2\xB7")
   val () = ui_el("progress-label", "scrubber-percent", TSpan, "pct")
+  (* a chapter at a time, shown where there is a chapter to go to (#388) *)
+  val () = ui_icon_btn("reader-bottom-bar", "chapter-previous", "ibtn pchprev", IcPhrasePrevious, "Previous chapter")
+  val () = _hide("chapter-previous")
   val () = ui_icon_btn("reader-bottom-bar", "previous-page", "ibtn pprev", IcPrev, "Previous page")
   (* scrubber *)
   val () = ui_el("reader-bottom-bar", "scrubber", TDiv, "scr")
@@ -693,6 +701,8 @@ fn _reader (): void = let
   val () = ui_role("scrubber-tip", RTooltip)
   val () = _hide("scrubber-tip")
   val () = ui_icon_btn("reader-bottom-bar", "next-page", "ibtn pnext", IcNext, "Next page")
+  val () = ui_icon_btn("reader-bottom-bar", "chapter-next", "ibtn pchnext", IcPhraseNext, "Next chapter")
+  val () = _hide("chapter-next")
   val () = ui_el("reader-bottom-bar", "tools-row", TDiv, "tools")
   val () = ui_icon_btn("tools-row", "contents-button", "ibtn", IcContents, "Contents")
   val () = ui_icon_btn("tools-row", "typography-button", "ibtn", IcFont, "Reading settings")
