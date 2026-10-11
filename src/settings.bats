@@ -854,15 +854,21 @@ fn _show_controls (): void = let
   val current = !_set
   val buf = $A.alloc<byte>(32)
   val next = $S.int_to_str(buf, 0, 32, current.size)
+  (* each slider's value says its unit (#389): the text's size in CSS
+     pixels, the line spacing and the narration's speed as multiples,
+     the other spacings in ems; margins are steps, said as such *)
+  val next = _put_text(buf, next, "\xC2\xA0px")
   val () = ui_text_buf("size-value", buf, next)
   val buf = $A.alloc<byte>(32)
   val next = $S.int_to_str(buf, 0, 32, current.line_height / 10)
   val next = _put_text(buf, next, ".")
   val next = $S.int_to_str(buf, next, 32,
     $AR.band_g1($AR.low_byte(current.line_height - (current.line_height / 10) * 10), 15))
+  val next = _put_text(buf, next, "\xC3\x97")
   val () = ui_text_buf("line-height-value", buf, next)
   val buf = $A.alloc<byte>(32)
   val next = $S.int_to_str(buf, 0, 32, current.margin + 1)
+  val next = _put_text(buf, next, " of 5")
   val () = ui_text_buf("margins-value", buf, next)
   val font = font_code(current.font)
   val () = _pressed("font-literata", font = font_code(Literata()))
@@ -900,12 +906,15 @@ fn _show_controls (): void = let
   val () = _narration_speed_text()
   val buf = $A.alloc<byte>(32)
   val next = _put_tenths(buf, 0, 32, current.paragraph_spacing)
+  val next = _put_text(buf, next, "\xC2\xA0em")
   val () = ui_text_buf("paragraph-value", buf, next)
   val buf = $A.alloc<byte>(32)
   val next = _put_hundredths(buf, 0, 32, current.letter_spacing)
+  val next = _put_text(buf, next, "\xC2\xA0em")
   val () = ui_text_buf("letter-value", buf, next)
   val buf = $A.alloc<byte>(32)
   val next = _put_hundredths(buf, 0, 32, current.word_spacing)
+  val next = _put_text(buf, next, "\xC2\xA0em")
 in ui_text_buf("word-value", buf, next) end
 
 (* ============================================================

@@ -88,6 +88,25 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await expect(libraryShown(page)).toBeVisible();
 });
 
+test('a row that ends in a chevron opens a screen, never a dialog, and a service\'s row says what it is (#389)', async ({ page }) => {
+  await start(page);
+  await librarySettings(page);
+  for (const row of ['Sync', 'Dictionaries', 'About Quire']) {
+    await settingsButton(page, row).click();
+    const opened = page.locator('[role=dialog]:visible').last();
+    await expect(opened, `${row} opens a screen`).toHaveClass(/\binfo\b/);
+    if (row === 'Sync') {
+      // each service says, under its name, what it is
+      await expect(opened.locator('#sync-webdav-hint')).toHaveText(/Any WebDAV folder/);
+      await expect(opened.locator('#sync-nextcloud-hint')).toHaveText(/Nextcloud server/);
+    }
+    if (row === 'Dictionaries') await expect(opened.getByText('Import dictionary')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(opened).toBeHidden();
+    await expect(settingsScreen(page)).toBeVisible();
+  }
+});
+
 test('the backup is exported and restored from Settings', async ({ page }, testInfo) => {
   await start(page);
   await importFiles(page, [epubFile({ title: 'Kept Safe', author: 'Archivist' })], 1);
