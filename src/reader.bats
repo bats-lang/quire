@@ -4414,6 +4414,21 @@ end
 
 (* Lays the chapter out again (the window or the type changed), keeping
    the page on which the content at the page's top is *)
+(* The runs of digits set upright (text-combine-upright: all, _tcy_parts)
+   are scaled to their cell by the font they were laid out in: a reading
+   face that arrives after the first layout (a page opened again with the
+   fonts not yet loaded) leaves them scaled by the fallback's, so the
+   book opened again looked different (e2e/relaunch.spec.js). Chrome lays
+   them out anew when their style changes: combining switched off and on
+   again, a layout between, makes them as the face now there makes them *)
+fn _tcy_refit (): void =
+  if ~_is_vertical() then ()
+  else let
+    val () = ui_text("style-tcy", ".caf .tcy{text-combine-upright:none}")
+    val () = _measure_literal("page")
+    val () = ui_clear("style-tcy")
+  in _measure_literal("page") end
+
 fn _relayout (): void = let
   (* a turn under way ends where it was going, the page laid out anew *)
   val () = _turn_settle()
@@ -4424,6 +4439,8 @@ in
     (case+ reading_get() of @(_, _, chapter, _) => _jump_checked(_goto(chapter - 1, 0, ~1)))
   else let
     val @(page, anchor) = (case+ reading_get() of @(current, page_count, _, _) => _place_kept(current, page_count)): @(Int, Int)
+    (* the place is read before anything is laid out anew *)
+    val () = _tcy_refit()
     val () = _measure_pagination()
     val count_now = (case+ reading_get() of @(_, page_count, _, _) => (page_count: Int)): Int
   in
