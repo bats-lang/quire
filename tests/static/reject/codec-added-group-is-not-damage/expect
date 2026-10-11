@@ -1,0 +1,12 @@
+function _static_added_group_missing
+line 4
+the dynamic expression cannot be assigned the type [S2Eapp(S2Ecst(SDEC); S2Evar(known(10472)), S2Eapp(S2Ecst(gs_cons); S2Evar(tag(10475)), S2Evar(kinds(10476)), S2Eapp(S2Ecst(m_added); ), S2Evar(defaults(10477)), S2Evar(more(10473))), S2Evar(spec_n(10474)), S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sd_fail); S2Eapp(S2Ecst(cause_damaged); )))].
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(m_req); )
+The needed term is: S2Eapp(S2Ecst(m_added); )
+mismatch of static terms (equal):
+The actual term is: S2Eapp(S2Ecst(gs_cons); S2EVar(5898->S2Evar(tag(10475))), S2EVar(5899->S2Evar(kinds(10476))), S2Eapp(S2Ecst(m_req); ), S2EVar(5901->S2Evar(defaults(10477))), S2EVar(5896->S2Evar(more(10473))))
+The needed term is: S2Eapp(S2Ecst(gs_cons); S2Evar(tag(10475)), S2Evar(kinds(10476)), S2Eapp(S2Ecst(m_added); ), S2Evar(defaults(10477)), S2Evar(more(10473)))
+mismatch of static terms (tyleq):
+The actual term is: S2Eapp(S2Ecst(SDEC); S2EVar(5895->S2Evar(known(10472))), S2Eapp(S2Ecst(gs_cons); S2EVar(5898->S2Evar(tag(10475))), S2EVar(5899->S2Evar(kinds(10476))), S2Eapp(S2Ecst(m_req); ), S2EVar(5901->S2Evar(defaults(10477))), S2EVar(5896->S2Evar(more(10473)))), S2EVar(5897->S2Evar(spec_n(10474))), S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sd_fail); S2Eapp(S2Ecst(cause_damaged); )))
+The needed term is: S2Eapp(S2Ecst(SDEC); S2Evar(known(10472)), S2Eapp(S2Ecst(gs_cons); S2Evar(tag(10475)), S2Evar(kinds(10476)), S2Eapp(S2Ecst(m_added); ), S2Evar(defaults(10477)), S2Evar(more(10473))), S2Evar(spec_n(10474)), S2Eapp(S2Ecst(pnil); ), S2Eapp(S2Ecst(sd_fail); S2Eapp(S2Ecst(cause_damaged); )))
