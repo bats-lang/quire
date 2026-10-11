@@ -11,6 +11,7 @@ fn _static_remedy (failed: failure): remedy =
   | AnnotationsNotRead() => ReopenQuire()
   | BookFileLost() => ReopenQuire()
   | BookStorageFailed() => ReopenQuire()
+  | BookReplacedElsewhere() => ReopenQuire()
   | RecordFromNewerQuire() => ReopenQuire()
   | RecordDamaged() => ReopenQuire()
   | RecordNotQuires() => ReopenQuire()

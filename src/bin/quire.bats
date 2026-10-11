@@ -14,6 +14,7 @@ staload "notice.sats"
 staload "storage.sats"
 staload "layer.sats"
 staload "app.sats"
+staload "palette.sats"
 staload "style.sats"
 staload "modal.sats"
 staload "undo.sats"
@@ -25,6 +26,7 @@ staload "import.sats"
 staload "reader.sats"
 staload "toc.sats"
 staload "annot.sats"
+staload "file_version.sats"
 staload "mem.sats"
 staload "stats.sats"
 staload "dictionary.sats"
@@ -541,6 +543,7 @@ fn _library_shown (save_view: bool): void = let
   (* what sync brings for the book now goes to its stored record, and
      no place of another device's is offered *)
   val () = annot_close()
+  val () = file_version_forget()
   val () = sync_book_closed()
   val () = back_view_set(AtLibrary())
 in lib_render() end
@@ -736,6 +739,8 @@ fn _open_book {book:int} (book: int book, cause: opening_cause): void =
       val unread = (if chapter = 0 then (if page = 0 then (if book_numbers.place_modified = 0 then book_numbers.minutes_read = 0 else false) else false) else false): bool
       val id_high = book_numbers.id_high
       val id_low = book_numbers.id_low
+      (* the file this tab reads: another tab may replace it *)
+      val () = file_version_remember(id_high, id_low)
       (* the other devices' place and annotations, brought *)
       val () = sync_book_opened(book_numbers.key)
     in
@@ -1729,7 +1734,16 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(SyncOfferClose()) => sync_further_dismiss())
     in 0 end)
   val listeners = RCons(listeners, OnDocument(), "visibilitychange", llam(_) => let
-      val () = (case+ $WN.get_visibility() of $WN.Hidden() => sync_run() | $WN.Visible() => ())
+      val () = (case+ $WN.get_visibility() of
+        | $WN.Hidden() => sync_run()
+        (* shown again: the book may have been replaced by another file in another tab *)
+        | $WN.Visible() => if _in_reader() then
+            $P.finish<int>(file_version_changed(), llam(replaced) =>
+              if replaced > 0 then (if _in_reader() then let
+                  val () = _show_library()
+                in notice_say(BookReplacedElsewhere()) end else ())
+              else ())
+          else ())
     in 0 end)
 in listeners end
 
