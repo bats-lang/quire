@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 105 | 18 | 16 | 139 |
+| must | 109 | 14 | 16 | 139 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
-| deprecated | 16 | 10 | 1 | 27 |
-| all | 141 | 42 | 22 | 205 |
+| deprecated | 17 | 9 | 1 | 27 |
+| all | 146 | 37 | 22 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -30,11 +30,7 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | test | level | why | others | e2e |
 | --- | --- | --- | ---: | --- |
 | `cnt-mathml-support` | must | a math element is made a div: its tokens are shown as plain text ("x / = / a / + / b / 2"), not an equation | 14/17 | next |
-| `cnt-svg-css` | must | an SVG content document is shown as its text only: no drawing, no CSS applied to it | 5/17 | next |
-| `cnt-svg-css-inclusion` | must | an SVG included in the XHTML is not drawn (svg elements are made divs) | 12/18 | next |
-| `cnt-svg-embedded` | must | an inline svg is not drawn (made a div; no graphics) | 16/18 | next |
-| `cnt-svg-support` | must | an SVG spine document shows its text but not its drawing | 9/17 | next |
-| `lay-pp-svg-icb_multi` | must | SVG spine documents are not drawn, nor sized by their viewBox | 0/0 | next |
+| `cnt-svg-css-inclusion` | must | the svg is drawn, but the page's own <style> does not reach it (by decision: the book's CSS is dropped, quire#411; the svg is a picture of its own, so a style outside it cannot change it, as for an img (cnt-svg-css-reference)) | 12/18 | policy |
 | `lay-pp-xhtml-icb` | must | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi` | must | each page's own viewport is read (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi_declarations` | must | the first of two viewport metas is the one used (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
@@ -63,7 +59,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `pkg-manifest-unlisted-resource` | should | an image the manifest does not list is shown: the zip is read by name, not by the manifest | 4/15 | next |
 | `fxl-spine-overrides_duplicate` | deprecated | when an itemref says both layout-reflowable and layout-pre-paginated the second wins (shown as a fixed page); the test says the second must be ignored | 4/13 | next |
 | `lay-fxl-orientation-landscape` | deprecated | rendition:orientation is not read: the page is not shown in landscape and the reader is not told it should be | 10/14 | next |
-| `lay-fxl-svg-icb_multi` | deprecated | SVG spine documents are not drawn, nor sized by their viewBox | 6/9 | next |
 | `lay-fxl-xhtml-icb` | deprecated | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 11/13 | policy |
 | `lay-fxl-xhtml-icb_device_sizes` | deprecated | device-width/device-height fill the view, but the pass criterion is drawn by the book's CSS, dropped by design | 5/10 | policy |
 | `lay-fxl-xhtml-icb_invalid_meta` | deprecated | an invalid viewport meta is read as 900x600 (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 7/10 | policy |
@@ -111,7 +106,10 @@ Caveats of a pass, where there is one:
 * `cnt-css-fonts_tt`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
 * `cnt-css-fonts_woff`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
 * `cnt-css-fonts_woff2`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-svg-css`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
 * `cnt-svg-css-reference`: an SVG referenced by img is shown, and the page's CSS does not change it
+* `cnt-svg-embedded`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
+* `cnt-svg-support`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
 * `fxl-page-spread-break`: two spreads, 1-2 and 3-4, measured
 * `fxl-page-spread-center`: a centred page is alone, measured
 * `lay-fxl-layout-pre-paginated-spreads`: pages meet with no gap, measured
@@ -120,6 +118,7 @@ Caveats of a pass, where there is one:
 * `lay-fxl-page-spread-right`: measured
 * `lay-fxl-spread-landscape`: in a landscape window
 * `lay-fxl-spread-none`: one page a screen, measured
+* `lay-fxl-svg-icb_multi`: an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it
 * `lay-page-layout-both-spread`: the reflowable item with page-spread-left starts on the left; page-spread-right on a reflowable item is not placed on the right (not tested by the suite)
 * `lay-pkg-flow-paginated`: paginated is the default
 * `lay-pkg-flow-scrolled-continuous`: a book that asks for scrolled flow is scrolled until the reader chooses Pages (the Page setting starts as the book's)
@@ -135,6 +134,7 @@ Caveats of a pass, where there is one:
 * `lay-pp-spine-overrides_image-spine-pp`: the PNG spine item is replaced by its fallback
 * `lay-pp-spine-overrides_image-spine-reflow`: the PNG spine item is replaced by its fallback
 * `lay-pp-spread-none`: one page a screen, measured
+* `lay-pp-svg-icb_multi`: an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it
 * `lay-rendition-flow-pre-pag`: rendition:flow is ignored everywhere
 * `lay-roll-embedded-images`: a roll layout (EPUB 3.4 draft) is read scrolled down: each document scrolls, and the next follows at its end; not one strip across documents
 * `lay-roll-embedded-images-svg`: a roll layout is read scrolled down (as lay-roll-embedded-images)

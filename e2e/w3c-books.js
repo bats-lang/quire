@@ -103,6 +103,16 @@ function split(bytes) {
 /** A book is { valid, errors, bytes() }: the epub's bytes made on demand */
 const book = (make, { valid = true, errors = [] } = {}) => ({ valid, errors, bytes: make });
 
+const SVG_INLINE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60" style="width: 70%">
+      <defs><style type="text/css"><![CDATA[ .fil0 { fill: red } ]]></style></defs>
+      <g id="layer"><rect class="fil0" x="0" y="0" width="100" height="60"/></g>
+    </svg>`;
+const SVG_DOCUMENT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">
+  <defs><style type="text/css"><![CDATA[ .fil0 { fill: red } ]]></style></defs>
+  <g id="layer"><rect class="fil0" x="0" y="0" width="100" height="60"/></g>
+  <text x="0" y="10">Test passes if you see this text on top of an image.</text>
+</svg>`;
+
 const PAGE_TEXT = 'The text of the page.';
 const FALLBACK_TEXT = 'The fallback page is shown.';
 const fallbackItem = page('fallback', `<p>${FALLBACK_TEXT}</p>`);
@@ -293,6 +303,19 @@ export const w3cBooks = {
     spine: [{ idref: 'one' }],
   }), { valid: false, errors: ['RSC-005'] }), // the suite's own: epub:type on a title is not allowed
   // OCF: the zip container
+  // SVG
+  'svg-inline': book(() => packageEpub({
+    title: 'Inline SVG',
+    items: [page('one', `<p>Test passes if you can see an image.</p>
+    ${SVG_INLINE}`, {}, { properties: 'svg' })],
+    spine: [{ idref: 'one' }],
+  })),
+  'svg-document': book(() => packageEpub({
+    title: 'SVG as a content document',
+    items: [{ id: 'scene', href: 'scene.svg', type: 'image/svg+xml', data: SVG_DOCUMENT }],
+    spine: [{ idref: 'scene' }],
+    toc: [{ href: 'scene.svg', label: 'Scene' }],
+  })),
   'zip-bzip2': book(() => packageEpub({
     title: 'Compressed with bzip2',
     items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],

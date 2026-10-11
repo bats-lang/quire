@@ -320,3 +320,47 @@ test('ocf-zip-mult (must): an archive split into segments is refused', async ({ 
   await expect(page.getByRole('alert')).toContainText('split');
   await expect(cards(page)).toHaveCount(0);
 });
+
+// ---- SVG ----
+
+/** The red of the picture drawn in the page's first image: the colour of its centre pixel, once it is loaded */
+async function pictureColour(page) {
+  const image = bookPage(page).locator('img').first();
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
+  return image.evaluate(i => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 20; canvas.height = 20;
+    const context = canvas.getContext('2d');
+    context.drawImage(i, 0, 0, 20, 20);
+    return Array.from(context.getImageData(10, 10, 1, 1).data);
+  });
+}
+
+test('cnt-svg-embedded, cnt-svg-support (must): an svg in a page and an svg as a page are drawn', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-inline', 'Inline SVG');
+  const [red, green, blue] = await pictureColour(page);
+  expect([red, green, blue]).toEqual([255, 0, 0]);
+});
+
+test('cnt-svg-support (must): an svg content document is drawn, its own style applied', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-document', 'SVG as a content document');
+  const [red, green, blue] = await pictureColour(page);
+  expect([red, green, blue]).toEqual([255, 0, 0]);
+});
+
+test('cnt-svg-css (must): the svg is a picture of its own, its style neither reaching the page nor reached by it', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-inline', 'Inline SVG');
+  await pictureColour(page);
+  // the page holds no svg element and no style of the book's: nothing the svg says reaches the text
+  await expect(bookPage(page).locator('svg')).toHaveCount(0);
+  await expect(bookPage(page).locator('style')).toHaveCount(0);
+  const colour = await bookPage(page).locator('p').first().evaluate(p => getComputedStyle(p).color);
+  expect(colour).not.toBe('rgb(255, 0, 0)');
+  // and it is a picture: an image whose source is a blob of its own
+  const source = await bookPage(page).locator('img').first().getAttribute('src');
+  expect(source).toMatch(/^blob:/);
+});

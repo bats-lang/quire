@@ -1038,7 +1038,7 @@ A must test stays failing only where two documented behaviours conflict, and the
 that wins is named:
 
 * **The book's CSS is not applied (#411) wins over the suite's CSS tests**
-  (`cnt-svg-css-inclusion`, `nav-spine_in-spine-hidden-toc-css`, `lay-pp-xhtml-icb`,
+  (`cnt-svg-css-inclusion` (the svg is drawn; the page's style does not reach it), `nav-spine_in-spine-hidden-toc-css`, `lay-pp-xhtml-icb`,
   `_multi`, `_multi_declarations`, `_repeated-in-meta`, `_units`, the deprecated
   `lay-fxl-*` copies, `css-epub-*` (ten should, vendor-prefixed properties),
   `mol-css`, `ocf-font_obfuscation`): each asks that a rule of the book's own style
@@ -1060,6 +1060,34 @@ that wins is named:
 * **Deprecated tests** (`fxl-spine-overrides_duplicate`, `lay-fxl-orientation-landscape`):
   the suite itself files them as deprecated (the `fxl-*` and `lay-fxl-*` copies
   that the `lay-pp-*` tests replace), and `rendition:orientation` is not read.
+
+## SVG is drawn as a picture of its own (#419)
+
+An inline `<svg>` of a page, and an SVG content document, is drawn by
+`_render_node` in `src/reader.bats` as an `<img>` whose source is a blob of the
+element's own bytes (`images_svg`, `_load_svg`): a copy of the element from its `<svg` to
+its closing tag (`_svg_end`, which passes over comments, CDATA sections, processing
+instructions and quoted values, so a `</svg>` in one does not end it), with the
+`xmlns` and `xmlns:xlink` it was given by its page written in when it names none. Its
+children are still made, so every content node keeps its number (search, read aloud and
+the overlays count the same tree), but an `<img>` shows none of them. An svg that holds
+an `<image>` (a cover page's usual form, drawn by the existing `<image>` path) or is over 512 KiB, or one inside
+another, is not drawn this way.
+
+By research, why a picture and not the element in the page, which is what other readers
+do: Readium's navigators (Thorium, Readium Mobile), Apple Books, Kobo, Calibre's viewer and
+foliate-js each show a content document in a frame or view of its own, so an svg's `<style>`,
+ids and links are scoped to that document. Quire's page is one DOM shared with its own
+interface and every chapter, with no frame, so a `<style>` in an svg would be a global rule
+that could restyle the interface (the proofs of `style.bats` and quire#411 are about exactly that),
+an id could collide with the app's, and a script-capable element is something a book may
+never put there. A sandboxed image has the same drawing, its own style scope and no
+script or outside load (a browser's rule for an svg used as an image), and no care about ids.
+What it costs: the book's page CSS does not reach it (`cnt-svg-css-inclusion`, kept
+failing by #411 above), its links and scripts do nothing, it uses system fonts, not the
+book's, and a dark theme does not recolour its black text (an image is not themed; the
+image dimming setting applies to it). Its text is kept in the page, hidden, so a search hit can
+still be counted.
 
 ## The platform, in Bats
 
