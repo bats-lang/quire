@@ -2597,26 +2597,35 @@ in cell end
 
 (* The languages of the blocks of the script being made, by their numbers: a block that has a language of
    its own, or inside an element that has one (a phrase in another language is a block of its own) *)
-datavtype block_langs =
-  | BlockLangsNone of ()
-  | {l:agz}{len:pos | len <= 35} BlockLangs of (Nat, $A.arr(byte, l, 35), int len, block_langs)
+datavtype block_langs(n:int) =
+  | BlockLangsNone(0) of ()
+  | {n:nat}{l:agz}{len:pos | len <= 35} BlockLangs(n + 1) of (Nat, $A.arr(byte, l, 35), int len, block_langs(n))
 
-val _block_langs = ref<block_langs>(BlockLangsNone())
+(* a list of any length, as the cell holds it *)
+datavtype langs_box =
+  | {n:nat} LangsBox of block_langs(n)
 
-fn _block_langs_swap (langs: block_langs): block_langs = let
-  var cell: block_langs = langs
-  val () = ref_exch_elt<block_langs>(_block_langs, cell)
+val _block_langs = ref<langs_box>(LangsBox(BlockLangsNone()))
+
+fn _block_langs_swap (langs: langs_box): langs_box = let
+  var cell: langs_box = langs
+  val () = ref_exch_elt<langs_box>(_block_langs, cell)
 in cell end
 
-fun _block_langs_free (langs: block_langs): void =
+fun _block_langs_free_list {n:nat} .<n>. (langs: block_langs(n)): void =
   case+ langs of
   | ~BlockLangsNone() => ()
-  | ~BlockLangs(_, tag, _, rest) => let val () = $A.free<byte>(tag) in _block_langs_free(rest) end
+  | ~BlockLangs(_, tag, _, rest) => let val () = $A.free<byte>(tag) in _block_langs_free_list(rest) end
+
+fn _block_langs_free (langs: langs_box): void =
+  case+ langs of ~LangsBox(list) => _block_langs_free_list(list)
+
+fn _block_langs_empty (): langs_box = LangsBox(BlockLangsNone())
 
 (* The language in force, for block *)
 fn _block_lang_add (block: Nat): void = let
   val current = _run_lang_swap(NoBookLang())
-  val langs = _block_langs_swap(BlockLangsNone())
+  val ~LangsBox(list) = _block_langs_swap(_block_langs_empty())
 in
   case+ current of
   | ~BookLang(tag, tag_len) => let
@@ -2628,15 +2637,15 @@ in
       val () = copy_into(tag, copy, tag_len, 0)
       val back = _run_lang_swap(BookLang(tag, tag_len))
       val () = _lang_drop(back)
-      val blank = _block_langs_swap(BlockLangs(block, copy, tag_len, langs))
+      val blank = _block_langs_swap(LangsBox(BlockLangs(block, copy, tag_len, list)))
     in _block_langs_free(blank) end
   | ~NoBookLang() => let
-      val blank = _block_langs_swap(langs)
+      val blank = _block_langs_swap(LangsBox(list))
     in _block_langs_free(blank) end
 end
 
 (* The language of block, as a language (none when it has none of its own) *)
-fun _block_lang_find (langs: !block_langs, block: Nat): book_lang =
+fun _block_lang_find {n:nat} .<n>. (langs: !block_langs(n), block: Nat): book_lang =
   case+ langs of
   | BlockLangsNone() => NoBookLang()
   | BlockLangs(found, tag, tag_len, rest) =>
@@ -6119,9 +6128,9 @@ fn _sentence_add {l:agz}{owner:addr}{size:nat}{runs_count,count:nat}
       else let
         (* the language its block has of its own, if it has one *)
         val block = (case+ runs of PlacedRun(block, _, _, _, _) => block | PlacedEnd() => 0): Nat
-        val langs = _block_langs_swap(BlockLangsNone())
+        val ~LangsBox(langs) = _block_langs_swap(_block_langs_empty())
         val lang = _block_lang_find(langs, block)
-        val blank = _block_langs_swap(langs)
+        val blank = _block_langs_swap(LangsBox(langs))
         val () = _block_langs_free(blank)
       in @(SentenceOf(first, last - first, start_node, start_offset, end_node, end_offset, lang, found), count + 1) end
     end
@@ -6219,16 +6228,16 @@ implement $P.dispose<script>(script) = script_free(script)
 fn _script_make {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), chapter: Nat): script = let
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
-  val () = _block_langs_free(_block_langs_swap(BlockLangsNone()))
+  val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
   val @(_, _, found) = _runs_nodes(data, nodes, true, true, ~1, 0, 0, TextRunsEnd())
   val () = _lang_drop(_run_lang_swap(NoBookLang()))
   val runs = _text_runs_reverse(found, TextRunsEnd())
   val total = _runs_total(runs, 0)
 in
-  if total <= 0 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(BlockLangsNone())) in NoScript() end
-  else if total > 268435456 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(BlockLangsNone())) in NoScript() end
+  if total <= 0 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
+  else if total > 268435456 then let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
   else case+ piece_new(total) of
-  | ~NoPiece() => let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(BlockLangsNone())) in NoScript() end
+  | ~NoPiece() => let val () = _text_runs_free(runs) val () = _block_langs_free(_block_langs_swap(_block_langs_empty())) in NoScript() end
   | ~Piece(owner, text) => let
       val placed = _placed_reverse(_runs_write(data, runs, text, total, 0, PlacedEnd()), PlacedEnd())
       val @(lang, lang_len) = reader_lang_tag()
@@ -6236,7 +6245,7 @@ in
       val @(found_sentences, count) = _blocks_sentences(placed, text, total, lang_bytes, lang_len, SentencesNone(), 0)
       val () = release_bytes(lang_frozen, lang_bytes)
       val sentences = _sentences_of_reverse(found_sentences, SentencesNone())
-      val () = _block_langs_free(_block_langs_swap(BlockLangsNone()))
+      val () = _block_langs_free(_block_langs_swap(_block_langs_empty()))
     in
       if count <= 0 then let
         val () = _sentences_of_free(sentences)
