@@ -2726,6 +2726,19 @@ a vertical Japanese one, and a left to right one; `vertical.spec.js`
 fails first, naming the cause, where no font has Japanese characters
 (CI installs `fonts-noto-cjk`).
 
+A bookmarked page shows its mark once the bars hide (#388): a ribbon
+(`bookmark-mark`, `.bmk`, clipped by `clip-path`) in the page's top-right
+corner, inside the `--page-top` band, in the accent (proven on the ground as
+text is, `S_accent_bg`), shown by `.chrome-off .bmk-on`; `annot_star`, the one
+place the bookmark's state reaches the screen, matches a `bookmark_state`
+(`Marked | Unmarked`) to set the star and the mark together. Kindle and Kobo
+draw theirs in that corner; with the bars up the star says it. The bottom bar
+has Previous chapter and Next chapter beside the page turns (`chapter-previous`,
+`chapter-next`, `reader_chapter_step`), shown where there is a chapter to go
+to and not in a fixed-layout book (its chapters are its pages), following the
+reading direction as the page turns do (`.bot.rtl` orders): the next chapter is
+two taps from the page, three through Contents. `e2e/page-marks.spec.js`.
+
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and
 its language is Chinese, Japanese or Korean, `vertical-lr` for
