@@ -571,5 +571,13 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
     }
   }
 
+  // opts.bomEntries: names of entries that begin with a UTF-8 byte order mark;
+  // opts.entryBytes: { name: bytes } replaces an entry's data as it is, in an
+  // encoding the generator does not write (quire#436)
+  for (const e of zipEntries) {
+    if (opts.entryBytes && opts.entryBytes[e.name]) e.data = opts.entryBytes[e.name];
+    if ((opts.bomEntries || []).includes(e.name)) e.data = Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), typeof e.data === 'string' ? toBytes(e.data) : e.data]);
+  }
+
   return createZip(zipEntries);
 }

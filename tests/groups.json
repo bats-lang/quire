@@ -10,6 +10,7 @@
     ],
     "reader": [
       "backup.spec.js",
+      "encodings.spec.js",
       "image-viewer.spec.js",
       "landmarks.spec.js",
       "relaunch-sync.spec.js",
@@ -21,6 +22,7 @@
     "reading-tools": [
       "annotations.spec.js",
       "drm-catalogue.spec.js",
+      "languages.spec.js",
       "progress.spec.js",
       "publisher.spec.js",
       "settings.spec.js",
@@ -98,6 +100,7 @@
       "reject/form-field-as-field",
       "reject/highlight-unmatched",
       "reject/image-roundtrip-another-book",
+      "reject/harm-empty-zero",
       "reject/import-unmatched",
       "reject/library-read-forged",
       "reject/library-reading-unmatched",
@@ -128,6 +131,7 @@
       "accept/codec-length-ok",
       "accept/codec-roundtrip",
       "accept/fixed-box-fits",
+      "accept/harm-empty-some",
       "accept/page-height-whole",
       "accept/page-width-whole",
       "accept/image-roundtrip",

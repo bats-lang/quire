@@ -7,7 +7,7 @@ Elements are made by ui.bats's constructors (ui_el, ui_add, ...), whose
 second argument is the id, and by helpers that pass one of their own
 parameters on to them (app.bats's _row, say): those are found here, so
 a literal handed to a helper counts where the helper makes it. A harm's
-menu item takes its id from ui_harm_id.
+button takes its id from ui_harm_id.
 
 A click's target is decoded once, in ui.bats, into a listener's own
 control datatype: each one's id comes from its *_control_id function,
@@ -43,7 +43,7 @@ MAKERS['ui_form_field'] = (1, 2)
 NAMERS = {name: (0,) for name in (
     'ui_clear', 'ui_attr', 'ui_attr_buf', 'ui_place', 'ui_class', 'ui_show',
     'ui_text', 'ui_text_buf', 'ui_text_long', 'ui_tone', 'ui_role',
-    'ui_named', 'ui_measure', 'ui_focus', 'ui_harm_item', 'OnEl', 'OnPointer',
+    'ui_named', 'ui_measure', 'ui_focus', 'ui_harm_button', 'OnEl', 'OnPointer',
     'ui_pointer_capture',
     'ui_option', 'ui_src_empty', 'ui_inert',
 )}

@@ -15,7 +15,9 @@ staload "notice.sats"
 staload "book.sats"
 staload "modal.sats"
 staload "undo.sats"
+staload "titles.sats"
 staload "epub_xml.sats"
+staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -592,14 +594,24 @@ fn _span_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_len 
     val text = $A.alloc<byte>(fallback_len)
     val () = $A.write_text(text, 0, $A.text_lit(fallback), fallback_len)
   in @(text, fallback_len) end
-  else if span_len >= 256 then let
-    val text = $A.alloc<byte>(255)
-    val () = $S.copy_from_borrow(data, start, data_len, text, 0, 255, 255)
-  in @(text, 255) end
   else let
-    val text = $A.alloc<byte>(span_len)
-    val () = $S.copy_from_borrow(data, start, data_len, text, 0, span_len, span_len)
-  in @(text, span_len) end
+    (* the characters its references stand for (Zo&#235; is Zoë), cut at 255 bytes *)
+    val take = (if span_len >= 256 then 255 else span_len): [take:pos | take <= span_len; take < 256] int take
+    val decoded = $A.alloc<byte>(take)
+    val decoded_len = decode_text(data, start, take, decoded)
+  in
+    if decoded_len <= 0 then let
+      val () = $A.free<byte>(decoded)
+      val fallback_len = g1u2i(string1_length(fallback))
+      val text = $A.alloc<byte>(fallback_len)
+      val () = $A.write_text(text, 0, $A.text_lit(fallback), fallback_len)
+    in @(text, fallback_len) end
+    else let
+      val text = $A.alloc<byte>(decoded_len)
+      val () = _copy(decoded, decoded_len, text, 0, 0)
+      val () = $A.free<byte>(decoded)
+    in @(text, decoded_len) end
+  end
 
 (* Adds a book: its id, title and author (spans of data), file size and
    cover type; its key. None when the library is full. *)
@@ -739,9 +751,11 @@ implement lib_trash (index) =
   | ~$R.some(nums) => let
       val key = nums.key
       val old_shelf = nums.shelf
+      (* the toast names the book *)
+      val @(title, title_len) = lib_text(index, TitleText())
       val () = lib_set_shelf(index, Trash())
     in
-      $P.finish<settled>(undo_offer(MovedToTrash()), llam(how) =>
+      $P.finish<settled>(undo_offer(MovedToTrash(title, title_len)), llam(how) =>
         case+ how of
         | Undone() => let
             val index_now = lib_index_of_key(key)
@@ -778,24 +792,137 @@ fun _empty_trash {left:nat} .<left>. (left: int left): void =
     if index < 0 then () else let val () = _delete_book(index) in _empty_trash(left - 1) end
   end
 
+(* What of the Trash's books is counted: how many, or their bytes *)
+datatype trash_sum = TrashBooks | TrashBytes
+
+(* The sum over the books of the Trash from i on, added to so_far *)
+fun _trashed_sum {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count, what: trash_sum, so_far: Int): Int =
+  if i >= count then so_far
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _trashed_sum(i + 1, count, what, so_far)
+    | ~$R.some(nums) =>
+      if same_shelf(nums.shelf, Trash()) then let
+        val step: Int = (case+ what of TrashBooks() => 1 | TrashBytes() => nums.file_size)
+      in _trashed_sum(i + 1, count, what, g1ofg0($AR.add_int_int(so_far, step))) end
+      else _trashed_sum(i + 1, count, what, so_far))
+
+(* The index of the Trash's book after skip others, or -1 *)
+fun _nth_trashed {i,count:nat | i <= count} .<count - i>. (i: int i, count: int count, skip: int): [found:int | found >= ~1] int found =
+  if i >= count then ~1
+  else (case+ lib_nums(i) of
+    | ~$R.none() => _nth_trashed(i + 1, count, skip)
+    | ~$R.some(nums) =>
+      if same_shelf(nums.shelf, Trash()) then (if skip <= 0 then i else _nth_trashed(i + 1, count, skip - 1))
+      else _nth_trashed(i + 1, count, skip))
+
+(* How many things the Trash holds: its books and dictionaries *)
+#pub fn lib_trash_things (dictionaries: int): [things:nat] int things
+
+implement lib_trash_things (dictionaries) = let
+  val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+  val held = g1ofg0(dictionaries)
+  val others = (if held > 0 then held else 0)
+  val things = g1ofg0($AR.add_int_int(books, others))
+in if things >= 0 then things else 0 end
+
+(* A place in a sentence's buffer: the sentences are well under 300
+   bytes, so a place past that is the last, and every write below has room *)
+fn _place (at: int): [place:nat | place <= 300] int place = let
+  val here = g1ofg0(at)
+in if here < 0 then 0 else if here > 300 then 300 else here end
+
+(* text at buffer[at, at + len) *)
+fn _put {l:agz}{size:nat}{at:nat}{len:pos | at + len <= size; len < 256}
+  (buffer: !$A.arr(byte, l, size), at: int at, text: string len, len: int len): int(at + len) = let
+  val () = $A.write_text(buffer, at, $A.text_lit(text), len)
+in at + len end
+
+(* "N one" or "N many" at buffer[at, ...) *)
+fn _counted {l:agz}{size:pos | size >= 400}{at:nat | at <= 300}{one_len,many_len:pos | one_len < 20; many_len < 20}
+  (buffer: !$A.arr(byte, l, size), size_value: int size, at: int at, count: Int, one: string one_len, one_len: int one_len, many: string many_len, many_len: int many_len): int = let
+  val after = $S.int_to_str(buffer, at, size_value, count)
+  val after = _place(after)
+  val spaced = _put(buffer, after, " ", 1)
+in if count = 1 then _put(buffer, spaced, one, one_len) else _put(buffer, spaced, many, many_len) end
+
+(* "N books", "N dictionaries" or both, as the Trash holds them *)
+fn _things_phrase {l:agz}{size:pos | size >= 400}{at:nat | at <= 300}
+  (buffer: !$A.arr(byte, l, size), size_value: int size, at: int at, books: Int, dictionaries: Int): int =
+  if books > 0 then let
+    val after = _place(_counted(buffer, size_value, at, books, "book", 4, "books", 5))
+  in
+    if dictionaries > 0 then let
+      val joined = _place(_put(buffer, after, " and ", 5))
+    in _counted(buffer, size_value, joined, dictionaries, "dictionary", 10, "dictionaries", 12) end
+    else after
+  end
+  else _counted(buffer, size_value, at, dictionaries, "dictionary", 10, "dictionaries", 12)
+
+(* "Delete 2 books forever?" *)
+fn _empty_title {l:agz} (buffer: !$A.arr(byte, l, 400), books: Int, dictionaries: Int): [ended:nat | ended <= 400] int ended = let
+  val after = _place(_put(buffer, 0, "Delete ", 7))
+  val after = _place(_things_phrase(buffer, 400, after, books, dictionaries))
+in _put(buffer, after, " forever?", 9) end
+
+(* The first shown of the Trash's books by their titles, quoted, joined
+   by commas and a last "and" (and "and N more" when others are not
+   named), from the book after k others *)
+fun _titles_list {l:agz}{shown,k:nat | k <= shown} .<shown - k>.
+  (buffer: !$A.arr(byte, l, 700), at: int, k: int k, shown: int shown, more: int): int =
+  if k >= shown then at
+  else let
+    val index = _nth_trashed(0, lib_count(), k)
+    val joined: int = (if k <= 0 then at
+      else if k + 1 = shown then (if more > 0 then _put(buffer, _place(at), ", ", 2) else _put(buffer, _place(at), " and ", 5))
+      else _put(buffer, _place(at), ", ", 2))
+    val @(title, title_len) = lib_text(index, TitleText())
+    val ended = title_put(title, title_len, buffer, _place(joined))
+    val () = $A.free<byte>(title)
+  in _titles_list(buffer, ended, k + 1, shown, more) end
+
+(* "'A', 'B' and 'C' will be deleted for good, ..." *)
+fn _empty_text {l:agz} (buffer: !$A.arr(byte, l, 700), books: Int, dictionaries: Int): [ended:nat | ended <= 700] int ended = let
+  val counted = books
+  val shown = (if counted > 3 then 3 else if counted > 0 then counted else 0): [shown:nat] int shown
+  val named = _titles_list(buffer, 0, 0, shown, counted - shown)
+  val named: int = (if counted > shown then let
+      val after = _place(_put(buffer, _place(named), " and ", 5))
+      val after = _place($S.int_to_str(buffer, after, 700, counted - shown))
+    in _put(buffer, after, " more", 5) end
+    else named)
+  val named: int = (if books > 0 then (if dictionaries > 0 then let
+        val after = _place(_put(buffer, _place(named), " and ", 5))
+      in _counted(buffer, 700, after, dictionaries, "dictionary", 10, "dictionaries", 12) end
+      else named)
+    else _counted(buffer, 700, 0, dictionaries, "dictionary", 10, "dictionaries", 12))
+in _put(buffer, _place(named), " will be deleted for good, with their reading positions, annotations and files. This cannot be undone.", 102) end
+
 (* Asks about harm, with the action that does it; if the answer is yes
    (Accepted), it is done. The promise resolves with the answer once
    that is done. HEmptyTrash: every book in the Trash and everything
    stored for it go (and any Undo offer, which could only put back what
-   is gone) *)
-#pub fn lib_ask_harm (harm: harm, dictionaries: int): $P.promise(reply, $P.Chained)
+   is gone). The question names what goes: how many books, their titles
+   (at most 3) and the dictionaries (quire#385) *)
+#pub fn lib_ask_harm (harm: harm_asked, dictionaries: int): $P.promise(reply, $P.Chained)
 
 implement lib_ask_harm (harm, dictionaries) =
   case+ harm of
-  | HEmptyTrash() => $P.and_then<reply><reply>(modal_confirm(harm, dictionaries), llam(answer) =>
-    case+ answer of
-    | Accepted() => let
-        val () = undo_close()
-        val () = _empty_trash(lib_count())
-        (* the records of the books gone are deleted *)
-        val () = lib_save()
-      in $P.ret<reply>(Accepted()) end
-    | Declined() => $P.ret<reply>(Declined()))
+  | HEmptyTrash() => let
+      val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+      val others = g1ofg0(dictionaries)
+      val title = $A.alloc<byte>(400)
+      val title_len = _empty_title(title, books, others)
+      val text = $A.alloc<byte>(700)
+      val text_len = _empty_text(text, books, others)
+    in $P.and_then<reply><reply>(modal_confirm(harm, title, title_len, text, text_len), llam(answer) =>
+      case+ answer of
+      | Accepted() => let
+          val () = undo_close()
+          val () = _empty_trash(lib_count())
+          (* the records of the books gone are deleted *)
+          val () = lib_save()
+        in $P.ret<reply>(Accepted()) end
+      | Declined() => $P.ret<reply>(Declined())) end
 
 (* Each book's key and the shelf it was on *)
 #pub datavtype shelved_list(int) =
@@ -878,18 +1005,58 @@ fn _lower (byte_value: int): int =
 (* How one text compares with another *)
 datatype comparison = Before | Same | After
 
-(* first[0, first_len) before second[0, second_len), letters in any case *)
-fun _less {first_loc,second_loc:agz}{first_len,second_len:nat}
-  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i:nat | i <= first_len} .<first_len - i>.
+(* The base letter of each character from U+00C0 to U+017F (Latin-1 Supplement and Latin Extended-A), in
+   lower case, so that Ł sorts under L and ë under E; '?' where the character is not a letter with a
+   base (× ÷ and the like), which then sorts by its code point. Made by scripts/ from Unicode's
+   decompositions, with the letters that do not decompose (Æ Ð Ø Þ ß Đ Ħ ı Ł Œ and the like) given the
+   letter an alphabetical list puts them under. *)
+fn _latin_base {k:nat | k < 192} (k: int k): int =
+  char2int0(string_get_at("aaaaaaaceeeeiiiidnooooo?ouuuuytsaaaaaaaceeeeiiiidnooooo?ouuuuytyaaaaaaccccccccddddeeeeeeeeeegggggggghhhhiiiiiiiiiiiijjkkkllllllllllnnnnnnnnnoooooooorrrrrrssssssssttttttuuuuuuuuuuuuwwyyyzzzzzzs", k))
+
+(* The code point folded for comparison: lower case, and a Latin letter with an accent as its base letter *)
+fn _fold (code_point: int): int =
+  if code_point < 128 then _lower(code_point)
+  else if code_point < 192 then code_point
+  else if code_point > 383 then code_point
+  else let
+    val k = g1ofg0(code_point - 192)
+    val base = (if k >= 0 then (if k < 192 then _latin_base(k) else 63) else 63): int
+  in if base = 63 then code_point else base end
+
+(* The folded character at text[i] (UTF-8) and the index after it *)
+fn _key {l:agz}{size,len:nat | len <= size}{i:nat | i < len}
+  (text: !$A.arr(byte, l, size), len: int len, i: int i): [j:int | i < j; j <= len] @(int, int j) = let
+  val lead = byte2int0($A.get<byte>(text, i))
+in
+  if lead < 192 then @(_fold(lead), i + 1)
+  else if lead < 224 then
+    (if i + 1 < len then @(_fold((lead - 192) * 64 + (byte2int0($A.get<byte>(text, i + 1)) - 128)), i + 2) else @(lead, i + 1))
+  else if lead < 240 then
+    (if i + 2 < len then @((lead - 224) * 4096 + (byte2int0($A.get<byte>(text, i + 1)) - 128) * 64 + (byte2int0($A.get<byte>(text, i + 2)) - 128), i + 3) else @(lead, i + 1))
+  else if i + 3 < len then
+    @((lead - 240) * 262144 + (byte2int0($A.get<byte>(text, i + 1)) - 128) * 4096 + (byte2int0($A.get<byte>(text, i + 2)) - 128) * 64 + (byte2int0($A.get<byte>(text, i + 3)) - 128), i + 4)
+  else @(lead, i + 1)
+end
+
+(* first[0, first_len) before second[0, second_len), letters in any case and without their accents
+   (the collation of a library sorted by title: Łukasz is under L), from first[i] and second[j] *)
+fun _less_from {first_loc,second_loc:agz}{first_len,second_len:nat}
+  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i,j:nat | i <= first_len; j <= second_len} .<first_len - i>.
+  (first: !$A.arr(byte, first_loc, first_size), first_len: int first_len, i: int i,
+   second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, j: int j): comparison =
+  if i >= first_len then (if j >= second_len then Same() else Before())
+  else if j >= second_len then After()
+  else let
+    val @(first_key, next_first) = _key(first, first_len, i)
+    val @(second_key, next_second) = _key(second, second_len, j)
+  in if first_key < second_key then Before() else if first_key > second_key then After()
+     else _less_from(first, first_len, next_first, second, second_len, next_second) end
+
+fn _less {first_loc,second_loc:agz}{first_len,second_len:nat}
+  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i:nat | i <= first_len; i <= second_len}
   (first: !$A.arr(byte, first_loc, first_size), first_len: int first_len,
    second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, i: int i): comparison =
-  if i >= first_len then (if i >= second_len then Same() else Before())
-  else if i >= second_len then After()
-  else let
-    val first_byte = _lower(byte2int0($A.get<byte>(first, i)))
-    val second_byte = _lower(byte2int0($A.get<byte>(second, i)))
-  in if first_byte < second_byte then Before() else if first_byte > second_byte then After()
-     else _less(first, first_len, second, second_len, i + 1) end
+  _less_from(first, first_len, i, second, second_len, i)
 
 fn _is_before (c: comparison): bool = case+ c of Before() => true | _ => false
 
@@ -3423,6 +3590,59 @@ fn _emptiness_offers (reason: emptiness): bool =
   | NothingArchived() => false
   | TrashEmpty() => false
 
+(* How many dictionaries the Trash holds, as dictionary.bats last said:
+   they are in the Trash's count and the question of emptying it *)
+val _trash_dictionaries = ref<int>(0)
+
+(* " · 4.0 MB" at buffer[at, ...): the middle dot between spaces, then
+   the size of bytes *)
+fn _trash_size {l:agz}{at:nat | at <= 300} (buffer: !$A.arr(byte, l, 400), at: int at, bytes: Int): [place:nat | place <= 300] int place = let
+  val dotted = _place(_put(buffer, at, " ", 1))
+  val () = $A.set<byte>(buffer, dotted, $A.int2byte(194))
+  val () = $A.set<byte>(buffer, dotted + 1, $A.int2byte(183))
+  val spaced = _place(_put(buffer, dotted + 2, " ", 1))
+  val size = $A.alloc<byte>(32)
+  val size_len = size_text(size, bytes)
+  val ended = bytes_put(size, size_len, buffer, spaced)
+  val () = $A.free<byte>(size)
+in _place(ended) end
+
+(* "2 books · 4.0 MB. Kept until you empty the Trash." *)
+fn _trash_summary {l:agz} (buffer: !$A.arr(byte, l, 400), books: Int, dictionaries: Int, bytes: Int): [ended:nat | ended <= 400] int ended = let
+  val after = _place(_things_phrase(buffer, 400, 0, books, dictionaries))
+  val after = (if books > 0 then _trash_size(buffer, after, bytes) else after): [place:nat | place <= 300] int place
+in _put(buffer, after, ". Kept until you empty the Trash.", 33) end
+
+(* The Trash's heading (quire#385): what it holds, how much room it
+   takes, that it is kept until emptied, and Empty beside it, shown on
+   the Trash's screen while it holds anything. Empty is made here, from
+   a harm that cannot be built for an empty Trash *)
+fn _trash_head (): void =
+  if same_shelf(!_shelf, Trash()) then let
+    val books = _trashed_sum(0, lib_count(), TrashBooks(), 0)
+    val listed = g1ofg0(!_trash_dictionaries)
+    val dictionaries = (if listed > 0 then listed else 0)
+    val [things:int] held = g1ofg0($AR.add_int_int(books, dictionaries))
+  in
+    if held > 0 then let
+      val buffer = $A.alloc<byte>(400)
+      val ended = _trash_summary(buffer, books, dictionaries, _trashed_sum(0, lib_count(), TrashBytes(), 0))
+      val () = ui_text_buf("trash-summary", buffer, ended)
+      val () = ui_clear("trash-head-actions")
+      val () = ui_harm_button("trash-head-actions", (HEmptyTrash(): harm(things)))
+    in ui_show("trash-head", true) end
+    else ui_show("trash-head", false)
+  end
+  else ui_show("trash-head", false)
+
+(* The dictionaries in the Trash are count (dictionary.bats says it as
+   it shows them), so the Trash's heading counts them *)
+#pub fn lib_trash_dictionaries_set (count: int): void
+
+implement lib_trash_dictionaries_set (count) = let
+  val () = !_trash_dictionaries := count
+in _trash_head() end
+
 (* The bar's tools (search, sort and view, the filters) and the import
    control that fits: with no book to search, sort or filter, the bar
    keeps only its name and menu, and Import is in the message below
@@ -3463,10 +3683,13 @@ implement lib_render () = let
   val () = ui_show("continue-reading", want >= 0)
   val () = query_put(query)
   val view = _view_of(shown)
+  (* a Trash with only dictionaries in it is not said to be empty: they are listed *)
+  val only_dictionaries = same_shelf(shelf, Trash()) && !_trash_dictionaries > 0
   val () = ui_show("library-empty", (case+ view of
     | ViewBooks() => false
     | ViewUnreadable(_) => true
-    | ViewEmpty() => true))
+    | ViewEmpty() => ~only_dictionaries))
+  val () = _trash_head()
   val () = _coll_row()
   val () = _install_hint_show()
   val on_shelf = same_shelf(shelf, OnShelf())
