@@ -2362,6 +2362,16 @@ job). Every spec and every static fixture is in exactly one group, or
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
 
+The specs that measure time (`pathological.spec.js`, `page-turn.spec.js`)
+are the `perf` group alone, run with one worker (`--workers=1`), and no
+spec that loads the machine joins it (`stall-capture.spec.js` spins a
+page on purpose): a budget that is measured beside another worker's load
+is flaky, and a flaky budget is relaxed until it stops catching anything.
+A budget keeps headroom over what a loaded runner has been seen to give
+(a turn's animated time against its instant time was 1.27 times once, on
+CI, against a quarter's slack), and still fails a turn that costs twice
+as much.
+
 Each group runs every project of `playwright.config.js`: `desktop` and
 `mobile-portrait` every spec, `narrow` (320 px, WCAG's reflow width),
 `mobile-landscape`, `tablet` and `wide` the layout specs, and `android`
