@@ -2161,7 +2161,7 @@ in node end
 fn _tcy_refit (): void =
   if ~_is_vertical() then ()
   else let
-    val () = ui_text("style-tcy", ".caf .tcy{text-combine-upright:none}")
+    val () = ui_text("style-tcy", ".caf.vertical .tcy,.caf.vertical-lr .tcy{text-combine-upright:none}")
     val () = _measure_literal("page")
     val () = ui_clear("style-tcy")
   in _measure_literal("page") end
