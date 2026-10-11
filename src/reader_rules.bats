@@ -12,8 +12,8 @@ staload "page_size.sats"
 
 #pub fn reader_rules {left:nat | left >= 10450} (sheet: sheet(left, false, false)): [after:nat | after >= left - 10450] sheet(after, false, false)
 
-(* The first part: the rules from .rv on *)
-fn reader_rules_first_part {left:nat | left >= 1642} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1642] sheet(after, false, false) = let
+(* The bars and title, from .rv on *)
+fn reader_rules_bars_and_title {left:nat | left >= 1642} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1642] sheet(after, false, false) = let
   (* the reader is the window, whatever a viewport unit says (in an
      Android WebView 100vh can be taller than what is shown, so the page
      and a sheet's bottom could pass the screen's edge, #275): fixed to
@@ -104,8 +104,8 @@ fn reader_rules_first_part {left:nat | left >= 1642} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The second part: the rules from .pinfo on *)
-fn reader_rules_second_part {left:nat | left >= 1675} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1675] sheet(after, false, false) = let
+(* The page indicator and footer, from .pinfo on *)
+fn reader_rules_page_indicator_and_footer {left:nat | left >= 1675} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1675] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pinfo")
   val sheet = lay(sheet, WhiteSpace(), "nowrap")
   val sheet = lay(sheet, Flex(), "0 1 auto")
@@ -211,8 +211,8 @@ fn reader_rules_second_part {left:nat | left >= 1675} (sheet: sheet(left, false,
   val sheet = close(sheet)
 in sheet end
 
-(* The third part: the rules from .sprobe on *)
-fn reader_rules_third_part {left:nat | left >= 1298} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1298] sheet(after, false, false) = let
+(* The book text, from .sprobe on *)
+fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1298] sheet(after, false, false) = let
   (* shown only by the typography's style, for a spread; a point the
      reader measures, never seen *)
   val sheet = rule(sheet, ".sprobe")
@@ -298,8 +298,8 @@ fn reader_rules_third_part {left:nat | left >= 1298} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The fourth part: the rules from .caf.rtl on *)
-fn reader_rules_fourth_part {left:nat | left >= 954} (sheet: sheet(left, false, false)): [after:nat | after >= left - 954] sheet(after, false, false) = let
+(* The vertical fixed and notes, from .caf.rtl on *)
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 954} (sheet: sheet(left, false, false)): [after:nat | after >= left - 954] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -384,8 +384,8 @@ fn reader_rules_fourth_part {left:nat | left >= 954} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The fifth part: the rules from .caf sup on *)
-fn reader_rules_fifth_part {left:nat | left >= 1358} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1358] sheet(after, false, false) = let
+(* The marks and bottom bar, from .caf sup on *)
+fn reader_rules_marks_and_bottom_bar {left:nat | left >= 1358} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1358] sheet(after, false, false) = let
   val sheet = rule(sheet, ".caf sup,.caf sub")
   val sheet = lay(sheet, LineHeight(), "0")
   val sheet = close(sheet)
@@ -470,8 +470,8 @@ fn reader_rules_fifth_part {left:nat | left >= 1358} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The sixth part: the rules from .trk-f on *)
-fn reader_rules_sixth_part {left:nat | left >= 2218} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2218] sheet(after, false, false) = let
+(* The scrubber, from .trk-f on *)
+fn reader_rules_scrubber {left:nat | left >= 2218} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2218] sheet(after, false, false) = let
   val sheet = rule(sheet, ".trk-f")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "0")
@@ -567,8 +567,8 @@ fn reader_rules_sixth_part {left:nat | left >= 2218} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The seventh part: the rules from .seltb button on *)
-fn reader_rules_seventh_part {left:nat | left >= 901} (sheet: sheet(left, false, false)): [after:nat | after >= left - 901] sheet(after, false, false) = let
+(* The selection toolbar, from .seltb button on *)
+fn reader_rules_selection_toolbar {left:nat | left >= 901} (sheet: sheet(left, false, false)): [after:nat | after >= left - 901] sheet(after, false, false) = let
   val sheet = rule(sheet, ".seltb button,.seltb a")
   val sheet = lay(sheet, Padding(), "8px 14px")
   val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
@@ -611,13 +611,13 @@ fn reader_rules_seventh_part {left:nat | left >= 901} (sheet: sheet(left, false,
 in sheet end
 
 implement reader_rules (sheet) = let
-  val sheet = reader_rules_first_part(sheet)
-  val sheet = reader_rules_second_part(sheet)
-  val sheet = reader_rules_third_part(sheet)
-  val sheet = reader_rules_fourth_part(sheet)
-  val sheet = reader_rules_fifth_part(sheet)
-  val sheet = reader_rules_sixth_part(sheet)
-  val sheet = reader_rules_seventh_part(sheet)
+  val sheet = reader_rules_bars_and_title(sheet)
+  val sheet = reader_rules_page_indicator_and_footer(sheet)
+  val sheet = reader_rules_book_text(sheet)
+  val sheet = reader_rules_vertical_fixed_and_notes(sheet)
+  val sheet = reader_rules_marks_and_bottom_bar(sheet)
+  val sheet = reader_rules_scrubber(sheet)
+  val sheet = reader_rules_selection_toolbar(sheet)
 in sheet end
 
 end

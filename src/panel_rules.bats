@@ -12,8 +12,8 @@ staload "declarations.sats"
 
 #pub fn panel_rules {left:nat | left >= 6700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6700] sheet(after, false, false)
 
-(* The first part: the rules from .panel on *)
-fn panel_rules_first_part {left:nat | left >= 1536} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1536] sheet(after, false, false) = let
+(* The panel frame and tabs, from .panel on *)
+fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1536] sheet(after, false, false) = let
   val sheet = rule(sheet, ".panel")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Top(), "0")
@@ -96,8 +96,8 @@ fn panel_rules_first_part {left:nat | left >= 1536} (sheet: sheet(left, false, f
   val sheet = close(sheet)
 in sheet end
 
-(* The second part: the rules from .pi[aria-current=true] on *)
-fn panel_rules_second_part {left:nat | left >= 1558} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1558] sheet(after, false, false) = let
+(* The contents and highlights, from .pi[aria-current=true] on *)
+fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1558] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
@@ -184,8 +184,8 @@ fn panel_rules_second_part {left:nat | left >= 1558} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The third part: the rules from .grp on *)
-fn panel_rules_third_part {left:nat | left >= 1612} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1612] sheet(after, false, false) = let
+(* The settings sheet, from .grp on *)
+fn panel_rules_settings_sheet {left:nat | left >= 1612} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1612] sheet(after, false, false) = let
   val sheet = rule(sheet, ".grp")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = lay(sheet, Padding(), "12px 12px 4px")
@@ -273,8 +273,8 @@ fn panel_rules_third_part {left:nat | left >= 1612} (sheet: sheet(left, false, f
   val sheet = close(sheet)
 in sheet end
 
-(* The fourth part: the rules from .srow on *)
-fn panel_rules_fourth_part {left:nat | left >= 1521} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1521] sheet(after, false, false) = let
+(* The setting rows, from .srow on *)
+fn panel_rules_setting_rows {left:nat | left >= 1521} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1521] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
@@ -353,10 +353,10 @@ fn panel_rules_fourth_part {left:nat | left >= 1521} (sheet: sheet(left, false, 
 in sheet end
 
 implement panel_rules (sheet) = let
-  val sheet = panel_rules_first_part(sheet)
-  val sheet = panel_rules_second_part(sheet)
-  val sheet = panel_rules_third_part(sheet)
-  val sheet = panel_rules_fourth_part(sheet)
+  val sheet = panel_rules_panel_frame_and_tabs(sheet)
+  val sheet = panel_rules_contents_and_highlights(sheet)
+  val sheet = panel_rules_settings_sheet(sheet)
+  val sheet = panel_rules_setting_rows(sheet)
 in sheet end
 
 end

@@ -11,8 +11,8 @@ staload "declarations.sats"
 
 #pub fn shell_rules {left:nat | left >= 8300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8300] sheet(after, false, false)
 
-(* The first part: the rules from body on *)
-fn shell_rules_first_part {left:nat | left >= 1831} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1831] sheet(after, false, false) = let
+(* The library page, from body on *)
+fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1831] sheet(after, false, false) = let
   val sheet = rule(sheet, "body")
   val sheet = lay(sheet, Margin(), "0")
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
@@ -97,8 +97,8 @@ fn shell_rules_first_part {left:nat | left >= 1831} (sheet: sheet(left, false, f
   val sheet = close(sheet)
 in sheet end
 
-(* The second part: the rules from .btn input[type=file] on *)
-fn shell_rules_second_part {left:nat | left >= 1366} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1366] sheet(after, false, false) = let
+(* The fields and banners, from .btn input[type=file] on *)
+fn shell_rules_fields_and_banners {left:nat | left >= 1366} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1366] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -182,8 +182,8 @@ fn shell_rules_second_part {left:nat | left >= 1366} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The third part: the rules from .banner span on *)
-fn shell_rules_third_part {left:nat | left >= 1354} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1354] sheet(after, false, false) = let
+(* The import and book lists, from .banner span on *)
+fn shell_rules_import_and_book_lists {left:nat | left >= 1354} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1354] sheet(after, false, false) = let
   (* the message takes the row and the buttons wrap under it on a narrow
      window, rather than Report being squeezed until its text is cut *)
   val sheet = rule(sheet, ".banner span")
@@ -271,8 +271,8 @@ fn shell_rules_third_part {left:nat | left >= 1354} (sheet: sheet(left, false, f
   val sheet = close(sheet)
 in sheet end
 
-(* The fourth part: the rules from .conth on *)
-fn shell_rules_fourth_part {left:nat | left >= 1479} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1479] sheet(after, false, false) = let
+(* The book cards, from .conth on *)
+fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1479] sheet(after, false, false) = let
   val sheet = rule(sheet, ".conth")
   val sheet = lay(sheet, FontWeight(), "600")
   val sheet = lay(sheet, MarginTop(), "8px")
@@ -357,8 +357,8 @@ fn shell_rules_fourth_part {left:nat | left >= 1479} (sheet: sheet(left, false, 
   val sheet = close(sheet)
 in sheet end
 
-(* The fifth part: the rules from .ba on *)
-fn shell_rules_fifth_part {left:nat | left >= 824} (sheet: sheet(left, false, false)): [after:nat | after >= left - 824] sheet(after, false, false) = let
+(* The progress and empty state, from .ba on *)
+fn shell_rules_progress_and_empty_state {left:nat | left >= 824} (sheet: sheet(left, false, false)): [after:nat | after >= left - 824] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ba")
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
@@ -402,11 +402,11 @@ fn shell_rules_fifth_part {left:nat | left >= 824} (sheet: sheet(left, false, fa
 in sheet end
 
 implement shell_rules (sheet) = let
-  val sheet = shell_rules_first_part(sheet)
-  val sheet = shell_rules_second_part(sheet)
-  val sheet = shell_rules_third_part(sheet)
-  val sheet = shell_rules_fourth_part(sheet)
-  val sheet = shell_rules_fifth_part(sheet)
+  val sheet = shell_rules_library_page(sheet)
+  val sheet = shell_rules_fields_and_banners(sheet)
+  val sheet = shell_rules_import_and_book_lists(sheet)
+  val sheet = shell_rules_book_cards(sheet)
+  val sheet = shell_rules_progress_and_empty_state(sheet)
 in sheet end
 
 end
