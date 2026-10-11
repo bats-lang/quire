@@ -1648,6 +1648,51 @@ fn _layout_of_value {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
   val @(value_offset, value_len) = _trim(data, offset, span_len)
 in if _span_is(data, value_offset, value_len, "pre-paginated") then LayoutSaysPrePaginated() else LayoutSaysReflowable() end
 
+(* Whether the OPF asks for the book to be scrolled: a rendition:flow
+   meta of scrolled-doc or scrolled-continuous, or a rendition:layout of
+   roll (EPUB 3.4's roll layout, a long strip) *)
+fun _scroll_meta_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => if _scroll_meta(data, node) then true else _scroll_meta_nodes(data, rest)
+  | $X.xml_nodes_nil() => false
+
+and _scroll_meta
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size)): bool =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
+         if _span_is(data, property_offset, property_len, "rendition:flow") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) => let
+                val @(trimmed_offset, trimmed_len) = _trim(data, value_offset, value_len)
+              in _span_is(data, trimmed_offset, trimmed_len, "scrolled-doc") || _span_is(data, trimmed_offset, trimmed_len, "scrolled-continuous") end
+            | ~xspan_none() => false)
+         else if _span_is(data, property_offset, property_len, "rendition:layout") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) => let
+                val @(trimmed_offset, trimmed_len) = _trim(data, value_offset, value_len)
+              in _span_is(data, trimmed_offset, trimmed_len, "roll") end
+            | ~xspan_none() => false)
+         else false
+       | ~xspan_none() => false)
+    else _scroll_meta_nodes(data, children)
+  end
+  | $X.xml_text(_, _) => false
+
+#pub fn opf_scroll_preferred
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool
+
+implement opf_scroll_preferred (data, nodes) = _scroll_meta_nodes(data, nodes)
+
 fun _layout_meta_nodes
   {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): layout_said =

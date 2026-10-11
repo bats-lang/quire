@@ -8,16 +8,17 @@
 // these need a package of their own (a manifest fallback, a package
 // attribute, a title with a direction), so the package is written here.
 
+import { readFileSync } from 'node:fs';
 import { createZip, solidPng, TINY_PNG } from './create-epub.js';
 
 export const BOOK_ID = 'urn:uuid:3f2b7a52-0000-4000-8000-000000000419';
 
 /** An XHTML content document: body in its body, head more of its head,
     attributes on its html element */
-export const xhtml = (body, { head = '', attributes = '' } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
+export const xhtml = (body, { head = '', attributes = '', titleElement = '<title>Test page</title>' } = {}) => `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"${attributes}>
-<head><title>Test page</title>${head}</head>
+<head>${titleElement}${head}</head>
 <body>
 ${body}
 </body>
@@ -45,7 +46,7 @@ export function packageEpub({
   archive = entries => entries, patch = bytes => bytes,
 } = {}) {
   const manifest = items.map(i => `    <item id="${i.id}" href="${i.href}" media-type="${i.type}"` +
-    `${i.properties ? ` properties="${i.properties}"` : ''}${i.fallback ? ` fallback="${i.fallback}"` : ''}/>\n`).join('');
+    `${i.properties ? ` properties="${i.properties}"` : ''}${i.fallback ? ` fallback="${i.fallback}"` : ''}${i.overlay ? ` media-overlay="${i.overlay}"` : ''}/>\n`).join('');
   const entries = toc || spine.map(r => items.find(i => i.id === r.idref))
     .filter(i => i && i.type === 'application/xhtml+xml' && !i.properties?.includes('nav'))
     .map((i, k) => ({ href: i.href, label: `Entry ${k + 1}` }));
@@ -101,6 +102,16 @@ function split(bytes) {
 
 /** A book is { valid, errors, bytes() }: the epub's bytes made on demand */
 const book = (make, { valid = true, errors = [] } = {}) => ({ valid, errors, bytes: make });
+
+const SVG_INLINE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60" style="width: 70%">
+      <defs><style type="text/css"><![CDATA[ .fil0 { fill: red } ]]></style></defs>
+      <g id="layer"><rect class="fil0" x="0" y="0" width="100" height="60"/></g>
+    </svg>`;
+const SVG_DOCUMENT = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">
+  <defs><style type="text/css"><![CDATA[ .fil0 { fill: red } ]]></style></defs>
+  <g id="layer"><rect class="fil0" x="0" y="0" width="100" height="60"/></g>
+  <text x="0" y="10">Test passes if you see this text on top of an image.</text>
+</svg>`;
 
 const PAGE_TEXT = 'The text of the page.';
 const FALLBACK_TEXT = 'The fallback page is shown.';
@@ -237,7 +248,74 @@ export const w3cBooks = {
     spine: [{ idref: 'nav' }, { idref: 'one' }, { idref: 'two' }],
     navBody: '<h1>Contents</h1><nav epub:type="toc"><ol>\n<li><a href="one.xhtml">The first link</a></li>\n<li hidden="hidden"><a href="two.xhtml">The second link</a></li>\n</ol></nav>',
   })),
+  // Publication Resources: links out of the book are asked about
+  'external-links': book(() => packageEpub({
+    title: 'Links out of the book',
+    items: [page('one', '<p>A <a href="https://example.com/page">link to the web</a> and a <a href="mailto:reader@example.com">link to mail</a>.</p>')],
+    spine: [{ idref: 'one' }],
+  })),
+  // Layout: a book that asks to be scrolled, one chapter long enough to scroll
+  'flow-scrolled': book(() => packageEpub({
+    title: 'Scrolled flow',
+    extraMetadata: '    <meta property="rendition:flow">scrolled-doc</meta>\n',
+    items: [page('one', Array.from({ length: 40 }, (_, k) => `<p>Scrolled paragraph ${k}. ${'Words to fill the line. '.repeat(10)}</p>`).join('')), closing],
+    spine: [{ idref: 'one' }, { idref: 'closing' }],
+  })),
+  'flow-paginated': book(() => packageEpub({
+    title: 'Paginated flow',
+    items: [page('one', Array.from({ length: 40 }, (_, k) => `<p>Paginated paragraph ${k}. ${'Words to fill the line. '.repeat(10)}</p>`).join('')), closing],
+    spine: [{ idref: 'one' }, { idref: 'closing' }],
+  })),
+  'roll-layout': book(() => packageEpub({
+    title: 'A roll of pictures',
+    extraMetadata: '    <meta property="rendition:layout">roll</meta>\n',
+    items: [
+      page('one', '<p><img src="a.png" alt="A tall picture" width="300" height="1500"/></p>'),
+      page('two', '<p><img src="b.png" alt="Another tall picture" width="300" height="1500"/></p>'),
+      { id: 'a', href: 'a.png', type: 'image/png', data: solidPng(300, 1500, [40, 90, 160]) },
+      { id: 'b', href: 'b.png', type: 'image/png', data: solidPng(300, 1500, [160, 90, 40]) },
+    ],
+    spine: [{ idref: 'one' }, { idref: 'two' }],
+  }), { valid: false, errors: ['RSC-005'] }), // epubcheck 5.2.1 does not know roll: "must be reflowable or pre-paginated"
+  // Content Documents: a font in the package, for the Book font setting
+  'book-font': book(() => packageEpub({
+    title: 'A book with a font',
+    items: [
+      page('one', '<p>Text in the book\'s own font.</p>'),
+      { id: 'font', href: 'fonts/book.woff2', type: 'font/woff2', data: readFileSync(new URL('../assets/fonts/inter-latin.woff2', import.meta.url)) },
+    ],
+    spine: [{ idref: 'one' }],
+  })),
+  // Media Overlays: a SMIL with no audio, to be read by speech
+  'smil-no-audio': book(() => packageEpub({
+    title: 'A SMIL with no audio',
+    items: [
+      page('one', '<p id="sentence">The extract the SMIL names, read by speech synthesis.</p>', {}, { overlay: 'smil' }),
+      { id: 'smil', href: 'one.smil', type: 'application/smil+xml', data: '<?xml version="1.0" encoding="UTF-8"?>\n<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><par id="par1"><text src="one.xhtml#sentence"/></par></body></smil>' },
+    ],
+    spine: [{ idref: 'one' }],
+    extraMetadata: '    <meta property="media:duration" refines="#smil">0:00:01</meta>\n    <meta property="media:duration">0:00:01</meta>\n',
+  })),
+  // Structural semantics: the head is not the page
+  'title-as-note': book(() => packageEpub({
+    title: 'A title marked as a note',
+    items: [page('one', '<p>Tap <a href="#the_note" epub:type="noteref">this link</a> and no note opens.</p>', { titleElement: '<title epub:type="footnote" id="the_note">A title that says it is a footnote</title>' })],
+    spine: [{ idref: 'one' }],
+  }), { valid: false, errors: ['RSC-005'] }), // the suite's own: epub:type on a title is not allowed
   // OCF: the zip container
+  // SVG
+  'svg-inline': book(() => packageEpub({
+    title: 'Inline SVG',
+    items: [page('one', `<p>Test passes if you can see an image.</p>
+    ${SVG_INLINE}`, {}, { properties: 'svg' })],
+    spine: [{ idref: 'one' }],
+  })),
+  'svg-document': book(() => packageEpub({
+    title: 'SVG as a content document',
+    items: [{ id: 'scene', href: 'scene.svg', type: 'image/svg+xml', data: SVG_DOCUMENT }],
+    spine: [{ idref: 'scene' }],
+    toc: [{ href: 'scene.svg', label: 'Scene' }],
+  })),
   'zip-bzip2': book(() => packageEpub({
     title: 'Compressed with bzip2',
     items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],

@@ -461,7 +461,8 @@ fn _about_screen (): void = let
   val () = ui_add("about-version-row", "about-version-label", TSpan)
   val () = ui_text("about-version-label", "Version")
   val () = ui_add("about-version-row", "about-version", TB)
-  val () = ui_text("about-version", quire_version())
+  val @(version_text, version_len) = quire_version_text()
+  val () = ui_text_buf("about-version", version_text, version_len)
   (* the details of the last unexpected error, for a report, once one
      has happened (shown when About opens, `_about_open`) *)
   val () = ui_text_btn("about-box", "about-error-copy", "btn", "Copy last error details")
@@ -1023,6 +1024,8 @@ fn _note (): void = let
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
   val () = ui_text_btn("footnote-bar", "footnote-go", "btn", "Go to note")
+  (* a link out of the book asks first: this opens it, in another tab *)
+  val () = ui_link_out("footnote-bar", "footnote-open", "btn linkout", "Open link")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")
   val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
 in _hide("footnote") end

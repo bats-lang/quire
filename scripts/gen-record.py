@@ -159,14 +159,14 @@ emit("""
    the format format_version, readable from least_version, with the chunks kept_extras kept *)
 #pub dataprop @U@ENC(@p@x, int, int, extras, bytes) =
   | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
-    @U@ENC_mk(@p@_value, format_version, least_version, kept_extras, octets) of (@U@V(@p@_value, vals), ENCODES(@U@_SPECS, @U@_KIND, rx_mk(format_version, least_version, vals, kept_extras), octets))
+    @U@ENC_mk(@p@_value, format_version, least_version, kept_extras, octets) of (@U@V(@p@_value, vals), ENCODES(@U@_SPECS, @U@_KIND, rx_mk(format_version, least_version, vals, kept_extras, ab_nil()), octets))
 
 (* @U@DEC(octets, outcome): reading octets as a @p@ comes to outcome *)
 #pub dataprop @U@DEC(bytes, @p@res) =
-  | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
-    @U@DEC_ok(octets, @ql@_ok(@p@_value, format_version, least_version, kept_extras)) of (@U@V(@p@_value, vals), DECODES(@U@_SPECS, @U@_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras))))
-  | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{vals:gvals}{octets:bytes}
-    @U@DEC_loss(octets, @ql@_loss(@p@_value, format_version, least_version, kept_extras, lost_groups)) of (@U@V(@p@_value, vals), DECODES(@U@_SPECS, @U@_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups)))
+  | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras}{missing_groups:absent}{vals:gvals}{octets:bytes}
+    @U@DEC_ok(octets, @ql@_ok(@p@_value, format_version, least_version, kept_extras)) of (@U@V(@p@_value, vals), DECODES(@U@_SPECS, @U@_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras, missing_groups))))
+  | {@p@_value:@p@x}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{missing_groups:absent}{vals:gvals}{octets:bytes}
+    @U@DEC_loss(octets, @ql@_loss(@p@_value, format_version, least_version, kept_extras, lost_groups)) of (@U@V(@p@_value, vals), DECODES(@U@_SPECS, @U@_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing_groups), lost_groups)))
   | {octets:bytes} @U@DEC_notquire(octets, @ql@_notquire()) of DECODES(@U@_SPECS, @U@_KIND, octets, rr_notquire())
   | {octets:bytes} @U@DEC_newer(octets, @ql@_newer()) of DECODES(@U@_SPECS, @U@_KIND, octets, rr_newer())
   | {octets:bytes} @U@DEC_damaged(octets, @ql@_damaged()) of DECODES(@U@_SPECS, @U@_KIND, octets, rr_damaged())
@@ -250,11 +250,13 @@ implement @p@_record_read {octets}{byte_count} (list) = let
   val () = specsv_free(specs)
 in
   case+ read_outcome of
-  | ~RR_ok(format_version, least_version, vals, extras) => let
+  | ~RR_ok(format_version, least_version, vals, extras, missing) => let
       val (fields | @p@) = @p@_of_vals(vals)
+      val () = absentv_free(missing)
     in (@U@DEC_ok(fields, read) | @QU@_ok(@C@Record(format_version, least_version, @p@, extras))) end
-  | ~RR_loss(format_version, least_version, vals, extras, lost) => let
+  | ~RR_loss(format_version, least_version, vals, extras, lost, missing) => let
       val (fields | @p@) = @p@_of_vals(vals)
+      val () = absentv_free(missing)
     in (@U@DEC_loss(fields, read) | @QU@_loss(@C@Record(format_version, least_version, @p@, extras), lost)) end
   | ~RR_notquire() => (@U@DEC_notquire(read) | @QU@_notquire())
   | ~RR_newer() => (@U@DEC_newer(read) | @QU@_newer())

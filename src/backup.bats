@@ -103,6 +103,9 @@ fn _settings_chunk (): jchunk =
       (* the version of Quire that wrote it (#219) *)
       val next = jw_lit(out, 0, "{\"quire\":1,\"appVersion\":\"")
       val next = jw_lit(out, next, quire_version())
+      val next = jw_lit(out, next, " (")
+      val next = jw_lit(out, next, quire_commit_short())
+      val next = jw_lit(out, next, ")")
       val next = jw_lit(out, next, "\",\"settings\":{\"size\":")
       val next = jw_int(out, next, set_size_get())
       val next = jw_lit(out, next, ",\"lineHeight\":")
@@ -1406,7 +1409,7 @@ in
         val () = (if value >= 0 then (if value <= 2 then set_cols_set(cols_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "scrolled") then let
-        val () = (if value >= 0 then (if value <= 1 then set_flow_set(flow_of_code(value)) else ()) else ())
+        val () = (if value >= 0 then (if value <= 2 then set_flow_set(flow_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "footerReadout") then let
         val () = (if value >= 0 then (if value <= 4 then set_rd_set(rd_of_code(value)) else ()) else ())
