@@ -291,7 +291,6 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2500} (sheet: s
   val sheet = lay(sheet, Flex(), "1 1 auto")
   val sheet = lay(sheet, MinHeight(), "0")
   val sheet = lay(sheet, Width(), "100%")
-  val sheet = lay(sheet, BoxSizing(), "border-box")
   val sheet = lay(sheet, MaxWidth(), "600px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, Display(), "flex")
