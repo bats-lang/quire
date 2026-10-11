@@ -41,6 +41,7 @@ implement $P.dispose<settled>(_) = ()
   | HighlightRangeChanged(UntilDismissed) of ()
   | BookmarkDeleted(UntilDismissed) of ()
   | LibraryTrashed(UntilDismissed) of ()
+  | BooksRestored(UntilDismissed) of ()
   | SettingsReset(UntilDismissed) of ()
   | SyncTurnedOff(UntilDismissed) of (sync_file_place)
   | CatalogueRemoved(UntilDismissed) of ()
@@ -70,6 +71,7 @@ fn _offered_show {life:offer_life} (what: offered(life)): void =
   | ~HighlightRangeChanged() => ui_text("undo-text", "Highlight changed")
   | ~BookmarkDeleted() => ui_text("undo-text", "Bookmark deleted")
   | ~LibraryTrashed() => ui_text("undo-text", "Library moved to the Trash, settings reset")
+  | ~BooksRestored() => ui_text("undo-text", "Books restored from the Trash")
   | ~SettingsReset() => ui_text("undo-text", "Settings reset")
   | ~SyncTurnedOff(place) =>
     (case+ place of

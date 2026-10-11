@@ -1066,7 +1066,8 @@ fn _find_joined {file_size:pos}{dir_name_offset,dir_len:nat | dir_name_offset + 
     val path = $A.alloc<byte>(path_size)
     val _ = book_read(serial, file_size, dir_name_offset, path, dir_len)
     val () = $S.copy_from_borrow(data, href_offset, n, path, dir_len, path_size, href_len)
-    val resolved_len = path_norm(path, path_size)
+    val decoded_len = path_unescape(path, path_size, dir_len)
+    val resolved_len = path_norm_in(path, path_size, decoded_len)
   in
     if resolved_len <= 0 then let val () = $A.free<byte>(path) in EntryMiss() end
     else let
