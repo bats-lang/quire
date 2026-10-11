@@ -26,6 +26,7 @@ staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
 staload "wellformed.sats"
+staload "dataurl.sats"
 staload "settings.sats"
 staload "stats.sats"
 staload "annot.sats"
@@ -3040,14 +3041,50 @@ in
     in release_bytes(target_frozen, target_bytes) end
 end
 
-(* The image of a content node, whose src is data[src_start, src_start + src_len): the
-   entry that src names relative to the chapter's directory (the first
-   dir_len bytes of the chapter's name, at name_offset in the file) *)
-fn _load_image {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <= n}{node:nat}
+(* The image of a content node, whose src names the entry joined of the chapter's directory
+   (the first dir_len bytes of its name, at name_offset in the file) and data[src_start, src_start + path_end) *)
+(* The mime type of a data URL's image *)
+fn _data_mime (kind: data_image): [mime_len:pos | mime_len <= 24] string mime_len =
+  case+ kind of
+  | NoDataImage() => "application/octet-stream"
+  | DataPng() => "image/png"
+  | DataJpeg() => "image/jpeg"
+  | DataGif() => "image/gif"
+  | DataWebp() => "image/webp"
+  | DataSvg() => "image/svg+xml"
+
+(* The image of a content node given as a data URL data[src_start, src_start + src_len)
+   of an image of kind: decoded from base64 and shown as any entry's bytes are; one over
+   512 KiB of text (alloc's bound is 1 MiB) is not shown. It is not kept for the image viewer *)
+fn _load_data_image {l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <= n}{node:nat}
+  (node: int node, generation: int, kind: data_image, data: !$A.borrow(byte, l, n), src_start: int src_start, src_len: int src_len): void =
+  if src_len > 524288 then ()
+  else let
+    val from = data_url_payload(data, src_start, src_len)
+    val count = src_len - from
+  in
+    if count <= 0 then ()
+    else let
+      val buf = $A.alloc<byte>(count)
+      val decoded = base64_decode(data, src_start + from, count, buf)
+    in
+      if decoded <= 0 then $A.free<byte>(buf)
+      else let
+        val exact = $A.alloc<byte>(decoded)
+        val buf = $S.copy_arr_region(buf, 0, count, exact, decoded, decoded)
+        val () = $A.free<byte>(buf)
+        val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
+        val () = (if !_load_generation = generation then let
+            val () = _set_src(node, false, exact_bytes, decoded, _data_mime(kind))
+          in _copy_stale() end else ())
+        val () = $A.drop<byte>(exact_frozen, exact_bytes)
+      in $A.free<byte>($A.thaw<byte>(exact_frozen)) end
+    end
+  end
+
+fn _load_image_from {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{src_start,path_end:nat | src_start + path_end <= n}{node:nat}
   (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
-   data: !$A.borrow(byte, l, n), n: int n, node: int node, src_start: int src_start, src_len: int src_len, generation: int): void = let
-  val path_end = src_end(data, src_start, src_len)
-in
+   data: !$A.borrow(byte, l, n), n: int n, node: int node, src_start: int src_start, path_end: int path_end, generation: int): void =
   (* An src of 65536 bytes or more names no zip entry (a zip name is
      shorter): the book's data, checked here *)
   if path_end <= 0 then ()
@@ -3070,7 +3107,25 @@ in
       (* kept, so the image can be shown again in the viewer *)
     in if path_len < 65536 then _pictures_push(node, $A.thaw<byte>(path_frozen), path_len) else $A.free<byte>($A.thaw<byte>(path_frozen)) end
   end
-end
+
+(* The image of a content node, whose src is data[src_start, src_start + src_len): the
+   entry that src names relative to the chapter's directory (the first
+   dir_len bytes of the chapter's name, at name_offset in the file), or,
+   for a path-absolute src ("/..."), from the container's root; a data:
+   URL is its own bytes (_load_data_image) *)
+fn _load_image {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <= file_size; dir_len < 65536}{l:agz}{n:pos}{src_start,src_len:nat | src_start + src_len <= n}{node:nat}
+  (serial: int, file_size: int file_size, name_offset: int name_offset, dir_len: int dir_len,
+   data: !$A.borrow(byte, l, n), n: int n, node: int node, src_start: int src_start, src_len: int src_len, generation: int): void =
+  case+ data_url_kind(data, src_start, src_len) of
+  | NoDataImage() => let
+      val path_end = src_end(data, src_start, src_len)
+    in
+      if href_rooted(data, src_start, path_end) then
+        (if path_end <= 1 then ()
+         else _load_image_from(serial, file_size, name_offset, 0, data, n, node, src_start + 1, path_end - 1, generation))
+      else _load_image_from(serial, file_size, name_offset, dir_len, data, n, node, src_start, path_end, generation)
+    end
+  | kind => _load_data_image(node, generation, kind, data, src_start, src_len)
 
 (* The length of the fragment after the '#' at path_end of an href of href_len
    bytes: 0 when there is none, or it is over 200 bytes *)

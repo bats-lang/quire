@@ -255,6 +255,43 @@ fun _copy_decoded {tmp_loc,label_loc:agz}{tmp_size:pos}{decoded_len:nat | decode
     end
   end
 
+(* The text data[text_offset, text_offset + text_len), its character
+   references decoded (numeric ones too), as the page's text is, added to
+   the label label_buffer[0, label_len) *)
+fn _gather_span {data_loc,label_loc:agz}{data_size:pos}{text_offset,text_len:nat | text_offset + text_len <= data_size}{label_len:nat | label_len <= LABEL_MAX}
+  (data: !$A.borrow(byte, data_loc, data_size), text_offset: int text_offset, text_len: int text_len,
+   label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len =
+  if text_len <= 0 then label_len
+  (* a label is 200 bytes: a text over 1 MiB (alloc's bound) adds none *)
+  else if text_len > 1048576 then label_len
+  else let
+    val tmp = $A.alloc<byte>(text_len)
+    val decoded_len = decode_text(data, text_offset, text_len, tmp)
+    val new_len = _copy_decoded(tmp, decoded_len, 0, label_buffer, label_len)
+    val () = $A.free<byte>(tmp)
+  in new_len end
+
+(* An image in a label is named by its alt text, else its title (EPUB 3.3
+   §7.4.1 asks for alternative text on a link's image; the suite's
+   nav-non-text_img and nav-non-text_img_title): added to the label *)
+fn _gather_image {data_loc,label_loc:agz}{data_size:pos}{attr_count:nat}{label_len:nat | label_len <= LABEL_MAX}
+  (data: !$A.borrow(byte, data_loc, data_size), attrs: !$X.xml_attr_list(data_size, attr_count),
+   label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len = let
+  var _a_alt = @[char][3]('a', 'l', 't')
+  var _a_title = @[char][5]('t', 'i', 't', 'l', 'e')
+in
+  case+ find_attr(data, attrs, _a_alt, 3) of
+  | ~xspan_at(alt_offset, alt_len) =>
+    if alt_len > 0 then _gather_span(data, alt_offset, alt_len, label_buffer, label_len)
+    else (case+ find_attr(data, attrs, _a_title, 5) of
+      | ~xspan_at(title_offset, title_len) => _gather_span(data, title_offset, title_len, label_buffer, label_len)
+      | ~xspan_none() => label_len)
+  | ~xspan_none() =>
+    (case+ find_attr(data, attrs, _a_title, 5) of
+     | ~xspan_at(title_offset, title_len) => _gather_span(data, title_offset, title_len, label_buffer, label_len)
+     | ~xspan_none() => label_len)
+end
+
 (* The text of nodes, added to the label label_buffer[0, label_len) *)
 fun _gather_nodes {data_loc,label_loc:agz}{data_size:pos}{nodes_size:nat}{label_len:nat | label_len <= LABEL_MAX} .<nodes_size, 1>.
   (data: !$A.borrow(byte, data_loc, data_size), nodes: !$X.xml_node_list(data_size, nodes_size),
@@ -267,18 +304,13 @@ and _gather_node {data_loc,label_loc:agz}{data_size:pos}{node_size:pos}{label_le
   (data: !$A.borrow(byte, data_loc, data_size), node: !$X.xml_node(data_size, node_size),
    label_buffer: !$A.arr(byte, label_loc, LABEL_MAX), label_len: int label_len): [new_len:nat | new_len <= LABEL_MAX] int new_len =
   case+ node of
-  | $X.xml_text(text_offset, text_len) =>
-    if text_len <= 0 then label_len
-    (* a label is 200 bytes: a text over 1 MiB (alloc's bound) adds none *)
-    else if text_len > 1048576 then label_len
-    else let
-      (* its character references decoded (numeric ones too), as the page's text is *)
-      val tmp = $A.alloc<byte>(text_len)
-      val decoded_len = decode_text(data, text_offset, text_len, tmp)
-      val new_len = _copy_decoded(tmp, decoded_len, 0, label_buffer, label_len)
-      val () = $A.free<byte>(tmp)
-    in new_len end
-  | $X.xml_element(_, _, _, children) => _gather_nodes(data, children, label_buffer, label_len)
+  | $X.xml_text(text_offset, text_len) => _gather_span(data, text_offset, text_len, label_buffer, label_len)
+  | $X.xml_element(name_offset, name_len, attrs, children) => let
+      var _e_img = @[char][3]('i', 'm', 'g')
+    in
+      if xml_name_eq(data, name_offset, name_len, _e_img, 3) then _gather_image(data, attrs, label_buffer, label_len)
+      else _gather_nodes(data, children, label_buffer, label_len)
+    end
 
 (* The text of the first child element of nodes named element_name,
    added to the label label_buffer[0, label_len) *)

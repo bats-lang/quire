@@ -952,6 +952,29 @@ shown as text and the fallback its manifest names was never followed.
   for language and all 13 for direction, which lay each document out on its own; Quire's flow
   cannot without giving up one of those two decisions. They stay listed as policy in the report.
 
+## Addresses and labels in a book (#419)
+
+* **A path-absolute address is the container's** (`href_rooted` in `src/paths.bats`, used by
+  `book_find_relative` and `_load_image` in `src/reader.bats`; the suite's
+  `ocf-url_link-path-absolute`, "MUST ... resolved from the container's root"): an image's `src`
+  or a link's `href` that starts with `/` names the entry of that name from the root of the
+  zip, not from the document's directory, so `/OEBPS/images/a.png` in OEBPS/ch1.xhtml is
+  OEBPS/images/a.png, not OEBPS/OEBPS/images/a.png. epubcheck calls such an address a
+  warning (RSC-026); the reading system still shows it.
+* **An image given as a data URL is shown** (`src/dataurl.bats`; `pub-data-urls_browsing-context`
+  and `pub-data-urls_top-level-content`, "must display the image rather than opening it in a new
+  top-level browsing context"): `data:image/<png|jpeg|gif|webp|svg+xml>;base64,...` is decoded
+  by Quire (`base64_decode`) and given to the image as any entry's bytes are (`_load_data_image`),
+  because the dom package refuses a `data:` URL as an attribute (a script cannot run from one).
+  One over 512 KiB of text (alloc's bound is 1 MiB) or of another type is not shown, and it is not
+  offered to the image viewer (it is not an entry).
+* **A navigation link holding an image is labelled by the image's alt text, else its title**
+  (`_gather_image` in `src/toc.bats`; `nav-non-text_img`, `nav-non-text_img_title`): EPUB 3.3
+  asks for alternative text on a link's image, and the label was "Untitled".
+* `nav-spine_in-spine-hidden-toc-html` passes: the navigation document in the spine hides an
+  entry marked `hidden` (the attribute is kept, #411) and the contents panel, made from the
+  nav, lists all.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
