@@ -60,14 +60,14 @@ implement index_of_vals {vals}{value_count} (vals) =
    the format format_version, readable from least_version, with the chunks kept_extras kept *)
 #pub dataprop INDEXENC(indexx, int, int, extras, bytes) =
   | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
-    INDEXENC_mk(index_value, format_version, least_version, kept_extras, octets) of (INDEXV(index_value, vals), ENCODES(INDEX_SPECS, INDEX_KIND, rx_mk(format_version, least_version, vals, kept_extras), octets))
+    INDEXENC_mk(index_value, format_version, least_version, kept_extras, octets) of (INDEXV(index_value, vals), ENCODES(INDEX_SPECS, INDEX_KIND, rx_mk(format_version, least_version, vals, kept_extras, ab_nil()), octets))
 
 (* INDEXDEC(octets, outcome): reading octets as a index comes to outcome *)
 #pub dataprop INDEXDEC(bytes, indexres) =
-  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{vals:gvals}{octets:bytes}
-    INDEXDEC_ok(octets, ir_ok(index_value, format_version, least_version, kept_extras)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras))))
-  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{vals:gvals}{octets:bytes}
-    INDEXDEC_loss(octets, ir_loss(index_value, format_version, least_version, kept_extras, lost_groups)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras), lost_groups)))
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{missing_groups:absent}{vals:gvals}{octets:bytes}
+    INDEXDEC_ok(octets, ir_ok(index_value, format_version, least_version, kept_extras)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_ok(rx_mk(format_version, least_version, vals, kept_extras, missing_groups))))
+  | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras}{lost_groups:lost}{missing_groups:absent}{vals:gvals}{octets:bytes}
+    INDEXDEC_loss(octets, ir_loss(index_value, format_version, least_version, kept_extras, lost_groups)) of (INDEXV(index_value, vals), DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_loss(rx_mk(format_version, least_version, vals, kept_extras, missing_groups), lost_groups)))
   | {octets:bytes} INDEXDEC_notquire(octets, ir_notquire()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_notquire())
   | {octets:bytes} INDEXDEC_newer(octets, ir_newer()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_newer())
   | {octets:bytes} INDEXDEC_damaged(octets, ir_damaged()) of DECODES(INDEX_SPECS, INDEX_KIND, octets, rr_damaged())
@@ -151,11 +151,13 @@ implement index_record_read {octets}{byte_count} (list) = let
   val () = specsv_free(specs)
 in
   case+ read_outcome of
-  | ~RR_ok(format_version, least_version, vals, extras) => let
+  | ~RR_ok(format_version, least_version, vals, extras, missing) => let
       val (fields | index) = index_of_vals(vals)
+      val () = absentv_free(missing)
     in (INDEXDEC_ok(fields, read) | IR_ok(IndexRecord(format_version, least_version, index, extras))) end
-  | ~RR_loss(format_version, least_version, vals, extras, lost) => let
+  | ~RR_loss(format_version, least_version, vals, extras, lost, missing) => let
       val (fields | index) = index_of_vals(vals)
+      val () = absentv_free(missing)
     in (INDEXDEC_loss(fields, read) | IR_loss(IndexRecord(format_version, least_version, index, extras), lost)) end
   | ~RR_notquire() => (INDEXDEC_notquire(read) | IR_notquire())
   | ~RR_newer() => (INDEXDEC_newer(read) | IR_newer())

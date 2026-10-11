@@ -49,6 +49,7 @@
       "fixed.spec.js",
       "fractional-window.spec.js",
       "library-records.spec.js",
+      "old-library.spec.js",
       "library.spec.js",
       "search.spec.js",
       "sync-idempotent.spec.js",
@@ -89,6 +90,10 @@
       "checkers",
       "reject/brightness-not-a-choice",
       "reject/bytes-from-other-cells",
+      "reject/codec-absent-needs-defaults",
+      "reject/codec-absent-opt-group",
+      "reject/codec-absent-then-same-tag",
+      "reject/codec-added-group-is-not-damage",
       "reject/codec-crc-omitted",
       "reject/codec-drops-unknown-chunk",
       "reject/codec-length-off-by-one",
@@ -130,6 +135,7 @@
       "accept/aloud-placement-matched",
       "accept/back-offer",
       "accept/clip-last",
+      "accept/codec-absent-added-group",
       "accept/codec-length-ok",
       "accept/codec-roundtrip",
       "accept/fixed-box-fits",
@@ -139,6 +145,7 @@
       "accept/image-roundtrip",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
+      "accept/sheet-scrolls-most",
       "accept/try-again-transient",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
@@ -147,6 +154,7 @@
       "reject/clip-past-end",
       "reject/fixed-box-zoom-zero",
       "reject/page-height-fraction",
+      "reject/sheet-scrolls-over-share",
       "reject/page-width-fraction"
     ]
   }

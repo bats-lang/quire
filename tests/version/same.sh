@@ -1,21 +1,54 @@
 #!/bin/sh
-# The version (#219) depends only on the commit: written again, under
-# other clocks' time zones, it is the same, it has the form
-# YEAR.MONTH.DAY.SECONDS (SHA), and the Android project gen-pwa wrote
-# carries it as its versionName (run after scripts/version.sh and
-# gen-pwa, from the checkout's root)
+# The version (#219) depends only on the commit. bats writes the commit's
+# facts (build/src/_bats_facts.dats, bats-lang/bats#250), which
+# src/version.bats words: written again under other clocks' time zones,
+# by a project of its own, they are the same; the version has the form
+# YEAR.MONTH.DAY.SECONDS (SHA); and the Android project gen-pwa wrote
+# carries it as its versionName, and the commit's time in minutes since
+# 2025 as its versionCode.
+#
+# Run after `bats build` and gen-pwa, from the checkout, with the
+# BATS_COMMIT the build had (none: HEAD); bats must be on PATH.
 set -eu
 cd "$(dirname "$0")/../.."
+facts=build/src/_bats_facts.dats
+[ -f "$facts" ] || { echo "no $facts: run bats build first"; exit 1; }
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# A project that only names the facts: bats writes them from git, here the
+# checkout's repository
+GIT_DIR=$(git rev-parse --absolute-git-dir)
+export GIT_DIR
+mkdir -p "$tmp/project/src/bin"
+cat > "$tmp/project/bats.toml" <<'TOML'
+[package]
+name = "version-same"
+kind = "bin"
+TOML
+cat > "$tmp/project/src/bin/facts.bats" <<'BATS'
+#include "share/atspre_staload.hats"
+
+staload F = "_bats_facts.sats"
+
+implement main0 () = println! ($F.bats_commit_version())
+BATS
 for zone in UTC Pacific/Kiritimati America/Adak; do
-  TZ=$zone scripts/version.sh "$tmp/version.bats" >/dev/null
-  cmp "$tmp/version.bats" src/version.bats || { echo "the version written in $zone differs:"; diff "$tmp/version.bats" src/version.bats; exit 1; }
+  rm -rf "$tmp/project/build"
+  (cd "$tmp/project" && TZ=$zone bats check) > "$tmp/check.log" 2>&1 || { echo "bats check under $zone failed:"; cat "$tmp/check.log"; exit 1; }
+  cmp "$tmp/project/build/src/_bats_facts.dats" "$facts" || { echo "the facts written in $zone differ:"; diff "$tmp/project/build/src/_bats_facts.dats" "$facts"; exit 1; }
 done
-version=$(sed -n 's/^implement quire_version () = "\(.*\)"$/\1/p' src/version.bats)
-code=$(sed -n 's/^implement quire_version_code () = "\(.*\)"$/\1/p' src/version.bats)
-echo "$version" | grep -Eq '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}\.[0-9]+ \([0-9a-f]{7,}\)$' || { echo "not a version: '$version'"; exit 1; }
-echo "$code" | grep -Eq '^[0-9]+$' || { echo "not a version code: '$code'"; exit 1; }
+fact() { sed -n "s/^implement $1 () = \"\{0,1\}\([^\"]*\)\"\{0,1\}\$/\1/p" "$facts"; }
+date=$(fact bats_commit_version)
+short=$(fact bats_commit_short)
+seconds=$(fact bats_commit_time)
+version="$date ($short)"
+echo "$version" | grep -Eq '^[0-9]{4}\.[0-9]{1,2}\.[0-9]{1,2}\.[0-9]+ \([0-9a-f]{7}\)$' || { echo "not a version: '$version'"; exit 1; }
+echo "$seconds" | grep -Eq '^[0-9]+$' || { echo "not a commit time: '$seconds'"; exit 1; }
+# the commit's, not the checkout's: BATS_COMMIT names a pull request's head
+case $(git rev-parse "${BATS_COMMIT:-HEAD}") in "$short"*) ;; *) false ;; esac || { echo "the facts name $short, not ${BATS_COMMIT:-HEAD}"; exit 1; }
+[ "$seconds" = "$(git log -1 --format=%ct "${BATS_COMMIT:-HEAD}")" ] || { echo "the facts' time $seconds is not ${BATS_COMMIT:-HEAD}'s"; exit 1; }
+# minutes since 2025-01-01T00:00:00Z
+code=$(( (seconds - 1735689600) / 60 ))
 grep -qF "versionName '$version'" dist/android/android-release.gradle || { echo "dist/android/android-release.gradle has no versionName '$version'"; exit 1; }
 grep -qF "versionCode $code" dist/android/android-release.gradle || { echo "dist/android/android-release.gradle has no versionCode $code"; exit 1; }
 echo "version $version, version code $code: the same in every time zone, and the Android project's"

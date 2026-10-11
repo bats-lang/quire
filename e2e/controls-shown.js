@@ -40,6 +40,17 @@
  *   shadow of its own), so a class proven on the card's ground, reused on
  *   the page's, does not leave a strip of the card's colour behind its text
  *   (quire#386: Book info's author).
+ * - peekAbove: a sheet over the page leaves at least 40% of the window
+ *   to the page, so a setting that changes the page can be judged on
+ *   it (Material 3's standard sheet; #379).
+ * - offScale: the gaps of a sheet, and the padding of its tabs, are
+ *   steps of the spacing scale (4, 8, 12, 16, 24 px), none under the
+ *   least inset on a side (#379).
+ * - sheetReach: every control of a visible sheet can be reached by
+ *   scrolling within the sheet: centred in the sheet's scrolling area, the
+ *   topmost thing at its centre is the control, not the sticky head or
+ *   foot (a bottom sheet capped to a short window left its body no room
+ *   and Playwright could not click Layout; #379).
  * - inSafeArea: no control or text comes within the spacing scale's
  *   least inset of the screen's safe-area insets, where the system's
  *   bars are drawn over the page (#341).
@@ -573,6 +584,83 @@ export async function strayGrounds(page) {
       for (let a = e.parentElement; a && !behind; a = a.parentElement) behind = paint(a);
       if (!behind || behind === own || control(e) || card(e)) continue;
       bad.push(`${e.id ? '#' + e.id : e.tagName.toLowerCase() + '.' + e.className}: rgb(${own}) on rgb(${behind})`);
+    }
+    return bad;
+  });
+}
+
+
+/** Each visible fixed sheet that covers more than 60% of the window's
+    area (a side sheet in a short window covers half of it) (the page keeps at least 40%; #379). Named with the share it
+    covers */
+export async function peekAbove(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      const box = sheet.getBoundingClientRect();
+      const covered = Math.max(0, Math.min(box.bottom, innerHeight) - Math.max(box.top, 0)) * Math.max(0, Math.min(box.right, innerWidth) - Math.max(box.left, 0)) / (innerHeight * innerWidth);
+      if (covered > 0.6) bad.push(`${(sheet.getAttribute('aria-label') || sheet.id || 'sheet')} covers ${Math.round(covered * 100)}% of the window`);
+    }
+    return bad;
+  });
+}
+
+/** In each visible sheet: a gap (row or column) that is not a step of
+    the spacing scale, and a tab whose padding is not one, or is under
+    the least inset at a side (#379) */
+export async function offScale(page) {
+  return page.evaluate(() => {
+    const scale = [0, 4, 8, 12, 16, 24];
+    const least = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-inset'));
+    const bad = [];
+    const named = e => (e.getAttribute('aria-label') || e.id || e.className || e.tagName).toString().trim().slice(0, 40);
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      for (const element of [sheet, ...sheet.querySelectorAll('*')]) {
+        const style = getComputedStyle(element);
+        for (const property of ['rowGap', 'columnGap']) {
+          const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
+          if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
+        }
+        if (element.getAttribute('role') === 'tab') {
+          for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+            const value = parseFloat(style[`padding${side}`]);
+            if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
+            if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
+          }
+        }
+      }
+    }
+    return bad;
+  });
+}
+
+
+/** Each control of a visible sheet that, scrolled to the middle of the
+    sheet, still has something else at its centre (a sticky head or
+    foot over it), or that cannot be scrolled into the sheet's view */
+export async function sheetReach(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const controls = 'button, a[href], select, input:not([type=hidden]):not([type=file]), [role=tab], [role=switch], [role=slider]';
+    for (const sheet of document.querySelectorAll('.sheet')) {
+      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
+      const own = sheet.getBoundingClientRect();
+      for (const control of sheet.querySelectorAll(controls)) {
+        if (!control.checkVisibility({ visibilityProperty: true }) || control.closest('[inert]')) continue;
+        if (control.getClientRects().length === 0 || control.getBoundingClientRect().width <= 1) continue;
+        const sticky = control.closest('.shead, .sfoot');
+        if (sticky) continue;
+        const box = control.getBoundingClientRect();
+        sheet.scrollTop += box.top + box.height / 2 - (own.top + own.height / 2);
+        const now = control.getBoundingClientRect();
+        const hit = document.elementFromPoint(now.left + now.width / 2, now.top + now.height / 2);
+        if (!hit || !(hit === control || control.contains(hit))) {
+          bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is covered by ${hit ? (hit.id || hit.className || hit.tagName) : 'nothing'}`);
+        }
+      }
+      sheet.scrollTop = 0;
     }
     return bad;
   });

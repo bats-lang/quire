@@ -53,11 +53,10 @@ Key packages used:
 ## Development
 
 ```bash
-# Write the version (src/version.bats, not in git): the date and short
-# SHA of the commit built from
-scripts/version.sh
-
-# Build the app (wasm) and the PWA generator (native)
+# Build the app (wasm) and the PWA generator (native); the version is
+# the date and short SHA of the commit built from (HEAD, or BATS_COMMIT),
+# which bats writes for src/version.bats. BATS_REPOSITORY may name the
+# repository instead of --repository
 bats build --repository ../repository-prototype
 
 # Generate the PWA (into dist/pwa) and the Android project
