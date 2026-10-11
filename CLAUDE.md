@@ -114,8 +114,9 @@ commit), and save theirs once the job passed. What was found:
   readable only by that pull request: same repository, no cross-fork
   writes). The required check on a pull request is incremental, main's is
   cold, so a stale hit would show on main at the latest.
-* Paths. patsopt names C symbols by the absolute path of the files, so a
-  cache is valid at the path it was made at. `build` is at the checkout,
+* Paths. patsopt named C symbols by the absolute path of the files, so a
+  cache was valid only at the path it was made at (bats now takes the
+  checkout's path out of the C, bats-lang/bats#250). `build` is at the checkout,
   `/home/runner/work/quire/quire` in every job. The static jobs checked in
   `mktemp -d`, a different path each time; `tests/static/run.sh` now takes
   `QUIRE_STATIC_WORK`, a fixed directory (CI: `$RUNNER_TEMP/quire-static`),
@@ -139,6 +140,20 @@ commit), and save theirs once the job passed. What was found:
   the inputs: they are right where the key holds every input. bats's
   own rule for C is a time, which is why the toolchain is in the key, only
   passed builds are saved, and main is checked cold.
+* `BATS_CACHE_DIR` (bats-lang/bats#250) is not used in CI, by measurement
+  (#499). A pull request's job restores the `build/` of its base or its
+  earlier push, and what it compiles again is what changed (a few modules;
+  the adoption experiment's one comment changed, 106 s, a `#pub`
+  added to one `.sats`, 325 s). A cache of patsopt's C instead still runs
+  cc for every module and looks each one up (about 0.4 s a module,
+  bats-lang/bats#253): a copy of a checked tree at another path, every
+  module a hit, took 229 s against a cold 355 s here, so on a pull request
+  it is slower than `build/`, and it would only speed up main, which is
+  checked cold on purpose. Kept beside `build/`, it hits only a module
+  whose every input was compiled before, which the restored `build/`
+  already holds. Paths no longer matter (bats strips the checkout's path
+  from the C), but the static jobs keep their fixed directory, which costs
+  nothing.
 
 ## Check locally before every push
 
@@ -149,13 +164,42 @@ reaches CI (#350's first push failed on a comparison and a free that
 what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
 tarball it names), `lld`, the compiler built from the commit in
 `.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
-clone of bats-lang/repository-prototype; then `scripts/version.sh` and
-`bats check --repository <the clone>`. A check takes about 10 minutes
-on a cold build: run it in the background and wait for it, never push on
-the hope that it passes. A change to a spec or a static fixture runs
-that group too where the machine can (`tests/static/run.sh`, `npx
-playwright test <spec>`), and what it cannot run is left to CI and said
-in the PR. A fix pushed after a red CI is checked the same way first.
+clone of bats-lang/repository-prototype; then `bats check --repository
+<the clone>`, or with `BATS_REPOSITORY=<the clone>` in the environment
+and no flag (the flag wins). Nothing is written first: bats writes the
+version's facts from HEAD (above). A check takes 6 to 10 minutes on a
+cold build: run it in the background and wait for it, never push on the
+hope that it passes. Two bats in one checkout take turns (bats holds a
+lock on `bats.toml` and says it waits); two checkouts or worktrees do not
+lock each other (bats-lang/bats#252), so a machine shared by sessions
+runs one heavy build at a time by a lock of its own, `flock
+/tmp/quire-build.lock bats check ...` (and the same lock around `gen-pwa
+test`), until bats has a machine-wide limit.
+
+`BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
+what patsopt reads (the toolchain, its arguments and every file a
+module's staloads reach, by SHA-256), and the C names no checkout's
+path, so every checkout and worktree of the machine shares it, and a hit
+is checked as a run is. Measured on 4 cores (#499): a cold check 355 s, a
+copy of the checkout at another path 229 s (every module a hit; cc still
+runs), no change in place 80 s. Set it in the shell's profile.
+
+The e2e suite runs through the app's generator, `./dist/debug/gen-pwa
+test [--timings <dir>] [-- <playwright args> <spec>...]` (pwa's
+`test_run`, bats-lang/pwa#82), after `bats build`, `./dist/debug/gen-pwa`,
+`scripts/sync-clients.sh dist/pwa` and `cp -R homepage dist/pwa/homepage`
+(`e2e/about.spec.js` reads the home page): it serves `dist/pwa` at a port
+the kernel picks, takes one of the machine's slots (`PWA_TEST_SLOTS`,
+default 1, in `PWA_TEST_LOCK_DIR`), checks that `PLAYWRIGHT_BROWSERS_PATH`
+holds the headless Chromium this Playwright expects (it never downloads
+one), runs the `@serial` tests alone on one worker and then the others,
+and stops Playwright's processes however it ends. A `--grep` or
+`--workers` of the caller's makes it one run, as given. A bare `npx
+playwright test` still serves the app itself (at `QUIRE_PORT`). A change
+to a spec or a static fixture runs that group too where the machine can
+(`tests/static/run.sh`, `gen-pwa test -- <spec>`), and what it cannot
+run is left to CI and said in the PR. A fix pushed after a red CI is
+checked the same way first.
 
 The e2e suite needs Playwright 1.58 or later (`package.json` says so,
 `package-lock.json` pins 1.58.2): before 1.58 its fake clock can set the
@@ -176,18 +220,27 @@ Quire's version is the date of the commit it is built from, never of the
 build, so the same commit always gives the same version (#219): the
 committer date in UTC as bats packages are versioned,
 `YEAR.MONTH.DAY.SECONDS` (seconds since midnight), and the short SHA,
-`2026.10.2.61373 (f95ce82)`. `scripts/version.sh` writes it into
-`src/version.bats` (not in git; run it before `bats check` or `build`),
-which the app and gen-pwa compile in: About shows it, a backup records
-it (`appVersion`), and gen-pwa appends it to the Android project's
+`2026.10.2.61373 (f95ce82)`. bats writes the commit's facts as a module
+(`build/src/_bats_facts`, bats-lang/bats#250: its time, its date so
+worded and its short SHA, from the commit `BATS_COMMIT` names, else
+HEAD), and `src/version.bats` (tracked, #499) words them:
+`quire_version` (the date), `quire_commit_short`, `quire_version_text`
+(the two as one text, "VERSION (SHA)", in an array: a `string n` cannot
+be joined at run time) and `quire_version_code`. The app and gen-pwa
+compile them in: About shows the text, a backup records it
+(`appVersion`), and gen-pwa appends it to the Android project's
 `android-release.gradle` as `versionName`, with `versionCode` the same
 time in minutes since 2025 (so it grows from release to release, and
-pwa's run-number code is overridden). CI writes it for a pull request's
-own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
-in `check.yml`, should a queue be switched on) from the group's own
-commit (`github.sha`). `tests/version/same.sh` checks that it is the
-same in other time zones and that the Android project carries it.
+pwa's run-number code is overridden). CI names a pull request's own
+head (`BATS_COMMIT`, set by `setup-bats` for every later step: the
+merge's second parent, hence `fetch-depth: 2`), and for a run of a merge
+queue's group (`merge_group` in `check.yml`, should a queue be switched
+on) the group's own commit (`github.sha`). Outside a git repository a
+build fails and says so; `tests/static/run.sh`, which checks a copy of
+the checkout, points git at the checkout's repository (`GIT_DIR`).
+`tests/version/same.sh` checks that the facts are the same written in
+other time zones, that they name the commit, and that the Android
+project carries the version and its code.
 
 ## Main goes to Play's internal testing (#308)
 
@@ -734,8 +787,9 @@ multimedia mode: the DuRoBo Moodi sends previous and next track there, its
 reading mode the volume keys; the others in the field send the arrows or Page
 Up and Down). Enter follows the focused link and is no page key. Keys are not
 the page's while a text field or a panel has the focus, and a volume key is
-the system's while a panel is open. `QUIRE_PORT` in `playwright.config.js` is
-the port the app is served on, so two runs of the suite from two checkouts
+the system's while a panel is open. `gen-pwa test` serves the app at a port
+the kernel picks, and a bare `npx playwright test` at `QUIRE_PORT`
+(`playwright.config.js`), so two runs of the suite from two checkouts
 do not serve each other's build.
 ### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
@@ -2715,11 +2769,21 @@ job). Every spec and every static fixture is in exactly one group, or
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
 
-The specs that measure time (`pathological.spec.js`, `page-turn.spec.js`)
-are the `perf` group alone, run with one worker (`--workers=1`), and no
-spec that loads the machine joins it (`stall-capture.spec.js` spins a
-page on purpose): a budget that is measured beside another worker's load
-is flaky, and a flaky budget is relaxed until it stops catching anything.
+The tests that measure time (the describes of `pathological.spec.js` and
+`page-turn.spec.js` with a budget) are tagged `@serial`, and `gen-pwa
+test` runs them alone on one worker before the rest of the group, which
+then run on half the cores (#499): a budget that is measured beside
+another worker's load is flaky, and a flaky budget is relaxed until it
+stops catching anything. The two specs are still the `perf` group alone,
+and no spec that loads the machine joins it (`stall-capture.spec.js`
+spins a page on purpose), for balance: measured on 4 cores (CI's), their
+`@serial` tests take 11.0 minutes alone and the rest 1.9 on two workers
+(about 3 on one, as the group ran before), so the serial part would
+lengthen any group it joined by 11 minutes. Running the rest on two
+workers found a test that clicked a bar's control after `showChrome` by
+itself, which the bars' 5 s timeout can hide on a loaded machine: a
+control is clicked with `clickControl`, which shows the bars and clicks
+together until the click lands.
 A budget keeps headroom over what a loaded runner has been seen to give
 (a turn's animated time against its instant time was 1.27 times once, on
 CI, against a quarter's slack), and still fails a turn that costs twice
