@@ -7,14 +7,24 @@
 staload "palette.sats"
 staload "palette_proofs.sats"
 staload "sheet.sats"
+staload GT = "gestures/src/tracker.sats"
 staload "declarations.sats"
 
-#pub fn overlay_rules {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5900] sheet(after, false, false)
+(* The axes the image viewer's scroller (gestures region 2) hands the
+   recognizer: none, since it takes a pinch, so the stylesheet's
+   touch-action for .imbox comes from them and the browser leaves every
+   gesture to the viewer *)
+#pub fn image_zoom_axes (): $GT.axes
+
+implement image_zoom_axes () = $GT.AxNone()
+
+#pub fn overlay_rules {left:nat | left >= 6826} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6826] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
-fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 1674} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1674] sheet(after, false, false) = let
-  (* a book's image, full screen, on the page's ground; the fingers zoom
-     and pan it *)
+fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
+  (* a book's image, full screen, on the bars' dark ground (a picture is
+     best seen on a dark one, and every theme's bar is dark); the fingers
+     zoom and pan it (image_viewer.bats) *)
   val sheet = rule(sheet, ".imview")
   val sheet = lay(sheet, Position(), "fixed")
   val sheet = lay(sheet, Left(), "0")
@@ -22,28 +32,46 @@ fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 1674} (sheet: sheet
   val sheet = lay(sheet, Top(), "0")
   val sheet = lay(sheet, Bottom(), "0")
   val sheet = lay(sheet, ZIndex(), "14")
-  val sheet = fill(sheet, RoleGround())
+  val sheet = fill(sheet, RoleBar())
   val sheet = close(sheet)
+  (* the scroller: the picture's box is as large as it, or larger when
+     zoomed, and the scroller scrolls it; margin auto (not centring by
+     the flex container) keeps a larger box's start reachable. The
+     fingers are the picture's own (touch-action from the region's axes,
+     as the page's is), the browser's pinch is not *)
   val sheet = rule(sheet, ".imbox")
   val sheet = lay(sheet, Width(), "100%")
   val sheet = lay(sheet, Height(), "100%")
   val sheet = lay(sheet, Overflow(), "auto")
   val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, JustifyContent(), "center")
-  val sheet = lay(sheet, TouchAction(), "pinch-zoom pan-x pan-y")
+  val sheet = lay(sheet, TouchAction(), $GT.touch_action(image_zoom_axes(), true))
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imimg")
-  val sheet = lay(sheet, MaxWidth(), "100%")
-  val sheet = lay(sheet, MaxHeight(), "100%")
+  val sheet = lay(sheet, Display(), "block")
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = lay(sheet, Margin(), "auto")
+  val sheet = lay(sheet, Width(), "100%")
+  val sheet = lay(sheet, Height(), "100%")
   val sheet = lay(sheet, ObjectFit(), "contain")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".imclose")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "max(8px,var(--safe-top))")
   val sheet = lay(sheet, Right(), "max(8px,var(--safe-right))")
-  val sheet = surf(S_barfg_bar | sheet, RoleBarText(), RoleBar())
+  val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
   val sheet = lay(sheet, BorderRadius(), "50%")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".imzoom")
+  val sheet = lay(sheet, Position(), "absolute")
+  val sheet = lay(sheet, Left(), "50%")
+  val sheet = lay(sheet, Bottom(), "max(8px,var(--safe-bottom))")
+  val sheet = centre_x(sheet)
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, Gap(), "8px")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".imzoom .btn")
+  val sheet = surf(S_barfg_barhi | sheet, RoleBarText(), RoleBarHigh())
+  val sheet = lay(sheet, BorderRadius(), "24px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".toast")
   val sheet = lay(sheet, Position(), "fixed")

@@ -40,6 +40,8 @@ staload "sharing.sats"
 staload "read_aloud.sats"
 staload "narration.sats"
 staload "back.sats"
+staload "image_viewer.sats"
+staload "overlay_rules.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -85,6 +87,11 @@ val _resize_generation = ref<int>(0)
 val _focus_link = ref<int>(~1)
 (* Whether the scrubber's thumb is being dragged *)
 val _scrubbing = ref<bool>(false)
+(* The style Highlight makes, the last one used (Libby: "tap Highlight to
+   use the most recent highlight color"), and the selection toolbar's
+   row shown (quire#378) *)
+val _selection_style = ref<highlight_style>(Yellow())
+val _selection_view = ref<selection_view>(ShowingPrimary())
 (* The gesture recognizer's state and its pointer source (linear, so
    they are taken out of their cell and put back); and whether a drag
    has just ended, so that the click the browser sends after it is not
@@ -2269,6 +2276,9 @@ in ui_show("pages-list", true) end
 (* The page turn's region: .caf (page), region 1 *)
 #define PAGE_REGION 1
 
+(* The image viewer's pinch region: its scroller, region 2 *)
+#define IMAGE_REGION 2
+
 (* A drag has ended: the click that follows it is not a tap. The flag
    drops once the click has had its turn *)
 fn _drag_ended (): void = let
@@ -2310,8 +2320,10 @@ fun _on_gestures {count:nat} .<count>. (events: list_vt($GT.gevent, count)): voi
           if region <> PAGE_REGION then ()
           else let val () = _drag_ended() in reader_pan_back() end
         | ~$GT.GLongPress(_, _, _) => ()
-        | ~$GT.GPinch(_, _, _, _) => ()
-        | ~$GT.GPinchEnd(_) => ()
+        | ~$GT.GPinch(region, scale, mid_x, mid_y) =>
+          if region = IMAGE_REGION then viewer_pinch(scale, mid_x, mid_y) else ()
+        | ~$GT.GPinchEnd(region) =>
+          if region = IMAGE_REGION then viewer_pinch_end() else ()
         | ~$GT.GScrollEnd(_, _) => ()
         | ~$GT.GTransitionEnd(_) => ()
         | ~$GT.GTransitionCancel(_) => ())
@@ -2383,6 +2395,24 @@ fn _gesture_record (h: $EV.event_payload): void =
         in _gestures_act(asked, FRAME_ROUNDS) end
       | ~GNone() => $A.free<byte>(record))
 
+(* A pointer record from the image viewer: the viewer's drag reads it,
+   and the recognizer sees a pinch in it *)
+fn _viewer_record (h: $EV.event_payload): void =
+  case+ take_blob(h) of
+  | ~NoBlobBytes() => ()
+  | ~BlobBytes(record, record_len) =>
+    if record_len < 48 then $A.free<byte>(record)
+    else if ~layer_is_open(LImage()) then $A.free<byte>(record)
+    else (case+ _gestures_take() of
+      | ~GSome(state, source) => let
+          val () = viewer_pointer(_int32_at(record, 0), _int32_at(record, 4), _int32_at(record, 8), _int32_at(record, 12), _int32_at(record, 20))
+          val @(events, asked) = $GS.gestures_raw(source, state, record, 0)
+          val () = $A.free<byte>(record)
+          val () = _gestures_put(GSome(state, source))
+          val () = _gestures_show(events)
+        in _gestures_act(asked, FRAME_ROUNDS) end
+      | ~GNone() => $A.free<byte>(record))
+
 (* A pointer record from the reader view while a panel is over it:
    dropped *)
 fn _gesture_drop (h: $EV.event_payload): void =
@@ -2395,6 +2425,7 @@ fn _gesture_drop (h: $EV.event_payload): void =
 fn _gestures_start (): void = let
   val state = $GT.gestures_new()
   val () = $GT.gestures_region(state, PAGE_REGION, $GP.NoRegion(), page_turn_axes(), false, false, $GT.DevTouch())
+  val () = $GT.gestures_region(state, IMAGE_REGION, $GP.NoRegion(), image_zoom_axes(), true, false, $GT.DevTouch())
 in _gestures_put(GSome(state, $GS.gestures_source_new())) end
 
 (* The page's scrolls, numbered, so only the last one's rest counts *)
@@ -2521,10 +2552,25 @@ fn _toolbar_place (): void = let
   val top = (if above >= floor then above else selection_bottom + HANDLE_CLEARANCE): Int
 in ui_toolbar_at(_clamp(top, 0, 10000), _clamp(height, 0, 10000)) end
 
+(* The toolbar shows view's row; its height changes, so it is placed again *)
+fn _selection_view_put (view: selection_view): void = let
+  val () = !_selection_view := view
+in selection_view_show(view) end
+
+(* Highlight is drawn with the swatch of the style it makes *)
+fn _highlight_swatch (style: highlight_style): void =
+  case+ style of
+  | Yellow() => ui_attr("selection-highlight", AClass, "btn hlmark hl-yellow")
+  | Orange() => ui_attr("selection-highlight", AClass, "btn hlmark hl-orange")
+  | Underlined() => ui_attr("selection-highlight", AClass, "btn hlmark hl-under")
+
 (* The selection made a highlight in style (or changed the range of the
-   one that was tapped), and ended: Highlight leaves nothing selected *)
+   one that was tapped), and ended: Highlight leaves nothing selected.
+   The style is the one Highlight makes next *)
 fn _highlight_selection (style: highlight_style): void = let
   val index = annot_highlight(style)
+  val () = !_selection_style := style
+  val () = _highlight_swatch(style)
 in if index >= 0 then annot_selection_end() else () end
 
 fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
@@ -2538,6 +2584,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
         val selected = (if _has_selection() then annot_selection_in_page() else false)
         (* the selection ended: a highlight the reader tapped is let go *)
         val () = (if _has_selection() then () else annot_tap_forget())
+        val () = (if selected then () else _selection_view_put(ShowingPrimary()))
         val () = ui_show("selection-toolbar", selected)
         val () = (if selected then let val () = _lookup_update(1) in _toolbar_place() end else ())
       in 0 end else 0)
@@ -2545,22 +2592,34 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
       val clicked = _target(h)
       val control = _selection_control(clicked)
       val () = _target_free(clicked)
-      val () = (case+ control of
-        | ~$R.none() => ()
-        | ~$R.some(SelectionHighlight()) => _highlight_selection(Yellow())
-        | ~$R.some(SelectionOrange()) => _highlight_selection(Orange())
-        | ~$R.some(SelectionUnderline()) => _highlight_selection(Underlined())
+      (* More turns the toolbar over and stays; any other control acts
+         and ends it *)
+      val keep = (case+ control of
+        | ~$R.none() => true
+        | ~$R.some(SelectionMore()) => let
+            val () = (case+ !_selection_view of
+              | ShowingPrimary() => _selection_view_put(ShowingOverflow())
+              | ShowingOverflow() => _selection_view_put(ShowingPrimary()))
+            val () = _toolbar_place()
+          in true end
+        | ~$R.some(SelectionHighlight()) => let val () = _highlight_selection(!_selection_style) in false end
+        | ~$R.some(SelectionYellow()) => let val () = _highlight_selection(Yellow()) in false end
+        | ~$R.some(SelectionOrange()) => let val () = _highlight_selection(Orange()) in false end
+        | ~$R.some(SelectionUnderlined()) => let val () = _highlight_selection(Underlined()) in false end
         (* a note on a highlight that was tapped is that highlight's note:
            cancelling it takes nothing away *)
         | ~$R.some(SelectionNote()) => let
             val index = annot_highlight(Yellow())
-          in annot_ask_note(index, ~annot_replaced()) end
-        | ~$R.some(SelectionCopy()) => _copy_selection()
-        | ~$R.some(SelectionSearch()) => _search_selection()
-        | ~$R.some(SelectionDefine()) => dict_show()
-        | ~$R.some(SelectionRead()) => aloud_from_selection()
-        | ~$R.some(SelectionShare()) => _share_selection())
-    in let val () = ui_show("selection-toolbar", false) in 0 end end)
+            val () = annot_ask_note(index, ~annot_replaced())
+          in false end
+        | ~$R.some(SelectionCopy()) => let val () = _copy_selection() in false end
+        | ~$R.some(SelectionSearch()) => let val () = _search_selection() in false end
+        | ~$R.some(SelectionDefine()) => let val () = dict_show() in false end
+        | ~$R.some(SelectionLookup()) => false
+        | ~$R.some(SelectionRead()) => let val () = aloud_from_selection() in false end
+        | ~$R.some(SelectionShare()) => let val () = _share_selection() in false end): bool
+      val () = (if keep then () else _selection_view_put(ShowingPrimary()))
+    in let val () = (if keep then () else ui_show("selection-toolbar", false)) in 0 end end)
   (* a word's dictionary entry: closed, or looked up online instead *)
   val listeners = RCons(listeners, OnEl("dictionary-panel"), "click", llam(h) => let
       val clicked = _target(h)
@@ -2655,7 +2714,7 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
   | ~$R.none() => false
   | ~$R.some(offset) => annot_tap_select(node, offset)
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 19) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
@@ -2718,15 +2777,31 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
     end)
   val listeners = RCons(listeners, OnEl("image-viewer"), "click", llam(h) => let
       val clicked = _target(h)
-      val close = (case+ _image_viewer_control(clicked) of ~$R.some(ImageClose()) => true | ~$R.none() => false): bool
+      val () = (case+ _image_viewer_control(clicked) of
+        (* the focus goes back where it was (layer.bats) *)
+        | ~$R.some(ImageClose()) => layer_close(LImage())
+        | ~$R.some(ImageZoomIn()) => viewer_zoom_in()
+        | ~$R.some(ImageZoomOut()) => viewer_zoom_out()
+        | ~$R.none() => ())
+      val () = _target_free(clicked)
+    in 0 end)
+  (* a double tap on the picture zooms it in there, or back to the fit
+     (a double click is the same for a mouse) *)
+  val listeners = RCons(listeners, OnEl("image-viewer"), "dblclick", llam(h) => let
+      val clicked = _target(h)
+      val on_picture = (if _is(clicked, "image-full") then true else _is(clicked, "image-box")): bool
+      val x = _target_x(clicked)
+      val y = _target_y(clicked)
       val () = _target_free(clicked)
     in
-      (* the focus goes back where it was (layer.bats) *)
-      if close then let
-        val () = layer_close(LImage())
-      in 0 end
+      if on_picture then let val () = viewer_double_tap(x, y) in 0 end
       else 0
     end)
+  (* the pointers on the picture: a pinch is the gestures package's, a
+     finger's drag is the viewer's own *)
+  val listeners = RCons(listeners, OnPointer("image-viewer"), "pointer", llam(h) => let
+      val () = _viewer_record(h)
+    in 0 end)
   (* a link within the book, focused from the keyboard, is followed with
      Enter *)
   val listeners = RCons(listeners, OnEl("page"), "focusin", llam(h) => let
@@ -2800,6 +2875,7 @@ fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 17) = let
     in 0 end)
   (* a resize lays the chapter out again, once it settles *)
   val listeners = RCons(listeners, OnWindow(), "resize", llam(_) => let
+      val () = viewer_resized()
       val () = _relayout_settled()
     in 0 end)
   (* the browser's Back: it took the guard back.bats pushes once there

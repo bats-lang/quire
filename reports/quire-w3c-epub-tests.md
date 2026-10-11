@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 94 | 28 | 17 | 139 |
-| should | 11 | 22 | 5 | 38 |
+| must | 98 | 24 | 17 | 139 |
+| should | 13 | 20 | 5 | 38 |
 | may | 0 | 1 | 0 | 1 |
 | deprecated | 16 | 10 | 1 | 27 |
-| all | 121 | 61 | 23 | 205 |
+| all | 127 | 55 | 23 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -47,16 +47,12 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `lay-roll-embedded-images` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
 | `lay-roll-embedded-images-svg` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
 | `nav-spine_in-spine-hidden-toc-css` | must | the navigation document in the spine shows the entry its CSS hides (display:none): the book's CSS is dropped by design; the contents panel lists both, as asked | 1/2 | policy |
-| `nav-spine_in-spine-hidden-toc-html` | must | the navigation document in the spine shows the entry its hidden attribute hides; the contents panel lists both, as asked | 1/2 | next |
-| `ocf-url_link-path-absolute` | must | a path-absolute address ("/images/photograph.jpg") is not resolved from the container root: the image is blanked | 6/16 | next |
 | `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
 | `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
 | `pub-cmt-mp3` | must | an audio element is not shown (its fallback content is) | 12/14 | next |
 | `pub-cmt-mp4` | must | an audio element is not shown (its fallback content is) | 11/14 | next |
 | `pub-cmt-opus` | must | an audio element is not shown (its fallback content is) | 6/14 | next |
-| `pub-data-urls_browsing-context` | must | an img with a data: URL is blanked (src="data:,") | 16/16 | next |
-| `pub-data-urls_top-level-content` | must | an img with a data: URL is blanked (src="data:,") | 14/15 | next |
 | `css-epub-hyphens` | should | the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's) | 7/18 | policy |
 | `css-epub-line-break` | should | the book's own CSS is dropped by design | 3/15 | policy |
 | `css-epub-text-align-last` | should | the book's own CSS is dropped by design | 1/19 | policy |
@@ -73,8 +69,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `mol-css` | should | the phrase is marked by Quire's own highlight; media:active-class and the book's CSS (green background) are not applied | 2/8 | decision |
 | `mol-tts_multi` | should | a SMIL with no audio is not read by speech synthesis: nothing plays | 6/13 | decision |
 | `mol-tts_single` | should | a SMIL with no audio is not read by speech synthesis: nothing plays | 6/13 | decision |
-| `nav-non-text_img` | should | a navigation link holding an image is labelled "Untitled": its alt text is not used | 0/4 | next |
-| `nav-non-text_img_title` | should | a navigation link holding an image is labelled "Untitled": its alt and title are not used | 0/4 | next |
 | `ocf-font_obfuscation` | should | the book's own CSS is dropped by design, so an embedded font is never used | 7/15 | policy |
 | `pkg-manifest-unlisted-resource` | should | an image the manifest does not list is shown: the zip is read by name, not by the manifest | 4/15 | next |
 | `pub-external-links` | should | a link out opens a new tab at once, with no consent step | 7/15 | decision |
@@ -172,8 +166,12 @@ Caveats of a pass, where there is one:
 * `mol-timing-synchronization_multiple_audio-fxl`: MP3
 * `mol-timing-synchronization_svg`: the text of the SVG is read and marked (the drawing is not shown); MP3
 * `mol-timing-synchronization_svg-fxl`: the text of the SVG is read and marked (the drawing is not shown); MP3
+* `nav-non-text_img`: a navigation link holding an image is labelled by its alt text
+* `nav-non-text_img_title`: a navigation link holding an image is labelled by its alt text, else its title
+* `nav-spine_in-spine-hidden-toc-html`: the navigation document in the spine hides the entry its hidden attribute hides, and the contents panel lists both
 * `nav-spine_in-spine-no-list-style`: the contents panel is not numbered
 * `ocf-font_obfuscation_bis`: the font is not displayed (no embedded font is ever used)
+* `ocf-url_link-path-absolute`: a path-absolute address ("/OEBPS/images/photograph.png") is resolved from the container root, for images and links
 * `ocf-zip-comp`: an archive with an entry compressed by anything but Deflate or stored is refused (the suite's EPUB is built with Deflate, so it cannot show the case; the e2e test makes a bzip2 entry)
 * `ocf-zip-mult`: an archive whose end record names more than one disk is refused (the suite's EPUB is one zip; the e2e test makes a split archive's end record)
 * `pkg-creator-order`: the first dc:creator is used
@@ -192,6 +190,8 @@ Caveats of a pass, where there is one:
 * `pkg-title-order`: the first dc:title is used
 * `pkg-unique-id`: two books with the one identifier are two cards
 * `pkg-unique-id_duplicate`: two books with the one identifier are two cards
+* `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
+* `pub-data-urls_top-level-content`: an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded
 * `pub-foreign_bad-fallback`: an item and a fallback that are both foreign are left out of the spine, never shown as text
 * `pub-foreign_image`: an img of a foreign type is shown as its manifest fallback
