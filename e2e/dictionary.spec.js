@@ -58,7 +58,7 @@ const dictionaries = page => dialog(page, 'Dictionaries');
 const entry = page => dialog(page, 'Dictionary');
 const selection = page => page.getByRole('toolbar', { name: 'Selection' });
 const lookUpHere = page => selection(page).getByRole('button', { name: 'Look up', exact: true });
-const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up' });
+const lookUpOnline = page => selection(page).getByRole('link', { name: 'Look up online', exact: true });
 
 /** Opens the dictionaries from Settings (opened from the library menu
     unless it is open) */

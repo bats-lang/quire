@@ -350,6 +350,15 @@ export async function selectText(page, from, to) {
 export const selectionButton = (page, name) =>
   page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name, exact: true });
 
+/** A control behind the selection toolbar's More (a highlight style's
+    swatch, Search, Read from here): More is pressed when the row it
+    turns over is not shown, then the control is */
+export async function selectionPick(page, name) {
+  const more = selectionButton(page, 'More');
+  if ((await more.getAttribute('aria-expanded')) === 'false') await more.click();
+  await selectionButton(page, name).click();
+}
+
 /** How many ranges are painted over the text (highlights, or the
     search match), and the text of the first */
 export async function marks(page) {
