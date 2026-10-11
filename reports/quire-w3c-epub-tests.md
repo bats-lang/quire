@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 98 | 24 | 17 | 139 |
+| must | 101 | 21 | 17 | 139 |
 | should | 13 | 20 | 5 | 38 |
 | may | 0 | 1 | 0 | 1 |
 | deprecated | 16 | 10 | 1 | 27 |
-| all | 127 | 55 | 23 | 205 |
+| all | 130 | 52 | 23 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -50,9 +50,6 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
 | `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
 | `pub-cmt-jxl` | must | the image is not decoded: Chromium (and Android's WebView) have no JPEG XL decoder | 0/2 | platform |
-| `pub-cmt-mp3` | must | an audio element is not shown (its fallback content is) | 12/14 | next |
-| `pub-cmt-mp4` | must | an audio element is not shown (its fallback content is) | 11/14 | next |
-| `pub-cmt-opus` | must | an audio element is not shown (its fallback content is) | 6/14 | next |
 | `css-epub-hyphens` | should | the book's own CSS is dropped by design (the reader's Hyphenation setting is the reader's) | 7/18 | policy |
 | `css-epub-line-break` | should | the book's own CSS is dropped by design | 3/15 | policy |
 | `css-epub-text-align-last` | should | the book's own CSS is dropped by design | 1/19 | policy |
@@ -190,6 +187,9 @@ Caveats of a pass, where there is one:
 * `pkg-title-order`: the first dc:title is used
 * `pkg-unique-id`: two books with the one identifier are two cards
 * `pkg-unique-id_duplicate`: two books with the one identifier are two cards
+* `pub-cmt-mp3`: an audio element is made with the browser's controls and the book's entry as its source (MP3 is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
+* `pub-cmt-mp4`: an audio element is made with the browser's controls and the book's entry as its source (AAC in MP4 is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
+* `pub-cmt-opus`: an audio element is made with the browser's controls and the book's entry as its source (Opus is played by the engine; Chromium's headless build, which the e2e suite runs, has no AAC decoder, so the e2e test plays the mp3 and checks the controls of all)
 * `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
 * `pub-data-urls_top-level-content`: an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded

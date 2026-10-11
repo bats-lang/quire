@@ -996,6 +996,22 @@ shown as text and the fallback its manifest names was never followed.
   entry marked `hidden` (the attribute is kept, #411) and the contents panel, made from the
   nav, lists all.
 
+## Audio and video play (#424, #419)
+
+An `audio` or `video` element of a chapter is made as such with the browser's own
+controls (dom's `Controls`) and never autoplay; its `src`, or the first `<source>`'s,
+is the book's entry, given as the picture's bytes are (`images_cons` on the element:
+bridge's `set_image_src` makes a blob and sets the element's `src`, which is generic,
+not an image's). A `<source>`'s file goes to the media element itself, since a
+`<source>` given its src after insertion is not looked at again (the last of several
+sources given, the first in the document, wins: no `type` selection). By research: Apple
+Books plays embedded audio and video, Kobo's apps do (its e-ink devices show the
+fallback), Thorium, Foliate and Calibre's viewer are browser engines that play them. The
+file passes through wasm memory (a piece of the chapter's arena); a long video is
+heavy there (a stored entry could instead be a range blob on the JS side, as narration's
+audio is: not done). Leaving the chapter removes the element, which stops it.
+`e2e/media.spec.js` plays a real mp3.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading

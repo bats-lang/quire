@@ -1,14 +1,19 @@
 // EPUB 3 books with audio and video elements in a chapter (#424), checked
-// by epubcheck (e2e/epubcheck.spec.js). The media files are a few bytes
-// of the right type: epubcheck checks the type, not the stream.
+// by epubcheck (e2e/epubcheck.spec.js). Only the mp3 is a real clip; the
+// others are a few bytes of the right type: epubcheck checks the type, not
+// the stream.
+
+import { readFileSync } from 'node:fs';
 
 const bytes = n => Buffer.alloc(n, 7);
+/** A real clip (the W3C suite's pub-cmt-mp3, a second of a tone) that a browser decodes */
+const clip = readFileSync(new URL('./media-clip.mp3', import.meta.url));
 
 export const mediaBooks = {
   media: { valid: true, opts: {
     title: 'Media', author: 'Media', toc: [{ label: 'Media', href: 'chapter1.xhtml' }],
     extraFiles: [
-      { name: 'audio/clip.mp3', mediaType: 'audio/mpeg', data: bytes(64), store: true },
+      { name: 'audio/clip.mp3', mediaType: 'audio/mpeg', data: clip, store: true },
       { name: 'audio/clip.m4a', mediaType: 'audio/mp4', data: bytes(64), store: true },
       { name: 'video/clip.mp4', mediaType: 'video/mp4', data: bytes(64), store: true },
     ],

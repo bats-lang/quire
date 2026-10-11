@@ -136,14 +136,20 @@ fn _mime_of {l:agz}{path_len:pos} (path: !$A.borrow(byte, l, path_len), path_len
   var gif = @[char][4]('.', 'g', 'i', 'f')
   var svg = @[char][4]('.', 's', 'v', 'g')
   var webp = @[char][5]('.', 'w', 'e', 'b', 'p')
+  var webm = @[char][5]('.', 'w', 'e', 'b', 'm')
+  var m4v = @[char][4]('.', 'm', '4', 'v')
+  var ogv = @[char][4]('.', 'o', 'g', 'v')
 in
   if path_len >= 5 && _ends_with(path, path_len, jpeg, 5, 0) then "image/jpeg"
+  else if path_len >= 5 && _ends_with(path, path_len, webm, 5, 0) then "video/webm"
   else if path_len >= 5 && _ends_with(path, path_len, webp, 5, 0) then "image/webp"
   else if path_len < 4 then "application/octet-stream"
   else if _ends_with(path, path_len, png, 4, 0) then "image/png"
   else if _ends_with(path, path_len, jpg, 4, 0) then "image/jpeg"
   else if _ends_with(path, path_len, gif, 4, 0) then "image/gif"
   else if _ends_with(path, path_len, svg, 4, 0) then "image/svg+xml"
+  else if _ends_with(path, path_len, m4v, 4, 0) then "video/mp4"
+  else if _ends_with(path, path_len, ogv, 4, 0) then "video/ogg"
   else _audio_mime(_audio_type(path, path_len))
 end
 
