@@ -8,9 +8,10 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, cards, importInput, bookPage,
   chapterTitle, indicator, libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, openSettings, toLibrary, topBar,
-  readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
+  reload, readingSettings, openReadingSettings, openShelf, emptyTrashDialog, shelfTitle, place, placeChanged, selectText, rawFile, startsOnPage, onPage, librarySearch, chooseInSortMenu,
 } from './helpers.js';
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
+import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
 import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
@@ -725,3 +726,27 @@ for (const [name, text, button, banner] of [
     await healReads(page);
   });
 }
+
+// #507: the notice of records that cannot be used has Copy details and
+// Report, which wrap under its message on a phone and make it tall; the
+// menus opened from the library are over it, not under it, and it is over
+// none of the library's controls
+test('the library menu is reachable under the banner of records that cannot be used', async ({ page }) => {
+  await start(page);
+  await forgetRecords(page);
+  const unreadable = { idHigh: 0x1234567, idLow: 0x0abcdef, title: 'Alpha Tales', author: 'Ann Writer' };
+  await put(page, 'lib', [...legacyLibrary(6, [], [unreadable, { idHigh: 0x2345678, idLow: 0x1bcdef0, title: 'Beta Notes', author: 'Bo Author' }])]);
+  await reload(page);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(unreadable)].slice();
+  record[10] ^= 0x5a;
+  await put(page, bookKey(unreadable), record);
+  await reload(page);
+  await expect(page.getByRole('alert')).toContainText('Some books in your library could not be read');
+  await expect(page.getByRole('alert').getByRole('button', { name: 'Copy details' })).toBeVisible();
+  expect(await coveredByBanner(page)).toEqual([]);
+  await libraryMenu(page);
+  for (const name of ['Settings', 'About Quire', 'Close']) await menuItem(page, name).click({ trial: true });
+  await page.keyboard.press('Escape');
+  await fits(page, 'the library with the banner of records that cannot be used');
+});
