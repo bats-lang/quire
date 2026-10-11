@@ -17,7 +17,7 @@ import { writeFileSync, statSync } from 'node:fs';
 import { librarySettings, settingsButton, restoreInput, exportedBackup, openShelf, shelfTitle } from './helpers.js';
 import { NOON, minutesLater, stores, sync, highlight, shown } from './sync-devices.js';
 import { replaceBook } from './replace-books.js';
-import { panel, note, readMinutes, highlightWithNote, inCollection, fileSizes, replaceWith } from './replace-steps.js';
+import { panel, note, readMinutes, highlightWithNote, bookmarkPage, inCollection, fileSizes, replaceWith } from './replace-steps.js';
 
 const FIXED = new Date('2026-06-01T10:00:00Z');
 
@@ -36,7 +36,7 @@ test('replacing a book with the identical file changes nothing the reader made',
   await openBook(page, 'Replace Me');
   await oneColumn(page);
   await highlightWithNote(page, 'First thought');
-  await page.getByRole('button', { name: 'Bookmark this page' }).click();
+  await bookmarkPage(page);
   await readMinutes(page, 2);
   await page.keyboard.press('End');
   await page.keyboard.press('ArrowRight');
