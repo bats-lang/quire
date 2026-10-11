@@ -3653,7 +3653,12 @@ implement sync_screen_open () = let
   val () = _status_show()
   val () = _actions_show(_store_on())
   val () = layer_open(LSync())
-in ui_focus("sync-done") end
+in let
+  (* focus goes to Done at the screen's foot, which scrolls it flush to the
+     window's edge, under the bars (#389: the rows grew taller); the
+     screen is shown from its top *)
+  val () = ui_focus("sync-done")
+in ui_scroll_to_top("sync-screen") end end
 
 (* A service's own sign-in step, opened from its row over the list:
    only its part, its button and Cancel shown, its fields as kept *)
@@ -3706,7 +3711,12 @@ end
 implement sync_step_cancel () = let
   val () = !_sign_in_generation := !_sign_in_generation + 1
   val () = _step_close()
-in ui_focus("sync-done") end
+in let
+  (* focus goes to Done at the screen's foot, which scrolls it flush to the
+     window's edge, under the bars (#389: the rows grew taller); the
+     screen is shown from its top *)
+  val () = ui_focus("sync-done")
+in ui_scroll_to_top("sync-screen") end end
 
 (* What the step says: a field left empty *)
 fn _step_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-step-status", text)
