@@ -970,11 +970,11 @@ fn service_title (service: sync_service): [name_len:pos | name_len < 64] string 
    (Android's settings: supporting text says what a setting is, #389) *)
 fn service_summary (service: sync_service): [text_len:pos | text_len < 128] string text_len =
   case+ service of
-  | ServiceGoogle() => "A private folder in your Google Drive that only Quire can see"
-  | ServiceDropbox() => "A folder named Quire in your Dropbox"
-  | ServiceFastmail() => "A folder named quire in your Fastmail Files"
-  | ServiceNextcloud() => "A folder on your Nextcloud server, signed in on its page"
-  | ServiceWebDav() => "Any WebDAV folder: its address, a user name and an app password"
+  | ServiceGoogle() => "A private folder in your Google Drive"
+  | ServiceDropbox() => "A folder named Quire in Dropbox"
+  | ServiceFastmail() => "A folder named quire in Fastmail Files"
+  | ServiceNextcloud() => "A folder on your Nextcloud server"
+  | ServiceWebDav() => "Any WebDAV folder, with an app password"
 
 (* The one verb of a service's step button, whichever the service: the
    name says where to (quire#361; the app's Google account is Google
