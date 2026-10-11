@@ -10,14 +10,17 @@
 // Budgets are relative, as page-turn.spec.js's are (#307): a turn is
 // measured against an instant turn, and a pathological chapter against a
 // plain chapter of the same length, both in the same page, so a slower
-// machine slows both. Absolute times are only ever printed. The stall watch
+// machine slows both. Absolute times are only ever printed. The describes
+// that measure are tagged @serial: `gen-pwa test` runs them alone on one
+// worker before the rest (#499), so no other test's load is in what they
+// measure. The stall watch
 // (e2e/stall-capture.js) is on in every test, so a page that stops
 // answering explains itself and fails the test.
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, place, indicator, bookPage, showChrome, dialog, openReadingSettings, readingSettings,
-  selectionButton, marks, epubFile, importFiles, toLibrary, control, cards, card,
+  start, readBook, place, indicator, bookPage, dialog, openReadingSettings, readingSettings,
+  selectionButton, marks, epubFile, importFiles, toLibrary, control, clickControl, cards, card,
 } from './helpers.js';
 import { pageMargins } from './page-margins.js';
 import {
@@ -258,7 +261,7 @@ const firstTagged = (page, tag) => bookPage(page).evaluate((doc, tag) => {
   return null;
 }, tag);
 
-test.describe('a table cell over many pages', () => {
+test.describe('a table cell over many pages', { tag: '@serial' }, () => {
   for (const mode of MODES) {
     test(`${mode}: turns across the cell cost what a plain chapter's do, and every page has its place and footer`, async ({ page }) => {
       test.setTimeout(85000);
@@ -475,7 +478,7 @@ async function operations(page) {
   return { turns, end, summary, found, highlight };
 }
 
-test.describe('a single-file book of 5 MB', () => {
+test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
   // The yardstick is the same book's shape at 300 KB (page-turn.spec.js's
   // chapter): the same operations, in the same page, timed the same way. A
   // 5 MB chapter holds about 17 times the text, so an operation that costs
@@ -579,8 +582,7 @@ test.describe('a thousand nested elements', () => {
         // read aloud, from the page's first sentence: the sentence holding
         // the word is reached
         await closeSearch(page);
-        await showChrome(page);
-        await control(page, 'Read aloud').click();
+        await clickControl(page, 'Read aloud');
         await expect(control(page, 'Read aloud')).toHaveAttribute('aria-pressed', 'true');
         let said = [];
         for (let k = 0; k < 12 && !said.some(text => text.includes(DEEP_WORD)); k++) {
@@ -589,8 +591,7 @@ test.describe('a thousand nested elements', () => {
           await page.evaluate(() => window.sentenceSpoken());
         }
         expect(said.some(text => text.includes(DEEP_WORD)), `chapter ${chapter} read aloud: ${JSON.stringify(said)}`).toBe(true);
-        await showChrome(page);
-        await control(page, 'Read aloud').click();
+        await clickControl(page, 'Read aloud');
         await expect(control(page, 'Read aloud')).toHaveAttribute('aria-pressed', 'false');
         await page.evaluate(() => { window.spoken.length = 0; });
         if (chapter < 3) {
@@ -614,7 +615,7 @@ async function screensOf(page) {
   return screens(page);
 }
 
-test.describe('ten thousand short paragraphs in one chapter', () => {
+test.describe('ten thousand short paragraphs in one chapter', { tag: '@serial' }, () => {
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
       test.setTimeout(85000);
@@ -649,7 +650,7 @@ test.describe('ten thousand short paragraphs in one chapter', () => {
   }
 });
 
-test.describe('one paragraph of a megabyte without a space', () => {
+test.describe('one paragraph of a megabyte without a space', { tag: '@serial' }, () => {
   for (const mode of MODES) {
     test(`${mode}: shown, paged, turned within budget and searchable`, async ({ page }) => {
       // a phone fits a third of the text a page, so a megabyte is three

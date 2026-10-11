@@ -53,9 +53,12 @@ fn _android_version (): void = let
   var b = $B.create()
   val () = $B.bput(b, "\n// Appended by quire's gen-pwa: the version of the commit built from (#219)\n")
   val () = $B.bput(b, "android {\n    defaultConfig {\n        versionCode ")
-  val () = $B.bput(b, quire_version_code())
+  val () = $B.put_int(b, quire_version_code())
   val () = $B.bput(b, "\n        versionName '")
   val () = $B.bput(b, quire_version())
+  val () = $B.bput(b, " (")
+  val () = $B.bput(b, quire_commit_short())
+  val () = $B.bput(b, ")")
   val () = $B.bput(b, "'\n    }\n}\n")
 in _write_file("dist/android/android-release.gradle", b, $F.CreateOrAppend()) end
 
@@ -107,7 +110,8 @@ fn _intent_filters (): bool =
     val () = _write_file("dist/android/intent-filters.xml", b, $F.CreateOrTruncate())
   in true end
 
-implement main0 () = let
+(* The PWA and the Android project, generated from the app's build *)
+fn _generate (): void = let
   (* The bundled fonts (the stylesheet names them) and the app's icons,
      copied next to the page: each path followed by a NUL (the array
      starts zeroed) *)
@@ -162,3 +166,13 @@ in
   if _intent_filters() then println! ("Android project generated in dist/android/")
   else exit(1)
 end
+
+(* `gen-pwa test [--timings <dir>] [-- <playwright args>]` runs the e2e
+   suite against the generated dist/pwa (pwa's test_run, bats-lang/pwa#82:
+   served at a port the kernel picks, one run a machine slot, the
+   @serial tests alone first); anything else generates *)
+implement main0 () =
+  if $P.test_wanted() then let
+    val status = $P.test_run()
+  in if status <> 0 then exit_void(status) else () end
+  else _generate()

@@ -458,7 +458,8 @@ fn _about_screen (): void = let
   val () = ui_add("about-version-row", "about-version-label", TSpan)
   val () = ui_text("about-version-label", "Version")
   val () = ui_add("about-version-row", "about-version", TB)
-  val () = ui_text("about-version", quire_version())
+  val @(version_text, version_len) = quire_version_text()
+  val () = ui_text_buf("about-version", version_text, version_len)
   (* the details of the last unexpected error, for a report, once one
      has happened (shown when About opens, `_about_open`) *)
   val () = ui_text_btn("about-box", "about-error-copy", "btn", "Copy last error details")
