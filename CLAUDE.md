@@ -1386,6 +1386,34 @@ group (`record_write` has `ab_nil()`), so the first save of an old
 record writes the groups it lacked; opening writes nothing and keeps no
 copy (`e2e/library-records.spec.js`, "written before ... existed").
 
+**The rule cannot be forgotten, and every table that shipped opens**
+(#515). A group of a record is added only as `added`, never `req` or
+`opt` (those are the first table's twelve groups and the index's two),
+and a group added is named in `RELEASES` in `scripts/record_tables.py`
+with its commit. `tests/static/groups.py` (in `tests/static/run.sh`'s
+`checkers`) fails a group of the other modes after the first table, a
+group not in `RELEASES`, and a change that does not add the library of
+the table before it: `e2e/old-library.spec.js` has one library for each
+table that shipped (`SHAPES`: the first table, then each prefix of
+`RELEASES`; the real build's library cut of the groups a build before it
+did not write, which is byte for byte what that build wrote, since a
+chunk's CRC covers its own tag and data), and each opens with every
+book, nothing said, nothing to set aside, no record changed or copied on
+open, and a save writes the current groups. The QLB1 to QLB6 formats of
+the old whole-library record are in `e2e/library-records.spec.js`. The
+Settings row "Set aside unreadable records" is absent for every record
+that reads (even with loss), in each of those specs.
+The flake of the set aside spec (#515) was the specs', not the app's:
+on the android project the app syncs as it opens (Auto Backup's file is
+merged), and the records it writes (`library/index`, and the books'
+`ORDR` renumbered by the save after a merge once a record is missing)
+land when that sync ends, not when the books show, so they landed over a
+spec's change to the store or after the snapshot it compared with.
+`syncEnded` / `reloadSettled` (`e2e/legacy-library.js`) take
+"sync-state" away before a reload and wait for the sync's end to write
+it (`_end`, after the saves), so a spec changes and snapshots the store
+only when the app has stopped writing it.
+
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
 the index's tables are in `scripts/record_tables.py` and
