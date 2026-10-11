@@ -266,7 +266,7 @@ export const w3cBooks = {
       { id: 'b', href: 'b.png', type: 'image/png', data: solidPng(300, 1500, [160, 90, 40]) },
     ],
     spine: [{ idref: 'one' }, { idref: 'two' }],
-  })),
+  }), { valid: false, errors: ['RSC-005'] }), // epubcheck 5.2.1 does not know roll: "must be reflowable or pre-paginated"
   // Content Documents: a font in the package, for the Book font setting
   'book-font': book(() => packageEpub({
     title: 'A book with a font',
@@ -284,14 +284,14 @@ export const w3cBooks = {
       { id: 'smil', href: 'one.smil', type: 'application/smil+xml', data: '<?xml version="1.0" encoding="UTF-8"?>\n<smil xmlns="http://www.w3.org/ns/SMIL" xmlns:epub="http://www.idpf.org/2007/ops" version="3.0"><body><par id="par1"><text src="one.xhtml#sentence"/></par></body></smil>' },
     ],
     spine: [{ idref: 'one' }],
-    extraMetadata: '    <meta property="media:duration">0:00:01</meta>\n',
+    extraMetadata: '    <meta property="media:duration" refines="#smil">0:00:01</meta>\n    <meta property="media:duration">0:00:01</meta>\n',
   })),
   // Structural semantics: the head is not the page
   'title-as-note': book(() => packageEpub({
     title: 'A title marked as a note',
     items: [page('one', '<p>Tap <a href="#the_note" epub:type="noteref">this link</a> and no note opens.</p>', { titleElement: '<title epub:type="footnote" id="the_note">A title that says it is a footnote</title>' })],
     spine: [{ idref: 'one' }],
-  })),
+  }), { valid: false, errors: ['RSC-005'] }), // the suite's own: epub:type on a title is not allowed
   // OCF: the zip container
   'zip-bzip2': book(() => packageEpub({
     title: 'Compressed with bzip2',

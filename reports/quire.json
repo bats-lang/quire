@@ -165,7 +165,7 @@
     "pkg-unique-id_duplicate": true,
     "pkg-version-backward": true,
     "pss-support": true,
-    "pss-support_ignore-title": "n/a",
+    "pss-support_ignore-title": true,
     "pub-cmt-avif": true,
     "pub-cmt-gif": true,
     "pub-cmt-jpeg": true,

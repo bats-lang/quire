@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 104 | 18 | 17 | 139 |
+| must | 105 | 18 | 16 | 139 |
 | should | 19 | 14 | 5 | 38 |
 | may | 1 | 0 | 0 | 1 |
 | deprecated | 16 | 10 | 1 | 27 |
-| all | 140 | 42 | 23 | 205 |
+| all | 141 | 42 | 22 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -87,7 +87,6 @@ dropped by design, #411).
 | `ocf-url_origin` | must | needs scripting, which Quire does not run |
 | `ocf-url_parse-leaking-relative` | must | needs scripting, which Quire does not run |
 | `ocf-url_parse-path-absolute` | must | needs scripting, which Quire does not run |
-| `pss-support_ignore-title` | must | only for reading systems with a footnote popup |
 | `scr-not-support_ccscript-modify-host` | must | Quire runs no scripts and shows no iframes |
 | `scr-not-support_ccscript-modify-size` | must | Quire runs no scripts and shows no iframes |
 | `scr-readingsystem-features` | must | Quire runs no scripts (no epubReadingSystem object) |
@@ -186,6 +185,7 @@ Caveats of a pass, where there is one:
 * `pkg-unique-id`: two books with the one identifier are two cards
 * `pkg-unique-id_duplicate`: two books with the one identifier are two cards
 * `pss-support`: a note link opens the note in a popup (#414)
+* `pss-support_ignore-title`: a title element marked as a footnote is not a note: the link to it opens no popup (the head is not searched)
 * `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
 * `pub-data-urls_top-level-content`: an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)
 * `pub-external-links`: a link out asks first, in the note overlay, and opens in a new tab on the reader's word
