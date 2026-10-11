@@ -212,8 +212,8 @@ fun _count {l:agz}{n:pos}{i:nat | i <= n} .<n - i>.
   (data: !$A.borrow(byte, l, n), n: int n, i: int i, source: text_source, total: int): int =
   if i >= n then total
   else let
-    val @(code_point, next) = _step(data, n, i, source)
-  in _count(data, n, next, source, total + _utf8_length(code_point)) end
+    val @(code_point, after_it) = _step(data, n, i, source)
+  in _count(data, n, after_it, source, total + _utf8_length(code_point)) end
 
 (* Puts byte value at out[at] when it is there: the index after it *)
 fn _put {lo:agz}{o:addr}{m:nat} (out: !$A.arrx(byte, lo, m, o), m: int m, at: int, value: int): int = let
@@ -243,8 +243,8 @@ fun _fill {l:agz}{n:pos}{i:nat | i <= n}{lo:agz}{o:addr}{m:nat} .<n - i>.
   (data: !$A.borrow(byte, l, n), n: int n, i: int i, source: text_source, out: !$A.arrx(byte, lo, m, o), m: int m, at: int): void =
   if i >= n then ()
   else let
-    val @(code_point, next) = _step(data, n, i, source)
-  in _fill(data, n, next, source, out, m, _put_character(out, m, at, code_point)) end
+    val @(code_point, after_it) = _step(data, n, i, source)
+  in _fill(data, n, after_it, source, out, m, _put_character(out, m, at, code_point)) end
 
 fun _copy_from {l:agz}{n:pos}{i:nat | i <= n}{lo:agz}{o:addr}{m:nat} .<n - i>.
   (data: !$A.borrow(byte, l, n), n: int n, i: int i, out: !$A.arrx(byte, lo, m, o), m: int m, at: int): void =
