@@ -1,0 +1,4 @@
+function _static_details
+line 4
+pattern match is nonexhaustive:
+HandedBookNotAdded()
