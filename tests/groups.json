@@ -9,6 +9,7 @@
     ],
     "reader": [
       "backup.spec.js",
+      "encodings.spec.js",
       "landmarks.spec.js",
       "relaunch-sync.spec.js",
       "smoke.spec.js",
@@ -19,6 +20,7 @@
     "reading-tools": [
       "annotations.spec.js",
       "drm-catalogue.spec.js",
+      "languages.spec.js",
       "pathological.spec.js",
       "progress.spec.js",
       "publisher.spec.js",

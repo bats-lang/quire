@@ -548,7 +548,7 @@ in
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><int>(decompressed, llam(inflated) =>
-           case+ take_decompressed(inflated) of
+           case+ take_text(inflated) of
            | ~NoContentBytes() => $P.ret<int>(0)
            | ~ContentBytes(content_owner, content, content_size) => let
                val @(content_frozen, content_bytes) = $A.freeze<byte>(content)

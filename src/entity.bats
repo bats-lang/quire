@@ -87,6 +87,10 @@ fn _named {l:agz}{n:pos}{offset,name_start,name_end:nat | name_start <= name_end
   var thinsp = @[char][6]('t', 'h', 'i', 'n', 's', 'p')
   var ensp = @[char][4]('e', 'n', 's', 'p')
   var emsp = @[char][4]('e', 'm', 's', 'p')
+  var rlm = @[char][3]('r', 'l', 'm')
+  var lrm = @[char][3]('l', 'r', 'm')
+  var zwj = @[char][3]('z', 'w', 'j')
+  var zwnj = @[char][4]('z', 'w', 'n', 'j')
 in
   if name_is(data, amp, 3) then 38 else if name_is(data, lt, 2) then 60
   else if name_is(data, gt, 2) then 62 else if name_is(data, quot, 4) then 34
@@ -106,6 +110,8 @@ in
   else if name_is(data, auml, 4) then 228 else if name_is(data, szlig, 5) then 223
   else if name_is(data, thinsp, 6) then 8201 else if name_is(data, ensp, 4) then 8194
   else if name_is(data, emsp, 4) then 8195
+  else if name_is(data, rlm, 3) then 8207 else if name_is(data, lrm, 3) then 8206
+  else if name_is(data, zwj, 3) then 8205 else if name_is(data, zwnj, 4) then 8204
   else ~1
 end
 

@@ -452,7 +452,7 @@ in
       val () = piece_free(container_owner, $A.thaw<byte>(data_frozen))
     in
       $P.and_then<decompressed><archive_outcome>(decompressing, llam(container_inflated) =>
-        case+ take_decompressed(container_inflated) of
+        case+ take_text(container_inflated) of
         | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(ContainerNotRead())) end
         | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
             val @(xml_frozen, xml_bytes) = $A.freeze<byte>(xml_buffer)
@@ -498,7 +498,7 @@ in
                     val () = piece_free(opf_owner, $A.thaw<byte>(opf_data_frozen))
                   in
                     $P.and_then<decompressed><archive_outcome>(opf_decompressing, llam(opf_inflated) =>
-                      case+ take_decompressed(opf_inflated) of
+                      case+ take_text(opf_inflated) of
                       | ~NoContentBytes() => let val () = book_abandon(serial) in $P.ret<archive_outcome>(ArchiveFailed(PackageNotRead())) end
                       | ~ContentBytes(opf_content_owner, opf_content, opf_size) => let
                           val @(opf_frozen, opf_bytes) = $A.freeze<byte>(opf_content)
@@ -592,7 +592,7 @@ in
         val () = piece_free(encryption_owner, $A.thaw<byte>(data_frozen))
       in
         $P.and_then<decompressed><protection>(decompressing, llam(inflated) =>
-          case+ take_decompressed(inflated) of
+          case+ take_text(inflated) of
           (* an encryption.xml that cannot be read declares nothing *)
           | ~NoContentBytes() => $P.ret<protection>(Unprotected())
           | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
