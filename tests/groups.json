@@ -19,7 +19,6 @@
     "reading-tools": [
       "annotations.spec.js",
       "drm-catalogue.spec.js",
-      "pathological.spec.js",
       "progress.spec.js",
       "publisher.spec.js",
       "settings.spec.js",
@@ -31,7 +30,6 @@
       "footnotes.spec.js",
       "headings.spec.js",
       "notices.spec.js",
-      "page-turn.spec.js",
       "pagelist.spec.js",
       "safe-area.spec.js",
       "sync-android-outcomes.spec.js",
@@ -62,7 +60,7 @@
       "storage.spec.js",
       "sync-nextcloud.spec.js"
     ],
-    "pathological": [
+    "extras": [
       "back.spec.js",
       "catalogue.spec.js",
       "epub2.spec.js",
@@ -72,6 +70,10 @@
       "settings-screen.spec.js",
       "stability.spec.js",
       "sync-android.spec.js"
+    ],
+    "perf": [
+      "pathological.spec.js",
+      "page-turn.spec.js"
     ]
   },
   "static": {
