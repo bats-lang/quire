@@ -3,7 +3,7 @@
 
 import { test, expect, onAndroid } from './fixtures.js';
 import {
-  expectBannerSaysWhatToDo, start, epubFile, rawFile, importFiles, importInput, card, cards, titles, openBook, toLibrary,
+  expectBannerSaysWhatToDo, start, epubFile, rawFile, importFiles, importInput, importEnded, card, cards, titles, openBook, toLibrary,
   chapters, dialog, menuItem, bookMenu, libraryMenu, librarySearch, bookPage,
   openSettings, colours, reload, place, pageShown,
   librarySettings, settingsButton, settingsScreen, continueReading,
@@ -495,7 +495,7 @@ test('importing the same book again and choosing Replace keeps one copy that sti
   await ask.getByRole('button', { name: 'Replace' }).click();
   await expect(ask).toBeHidden();
   await expect(cards(page)).toHaveCount(1);
-  await expect(page.getByRole('status').filter({ hasText: /Reading file|Opening archive|Adding/ })).toBeHidden();
+  await importEnded(page);
   await openBook(page, 'Replaced Twice');
 });
 

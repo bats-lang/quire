@@ -4,7 +4,7 @@
 
 import { test, expect } from './fixtures.js';
 import {
-  start, readBook, place, showChrome, selectText, marks, chapters, dialog, selectionButton,
+  start, readBook, place, showChrome, selectText, marks, chapters, dialog, selectionButton, selectionPick,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Search in book');
@@ -91,7 +91,7 @@ test('the selection can be searched for', async ({ page }) => {
   await start(page);
   await readBook(page, book);
   await selectText(page, 0, 4);
-  await selectionButton(page, 'Search').click();
+  await selectionPick(page, 'Search');
   await expect(panel(page)).toBeVisible();
   await expect(box(page)).toHaveValue('Para');
   await expect(summary(page)).toHaveText('60 results');

@@ -849,7 +849,7 @@ in
     key = before.key, id_high = before.id_high, id_low = before.id_low, shelf = shelf,
     added = (if added > 0 then added else before.added), opened = opened,
     chapter = chapter, chapters = chapters, page = page, pages = pages, anchor = anchor,
-    file_size = before.file_size, cover = before.cover, done = done, series_number = before.series_number,
+    file_size = before.file_size, cover = before.cover, done = done, series_position = before.series_position,
     collections = (if collections >= 0 then collections else before.collections),
     minutes_read = (if minutes >= 0 then minutes else before.minutes_read),
     pages_read = (if pages_turned >= 0 then pages_turned else before.pages_read),

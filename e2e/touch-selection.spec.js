@@ -623,7 +623,7 @@ test('a selection in the footnote popup is the popup\'s: no highlight is offered
   await expect.poll(() => selected(page).then(squash)).toBe('several');
   expect(await page.evaluate(() => document.querySelector('[role=dialog][aria-label=Footnote]').contains(getSelection().anchorNode))).toBe(true);
   // the page's highlight controls are not offered over it
-  for (const name of ['Highlight', 'Orange', 'Underline', 'Note']) {
+  for (const name of ['Highlight', 'Yellow', 'Orange', 'Underlined', 'Note']) {
     await expect(selectionButton(page, name), `${name} on text that is not the chapter's`).toBeHidden();
   }
   expect((await marks(page)).size).toBe(0);
@@ -745,9 +745,17 @@ test('on a 320 px window the toolbar\'s buttons are all in the window, reachable
   await open(page, 'prose', { oneColumn: true });
   const word = await middleWord(page, 150);
   await pressOn(page, testInfo, word);
-  const names = await toolbar(page).getByRole('button').evaluateAll(buttons => buttons.map(b => b.textContent.trim()));
-  expect(names).toEqual(expect.arrayContaining(['Highlight', 'Orange', 'Underline', 'Note', 'Copy']));
+  // both rows are checked: the first, then the one behind More
+  const nameOf = b => b.getAttribute('aria-label') || b.textContent.trim();
+  const first = await toolbar(page).getByRole('button').evaluateAll(buttons => buttons.filter(b => b.offsetParent).map(b => b.getAttribute('aria-label') || b.textContent.trim()));
+  expect(first).toEqual(expect.arrayContaining(['Highlight', 'Note', 'Copy', 'More']));
+  await selectionButton(page, 'More').click();
+  const second = await toolbar(page).getByRole('button').evaluateAll(buttons => buttons.filter(b => b.offsetParent).map(b => b.getAttribute('aria-label') || b.textContent.trim()));
+  expect(second).toEqual(expect.arrayContaining(['Yellow', 'Orange', 'Underlined', 'Search', 'More']));
+  const names = [...new Set([...first, ...second])];
   for (const name of names) {
+    const shownFirst = first.includes(name) && name !== 'More';
+    if (name !== 'More') await selectionButton(page, 'More').evaluate((b, want) => { if (b.getAttribute('aria-expanded') !== String(want)) b.click(); }, !shownFirst);
     const button = selectionButton(page, name);
     if (!(await button.isVisible())) continue;
     const box = await button.boundingBox();
@@ -769,6 +777,30 @@ test('on a 320 px window the toolbar\'s buttons are all in the window, reachable
   expect(await labelInName(page), 'buttons whose name is not their words').toEqual([]);
   expect(await coveredByBanner(page)).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
+
+test('the toolbar is at most two rows and a fifth of the window, and no two buttons share a name (#378)', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await open(page, 'prose', { oneColumn: true });
+  for (const width of [320, 412]) {
+    await page.setViewportSize({ width, height: 800 });
+    const word = await middleWord(page, 150);
+    await pressOn(page, testInfo, word);
+    const rows = async () => toolbar(page).evaluate(t => {
+      const tops = new Set([...t.querySelectorAll('button,a')].filter(b => b.offsetParent).map(b => Math.round(b.getBoundingClientRect().top)));
+      return { rows: tops.size, height: t.getBoundingClientRect().height };
+    });
+    for (const behindMore of [false, true]) {
+      if (behindMore) await selectionButton(page, 'More').click();
+      const { rows: count, height } = await rows();
+      expect(count, `rows at ${width} px, More ${behindMore ? 'open' : 'closed'}`).toBeLessThanOrEqual(2);
+      expect(height, `height at ${width} px`).toBeLessThanOrEqual(800 * 0.2);
+      const names = await toolbar(page).locator('button,a').evaluateAll(all => all.filter(b => b.offsetParent).map(b => b.getAttribute('aria-label') || b.textContent.trim()));
+      expect(new Set(names).size, `names at ${width} px: ${names}`).toBe(names.length);
+    }
+    await page.evaluate(() => getSelection().removeAllRanges());
+    await expect(toolbar(page)).toBeHidden();
+  }
 });
 
 // ------------------------------------------------------------------
