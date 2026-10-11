@@ -721,23 +721,29 @@ implement style_label (style) =
 (* What would be lost for good. Only emptying the Trash cannot be
    undone (everything else is done at once and offered back: undo.bats),
    so it is the one harm *)
-#pub datatype harm =
-  | HEmptyTrash                           (* every book in the Trash *)
+#pub datatype harm(things:int) =
+  (* what is in the Trash: its books and dictionaries, counted, and at
+     least one, so the Trash is never asked to be emptied when it holds
+     nothing: harm(0) has no value (quire#385) *)
+  | {things:pos} HEmptyTrash(things)
 
-(* The menu item that asks about the_harm: its id and its label *)
-fn _harm_item (the_harm: harm): @([id_len:pos | id_len < 256] string id_len, [label_len:pos | label_len < 256] string label_len) =
+(* A harm, of however many things *)
+#pub typedef harm_asked = [things:pos] harm(things)
+
+(* The button that asks about the_harm: its id and its label *)
+fn _harm_item (the_harm: harm_asked): @([id_len:pos | id_len < 256] string id_len, [label_len:pos | label_len < 256] string label_len) =
   case+ the_harm of
-  | HEmptyTrash() => @("menu-empty-trash", "Empty Trash")
+  | HEmptyTrash() => @("trash-empty", "Empty Trash")
 
-(* The id of the_harm's menu item, for its click: the item asks about the_harm *)
-#pub fn ui_harm_id (the_harm: harm): [id_len:pos | id_len < 256] string id_len
+(* The id of the_harm's button, for its click: the button asks about the_harm *)
+#pub fn ui_harm_id (the_harm: harm_asked): [id_len:pos | id_len < 256] string id_len
 implement ui_harm_id (the_harm) = let val @(id, _) = _harm_item(the_harm) in id end
 
 (* What a dialog's button does: Danger(the_harm) for the one that does the_harm. Red
    is the stylesheet's mark for [data-harm], which only this module
-   sets, and only from a harm: on the_harm's menu item (ui_harm_item) and on
+   sets, and only from a harm: on the_harm's button (ui_harm_button) and on
    the button that does the_harm (ui_tone) *)
-#pub datavtype tone = Plain | Danger of harm
+#pub datavtype tone = Plain | Danger of harm_asked
 
 (* The kinds of control, each carrying what names it *)
 datavtype control =
@@ -748,7 +754,7 @@ datavtype control =
   | {class_len,name_len:pos | class_len < 256; name_len < 256} CSwatch of (string class_len, string name_len)
   | {label_len:pos | label_len < 256} CMenuItem of (string label_len)
   | {label_len:pos | label_len < 256} CMenuChoice of (string label_len)
-  | CHarmItem of harm
+  | CHarmButton of harm_asked
   | {label_len,controls_len:pos | label_len < 256; controls_len < 256} CTab of (string label_len, string controls_len, bool)
   (* a link out of the app, named by its text, opened in a new tab and
      told nothing of the app; its href is set by ui_https_href *)
@@ -801,10 +807,9 @@ fn _control {document_loc,parent_loc,id_loc:agz}{parent_len,id_len:pos | parent_
       val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitemradio")
       val () = _document_attr(document, id_bytes, id_len, $D.Aria("checked"), "false")
     in _document_text(document, id_bytes, id_len, label) end
-  | ~CHarmItem(the_harm) => let
+  | ~CHarmButton(the_harm) => let
       val @(_, label) = _harm_item(the_harm)
-      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "mi")
-      val () = _document_attr(document, id_bytes, id_len, $D.Role, "menuitem")
+      val () = _document_button(document, parent_bytes, parent_len, id_bytes, id_len, "btn")
       val () = _document_attr(document, id_bytes, id_len, $D.Data("harm"), "y")
     in _document_text(document, id_bytes, id_len, label) end
   | ~CTab(label, controls, selected) => let
@@ -1022,13 +1027,13 @@ implement ui_menuitem(parent, id, label) = _control_literal(parent, id, CMenuIte
 
 implement ui_menu_choice(parent, id, label) = _control_literal(parent, id, CMenuChoice(label))
 
-(* The menu item that asks about the_harm, marked as losing what it names: its
-   id and label are the_harm's *)
-#pub fn ui_harm_item {parent_len:pos | parent_len < 256} (parent: string parent_len, the_harm: harm): void
+(* The button that asks about the_harm, marked as losing what it names:
+   its id and label are the_harm's *)
+#pub fn ui_harm_button {parent_len:pos | parent_len < 256} (parent: string parent_len, the_harm: harm_asked): void
 
-implement ui_harm_item(parent, the_harm) = let
+implement ui_harm_button(parent, the_harm) = let
   val @(id, _) = _harm_item(the_harm)
-in _control_literal(parent, id, CHarmItem(the_harm)) end
+in _control_literal(parent, id, CHarmButton(the_harm)) end
 
 (* Button id's tone: marked when it does a harm *)
 #pub fn ui_tone {id_len:pos | id_len < 256} (id: string id_len, button_tone: tone): void
@@ -1692,6 +1697,7 @@ implement ui_try_again_hide () = ui_show("library-try-again", false)
 
 (* A book's menu's items, each by its element's id (card_menu_control_id) *)
 #pub datatype card_menu_control =
+  | CardMenuRestore
   | CardMenuInfo
   | CardMenuCollections
   | CardMenuHide
@@ -1701,6 +1707,7 @@ implement ui_try_again_hide () = ui_show("library-try-again", false)
 #pub fn card_menu_control_id (control: card_menu_control): [id_len:pos | id_len < 256] string id_len
 implement card_menu_control_id (control) =
   case+ control of
+  | CardMenuRestore() => "card-menu-restore"
   | CardMenuInfo() => "card-menu-info"
   | CardMenuCollections() => "card-menu-collections"
   | CardMenuHide() => "card-menu-hide"
@@ -1710,6 +1717,7 @@ implement card_menu_control_id (control) =
 (* The control after control, in the order the decoder tries them *)
 fn _card_menu_control_after (control: card_menu_control): $R.option(card_menu_control) =
   case+ control of
+  | CardMenuRestore() => $R.some(CardMenuInfo())
   | CardMenuInfo() => $R.some(CardMenuCollections())
   | CardMenuCollections() => $R.some(CardMenuHide())
   | CardMenuHide() => $R.some(CardMenuArchive())
@@ -1730,7 +1738,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_card_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(card_menu_control)
-implement ui_card_menu_control (bytes, n, at) = _card_menu_control_from(bytes, n, at, CardMenuInfo(), 5)
+implement ui_card_menu_control (bytes, n, at) = _card_menu_control_from(bytes, n, at, CardMenuRestore(), 5)
 
 (* A book's collections' menu: a new one, done, or its backdrop, each by its element's id (collections_control_id) *)
 #pub datatype collections_control =

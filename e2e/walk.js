@@ -10,7 +10,7 @@ import {
   start, epubFile, importFiles, readBook, showChrome, chapters, bookPage,
   libraryMenu, menuItem, dialog, librarySettings, settingsScreen,
   settingsButton, bookMenu, clickControl, topBar,
-  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle,
+  readingSettings, openReadingSettings, selectText, rawFile, openSortMenu, shelfTitle, openShelf, emptyTrashDialog,
 } from './helpers.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
@@ -144,10 +144,12 @@ export async function walkEveryScreen(page, { look, back }) {
   await page.getByRole('status').filter({ has: page.getByRole('button', { name: 'Undo', exact: true }) })
     .getByRole('button', { name: 'Dismiss' }).click();
   await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeHidden();
-  await libraryMenu(page);
-  await menuItem(page, 'Empty Trash').click();
-  await expect(dialog(page, 'Empty the Trash?')).toBeVisible();
+  await openShelf(page, 'Trash');
+  await check('the Trash with its heading and Empty');
+  await page.getByRole('button', { name: 'Empty Trash' }).click();
+  await expect(emptyTrashDialog(page)).toBeVisible();
   await check('the Empty the Trash dialog');
+  await back();
   await back();
   // a note and a picture in its second chapter, so the note and the
   // picture's viewer open (the picture by a double tap, quire#365)

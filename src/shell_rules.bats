@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 8300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8300] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 8750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8750] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1831] sheet(after, false, false) = let
@@ -358,7 +358,7 @@ fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, f
 in sheet end
 
 (* The progress and empty state, from .ba on *)
-fn shell_rules_progress_and_empty_state {left:nat | left >= 824} (sheet: sheet(left, false, false)): [after:nat | after >= left - 824] sheet(after, false, false) = let
+fn shell_rules_progress_and_empty_state {left:nat | left >= 1260} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1260] sheet(after, false, false) = let
   val sheet = rule(sheet, ".ba")
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "14px")
@@ -390,6 +390,21 @@ fn shell_rules_progress_and_empty_state {left:nat | left >= 824} (sheet: sheet(l
   val sheet = close(sheet)
   val sheet = rule(sheet, "#library-try-again")
   val sheet = lay(sheet, AlignSelf(), "center")
+  val sheet = close(sheet)
+  (* the Trash's heading: what it holds and the Empty beside it (#385) *)
+  val sheet = rule(sheet, ".thead")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, FlexWrap(), "wrap")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = lay(sheet, JustifyContent(), "space-between")
+  val sheet = lay(sheet, Gap(), "12px")
+  val sheet = lay(sheet, Padding(), "8px 0")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tsum")
+  val sheet = surf(S_muted_bg | sheet, RoleMuted(), RoleGround())
+  val sheet = lay(sheet, FontSize(), "14px")
+  val sheet = lay(sheet, Flex(), "1")
+  val sheet = lay(sheet, MinWidth(), "200px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".empty")
   val sheet = lay(sheet, TextAlign(), "center")

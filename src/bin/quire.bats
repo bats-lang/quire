@@ -159,13 +159,20 @@ fn _is {id_len:pos} (clicked: !target, id: string id_len): bool =
   | Target(bytes, n, _) => _bytes_are(bytes, n, 10, id, g1u2i(string1_length(id)), 0)
   | NoTarget() => false
 
-(* The harm whose menu item (ui_harm_item) clicked is: its click asks about
-   that same harm *)
 (* The Trash's dictionaries are listed while the Trash is the shelf shown *)
 fn _trash_dictionaries (): void = dict_trash_render(same_shelf(lib_shelf_get(), Trash()))
 
-fn _harm_clicked (clicked: !target): Option_vt(harm) =
-  if _is(clicked, ui_harm_id(HEmptyTrash())) then Some_vt(HEmptyTrash()) else None_vt()
+(* The harm whose button (ui_harm_button) clicked is: its click asks about
+   that same harm. The Trash is asked about only while it holds
+   something (a harm for it cannot be made otherwise) *)
+fn _harm_clicked (clicked: !target): Option_vt(harm_asked) = let
+  val [things:int] held = lib_trash_things(dict_trash_count())
+in
+  if held > 0 then let
+    val the_harm: harm(things) = HEmptyTrash()
+  in if _is(clicked, ui_harm_id(the_harm)) then Some_vt(the_harm) else None_vt() end
+  else None_vt()
+end
 
 (* The control clicked is, of a listener's own (ui.bats decodes it) *)
 fn _settings_control (clicked: !target): $R.option(settings_control) =
@@ -862,6 +869,10 @@ fn _archive {book:int} (book: int book): void =
           end)
     end
 
+(* What Undo would undo after a book was hidden or unhidden *)
+fn _hide_offer (was_hidden: bool): offered(UntilDismissed) =
+  if was_hidden then BookUnhidden() else BookHidden()
+
 (* Hides or unhides the book, offering Undo *)
 fn _hide_toggle {book:int} (book: int book): void =
   case+ lib_nums(book) of
@@ -872,7 +883,7 @@ fn _hide_toggle {book:int} (book: int book): void =
       val was_hidden = same_shelf(was, Hidden())
       val () = _set_shelf(book, (if was_hidden then OnShelf() else Hidden()): shelf)
     in
-      $P.finish<settled>(undo_offer(if was_hidden then BookUnhidden() else BookHidden()), llam(how) =>
+      $P.finish<settled>(undo_offer(_hide_offer(was_hidden)), llam(how) =>
         case+ how of
         | Undone() => let
             val index = lib_index_of_key(key)
@@ -905,6 +916,10 @@ fn _menu_open {book:int} (book: int book): void =
   | ~$R.some(book_numbers) => let
       val () = !_menu_index := book
       val () = _shelf_labels("card-menu-hide", "card-menu-archive", "card-menu-trash", book_numbers.shelf)
+      (* in the Trash, Restore is the first item, in place of Hide *)
+      val in_trash = same_shelf(book_numbers.shelf, Trash())
+      val () = ui_show("card-menu-restore", in_trash)
+      val () = ui_show("card-menu-hide", ~in_trash)
       val () = layer_open(LBookMenu())
     in ui_focus("card-menu-info") end
 
@@ -1519,6 +1534,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = _target_free(clicked)
       val () = (if book >= 0 then
           (case+ control of
+           | ~$R.some(CardMenuRestore()) => _book_action(book, HideOrRestore())
            | ~$R.some(CardMenuInfo()) => _info_open(book)
            | ~$R.some(CardMenuCollections()) => _collections_open(book)
            | ~$R.some(CardMenuHide()) => _book_action(book, HideOrRestore())
@@ -1586,10 +1602,24 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   val listeners = RCons(listeners, OnEl("shelf-more"), "click", llam(_) => let
       val () = layer_open(LLibraryMenu())
     in let val () = ui_focus("menu-settings") in 0 end end)
-  (* the dictionaries in the Trash, each with a Restore (#396) *)
-  val listeners = RCons(listeners, OnEl("trash-dictionaries"), "click", llam(h) => let
+  (* the Trash's heading, with Empty (quire#385), and the dictionaries in
+     it, each with a Restore (#396) *)
+  val listeners = RCons(listeners, OnEl("trash-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val restored = _row_of(clicked, "restore-dict")
+      val () = (case+ _harm_clicked(clicked) of
+        | ~Some_vt(the_harm) =>
+          $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>
+            case+ answer of
+            (* the dictionaries in the Trash go with the books, here and
+               nowhere else (tests/static/trash.py) *)
+            | Accepted() => let
+                val () = dict_trash_empty()
+                val () = dict_trash_render(false)
+                val () = _save_render()
+              in ui_focus("shelf-back") end
+            | Declined() => ())
+        | ~None_vt() => ())
       val () = _target_free(clicked)
     in if restored >= 0 then let val () = dict_trash_restore(restored) in 0 end else 0 end)
   (* search *)
@@ -1627,20 +1657,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
     in let val () = ui_focus("menu-settings") in 0 end end)
   val listeners = RCons(listeners, OnEl("library-menu"), "click", llam(h) => let
       val clicked = _target(h)
-      val () = (case+ _harm_clicked(clicked) of
-        | ~Some_vt(the_harm) => let
-            val () = layer_close(LLibraryMenu())
-          in $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>
-            case+ answer of
-            (* the dictionaries in the Trash go with the books, here and
-               nowhere else (tests/static/trash.py) *)
-            | Accepted() => let
-                val () = dict_trash_empty()
-                val () = dict_trash_render(false)
-              in _save_render() end
-            | Declined() => ()) end
-        | ~None_vt() =>
-        case+ _library_menu_control(clicked) of
+      val () = (case+ _library_menu_control(clicked) of
         | ~$R.none() => ()
         | ~$R.some(MenuSettings()) => let
           val () = layer_close(LLibraryMenu())
