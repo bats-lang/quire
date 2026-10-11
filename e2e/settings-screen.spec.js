@@ -186,6 +186,6 @@ test('a row that opens a screen is one target, and the Undo toast is over nothin
   expect(order.indexOf('About')).toBeLessThan(order.indexOf('Reset'));
   await settingsButton(page, 'Reset reading settings').click();
   await expect(undo(page)).toBeVisible();
-  await screen.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  await screen.locator('.info-in').evaluate(element => { element.scrollTop = element.scrollHeight; });
   expect(await toastClear(page)).toEqual([]);
 });

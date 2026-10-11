@@ -3657,7 +3657,7 @@ in let
      window's edge, under the bars (#389: the rows grew taller); the
      screen is shown from its top *)
   val () = ui_focus("sync-done")
-in ui_scroll_to_top("sync-screen") end end
+in ui_scroll_to_top("sync-box") end end
 
 (* A service's own sign-in step, opened from its row over the list:
    only its part, its button and Cancel shown, its fields as kept *)
@@ -3715,7 +3715,7 @@ in let
      window's edge, under the bars (#389: the rows grew taller); the
      screen is shown from its top *)
   val () = ui_focus("sync-done")
-in ui_scroll_to_top("sync-screen") end end
+in ui_scroll_to_top("sync-box") end end
 
 (* What the step says: a field left empty *)
 fn _step_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-step-status", text)
