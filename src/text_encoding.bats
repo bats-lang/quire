@@ -179,13 +179,17 @@ in
   else 256 * first + second
 end
 
+(* The unit two bytes on, or -1 when there is not one *)
+fn _unit_ahead {l:agz}{n:pos}{i:nat | i < n} (data: !$A.borrow(byte, l, n), n: int n, i: int i, little: bool): int =
+  if i + 3 < n then _unit(data, n, i + 2, little) else ~1
+
 fn _step_16 {l:agz}{n:pos}{i:nat | i < n} (data: !$A.borrow(byte, l, n), n: int n, i: int i, little: bool)
   : [j:int | i < j; j <= n] @(int, int j) = let
   val unit: int = _unit(data, n, i, little)
 in
   if unit < 0 then @(65533, n)
   else if unit >= 55296 && unit < 56320 then let
-      val following: int = (if i + 3 < n then _unit(data, n, i + 2, little) else ~1)
+      val following: int = _unit_ahead(data, n, i, little)
     in
       if following >= 56320 && following < 57344 then @($AR.add_int_int($AR.add_int_int(65536, $AR.mul_int_int($AR.sub_int_int(unit, 55296), 1024)), $AR.sub_int_int(following, 56320)), _after(n, i, 4))
       else @(65533, _after(n, i, 2))
