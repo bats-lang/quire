@@ -104,7 +104,7 @@ test('a chapter declared ISO-8859-1 (an EPUB 2 file) is decoded by its declarati
   await readBook(page, encodingBooks.latin1.opts);
   expect(await pageText(page)).toContain('Quillon café Zoë niño, Ångström and "quoted" text.');
   expect(await pageText(page)).not.toMatch(/\uFFFD|Ã/);
-  expect(await searched(page, 'ångström')).toBe('1 result');
+  expect(await searched(page, 'Ångström')).toBe('1 result');
   expect(errors).toEqual([]);
 });
 
