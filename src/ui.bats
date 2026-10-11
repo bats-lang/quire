@@ -453,6 +453,28 @@ implement ui_fixed_box_n (id, id_len, width, height, zoom) = let
   val style_len = _put_text(style, style_len, "%", 1, 0)
 in _set_attr_n_buf(id, id_len, $D.Style, style, style_len) end
 
+(* The box of a picture shown at a zoom (image_viewer.bats): the same
+   inline style as a fixed page's box, for an element named by a literal *)
+#pub fn ui_picture_box {id_len:pos | id_len < 256}{width,height:pos | width <= 10000; height <= 10000}{zoom:pos | zoom <= 10000}
+  (id: string id_len, width: int width, height: int height, zoom: int zoom): void
+
+implement ui_picture_box (id, width, height, zoom) = let
+  val id_len = _length(id)
+in ui_fixed_box_n(_literal_bytes(id, id_len), id_len, width, height, zoom) end
+
+(* Element id scrolled to left and top (CSS pixels from its start; the
+   browser keeps it within what can be scrolled) *)
+#pub fn ui_scroll_set {id_len:pos | id_len < 256}{left,top:nat} (id: string id_len, left: int left, top: int top): void
+
+implement ui_scroll_set (id, left, top) = let
+  val id_len = _length(id)
+  val @(id_frozen, id_bytes) = $A.freeze<byte>(_literal_bytes(id, id_len))
+  val document = $D.open_document($A.text_lit("bats-root"), 9)
+  val () = _scroll_in(document, id_bytes, id_len, ScrolledAcross(left))
+  val () = _scroll_in(document, id_bytes, id_len, ScrolledDown(top))
+  val () = $D.destroy(document)
+in release_bytes(id_frozen, id_bytes) end
+
 (* The class of element id *)
 #pub fn ui_class {id_len:pos | id_len < 256}{class_len:pos | class_len < 256} (id: string id_len, class_name: string class_len): void
 
@@ -2577,19 +2599,25 @@ end
 #pub fn ui_search_nav_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(search_nav_control)
 implement ui_search_nav_control (bytes, n, at) = _search_nav_control_from(bytes, n, at, SearchPrevious(), 3)
 
-(* The image viewer's close, each by its element's id (image_viewer_control_id) *)
+(* The image viewer's buttons, each by its element's id (image_viewer_control_id) *)
 #pub datatype image_viewer_control =
   | ImageClose
+  | ImageZoomIn
+  | ImageZoomOut
 
 #pub fn image_viewer_control_id (control: image_viewer_control): [id_len:pos | id_len < 256] string id_len
 implement image_viewer_control_id (control) =
   case+ control of
   | ImageClose() => "image-close"
+  | ImageZoomIn() => "image-zoom-in"
+  | ImageZoomOut() => "image-zoom-out"
 
 (* The control after control, in the order the decoder tries them *)
 fn _image_viewer_control_after (control: image_viewer_control): $R.option(image_viewer_control) =
   case+ control of
-  | ImageClose() => $R.none()
+  | ImageClose() => $R.some(ImageZoomIn())
+  | ImageZoomIn() => $R.some(ImageZoomOut())
+  | ImageZoomOut() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -2605,7 +2633,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_image_viewer_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(image_viewer_control)
-implement ui_image_viewer_control (bytes, n, at) = _image_viewer_control_from(bytes, n, at, ImageClose(), 1)
+implement ui_image_viewer_control (bytes, n, at) = _image_viewer_control_from(bytes, n, at, ImageClose(), 3)
 
 (* The About screen's buttons, each by its element's id (about_control_id) *)
 #pub datatype about_control =

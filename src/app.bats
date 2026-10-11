@@ -988,14 +988,22 @@ fn _note (): void = let
   val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
 in _hide("footnote") end
 
-(* A book's image, full screen: it can be zoomed with the fingers, and
-   scrolled; the image is the page's, whose alt says what it shows *)
+(* A book's image, full screen: fitted, zoomed with the fingers or the
+   Zoom buttons, and scrolled (image_viewer.bats); the image is the page's, whose alt says what it shows *)
 fn _image_viewer (): void = let
   val () = ui_el("bats-root", "image-viewer", TDiv, "imview")
   val () = ui_named("image-viewer", NModal, "Image")
   val () = ui_el("image-viewer", "image-box", TDiv, "imbox")
+  (* the zoom's gesture region (quire.bats's IMAGE_REGION): a pinch *)
+  val () = ui_attr("image-box", AGestureRegion, "2")
   val () = ui_img("image-box", "image-full", "imimg")
   val () = ui_icon_btn("image-viewer", "image-close", "ibtn imclose", IcClose, "Close")
+  (* the single-pointer way to zoom (WCAG 2.5.1: a pinch is a path the
+     fingers draw, and a mouse or the keyboard has none) *)
+  val () = ui_el("image-viewer", "image-zoom-bar", TDiv, "imzoom")
+  val () = ui_named("image-zoom-bar", NToolbar, "Zoom")
+  val () = ui_text_btn("image-zoom-bar", "image-zoom-out", "btn", "Zoom out")
+  val () = ui_text_btn("image-zoom-bar", "image-zoom-in", "btn", "Zoom in")
 in _hide("image-viewer") end
 
 (* What makes the reader's panels modal (layer.bats): the scrim over the

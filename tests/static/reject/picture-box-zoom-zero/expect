@@ -1,0 +1,3 @@
+function _static_zoom
+line 4
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eapp(S2Ecst(>); S2EVar(_->S2Eintinf(0)), S2Eintinf(0)))
