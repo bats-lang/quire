@@ -122,4 +122,27 @@ implement under_600px_rules (sheet) = let
   val sheet = media_end(sheet)
 in sheet end
 
+(* A short window, a phone turned sideways (360 to 412 px high): a
+   bottom sheet capped at 55% would leave its sticky head and foot no
+   room for a row (#379, the relaunch specs could not click Layout). Material 3's
+   modal side sheet is its sheet for a window wide and short (no rule for
+   heights is given, so the 500 px is the app's: a phone turned sideways
+   is 360 to 412 px high). It becomes a side sheet: the
+   right half of the window, the whole of its height, scrolling
+   inside, and the page stays in view beside it *)
+#pub fn short_screen_rules {left:nat | left >= 400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 400] sheet(after, false, false)
+
+implement short_screen_rules (sheet) = let
+  val sheet = media(sheet, "(max-height:500px) and (orientation:landscape)")
+  val sheet = rule(sheet, ".sheet:not([data-side])")
+  val sheet = lay(sheet, Left(), "auto")
+  val sheet = lay(sheet, Margin(), "0")
+  val sheet = lay(sheet, Width(), "min(420px,50vw)")
+  val sheet = lay(sheet, MaxHeight(), "100dvh")
+  val sheet = lay(sheet, BorderRadius(), "12px 0 0 12px")
+  val sheet = lay(sheet, Top(), "0")
+  val sheet = close(sheet)
+  val sheet = media_end(sheet)
+in sheet end
+
 end
