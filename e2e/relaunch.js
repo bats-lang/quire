@@ -36,7 +36,7 @@ export async function fixedClock(context) {
 /** Every record the app keeps: localStorage, and each IndexedDB
     database's stores, each value as a hash of its bytes (a Blob's or an
     ArrayBuffer's, or its JSON) */
-async function stored(page) {
+export async function stored(page) {
   return page.evaluate(async () => {
     const hex = async bytes => {
       const digest = await crypto.subtle.digest('SHA-256', bytes);

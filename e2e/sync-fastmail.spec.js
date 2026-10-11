@@ -141,7 +141,10 @@ test("in the app, the first sync makes Fastmail's folder, then syncs there; the 
   // kept across a reload: the next sync reads the file, and makes no folder
   await page.reload();
   await expect(libraryShown(page)).toBeVisible();
-  await expect.poll(() => server.requests.filter(r => r === `GET ${FILE}`).length).toBe(2);
+  // a sync reads the file again as the app opens. A page that is hidden as it unloads also
+  // syncs (visibilitychange), and whether that request leaves before the page goes depends on
+  // the browser's timing, so the count after the first read is two or three, never fewer
+  await expect.poll(() => server.requests.filter(r => r === `GET ${FILE}`).length).toBeGreaterThanOrEqual(2);
   await openSync(page);
   await expect(panel(page).getByLabel('Fastmail address')).toHaveValue(ADDRESS);
   await panel(page).getByRole('button', { name: 'Sync now' }).click();

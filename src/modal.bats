@@ -19,6 +19,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 #pub datatype question =
   | QInform                  (* a message: OK *)
   | QDuplicate               (* a book already in the library: Skip, Replace *)
+  | QNewerFile               (* a file that looks like a book in the library, corrected: Add as new book, Replace *)
   | QNote                    (* a note: Cancel, Save *)
   | QNewCollection           (* a new collection's name: Cancel, Create *)
   | QRenameCollection        (* a collection's name: Cancel, Rename *)
@@ -98,6 +99,7 @@ fn _buttons (asked: !ask): @(lit, lit, tone) =
   case+ asked of
   | Harmless(QInform()) => @("OK", "-", Plain)
   | Harmless(QDuplicate()) => @("Skip", "Replace", Plain)
+  | Harmless(QNewerFile()) => @("Add as new book", "Replace", Plain)
   | Harmless(QNote()) => @("Cancel", "Save", Plain)
   | Harmless(QNewCollection()) => @("Cancel", "Create", Plain)
   | Harmless(QRenameCollection()) => @("Cancel", "Rename", Plain)

@@ -18,7 +18,7 @@ staload "local_time.sats"
 staload "jsonio.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
 staload "storage.sats"
-staload "style.sats"
+staload "palette.sats"
 staload DR = "wasm.bats-packages.dev/bridge/src/dom_read.sats"
 staload MEDIA = "wasm.bats-packages.dev/bridge/src/media.sats"
 
