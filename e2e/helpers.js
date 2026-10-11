@@ -76,6 +76,16 @@ export function pagedBook(title, author) {
 /** The input that imports EPUB files */
 export const importInput = page => page.locator('#import-file');
 
+/** Waits until the import in progress has ended: the import's progress
+    (#import-progress, whatever its stage says: "Reading file", "Opening
+    archive", "Reading metadata", "Adding to library") is gone, and with it
+    the file input is made anew (the app clears it in the same step), so
+    the next file is picked on the input the app keeps. A wait for some
+    stages' words passed in the stage between them ("Reading metadata"),
+    while the import ran on, and the next file was then set on an input the
+    app replaced a moment later: its change was lost and no question came */
+export const importEnded = page => expect(page.locator('#import-progress')).toBeHidden();
+
 /** The empty library's own Import EPUB (quire#375): its input and the
     button over it */
 /** The Import EPUB the reader sees: the bar's, or the empty library's */

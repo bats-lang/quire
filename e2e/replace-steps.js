@@ -3,7 +3,7 @@
 
 import { expect } from './fixtures.js';
 import {
-  importInput, toLibrary, dialog, menuItem, bookMenu, place, placeChanged, selectText, selectionButton, clickControl, bookPage,
+  importInput, importEnded, showChrome, toLibrary, dialog, menuItem, bookMenu, place, placeChanged, selectText, selectionButton, clickControl, bookPage,
 } from './helpers.js';
 
 export const panel = page => dialog(page, 'Annotations');
@@ -17,6 +17,17 @@ export async function readMinutes(page, n) {
     await page.keyboard.press('ArrowRight');
     await placeChanged(page, before);
   }
+}
+
+/** Bookmarks the page shown. The bars hide 5 s after they were last
+    shown, which a loaded machine can pass between one step and this: the
+    bars are brought up and the click made again until it lands, as
+    clickControl does for the bottom bar's buttons */
+export async function bookmarkPage(page) {
+  await expect(async () => {
+    await showChrome(page);
+    await page.getByRole('button', { name: 'Bookmark this page' }).click({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
 }
 
 /** A highlight of the first words of the chapter shown, with a note */
@@ -84,7 +95,7 @@ export async function replaceWith(page, file) {
   const ask = dialog(page, 'Already in library');
   await ask.getByRole('button', { name: 'Replace' }).click();
   await expect(ask).toBeHidden();
-  await expect(page.getByRole('status').filter({ hasText: /Reading file|Opening archive|Adding/ })).toBeHidden();
+  await importEnded(page);
 }
 
 
@@ -97,7 +108,7 @@ async function newerFile(page, file, button) {
   await expect(ask).toContainText('looks like a corrected version');
   await ask.getByRole('button', { name: button, exact: true }).click();
   await expect(ask).toBeHidden();
-  await expect(page.getByRole('status').filter({ hasText: /Reading file|Opening archive|Adding/ })).toBeHidden();
+  await importEnded(page);
 }
 
 /** A corrected file of the book, imported as that book (Replace) */

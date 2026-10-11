@@ -561,80 +561,289 @@ implement opf_a11y(data, nodes) = _a11y_nodes(data, nodes, 0, xspan_none())
    Calibre's calibre:series and calibre:series_index
    ============================================================ *)
 
-(* The whole number at data[offset, offset + span_len) (digits before
-   any '.'), its digits after those of number; 0 when there is none; at
-   most 99999 *)
-fun _whole_number {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n} .<span_len>.
-  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len, number: int): int =
-  if span_len <= 0 then number
+(* A series position is kept in hundredths (2.5 is 250, "-1" is -100),
+   from -99999.99 to 99999.99, as the number Calibre keeps as a float
+   (calibre:series_index) read to two places, and told apart from no
+   position at all: the stored number is 0 for none, else the hundredths
+   plus SERIES_ZERO, so 0 ("a prequel") is a position and sorts first *)
+#pub fn series_position_of (hundredths: int): [position:int] int position
+implement series_position_of (hundredths) =
+  if hundredths < 0 - 9999999 then 0
+  else if hundredths > 9999999 then 0
+  else g1ofg0(hundredths + 10000001)
+
+(* A series position in the text at data[offset, offset + span_len): a
+   number with an optional sign, digits, and a '.' or ',' (as some locales
+   write it) with digits after it, the white space around it ignored; the
+   hundredths past two places are cut. Anything else ("II", "Part Two",
+   "2 5", "1e2", empty) has no position (0), and so has a whole part over
+   99999. *)
+fun _number_scan {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n} .<span_len>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len,
+   started: bool, negative: bool, ended: bool, frac_digits: int, whole: int, frac: int, digits: int): int =
+  if span_len <= 0 then
+    (if digits <= 0 then 0
+     else let
+       val fraction: int = (if frac_digits = 1 then $AR.mul_int_int(frac, 10) else frac)
+       val hundredths: int = $AR.add_int_int($AR.mul_int_int(whole, 100), fraction)
+     in series_position_of((if negative then 0 - hundredths else hundredths)) end)
   else let
-    val digit_byte = byte2int0($A.read<byte>(data, offset))
+    val byte_value = byte2int0($A.read<byte>(data, offset))
   in
-    if digit_byte = 32 then (if number = 0 then _whole_number(data, offset + 1, span_len - 1, number) else number)
-    else if digit_byte < 48 then number
-    else if digit_byte > 57 then number
-    else if number > 9999 then number
-    else _whole_number(data, offset + 1, span_len - 1, number * 10 + (digit_byte - 48))
+    if byte_value = 32 then
+      (if started then _number_scan(data, offset + 1, span_len - 1, started, negative, true, frac_digits, whole, frac, digits)
+       else _number_scan(data, offset + 1, span_len - 1, started, negative, ended, frac_digits, whole, frac, digits))
+    else if byte_value = 9 then
+      (if started then _number_scan(data, offset + 1, span_len - 1, started, negative, true, frac_digits, whole, frac, digits)
+       else _number_scan(data, offset + 1, span_len - 1, started, negative, ended, frac_digits, whole, frac, digits))
+    else if byte_value = 10 then
+      (if started then _number_scan(data, offset + 1, span_len - 1, started, negative, true, frac_digits, whole, frac, digits)
+       else _number_scan(data, offset + 1, span_len - 1, started, negative, ended, frac_digits, whole, frac, digits))
+    else if byte_value = 13 then
+      (if started then _number_scan(data, offset + 1, span_len - 1, started, negative, true, frac_digits, whole, frac, digits)
+       else _number_scan(data, offset + 1, span_len - 1, started, negative, ended, frac_digits, whole, frac, digits))
+    else if ended then 0
+    else if byte_value = 45 then
+      (if started then 0 else _number_scan(data, offset + 1, span_len - 1, true, true, ended, frac_digits, whole, frac, digits))
+    else if byte_value = 43 then
+      (if started then 0 else _number_scan(data, offset + 1, span_len - 1, true, false, ended, frac_digits, whole, frac, digits))
+    else if byte_value = 46 then
+      (if frac_digits >= 0 then 0 else _number_scan(data, offset + 1, span_len - 1, true, negative, ended, 0, whole, frac, digits))
+    else if byte_value = 44 then
+      (if frac_digits >= 0 then 0 else _number_scan(data, offset + 1, span_len - 1, true, negative, ended, 0, whole, frac, digits))
+    else if byte_value < 48 then 0
+    else if byte_value > 57 then 0
+    else if frac_digits < 0 then
+      (if whole > 9999 then 0
+       else _number_scan(data, offset + 1, span_len - 1, true, negative, ended, frac_digits, whole * 10 + (byte_value - 48), frac, digits + 1))
+    else if frac_digits < 2 then
+      _number_scan(data, offset + 1, span_len - 1, true, negative, ended, frac_digits + 1, whole, frac * 10 + (byte_value - 48), digits + 1)
+    else _number_scan(data, offset + 1, span_len - 1, true, negative, ended, frac_digits, whole, frac, digits + 1)
   end
 
-(* The series found in nodes so far: its name, and its number *)
-fun _series_nodes
+fn _series_value {l:agz}{n:pos}{offset,span_len:nat | offset + span_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, span_len: int span_len): int =
+  _number_scan(data, offset, span_len, false, false, false, ~1, 0, 0, 0)
+
+(* Whether data[first, first + len) and data[second, second + len) are the
+   same bytes, from position *)
+fun _same_bytes {l:agz}{n:pos}{first,second,len:nat | first + len <= n; second + len <= n}{position:nat | position <= len} .<len - position>.
+  (data: !$A.borrow(byte, l, n), first: int first, second: int second, len: int len, position: int position): bool =
+  if position >= len then true
+  else if byte2int0($A.read<byte>(data, first + position)) <> byte2int0($A.read<byte>(data, second + position)) then false
+  else _same_bytes(data, first, second, len, position + 1)
+
+(* Whether a meta's refines attribute is "#" and the id at
+   data[id_offset, id_offset + id_len) *)
+fn _refines_id {l:agz}{n:pos}{attr_count:nat}{id_offset,id_len:nat | id_offset + id_len <= n}
+  (data: !$A.borrow(byte, l, n), attrs: !$X.xml_attr_list(n, attr_count), id_offset: int id_offset, id_len: int id_len): bool = let
+  var refines_chars = @[char][7]('r', 'e', 'f', 'i', 'n', 'e', 's')
+in
+  case+ _find_attr_value(data, attrs, refines_chars, 7) of
+  | ~xspan_at(refines_offset, refines_len) =>
+    if refines_len <> id_len + 1 then false
+    else if refines_len <= 0 then false
+    else if byte2int0($A.read<byte>(data, refines_offset)) <> 35 then false
+    else _same_bytes(data, refines_offset + 1, id_offset, id_len, 0)
+  | ~xspan_none() => false
+end
+
+(* Whether some meta of nodes refines the id at data[id_offset, id_offset +
+   id_len) with a collection-type that is not "series" ("set" is the other
+   type EPUB defines) *)
+fun _other_type_nodes
+  {l:agz}{n:pos}{tree_size:nat}{id_offset,id_len:nat | id_offset + id_len <= n} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), id_offset: int id_offset, id_len: int id_len): bool =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    if _other_type_node(data, node, id_offset, id_len) then true
+    else _other_type_nodes(data, rest, id_offset, id_len)
+  | $X.xml_nodes_nil() => false
+
+and _other_type_node
+  {l:agz}{n:pos}{tree_size:pos}{id_offset,id_len:nat | id_offset + id_len <= n} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), id_offset: int id_offset, id_len: int id_len): bool =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (if _refines_id(data, attrs, id_offset, id_len) then
+         (case+ _find_attr_value(data, attrs, property_chars, 8) of
+          | ~xspan_at(property_offset, property_len) =>
+            if _span_is(data, property_offset, property_len, "collection-type") then
+              (case+ _get_first_text(children) of
+               | ~xspan_at(value_offset, value_len) => let
+                   val @(trimmed_offset, trimmed_len) = _trim(data, value_offset, value_len)
+                 in ~_span_is(data, trimmed_offset, trimmed_len, "series") end
+               | ~xspan_none() => false)
+            else false
+          | ~xspan_none() => false)
+       else false)
+    else _other_type_nodes(data, children, id_offset, id_len)
+  end
+  | $X.xml_text(_, _) => false
+
+(* The belongs-to-collection of nodes that comes after skip others: its name and its id (none when it has
+   none), and how many remain to skip *)
+fun _collection_nth_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), skip: int): @(xspan(n), xspan(n), int) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(name, id, left) = _collection_nth_node(data, node, skip)
+    in
+      case+ name of
+      | ~xspan_none() => let val () = xspan_free(id) in _collection_nth_nodes(data, rest, left) end
+      | _ => @(name, id, left)
+    end
+  | $X.xml_nodes_nil() => @(xspan_none(), xspan_none(), skip)
+
+and _collection_nth_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), skip: int): @(xspan(n), xspan(n), int) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+    var id_chars = @[char][2]('i', 'd')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
+         if _span_is(data, property_offset, property_len, "belongs-to-collection") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) =>
+              if skip > 0 then @(xspan_none(), xspan_none(), skip - 1)
+              else
+                (case+ _find_attr_value(data, attrs, id_chars, 2) of
+                 | ~xspan_at(id_offset, id_len) => @(xspan_at(value_offset, value_len), xspan_at(id_offset, id_len), 0)
+                 | ~xspan_none() => @(xspan_at(value_offset, value_len), xspan_none(), 0))
+            | ~xspan_none() => @(xspan_none(), xspan_none(), skip))
+         else @(xspan_none(), xspan_none(), skip)
+       | ~xspan_none() => @(xspan_none(), xspan_none(), skip))
+    else _collection_nth_nodes(data, children, skip)
+  end
+  | $X.xml_text(_, _) => @(xspan_none(), xspan_none(), skip)
+
+(* The first belongs-to-collection of nodes that is a series, from the skip-th on: its name, and its id (none
+   when it has none). A collection another meta refines as a "set" is not one. *)
+fun _collection_pick
+  {l:agz}{n:pos}{tree_size:nat}{skip:nat | skip <= 64} .<64 - skip>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), skip: int skip): @(xspan(n), xspan(n)) =
+  if skip >= 64 then @(xspan_none(), xspan_none())
+  else let
+    val @(name, id, _) = _collection_nth_nodes(data, nodes, skip)
+  in
+    case+ name of
+    | ~xspan_none() => let val () = xspan_free(id) in @(xspan_none(), xspan_none()) end
+    | _ => let
+        val other = (case+ id of
+          | xspan_at(id_offset, id_len) => _other_type_nodes(data, nodes, id_offset, id_len)
+          | xspan_none() => false)
+      in
+        if other then let
+            val () = xspan_free(name)
+            val () = xspan_free(id)
+          in _collection_pick(data, nodes, skip + 1) end
+        else @(name, id)
+      end
+  end
+
+(* The position of nodes' first group-position that refines the id (any
+   group-position when the collection has no id), 0 when none *)
+fun _position_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), id: !xspan(n)): int =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val found = _position_node(data, node, id)
+    in if found <> 0 then found else _position_nodes(data, rest, id) end
+  | $X.xml_nodes_nil() => 0
+
+and _position_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), id: !xspan(n)): int =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+    var meta_chars = @[char][4]('m', 'e', 't', 'a')
+    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
+  in
+    if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
+      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+       | ~xspan_at(property_offset, property_len) =>
+         if _span_is(data, property_offset, property_len, "group-position") then
+           (case+ _get_first_text(children) of
+            | ~xspan_at(value_offset, value_len) =>
+              (case+ id of
+               | xspan_at(id_offset, id_len) =>
+                 if _refines_id(data, attrs, id_offset, id_len) then _series_value(data, value_offset, value_len) else 0
+               | xspan_none() => _series_value(data, value_offset, value_len))
+            | ~xspan_none() => 0)
+         else 0
+       | ~xspan_none() => 0)
+    else _position_nodes(data, children, id)
+  end
+  | $X.xml_text(_, _) => 0
+
+(* Calibre's series (calibre:series) and its position (the first
+   calibre:series_index that is a number) in nodes *)
+fun _calibre_nodes
   {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), name: xspan(n), number: int): @(xspan(n), int) =
   case+ nodes of
   | $X.xml_nodes_cons(node, rest) => let
-      val @(name, number) = _series_node(data, node, name, number)
-    in _series_nodes(data, rest, name, number) end
+      val @(name, number) = _calibre_node(data, node, name, number)
+    in _calibre_nodes(data, rest, name, number) end
   | $X.xml_nodes_nil() => @(name, number)
 
-and _series_node
+and _calibre_node
   {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
   (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), name: xspan(n), number: int): @(xspan(n), int) =
   case+ node of
   | $X.xml_element(tag_offset, tag_len, attrs, children) => let
     var meta_chars = @[char][4]('m', 'e', 't', 'a')
-    var property_chars = @[char][8]('p', 'r', 'o', 'p', 'e', 'r', 't', 'y')
     var name_chars = @[char][4]('n', 'a', 'm', 'e')
     var content_chars = @[char][7]('c', 'o', 'n', 't', 'e', 'n', 't')
   in
     if xml_name_eq(data, tag_offset, tag_len, meta_chars, 4) then
-      (case+ _find_attr_value(data, attrs, property_chars, 8) of
+      (case+ _find_attr_value(data, attrs, name_chars, 4) of
        | ~xspan_at(property_offset, property_len) =>
-         (case+ _get_first_text(children) of
+         (case+ _find_attr_value(data, attrs, content_chars, 7) of
           | ~xspan_at(value_offset, value_len) =>
-            if _span_is(data, property_offset, property_len, "belongs-to-collection") then
+            if _span_is(data, property_offset, property_len, "calibre:series") then
               (case+ name of
                | xspan_none() => let val () = xspan_free(name) in @(xspan_at(value_offset, value_len), number) end
                | _ => @(name, number))
-            else if _span_is(data, property_offset, property_len, "group-position") then
-              @(name, (if number = 0 then _whole_number(data, value_offset, value_len, 0) else number))
+            else if _span_is(data, property_offset, property_len, "calibre:series_index") then
+              @(name, (if number = 0 then _series_value(data, value_offset, value_len) else number))
             else @(name, number)
           | ~xspan_none() => @(name, number))
-       | ~xspan_none() =>
-         (case+ _find_attr_value(data, attrs, name_chars, 4) of
-          | ~xspan_at(property_offset, property_len) =>
-            (case+ _find_attr_value(data, attrs, content_chars, 7) of
-             | ~xspan_at(value_offset, value_len) =>
-               if _span_is(data, property_offset, property_len, "calibre:series") then
-                 (case+ name of
-                  | xspan_none() => let val () = xspan_free(name) in @(xspan_at(value_offset, value_len), number) end
-                  | _ => @(name, number))
-               else if _span_is(data, property_offset, property_len, "calibre:series_index") then
-                 @(name, (if number = 0 then _whole_number(data, value_offset, value_len, 0) else number))
-               else @(name, number)
-             | ~xspan_none() => @(name, number))
-          | ~xspan_none() => @(name, number)))
-    else _series_nodes(data, children, name, number)
+       | ~xspan_none() => @(name, number))
+    else _calibre_nodes(data, children, name, number)
   end
   | $X.xml_text(_, _) => @(name, number)
 
-(* The book's series (its name, when it has one) and its number in it
-   (0 when none is given) *)
+(* The book's series (its name, when it has one) and its position in it
+   (series_position_of's number, 0 when none is given): the first series
+   collection of EPUB 3, whose group-position refines it, else Calibre's *)
 #pub fn opf_series
   {l:agz}{n:pos}{tree_size:nat}
   (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): @(xspan(n), int)
 
-implement opf_series(data, nodes) = _series_nodes(data, nodes, xspan_none(), 0)
+implement opf_series(data, nodes) = let
+  val @(name, id) = _collection_pick(data, nodes, 0)
+in
+  case+ name of
+  | ~xspan_none() => let
+      val () = xspan_free(id)
+    in _calibre_nodes(data, nodes, xspan_none(), 0) end
+  | _ => let
+      val position = _position_nodes(data, nodes, id)
+      val () = xspan_free(id)
+    in @(name, position) end
+end
 
 (* ============================================================
    Spine: find Nth idref

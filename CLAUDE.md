@@ -842,6 +842,27 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+* Search finds a phrase across inline elements (#437): un<span/>believable,
+  a drop cap, `<em>emph</em>asis`, a phrase running out of a page-break
+  span. The text of a block's inline nodes is searched as one text
+  (`_scan_text`, `_find_in_block` in `src/reader.bats`): a tail of the
+  last query length - 1 bytes, each with its content node and UTF-16
+  offset, is searched for hits that start in it and end in the next text
+  node, then that node for the hits inside it. A hit has a start and an
+  end (content node, offset), which are different nodes for a phrase
+  across elements, and `mark_range` takes both. Blocks (what `_tag_of`
+  does not show inline), `br`, `hr` and images end a phrase; a ruby's
+  `rt`, `rtc` and `rp` are neither searched nor a break, so a base reads
+  on through its reading (the mark runs over the reading, which is in the
+  page). Node numbering is unchanged, so annotation offsets do not move.
+  Decided by research: foliate-js joins the strings of its text walker
+  and maps a match to a start and an end in different entries; the Calibre
+  viewer's manual documents whole-word, contains and accent/space-blind
+  modes and nothing on tags; Readium's search architecture page and
+  Thorium's pages document nothing on it (a search for them found
+  nothing); the W3C find-text draft notes browsers rarely match across
+  element boundaries and none across blocks is expected.
+
 ## Spine items and fallbacks (#419)
 
 The W3C's EPUB 3 test suite (`reports/quire-w3c-epub-tests.md`) found that
@@ -1499,6 +1520,35 @@ read of storage changed: each still folds, as #174 says.
   of each name (`failLibrary`), once or always: each kind's text and
   button, an unlisted name's details, Try again showing the books and a
   later import being kept, and a retry that fails.
+
+## A book's place in its series is a position in hundredths (#434)
+
+`opf_series` (`src/epub_xml.bats`) reads a book's series and position: the
+first `belongs-to-collection` that is a series (one another meta refines as
+`collection-type` `set` is not), and the `group-position` that **refines it**
+(any, when the collection has no id); else Calibre's `calibre:series` and
+`calibre:series_index`. A position is a number with an optional sign, digits
+and a `.` or `,` with digits after it, spaces around it ignored (`_number_scan`),
+kept to two places (3.125 is 3.12), `-99999.99` to `99999.99`; anything else
+("II", "Part Two", "2 5", "1e2", empty) is no position, never a refusal. Calibre
+keeps `series_index` as a float, so 0 is a prequel and 2.5 a novella between
+volumes 2 and 3: the library sorts a series by the number, 0 and negatives
+included, and a book of the series with no number after those that have one,
+by title.
+
+`bnums.series_position` is `series_position_of(hundredths)`: 0 for none, else
+the hundredths plus 10000001 (as `progress_weighted` is the thousandth plus one),
+so the order of the ints is the order of the positions. The card and Book info
+(a Series row, `lib_series_line`) show it as written without a trailing zero
+(`Foundation · 2.5`, `· 2`, `· 1.25`, `· 0`, `· -1`). A record keeps it in an
+ancillary group `snum` (`series_position`), written only when SERI's whole number
+does not already say it; SERI keeps the **whole number** (`_series_whole`: 2 for
+2.5, 0 for none or below 1), so an older Quire reads 2 and keeps `snum` as it
+keeps `prog`, and a record with no `snum` reads as SERI's whole number
+(`_series_read`), as the records written before it do. Neither the backup nor the
+sync file holds a book's series (it is the book's own, read from its file, so a
+second device or a restore shows what the file says). `e2e/series.spec.js`,
+`e2e/series-books.js` and `e2e/library-records.spec.js` test it.
 
 ## What allocates is linear
 
@@ -2384,6 +2434,16 @@ job). Every spec and every static fixture is in exactly one group, or
 `scripts/ci-groups.py` fails the run: a new one is put in a group, by
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
+
+The specs that measure time (`pathological.spec.js`, `page-turn.spec.js`)
+are the `perf` group alone, run with one worker (`--workers=1`), and no
+spec that loads the machine joins it (`stall-capture.spec.js` spins a
+page on purpose): a budget that is measured beside another worker's load
+is flaky, and a flaky budget is relaxed until it stops catching anything.
+A budget keeps headroom over what a loaded runner has been seen to give
+(a turn's animated time against its instant time was 1.27 times once, on
+CI, against a quarter's slack), and still fails a turn that costs twice
+as much.
 
 Each group runs every project of `playwright.config.js`: `desktop` and
 `mobile-portrait` every spec, `narrow` (320 px, WCAG's reflow width),

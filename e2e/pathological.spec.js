@@ -190,11 +190,15 @@ async function turnTimes(page) {
 }
 const ms = (times) => times.map(Math.round).join(', ');
 
-/** How much later than an instant turn an animated one may come: 30 ms
-    (page-turn.spec.js's margin), or a quarter of it where the browser's own
-    frame takes 150 ms or more, which spreads by that much within one run
-    (157 to 209 ms for six turns of the same chapter) */
-const slack = (instant) => Math.max(30, instant * 0.25);
+/** How much later than an instant turn an animated one may come: 50 ms,
+    or half of it where the browser's own frame is long. A frame spreads
+    within one run (157 to 209 ms for six turns of the same chapter, 213 to
+    289 against 187 to 199 on CI's mobile-portrait), and a turn that costs
+    1.27 times the instant one has been measured there against the earlier
+    quarter, so the budget keeps headroom over what a loaded runner gives:
+    a turn that costs twice as much still fails it (these specs run alone
+    in the `perf` group, one worker, for the same reason) */
+const slack = (instant) => Math.max(50, instant * 0.5);
 
 /** The middle turn of six, instant (less motion) and animated, in this page */
 async function turnBudget(page) {
