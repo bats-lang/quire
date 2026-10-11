@@ -627,6 +627,13 @@ export async function toastClear(page) {
         const stack = document.elementsFromPoint(x, y);
         if (stack.length > 0 && toast.contains(stack[0]) && stack.includes(control)) {
           bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is under the toast`);
+        }
+      }
+    }
+    return bad;
+  });
+}
+
 /** Each visible fixed sheet that covers more than 60% of the window's
     height (the page keeps at least 40%; #379). Named with the share it
     covers */
