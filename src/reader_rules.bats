@@ -299,7 +299,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)
-fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 954} (sheet: sheet(left, false, false)): [after:nat | after >= left - 954] sheet(after, false, false) = let
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 1130} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1130] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -324,6 +324,12 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 954} (sheet: sheet(
      or acronym upright, which text-combine-upright:all gives a wrapped
      run (quire#391); upright on the page set every Latin word upright
      too, which no source supports *)
+  val sheet = close(sheet)
+  (* a run of one or two digits (reader.bats's _tcy_parts wraps it in a
+     part of the class tcy), set upright in one cell *)
+  val sheet = rule(sheet, ".caf.vertical .tcy,.caf.vertical-lr .tcy")
+  (* written as it is: the property's name is longer than lay takes *)
+  val () = raw(sheet, "text-combine-upright:all;")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".caf.vertical-lr")
   val sheet = lay(sheet, WritingMode(), "vertical-lr")

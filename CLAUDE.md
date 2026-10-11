@@ -2320,7 +2320,7 @@ CSS columns follow the inline axis, which then runs down, so its pages
 go down the page: the page's class is `caf vertical` (not `rtl`, whose
 `direction` would turn that axis upward), a column and its gap (the
 page's top and bottom paddings) are exactly the page's height, and
-Latin and digits are turned, the default `text-orientation:mixed` (JLREQ: an English word is rotated 90 degrees; only a short number or acronym stands upright, by `text-combine-upright`, which no browser supports as `digits` and which needs the run wrapped for `all`; quire#391 stays open for that), and `_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
+Latin and digits are turned, the default `text-orientation:mixed` (JLREQ: an English word is rotated 90 degrees; only a short number stands upright, as tate-chu-yoko, usually a number of two digits; no browser supports `text-combine-upright: digits`, and Chromium's `all` needs the run in an element of its own: see Text parts below), and `_page_axis` (`Across`, `AcrossBack`, `Down`) is what counts, finds and
 shows pages, by scrollTop for `Down`. Such a book is always paged, one
 column a screen, a drag does not follow the finger (a committed one
 turns the page), and the settings of the page's layout and of its
@@ -2329,6 +2329,35 @@ margins are logical (`margin-block`, and the Paragraph spacing setting
 as `margin-block-end`), so set vertically the space after it is beside
 it and its lines keep their length; that row stays. Taps, keys and
 swipes keep the meaning of a book read right to left.
+
+**Text parts (#391).** Set vertically, each run of one or two ASCII digits
+in a text (`_tcy_find`: not one in a longer number, not one against a
+Latin letter, which is a word, and not a digit of a character reference)
+is wrapped by `_tcy_parts` in a *text part*, a span of the class `tcy`
+that the stylesheet sets `text-combine-upright: all` (inside
+`.caf.vertical` and `.caf.vertical-lr` only, so no horizontal book has the
+rule), the text between the runs in parts of their own. A part has the id
+`t<number>` and the attribute `data-part` (`_part_add`), and it takes no
+content node number: the content node is still one span, `c<N>`, whose
+text is the whole text, so a note, a highlight, a place, a search hit and
+read aloud keep their node numbers and UTF-16 offsets (the numbering
+code in search, read aloud and `_skip_spans` is unchanged, and a search
+for "第1章" still matches across the parts). Bridge's `data-part` is
+what makes that so: a position in a part is an offset into the text of
+its *owner*, the nearest ancestor with no `data-part`, and a click's
+target or the element at a point is the owner (bridge's `ownerOf`,
+`textPointAt`, `textOffsetOf`; `mark_range`, `select_range`,
+`measure_text_offset`, `caret_position_from_point`,
+`get_selection_range`, `element_at_point` and an event's target). By
+research: JLREQ sets a number of 1-2 digits upright in one cell and a
+longer one turned (an English word is turned too); CSS Writing Modes 3
+has `text-combine-upright: all` for an element and `digits <n>` which no
+browser has (MDN); Manabi Reader normalises a book's legacy
+`-webkit-text-combine` the same way; a book's own CSS is dropped here,
+so there is none to honour. Not wrapped: a number of 3 or more digits, a
+decimal's digits are each a run ("3.5" is two), and a fullwidth digit
+is upright already. `e2e/vertical.spec.js` plays it, and bridge's
+`tests/dynamic/decoders` the offsets and targets.
 
 A fixed-layout book (EPUB 3.3 §8.2, `rendition:layout` pre-paginated)
 is shown a spine item a page, as Thorium shows it. `src/epub_xml.bats`
