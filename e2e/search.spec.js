@@ -38,6 +38,19 @@ test('the book is searched, and the results are gone to and stepped through', as
   const listed = panel(page).getByRole('region', { name: 'Results' });
   await expect(listed.getByText('Chapter 2', { exact: true })).toHaveCount(1);
   expect(await listed.innerText()).toMatch(/Chapter 1[\s\S]*Zebra[\s\S]*Chapter 2[\s\S]*Zebra[\s\S]*Chapter 3[\s\S]*Zebra/i);
+  // each row marks the match, in the book's own letters, and says where in the book it is
+  for (let i = 0; i < 3; i++) {
+    await expect(rows.nth(i).locator('.mk')).toHaveText('Zebra&c');
+    await expect(rows.nth(i).locator('.mk')).toHaveCSS('font-weight', '700');
+    await expect(rows.nth(i).locator('[id^=search-hit-place]')).toHaveText(/^(<1|\d+)%$/);
+  }
+  // later chapters are further into the book
+  const percents = await rows.locator('[id^=search-hit-place]').allInnerTexts();
+  const numbers = percents.map(text => parseInt(text, 10) || 0);
+  expect(numbers[0]).toBeLessThan(numbers[1]);
+  expect(numbers[1]).toBeLessThan(numbers[2]);
+  // a chapter's heading counts its results
+  await expect(listed.getByText(/· 1 result$/)).toHaveCount(3);
   // typing did not turn pages or bookmark
   expect(await place(page)).toMatchObject({ ch: 1, p: 1 });
   await rows.nth(1).click();

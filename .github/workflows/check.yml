@@ -29,6 +29,8 @@ jobs:
       # main only; its script is checked here against a stub of Play
       - name: The Play release script
         run: tests/play-release/run.sh
+      - name: The with-env script
+        run: tests/with-env/run.sh
 
   # The app and the PWA, built once: the Android project and the e2e
   # groups take them from here (the quire-android artifact)
