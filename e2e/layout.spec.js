@@ -749,4 +749,19 @@ test('the library menu is reachable under the banner of records that cannot be u
   for (const name of ['Settings', 'About Quire', 'Close']) await menuItem(page, name).click({ trial: true });
   await page.keyboard.press('Escape');
   await fits(page, 'the library with the banner of records that cannot be used');
+  // a screen opened over the library does not hide the banner's buttons
+  // (an error of a sync is said there): Settings, then Sync
+  const banner = page.getByRole('alert');
+  const reachable = async () => {
+    for (const control of [banner.getByRole('button', { name: 'Copy details' }), banner.getByRole('link', { name: 'Report' }), banner.getByRole('button', { name: 'Dismiss' })]) {
+      await control.click({ trial: true });
+    }
+  };
+  await librarySettings(page);
+  await reachable();
+  // (on a phone the tall banner is over the Sync row: the reader dismisses
+  // the banner first, so the screen is opened here by its own handler)
+  await page.evaluate(() => document.getElementById('settings-sync').click());
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await reachable();
 });
