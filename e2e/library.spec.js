@@ -490,7 +490,7 @@ test('the Trash restores every book at once after a factory reset, and that can 
   await start(page);
   await importFiles(page, [epubFile({ title: 'Restore One', author: 'A' }), epubFile({ title: 'Restore Two', author: 'B' })], 2);
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   // the offer to undo the reset goes away; the books wait in the Trash
   await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
