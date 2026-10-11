@@ -362,6 +362,123 @@ fn check_any_order (): void =
          val () = book_image_free(other_image)
        in book_image_free(image) end)
 
+(* ---------------- a group the record needs, lost (#510) ---------------- *)
+
+(* the size of the record without the chunks of the groups it is told to drop (AUTH 20 bytes, BOOK 20, TITL 22) *)
+fn needed_size (drop_auth: bool, drop_book: bool, drop_titl: bool): [k:pos | k <= 339] int k =
+  if drop_auth then
+    (if drop_book then (if drop_titl then 277 else 299) else (if drop_titl then 297 else 319))
+  else
+    (if drop_book then (if drop_titl then 297 else 319) else (if drop_titl then 317 else 339))
+
+(* the record without the chunks of the groups it is told to drop (AUTH 7..27, BOOK 27..47, TITL 257..279) *)
+fn without_needed {l:agz}{n:pos | n == 339} (bytes: !$A.arr(byte, l, n), n: int n, drop_auth: bool, drop_book: bool, drop_titl: bool)
+  : [m:pos | m <= 339] @([copy_l:agz] $A.arr(byte, copy_l, m), int m) = let
+  val kept = needed_size(drop_auth, drop_book, drop_titl)
+  val copy = $A.alloc<byte>(kept)
+  val at = put_span(bytes, n, copy, kept, 0, 7, 0)
+  val at = put_span_unless(drop_auth, bytes, n, copy, kept, 7, 27, at)
+  val at = put_span_unless(drop_book, bytes, n, copy, kept, 27, 47, at)
+  val at = put_span(bytes, n, copy, kept, 47, 257, at)
+  val at = put_span_unless(drop_titl, bytes, n, copy, kept, 257, 279, at)
+  val _ = put_span(bytes, n, copy, kept, 279, 339, at)
+in @(copy, kept) end
+
+(* a copy of the record, with the byte at a place changed (so that the CRC of its chunk no longer holds) when it is told to *)
+fn copy_spoiled {l:agz}{n:pos | n == 339}{at:nat | at < 339} (bytes: !$A.arr(byte, l, n), n: int n, spoil: bool, at: int at): [copy_l:agz] $A.arr(byte, copy_l, n) = let
+  val copy = copy_of(bytes, n)
+  val () = (if spoil then $A.set<byte>(copy, at, $A.int2byte($AR.band_g1($AR.add_g1($AR.low_byte(byte2int0($A.get<byte>(bytes, at))), 90), 255))) else ())
+in copy end
+
+(* the record with a byte of the data of each group it is told to damage changed (AUTH, BOOK, TITL) *)
+fn damaged_needed {l:agz}{n:pos | n == 339} (bytes: !$A.arr(byte, l, n), n: int n, damage_auth: bool, damage_book: bool, damage_titl: bool)
+  : [copy_l:agz] $A.arr(byte, copy_l, n) = let
+  val first = copy_spoiled(bytes, n, damage_auth, 15)
+  val second = copy_spoiled(first, n, damage_book, 35)
+  val () = $A.free<byte>(first)
+  val third = copy_spoiled(second, n, damage_titl, 265)
+  val () = $A.free<byte>(second)
+in third end
+
+fn tested_of {contents:bookx} (made: book_imaged(contents)): tested =
+  case+ made of
+  | ~BookImaged(image) => Tested(image)
+  | ~BookNotImaged() => let val () = fail("an image of a number of 32 bits") in NoTested() end
+
+(* the image of the record without those groups: their substitutes stand in *)
+fn image_lacking (drop_auth: bool, drop_book: bool, drop_titl: bool): tested = let
+  val numbers = numbers_of(31337)
+  val numbers = @{id_high = (if drop_book then 0 else numbers.id_high), id_low = (if drop_book then 0 else numbers.id_low), collections = numbers.collections,
+    collections_modified = numbers.collections_modified, minutes_elsewhere = numbers.minutes_elsewhere, pages_elsewhere = numbers.pages_elsewhere,
+    finished_at = numbers.finished_at, finished_modified = numbers.finished_modified, chapter = numbers.chapter, chapters = numbers.chapters,
+    page = numbers.page, pages = numbers.pages, anchor = numbers.anchor, place_modified = numbers.place_modified, place_declined = numbers.place_declined,
+    position = numbers.position, series_number = numbers.series_number, shelf = numbers.shelf, added = numbers.added, opened = numbers.opened,
+    shelf_modified = numbers.shelf_modified, file_size = numbers.file_size, cover = numbers.cover, done = numbers.done, minutes_read = numbers.minutes_read,
+    pages_read = numbers.pages_read, progress_weighted = numbers.progress_weighted, text_directions = numbers.text_directions, series_position = numbers.series_position}: book_numbers
+  val untitled = $A.alloc<byte>(9)
+  val () = $A.set<byte>(untitled, 0, $A.int2byte(85))
+  val () = $A.set<byte>(untitled, 1, $A.int2byte(110))
+  val () = $A.set<byte>(untitled, 2, $A.int2byte(116))
+  val () = $A.set<byte>(untitled, 3, $A.int2byte(105))
+  val () = $A.set<byte>(untitled, 4, $A.int2byte(116))
+  val () = $A.set<byte>(untitled, 5, $A.int2byte(108))
+  val () = $A.set<byte>(untitled, 6, $A.int2byte(101))
+  val () = $A.set<byte>(untitled, 7, $A.int2byte(100))
+  val () = $A.set<byte>(untitled, 8, $A.int2byte(0))
+  val nothing = $A.alloc<byte>(1)
+  val () = $A.set<byte>(nothing, 0, $A.int2byte(0))
+in
+  if drop_auth then
+    (if drop_titl then tested_of(book_image_make(numbers, nothing, 0, text_of(5, 2), 5, untitled, 8))
+     else let val () = $A.free<byte>(untitled) in tested_of(book_image_make(numbers, nothing, 0, text_of(5, 2), 5, text_of(9, 3), 9)) end)
+  else
+    (if drop_titl then let val () = $A.free<byte>(nothing) in tested_of(book_image_make(numbers, text_of(7, 1), 7, text_of(5, 2), 5, untitled, 8)) end
+     else let
+       val () = $A.free<byte>(nothing)
+       val () = $A.free<byte>(untitled)
+     in tested_of(book_image_make(numbers, text_of(7, 1), 7, text_of(5, 2), 5, text_of(9, 3), 9)) end)
+end
+
+(* read with a loss, as the image whose substitutes stand in, and written as the record of that image *)
+fn expect_lost (code: int, written: bool): void = let
+  val () = expect(code = 2, "a record that lost a group it needs is used, with the group's substitute, and the loss is said")
+in expect(written, "a record that lost a group it needs is written whole") end
+
+fn check_needed_lost_with (drop_auth: bool, drop_book: bool, drop_titl: bool, damage: bool): void =
+  case+ image_of(31337, 9, 7, 5) of
+  | ~NoTested() => ()
+  | ~Tested(full) =>
+    (case+ image_lacking(drop_auth, drop_book, drop_titl) of
+     | ~NoTested() => book_image_free(full)
+     | ~Tested(expected) => let
+         val @(bytes, n) = encode(full)
+         val @(expected_bytes, expected_n) = encode(expected)
+         val () = (if n = 339 then let
+             val () = (if damage then let
+                 val spoiled = damaged_needed(bytes, n, drop_auth, drop_book, drop_titl)
+                 val @(code, written) = classify_same(spoiled, n, expected, expected_bytes, expected_n)
+                 val () = expect_lost(code, written)
+               in $A.free<byte>(spoiled) end else let
+                 val @(cut, m) = without_needed(bytes, n, drop_auth, drop_book, drop_titl)
+                 val @(code, written) = classify_same(cut, m, expected, expected_bytes, expected_n)
+                 val () = expect_lost(code, written)
+               in $A.free<byte>(cut) end)
+           in () end else fail("a record of the shape these tests rely on"))
+         val () = $A.free<byte>(expected_bytes)
+         val () = $A.free<byte>(bytes)
+         val () = book_image_free(expected)
+       in book_image_free(full) end)
+
+fn check_needed_lost (): void = let
+  val () = check_needed_lost_with(true, false, false, false)
+  val () = check_needed_lost_with(false, true, false, false)
+  val () = check_needed_lost_with(false, false, true, false)
+  val () = check_needed_lost_with(true, true, true, false)
+  val () = check_needed_lost_with(true, false, false, true)
+  val () = check_needed_lost_with(false, true, false, true)
+  val () = check_needed_lost_with(false, false, true, true)
+in check_needed_lost_with(true, true, true, true) end
+
 (* ---------------- the checksum ---------------- *)
 
 fn check_crc (): void = let
@@ -555,6 +672,7 @@ implement main0 () = let
   val () = check_damage()
   val () = check_absent()
   val () = check_any_order()
+  val () = check_needed_lost()
   val () = check_fuzz(20000)
 in
   if !_failures = 0 then println! ("all ok")

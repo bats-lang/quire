@@ -258,6 +258,32 @@ fn _key_kind {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
   else KeyOther()
 
 
+(* An image with the ids of the record's key instead of the ones it holds, or none when it cannot be made. The key is
+   the authority on which book a record is (quire#510): whatever a record holds in its BOOK group, or lost of it, it is
+   used as the book of its key, and its next save writes the ids it is under. *)
+datavtype keyed_image =
+  | {contents:bookx} Keyed of book_image(contents)
+  | NotKeyed of ()
+
+fn _image_keyed {contents:bookx} (image: !book_image(contents), id_high: Int, id_low: Int): keyed_image = let
+  var numbers: book_numbers = book_image_numbers(image)
+  val () = numbers.id_high := id_high
+  val () = numbers.id_low := id_low
+  val @(author, author_len) = book_image_author(image)
+  val @(series, series_len) = book_image_series(image)
+  val @(title, title_len) = book_image_title(image)
+in
+  case+ book_image_make(numbers, author, author_len, series, series_len, title, title_len) of
+  | ~BookImaged(made) => Keyed(made)
+  | ~BookNotImaged() => NotKeyed()
+end
+
+(* The book of a record found under a key that is not the ids it holds: the key's book, with the groups it holds *)
+fn _keyed_book {contents:bookx} (image: book_image(contents), id_high: Int, id_low: Int): stored_book =
+  case+ _image_keyed(image, id_high, id_low) of
+  | ~Keyed(keyed) => let val () = book_image_free(image) in LossyBook(id_high, id_low, keyed) end
+  | ~NotKeyed() => let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end
+
 (* A book's record at piece[at, at + len) read *)
 fn _read_book {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
   (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, id_high: Int, id_low: Int): stored_book =
@@ -275,8 +301,8 @@ fn _read_book {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
       in
         if numbers.id_high = id_high then
           (if numbers.id_low = id_low then WholeBook(id_high, id_low, image)
-           else let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end)
-        else let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end
+           else _keyed_book(image, id_high, id_low))
+        else _keyed_book(image, id_high, id_low)
       end
     | ~BR_loss(record, lost) => let
         val image = book_record_image(record)
@@ -286,8 +312,8 @@ fn _read_book {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
       in
         if numbers.id_high = id_high then
           (if numbers.id_low = id_low then LossyBook(id_high, id_low, image)
-           else let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end)
-        else let val () = book_image_free(image) in UnusableBook(id_high, id_low, UnusableDamaged()) end
+           else _keyed_book(image, id_high, id_low))
+        else _keyed_book(image, id_high, id_low)
       end
     | ~BR_notquire() => UnusableBook(id_high, id_low, UnusableNotQuire())
     | ~BR_newer() => UnusableBook(id_high, id_low, UnusableNewer())
@@ -474,6 +500,38 @@ fn _crc_of {l:agz}{n,count:nat | count <= n} (array: !$A.arr(byte, l, n), count:
   val () = blist_free(list)
 in @(65535 - high, 65535 - low) end
 
+(* A record that lost a group, or is under another book's ids, repaired: the library's own image is written whole (every
+   group, the ids of the key among them: what the library holds is the book, and what the record lost is what stands in
+   for it there), and the bytes it had are kept under another key, in the same transaction (quire#510) *)
+fn _repaired {previous_l:agz}{size:pos | size <= 65536}{record_value,contents:bookx}{format_version,least_version:int}{kept_extras:extras}
+  (record: bookrecord(record_value, format_version, least_version, kept_extras), previous: $A.arr(byte, previous_l, size), size: int size,
+   id_high: Int, id_low: Int, image: book_image(contents), answer: $P.resolver(book_saved)): $IDB.writeback = let
+  val patched = book_record_patch(record, image, book_group_all())
+  val () = book_image_free(image)
+in
+  case+ _bytes_of_record(patched) of
+  | ~RecordBytes(bytes, count) => let
+      val () = book_record_free(patched)
+      val @(sum_high, sum_low) = _crc_of(previous, size)
+      val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
+      val key = libstore_book_key(id_high, id_low)
+      val batch_size = 7 + 39 + size + 7 + 27 + count
+      val batch = $A.alloc<byte>(batch_size)
+      val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
+      val () = _put_operation(batch, 7 + 39 + size, key, 27, bytes, count)
+      val () = $A.free<byte>(damaged_key)
+      val () = $A.free<byte>(key)
+      val () = $A.free<byte>(previous)
+      val () = $A.free<byte>(bytes)
+      val () = $P.resolve<book_saved>(answer, BookSaved())
+    in $IDB.WriteBatch(batch, batch_size) end
+  | ~NoRecordBytes() => let
+      val () = book_record_free(patched)
+      val () = $A.free<byte>(previous)
+      val () = $P.resolve<book_saved>(answer, BookNotSaved())
+    in $IDB.Keep() end
+end
+
 (* What an update of a book's record decides, from what it read.
    Closed over the image to put in, the groups of it to take, and the
    resolver of the answer *)
@@ -520,49 +578,31 @@ fn _decide_book {contents:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int,
       in
         case+ read of
         | ~BR_ok(record) => let
-            val patched = book_record_patch(record, image, mask)
-            val () = book_image_free(image)
-            val () = $A.free<byte>(previous)
+            val own = book_record_image(record)
+            val numbers = book_image_numbers(own)
+            val () = book_image_free(own)
           in
-            case+ _bytes_of_record(patched) of
-            | ~RecordBytes(bytes, count) => let
-                val () = book_record_free(patched)
-                val () = $P.resolve<book_saved>(answer, BookSaved())
-              in $IDB.Write(bytes, count) end
-            | ~NoRecordBytes() => let
-                val () = book_record_free(patched)
-                val () = $P.resolve<book_saved>(answer, BookNotSaved())
-              in $IDB.Keep() end
+            if numbers.id_high = id_high && numbers.id_low = id_low then let
+              val patched = book_record_patch(record, image, mask)
+              val () = book_image_free(image)
+              val () = $A.free<byte>(previous)
+            in
+              case+ _bytes_of_record(patched) of
+              | ~RecordBytes(bytes, count) => let
+                  val () = book_record_free(patched)
+                  val () = $P.resolve<book_saved>(answer, BookSaved())
+                in $IDB.Write(bytes, count) end
+              | ~NoRecordBytes() => let
+                  val () = book_record_free(patched)
+                  val () = $P.resolve<book_saved>(answer, BookNotSaved())
+                in $IDB.Keep() end
+            end
+            (* under another book's ids: the key's book, repaired *)
+            else _repaired(record, previous, size, id_high, id_low, image, answer)
           end
         | ~BR_loss(record, lost) => let
-            (* a group was lost: the previous bytes are kept under another key,
-               in the same transaction as the repaired record *)
             val () = lostv_free(lost)
-            val patched = book_record_patch(record, image, mask)
-            val () = book_image_free(image)
-          in
-            case+ _bytes_of_record(patched) of
-            | ~RecordBytes(bytes, count) => let
-                val () = book_record_free(patched)
-                val @(sum_high, sum_low) = _crc_of(previous, size)
-                val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
-                val key = libstore_book_key(id_high, id_low)
-                val batch_size = 7 + 39 + size + 7 + 27 + count
-                val batch = $A.alloc<byte>(batch_size)
-                val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
-                val () = _put_operation(batch, 7 + 39 + size, key, 27, bytes, count)
-                val () = $A.free<byte>(damaged_key)
-                val () = $A.free<byte>(key)
-                val () = $A.free<byte>(previous)
-                val () = $A.free<byte>(bytes)
-                val () = $P.resolve<book_saved>(answer, BookSaved())
-              in $IDB.WriteBatch(batch, batch_size) end
-            | ~NoRecordBytes() => let
-                val () = book_record_free(patched)
-                val () = $A.free<byte>(previous)
-                val () = $P.resolve<book_saved>(answer, BookNotSaved())
-              in $IDB.Keep() end
-          end
+          in _repaired(record, previous, size, id_high, id_low, image, answer) end
         | ~BR_notquire() => let
             val () = book_image_free(image)
             val () = $A.free<byte>(previous)
