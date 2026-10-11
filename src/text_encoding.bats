@@ -191,8 +191,11 @@ in
   else if unit >= 55296 && unit < 56320 then let
       val following: int = _unit_ahead(data, n, i, little)
     in
-      if following >= 56320 && following < 57344 then @($AR.add_int_int($AR.add_int_int(65536, $AR.mul_int_int($AR.sub_int_int(unit, 55296), 1024)), $AR.sub_int_int(following, 56320)), _after(n, i, 4))
-      else @(65533, _after(n, i, 2))
+      if following >= 56320 && following < 57344 then let
+          val pair_code: int = $AR.add_int_int($AR.add_int_int(65536, $AR.mul_int_int($AR.sub_int_int(unit, 55296), 1024)), $AR.sub_int_int(following, 56320))
+          val stop = _after(n, i, 4)
+        in @(pair_code, stop) end
+      else let val stop = _after(n, i, 2) in @(65533, stop) end
     end
   else if unit >= 56320 && unit < 57344 then @(65533, _after(n, i, 2))
   else @(unit, _after(n, i, 2))
