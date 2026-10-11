@@ -13,6 +13,7 @@
 
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload "bytes.sats"
 staload "crc.sats"
 staload "fields.sats"
@@ -97,6 +98,110 @@ fn _damaged_key (id_high: int, id_low: int, sum_high: int, sum_low: int): [l:agz
   val () = _put_four_hex(key, 31, sum_high)
   val () = _put_four_hex(key, 35, sum_low)
 in key end
+
+(* The key of a book's previous version: "library/previous/" and its 14 hex digits (#510): the record as it was before
+   the save that replaced it, kept once in a minute at most, for the book to be read from when its record is lost *)
+fn _previous_key (id_high: int, id_low: int): [l:agz] $A.arr(byte, l, 31) = let
+  val key = $A.alloc<byte>(31)
+  val () = $A.write_text(key, 0, $A.text_lit("library/previous/"), 17)
+  val () = _put_seven_hex(key, 17, id_high)
+  val () = _put_seven_hex(key, 24, id_low)
+in key end
+
+(* The key of the time a book's record was last written: "library/stamp/" and its 14 hex digits; its value is 4 bytes,
+   the seconds since 2025 *)
+fn _stamp_key (id_high: int, id_low: int): [l:agz] $A.arr(byte, l, 28) = let
+  val key = $A.alloc<byte>(28)
+  val () = $A.write_text(key, 0, $A.text_lit("library/stamp/"), 14)
+  val () = _put_seven_hex(key, 14, id_high)
+  val () = _put_seven_hex(key, 21, id_low)
+in key end
+
+(* The seconds since 2025 by the clock, from its milliseconds (bridge's epoch_millis, high * 2^30 + low: 2^30 ms is
+   17895 minutes and 41824 ms) *)
+fn _seconds_now (): [seconds:nat] int seconds = let
+  val @(high, low) = $TM.epoch_millis()
+  val remainder = high * 41824 + low
+  val minutes = high * 17895 + remainder / 60000
+  val inside = (remainder - (remainder / 60000) * 60000) / 1000
+  val since = (minutes - 28928160) * 60 + inside
+in if since >= 0 then since else 0 end
+
+(* When each book's record was last written, as the library read it and as this run has written it (seconds since
+   2025): a record is rotated into the book's previous version only when it was last written a minute ago or more, so
+   that a bug that damages a record at every save cannot, within a minute, replace the version before it (the rule of
+   KOReader's metadata.lua.old, which is not rotated until it is 60 seconds old) *)
+datavtype stamps(int) =
+  | stamps_nil(0) of ()
+  | {count:nat} stamps_cons(count + 1) of (Int, Int, Int, stamps(count))
+
+datavtype stamp_cell =
+  | {count:nat} StampCell of (stamps(count))
+
+val _stamps = ref<stamp_cell>(StampCell(stamps_nil()))
+
+fun _stamps_free {count:nat} .<count>. (list: stamps(count)): void =
+  case+ list of
+  | ~stamps_nil() => ()
+  | ~stamps_cons(_, _, _, rest) => _stamps_free(rest)
+
+fn _stamps_take (): stamp_cell = let
+  var cell: stamp_cell = StampCell(stamps_nil())
+  val () = ref_exch_elt<stamp_cell>(_stamps, cell)
+in cell end
+
+fn _stamps_put (cell: stamp_cell): void = let
+  var current: stamp_cell = cell
+  val () = ref_exch_elt<stamp_cell>(_stamps, current)
+  val+ ~StampCell(list) = current
+in _stamps_free(list) end
+
+fun _stamp_in {count:nat} .<count>. (list: !stamps(count), id_high: Int, id_low: Int): Int =
+  case+ list of
+  | stamps_nil() => 0
+  | stamps_cons(other_high, other_low, seconds, rest) =>
+    if other_high = id_high then (if other_low = id_low then seconds else _stamp_in(rest, id_high, id_low))
+    else _stamp_in(rest, id_high, id_low)
+
+fun _stamp_with {count:nat} .<count>. (list: stamps(count), id_high: Int, id_low: Int, seconds: Int): [more:nat] stamps(more) =
+  case+ list of
+  | ~stamps_nil() => stamps_cons(id_high, id_low, seconds, stamps_nil())
+  | ~stamps_cons(other_high, other_low, other_seconds, rest) =>
+    if other_high = id_high then
+      (if other_low = id_low then stamps_cons(other_high, other_low, seconds, rest)
+       else stamps_cons(other_high, other_low, other_seconds, _stamp_with(rest, id_high, id_low, seconds)))
+    else stamps_cons(other_high, other_low, other_seconds, _stamp_with(rest, id_high, id_low, seconds))
+
+(* When the record of a book was last written, 0 when not known *)
+fn _stamp_get (id_high: Int, id_low: Int): Int = let
+  val cell = _stamps_take()
+  val+ StampCell(list) = cell
+  val seconds = _stamp_in(list, id_high, id_low)
+  val () = _stamps_put(cell)
+in seconds end
+
+(* The record of a book was written at seconds *)
+fn _stamp_set (id_high: Int, id_low: Int, seconds: Int): void = let
+  val cell = _stamps_take()
+  val+ ~StampCell(list) = cell
+  val () = _stamps_put(StampCell(_stamp_with(list, id_high, id_low, seconds)))
+in () end
+
+(* The stamp of a book that is no more *)
+fun _stamp_without {count:nat} .<count>. (list: stamps(count), id_high: Int, id_low: Int): [more:nat] stamps(more) =
+  case+ list of
+  | ~stamps_nil() => stamps_nil()
+  | ~stamps_cons(other_high, other_low, other_seconds, rest) =>
+    if other_high = id_high then
+      (if other_low = id_low then _stamp_without(rest, id_high, id_low)
+       else stamps_cons(other_high, other_low, other_seconds, _stamp_without(rest, id_high, id_low)))
+    else stamps_cons(other_high, other_low, other_seconds, _stamp_without(rest, id_high, id_low))
+
+fn _stamp_forget (id_high: Int, id_low: Int): void = let
+  val cell = _stamps_take()
+  val+ ~StampCell(list) = cell
+  val () = _stamps_put(StampCell(_stamp_without(list, id_high, id_low)))
+in () end
 
 (* ============================================================
    What the library holds, read
@@ -203,6 +308,17 @@ in
   if fourth_byte >= 16 then ~1 else first_byte + 256 * (second_byte + 256 * (third_byte + 256 * fourth_byte))
 end
 
+(* The little-endian u32 at source[at, at + 4) as seconds, or 0 when it is 2 to the 31 or more *)
+fn _seconds_at {l:agz}{owner:addr}{n:nat}{at:nat | at + 4 <= n}
+  (source: !$A.arrx(byte, l, n, owner), at: int at): Int = let
+  val first_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at)))
+  val second_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 1)))
+  val third_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 2)))
+  val fourth_byte = $AR.low_byte(byte2int0($A.get<byte>(source, at + 3)))
+in
+  if fourth_byte >= 128 then 0 else first_byte + 256 * (second_byte + 256 * (third_byte + 256 * fourth_byte))
+end
+
 (* Whether byte source[at] is value *)
 fn _byte_is {l:agz}{owner:addr}{n:nat}{at:nat | at < n}
   (source: !$A.arrx(byte, l, n, owner), at: int at, value: int): bool =
@@ -212,6 +328,8 @@ fn _byte_is {l:agz}{owner:addr}{n:nat}{at:nat | at < n}
 datavtype key_kind =
   | KeyBook of (Int, Int)      (* a book's record: its id *)
   | KeyIndex of ()             (* the collections' record *)
+  | KeyPrevious of (Int, Int)  (* a book's previous version: its id *)
+  | KeyStamp of (Int, Int)     (* when a book's record was last written: its id *)
   | KeyOther of ()             (* anything else (a damaged record kept, ...) *)
 
 fn _key_kind {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
@@ -251,6 +369,54 @@ fn _key_kind {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
                    else if id_low < 0 then KeyOther()
                    else KeyBook(id_high, id_low)
                  end
+                 else KeyOther())
+              else KeyOther())
+           else KeyOther())
+        else KeyOther())
+     else KeyOther())
+  (* "previous/" and 14 hex digits *)
+  else if _byte_is(source, at + 8, 112) then
+    (if len = 31 then
+       (if _byte_is(source, at + 9, 114) then
+          (if _byte_is(source, at + 10, 101) then
+             (if _byte_is(source, at + 11, 118) then
+                (if _byte_is(source, at + 12, 105) then
+                   (if _byte_is(source, at + 13, 111) then
+                      (if _byte_is(source, at + 14, 117) then
+                         (if _byte_is(source, at + 15, 115) then
+                            (if _byte_is(source, at + 16, 47) then let
+                               val id_high = _seven_hex_at(source, at + 17)
+                               val id_low = _seven_hex_at(source, at + 24)
+                             in
+                               if id_high < 0 then KeyOther()
+                               else if id_low < 0 then KeyOther()
+                               else KeyPrevious(id_high, id_low)
+                             end
+                             else KeyOther())
+                          else KeyOther())
+                       else KeyOther())
+                    else KeyOther())
+                 else KeyOther())
+              else KeyOther())
+           else KeyOther())
+        else KeyOther())
+     else KeyOther())
+  (* "stamp/" and 14 hex digits *)
+  else if _byte_is(source, at + 8, 115) then
+    (if len = 28 then
+       (if _byte_is(source, at + 9, 116) then
+          (if _byte_is(source, at + 10, 97) then
+             (if _byte_is(source, at + 11, 109) then
+                (if _byte_is(source, at + 12, 112) then
+                   (if _byte_is(source, at + 13, 47) then let
+                      val id_high = _seven_hex_at(source, at + 14)
+                      val id_low = _seven_hex_at(source, at + 21)
+                    in
+                      if id_high < 0 then KeyOther()
+                      else if id_low < 0 then KeyOther()
+                      else KeyStamp(id_high, id_low)
+                    end
+                    else KeyOther())
                  else KeyOther())
               else KeyOther())
            else KeyOther())
@@ -345,6 +511,51 @@ fn _read_index {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
     | ~IR_damaged() => UnusableIndex(UnusableDamaged())
   end
 
+(* The previous version of a book, taken out of the versions kept (the unusable book, when it has none) *)
+fun _take_previous {kept:nat} .<kept>. (previous: stored_books(kept), id_high: Int, id_low: Int): [left:nat] @(stored_book, stored_books(left)) =
+  case+ previous of
+  | ~StoredNone() => @(UnusableBook(id_high, id_low, UnusableDamaged()), StoredNone())
+  | ~StoredSome(slot, rest) =>
+    (case+ slot of
+     | ~LossyBook(other_high, other_low, image) =>
+       if other_high = id_high then
+         (if other_low = id_low then @(LossyBook(other_high, other_low, image), rest)
+          else let
+            val @(found, others) = _take_previous(rest, id_high, id_low)
+          in @(found, StoredSome(LossyBook(other_high, other_low, image), others)) end)
+       else let
+         val @(found, others) = _take_previous(rest, id_high, id_low)
+       in @(found, StoredSome(LossyBook(other_high, other_low, image), others)) end
+     | ~WholeBook(other_high, other_low, image) => let
+         val @(found, others) = _take_previous(rest, id_high, id_low)
+       in @(found, StoredSome(WholeBook(other_high, other_low, image), others)) end
+     | ~UnusableBook(other_high, other_low, why) => let
+         val @(found, others) = _take_previous(rest, id_high, id_low)
+       in @(found, StoredSome(UnusableBook(other_high, other_low, why), others)) end)
+
+(* The books, those whose record is broken (it is not whole: UnusableDamaged) read from their previous version *)
+fun _recover {count,kept:nat} .<count>. (books: stored_books(count), previous: stored_books(kept)): [left:nat] @(stored_books(count), stored_books(left)) =
+  case+ books of
+  | ~StoredNone() => @(StoredNone(), previous)
+  | ~StoredSome(book, rest) =>
+    (case+ book of
+     | ~UnusableBook(id_high, id_low, UnusableDamaged()) => let
+         val @(found, others) = _take_previous(previous, id_high, id_low)
+         val @(recovered, left) = _recover(rest, others)
+       in @(StoredSome(found, recovered), left) end
+     | ~UnusableBook(id_high, id_low, UnusableNewer()) => let
+         val @(recovered, left) = _recover(rest, previous)
+       in @(StoredSome(UnusableBook(id_high, id_low, UnusableNewer()), recovered), left) end
+     | ~UnusableBook(id_high, id_low, UnusableNotQuire()) => let
+         val @(recovered, left) = _recover(rest, previous)
+       in @(StoredSome(UnusableBook(id_high, id_low, UnusableNotQuire()), recovered), left) end
+     | ~WholeBook(id_high, id_low, image) => let
+         val @(recovered, left) = _recover(rest, previous)
+       in @(StoredSome(WholeBook(id_high, id_low, image), recovered), left) end
+     | ~LossyBook(id_high, id_low, image) => let
+         val @(recovered, left) = _recover(rest, previous)
+       in @(StoredSome(LossyBook(id_high, id_low, image), recovered), left) end)
+
 (* The byte at piece[at + i] when i is inside the record's len bytes, else 0 *)
 fn _head_byte {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}{i:int}
   (piece: !$A.arrx(byte, l, n, owner), at: int at, len: int len, i: int i): int =
@@ -393,36 +604,47 @@ fn _index_noted {l:agz}{owner:addr}{n:nat}{at,len:nat | at + len <= n}
 (* The entries of the blob get_prefix gave, from at on: the collections'
    record and the books', each key checked. The books are read onto
    books, count of them *)
-fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count:nat | count <= STORED_MAX} .<n - at>.
-  (piece: !$A.arrx(byte, l, n, owner), size: int n, at: int at, index: stored_index, books: stored_books(count), count: int count)
-  : [total:nat | total <= STORED_MAX] @(stored_index, stored_books(total), int total) =
-  if at + 2 > size then @(index, books, count)
+fun _read_entries {l:agz}{owner:addr}{n:nat}{at:nat | at <= n}{count,kept:nat | count <= STORED_MAX} .<n - at>.
+  (piece: !$A.arrx(byte, l, n, owner), size: int n, at: int at, index: stored_index, books: stored_books(count), count: int count, previous: stored_books(kept))
+  : [total,left:nat | total <= STORED_MAX] @(stored_index, stored_books(total), int total, stored_books(left)) =
+  if at + 2 > size then @(index, books, count, previous)
   else let
     val key_len = _u16_at(piece, at)
     val key_at = at + 2
   in
-    if key_at + key_len + 4 > size then @(index, books, count)
+    if key_at + key_len + 4 > size then @(index, books, count, previous)
     else let
       val value_len = _u32_at(piece, key_at + key_len)
       val value_at = key_at + key_len + 4
     in
-      if value_len < 0 then @(index, books, count)
-      else if value_at + value_len > size then @(index, books, count)
+      if value_len < 0 then @(index, books, count, previous)
+      else if value_at + value_len > size then @(index, books, count, previous)
       else let
         val next = value_at + value_len
         val kind = _key_kind(piece, key_at, key_len)
       in
         case+ kind of
         | ~KeyBook(id_high, id_low) =>
-          if count >= 100000 then @(index, books, count)
+          if count >= 100000 then @(index, books, count, previous)
           else let
             val book = _book_noted(piece, value_at, value_len, _read_book(piece, value_at, value_len, id_high, id_low))
-          in _read_entries(piece, size, next, index, StoredSome(book, books), count + 1) end
+          in _read_entries(piece, size, next, index, StoredSome(book, books), count + 1, previous) end
         | ~KeyIndex() => let
             val read = _index_noted(piece, value_at, value_len, _read_index(piece, value_at, value_len))
             val () = stored_index_free(index)
-          in _read_entries(piece, size, next, read, books, count) end
-        | ~KeyOther() => _read_entries(piece, size, next, index, books, count)
+          in _read_entries(piece, size, next, read, books, count, previous) end
+        (* a book's previous version: read as a record is, kept to be read from when the record is lost *)
+        | ~KeyPrevious(id_high, id_low) => let
+            val kept = (case+ _read_book(piece, value_at, value_len, id_high, id_low) of
+              | ~WholeBook(found_high, found_low, image) => StoredSome(LossyBook(found_high, found_low, image), previous)
+              | ~LossyBook(found_high, found_low, image) => StoredSome(LossyBook(found_high, found_low, image), previous)
+              | ~UnusableBook(_, _, _) => previous): [more:nat] stored_books(more)
+          in _read_entries(piece, size, next, index, books, count, kept) end
+        (* when a record was last written *)
+        | ~KeyStamp(id_high, id_low) => let
+            val () = (if value_len = 4 then _stamp_set(id_high, id_low, _seconds_at(piece, value_at)) else ())
+          in _read_entries(piece, size, next, index, books, count, previous) end
+        | ~KeyOther() => _read_entries(piece, size, next, index, books, count, previous)
       end
     end
   end
@@ -466,8 +688,11 @@ in
     | ~LibraryFailed(why) => $P.ret<library_read>(ReadFailed(why))
     | ~LibraryContent(owner, piece, size) => let
         val () = notice_notes_clear()
-        val @(index, books, count) = _read_entries(piece, size, 0, IndexNone(), StoredNone(), 0)
+        val @(index, found, count, previous) = _read_entries(piece, size, 0, IndexNone(), StoredNone(), 0, StoredNone())
         val () = piece_free(owner, piece)
+        (* a book whose record is broken beyond recovery is read from its previous version, when it has one (#510) *)
+        val @(books, left) = _recover(found, previous)
+        val () = stored_books_free(left)
       in $P.ret<library_read>(ReadLibrary(index, books, count)) end)
 end
 
@@ -547,6 +772,72 @@ fn _crc_of {l:agz}{n,count:nat | count <= n} (array: !$A.arr(byte, l, n), count:
   val () = blist_free(list)
 in @(65535 - high, 65535 - low) end
 
+(* The 4 bytes of a stamp: seconds, little-endian *)
+fn _stamp_value (seconds: int): [l:agz] $A.arr(byte, l, 4) = let
+  val value = $A.alloc<byte>(4)
+  val () = _put_u32(value, 0, seconds)
+in value end
+
+(* A record written with the time it is written, in one batch (quire#510) *)
+fn _written_batch {bytes_l:agz}{count:pos | count <= 65536}
+  (id_high: Int, id_low: Int, bytes: $A.arr(byte, bytes_l, count), count: int count, now: int): $IDB.writeback = let
+  val batch_size = 39 + 34 + count
+  val batch = $A.alloc<byte>(batch_size)
+  val stamp_key = _stamp_key(id_high, id_low)
+  val stamp = _stamp_value(now)
+  val key = libstore_book_key(id_high, id_low)
+  val () = _put_operation(batch, 0, stamp_key, 28, stamp, 4)
+  val () = _put_operation(batch, 39, key, 27, bytes, count)
+  val () = $A.free<byte>(stamp_key)
+  val () = $A.free<byte>(stamp)
+  val () = $A.free<byte>(key)
+  val () = $A.free<byte>(bytes)
+in $IDB.WriteBatch(batch, batch_size) end
+
+(* The same, with the record it replaces kept as the book's previous version: the record was last written a minute ago
+   or more, and read whole *)
+fn _rotated_batch {bytes_l,previous_l:agz}{count,previous_size:pos | count <= 65536; previous_size <= 65536}
+  (id_high: Int, id_low: Int, bytes: $A.arr(byte, bytes_l, count), count: int count,
+   previous: $A.arr(byte, previous_l, previous_size), previous_size: int previous_size, now: int): $IDB.writeback = let
+  val batch_size = 38 + previous_size + 39 + 34 + count
+  val batch = $A.alloc<byte>(batch_size)
+  val previous_key = _previous_key(id_high, id_low)
+  val stamp_key = _stamp_key(id_high, id_low)
+  val stamp = _stamp_value(now)
+  val key = libstore_book_key(id_high, id_low)
+  val () = _put_operation(batch, 0, previous_key, 31, previous, previous_size)
+  val () = _put_operation(batch, 38 + previous_size, stamp_key, 28, stamp, 4)
+  val () = _put_operation(batch, 38 + previous_size + 39, key, 27, bytes, count)
+  val () = $A.free<byte>(previous_key)
+  val () = $A.free<byte>(stamp_key)
+  val () = $A.free<byte>(stamp)
+  val () = $A.free<byte>(key)
+  val () = $A.free<byte>(previous)
+  val () = $A.free<byte>(bytes)
+in $IDB.WriteBatch(batch, batch_size) end
+
+(* A record that is replaced and the bytes it held kept under another key, in one batch, with the time it is written *)
+fn _damaged_batch {bytes_l,previous_l:agz}{count,size:pos | count <= 65536; size <= 65536}
+  (id_high: Int, id_low: Int, bytes: $A.arr(byte, bytes_l, count), count: int count,
+   previous: $A.arr(byte, previous_l, size), size: int size, now: int): $IDB.writeback = let
+  val @(sum_high, sum_low) = _crc_of(previous, size)
+  val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
+  val key = libstore_book_key(id_high, id_low)
+  val stamp_key = _stamp_key(id_high, id_low)
+  val stamp = _stamp_value(now)
+  val batch_size = 7 + 39 + size + 7 + 27 + count + 39
+  val batch = $A.alloc<byte>(batch_size)
+  val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
+  val () = _put_operation(batch, 7 + 39 + size, key, 27, bytes, count)
+  val () = _put_operation(batch, 7 + 39 + size + 7 + 27 + count, stamp_key, 28, stamp, 4)
+  val () = $A.free<byte>(damaged_key)
+  val () = $A.free<byte>(key)
+  val () = $A.free<byte>(stamp_key)
+  val () = $A.free<byte>(stamp)
+  val () = $A.free<byte>(previous)
+  val () = $A.free<byte>(bytes)
+in $IDB.WriteBatch(batch, batch_size) end
+
 (* A record that lost a group, or is under another book's ids, repaired: the library's own image is written whole (every
    group, the ids of the key among them: what the library holds is the book, and what the record lost is what stands in
    for it there), and the bytes it had are kept under another key, in the same transaction (quire#510) *)
@@ -559,19 +850,10 @@ in
   case+ _bytes_of_record(patched) of
   | ~RecordBytes(bytes, count) => let
       val () = book_record_free(patched)
-      val @(sum_high, sum_low) = _crc_of(previous, size)
-      val damaged_key = _damaged_key(id_high, id_low, sum_high, sum_low)
-      val key = libstore_book_key(id_high, id_low)
-      val batch_size = 7 + 39 + size + 7 + 27 + count
-      val batch = $A.alloc<byte>(batch_size)
-      val () = _put_operation(batch, 0, damaged_key, 39, previous, size)
-      val () = _put_operation(batch, 7 + 39 + size, key, 27, bytes, count)
-      val () = $A.free<byte>(damaged_key)
-      val () = $A.free<byte>(key)
-      val () = $A.free<byte>(previous)
-      val () = $A.free<byte>(bytes)
+      val now = _seconds_now()
+      val () = _stamp_set(id_high, id_low, now)
       val () = $P.resolve<book_saved>(answer, BookSaved())
-    in $IDB.WriteBatch(batch, batch_size) end
+    in _damaged_batch(id_high, id_low, bytes, count, previous, size, now) end
   | ~NoRecordBytes() => let
       val () = book_record_free(patched)
       val () = $A.free<byte>(previous)
@@ -596,8 +878,10 @@ fn _decide_book {contents:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int,
       case+ _bytes_of_record(record) of
       | ~RecordBytes(bytes, count) => let
           val () = book_record_free(record)
+          val now = _seconds_now()
+          val () = _stamp_set(id_high, id_low, now)
           val () = $P.resolve<book_saved>(answer, BookSaved())
-        in $IDB.Write(bytes, count) end
+        in _written_batch(id_high, id_low, bytes, count, now) end
       | ~NoRecordBytes() => let
           val () = book_record_free(record)
           val () = $P.resolve<book_saved>(answer, BookNotSaved())
@@ -632,15 +916,22 @@ fn _decide_book {contents:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int,
             if numbers.id_high = id_high && numbers.id_low = id_low then let
               val patched = book_record_patch(record, image, mask)
               val () = book_image_free(image)
-              val () = $A.free<byte>(previous)
+              val now = _seconds_now()
+              (* the version before is kept once in a minute at most, and only a record that was whole *)
+              val due = (now - _stamp_get(id_high, id_low) >= 60)
             in
               case+ _bytes_of_record(patched) of
               | ~RecordBytes(bytes, count) => let
                   val () = book_record_free(patched)
+                  val () = _stamp_set(id_high, id_low, now)
                   val () = $P.resolve<book_saved>(answer, BookSaved())
-                in $IDB.Write(bytes, count) end
+                in
+                  if due then _rotated_batch(id_high, id_low, bytes, count, previous, size, now)
+                  else let val () = $A.free<byte>(previous) in _written_batch(id_high, id_low, bytes, count, now) end
+                end
               | ~NoRecordBytes() => let
                   val () = book_record_free(patched)
+                  val () = $A.free<byte>(previous)
                   val () = $P.resolve<book_saved>(answer, BookNotSaved())
                 in $IDB.Keep() end
             end
@@ -661,10 +952,24 @@ fn _decide_book {contents:bookx} (found: $IDB.lookup, id_high: Int, id_low: Int,
             val () = $P.resolve<book_saved>(answer, BookRefused(UnusableNewer()))
           in $IDB.Keep() end
         | ~BR_damaged() => let
+            (* not whole, and nothing in it to read: the library's own image replaces it (a book read from its previous
+               version, or imported again), the bytes it had kept *)
+            val record = book_record_new(image)
             val () = book_image_free(image)
-            val () = $A.free<byte>(previous)
-            val () = $P.resolve<book_saved>(answer, BookRefused(UnusableDamaged()))
-          in $IDB.Keep() end
+          in
+            case+ _bytes_of_record(record) of
+            | ~RecordBytes(bytes, count) => let
+                val () = book_record_free(record)
+                val now = _seconds_now()
+                val () = _stamp_set(id_high, id_low, now)
+                val () = $P.resolve<book_saved>(answer, BookSaved())
+              in _damaged_batch(id_high, id_low, bytes, count, previous, size, now) end
+            | ~NoRecordBytes() => let
+                val () = book_record_free(record)
+                val () = $A.free<byte>(previous)
+                val () = $P.resolve<book_saved>(answer, BookNotSaved())
+              in $IDB.Keep() end
+          end
       end
     end
 
@@ -716,12 +1021,23 @@ fn _decide_delete (found: $IDB.lookup, id_high: Int, id_low: Int): $IDB.writebac
   | ~$IDB.Found(blob) => let
       val () = $BD.blob_free(blob)
       val key = libstore_book_key(id_high, id_low)
-      val batch = $A.alloc<byte>(30)
+      val previous_key = _previous_key(id_high, id_low)
+      val stamp_key = _stamp_key(id_high, id_low)
+      val batch = $A.alloc<byte>(95)
       val () = $A.write_byte(batch, 0, 2)
       val () = _put_u16(batch, 1, 27)
       val () = _put_bytes(batch, 3, key, 27)
+      val () = $A.write_byte(batch, 30, 2)
+      val () = _put_u16(batch, 31, 31)
+      val () = _put_bytes(batch, 33, previous_key, 31)
+      val () = $A.write_byte(batch, 64, 2)
+      val () = _put_u16(batch, 65, 28)
+      val () = _put_bytes(batch, 67, stamp_key, 28)
       val () = $A.free<byte>(key)
-    in $IDB.WriteBatch(batch, 30) end
+      val () = $A.free<byte>(previous_key)
+      val () = $A.free<byte>(stamp_key)
+      val () = _stamp_forget(id_high, id_low)
+    in $IDB.WriteBatch(batch, 95) end
 
 (* A book's record deleted, after it is read in the same transaction *)
 #pub fun libstore_delete_book (id_high: Int, id_low: Int): $P.promise(book_deleted, $P.Chained)
