@@ -1053,7 +1053,14 @@ fn _book_action {book:int} (book: int book, action: book_action): void =
 (* The page's fonts changed as they loaded: the open chapter's pages are
    counted again *)
 fn _fonts_arrived (): void =
-  if _in_reader() then reader_relayout() else ()
+  if _in_reader() then let
+    val () = reader_relayout()
+  in
+    (* the browser lays the text out with the face a moment after the
+       event: the digits set upright are scaled to their cell by it then *)
+    $P.finish<Int>($P.vow($TM.timer_set(150)), llam(_) => if _in_reader() then reader_tcy_refit() else ())
+  end
+  else ()
 
 (* The chapter laid out again once the area has settled: a resize, or
    the app's bars shown or hidden (the latest asks, the earlier are
@@ -2689,6 +2696,8 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
           val () = layer_close(LNote())
           val () = reader_note_go()
         in ui_focus("page") end
+        (* the link opens in its own tab; the question is answered *)
+        | ~$R.some(FootnoteOpen()) => layer_close(LNote())
         (* the focus goes back where it was (layer.bats) *)
         | ~$R.some(FootnoteClose()) => layer_close(LNote()))
     in 0 end)

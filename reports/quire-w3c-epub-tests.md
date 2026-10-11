@@ -12,11 +12,11 @@ Android app itself were not run.
 
 | level | pass | fail | n/a | total |
 | --- | ---: | ---: | ---: | ---: |
-| must | 98 | 24 | 17 | 139 |
-| should | 13 | 20 | 5 | 38 |
-| may | 0 | 1 | 0 | 1 |
-| deprecated | 16 | 10 | 1 | 27 |
-| all | 127 | 55 | 23 | 205 |
+| must | 109 | 14 | 16 | 139 |
+| should | 19 | 14 | 5 | 38 |
+| may | 1 | 0 | 0 | 1 |
+| deprecated | 17 | 9 | 1 | 27 |
+| all | 146 | 37 | 22 | 205 |
 
 The suite lists `deprecated` tests (the `fxl-*` and `lay-fxl-*` ones, which the `lay-pp-*` ones replace); they are in
 the table too, and in `reports/quire.json`, as the suite's own template has them.
@@ -29,23 +29,13 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 
 | test | level | why | others | e2e |
 | --- | --- | --- | ---: | --- |
-| `cnt-css-fonts_ot` | must | the book's own CSS is dropped by design, so its @font-face is never loaded | 1/1 | policy |
-| `cnt-css-fonts_tt` | must | the book's own CSS is dropped by design, so its @font-face is never loaded | 1/1 | policy |
-| `cnt-css-fonts_woff` | must | the book's own CSS is dropped by design, so its @font-face is never loaded | 1/1 | policy |
-| `cnt-css-fonts_woff2` | must | the book's own CSS is dropped by design, so its @font-face is never loaded | 1/1 | policy |
 | `cnt-mathml-support` | must | a math element is made a div: its tokens are shown as plain text ("x / = / a / + / b / 2"), not an equation | 14/17 | next |
-| `cnt-svg-css` | must | an SVG content document is shown as its text only: no drawing, no CSS applied to it | 5/17 | next |
-| `cnt-svg-css-inclusion` | must | an SVG included in the XHTML is not drawn (svg elements are made divs) | 12/18 | next |
-| `cnt-svg-embedded` | must | an inline svg is not drawn (made a div; no graphics) | 16/18 | next |
-| `cnt-svg-support` | must | an SVG spine document shows its text but not its drawing | 9/17 | next |
-| `lay-pp-svg-icb_multi` | must | SVG spine documents are not drawn, nor sized by their viewBox | 0/0 | next |
+| `cnt-svg-css-inclusion` | must | the svg is drawn, but the page's own <style> does not reach it (by decision: the book's CSS is dropped, quire#411; the svg is a picture of its own, so a style outside it cannot change it, as for an img (cnt-svg-css-reference)) | 12/18 | policy |
 | `lay-pp-xhtml-icb` | must | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi` | must | each page's own viewport is read (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_multi_declarations` | must | the first of two viewport metas is the one used (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_repeated-in-meta` | must | the first width and height are used (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `lay-pp-xhtml-icb_units` | must | units are ignored, values in pixels (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
-| `lay-roll-embedded-images` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
-| `lay-roll-embedded-images-svg` | must | roll layout (EPUB 3.4) is not implemented: read as reflowable, a chapter a document | 2/2 | policy |
 | `nav-spine_in-spine-hidden-toc-css` | must | the navigation document in the spine shows the entry its CSS hides (display:none): the book's CSS is dropped by design; the contents panel lists both, as asked | 1/2 | policy |
 | `pkg-dir_but_not_content` | must | a Hebrew book's page is set right to left, as its reading direction is (by decision, quire#416: a book in Hebrew or Arabic whose spine names no direction reads right to left, as Readium reads it; the page is one CSS column flow, so its direction is the columns' order, and a list or a paragraph in the book inherits it). The suite's pass criterion is a content document with no dir staying left to right, which 13 of the 13 reading systems that answered meet by laying each document out on its own; Quire's single flow cannot without giving up the Hebrew heuristic or marking every block | 13/13 | policy |
 | `pkg-lang_but_not_content` | must | the OPF's dc:language is the page's language where the chapter names none, so a q gets French quotation marks in a French book (by decision: browsers hyphenate and pick quotation marks only for text whose language is known, and the package's language is the only one a book declares; the earlier test in reader.spec.js holds it, and a book that names none is 'und', not English). 11 of the 15 reading systems that answered show a content document with no language in their own, the suite's criterion | 11/15 | policy |
@@ -63,20 +53,12 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `css-epub-text-underline-position` | should | the book's own CSS is dropped by design | 4/16 | policy |
 | `css-epub-word-break` | should | the book's own CSS is dropped by design | 8/17 | policy |
 | `css-epub-writing-mode` | should | the book's own CSS is dropped by design (vertical writing comes from the OPF) | 14/16 | policy |
-| `lay-pkg-flow-scrolled-continuous` | should | rendition:flow is not read: the reader's own Pages | Scroll setting decides | 3/14 | next |
-| `lay-pkg-flow-scrolled-doc` | should | rendition:flow is not read: the reader's own Pages | Scroll setting decides | 6/13 | next |
 | `lay-pp-xhtml-icb_invalid_meta` | should | an invalid viewport meta is read as 900x600 (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 0/0 | policy |
 | `mol-css` | should | the phrase is marked by Quire's own highlight; media:active-class and the book's CSS (green background) are not applied | 2/8 | decision |
-| `mol-tts_multi` | should | a SMIL with no audio is not read by speech synthesis: nothing plays | 6/13 | decision |
-| `mol-tts_single` | should | a SMIL with no audio is not read by speech synthesis: nothing plays | 6/13 | decision |
 | `ocf-font_obfuscation` | should | the book's own CSS is dropped by design, so an embedded font is never used | 7/15 | policy |
 | `pkg-manifest-unlisted-resource` | should | an image the manifest does not list is shown: the zip is read by name, not by the manifest | 4/15 | next |
-| `pub-external-links` | should | a link out opens a new tab at once, with no consent step | 7/15 | decision |
-| `pub-external-links_consent` | should | a mailto: link opens the mail application at once, with no consent step | 4/12 | decision |
-| `pss-support` | may | no footnote popup: a note link is followed as a link | 4/14 | next |
 | `fxl-spine-overrides_duplicate` | deprecated | when an itemref says both layout-reflowable and layout-pre-paginated the second wins (shown as a fixed page); the test says the second must be ignored | 4/13 | next |
 | `lay-fxl-orientation-landscape` | deprecated | rendition:orientation is not read: the page is not shown in landscape and the reader is not told it should be | 10/14 | next |
-| `lay-fxl-svg-icb_multi` | deprecated | SVG spine documents are not drawn, nor sized by their viewBox | 6/9 | next |
 | `lay-fxl-xhtml-icb` | deprecated | the viewport is read (900x600, measured) but the pass criterion is a grid the book's CSS draws, and the CSS is dropped by design | 11/13 | policy |
 | `lay-fxl-xhtml-icb_device_sizes` | deprecated | device-width/device-height fill the view, but the pass criterion is drawn by the book's CSS, dropped by design | 5/10 | policy |
 | `lay-fxl-xhtml-icb_invalid_meta` | deprecated | an invalid viewport meta is read as 900x600 (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 7/10 | policy |
@@ -86,10 +68,8 @@ decision of Quire's (the book's CSS is dropped; no scripts), not a bug: whether 
 | `lay-fxl-xhtml-icb_units` | deprecated | units are ignored, values in pixels (measured) but the pass criterion is drawn by the book's CSS, dropped by design | 13/13 | policy |
 
 A failure marked `next` is a bug whose e2e test is written with its fix, in the area of fixes it belongs to (so a branch
-carries only tests that pass). The `should` failures marked `decision` are left for a decision: `pub-external-links` and `pub-external-links_consent`
-(a link out opens at once: a consent step is a design to choose, with what Thorium, Apple Books and Kobo do, in the "Others" column
-and on the results page), `mol-tts_single` and `mol-tts_multi` (a SMIL with no audio read by speech synthesis: Quire has both
-narration and speech, but not the one through the other) and `mol-css` (the book's own highlight CSS, dropped by design).
+carries only tests that pass). A `decision` is a failure settled in CLAUDE.md (#419) and kept: `mol-css` (the book's own highlight CSS,
+dropped by design, #411).
 
 ## Not applicable
 
@@ -102,7 +82,6 @@ narration and speech, but not the one through the other) and `mol-css` (the book
 | `ocf-url_origin` | must | needs scripting, which Quire does not run |
 | `ocf-url_parse-leaking-relative` | must | needs scripting, which Quire does not run |
 | `ocf-url_parse-path-absolute` | must | needs scripting, which Quire does not run |
-| `pss-support_ignore-title` | must | only for reading systems with a footnote popup |
 | `scr-not-support_ccscript-modify-host` | must | Quire runs no scripts and shows no iframes |
 | `scr-not-support_ccscript-modify-size` | must | Quire runs no scripts and shows no iframes |
 | `scr-readingsystem-features` | must | Quire runs no scripts (no epubReadingSystem object) |
@@ -123,7 +102,14 @@ narration and speech, but not the one through the other) and `mol-css` (the book
 
 Caveats of a pass, where there is one:
 
+* `cnt-css-fonts_ot`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-css-fonts_tt`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-css-fonts_woff`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-css-fonts_woff2`: the font the package carries is loaded and used when the Font setting is Book; the book's own CSS, which says what uses it, is dropped by design
+* `cnt-svg-css`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
 * `cnt-svg-css-reference`: an SVG referenced by img is shown, and the page's CSS does not change it
+* `cnt-svg-embedded`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
+* `cnt-svg-support`: an svg (in a page or a content document) is drawn as a picture of its own bytes: an image whose source is a blob, so its own style applies, no script runs and nothing reaches in or out; its text stays in the page for search but is not seen
 * `fxl-page-spread-break`: two spreads, 1-2 and 3-4, measured
 * `fxl-page-spread-center`: a centred page is alone, measured
 * `lay-fxl-layout-pre-paginated-spreads`: pages meet with no gap, measured
@@ -132,8 +118,11 @@ Caveats of a pass, where there is one:
 * `lay-fxl-page-spread-right`: measured
 * `lay-fxl-spread-landscape`: in a landscape window
 * `lay-fxl-spread-none`: one page a screen, measured
+* `lay-fxl-svg-icb_multi`: an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it
 * `lay-page-layout-both-spread`: the reflowable item with page-spread-left starts on the left; page-spread-right on a reflowable item is not placed on the right (not tested by the suite)
 * `lay-pkg-flow-paginated`: paginated is the default
+* `lay-pkg-flow-scrolled-continuous`: a book that asks for scrolled flow is scrolled until the reader chooses Pages (the Page setting starts as the book's)
+* `lay-pkg-flow-scrolled-doc`: a book that asks for scrolled flow is scrolled until the reader chooses Pages (the Page setting starts as the book's)
 * `lay-pp-embedded-images`: measured: each image fills its page
 * `lay-pp-embedded-images-svg`: the images inside the SVG are shown
 * `lay-pp-images-in-spine`: an image in the spine is replaced by its fallback and never read as text; no crash (the 3 MB PNG)
@@ -145,9 +134,12 @@ Caveats of a pass, where there is one:
 * `lay-pp-spine-overrides_image-spine-pp`: the PNG spine item is replaced by its fallback
 * `lay-pp-spine-overrides_image-spine-reflow`: the PNG spine item is replaced by its fallback
 * `lay-pp-spread-none`: one page a screen, measured
+* `lay-pp-svg-icb_multi`: an SVG spine document is drawn as a picture whose viewBox sets its size, clipped to it
 * `lay-rendition-flow-pre-pag`: rendition:flow is ignored everywhere
-* `lay-roll-images-in-spine`: an image in the spine is replaced by its fallback, no crash (roll layout itself is not implemented, as lay-roll-embedded-images says)
-* `lay-roll-images-mixed`: an image in the spine is replaced by its fallback, no hang (roll layout itself is not implemented)
+* `lay-roll-embedded-images`: a roll layout (EPUB 3.4 draft) is read scrolled down: each document scrolls, and the next follows at its end; not one strip across documents
+* `lay-roll-embedded-images-svg`: a roll layout is read scrolled down (as lay-roll-embedded-images)
+* `lay-roll-images-in-spine`: an image in the spine is replaced by its fallback, no crash
+* `lay-roll-images-mixed`: an image in the spine is replaced by its fallback, no hang
 * `lay-viewport-meta-prop`: only the dimensions of the viewport are read (measured)
 * `mol-audio`: clipBegin/clipEnd obeyed (MP3)
 * `mol-audio-exceeding-clipend`: MP3
@@ -166,6 +158,8 @@ Caveats of a pass, where there is one:
 * `mol-timing-synchronization_multiple_audio-fxl`: MP3
 * `mol-timing-synchronization_svg`: the text of the SVG is read and marked (the drawing is not shown); MP3
 * `mol-timing-synchronization_svg-fxl`: the text of the SVG is read and marked (the drawing is not shown); MP3
+* `mol-tts_multi`: a SMIL with no audio hands the chapter to reading aloud by speech synthesis, from the page; the SMIL's order and its highlight are not used
+* `mol-tts_single`: a SMIL with no audio hands the chapter to reading aloud by speech synthesis, from the page; the SMIL's order and its highlight are not used
 * `nav-non-text_img`: a navigation link holding an image is labelled by its alt text
 * `nav-non-text_img_title`: a navigation link holding an image is labelled by its alt text, else its title
 * `nav-spine_in-spine-hidden-toc-html`: the navigation document in the spine hides the entry its hidden attribute hides, and the contents panel lists both
@@ -190,8 +184,12 @@ Caveats of a pass, where there is one:
 * `pkg-title-order`: the first dc:title is used
 * `pkg-unique-id`: two books with the one identifier are two cards
 * `pkg-unique-id_duplicate`: two books with the one identifier are two cards
+* `pss-support`: a note link opens the note in a popup (#414)
+* `pss-support_ignore-title`: a title element marked as a footnote is not a note: the link to it opens no popup (the head is not searched)
 * `pub-data-urls_browsing-context`: an img with a data: URL of png, jpeg, gif, webp or svg in base64 is shown (decoded here, up to 512 KiB of text); not offered to the image viewer
 * `pub-data-urls_top-level-content`: an img with a data: URL is shown as the reflowable case is (measured on a reflowable page, not on a fixed-layout one)
+* `pub-external-links`: a link out asks first, in the note overlay, and opens in a new tab on the reader's word
+* `pub-external-links_consent`: a mailto: link asks first, in the note overlay, and opens the mail application on the reader's word
 * `pub-file-urls`: iframes are not shown, so no file: URL is loaded
 * `pub-foreign_bad-fallback`: an item and a fallback that are both foreign are left out of the spine, never shown as text
 * `pub-foreign_image`: an img of a foreign type is shown as its manifest fallback

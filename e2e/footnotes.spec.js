@@ -39,9 +39,10 @@ test('a note opens as its text, with no links in it; Go to note reaches the note
   await expect(note(page)).toBeHidden();
   await expect(jumpBack(page)).toBeVisible();
   // the note's own links, where it is: inside the book it jumps, outside it opens outside
-  const out = bookPage(page).getByRole('link', { name: 'the web' });
-  await expect(out).toHaveAttribute('target', '_blank');
-  await expect(out).toHaveAttribute('rel', /noopener/);
+  await bookPage(page).getByRole('link', { name: 'the web' }).click();
+  await expect(note(page).getByRole('link', { name: 'Open link' })).toHaveAttribute('target', '_blank');
+  await expect(note(page).getByRole('link', { name: 'Open link' })).toHaveAttribute('rel', /noopener/);
+  await close(page).click();
   await bookPage(page).getByRole('link', { name: 'the far place' }).click();
   await expect.poll(() => visibleText(page)).toContain('Far target');
   await jumpBack(page).click();

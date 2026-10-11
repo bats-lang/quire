@@ -1015,6 +1015,8 @@ fn _note (): void = let
   val () = ui_el("footnote", "footnote-text", TDiv, "fntext")
   val () = ui_el("footnote", "footnote-bar", TDiv, "srow sfoot")
   val () = ui_text_btn("footnote-bar", "footnote-go", "btn", "Go to note")
+  (* a link out of the book asks first: this opens it, in another tab *)
+  val () = ui_link_out("footnote-bar", "footnote-open", "btn linkout", "Open link")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")
   val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
 in _hide("footnote") end
@@ -1064,6 +1066,8 @@ implement app_build () = let
   val () = ui_text_buf("style-sheet", css, css_len)
   val () = ui_add("bats-root", "style-type", TStyle)
   val () = ui_add("bats-root", "style-fonts", TStyle)
+  (* for a moment, as fonts arrive: reader.bats's _tcy_refit *)
+  val () = ui_add("bats-root", "style-tcy", TStyle)
   val () = _notices()
   val () = _library()
   val () = _context_menu()
