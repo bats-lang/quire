@@ -129,8 +129,8 @@ export async function settled(page) {
   // jump: both are a moment's, not the app's state
   await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden({ timeout: 15000 });
   await expect(page.getByRole('button', { name: '↩ Back' })).toBeHidden({ timeout: 15000 });
-  // the hint on turning pages goes 8 s after the first book opens
-  await expect(page.getByText('Swipe or tap the sides to turn the page')).toBeHidden({ timeout: 15000 });
+  // the hint on turning pages goes 13 s after the first book opens (5 s under the bars, 8 s seen)
+  await expect(page.getByText('Tap the middle for the menu.')).toBeHidden({ timeout: 15000 });
 }
 
 /** How far each element shown is scrolled (the page, the library's

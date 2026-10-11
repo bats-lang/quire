@@ -28,6 +28,7 @@ staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
 staload "locator.sats"
+staload "titles.sats"
 staload "wellformed.sats"
 staload "dataurl.sats"
 staload "settings.sats"
@@ -4803,6 +4804,11 @@ end
    never shown without a pending timeout that takes it away *)
 datavtype ps_cell =
   | PsHidden of ()
+  (* the button gone (its 10 s are over, a page was turned, the bars came
+     up), the positions kept: Contents offers the way back (#384). Never
+     made of no position, and the timeout moves PsShown here, not to
+     PsHidden *)
+  | {count:pos} PsKept of (pstack(count))
   | {count:pos}{timeout:int} PsShown of (TIMED(timeout) | int timeout, pstack(count))
 
 val _ps = ref<ps_cell>(PsHidden())
@@ -4813,6 +4819,7 @@ val _ps_timed = ref<Int>(0)
 fn _ps_free (cell: ps_cell): void =
   case+ cell of
   | ~PsHidden() => ()
+  | ~PsKept(positions) => ps_free(positions)
   | ~PsShown(_ | _, positions) => ps_free(positions)
 
 fn _ps_take (): ps_cell = let
@@ -4823,22 +4830,23 @@ in cell end
 (* Keeps the cell, and shows the button or hides it as the cell says: the only place
    that shows or hides it *)
 fn _ps_put (cell: ps_cell): void = let
-  val shown = (case+ cell of PsHidden() => false | PsShown(_ | _, _) => true): bool
+  val shown = (case+ cell of PsHidden() => false | PsKept(_) => false | PsShown(_ | _, _) => true): bool
   var old: ps_cell = cell
   val () = ref_exch_elt<ps_cell>(_ps, old)
   val () = _ps_free(old)
 in ui_show("jump-back", shown) end
 
-(* A timeout has run: the button goes, with the positions it offered,
-   when it is still the one timeout that was armed for *)
+(* A timeout has run: the button goes, when it is still the one timeout
+   that was armed for, and the positions it offered are kept for Contents *)
 fn _back_timeout (timeout: Int): void = let
   val cell = _ps_take()
-  val due = (case+ cell of PsHidden() => false | PsShown(_ | armed, _) => armed = timeout): bool
 in
-  if due then let
-    val () = _ps_free(cell)
-  in _ps_put(PsHidden()) end
-  else _ps_put(cell)
+  case+ cell of
+  | ~PsHidden() => _ps_put(PsHidden())
+  | ~PsKept(positions) => _ps_put(PsKept(positions))
+  | ~PsShown(armed_proof | armed, positions) =>
+    if armed = timeout then _ps_put(PsKept(positions))
+    else _ps_put(PsShown(armed_proof | armed, positions))
 end
 
 (* Arms a new timeout for the button, which takes it away *)
@@ -4861,24 +4869,29 @@ fn _push_position (): void = let
   val cell = _ps_take()
   val positions = (case+ cell of
     | ~PsHidden() => ps_nil()
+    | ~PsKept(positions) => positions
     | ~PsShown(_ | _, positions) => positions): [count:nat] pstack(count)
   val positions = (case+ reading_get() of
     | @(page, _, chapter, _) => ps_cons((if chapter > 0 then chapter - 1 else 0), page, anchor, ps_keep(positions, 29))): [count:pos] pstack(count)
 in _back_offer(positions) end
 
-(* Returns to the position last jumped away from; the button stays, with
+(* Returns to the position last of positions; the button comes back, with
    a new timeout, while there are more *)
+fn _pop_from {count:pos} (positions: pstack(count)): void = let
+  val+ ~ps_cons(chapter, page, anchor, rest) = positions
+  val () = (case+ rest of
+    | ~ps_nil() => _ps_put(PsHidden())
+    | ps_cons(_, _, _, _) => _back_offer(rest))
+in _jump_checked(_goto(chapter, page, anchor)) end
+
+(* Returns to the position last jumped away from *)
 fn _pop_position (): void = let
   val cell = _ps_take()
 in
   case+ cell of
   | ~PsHidden() => _ps_put(PsHidden())
-  | ~PsShown(_ | _, positions) => let
-      val+ ~ps_cons(chapter, page, anchor, rest) = positions
-      val () = (case+ rest of
-        | ~ps_nil() => _ps_put(PsHidden())
-        | ps_cons(_, _, _, _) => _back_offer(rest))
-    in _jump_checked(_goto(chapter, page, anchor)) end
+  | ~PsKept(positions) => _pop_from(positions)
+  | ~PsShown(_ | _, positions) => _pop_from(positions)
 end
 
 (* Loads a chapter and shows its page at a thousandth of it *)
@@ -5760,19 +5773,19 @@ implement reader_scrolled () =
    the back button goes *)
 #pub fun page_next(): void
 implement page_next() = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in _page_next() end
 
 #pub fun page_prev(): void
 implement page_prev() = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in _page_previous() end
 
 (* The chapter before (direction -1) or after (1) the one shown, from its
    first page; nothing when there is none *)
 #pub fun reader_chapter_step (direction: Int): void
 implement reader_chapter_step (direction) = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in
   case+ reading_get() of
   | @(_, _, chapter, chapter_count) => let
@@ -5882,12 +5895,64 @@ in _jump_checked(_goto(chapter, page, anchor)) end
 implement reader_back () = _pop_position()
 
 (* Forgets the positions jumped from, and the back button goes: a book
-   is opened or closed, a page turned, or the bars brought up *)
+   is opened or closed *)
 #pub fun reader_stack_clear (): void
 implement reader_stack_clear () = let
-  (* the reader acted (a turn, the bars brought up): its moves are dated *)
+  (* the reader acted: its moves are dated *)
   val () = !_dating := true
 in _ps_put(PsHidden()) end
+
+(* The back button goes (a page was turned, the bars came up), the
+   positions jumped from are kept: Contents offers the way back (#384) *)
+#pub fun reader_back_rest (): void
+implement reader_back_rest () = let
+  val () = !_dating := true
+  val cell = _ps_take()
+in
+  case+ cell of
+  | ~PsHidden() => _ps_put(PsHidden())
+  | ~PsKept(positions) => _ps_put(PsKept(positions))
+  | ~PsShown(_ | _, positions) => _ps_put(PsKept(positions))
+end
+
+(* The Contents row for the position last jumped from, "Back to <chapter>
+   · page N"; hidden when there is none *)
+fun _back_row_set {count:nat} .<count>. (positions: !pstack(count)): void =
+  case+ positions of
+  | ps_nil() => ui_show("contents-back", false)
+  | @ps_cons(chapter, page, _, _) =>
+    if chapter < 0 then let
+      prval () = fold@(positions)
+    in ui_show("contents-back", false) end
+    else let
+      val @(label, label_len) = toc_label_of(chapter)
+      val buf = $A.alloc<byte>(256)
+      val offset = _put(buf, 0, "Back to ")
+      val offset = bytes_put(label, label_len, buf, offset)
+      val offset = _put(buf, offset, " \xC2\xB7 page ")
+      val offset = $S.int_to_str(buf, offset, 256, (if page >= 0 then page + 1 else 1): Nat)
+      val () = $A.free<byte>(label)
+      val () = ui_text_buf("contents-back", buf, offset)
+      prval () = fold@(positions)
+    in ui_show("contents-back", true) end
+
+(* Contents opened: the way back from the jumps, while there is a position
+   to go back to, past the button's seconds *)
+#pub fun reader_back_row (): void
+implement reader_back_row () = let
+  val cell = _ps_take()
+in
+  case+ cell of
+  | ~PsHidden() => let
+      val () = ui_show("contents-back", false)
+    in _ps_put(PsHidden()) end
+  | ~PsKept(positions) => let
+      val () = _back_row_set(positions)
+    in _ps_put(PsKept(positions)) end
+  | ~PsShown(armed | timeout, positions) => let
+      val () = _back_row_set(positions)
+    in _ps_put(PsShown(armed | timeout, positions)) end
+end
 
 (* A book opened: its first page is read from now, so the first turn
    counts the minutes since. Back in the library, nothing is being read
@@ -6589,7 +6654,7 @@ implement $P.dispose<turned>(_) = ()
 #pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
 
 implement reader_turn_on () = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
   val () = !_anchor_kept := ~1
 in
   case+ reading_get() of

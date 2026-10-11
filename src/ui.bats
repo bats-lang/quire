@@ -2435,6 +2435,7 @@ implement ui_catalogue_control (bytes, n, at) = _catalogue_control_from(bytes, n
   | ContentsTab
   | BookmarksTab
   | PagesTab
+  | ContentsBack
 
 #pub fn contents_control_id (control: contents_control): [id_len:pos | id_len < 256] string id_len
 implement contents_control_id (control) =
@@ -2443,6 +2444,7 @@ implement contents_control_id (control) =
   | ContentsTab() => "contents-tab"
   | BookmarksTab() => "bookmarks-tab"
   | PagesTab() => "pages-tab"
+  | ContentsBack() => "contents-back"
 
 (* The control after control, in the order the decoder tries them *)
 fn _contents_control_after (control: contents_control): $R.option(contents_control) =
@@ -2450,7 +2452,8 @@ fn _contents_control_after (control: contents_control): $R.option(contents_contr
   | ContentsClose() => $R.some(ContentsTab())
   | ContentsTab() => $R.some(BookmarksTab())
   | BookmarksTab() => $R.some(PagesTab())
-  | PagesTab() => $R.none()
+  | PagesTab() => $R.some(ContentsBack())
+  | ContentsBack() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -2466,7 +2469,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_contents_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(contents_control)
-implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 4)
+implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 5)
 
 (* The selection toolbar's buttons, each by its element's id
    (selection_control_id). A colour is a control for each style, flat:
