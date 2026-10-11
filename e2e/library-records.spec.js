@@ -296,4 +296,87 @@ test('a series position of 2.5 is kept in a group of its own, and the whole numb
   expect(found.map(f => [f.whole, f.snum]).sort()).toEqual([[0, 10000001], [2, 10000251], [2, 0]].sort());
   // the card says 2.5 from the snum group, and a Quire that knows no snum keeps it (lower case: ancillary) and reads SERI's 2
   await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2.5');
+  // an older Quire, which knows no snum group, wrote the record without it (#497: the step dropped from #434):
+  // it reads as numbered 2, whole, with nothing said, set aside or copied, and the 2.5 is not there
+  const novella = found.find(f => f.snum === 10000251);
+  const snumChunk = novella.groups.find(g => g.tag === 'snum');
+  const older = Uint8Array.from([...kept[novella.key].slice(0, snumChunk.start), ...kept[novella.key].slice(snumChunk.end)]);
+  await put(page, novella.key, older);
+  await reload(page);
+  await expect(card(page, 'Three A Novella')).toContainText('Foundation · 2');
+  await expect(card(page, 'Three A Novella')).not.toContainText('2.5');
+  await expect(alert(page)).toBeHidden();
+  const opened = await store(page);
+  expect(same(opened[novella.key], [...older])).toBe(true);
+  expect(Object.keys(opened).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
+});
+
+// A record written by a Quire before a group existed lacks it (#497): that is no loss and no damage. The
+// groups that were added to the format after records were first written (record_tables.py, "added").
+const addedGroups = ['prog', 'snum', 'tdir'];
+const without = (record, tags) => {
+  const cut = chunks(record).filter(g => tags.includes(g.tag));
+  expect(cut.map(g => g.tag).sort(), 'the record holds the groups to cut').toEqual([...tags].sort());
+  return Uint8Array.from([...record].filter((_, i) => !cut.some(g => i >= g.start && i < g.end)));
+};
+const tagsOf = record => chunks(record).map(g => g.tag);
+const bookId = `${hex7(books[0].idHigh)}${hex7(books[0].idLow)}`;
+
+for (const missing of [['prog'], ['snum'], ['tdir'], ['prog', 'snum'], ['prog', 'snum', 'tdir']]) {
+  test(`a record written before ${missing.join(', ')} existed opens whole with nothing said, and its save writes ${missing.length > 1 ? 'them' : 'it'} (#497)`, async ({ page }) => {
+    await startWithLegacy(page, 6);
+    await expect(cards(page)).toHaveCount(2);
+    const stored = await store(page);
+    expect(addedGroups.every(tag => tagsOf(stored[bookKey(books[0])]).includes(tag))).toBe(true);
+    const older = without(stored[bookKey(books[0])], missing);
+    await put(page, bookKey(books[0]), older);
+    await reload(page);
+    // every book is shown with its details, there is no banner and no row to set anything aside
+    await expect(cards(page)).toHaveCount(2);
+    await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+    await expect(card(page, 'Alpha Tales')).toContainText('First Series · 2');
+    await expect(card(page, 'Gamma Days')).toBeVisible();
+    await expect(alert(page)).toBeHidden();
+    await librarySettings(page);
+    await expect(setAside(page)).toBeHidden();
+    // opening changed nothing and copied nothing
+    const opened = await store(page);
+    expect(same(opened[bookKey(books[0])], [...older])).toBe(true);
+    expect(Object.keys(opened).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
+    // a change to the book saves its record with the groups it lacked, and its details are as they were
+    await page.keyboard.press('Escape');
+    await bookMenu(page, 'Alpha Tales');
+    await menuItem(page, 'Hide').click();
+    await reload(page);
+    const saved = await store(page);
+    for (const tag of addedGroups) expect(tagsOf(saved[bookKey(books[0])]), `${tag} is written`).toContain(tag);
+    expect(Object.keys(saved).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
+    await openShelf(page, 'Hidden');
+    await expect(card(page, 'Alpha Tales')).toContainText('First Series · 2');
+    await expect(alert(page)).toBeHidden();
+  });
+}
+
+test('a group that is there and damaged is still lost: the book opens with its defaults, and its save keeps the old bytes (#497)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const stored = await store(page);
+  const damaged = stored[bookKey(books[0])].slice();
+  const snum = chunks(damaged).find(g => g.tag === 'snum');
+  // a byte of its data: the chunk's CRC no longer holds
+  damaged[snum.start + 8] ^= 0x5a;
+  await put(page, bookKey(books[0]), damaged);
+  await reload(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  // unlike a group that was never there, this is said
+  await expect(alert(page)).toContainText('Some details of your library were damaged and show as defaults');
+  expect(Object.keys(await store(page)).filter(key => key.startsWith('library/damaged/'))).toHaveLength(0);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const copies = damagedKeys(saved, bookId);
+  expect(copies).toHaveLength(1);
+  expect(same(saved[copies[0]], damaged)).toBe(true);
+  expect(tagsOf(saved[bookKey(books[0])])).toContain('snum');
 });
