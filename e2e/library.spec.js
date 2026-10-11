@@ -348,6 +348,8 @@ test('a book moved to the Trash can be undone, and restored from it', async ({ p
   // when the Trash is emptied
   await bookMenu(page, 'Doomed');
   await expect(menuItem(page, 'Restore')).toBeVisible();
+  // Restore is the first item (quire#385)
+  await expect(page.getByRole('menu', { name: 'Book menu' }).getByRole('menuitem').first()).toHaveText('Restore');
   await expect(menuItem(page, 'Move to Trash')).toBeHidden();
   await expect(menuItem(page, 'Archive')).toBeHidden();
   await menuItem(page, 'Restore').click();
@@ -377,7 +379,7 @@ test('emptying the Trash asks, and deletes only what is in it', async ({ page })
   await menuItem(page, 'Trash').click();
   // the Trash says what it holds and that it is kept, with Empty beside it
   const summary = page.locator('#trash-summary');
-  await expect(summary).toContainText(/^2 books · .* MB?\. Kept until you empty the Trash\.$/);
+  await expect(summary).toContainText(/^2 books · \d+(\.\d)? (KB|MB)\. Kept until you empty the Trash\.$/);
   const colour = l => l.evaluate(e => getComputedStyle(e).color);
   // the one irreversible action is the one marked: red, unlike the
   // button beside it
