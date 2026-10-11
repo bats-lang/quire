@@ -71,7 +71,9 @@
       "ruby.spec.js",
       "settings-screen.spec.js",
       "stability.spec.js",
-      "sync-android.spec.js"
+      "sync-android.spec.js",
+      "replace.spec.js",
+      "replace-corrected.spec.js"
     ]
   },
   "static": {
