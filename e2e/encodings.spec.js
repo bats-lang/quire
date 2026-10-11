@@ -28,6 +28,7 @@ async function searched(page, text) {
   await page.keyboard.press('/');
   await expect(searchPanel(page)).toBeVisible();
   await page.keyboard.type(text);
+  await expect(summary(page)).toHaveText(/^(\d+ results?|No results.*)$/);
   const said = await summary(page).textContent();
   await page.keyboard.press('Escape');
   await expect(searchPanel(page)).toBeHidden();
@@ -155,7 +156,7 @@ test('character references over the whole range are decoded: numeric, one past t
   await readBook(page, encodingBooks.references.opts);
   const text = await pageText(page);
   expect(text).toContain('Quillon \u{1F600} ב ‏|‍| é אב & < > " \' €  end');
-  expect(text).not.toContain('&');
+  expect(text).not.toMatch(/&#/);
   // searched as the characters are, by the letters
   expect(await searched(page, '\u{1F600}')).toBe('1 result');
 });

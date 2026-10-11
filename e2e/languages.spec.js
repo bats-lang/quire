@@ -72,7 +72,9 @@ test('Hebrew text in a book that names no language: und, read left to right by i
   // the text itself runs right to left, by the Unicode algorithm: of two Hebrew words on a line, the first is on the right
   const order = await bookPage(page).evaluate(doc => {
     const p = doc.querySelectorAll('p')[1];
-    const node = p.firstChild;
+    const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node && !node.textContent.includes('עולם')) node = walker.nextNode();
     const rect = (from, to) => { const r = document.createRange(); r.setStart(node, from); r.setEnd(node, to); return r.getBoundingClientRect(); };
     const text = node.textContent;
     const first = text.indexOf('שלום');

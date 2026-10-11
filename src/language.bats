@@ -98,6 +98,13 @@ fn _two_letters (first: int, second: int, third: int): int =
   else if _is_three(first, second, third, "hbo") then _pair(104, 101)
   else 0
 
+(* The two letters now used for a language that two letters once named: iw is he, ji is yi, in is id; 0 for any other *)
+fn _legacy_two (first: int, second: int): int =
+  if first = 105 && second = 119 then _pair(104, 101)
+  else if first = 106 && second = 105 then _pair(121, 105)
+  else if first = 105 && second = 110 then _pair(105, 100)
+  else 0
+
 (* Puts value at out[at] when at is in the tag's 35 bytes: the index after it *)
 fn _emit {lo:agz} (out: !$A.arr(byte, lo, 35), at: int, value: int): int = let
   val index = g1ofg0(at)
@@ -149,7 +156,8 @@ in
     val language_form = (k = 0)
     val letters = _all_of(data, offset, tag_len, i, stop, true)
     val digits = _all_of(data, offset, tag_len, i, stop, false)
-    val shorter = (if language_form then (if sublen = 3 then (if letters then _two_letters(_lower(byte2int0($A.read<byte>(data, offset + i))), _lower(byte2int0($A.read<byte>(data, offset + i + 1))), _lower(byte2int0($A.read<byte>(data, offset + i + 2)))) else 0) else 0) else 0): int
+    val legacy = (if language_form then (if sublen = 2 then (if letters then _legacy_two(_lower(byte2int0($A.read<byte>(data, offset + i))), _lower(byte2int0($A.read<byte>(data, offset + i + 1)))) else 0) else 0) else 0): int
+    val shorter = (if legacy > 0 then legacy else if language_form then (if sublen = 3 then (if letters then _two_letters(_lower(byte2int0($A.read<byte>(data, offset + i))), _lower(byte2int0($A.read<byte>(data, offset + i + 1))), _lower(byte2int0($A.read<byte>(data, offset + i + 2)))) else 0) else 0) else 0): int
     val after = (if shorter > 0 then _emit(out, _emit(out, at, shorter / 256), shorter - (shorter / 256) * 256)
       else if language_form then _write_subtag(data, offset, tag_len, i, stop, out, at, 0, i)
       else if sublen = 4 then (if letters then _write_subtag(data, offset, tag_len, i, stop, out, at, 1, i) else _write_subtag(data, offset, tag_len, i, stop, out, at, 0, i))
