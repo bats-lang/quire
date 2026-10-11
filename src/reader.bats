@@ -2183,7 +2183,8 @@ fun _tcy_find {l:agz}{n:pos}{offset,text_len:nat | offset + text_len <= n}{at:na
   in
     if code = 38 then _tcy_find(data, offset, text_len, _reference_end(data, offset, text_len, at, 0))
     else if _is_digit(code) then let
-      val stop = _digit_run_end(data, offset, text_len, at)
+      val run_end = _digit_run_end(data, offset, text_len, at)
+      val stop = (if run_end > at then run_end else at + 1): [stop:nat | at < stop; stop <= text_len] int stop
       val before_word = (if at > 0 then _is_letter(byte2int0($A.read<byte>(data, offset + at - 1))) else false): bool
       val after_word = (if stop < text_len then _is_letter(byte2int0($A.read<byte>(data, offset + stop))) else false): bool
     in
