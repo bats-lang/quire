@@ -4774,10 +4774,13 @@ fn _ellipsis_if {l:agz}{n:pos}{at:nat}{width:int | width == 0 || width == 3; at 
 fn _span200 {start,end_at:nat | start <= end_at} (start: int start, end_at: int end_at): [span:nat | span <= 200; start + span <= end_at] int span =
   if end_at - start <= 200 then end_at - start else 200
 
-(* How much of the query's length lies inside a snippet's span, from before
-   bytes into it *)
-fn _hit_span {span,before,query:nat | before <= span} (span: int span, before: int before, query: int query): [hit_len:nat | before + hit_len <= span] int hit_len =
-  if query <= span - before then query else span - before
+(* Where the query's match is inside a snippet's span of span bytes, when
+   it starts before bytes into it: from there, as much of the query's
+   length as lies inside the span (all of it unless the span ends first) *)
+fn _hit_in {span,before,query:nat} (span: int span, before: int before, query: int query): [hit_at,hit_len:nat | hit_at + hit_len <= span] @(int hit_at, int hit_len) =
+  if before > span then @(span, 0)
+  else if query <= span - before then @(before, query)
+  else @(before, span - before)
 
 (* The text around text[at, at + query_len) in text[0, text_len): some 40
    bytes before it and 80 after, whole characters, its line breaks as spaces, with an
@@ -4799,10 +4802,8 @@ fn _snippet {l:agz}{text_size:pos}{text_len:nat | text_len <= text_size}{at,quer
   val () = _snippet_copy(text, start, snippet, ellipsis_before, snippet_len, 0)
   val () = _ellipsis_if(snippet, ellipsis_before + snippet_len, ellipsis_after)
   val before_hit = at - start
-in
-  if before_hit <= snippet_len then @(snippet, ellipsis_before + snippet_len + ellipsis_after, ellipsis_before + before_hit, _hit_span(snippet_len, before_hit, query_len))
-  else @(snippet, ellipsis_before + snippet_len + ellipsis_after, 0, 0)
-end
+  val @(hit_in, hit_len) = _hit_in(snippet_len, before_hit, query_len)
+in @(snippet, ellipsis_before + snippet_len + ellipsis_after, ellipsis_before + hit_in, hit_len) end
 
 (* The UTF-16 units of text[from, until), as the page counts a text node's
    offsets: one for each character, two for one past U+FFFF (a 4-byte
@@ -5187,15 +5188,18 @@ fn _hit_heading {chapter:nat} (chapter: int chapter, hits_in_chapter: Nat): void
   val tally = $A.alloc<byte>(32)
   val offset = _put(tally, 0, " \xC2\xB7 ")
   val offset = $S.int_to_str(tally, offset, 32, hits_in_chapter)
-  val offset = _put(tally, offset, " result")
-  val plural = (if hits_in_chapter = 1 then 0 else 1): [e:nat | e <= 1] int e
-  val () = (if plural = 1 then $A.set<byte>(tally, offset, $A.int2byte(115)) else ())
-  val offset = offset + plural
   val @(tally_id, tally_id_len) = nid_make("search-tally", chapter)
-in ui_text_n_buf(tally_id, tally_id_len, tally, offset) end
+in
+  if hits_in_chapter = 1 then let
+    val ended = _put(tally, offset, " result")
+  in ui_text_n_buf(tally_id, tally_id_len, tally, ended) end
+  else let
+    val ended = _put(tally, offset, " results")
+  in ui_text_n_buf(tally_id, tally_id_len, tally, ended) end
+end
 
 (* snippet[from, from + length) as a new array of length + 1 bytes *)
-fn _snippet_slice {l:agz}{n:pos}{from,length:nat | from + length <= n}
+fn _snippet_slice {l:agz}{n:pos}{from,length:nat | from + length <= n; length <= 206}
   (snippet: !$A.arr(byte, l, n), from: int from, length: int length): [slice_location:agz] $A.arr(byte, slice_location, length + 1) = let
   fun copy {source_location,target_location:agz}{source_size,target_size:pos}{start,count:nat | start + count <= source_size; count < target_size}{j:nat | j <= count} .<count - j>.
     (source: !$A.arr(byte, source_location, source_size), start: int start, target: !$A.arr(byte, target_location, target_size), count: int count, j: int j): void =
@@ -5207,7 +5211,7 @@ in slice end
 
 (* One row of the results: a hit, with its text, the match in bold, and its
    place in the book under it (its chapter is the heading above it) *)
-fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_len < 65536}{hit_at,hit_len:nat | hit_at + hit_len <= snippet_len}
+fn _hit_row {hit:nat}{l:agz}{n:pos}{snippet_len:nat | snippet_len < n; snippet_len <= 206}{hit_at,hit_len:nat | hit_at + hit_len <= snippet_len}
   (hit: int hit, snippet: !$A.arr(byte, l, n), snippet_len: int snippet_len, hit_at: int hit_at, hit_len: int hit_len, place: locator_kind, number: Int): void = let
   val @(row_id, row_id_len) = nid_make("search-hit", hit)
   val () = ui_btn_n("search-results", row_id, row_id_len, "pi hgo")
