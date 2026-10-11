@@ -47,4 +47,18 @@ export const pagebreakBooks = {
       '<p>An <em>emph<span epub:type="pagebreak" id="p30" title="30"></span>asis</em> inside. ' + filler + '</p>\n' +
       '<p>The needle after every break. ' + filler + '</p>' }],
     pageList: [{ href: 'chapter1.xhtml#p10', label: '10' }, { href: 'chapter1.xhtml#p20', label: '20' }, { href: 'chapter1.xhtml#p30', label: '30' }] } },
+
+  /** Inline elements inside a phrase (#437): a drop cap, emphasis inside
+      a word, nested inline elements, a ruby, and a block break */
+  inline: { valid: true, opts: {
+    title: 'Phrases across inline elements', author: 'Breaks',
+    rawChapters: [{ body:
+      '<h1>Inline</h1>\n' +
+      '<p><span class="dropcap">T</span>he drop cap opens. ' + filler + '</p>\n' +
+      '<p>An <em>emph</em>asis in a word. ' + filler + '</p>\n' +
+      '<p>See the <i>phrase <b>across</b> two</i> inline elements here. ' + filler + '</p>\n' +
+      '<p>It is one <span>and</span> a <span><span>half</span></span> long. ' + filler + '</p>\n' +
+      '<p>The first block ends here.</p><p>Next block starts. ' + filler + '</p>\n' +
+      '<p><ruby>\u6f22<rp>(</rp><rt>kan</rt><rp>)</rp>\u5b57</ruby> after the ruby. ' + filler + '</p>\n' +
+      '<p>The <em>needle</em> at the <strong>end</strong>. ' + filler + '</p>' }] } },
 };

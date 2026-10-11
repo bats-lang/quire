@@ -51,9 +51,6 @@ staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
    marked on no page and leads nowhere, and two such annotations are two *)
 #define LOST_CHAPTER 65536
 
-(* A highlight's style *)
-#pub datatype highlight_style = Yellow | Orange | Underlined
-
 (* What an annotation is: a bookmark, or a highlight in its style *)
 datatype annotation_kind = Bookmark | YellowHighlight | OrangeHighlight | UnderlinedHighlight
 
@@ -1583,10 +1580,7 @@ fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_l
      is marked on the page *)
   val () = _child("highlight-go", "highlight-style", i, TSpan, "hstyle")
   val @(style_id, style_id_len) = nid_make("highlight-style", i)
-  val () = (case+ style of
-    | Orange() => ui_text_n(style_id, style_id_len, "Orange")
-    | Underlined() => ui_text_n(style_id, style_id_len, "Underlined")
-    | Yellow() => ui_text_n(style_id, style_id_len, "Yellow"))
+  val () = ui_text_n(style_id, style_id_len, style_label(style))
   val () = (case+ style of
     | Orange() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-orange")
     | Underlined() => _child("highlight-go", "highlight-quote", i, TSpan, "hq hq-under")

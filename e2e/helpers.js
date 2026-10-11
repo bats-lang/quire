@@ -76,6 +76,16 @@ export function pagedBook(title, author) {
 /** The input that imports EPUB files */
 export const importInput = page => page.locator('#import-file');
 
+/** Waits until the import in progress has ended: the import's progress
+    (#import-progress, whatever its stage says: "Reading file", "Opening
+    archive", "Reading metadata", "Adding to library") is gone, and with it
+    the file input is made anew (the app clears it in the same step), so
+    the next file is picked on the input the app keeps. A wait for some
+    stages' words passed in the stage between them ("Reading metadata"),
+    while the import ran on, and the next file was then set on an input the
+    app replaced a moment later: its change was lost and no question came */
+export const importEnded = page => expect(page.locator('#import-progress')).toBeHidden();
+
 /** The empty library's own Import EPUB (quire#375): its input and the
     button over it */
 /** The Import EPUB the reader sees: the bar's, or the empty library's */
@@ -339,6 +349,15 @@ export async function selectText(page, from, to) {
 /** The selection's toolbar button of name */
 export const selectionButton = (page, name) =>
   page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name, exact: true });
+
+/** A control behind the selection toolbar's More (a highlight style's
+    swatch, Search, Read from here): More is pressed when the row it
+    turns over is not shown, then the control is */
+export async function selectionPick(page, name) {
+  const more = selectionButton(page, 'More');
+  if ((await more.getAttribute('aria-expanded')) === 'false') await more.click();
+  await selectionButton(page, name).click();
+}
 
 /** How many ranges are painted over the text (highlights, or the
     search match), and the text of the first */

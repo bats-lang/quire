@@ -5,7 +5,7 @@ import { test, expect, onAndroid } from './fixtures.js';
 import { readFileSync } from 'node:fs';
 import {
   start, readBook, place, showChrome, toLibrary, openBook, selectText, marks, chapters, dialog,
-  control, selectionButton, reload, pagedBook, librarySearch, libraryShown,
+  control, selectionButton, selectionPick, reload, pagedBook, librarySearch, libraryShown,
 } from './helpers.js';
 
 const panel = page => dialog(page, 'Annotations');
@@ -242,9 +242,9 @@ test('a highlight is yellow, orange or underlined: marked so, named in the list,
   await selectText(page, 0, 8);
   await selectionButton(page, 'Highlight').click();
   await selectText(page, 9, 14);
-  await selectionButton(page, 'Orange').click();
+  await selectionPick(page, 'Orange');
   await selectText(page, 15, 20);
-  await selectionButton(page, 'Underline').click();
+  await selectionPick(page, 'Underlined');
   const expected = { 'bats-mark-1': ['Para 1.0'], 'bats-mark-3': ['lorem'], 'bats-mark-4': ['ipsum'] };
   await expect.poll(() => markSets(page)).toEqual(expected);
   // each is named by its style in words, not by its colour alone
@@ -280,9 +280,9 @@ test('the export names a highlight\'s style, unless it is yellow', async ({ page
   await selectText(page, 0, 8);
   await selectionButton(page, 'Highlight').click();
   await selectText(page, 9, 14);
-  await selectionButton(page, 'Orange').click();
+  await selectionPick(page, 'Orange');
   await selectText(page, 15, 20);
-  await selectionButton(page, 'Underline').click();
+  await selectionPick(page, 'Underlined');
   await openPanel(page);
   const download = page.waitForEvent('download');
   await panel(page).getByRole('button', { name: 'Export', exact: true }).click();
@@ -356,7 +356,7 @@ test('Look up opens the selection in a dictionary of the book\'s language, in a 
   await readBook(page, { ...book, title: 'Livre', language: 'fr-CA' });
   await selectText(page, 0, 8);
   const toolbar = page.getByRole('toolbar', { name: 'Selection' });
-  const look = toolbar.getByRole('link', { name: 'Look up' });
+  const look = toolbar.getByRole('link', { name: 'Look up online', exact: true });
   await expect(look).toHaveAttribute('href', 'https://fr.wiktionary.org/wiki/Special:Search?search=Para%201.0');
   await expect(look).toHaveAttribute('target', '_blank');
   await expect(look).toHaveAttribute('rel', /noopener/);

@@ -8,7 +8,7 @@
 // these need a package of their own (a manifest fallback, a package
 // attribute, a title with a direction), so the package is written here.
 
-import { createZip, solidPng } from './create-epub.js';
+import { createZip, solidPng, TINY_PNG } from './create-epub.js';
 
 export const BOOK_ID = 'urn:uuid:3f2b7a52-0000-4000-8000-000000000419';
 
@@ -208,6 +208,34 @@ export const w3cBooks = {
     title: 'CSS: הרפתקה חדשה!', titleAttributes: 'dir="ltr"', packageAttributes: 'dir="rtl"', language: 'ar',
     creators: ['דוד קרמר'], creatorAttributes: 'dir="ltr"',
     items: [page('one', `<p>${PAGE_TEXT}</p>`)], spine: [{ idref: 'one' }],
+  })),
+  // Publication Resources: addresses
+  'path-absolute-image': book(() => packageEpub({
+    title: 'Image by an absolute path',
+    items: [
+      page('one', '<p>The photograph below.</p><p><img src="/OEBPS/images/photograph.png" alt="A photograph"/></p>'),
+      { id: 'photograph', href: 'images/photograph.png', type: 'image/png', data: solidPng(80, 80) },
+    ],
+    spine: [{ idref: 'one' }],
+  }), { valid: false, errors: ['RSC-026'] }),
+  'data-url-image': book(() => packageEpub({
+    title: 'Image as a data URL',
+    items: [page('one', `<p>The image below is a data URL.</p><p><img src="data:image/png;base64,${TINY_PNG.toString('base64')}" alt="A pixel" width="40" height="40"/></p>`)],
+    spine: [{ idref: 'one' }],
+  })),
+  // Navigation Documents
+  'nav-image-label': book(() => packageEpub({
+    title: 'Image in a navigation label',
+    items: [page('one', '<p>First page.</p>'), page('two', '<p>Second page.</p>'),
+      { id: 'abbey', href: 'abbey.png', type: 'image/png', data: solidPng(64, 64) }],
+    spine: [{ idref: 'one' }, { idref: 'two' }],
+    toc: [{ href: 'one.xhtml', label: 'Start page' }, { href: 'two.xhtml', label: '<img src="abbey.png" alt="Description of the Abbey" title="The Abbey"/>' }],
+  })),
+  'nav-in-spine-hidden': book(() => packageEpub({
+    title: 'Navigation document in the spine, an entry hidden',
+    items: [page('one', '<p>First page.</p>'), page('two', '<p>Second page.</p>')],
+    spine: [{ idref: 'nav' }, { idref: 'one' }, { idref: 'two' }],
+    navBody: '<h1>Contents</h1><nav epub:type="toc"><ol>\n<li><a href="one.xhtml">The first link</a></li>\n<li hidden="hidden"><a href="two.xhtml">The second link</a></li>\n</ol></nav>',
   })),
   // OCF: the zip container
   'zip-bzip2': book(() => packageEpub({
