@@ -69,7 +69,9 @@
       "ruby.spec.js",
       "settings-screen.spec.js",
       "stability.spec.js",
-      "sync-android.spec.js"
+      "sync-android.spec.js",
+      "replace.spec.js",
+      "replace-corrected.spec.js"
     ],
     "perf": [
       "pathological.spec.js",
@@ -106,6 +108,7 @@
       "reject/page-turn-held-lifted",
       "reject/page-turn-left-unfinished",
       "reject/restored-bare-count",
+      "reject/role-unmatched",
       "reject/shelf-unmatched",
       "reject/snapshot-not-handed-on",
       "reject/sync-result-unmatched",
@@ -136,9 +139,6 @@
       "reject/fixed-box-zoom-zero",
       "reject/page-height-fraction",
       "reject/page-width-fraction"
-    ],
-    "style": [
-      "reject/role-unmatched"
     ]
   }
 }
