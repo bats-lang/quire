@@ -16,7 +16,7 @@ datatype gesture = TapSides | TapMiddle
 
 fn gesture_hint (gesture: gesture): [text_len:pos | text_len < 256] string text_len =
   case+ gesture of
-  | TapSides() => "Tap the sides to turn pages."
+  | TapSides() => "Tap the sides to turn pages. "
   | TapMiddle() => "Tap the middle for the menu."
 
 (* Where the hint lies: in a band the page's text keeps clear of, the top

@@ -2959,10 +2959,17 @@ numbered g is armed; `_ps_put`, the only code that shows or hides the
 button, shows it exactly in that state. `TIMED`'s constructor is local to
 `_timed_arm`, which arms the timer, so no other code can make one, and a
 proof for one number does not type-check as another's. When the timeout
-runs (10 s, `BACK_SHOWN`) the button goes with its positions, unless a
-later jump has armed a later timeout. It goes sooner when a page is
-turned, the bars are brought up (`_chrome_set`), or a book is opened or
-closed (`reader_stack_clear`).
+runs (10 s, `BACK_SHOWN`) the button goes but the positions are kept
+(`PsKept`, #384: Apple Books reaches "previous location" from a control
+that does not expire, KOReader keeps it until used), unless a later jump
+has armed a later timeout. It goes sooner when a page is turned or the
+bars are brought up (`_chrome_set`), also keeping them; Contents shows
+"Back to <chapter> · page N" (`contents-back`) while a position is kept,
+and pressing it pops it as the button does. Opening or closing a book
+forgets them (`reader_stack_clear`). The first-book hint (#384) says
+both gestures (`gesture`: `TapSides | TapMiddle`, `gesture_hint`), lies
+in the band the text keeps clear of (`hint_band`: `TopBand | BottomBand`,
+no centre case) and is up for 8 s after the bars first hide.
 `tests/static` holds code that must not type-check (a forged `TIMED`,
 another timeout's proof, the button with nothing to offer), and code
 that must (`_back_offer`); CI runs `tests/static/run.sh`.
