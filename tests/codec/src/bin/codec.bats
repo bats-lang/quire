@@ -248,6 +248,120 @@ fn check_absent (): void = let
   val () = check_absent_added(false, true, true)
 in check_absent_added(true, true, true) end
 
+(* ---------------- chunks in any order, a tag twice (#510) ---------------- *)
+
+(* The record of image_of(_, 9, 7, 5) is 339 bytes: a header of 7, then the chunks AUTH BOOK COLL ELSE FNSH (20 each),
+   ORDR 16, PLCE 40, SERI 22, SHLF 28, SIZE 24, TIME 20, TITL 22, prog snum tdir (16 each) and the end chunk, 12; they
+   start at 7 27 47 67 87 107 123 163 185 213 237 257 279 295 311 327. *)
+
+(* the record with the chunks between its header and its end chunk in the opposite order *)
+fn reversed_chunks {l:agz}{n:pos | n == 339} (bytes: !$A.arr(byte, l, n), n: int n): [copy_l:agz] $A.arr(byte, copy_l, n) = let
+  val copy = $A.alloc<byte>(n)
+  (* a chunk [from, to) goes where the same distance from the end of the chunks is *)
+  val _ = put_span(bytes, n, copy, n, 0, 7, 0)
+  val _ = put_span(bytes, n, copy, n, 327, 339, 327)
+  val _ = put_span(bytes, n, copy, n, 7, 27, 307)
+  val _ = put_span(bytes, n, copy, n, 27, 47, 287)
+  val _ = put_span(bytes, n, copy, n, 47, 67, 267)
+  val _ = put_span(bytes, n, copy, n, 67, 87, 247)
+  val _ = put_span(bytes, n, copy, n, 87, 107, 227)
+  val _ = put_span(bytes, n, copy, n, 107, 123, 211)
+  val _ = put_span(bytes, n, copy, n, 123, 163, 171)
+  val _ = put_span(bytes, n, copy, n, 163, 185, 149)
+  val _ = put_span(bytes, n, copy, n, 185, 213, 121)
+  val _ = put_span(bytes, n, copy, n, 213, 237, 97)
+  val _ = put_span(bytes, n, copy, n, 237, 257, 77)
+  val _ = put_span(bytes, n, copy, n, 257, 279, 55)
+  val _ = put_span(bytes, n, copy, n, 279, 295, 39)
+  val _ = put_span(bytes, n, copy, n, 295, 311, 23)
+  val _ = put_span(bytes, n, copy, n, 311, 327, 7)
+in copy end
+
+(* the record with the BOOK chunk (the second) of another record of the same shape put in front of its own chunks: a
+   tag twice, the later one the record's own *)
+fn with_stale_chunk_first {l:agz}{other_l:agz}{n:pos | n == 339} (bytes: !$A.arr(byte, l, n), other: !$A.arr(byte, other_l, n), n: int n)
+  : [copy_l:agz] $A.arr(byte, copy_l, 359) = let
+  val copy = $A.alloc<byte>(359)
+  val _ = put_span(bytes, n, copy, 359, 0, 7, 0)
+  val _ = put_span(other, n, copy, 359, 27, 47, 7)
+  val _ = put_span(bytes, n, copy, 359, 7, 339, 27)
+in copy end
+
+(* a record read whole or with a loss, and the image it is: 0 whole and the same, 1 whole and another, 2 with a loss and the same,
+   3 with a loss and another, 4 not read; and whether it is written again as other, other_n bytes *)
+fn written_as {other_l:agz}{other_n:pos | other_n <= 1048576}{record_contents:bookx}{format_version,least_version:int}{kept_extras:extras}
+  (record: !bookrecord(record_contents, format_version, least_version, kept_extras), other: !$A.arr(byte, other_l, other_n), other_n: int other_n): bool = let
+  val (_ | again) = book_record_write(record)
+  val (_ | count) = blist_len(again)
+  val equal = (if count = other_n then let
+      val rewritten = blist_to_buffer(again, other_n)
+      val same = equal_prefix(other, rewritten, other_n, 0)
+      val () = $A.free<byte>(rewritten)
+    in same end else false): bool
+  val () = blist_free(again)
+in equal end
+
+fn classify_same {l:agz}{n:pos | n <= 1048576}{contents:bookx}{other_l:agz}{other_n:pos | other_n <= 1048576}
+  (bytes: !$A.arr(byte, l, n), n: int n, original: !book_image(contents), other: !$A.arr(byte, other_l, other_n), other_n: int other_n): @(int, bool) = let
+  val list = blist_of_array(bytes, 0, n)
+  val (_ | read) = book_record_read(list)
+in
+  case+ read of
+  | ~BR_ok(record) => let
+      val back = book_record_image(record)
+      val same = (book_image_diff(original, back) = 0)
+      val () = book_image_free(back)
+      val written = written_as(record, other, other_n)
+      val () = book_record_free(record)
+    in @(if same then 0 else 1, written) end
+  | ~BR_loss(record, lost) => let
+      val back = book_record_image(record)
+      val same = (book_image_diff(original, back) = 0)
+      val () = book_image_free(back)
+      val written = written_as(record, other, other_n)
+      val () = lostv_free(lost)
+      val () = book_record_free(record)
+    in @(if same then 2 else 3, written) end
+  | ~BR_notquire() => @(4, false)
+  | ~BR_newer() => @(4, false)
+  | ~BR_damaged() => @(4, false)
+end
+
+fn check_any_order (): void =
+  case+ image_of(31337, 9, 7, 5) of
+  | ~NoTested() => ()
+  | ~Tested(image) =>
+    (case+ image_of(4242, 9, 7, 5) of
+     | ~NoTested() => book_image_free(image)
+     | ~Tested(other_image) => let
+         val @(bytes, n) = encode(image)
+         val @(other_bytes, other_n) = encode(other_image)
+         val () = (if n = 339 then (if other_n = 339 then let
+             val () = expect(byte_at(bytes, n, 7 + 4) = 65 && byte_at(bytes, n, 327 + 4) = 73 && byte_at(bytes, n, 311 + 4) = 116, "the layout the order tests rely on")
+             (* the chunks in the opposite order are the same record, and saving writes them in ascending order *)
+             val reversed = reversed_chunks(bytes, n)
+             val @(code, written) = classify_same(reversed, n, image, bytes, n)
+             val () = expect(code = 0, "a record with its chunks in the opposite order is read whole, as the same record")
+             val () = expect(written, "a record with its chunks in the opposite order is written in ascending order")
+             val () = $A.free<byte>(reversed)
+             (* a tag twice: the later chunk wins, the record is read with a loss, and written once for each tag *)
+             val doubled = with_stale_chunk_first(bytes, other_bytes, n)
+             val @(code, written) = classify_same(doubled, 359, image, bytes, n)
+             val () = expect(code = 2, "a group twice: the record is read with a loss, as the same record (the later chunk wins)")
+             val () = expect(written, "a group twice is written once")
+             val () = $A.free<byte>(doubled)
+             (* and whichever it is that comes last wins *)
+             val doubled_other = with_stale_chunk_first(other_bytes, bytes, n)
+             val @(code, written) = classify_same(doubled_other, 359, other_image, other_bytes, n)
+             val () = expect(code = 2, "a group twice: the later chunk wins, whichever it is")
+             val () = expect(written, "a group twice, the other way, is written once")
+             val () = $A.free<byte>(doubled_other)
+           in () end else fail("a record of the shape the order tests rely on")) else fail("a record of the shape the order tests rely on"))
+         val () = $A.free<byte>(other_bytes)
+         val () = $A.free<byte>(bytes)
+         val () = book_image_free(other_image)
+       in book_image_free(image) end)
+
 (* ---------------- the checksum ---------------- *)
 
 fn check_crc (): void = let
@@ -440,6 +554,7 @@ implement main0 () = let
   val () = check_strings()
   val () = check_damage()
   val () = check_absent()
+  val () = check_any_order()
   val () = check_fuzz(20000)
 in
   if !_failures = 0 then println! ("all ok")

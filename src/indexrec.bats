@@ -21,7 +21,7 @@ staload "record.sats"
 
 #pub fun index_specs (): specsv(INDEX_SPECS, 2)
 
-implement index_specs () = SPV_cons(TAGNOT_mk() | blist_cons(76, blist_cons(69, blist_cons(71, blist_cons(65, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk() | blist_cons(78, blist_cons(65, blist_cons(77, blist_cons(83, blist_nil())))), LYV_i32(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_nil()))))))))), ModeReq(), FVV_i32(int32_zero(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_nil()))))))))), SPV_nil()))
+implement index_specs () = SPV_cons(TAGNOT_mk(), NOTKNOWN_cons(TAGDIFF_mk(), NOTKNOWN_nil()) | blist_cons(76, blist_cons(69, blist_cons(71, blist_cons(65, blist_nil())))), LYV_i32(LYV_i32(LYV_nil())), ModeOpt(), FVV_i32(int32_zero(), FVV_i32(int32_zero(), FVV_nil())), SPV_cons(TAGNOT_mk(), NOTKNOWN_nil() | blist_cons(78, blist_cons(65, blist_cons(77, blist_cons(83, blist_nil())))), LYV_i32(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_str(LYV_nil()))))))))), ModeReq(), FVV_i32(int32_zero(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_str(blist_nil(), FVV_nil()))))))))), SPV_nil()))
 
 (* INDEXV(index_value, vals): the values of the groups are the fields of the index index_value *)
 #pub dataprop INDEXV(indexx, gvals) =
@@ -121,7 +121,7 @@ primplement index_enc_dec {index_value}{format_version,least_version}{kept_extra
    and the chunks kept *)
 #pub datavtype indexrecord(indexx, int, int, extras) =
   | {index_value:indexx}{format_version,least_version:int | 0 <= format_version; format_version < 256; 0 <= least_version; least_version <= READER}{kept_extras:extras}{extra_count:nat}
-    IndexRecord(index_value, format_version, least_version, kept_extras) of (int format_version, int least_version, indexv(index_value), extrasv(kept_extras, extra_count))
+    IndexRecord(index_value, format_version, least_version, kept_extras) of (int format_version, int least_version, indexv(index_value), extrasv(INDEX_SPECS, kept_extras, extra_count))
 
 #pub datavtype indexread(indexres) =
   | {index_value:indexx}{format_version,least_version:int}{kept_extras:extras} IR_ok(ir_ok(index_value, format_version, least_version, kept_extras)) of indexrecord(index_value, format_version, least_version, kept_extras)

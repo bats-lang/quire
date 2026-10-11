@@ -584,6 +584,15 @@ export async function expectBarFollows(page, rightToLeft) {
   expect(thumb.middle > trackMiddle, 'the thumb at the start is in the track\'s ' + (rightToLeft ? 'right' : 'left') + ' half').toBe(rightToLeft);
   expect(previous.middle > next.middle, 'Previous is ' + (rightToLeft ? 'right' : 'left') + ' of Next').toBe(rightToLeft);
   expect(track.middle > Math.max(previous.middle, next.middle) || track.middle < Math.min(previous.middle, next.middle), 'the scrubber between the page turns').toBe(false);
+  // the chapter steps lie beyond the page turns, on their sides (#388)
+  if (await page.locator('#chapter-next').isVisible()) {
+    const stepNext = await box('#chapter-next');
+    expect(stepNext.middle < next.middle, 'Next chapter is beyond Next page').toBe(rightToLeft);
+  }
+  if (await page.locator('#chapter-previous').isVisible()) {
+    const stepPrevious = await box('#chapter-previous');
+    expect(stepPrevious.middle > previous.middle, 'Previous chapter is beyond Previous page').toBe(rightToLeft);
+  }
 }
 
 /** Whether a font with Han characters is installed: the canvas draws a
