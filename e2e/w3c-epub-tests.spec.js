@@ -364,3 +364,35 @@ test('cnt-svg-css (must): the svg is a picture of its own, its style neither rea
   const source = await bookPage(page).locator('img').first().getAttribute('src');
   expect(source).toMatch(/^blob:/);
 });
+
+// ---- MathML ----
+
+test('cnt-mathml-support (must): a math element is drawn as an equation: MathML elements, a fraction set one number over the other', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'mathml', 'MathML in a page');
+  const equation = await bookPage(page).evaluate(doc => {
+    const math = doc.querySelector('math');
+    const parts = math ? [...math.querySelectorAll('*')] : [];
+    const fraction = math?.querySelector('mfrac');
+    const [top, bottom] = fraction ? [...fraction.children].map(e => e.getBoundingClientRect().top) : [0, 0];
+    return {
+      namespace: math?.namespaceURI,
+      names: parts.map(e => e.localName),
+      spaces: parts.every(e => e.namespaceURI === 'http://www.w3.org/1998/Math/MathML'),
+      stacked: bottom - top,
+      variant: math?.querySelector('mi')?.getAttribute('mathvariant'),
+      text: math?.textContent.replace(/\s+/g, ''),
+      block: math ? getComputedStyle(math).display : '',
+    };
+  });
+  expect(equation.namespace).toBe('http://www.w3.org/1998/Math/MathML');
+  expect(equation.spaces).toBe(true);
+  expect(equation.names).toEqual(expect.arrayContaining(['mi', 'mo', 'mfrac', 'mn', 'msqrt']));
+  // the numerator is above the denominator: an equation, not a line of words
+  expect(equation.stacked).toBeGreaterThan(4);
+  expect(equation.variant).toBe('bold');
+  expect(equation.text).toContain('x=12+y');
+  // maction (it can run something) is refused; its content is shown in its place
+  expect(equation.names).not.toContain('maction');
+  expect(equation.block).toContain('math');
+});
