@@ -10,7 +10,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn panel_rules {left:nat | left >= 7500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7500] sheet(after, false, false)
+#pub fn panel_rules {left:nat | left >= 7700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7700] sheet(after, false, false)
 
 (* The panel frame and tabs, from .panel on *)
 fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1536] sheet(after, false, false) = let
@@ -97,7 +97,7 @@ fn panel_rules_panel_frame_and_tabs {left:nat | left >= 1536} (sheet: sheet(left
 in sheet end
 
 (* The contents and highlights, from .pi[aria-current=true] on *)
-fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1558] sheet(after, false, false) = let
+fn panel_rules_contents_and_highlights {left:nat | left >= 1750} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1750] sheet(after, false, false) = let
   val sheet = rule(sheet, ".pi[aria-current=true]")
   val sheet = lay(sheet, FontWeight(), "bold")
   val sheet = surf(S_fg_line | sheet, RoleText(), RoleLine())
@@ -116,6 +116,15 @@ fn panel_rules_contents_and_highlights {left:nat | left >= 1558} (sheet: sheet(l
   val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
   val sheet = lay(sheet, FontSize(), "13px")
   val sheet = lay(sheet, MarginTop(), "2px")
+  val sheet = close(sheet)
+  (* the match in a search result, in bold *)
+  val sheet = rule(sheet, ".mk")
+  val sheet = lay(sheet, FontWeight(), "bold")
+  val sheet = close(sheet)
+  (* the count beside a chapter's heading in the results *)
+  val sheet = rule(sheet, ".cnt")
+  val sheet = lay(sheet, FontWeight(), "normal")
+  val sheet = lay(sheet, TextTransform(), "none")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".hq")
   val sheet = lay(sheet, Display(), "block")
@@ -205,14 +214,13 @@ fn panel_rules_settings_sheet {left:nat | left >= 2400} (sheet: sheet(left, fals
   val sheet = lay(sheet, BoxShadow(), "0 -2px 16px rgba(0,0,0,.3)")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
-  val sheet = lay(sheet, Gap(), "10px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = lay(sheet, MaxWidth(), "520px")
   val sheet = lay(sheet, Margin(), "0 auto")
   val sheet = lay(sheet, BorderRadius(), "12px 12px 0 0")
   (* taller than a short screen allows: it scrolls, within the height
      shown (dvh: in full screen, and in a WebView, vh can be more) *)
-  val sheet = lay(sheet, MaxHeight(), "85dvh")
-  val sheet = lay(sheet, Overflow(), "auto")
+  val sheet = scrolls(sheet, ShareMost())
   val sheet = close(sheet)
   (* a sheet's head, its Close in it: held at the sheet's top as the
      rest scrolls, so Close is always in reach (as Apple Books' sheet
@@ -288,11 +296,11 @@ fn panel_rules_settings_sheet {left:nat | left >= 2400} (sheet: sheet(left, fals
 in sheet end
 
 (* The setting rows, from .srow on *)
-fn panel_rules_setting_rows {left:nat | left >= 1521} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1521] sheet(after, false, false) = let
+fn panel_rules_setting_rows {left:nat | left >= 1522} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1522] sheet(after, false, false) = let
   val sheet = rule(sheet, ".srow")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = lay(sheet, Gap(), "10px")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".slabel")
   val sheet = lay(sheet, Width(), "7em")
@@ -310,7 +318,7 @@ fn panel_rules_setting_rows {left:nat | left >= 1521} (sheet: sheet(left, false,
   val sheet = close(sheet)
   val sheet = rule(sheet, ".seg")
   val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, Gap(), "6px")
+  val sheet = spaced(sheet, Gap(), SpaceTight())
   val sheet = lay(sheet, Flex(), "1")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = close(sheet)

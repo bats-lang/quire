@@ -143,6 +143,7 @@
       "accept/image-roundtrip",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
+      "accept/sheet-scrolls-most",
       "accept/try-again-transient",
       "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
@@ -151,6 +152,7 @@
       "reject/clip-past-end",
       "reject/fixed-box-zoom-zero",
       "reject/page-height-fraction",
+      "reject/sheet-scrolls-over-share",
       "reject/page-width-fraction"
     ]
   }
