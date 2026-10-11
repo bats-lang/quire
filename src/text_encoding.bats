@@ -185,9 +185,9 @@ fn _step_16 {l:agz}{n:pos}{i:nat | i < n} (data: !$A.borrow(byte, l, n), n: int 
 in
   if unit < 0 then @(65533, n)
   else if unit >= 55296 && unit < 56320 then let
-      val next: int = (if i + 3 < n then _unit(data, n, i + 2, little) else ~1)
+      val following: int = (if i + 3 < n then _unit(data, n, i + 2, little) else ~1)
     in
-      if next >= 56320 && next < 57344 then @($AR.add_int_int($AR.add_int_int(65536, $AR.mul_int_int($AR.sub_int_int(unit, 55296), 1024)), $AR.sub_int_int(next, 56320)), _after(n, i, 4))
+      if following >= 56320 && following < 57344 then @($AR.add_int_int($AR.add_int_int(65536, $AR.mul_int_int($AR.sub_int_int(unit, 55296), 1024)), $AR.sub_int_int(following, 56320)), _after(n, i, 4))
       else @(65533, _after(n, i, 2))
     end
   else if unit >= 56320 && unit < 57344 then @(65533, _after(n, i, 2))
