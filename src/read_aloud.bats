@@ -197,7 +197,7 @@ fun _sentence_at {size:int}{count:nat} .<count>.
   (sentences: !sentences_of(size, count), node: Int, offset: Int, index: Nat, found: Nat): Nat =
   case+ sentences of
   | SentencesNone() => found
-  | SentenceOf(_, _, start_node, start_offset, _, _, rest) =>
+  | SentenceOf(_, _, start_node, start_offset, _, _, _, rest) =>
     if start_node < node then _sentence_at(rest, node, offset, index + 1, index)
     else if start_node > node then found
     else if start_offset <= offset then _sentence_at(rest, node, offset, index + 1, index)
@@ -234,24 +234,63 @@ in
   in release_bytes(start_frozen, start_bytes) end
 end
 
-(* The voice chosen for the book's language: its name in a new array
+(* The first language subtag of tag[0, tag_len), at most 3 bytes: the code the voices are kept by; "en" for none *)
+fun _primary_len {l:agz}{n:nat | n <= 35}{i:nat | i <= n} .<n - i>.
+  (tag: !$A.arr(byte, l, 36), tag_len: int n, i: int i): [j:nat | j <= n] int j =
+  if i >= tag_len then i
+  else if byte2int0($A.get<byte>(tag, i)) = 45 then i
+  else _primary_len(tag, tag_len, i + 1)
+
+fn _code_of {l:agz}{n:nat | n <= 35} (tag: !$A.arr(byte, l, 36), tag_len: int n): [code_loc:agz][code_len:pos | code_len <= 3] @($A.arr(byte, code_loc, 3), int code_len) = let
+  val primary = _primary_len(tag, tag_len, 0)
+  val code = $A.alloc<byte>(3)
+in
+  if primary < 2 then let
+      val () = $A.set<byte>(code, 0, $A.int2byte(101))
+      val () = $A.set<byte>(code, 1, $A.int2byte(110))
+    in @(code, 2) end
+  else if primary = 2 then let
+      val () = $A.set<byte>(code, 0, $A.get<byte>(tag, 0))
+      val () = $A.set<byte>(code, 1, $A.get<byte>(tag, 1))
+    in @(code, 2) end
+  else if primary = 3 then let
+      val () = $A.set<byte>(code, 0, $A.get<byte>(tag, 0))
+      val () = $A.set<byte>(code, 1, $A.get<byte>(tag, 1))
+      val () = $A.set<byte>(code, 2, $A.get<byte>(tag, 2))
+    in @(code, 3) end
+  else let
+      val () = $A.set<byte>(code, 0, $A.int2byte(101))
+      val () = $A.set<byte>(code, 1, $A.int2byte(110))
+    in @(code, 2) end
+end
+
+(* The voice chosen for the language with this code: its name in a new array
    and its length, 0 for the automatic one *)
-fn _voice_name (): [l:agz][n:pos][name_len:nat | name_len <= n] @($A.arr(byte, l, n), int name_len) = let
-  val @(code, code_len) = reader_lang_code()
+fn _voice_for {l:agz}{code_len:pos | code_len <= 3} (code: !$A.arr(byte, l, 3), code_len: int code_len)
+  : [vl:agz][n:pos][name_len:nat | name_len <= n] @($A.arr(byte, vl, n), int name_len) = let
   val kept = set_voice_get(code, code_len)
-  val () = $A.free<byte>(code)
 in
   case+ kept of
   | ~KeptVoice(name, name_len) => @(name, name_len)
   | ~AutomaticVoice() => let val empty = $A.alloc<byte>(1) in @(empty, 0) end
 end
 
-(* Says text[0, text_len) in the book's language, in the voice and at
-   the speed chosen *)
-fn _say {l:agz}{n:pos} (text: !$A.borrow(byte, l, n), text_len: int n): $SP.speech_start = let
-  val @(lang, lang_len) = reader_lang_tag()
+(* The voice chosen for the book's language: its name in a new array
+   and its length, 0 for the automatic one *)
+fn _voice_name (): [l:agz][n:pos][name_len:nat | name_len <= n] @($A.arr(byte, l, n), int name_len) = let
+  val @(code, code_len) = reader_lang_code()
+  val voice = _voice_for(code, code_len)
+  val () = $A.free<byte>(code)
+in voice end
+
+(* Says text[0, text_len), sentence index of script, in its language (the chapter's or the book's, or that of
+   the phrase it is), in the voice chosen for that language and at the speed chosen *)
+fn _say {l:agz}{n:pos} (text: !$A.borrow(byte, l, n), text_len: int n, script: !script, index: Nat): $SP.speech_start = let
+  val @(lang, lang_len) = script_lang(script, index)
+  val @(code, code_len) = _code_of(lang, lang_len)
+  val @(voice, voice_len) = _voice_for(code, code_len)
+  val () = $A.free<byte>(code)
   val @(lang_frozen, lang_bytes) = $A.freeze<byte>(lang)
-  val @(voice, voice_len) = _voice_name()
   val @(voice_frozen, voice_bytes) = $A.freeze<byte>(voice)
   val started = $SP.speech_speak(text, text_len, lang_bytes, lang_len, voice_bytes, voice_len,
     speech_rate_hundredths(set_speech_rate_get()))
@@ -269,7 +308,7 @@ in
     in _stop() end
   | ~SentenceText(text_owner, text, text_len) => let
       val @(text_frozen, text_bytes) = $A.freeze<byte>(text)
-      val started = _say(text_bytes, text_len)
+      val started = _say(text_bytes, text_len, script, index)
       val () = $A.drop<byte>(text_frozen, text_bytes)
       val () = piece_free(text_owner, $A.thaw<byte>(text_frozen))
     in

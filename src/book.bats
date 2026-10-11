@@ -13,6 +13,7 @@ staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
 
 staload "epub_xml.sats"
+staload "text_encoding.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "zipcheck.sats"
@@ -298,6 +299,15 @@ implement $P.dispose<$IDB.stored>(_) = ()
    when decompression failed, the result is empty, or no piece can be
    had for it *)
 #pub fn take_decompressed (inflated: decompressed): content_bytes
+
+(* The content decompress resolved with, as UTF-8 (text_encoding): a
+   document in UTF-16 or in a single-byte encoding it declares is made
+   UTF-8 in a piece of its own, a byte order mark is dropped, and one that
+   is not UTF-8 (or is in an encoding Quire has no table for) is none, as
+   one that could not be decompressed. For the book's text documents: the
+   package, the container, the navigation document, a content document, an
+   overlay; not for an image, a font or audio *)
+#pub fn take_text (inflated: decompressed): content_bytes
 
 (* What a read of storage found, as content (in a piece): it, nothing
    stored there, or a read that failed (or no piece could be had) *)
@@ -666,6 +676,44 @@ implement take_decompressed (inflated) =
   case+ inflated of
   | ~$BD.DecompressFailed() => NoContentBytes()
   | ~$BD.Decompressed(blob) => _blob_content(blob)
+
+implement take_text (inflated) =
+  case+ take_decompressed(inflated) of
+  | ~NoContentBytes() => NoContentBytes()
+  | ~ContentBytes(owner, piece, size) => let
+      val @(frozen, bytes) = $A.freeze<byte>(piece)
+    in
+      case+ text_plan_of(bytes, size) of
+      | PlanAsIs() => let
+          val () = $A.drop<byte>(frozen, bytes)
+        in ContentBytes(owner, $A.thaw<byte>(frozen), size) end
+      | PlanRefused() => let
+          val () = $A.drop<byte>(frozen, bytes)
+          val () = piece_free(owner, $A.thaw<byte>(frozen))
+        in NoContentBytes() end
+      | PlanConvert() => let
+          val converted = text_converted_size(bytes, size)
+        in
+          if converted <= 0 then let
+              val () = $A.drop<byte>(frozen, bytes)
+              val () = piece_free(owner, $A.thaw<byte>(frozen))
+            in NoContentBytes() end
+          else if converted > 268435456 then let
+              val () = $A.drop<byte>(frozen, bytes)
+              val () = piece_free(owner, $A.thaw<byte>(frozen))
+            in NoContentBytes() end
+          else (case+ piece_new(converted) of
+            | ~NoPiece() => let
+                val () = $A.drop<byte>(frozen, bytes)
+                val () = piece_free(owner, $A.thaw<byte>(frozen))
+              in NoContentBytes() end
+            | ~Piece(converted_owner, converted_piece) => let
+                val () = text_convert_into(bytes, size, converted_piece, converted)
+                val () = $A.drop<byte>(frozen, bytes)
+                val () = piece_free(owner, $A.thaw<byte>(frozen))
+              in ContentBytes(converted_owner, converted_piece, converted) end)
+        end
+    end
 
 implement lookup_content (found) =
   case+ found of

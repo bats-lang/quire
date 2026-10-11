@@ -17,6 +17,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "titles.sats"
 staload "epub_xml.sats"
+staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
@@ -593,14 +594,24 @@ fn _span_arr {data_loc:agz}{data_len:pos}{start,span_len:nat | start + span_len 
     val text = $A.alloc<byte>(fallback_len)
     val () = $A.write_text(text, 0, $A.text_lit(fallback), fallback_len)
   in @(text, fallback_len) end
-  else if span_len >= 256 then let
-    val text = $A.alloc<byte>(255)
-    val () = $S.copy_from_borrow(data, start, data_len, text, 0, 255, 255)
-  in @(text, 255) end
   else let
-    val text = $A.alloc<byte>(span_len)
-    val () = $S.copy_from_borrow(data, start, data_len, text, 0, span_len, span_len)
-  in @(text, span_len) end
+    (* the characters its references stand for (Zo&#235; is Zoë), cut at 255 bytes *)
+    val take = (if span_len >= 256 then 255 else span_len): [take:pos | take <= span_len; take < 256] int take
+    val decoded = $A.alloc<byte>(take)
+    val decoded_len = decode_text(data, start, take, decoded)
+  in
+    if decoded_len <= 0 then let
+      val () = $A.free<byte>(decoded)
+      val fallback_len = g1u2i(string1_length(fallback))
+      val text = $A.alloc<byte>(fallback_len)
+      val () = $A.write_text(text, 0, $A.text_lit(fallback), fallback_len)
+    in @(text, fallback_len) end
+    else let
+      val text = $A.alloc<byte>(decoded_len)
+      val () = _copy(decoded, decoded_len, text, 0, 0)
+      val () = $A.free<byte>(decoded)
+    in @(text, decoded_len) end
+  end
 
 (* Adds a book: its id, title and author (spans of data), file size and
    cover type; its key. None when the library is full. *)
@@ -994,18 +1005,58 @@ fn _lower (byte_value: int): int =
 (* How one text compares with another *)
 datatype comparison = Before | Same | After
 
-(* first[0, first_len) before second[0, second_len), letters in any case *)
-fun _less {first_loc,second_loc:agz}{first_len,second_len:nat}
-  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i:nat | i <= first_len} .<first_len - i>.
+(* The base letter of each character from U+00C0 to U+017F (Latin-1 Supplement and Latin Extended-A), in
+   lower case, so that Ł sorts under L and ë under E; '?' where the character is not a letter with a
+   base (× ÷ and the like), which then sorts by its code point. Made by scripts/ from Unicode's
+   decompositions, with the letters that do not decompose (Æ Ð Ø Þ ß Đ Ħ ı Ł Œ and the like) given the
+   letter an alphabetical list puts them under. *)
+fn _latin_base {k:nat | k < 192} (k: int k): int =
+  char2int0(string_get_at("aaaaaaaceeeeiiiidnooooo?ouuuuytsaaaaaaaceeeeiiiidnooooo?ouuuuytyaaaaaaccccccccddddeeeeeeeeeegggggggghhhhiiiiiiiiiiiijjkkkllllllllllnnnnnnnnnoooooooorrrrrrssssssssttttttuuuuuuuuuuuuwwyyyzzzzzzs", k))
+
+(* The code point folded for comparison: lower case, and a Latin letter with an accent as its base letter *)
+fn _fold (code_point: int): int =
+  if code_point < 128 then _lower(code_point)
+  else if code_point < 192 then code_point
+  else if code_point > 383 then code_point
+  else let
+    val k = g1ofg0(code_point - 192)
+    val base = (if k >= 0 then (if k < 192 then _latin_base(k) else 63) else 63): int
+  in if base = 63 then code_point else base end
+
+(* The folded character at text[i] (UTF-8) and the index after it *)
+fn _key {l:agz}{size,len:nat | len <= size}{i:nat | i < len}
+  (text: !$A.arr(byte, l, size), len: int len, i: int i): [j:int | i < j; j <= len] @(int, int j) = let
+  val lead = byte2int0($A.get<byte>(text, i))
+in
+  if lead < 192 then @(_fold(lead), i + 1)
+  else if lead < 224 then
+    (if i + 1 < len then @(_fold((lead - 192) * 64 + (byte2int0($A.get<byte>(text, i + 1)) - 128)), i + 2) else @(lead, i + 1))
+  else if lead < 240 then
+    (if i + 2 < len then @((lead - 224) * 4096 + (byte2int0($A.get<byte>(text, i + 1)) - 128) * 64 + (byte2int0($A.get<byte>(text, i + 2)) - 128), i + 3) else @(lead, i + 1))
+  else if i + 3 < len then
+    @((lead - 240) * 262144 + (byte2int0($A.get<byte>(text, i + 1)) - 128) * 4096 + (byte2int0($A.get<byte>(text, i + 2)) - 128) * 64 + (byte2int0($A.get<byte>(text, i + 3)) - 128), i + 4)
+  else @(lead, i + 1)
+end
+
+(* first[0, first_len) before second[0, second_len), letters in any case and without their accents
+   (the collation of a library sorted by title: Łukasz is under L), from first[i] and second[j] *)
+fun _less_from {first_loc,second_loc:agz}{first_len,second_len:nat}
+  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i,j:nat | i <= first_len; j <= second_len} .<first_len - i>.
+  (first: !$A.arr(byte, first_loc, first_size), first_len: int first_len, i: int i,
+   second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, j: int j): comparison =
+  if i >= first_len then (if j >= second_len then Same() else Before())
+  else if j >= second_len then After()
+  else let
+    val @(first_key, next_first) = _key(first, first_len, i)
+    val @(second_key, next_second) = _key(second, second_len, j)
+  in if first_key < second_key then Before() else if first_key > second_key then After()
+     else _less_from(first, first_len, next_first, second, second_len, next_second) end
+
+fn _less {first_loc,second_loc:agz}{first_len,second_len:nat}
+  {first_size,second_size:nat | first_len <= first_size; second_len <= second_size}{i:nat | i <= first_len; i <= second_len}
   (first: !$A.arr(byte, first_loc, first_size), first_len: int first_len,
    second: !$A.arr(byte, second_loc, second_size), second_len: int second_len, i: int i): comparison =
-  if i >= first_len then (if i >= second_len then Same() else Before())
-  else if i >= second_len then After()
-  else let
-    val first_byte = _lower(byte2int0($A.get<byte>(first, i)))
-    val second_byte = _lower(byte2int0($A.get<byte>(second, i)))
-  in if first_byte < second_byte then Before() else if first_byte > second_byte then After()
-     else _less(first, first_len, second, second_len, i + 1) end
+  _less_from(first, first_len, i, second, second_len, i)
 
 fn _is_before (c: comparison): bool = case+ c of Before() => true | _ => false
 
