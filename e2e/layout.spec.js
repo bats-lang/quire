@@ -13,7 +13,7 @@ import {
 import { failLibrary, healReads, stubReads } from './storage-stub.js';
 import { legacyLibrary, bookKey, store, put, forgetRecords } from './legacy-library.js';
 import { checkPageMargins } from './page-margins.js';
-import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort } from './controls-shown.js';
+import { strayGrounds, cutOff, statesUnseen, insetsShort, peekAbove, sheetReach, offScale, rowIsTarget, toastClear, coveredByBanner, onOffPairs, textContrastShort, stateCueShort, labelsShown, labelInName, targetsShort, cardMoreBoxes } from './controls-shown.js';
 import { solidPng } from './create-epub.js';
 import { createStardict } from './create-stardict.js';
 import { walkEveryScreen, appPlayed, syncSteps } from './walk.js';
@@ -206,6 +206,8 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
     epubFile({ title: 'Short', author: 'S' }),
   ], 2);
   await fits(page, 'the library');
+  const listBoxes = await cardMoreBoxes(page);
+  expect(listBoxes.length, 'a book menu button on each card of the list').toBe(2);
   // a collection, so its row shows
   await bookMenu(page, 'Short');
   await menuItem(page, 'Collections').click();
@@ -222,6 +224,11 @@ test('nothing is cut off in the library, its menus and its screens', async ({ pa
   await fits(page, 'the library with a collection');
   await chooseInSortMenu(page, 'Grid');
   await fits(page, 'the library as a grid');
+  // quire#495: the book menu button is one box, in the list and in the grid
+  // (not stretched to the card's height, nor under 48 px)
+  const gridBoxes = await cardMoreBoxes(page);
+  expect(gridBoxes.length, 'a book menu button on each card of the grid').toBe(2);
+  expect([...new Set([...listBoxes, ...gridBoxes])], 'the book menu button differs between list and grid').toHaveLength(1);
   await chooseInSortMenu(page, 'List');
   await bookMenu(page, 'Short');
   await fits(page, 'the book menu');

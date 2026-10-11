@@ -6,7 +6,7 @@ UPPER = NAME.upper()
 PREFIX = NAME
 CAPITAL = NAME.capitalize()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from record_tables import tables
+from record_tables import tables, SUBSTITUTES
 GROUPS, KIND = tables(NAME)
 fields = [field for group in GROUPS for field in group[2]]
 
@@ -41,8 +41,8 @@ def layout(group):
 
 def default_vals(group):
     result = "fv_nil()"
-    for _, kind in reversed(group[2]):
-        result = f"fv_i32(0, {result})" if kind == "i" else f"fv_str(bnil(), {result})"
+    for name, kind in reversed(group[2]):
+        result = f"fv_i32(0, {result})" if kind == "i" else f"fv_str({bytes_lit(SUBSTITUTES.get(name, ''))}, {result})"
     return result
 
 
@@ -63,8 +63,15 @@ def layoutv(group):
 
 def defaultv(group):
     result = "FVV_nil()"
-    for _, kind in reversed(group[2]):
-        result = f"FVV_i32(int32_zero(), {result})" if kind == "i" else f"FVV_str(blist_nil(), {result})"
+    for name, kind in reversed(group[2]):
+        result = f"FVV_i32(int32_zero(), {result})" if kind == "i" else f"FVV_str({textv(SUBSTITUTES.get(name, ''))}, {result})"
+    return result
+
+
+def textv(text):
+    result = "blist_nil()"
+    for letter in reversed(text):
+        result = f"blist_cons({ord(letter)}, {result})"
     return result
 
 

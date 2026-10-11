@@ -561,6 +561,14 @@ export async function targetsShort(page) {
   }, TARGET_PX);
 }
 
+/** The box of each visible book menu button (the card's ⋮) as "w x h",
+    to the pixel: the list and the grid give the same one (quire#495) */
+export async function cardMoreBoxes(page) {
+  return page.evaluate(() => [...document.querySelectorAll('.cmore')]
+    .filter(e => e.checkVisibility() && e.getClientRects().length > 0)
+    .map(e => { const b = e.getBoundingClientRect(); return `${Math.round(b.width)} x ${Math.round(b.height)}`; }));
+}
+
 /** The visible elements with text of their own whose background is a
     ground other than the one behind them, and that are neither a control
     nor a card (a box with a border, a radius or a shadow): a strip of one

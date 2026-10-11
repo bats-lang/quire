@@ -1392,9 +1392,12 @@ its high 16 bits, little endian, over the tag and the data; the last
 chunk is `IEND`. A record is a set of groups, one chunk each, written
 in ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
 SIZE TIME TITL`, the index's `LEGA NAMS`) and read by tag, in any order
-(#510, below); each group is required (its
-loss makes the record `Undecodable`) or optional (its loss gives its
-defaults and `DecodedWithLoss`). A chunk of a tag this version does not
+(#510, below); a group the record needs or that every version has
+written (`req`, `opt`), when it is lost (absent, its CRC bad or its fields
+not parsing), is read with its substitute (`SUBSTITUTES` in
+`scripts/record_tables.py`, else 0 and empty) and said to be lost, and the
+record is used (`rr_loss`); nothing about a group makes a record unusable.
+A chunk of a tag this version does not
 know is kept as it is, at the end, when its first letter is lower case
 (ancillary, as in PNG), so a newer Quire's addition survives this one's
 save; a capital one (critical), or a least version over `READER`, makes
@@ -1441,6 +1444,26 @@ order is the writer's, not the format's.
   it: `EXV_cons(ANC, NOTKNOWN | ...)`), so `senc_canon` shows that the
   chunks written are their own canonical ones (`tests/static/reject/
   codec-group-twice-earlier-wins`, `codec-group-twice-not-said`).
+* **A group the record needs, lost, is substituted (stage 2b).** The
+  `LOSES(requirement)` constructors of `SDEC` (`SD_garbled_lost`,
+  `SD_bad_lost`, `SD_absent_lost_end`, `_good`, `_bad`) are one set for
+  `req` and `opt`, a group absent, with a bad CRC or fields that do not
+  parse; `added` keeps its own, for which absent is silent. A book whose
+  TITL is lost is "Untitled" (the contents panel's word for a label with
+  none), whose AUTH is lost has no author, whose BOOK is lost has ids 0
+  in the record and the ids of its key in the library. **The key wins**
+  (`_read_book`, `_keyed_book` in `src/libstore.bats`): a record found
+  under `library/book/<id>` is the book `<id>` whatever ids it holds, and
+  its save writes the key's ids. Such a save (`_repaired`) writes the
+  library's image whole, every group, and keeps the bytes the record had
+  under `library/damaged/<id>/<crc>`, in the same transaction. Research
+  (on #510): SQLite's `.recover` keeps what it cannot place in a
+  `lost_and_found` table and calls the result a salvage, and Calibre
+  rebuilds a lost `metadata.db` from the book folders, so the record
+  is salvaged and the book files stay the source of truth (the next
+  stage reads the title and author from the file again).
+  `tests/codec` and `e2e/library-records.spec.js` lose each of AUTH, BOOK
+  and TITL, absent and damaged.
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with
@@ -1826,7 +1849,8 @@ read of storage changed: each still folds, as #174 says.
   made beside it could not be seen while the read keeps failing.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
-  record, or the collections', that is damaged or not Quire's: it is shown
+  record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
+  the end, no end chunk; every other damage is used, #510): it is shown
   nowhere and never written over, so the book cannot be imported again and
   no collection can be made. Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
@@ -2512,8 +2536,9 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it, and the screen says why and offers what fits (#374, below); a book's record that is damaged, newer or not Quire's is
-shown nowhere, said once and never written over. A backup that could not
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer, not Quire's or broken in its framing is
+shown nowhere, said once and never written over; one that lost a group, or
+that is under other ids than its key, is used (#510). A backup that could not
 read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
@@ -2669,6 +2694,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and

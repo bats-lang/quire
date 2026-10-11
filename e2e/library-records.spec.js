@@ -407,6 +407,15 @@ function shuffled(items, seed) {
   }
   return out;
 }
+/** A chunk of tag with data: length, tag, data and CRC-32 */
+function makeChunk(tag, data) {
+  const body = [...tag].map(c => c.charCodeAt(0)).concat(data);
+  let crc = 0xffffffff;
+  for (const b of body) { crc ^= b; for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1; }
+  crc = (crc ^ 0xffffffff) >>> 0;
+  const le = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+  return { tag, bytes: [...le(data.length), ...body, ...le(crc)] };
+}
 const ascending = tags => tags.every((tag, i) => i === 0 || tags[i - 1] < tag);
 
 test('a record with its chunks in any order opens as the same book, unchanged, and a save writes them in ascending order (#510)', async ({ page }) => {
@@ -510,14 +519,7 @@ test('a chunk this version does not know is kept whole, twice if it was there tw
   const record = (await store(page))[bookKey(books[0])];
   const parts = partsOf(record);
   // a newer Quire's chunk (a lower case first letter), once before the groups and twice among them
-  const later = (tag, text) => {
-    const body = [...tag].map(c => c.charCodeAt(0)).concat([...text].map(c => c.charCodeAt(0)));
-    let crc = 0xffffffff;
-    for (const b of body) { crc ^= b; for (let k = 0; k < 8; k++) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1; }
-    crc = (crc ^ 0xffffffff) >>> 0;
-    const le = n => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
-    return { tag, bytes: [...le(text.length), ...body, ...le(crc)] };
-  };
+  const later = (tag, text) => makeChunk(tag, [...text].map(c => c.charCodeAt(0)));
   const first = later('newa', 'first'), second = later('newa', 'second');
   const mixed = assemble(record, [first, ...parts.slice(0, 3), second, ...parts.slice(3)]);
   await put(page, bookKey(books[0]), mixed);
@@ -536,4 +538,81 @@ test('a chunk this version does not know is kept whole, twice if it was there tw
   const kept = chunks(saved[bookKey(books[0])]).filter(one => one.tag === 'newa').map(one => String.fromCharCode(...one.data));
   expect(kept).toEqual(['first', 'second']);
   expect(damagedKeys(saved, bookId)).toHaveLength(0);
+});
+
+// ---- a group the record needs, lost (#510): the record is used, with the group's substitute ----
+
+const le32 = bytes => bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
+
+for (const group of ['AUTH', 'BOOK', 'TITL']) {
+  for (const how of ['absent', 'damaged']) {
+    test(`a record whose ${group} group is ${how} is used with the group's substitute, said once, and its save writes the group and keeps the old bytes (#510)`, async ({ page }) => {
+      await startWithLegacy(page, 6);
+      await expect(cards(page)).toHaveCount(2);
+      const record = (await store(page))[bookKey(books[0])];
+      const variant = assemble(record, partsOf(record).flatMap(part => {
+        if (part.tag !== group) return [part];
+        if (how === 'absent') return [];
+        const bytes = part.bytes.slice();
+        bytes[8] ^= 0x5a;
+        return [{ tag: part.tag, bytes }];
+      }));
+      await put(page, bookKey(books[0]), variant);
+      await reloadSettled(page);
+      // the title is lost with its group: the word the contents panel uses for a label with none
+      const shown = group === 'TITL' ? 'Untitled' : 'Alpha Tales';
+      await expect(card(page, shown)).toBeVisible();
+      if (group === 'AUTH') await expect(card(page, shown)).not.toContainText('Ann Writer');
+      else await expect(card(page, shown)).toContainText('Ann Writer');
+      await expect(cards(page)).toHaveCount(2);
+      await expect(alert(page)).toContainText('Some details of your library were damaged');
+      // nothing is unreadable: nothing to set aside, no copy yet, nothing written by opening
+      await librarySettings(page);
+      await expect(setAside(page)).toBeHidden();
+      const opened = await store(page);
+      // opening writes nothing; but on the android project the app syncs as it opens, and the save that makes
+      // (the library's own) repairs a record that lost a group at once, keeping the bytes it had
+      if (test.info().project.name !== 'android') {
+        expect(same(opened[bookKey(books[0])], variant)).toBe(true);
+        expect(damagedKeys(opened, bookId)).toHaveLength(0);
+      }
+      // a save writes the record whole, with the ids it is under, and keeps the bytes it had
+      await reload(page);
+      await bookMenu(page, shown);
+      await menuItem(page, 'Hide').click();
+      await reload(page);
+      const saved = await store(page);
+      const savedRecord = saved[bookKey(books[0])];
+      expect(tagsOf(savedRecord)).toEqual(tagsOf(record));
+      const ids = chunks(savedRecord).find(one => one.tag === 'BOOK').data;
+      expect([le32(ids.slice(0, 4)), le32(ids.slice(4, 8))]).toEqual([books[0].idHigh, books[0].idLow]);
+      const copies = damagedKeys(saved, bookId);
+      expect(copies).toHaveLength(1);
+      expect(same(saved[copies[0]], variant)).toBe(true);
+    });
+  }
+}
+
+test('a record under the key of another book than the ids it holds is the key\'s book, and its save writes the ids of the key (#510)', async ({ page }) => {
+  await startWithLegacy(page, 6);
+  await expect(cards(page)).toHaveCount(2);
+  const record = (await store(page))[bookKey(books[0])];
+  // the ids of a book that is not there
+  const wrong = makeChunk('BOOK', [1, 0, 0, 0, 2, 0, 0, 0]);
+  const variant = assemble(record, partsOf(record).map(part => (part.tag === 'BOOK' ? wrong : part)));
+  await put(page, bookKey(books[0]), variant);
+  await reloadSettled(page);
+  await expect(card(page, 'Alpha Tales')).toContainText('Ann Writer');
+  await expect(cards(page)).toHaveCount(2);
+  await expect(alert(page)).toContainText('Some details of your library were damaged');
+  expect(same((await store(page))[bookKey(books[0])], variant)).toBe(true);
+  await bookMenu(page, 'Alpha Tales');
+  await menuItem(page, 'Hide').click();
+  await reload(page);
+  const saved = await store(page);
+  const ids = chunks(saved[bookKey(books[0])]).find(one => one.tag === 'BOOK').data;
+  expect([le32(ids.slice(0, 4)), le32(ids.slice(4, 8))]).toEqual([books[0].idHigh, books[0].idLow]);
+  const copies = damagedKeys(saved, bookId);
+  expect(copies).toHaveLength(1);
+  expect(same(saved[copies[0]], variant)).toBe(true);
 });
