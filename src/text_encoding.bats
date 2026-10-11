@@ -197,8 +197,8 @@ in
         in @(pair_code, stop) end
       else let val stop = _after(n, i, 2) in @(65533, stop) end
     end
-  else if unit >= 56320 && unit < 57344 then @(65533, _after(n, i, 2))
-  else @(unit, _after(n, i, 2))
+  else if unit >= 56320 && unit < 57344 then let val stop = _after(n, i, 2) in @(65533, stop) end
+  else let val stop = _after(n, i, 2) in @(unit, stop) end
 end
 
 (* The character at i and the index after it, in a source that is not UTF-8 *)
