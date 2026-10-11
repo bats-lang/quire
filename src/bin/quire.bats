@@ -1735,8 +1735,8 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = (case+ control of
         | ~$R.none() => (if removed >= 0 then dict_remove(removed) else ())
         | ~$R.some(DictionariesDone()) => layer_close(LDictionaries())
-        (* a click outside *)
-        | ~$R.some(DictionariesPanel()) => layer_close(LDictionaries()))
+        (* a screen has no outside to click (#389) *)
+        | ~$R.some(DictionariesPanel()) => ())
     in 0 end)
   (* a dictionary's files picked to import (the input is made again to
      be cleared: its events are taken on its box) *)

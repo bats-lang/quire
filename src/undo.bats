@@ -23,6 +23,12 @@ implement $P.dispose<settled>(_) = ()
    is for a message with no action, which goes by itself (quire#364) *)
 #pub datasort offer_life = Brief | UntilDismissed
 
+(* Where the sync file is, which Turn off leaves there: the toast says it
+   stays (#389; Android's "Remove account" says what happens to the
+   account's data) *)
+#pub datatype sync_file_place =
+  | FileInGoogleDrive | FileInDropbox | FileInFastmail | FileOnServer
+
 (* What is offered back, each by its own words: the toast says what an
    Undo would undo. Its life is in its type *)
 #pub datavtype offered(offer_life) =
@@ -36,7 +42,7 @@ implement $P.dispose<settled>(_) = ()
   | BookmarkDeleted(UntilDismissed) of ()
   | LibraryTrashed(UntilDismissed) of ()
   | SettingsReset(UntilDismissed) of ()
-  | SyncTurnedOff(UntilDismissed) of ()
+  | SyncTurnedOff(UntilDismissed) of (sync_file_place)
   | CatalogueRemoved(UntilDismissed) of ()
   | DictionaryRemoved(UntilDismissed) of ()
   | CollectionDeleted(UntilDismissed) of ()
@@ -65,7 +71,12 @@ fn _offered_show {life:offer_life} (what: offered(life)): void =
   | ~BookmarkDeleted() => ui_text("undo-text", "Bookmark deleted")
   | ~LibraryTrashed() => ui_text("undo-text", "Library moved to the Trash, settings reset")
   | ~SettingsReset() => ui_text("undo-text", "Settings reset")
-  | ~SyncTurnedOff() => ui_text("undo-text", "Sync turned off")
+  | ~SyncTurnedOff(place) =>
+    (case+ place of
+    | FileInGoogleDrive() => ui_text("undo-text", "Sync turned off. The file stays in your Google Drive.")
+    | FileInDropbox() => ui_text("undo-text", "Sync turned off. The file stays in your Dropbox.")
+    | FileInFastmail() => ui_text("undo-text", "Sync turned off. The file stays in your Fastmail Files.")
+    | FileOnServer() => ui_text("undo-text", "Sync turned off. The file stays in your folder on the server."))
   | ~CatalogueRemoved() => ui_text("undo-text", "Catalogue removed")
   | ~DictionaryRemoved() => ui_text("undo-text", "Dictionary removed")
   | ~CollectionDeleted() => ui_text("undo-text", "Collection deleted")
