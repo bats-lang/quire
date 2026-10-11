@@ -1735,8 +1735,8 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = (case+ control of
         | ~$R.none() => (if removed >= 0 then dict_remove(removed) else ())
         | ~$R.some(DictionariesDone()) => layer_close(LDictionaries())
-        (* a click outside *)
-        | ~$R.some(DictionariesPanel()) => layer_close(LDictionaries()))
+        (* a screen has no outside to click (#389) *)
+        | ~$R.some(DictionariesPanel()) => ())
     in 0 end)
   (* a dictionary's files picked to import (the input is made again to
      be cleared: its events are taken on its box) *)
@@ -2741,10 +2741,13 @@ fn _highlight_tapped (node: Int, x: Int, y: Int): bool =
   | ~$R.none() => false
   | ~$R.some(offset) => annot_tap_select(node, offset)
 
-fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 19) = let
+fn _wire_reader {count:nat} (listeners: regs(count)): regs(count + 21) = let
   val listeners = RCons(listeners, OnEl("back-to-library"), "click", llam(_) => let val () = _show_library() in 0 end)
   val listeners = RCons(listeners, OnEl("previous-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_prev() in 0 end end)
   val listeners = RCons(listeners, OnEl("next-page"), "click", llam(_) => let val () = _hint_hide() in let val () = page_next() in 0 end end)
+  (* a chapter at a time: no further than the first or the last *)
+  val listeners = RCons(listeners, OnEl("chapter-previous"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(~1) in 0 end end)
+  val listeners = RCons(listeners, OnEl("chapter-next"), "click", llam(_) => let val () = _hint_hide() in let val () = reader_chapter_step(1) in 0 end end)
   (* what is selected as a pointer goes down: the press clears it *)
   val listeners = RCons(listeners, OnEl("page"), "pointerdown", llam(_) => let
       val () = !_press_selected := _has_selection()

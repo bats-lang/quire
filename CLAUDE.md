@@ -921,6 +921,26 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+* Where a place is (#383): the footer, the bar's label (`scrubber-percent`)
+  and its tip say how far into the book in one wording, "6% of book"
+  (`_put_book_percent`, over `_put_percent`; "<1%" once reading has begun),
+  where the label said "6%" beside the footer's "6% of book". A Contents
+  row and an annotation's chapter (its heading in the list, a bookmark's
+  row) say where the chapter starts, by `toc_place_of` over src/locator.bats
+  (the same `locator_kind` and number as a search hit; `ByPage` in a
+  fixed-layout book, `book_fixed`; `locator_thousandth` is the one rule of
+  the percent, shared with `_thousandth`). The Contents place is a span
+  over the row's right end (`toc-place`, in `toc-line`), not text of the
+  button, so a row's name stays its label. The `place_text` datatype of
+  the issue's "Prevent" is not made: a flat datatype cannot carry the
+  number, and the number's wording is written in one place instead
+  (`_put_book_percent`, `locator_put`). An annotation's row goes to its
+  place by the whole row (`.hgo`, with a chevron at its end), Delete is
+  quiet (`.quiet`: no edge, muted; it has Undo, so it is no equal of Add
+  note), and each style's filter has a swatch. `e2e/places.spec.js`.
+  Not done, filed as a follow-up: a place for each annotation row (the
+  chapter's is shown, not the annotation's own page).
+
 * A search result row (#381) shows the hit in its snippet, the match in
   bold (`.mk`; no new colour pair), and where it is in the book. The
   snippet is cut into three spans (`search-hit-lead`, `-mark`, `-trail`)
@@ -2813,6 +2833,19 @@ whose spine reads right to left, a Hebrew one whose spine does not say so,
 a vertical Japanese one, and a left to right one; `vertical.spec.js`
 fails first, naming the cause, where no font has Japanese characters
 (CI installs `fonts-noto-cjk`).
+
+A bookmarked page shows its mark once the bars hide (#388): a ribbon
+(`bookmark-mark`, `.bmk`, clipped by `clip-path`) in the page's top-right
+corner, inside the `--page-top` band, in the accent (proven on the ground as
+text is, `S_accent_bg`), shown by `.chrome-off .bmk-on`; `annot_star`, the one
+place the bookmark's state reaches the screen, matches a `bookmark_state`
+(`Marked | Unmarked`) to set the star and the mark together. Kindle and Kobo
+draw theirs in that corner; with the bars up the star says it. The bottom bar
+has Previous chapter and Next chapter beside the page turns (`chapter-previous`,
+`chapter-next`, `reader_chapter_step`), shown where there is a chapter to go
+to and not in a fixed-layout book (its chapters are its pages), following the
+reading direction as the page turns do (`.bot.rtl` orders): the next chapter is
+two taps from the page, three through Contents. `e2e/page-marks.spec.js`.
 
 A book is set vertically as Readium sets it, from its OPF (the book's
 CSS is dropped): `vertical-rl` when its spine reads right to left and

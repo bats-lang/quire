@@ -15,6 +15,7 @@
 staload "epub_xml.sats"
 staload "entity.sats"
 staload "book.sats"
+staload "locator.sats"
 staload "paths.sats"
 staload "ui.sats"
 staload "mem.sats"
@@ -625,27 +626,63 @@ fun _current {count:nat} .<count>. (entries: !toc(count), chapter: int, i: int, 
     in found end
     else let prval () = fold@(entries) in best end
 
+(* Where chapter chapter (from 0) starts in the open book: its page in a
+   fixed-layout book, else how far into the book, by the chapters' sizes
+   (the footer's scale); the same for a Contents row and an annotation's
+   chapter (#383) *)
+#pub fn toc_place_of (chapter: Int): @(locator_kind, Int)
+
+implement toc_place_of (chapter) = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then @(ByPage(), chapter + 1)
+  else let
+    val @(size_before, _, book_size) = book_weights(serial, chapter)
+  in @(ByPercent(), locator_thousandth(size_before, book_size)) end
+end
+
 fn _level_class {level:nat | level <= 3} (level: int level): [class_len:pos | class_len < 256] string class_len =
   if level = 0 then "pi" else if level = 1 then "pi pi1" else if level = 2 then "pi pi2" else "pi pi3"
 
-(* A row of the list: button toc-row<i> with the label
-   label_bytes[0, label_len) *)
+(* A row of the list: a line toc-line<i> holding the button toc-row<i> with
+   the label label_bytes[0, label_len) and, over its right end (a tap on it
+   is the button's), where the entry is in the book (toc-place<i>); an
+   entry that leads to no chapter has none *)
 fn _row {label_loc:agz}{label_size:pos}{label_len:pos | label_len <= LABEL_MAX; label_len <= label_size}{i:nat}{level:nat | level <= 3}
-  (i: int i, level: int level, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool): void = let
+  (i: int i, level: int level, label_bytes: !$A.arr(byte, label_loc, label_size), label_len: int label_len, current: bool, chapter: Int): void = let
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
+  val () = ui_add_n("contents-list", line_id, line_id_len, TDiv)
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
+  val () = ui_attr_n(line_id, line_id_len, AClass, "tocline")
+  val @(line_id, line_id_len) = nid_make("toc-line", i)
   val @(row_id, row_id_len) = nid_make("toc-row", i)
-  val () = ui_btn_n("contents-list", row_id, row_id_len, _level_class(level))
+  val () = ui_btn_nn(line_id, line_id_len, row_id, row_id_len, _level_class(level))
   val @(row_id, row_id_len) = nid_make("toc-row", i)
   val () = (if current then ui_attr_n(row_id, row_id_len, ACurrent, "true") else ui_attr_n(row_id, row_id_len, ACurrent, "false"))
   val label_copy = $A.alloc<byte>(label_len)
   val () = _copy_bytes(label_bytes, label_copy, label_len, 0)
   val @(row_id, row_id_len) = nid_make("toc-row", i)
-in ui_text_n_buf(row_id, row_id_len, label_copy, label_len) end
+  val () = ui_text_n_buf(row_id, row_id_len, label_copy, label_len)
+in
+  if chapter >= 0 then let
+    val @(line_id, line_id_len) = nid_make("toc-line", i)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+    val () = ui_add_nn(line_id, line_id_len, place_id, place_id_len, TSpan)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+    val () = ui_attr_n(place_id, place_id_len, AClass, "tocplace")
+    val @(kind, number) = toc_place_of(chapter)
+    val place_text = $A.alloc<byte>(32)
+    val place_end = locator_put(place_text, 0, kind, number)
+    val @(place_id, place_id_len) = nid_make("toc-place", i)
+  in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
+  else ()
+end
 
 fun _rows {count:nat}{i:nat} .<count>. (entries: !toc(count), i: int i, current: int): void =
   case+ entries of
   | toc_nil() => ()
-  | @toc_cons(label_bytes, label_len, level, _, _, _, rest) => let
-      val () = _row(i, level, label_bytes, label_len, i = current)
+  | @toc_cons(label_bytes, label_len, level, chapter, _, _, rest) => let
+      val () = _row(i, level, label_bytes, label_len, i = current, chapter)
       val () = _rows(rest, i + 1, current)
       prval () = fold@(entries)
     in end
@@ -662,7 +699,7 @@ fun _chapter_rows {i,chapter_count:nat} .<max(chapter_count - i, 0)>. (i: int i,
   if i >= chapter_count then ()
   else let
     val @(label_bytes, label_len) = _chapter_label(i + 1)
-    val () = _row(i, 0, label_bytes, label_len, i = current)
+    val () = _row(i, 0, label_bytes, label_len, i = current, i)
     val () = $A.free<byte>(label_bytes)
   in _chapter_rows(i + 1, chapter_count, current) end
 

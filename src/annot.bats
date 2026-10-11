@@ -24,6 +24,7 @@ staload "modal.sats"
 staload "undo.sats"
 staload "library.sats"
 staload "toc.sats"
+staload "locator.sats"
 staload "jsonio.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -808,16 +809,26 @@ fn _here (): int = let
   val () = _put(cell)
 in found end
 
-(* The bookmark button: "added" when the page shown has a bookmark *)
+(* Whether the page shown has a bookmark *)
+datatype bookmark_state = Marked | Unmarked
+
+fn _state_here (): bookmark_state = if _here() >= 0 then Marked() else Unmarked()
+
+(* The bookmark button: "added" when the page shown has a bookmark, and
+   the mark in the page's corner, which shows once the bars hide (Kindle
+   and Kobo draw it there; #388) *)
 #pub fn annot_star (): void
 
 implement annot_star () =
-  if _here() >= 0 then let
-    val () = ui_icon_set("bookmark-button", IcBookmarked)
-  in ui_attr("bookmark-button", APressed, "true") end
-  else let
-    val () = ui_icon_set("bookmark-button", IcBookmark)
-  in ui_attr("bookmark-button", APressed, "false") end
+  case+ _state_here() of
+  | Marked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmarked)
+      val () = ui_attr("bookmark-mark", AClass, "bmk bmk-on")
+    in ui_attr("bookmark-button", APressed, "true") end
+  | Unmarked() => let
+      val () = ui_icon_set("bookmark-button", IcBookmark)
+      val () = ui_attr("bookmark-mark", AClass, "bmk")
+    in ui_attr("bookmark-button", APressed, "false") end
 
 (* annotations without its i-th annotation *)
 fun _remove {count:nat} .<count>. (annotations: annotations(count), i: int): [kept_count:nat | kept_count <= count] @(annotations(kept_count), int kept_count) =
@@ -1546,6 +1557,12 @@ fn _child_text_button {parent_prefix_len,child_prefix_len:pos | parent_prefix_le
   val @(child_id, child_id_len) = nid_make(child_prefix, i)
 in ui_text_btn_nn(parent_id, parent_id_len, child_id, child_id_len, class_name, label) end
 
+(* A button child named by its label, quiet: Delete has Undo, so it is
+   no equal of the button beside it (#383) *)
+fn _child_quiet_button {parent_prefix_len,child_prefix_len:pos | parent_prefix_len <= 16; child_prefix_len <= 16}{i:nat}{label_len:pos | label_len < 256}
+  (parent_prefix: string parent_prefix_len, child_prefix: string child_prefix_len, i: int i, label: string label_len): void =
+  _child_text_button(parent_prefix, child_prefix, i, "hbtn quiet", label)
+
 (* Element id_prefix<i>'s text: text[0, text_len) *)
 fn _text_of {id_prefix_len:pos | id_prefix_len <= 16}{i:nat}{l:agz}{n:pos}{text_len:nat | text_len < n; text_len < 65536}
   (id_prefix: string id_prefix_len, i: int i, text: !$A.arr(byte, l, n), text_len: int text_len): void = let
@@ -1564,8 +1581,27 @@ fn _heading {list_id_len:pos | list_id_len < 256}{chapter:nat} (list_id: string 
 in
   if chapter >= LOST_CHAPTER then ui_text_n(group_id, group_id_len, "Not found in this version")
   else let
+    val @(title_id, title_id_len) = nid_make("annot-heading", chapter)
+    val () = ui_add_nn(group_id, group_id_len, title_id, title_id_len, TSpan)
     val @(label_bytes, label_len) = toc_label_of(chapter)
-  in ui_text_n_buf(group_id, group_id_len, label_bytes, label_len) end
+    val @(title_id, title_id_len) = nid_make("annot-heading", chapter)
+    val () = ui_text_n_buf(title_id, title_id_len, label_bytes, label_len)
+    (* where the chapter starts in the book, as Contents says it *)
+    val @(group_id, group_id_len) = nid_make("annot-group", chapter)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+    val () = ui_add_nn(group_id, group_id_len, place_id, place_id_len, TSpan)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+    val () = ui_attr_n(place_id, place_id_len, AClass, "cnt")
+    val @(kind, number) = toc_place_of(chapter)
+    val place_text = $A.alloc<byte>(32)
+    (* " · " (a space, U+00B7, a space), then the place *)
+    val () = $A.set<byte>(place_text, 0, $A.int2byte(32))
+    val () = $A.set<byte>(place_text, 1, $A.int2byte(194))
+    val () = $A.set<byte>(place_text, 2, $A.int2byte(183))
+    val () = $A.set<byte>(place_text, 3, $A.int2byte(32))
+    val place_end = locator_put(place_text, 4, kind, number)
+    val @(place_id, place_id_len) = nid_make("annot-place", chapter)
+  in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end
 end
 
 (* One row of the annotations list: highlight i *)
@@ -1592,7 +1628,7 @@ fn _highlight_row {i:nat}{text_loc,note_loc:agz}{text_size,note_size:pos}{text_l
   val () = _child("highlight-row", "highlight-tools", i, TDiv, "hbtns")
   val () = (if note_len > 0 then _child_text_button("highlight-tools", "highlight-edit", i, "hbtn", "Edit note")
     else _child_text_button("highlight-tools", "highlight-edit", i, "hbtn", "Add note"))
-in _child_text_button("highlight-tools", "highlight-delete", i, "hbtn", "Delete") end
+in _child_quiet_button("highlight-tools", "highlight-delete", i, "Delete") end
 
 (* The highlights the annotations list shows: every one, or one style's *)
 #pub datatype style_filter = EveryStyle | OnlyYellow | OnlyOrange | OnlyUnderlined
@@ -1708,6 +1744,14 @@ fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size
     else let
       val @(label_bytes, label_len) = toc_label_of(chapter)
     in ui_text_n_buf(title_id, title_id_len, label_bytes, label_len) end)
+  (* where the chapter starts in the book, as Contents says it *)
+  val () = (if chapter >= LOST_CHAPTER then () else let
+      val () = _child("bookmark-go", "bookmark-place", i, TSpan, "hstyle")
+      val @(kind, number) = toc_place_of(chapter)
+      val place_text = $A.alloc<byte>(32)
+      val place_end = locator_put(place_text, 0, kind, number)
+      val @(place_id, place_id_len) = nid_make("bookmark-place", i)
+    in ui_text_n_buf(place_id, place_id_len, place_text, place_end) end)
   val () = (if text_len > 0 then let
       val () = _child("bookmark-go", "bookmark-snippet", i, TSpan, "snip")
     in _text_of("bookmark-snippet", i, text, text_len) end else ())
@@ -1717,7 +1761,7 @@ fn _bookmark_row {i:nat}{chapter:nat}{text_loc,note_loc:agz}{text_size,note_size
   val () = _child("bookmark-row", "bookmark-tools", i, TDiv, "hbtns")
   val () = (if note_len > 0 then _child_text_button("bookmark-tools", "bookmark-edit", i, "hbtn", "Edit note")
     else _child_text_button("bookmark-tools", "bookmark-edit", i, "hbtn", "Add note"))
-in _child_text_button("bookmark-tools", "bookmark-delete", i, "hbtn", "Delete") end
+in _child_quiet_button("bookmark-tools", "bookmark-delete", i, "Delete") end
 
 fun _bookmark_rows {count:nat}{i:nat} .<count>. (annotations: !annotations(count), i: int i): void =
   case+ annotations of
