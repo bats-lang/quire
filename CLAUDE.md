@@ -1251,6 +1251,35 @@ the record `Newer`, and a first four bytes that are not `QREC` make it
 (`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
 a decode never fails to say which.
 
+**A group added later is not loss when it is absent** (#497).
+A group is one of three modes in `scripts/record_tables.py`: `req`
+(the record needs it), `opt` (every version of the format has written
+it: absent is damage, present and damaged is loss, the defaults), and
+`added` (added to the format after records were written: absent is
+nothing, the record reads whole and the group has its defaults; present
+and damaged is loss as for `opt`). `prog`, `snum` and `tdir` are `added`,
+and every group added from now on is. Before this an absent group of
+either mode was `Damaged`, so a Quire that added a group made every
+record written before it unreadable: the book was shown nowhere, the
+banner said it could not be read, and Settings offered to set it aside
+(which would have moved it out of the library). By research: a PNG
+decoder must not require an ancillary chunk, protobuf reads an absent
+field as its default, and SQLite's `ADD COLUMN ... DEFAULT` leaves old
+rows unrewritten and valid; none counts a record written before the
+addition as damaged. The format version cannot tell them apart (the
+records in the wild are all version 1, with any prefix of the groups),
+so it is the group's own mode. A chunk cleanly cut out of a record is
+the same as one that was never there, as in PNG. The decoded record
+says which groups were absent (`rx_mk(format, least, vals, extras,
+absent)`, `vals` holding the group's defaults), reading is a proof
+about it and writing an absent group writes nothing, with the proof
+that the next chunk is not the group's (`SENC_absent_*`, `TAGDIFF`), so
+`decodes_encodes` and `encodes_decodes` hold byte for byte for a record
+with and without the group. The app only ever writes records with every
+group (`record_write` has `ab_nil()`), so the first save of an old
+record writes the groups it lacked; opening writes nothing and keeps no
+copy (`e2e/library-records.spec.js`, "written before ... existed").
+
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
 the index's tables are in `scripts/record_tables.py` and
@@ -1699,7 +1728,8 @@ ancillary group `snum` (`series_position`), written only when SERI's whole numbe
 does not already say it; SERI keeps the **whole number** (`_series_whole`: 2 for
 2.5, 0 for none or below 1), so an older Quire reads 2 and keeps `snum` as it
 keeps `prog`, and a record with no `snum` reads as SERI's whole number
-(`_series_read`), as the records written before it do. Neither the backup nor the
+(`_series_read`), as the records written before it do (they read whole: a
+group that is absent from a record written before it existed is not loss, #497). Neither the backup nor the
 sync file holds a book's series (it is the book's own, read from its file, so a
 second device or a restore shows what the file says). `e2e/series.spec.js`,
 `e2e/series-books.js` and `e2e/library-records.spec.js` test it.

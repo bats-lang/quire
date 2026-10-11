@@ -42,13 +42,15 @@ in next end
 
 (* ---------------- a book image from a number ---------------- *)
 
-fn numbers_of (value: Int): book_numbers = @{
+fn numbers_with (value: Int, progress: Int, directions: Int, series: Int): book_numbers = @{
   id_high = value, id_low = value, collections = value, collections_modified = value, minutes_elsewhere = value,
   pages_elsewhere = value, finished_at = value, finished_modified = value, chapter = value, chapters = value,
   page = value, pages = value, anchor = value, place_modified = value, place_declined = value, position = value,
   series_number = value, shelf = value, added = value, opened = value, shelf_modified = value, file_size = value,
-  cover = value, done = value, minutes_read = value, pages_read = value, progress_weighted = value, text_directions = value, series_position = value
+  cover = value, done = value, minutes_read = value, pages_read = value, progress_weighted = progress, text_directions = directions, series_position = series
 }
+
+fn numbers_of (value: Int): book_numbers = numbers_with(value, value, value, value)
 
 fn text_of {n:nat | n < 256} (len: int n, letter: int): [l:agz] $A.arr(byte, l, n + 1) = let
   val text = $A.alloc<byte>(len + 1)
@@ -134,6 +136,117 @@ in
   | ~BR_newer() => @(4, true)
   | ~BR_damaged() => @(5, true)
 end
+
+(* The record of bytes, read and written again: whether it is read whole and written as other, other_n bytes *)
+fn rewritten_as {l:agz}{n:pos | n <= 1048576}{other_l:agz}{other_n:pos | other_n <= 1048576}
+  (bytes: !$A.arr(byte, l, n), n: int n, other: !$A.arr(byte, other_l, other_n), other_n: int other_n): bool = let
+  val list = blist_of_array(bytes, 0, n)
+  val (_ | read) = book_record_read(list)
+in
+  case+ read of
+  | ~BR_ok(record) => let
+      val (_ | again) = book_record_write(record)
+      val (_ | count) = blist_len(again)
+      val equal = (if count = other_n then let
+          val rewritten = blist_to_buffer(again, other_n)
+          val same = equal_prefix(other, rewritten, other_n, 0)
+          val () = $A.free<byte>(rewritten)
+        in same end else false): bool
+      val () = blist_free(again)
+      val () = book_record_free(record)
+    in equal end
+  | ~BR_loss(record, lost) => let
+      val () = lostv_free(lost)
+      val () = book_record_free(record)
+    in false end
+  | ~BR_notquire() => false
+  | ~BR_newer() => false
+  | ~BR_damaged() => false
+end
+
+(* ---------------- groups added later, absent from a record (#497) ---------------- *)
+
+(* a byte of the array, or 0 outside it *)
+fn byte_at {l:agz}{n:pos}{i:int} (bytes: !$A.arr(byte, l, n), n: int n, i: int i): int =
+  if i >= 0 then (if i < n then byte2int0($A.get<byte>(bytes, i)) else 0) else 0
+
+(* bytes[from, to) put into dst from at on; the next place *)
+fun put_span {l:agz}{n:pos}{dl:agz}{dn:pos}{from,to,at:nat | from <= to; to <= n} .<to - from>.
+  (bytes: !$A.arr(byte, l, n), n: int n, dst: !$A.arr(byte, dl, dn), dn: int dn, from: int from, to: int to, at: int at): [r:nat] int r =
+  if from >= to then at
+  else let
+    val () = (if at < dn then $A.set<byte>(dst, at, $A.get<byte>(bytes, from)) else ())
+  in put_span(bytes, n, dst, dn, from + 1, to, at + 1) end
+
+(* the same, unless the group is dropped *)
+fn put_span_unless {l:agz}{n:pos}{dl:agz}{dn:pos}{from,to,at:nat | from <= to; to <= n}
+  (drop: bool, bytes: !$A.arr(byte, l, n), n: int n, dst: !$A.arr(byte, dl, dn), dn: int dn, from: int from, to: int to, at: int at): [r:nat] int r =
+  if drop then at else put_span(bytes, n, dst, dn, from, to, at)
+
+(* the size of the record without the groups dropped, each 16 bytes *)
+fn kept_size {n:pos | n >= 60} (n: int n, drop_prog: bool, drop_snum: bool, drop_tdir: bool): [k:int | k >= 12; k <= n] int k =
+  if drop_prog then
+    (if drop_snum then (if drop_tdir then n - 48 else n - 32) else (if drop_tdir then n - 32 else n - 16))
+  else
+    (if drop_snum then (if drop_tdir then n - 32 else n - 16) else (if drop_tdir then n - 16 else n))
+
+(* the record without the added groups it is told to drop. The groups are the last three before the end chunk
+   (prog, snum, tdir, each 16 bytes: a four byte number), and the end chunk is 12 bytes. *)
+fn without_added {l:agz}{n:pos | n >= 60; n <= 1048576} (bytes: !$A.arr(byte, l, n), n: int n, drop_prog: bool, drop_snum: bool, drop_tdir: bool)
+  : [m:pos | m <= 1048576] @([copy_l:agz] $A.arr(byte, copy_l, m), int m) = let
+  val kept = kept_size(n, drop_prog, drop_snum, drop_tdir)
+  val copy = $A.alloc<byte>(kept)
+  val at = put_span(bytes, n, copy, kept, 0, n - 60, 0)
+  val at = put_span_unless(drop_prog, bytes, n, copy, kept, n - 60, n - 44, at)
+  val at = put_span_unless(drop_snum, bytes, n, copy, kept, n - 44, n - 28, at)
+  val at = put_span_unless(drop_tdir, bytes, n, copy, kept, n - 28, n - 12, at)
+  val _ = put_span(bytes, n, copy, kept, n - 12, n, at)
+in @(copy, kept) end
+
+fn image_defaulted (drop_prog: bool, drop_snum: bool, drop_tdir: bool): tested = let
+  val numbers = numbers_with(31337, (if drop_prog then 0 else 31337), (if drop_tdir then 0 else 31337), (if drop_snum then 0 else 31337))
+in
+  case+ book_image_make(numbers, text_of(7, 1), 7, text_of(5, 2), 5, text_of(9, 3), 9) of
+  | ~BookImaged(image) => Tested(image)
+  | ~BookNotImaged() => let val () = fail("an image of a number of 32 bits") in NoTested() end
+end
+
+(* A record written before some of the added groups existed is read whole, with their defaults, and is
+   written with all of them: the record of the image holding those defaults *)
+fn check_absent_added (drop_prog: bool, drop_snum: bool, drop_tdir: bool): void =
+  case+ image_of(31337, 9, 7, 5) of
+  | ~NoTested() => ()
+  | ~Tested(full) =>
+    (case+ image_defaulted(drop_prog, drop_snum, drop_tdir) of
+     | ~NoTested() => book_image_free(full)
+     | ~Tested(expected) => let
+         val @(bytes, n) = encode(full)
+         val @(expected_bytes, expected_n) = encode(expected)
+         val any = (drop_prog || drop_snum || drop_tdir)
+         val () = (if n >= 60 then (if n <= 1048576 then let
+             (* the layout this relies on: prog, snum, tdir, then IEND *)
+             val () = expect(byte_at(bytes, n, n - 60 + 4) = 112 && byte_at(bytes, n, n - 44 + 4) = 115 && byte_at(bytes, n, n - 28 + 4) = 116 && byte_at(bytes, n, n - 12 + 4) = 73, "the added groups are the last before IEND")
+             val @(cut, m) = without_added(bytes, n, drop_prog, drop_snum, drop_tdir)
+             val @(code, written) = classify(cut, m, expected)
+             val () = expect(code = 0, "a record without added groups is read whole, with their defaults")
+             val () = expect((if any then (not written) else written), "a record without added groups is written with them; one with all of them as it was")
+             val () = expect(rewritten_as(cut, m, expected_bytes, expected_n), "a record without added groups is written as the record of their defaults")
+             val () = $A.free<byte>(cut)
+           in () end else fail("a record of a sensible size")) else fail("a record of a sensible size"))
+         val () = $A.free<byte>(expected_bytes)
+         val () = $A.free<byte>(bytes)
+         val () = book_image_free(expected)
+       in book_image_free(full) end)
+
+fn check_absent (): void = let
+  val () = check_absent_added(false, false, false)
+  val () = check_absent_added(true, false, false)
+  val () = check_absent_added(false, true, false)
+  val () = check_absent_added(false, false, true)
+  val () = check_absent_added(true, true, false)
+  val () = check_absent_added(true, false, true)
+  val () = check_absent_added(false, true, true)
+in check_absent_added(true, true, true) end
 
 (* ---------------- the checksum ---------------- *)
 
@@ -326,6 +439,7 @@ implement main0 () = let
   val () = check_edges(0)
   val () = check_strings()
   val () = check_damage()
+  val () = check_absent()
   val () = check_fuzz(20000)
 in
   if !_failures = 0 then println! ("all ok")
