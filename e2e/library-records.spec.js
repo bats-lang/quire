@@ -5,7 +5,7 @@
 // is never shown wrong and never written over.
 
 import { test, expect } from './fixtures.js';
-import { legacyLibrary, hex7, bookKey, store, put, forgetRecords } from './legacy-library.js';
+import { legacyLibrary, hex7, bookKey, store, put, forgetRecords, syncEnded, reloadSettled } from './legacy-library.js';
 import {
   start, epubFile, importFiles, card, cards, titles, bookMenu, menuItem, dialog, reload,
   librarySettings, settingsButton, settingsScreen, openShelf, emptyTrash,
@@ -24,9 +24,16 @@ const books = [
 /** The app started with "lib" holding the library, version version */
 async function startWithLegacy(page, version, library = books) {
   await start(page);
+  await syncEnded(page);
   await forgetRecords(page);
   await put(page, 'lib', [...legacyLibrary(version, ['To read', 'Shared'], library)]);
-  await reload(page);
+  await reloadSettled(page);
+  await recordsWritten(page, library);
+}
+
+/** The records the conversion of "lib" makes are in the store */
+async function recordsWritten(page, library) {
+  for (const book of library) await expect.poll(async () => (await store(page))[bookKey(book)] !== undefined, { message: `the record of ${book.title} is written` }).toBe(true);
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -181,7 +188,7 @@ test('a damaged book record and a damaged collections record are set aside, thei
   damagedIndex[10] ^= 0x5a;
   await put(page, bookKey(books[0]), damagedBook);
   await put(page, 'library/index', damagedIndex);
-  await reload(page);
+  await reloadSettled(page);
   await expect(card(page, 'Alpha Tales')).toHaveCount(0);
   await expect(card(page, 'Gamma Days')).toBeVisible();
   const before = await store(page);
@@ -218,7 +225,7 @@ test('a record a newer Quire wrote, or one that reads, is not offered to be set 
   const newer = stored[bookKey(books[0])].slice();
   newer[6] = 9;
   await put(page, bookKey(books[0]), newer);
-  await reload(page);
+  await reloadSettled(page);
   await librarySettings(page);
   await expect(setAside(page)).toBeHidden();
   expect(same((await store(page))[bookKey(books[0])], newer)).toBe(true);
@@ -230,7 +237,7 @@ test('a set aside that is aborted midway leaves the old record byte for byte, an
   const damaged = (await store(page))[bookKey(books[0])].slice();
   damaged[10] ^= 0x5a;
   await put(page, bookKey(books[0]), damaged);
-  await reload(page);
+  await reloadSettled(page);
   await librarySettings(page);
   // the transaction is aborted after the copy is put and before the key is deleted
   await page.evaluate(() => {
