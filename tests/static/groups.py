@@ -37,7 +37,11 @@ def load(root):
 
 
 def shapes_in(root):
-    text = (Path(root) / "e2e" / "old-library.spec.js").read_text()
+    path = Path(root) / "e2e" / "old-library.spec.js"
+    if not path.exists():
+        # a fixture's copy is not named *.spec.js, which the unit tests would collect
+        path = Path(root) / "e2e" / "old-library.spec.js.fixture"
+    text = path.read_text()
     block = re.search(r'const SHAPES = \[(.*?)\n\];', text, re.S)
     if not block:
         return None
