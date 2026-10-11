@@ -1426,6 +1426,35 @@ read of storage changed: each still folds, as #174 says.
   button, an unlisted name's details, Try again showing the books and a
   later import being kept, and a retry that fails.
 
+## A book's place in its series is a position in hundredths (#434)
+
+`opf_series` (`src/epub_xml.bats`) reads a book's series and position: the
+first `belongs-to-collection` that is a series (one another meta refines as
+`collection-type` `set` is not), and the `group-position` that **refines it**
+(any, when the collection has no id); else Calibre's `calibre:series` and
+`calibre:series_index`. A position is a number with an optional sign, digits
+and a `.` or `,` with digits after it, spaces around it ignored (`_number_scan`),
+kept to two places (3.125 is 3.12), `-99999.99` to `99999.99`; anything else
+("II", "Part Two", "2 5", "1e2", empty) is no position, never a refusal. Calibre
+keeps `series_index` as a float, so 0 is a prequel and 2.5 a novella between
+volumes 2 and 3: the library sorts a series by the number, 0 and negatives
+included, and a book of the series with no number after those that have one,
+by title.
+
+`bnums.series_position` is `series_position_of(hundredths)`: 0 for none, else
+the hundredths plus 10000001 (as `progress_weighted` is the thousandth plus one),
+so the order of the ints is the order of the positions. The card and Book info
+(a Series row, `lib_series_line`) show it as written without a trailing zero
+(`Foundation · 2.5`, `· 2`, `· 1.25`, `· 0`, `· -1`). A record keeps it in an
+ancillary group `snum` (`series_position`), written only when SERI's whole number
+does not already say it; SERI keeps the **whole number** (`_series_whole`: 2 for
+2.5, 0 for none or below 1), so an older Quire reads 2 and keeps `snum` as it
+keeps `prog`, and a record with no `snum` reads as SERI's whole number
+(`_series_read`), as the records written before it do. Neither the backup nor the
+sync file holds a book's series (it is the book's own, read from its file, so a
+second device or a restore shows what the file says). `e2e/series.spec.js`,
+`e2e/series-books.js` and `e2e/library-records.spec.js` test it.
+
 ## What allocates is linear
 
 wasm has no garbage collector, so outside `$UNSAFE` nothing that

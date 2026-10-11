@@ -16,6 +16,9 @@ BOOK_GROUPS = [
   ("TITL", "req", [("title", "s")]),
   # lower case first letter: ancillary, so a Quire that does not know it keeps it and still reads the record
   ("prog", "opt", [("progress_weighted", "i")]),
+  # a series position kept in hundredths (quire#434): 0 none, else the hundredths plus 10000001; with no such
+  # chunk the position is the whole number of SERI, which an older Quire reads and writes
+  ("snum", "opt", [("series_position", "i")]),
   # the direction of the title and of the author as the package gives them (quire#419): two codes in one number
   ("tdir", "opt", [("text_directions", "i")]),
 ]

@@ -4,6 +4,7 @@
       "keys.spec.js",
       "media.spec.js",
       "relaunch.spec.js",
+      "series.spec.js",
       "spreads.spec.js",
       "sync-fastmail.spec.js"
     ],
