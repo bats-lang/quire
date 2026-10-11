@@ -25,10 +25,12 @@ and every name a group lists exists: anything else fails, so a spec or a
 fixture added and not put in a group fails CI instead of never running.
 
 Every e2e group runs in the `android` project too (#295): every project
-of playwright.config.js runs in each group (check.yml's run names no
---project), and the `android` project must be there and run every spec:
-no testMatch, testIgnore, grep or grepInvert in it or over the whole
-configuration, and no --project, --grep or --grep-invert on the run. A
+of playwright.config.js runs in each group (check.yml's run, through
+`gen-pwa test`, names no --project), and the `android` project must be
+there and run every spec: no testMatch, testIgnore, grep or grepInvert
+in it or over the whole configuration, and no --project, --grep or
+--grep-invert on the run (`gen-pwa test`'s own split by @serial runs
+every test, in one of its two runs). A
 spec that cannot apply on Android skips itself, saying why. Removing the
 project or narrowing it fails CI.
 
@@ -128,9 +130,9 @@ def android_problems():
         if re.search(rf'\b{key}\s*:', outside):
             found.append(f'playwright.config.js narrows every project by {key}, android among them (#295)')
     with open(os.path.join(ROOT, '.github', 'workflows', 'check.yml')) as workflow_file:
-        runs = [line for line in workflow_file if 'playwright test' in line]
-    if not runs:
-        found.append('check.yml runs no `playwright test`')
+        runs = [line for line in workflow_file if 'playwright test' in line or 'gen-pwa test' in line]
+    if not any('gen-pwa test' in line for line in runs):
+        found.append('check.yml runs no `gen-pwa test`')
     for line in runs:
         if re.search(r'--project|--grep|(^|\s)-g\s', line):
             found.append(f'check.yml narrows the e2e run, so a group may leave out the `android` project: {line.strip()}')
