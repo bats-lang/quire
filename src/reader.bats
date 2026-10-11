@@ -2508,7 +2508,7 @@ end
 (* Whether data[offset + i, offset + tag_len) is letters, digits and hyphens *)
 (* The book's language (its OPF's dc:language), when it is a plausible
    language tag: 1 to 35 letters, digits and hyphens *)
-datavtype book_lang =
+#pub datavtype book_lang =
   | {l:agz}{lang_len:pos | lang_len <= 35} BookLang of ($A.arr(byte, l, 35), int lang_len)
   | NoBookLang of ()
 
