@@ -291,7 +291,8 @@ in
     val path = $A.alloc<byte>(path_size)
     val _ = book_read(serial, file_size, opf_name_offset, path, dir_len)
     val () = $S.copy_from_borrow(data, href_offset, n, path, dir_len, path_size, href_path_len)
-    val resolved_len = path_norm(path, path_size)
+    val decoded_len = path_unescape(path, path_size, dir_len)
+    val resolved_len = path_norm_in(path, path_size, decoded_len)
   in
     if resolved_len <= 0 then let val () = $A.free<byte>(path) in NotAnImage() end
     else let
@@ -504,6 +505,22 @@ fn _opf_done {file_size:pos}{l:agz}{n:pos}{compressed_offset:nat}{compressed_siz
   | AddAlone() => _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
   | Replace() => _opf_store(serial, file_size, opf_bytes, n, compressed_offset, compressed_size, method, opf_name_offset, opf_name_len, mode, library_index, id_high, id_low)
 
+(* The package document the container.xml names, path[0, path_len) being its
+   full-path: a URL from the container's root, so percent-escapes are decoded and
+   "./" and a leading "/" resolved (quire#433); frees path *)
+fn _read_package {file_size:pos}{l:agz}{path_len:pos | path_len < 65536}
+  (serial: int, file_size: int file_size, path: $A.arr(byte, l, path_len), path_len: int path_len): zip_got(file_size) = let
+  val decoded_len = path_unescape(path, path_len, 0)
+  val resolved_len = path_norm_in(path, path_len, decoded_len)
+  val exact_len = (if resolved_len <= 0 then 1 else resolved_len): [exact_len:pos | exact_len <= path_len] int exact_len
+  val exact = $A.alloc<byte>(exact_len)
+  val path = $S.copy_arr_region(path, 0, path_len, exact, exact_len, exact_len)
+  val () = $A.free<byte>(path)
+  val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
+  val got = book_zip_read(serial, file_size, exact_bytes, exact_len)
+  val () = release_bytes(exact_frozen, exact_bytes)
+in got end
+
 (* Reads the container.xml and OPF of book `serial` (the file_size-byte
    file just put in the book cell), then _opf_done; the promise resolves with
    how that went *)
@@ -563,9 +580,7 @@ in
                 val () = $S.copy_from_borrow(xml_bytes, opf_path_offset, xml_size, path_buffer, 0, opf_path_len, opf_path_len)
                 val () = $A.drop<byte>(xml_frozen, xml_bytes)
                 val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
-                val @(path_frozen, path_bytes) = $A.freeze<byte>(path_buffer)
-                val opf_entry = book_zip_read(serial, file_size, path_bytes, opf_path_len)
-                val () = release_bytes(path_frozen, path_bytes)
+                val opf_entry = _read_package(serial, file_size, path_buffer, opf_path_len)
                 val () = (if ~_is_reopen(mode) then _stage("Reading metadata", 60) else ())
               in
                 case+ opf_entry of

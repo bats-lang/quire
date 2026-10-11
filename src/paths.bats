@@ -12,6 +12,8 @@ fun _after_last_slash {l:agz}{n:pos}{position,path_end:nat | position <= path_en
   : [found:int | after_slash <= found; found <= path_end] int found =
   if position >= path_end then after_slash
   else if byte2int0($A.get<byte>(path, position)) = 47 then _after_last_slash(path, position + 1, path_end, position + 1)
+  (* a backslash, in the name of an entry written by a tool for Windows *)
+  else if byte2int0($A.get<byte>(path, position)) = 92 then _after_last_slash(path, position + 1, path_end, position + 1)
   else _after_last_slash(path, position + 1, path_end, after_slash)
 
 (* The end of the segment of path[start, path_len): the next '/' at or

@@ -15,9 +15,13 @@ const OPF = 'OEBPS/content.opf';
 const base = (title, more = {}) => createEpub({ title, author: 'Containers', chapters: 3, paragraphsPerChapter: 8, ...more });
 
 /** The entries of a book made from opts, changed by change(entries) */
-const archive = (title, change, more, zipOptions) => () => {
-  const entries = readZip(base(title, more));
-  return writeZip(change(entries) || entries, zipOptions);
+const archive = (title, change, more, zipOptions) => {
+  const bytes = () => {
+    const entries = readZip(base(title, more));
+    return writeZip(change(entries) || entries, zipOptions);
+  };
+  bytes.title = title;
+  return bytes;
 };
 const find = (entries, name) => entries.find(entry => entry.name === name);
 const text = entry => entry.data.toString('utf8');
@@ -103,9 +107,9 @@ export const containerBooks = {
     entries.map(entry => isMimetype(entry) ? entry : { ...entry, name: entry.name.replaceAll('/', '\\') })) },
 
   /** Two rootfiles: a second rendition of another title with its own chapter */
-  twoRootfiles: { valid: true, bytes: () => {
+  twoRootfiles: { valid: true, bytes: Object.assign(() => {
     const entries = readZip(base('First Rendition'));
-    const other = readZip(createEpub({ title: 'Second Rendition', author: 'Containers', chapters: 1, paragraphsPerChapter: 4 }));
+    const other = readZip(createEpub({ title: 'Second Rendition', author: 'Containers', rawChapters: [{ body: '<h1>Other</h1><p>Other rendition 0.</p>' }], toc: [{ label: 'Other', href: 'chapter1.xhtml' }] }));
     const container = find(entries, 'META-INF/container.xml');
     container.data = Buffer.from(text(container).replace('</rootfiles>',
       '  <rootfile full-path="OTHER/content.opf" media-type="application/oebps-package+xml"/>\n  </rootfiles>'), 'utf8');
@@ -113,15 +117,15 @@ export const containerBooks = {
       if (entry.name.startsWith('OEBPS/')) entries.push({ ...entry, name: entry.name.replace('OEBPS/', 'OTHER/') });
     }
     return writeZip(entries);
-  } },
+  }, { title: 'First Rendition' }) },
 
   /** A full-path with an encoded space (the package is in a folder with a space) */
-  rootfileEncoded: { valid: true, bytes: () => {
+  rootfileEncoded: { valid: true, bytes: Object.assign(() => {
     const entries = readZip(base('Encoded full-path')).map(entry =>
       entry.name.startsWith('OEBPS/') ? { ...entry, name: entry.name.replace('OEBPS/', 'OPS dir/') } : entry);
     setText(entries, 'META-INF/container.xml', xml => xml.replace('OEBPS/', 'OPS%20dir/'));
     return writeZip(entries);
-  } },
+  }, { title: 'Encoded full-path' }) },
 
   /** A full-path with a leading slash */
   rootfileSlash: { valid: false, errors: ['RSC-026'], bytes: archive('Leading slash', entries => {
@@ -162,4 +166,3 @@ export const containerBooks = {
   opfCrlf: { valid: true, bytes: archive('OPF with CRLF', entries => { setText(entries, OPF, xml => xml.replace(/\n/g, '\r\n')); }) },
 };
 
-export { zip64Extra };
