@@ -91,8 +91,10 @@ implement $P.dispose<settled>(_) = ()
 #pub datatype readout = PagesLeft | PageOfPages | ChapterOfChapters | TimeLeftInChapter | TimeLeftInBook
 #pub typedef set_rd = readout
 
-(* A chapter turned across in pages, or scrolled down *)
-#pub datatype page_flow = Paged | Scrolled
+(* A chapter turned across in pages, or scrolled down, or as the open
+   book asks (its rendition:flow of scrolled-doc or scrolled-continuous, or
+   roll layout): the setting's default, and what Pages and Scroll replace *)
+#pub datatype page_flow = Paged | Scrolled | ByBook
 #pub typedef set_flow = page_flow
 
 (* Paged, the columns a screen shows: auto (two on a wide screen in
@@ -152,10 +154,10 @@ implement rd_of_code (code) =
   if code = 1 then PageOfPages() else if code = 2 then ChapterOfChapters() else if code = 3 then TimeLeftInChapter()
   else if code = 4 then TimeLeftInBook() else PagesLeft()
 
-#pub fn flow_code (v: page_flow): [code:nat | code <= 1] int code
-implement flow_code (v) = case+ v of Paged() => 0 | Scrolled() => 1
+#pub fn flow_code (v: page_flow): [code:nat | code <= 2] int code
+implement flow_code (v) = case+ v of Paged() => 0 | Scrolled() => 1 | ByBook() => 2
 #pub fn flow_of_code (code: int): page_flow
-implement flow_of_code (code) = if code = 1 then Scrolled() else Paged()
+implement flow_of_code (code) = if code = 1 then Scrolled() else if code = 2 then ByBook() else Paged()
 
 #pub fn cols_code (v: column_count): [code:nat | code <= 2] int code
 implement cols_code (v) = case+ v of AutoColumns() => 0 | OneColumn() => 1 | TwoColumns() => 2
@@ -185,9 +187,25 @@ typedef settings = @{
 fn _defaults (): settings =
   @{ size = 18, line_height = 16, margin = 2, font = Literata(), align = Ragged(), hyphens = Hyphenated(),
      paragraph_spacing = 8, letter_spacing = 0, word_spacing = 0, dim_images = ImagesDimmed(), tap_zones = SideZones(),
-     volume_keys = KeysForVolume(), readout = PagesLeft(), scrolled = Paged(), columns = AutoColumns() }
+     volume_keys = KeysForVolume(), readout = PagesLeft(), scrolled = ByBook(), columns = AutoColumns() }
 
 val _set = ref<settings>(_defaults())
+
+(* Whether the open book asks to be scrolled (the OPF's: opf_scroll_preferred) *)
+val _book_scrolls = ref<bool>(false)
+
+(* Whether a chapter is scrolled down under flow: as the reader chose, or,
+   when they have not, as the open book asks *)
+#pub fn flow_scrolled (flow: set_flow): bool
+implement flow_scrolled (flow) =
+  case+ flow of
+  | Scrolled() => true
+  | Paged() => false
+  | ByBook() => !_book_scrolls
+
+(* The open book asks to be scrolled, or not *)
+#pub fn set_book_scrolls_set (scrolls: bool): void
+implement set_book_scrolls_set (scrolls) = !_book_scrolls := scrolls
 (* The theme chosen (auto, the default): kept apart from the record, as
    _ruby is, and taken out and put back, since it is linear *)
 val _theme_choice = ref<theme_choice>(Auto())
@@ -747,10 +765,9 @@ fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
 fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
   (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
   : [stop:nat | stop <= position + 440] int stop =
-  case+ scrolled of
-  | Scrolled() => _put_text(buf, position,
+  if flow_scrolled(scrolled) then _put_text(buf, position,
     ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}.caf:not(.vertical,.vertical-lr,.fixed){padding-block:0;margin-block:var(--page-top) var(--page-bottom)}.caf:not(.vertical,.vertical-lr,.fixed)::before,.caf:not(.vertical,.vertical-lr,.fixed)::after{content:'';position:fixed;left:0;right:0;top:0;height:var(--page-top)}.caf:not(.vertical,.vertical-lr,.fixed)::after{top:auto;bottom:0;height:var(--page-bottom)}")
-  | Paged() => position
+  else position
 
 (* A ruby's annotations hidden: its rt and rtc (an rp is not shown
    where ruby is, by the browser's own sheet). Layout, not colour *)
@@ -878,8 +895,8 @@ fn _show_controls (): void = let
   val () = _pressed("theme-dark", _is_chosen(theme, Fixed(Dark())))
   val () = _pressed("theme-night", _is_chosen(theme, Fixed(Night())))
   val () = _pressed("theme-grey", _is_chosen(theme, Fixed(Grey())))
-  val () = _pressed("layout-pages", flow_code(current.scrolled) = flow_code(Paged()))
-  val () = _pressed("layout-scroll", flow_code(current.scrolled) = flow_code(Scrolled()))
+  val () = _pressed("layout-pages", ~flow_scrolled(current.scrolled))
+  val () = _pressed("layout-scroll", flow_scrolled(current.scrolled))
   val columns = cols_code(current.columns)
   val () = _pressed("columns-auto", columns = cols_code(AutoColumns()))
   val () = _pressed("columns-one", columns = cols_code(OneColumn()))
