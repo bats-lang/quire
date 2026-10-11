@@ -210,6 +210,11 @@ implement $P.dispose<$IDB.stored>(_) = ()
    own, and all of theirs; @(0, 0, 0) when the chapters are unknown *)
 #pub fn book_weights (serial: int, chapter_index: int): @([before:nat] int before, [own:nat] int own, [total:nat] int total)
 
+(* Whether every chapter of the open book, book `serial`, that is there is a
+   fixed page and one at least is: a page of such a book is a spine item,
+   which is where a place in it is told by page (src/locator.bats) *)
+#pub fn book_fixed (serial: int): bool
+
 (* Where the book's text ends, for its percentage (#426): the first chapter
    of its back matter, as its landmarks name it (EPUB 3's `backmatter`).
    The chapters from there on weigh nothing in book_weights, so the end of
@@ -1009,6 +1014,25 @@ end
 
 implement book_text_end_set (serial, chapter_index) =
   if serial = !_book_serial then !_text_end := chapter_index else ()
+
+implement book_fixed (serial) = let
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(_, _, _, spine, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val fixed = (case+ spine of
+        | @Spine(chapters, _) => let
+            val all = book_all_fixed(chapters, false)
+            prval () = fold@(spine)
+          in all end
+        | NoSpine() => false): bool
+      prval () = fold@(book)
+      val () = book_put(book)
+    in fixed end
+    else let prval () = fold@(book); val () = book_put(book) in false end
+  | _ => let val () = book_put(book) in false end
+end
 
 implement book_weights (serial, chapter_index) = let
   val book = book_take()
