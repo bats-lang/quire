@@ -1,4 +1,5 @@
-(* a record without an added group is not read as damaged: only a group the record needs is *)
-prfn _static_added_group_missing {known,more:specs}{spec_n:pos}{tag:bytes}{kinds:layout}{defaults:fvals}
-  (): SDEC(known, gs_cons(tag, kinds, m_added(), defaults, more), spec_n, pnil(), sd_fail(cause_damaged())) =
-  SD_missing_end(MUSTHAVE_req())
+(* a record without an added group is not read as having lost it: only a group the record needs, or that every version has written, is lost *)
+prfn _static_added_group_lost {known,more:specs}{spec_n:nat}{tag:bytes}{kinds:layout}{defaults:fvals}{rest_result,whole_result:sdres}
+  (sub: SDEC(known, more, spec_n, pnil(), rest_result), prepend: PREPL(defaults, tag, rest_result, whole_result))
+  : SDEC(known, gs_cons(tag, kinds, m_added(), defaults, more), spec_n+1, pnil(), whole_result) =
+  SD_absent_lost_end(LOSES_req(), sub, prepend)

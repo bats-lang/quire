@@ -139,14 +139,16 @@ test('a window swap keeps the paragraph when scrolled, in two columns, and verti
   await expect.poll(() => onScreen(page, top)).toBe(true);
 });
 
+// checked after the debounced relayout has run (swapWindow), not before it (#484)
 test('a vertical book keeps its paragraph across a window swap', async ({ page }) => {
+  await page.clock.install();
   await page.goto('/');
   const size = page.viewportSize();
   await readFar(page, vertical);
   const top = await middleParagraph(page);
-  await page.setViewportSize({ width: size.height, height: size.width });
+  await swapWindow(page, { width: size.height, height: size.width });
   await expect.poll(() => onScreen(page, top)).toBe(true);
-  await page.setViewportSize(size);
+  await swapWindow(page, size);
   await expect.poll(() => onScreen(page, top)).toBe(true);
 });
 

@@ -350,10 +350,7 @@ fn _clamp1000 (value: Int): [clamped:nat | clamped <= 1000] int clamped =
 
 (* The thousandth of the book at a size position, of its total *)
 fn _thousandth (position: Int, total: Int): [thousandth:nat | thousandth <= 1000] int thousandth =
-  if total <= 0 then 0
-  (* position * 1000 fits an int *)
-  else if total < 2000000 then _clamp1000(position * 1000 / total)
-  else _clamp1000(position / (total / 1000))
+  locator_thousandth(position, total)
 
 (* The size position of a thousandth of total *)
 fn _of_thousandth (thousandth: Int, total: Int): Int =
@@ -573,11 +570,19 @@ end
 
 (* The percentage of a thousandth at buf[at, end_at): "<1" rather than "0"
    once reading has begun *)
-fn _put_percent {l:agz}{at:nat | at <= 5}{thousandth:nat | thousandth <= 1000}
-  (buf: !$A.arr(byte, l, 32), at: int at, thousandth: int thousandth, begun: bool): [end_at:nat | end_at <= at + 11] int end_at =
-  if thousandth >= 10 then $S.int_to_str(buf, at, 32, thousandth / 10)
+fn _put_percent {l:agz}{n:pos}{at:nat | at <= 5; at + 11 <= n}{thousandth:nat | thousandth <= 1000}
+  (buf: !$A.arr(byte, l, n), at: int at, n: int n, thousandth: int thousandth, begun: bool): [end_at:nat | end_at <= at + 11] int end_at =
+  if thousandth >= 10 then $S.int_to_str(buf, at, n, thousandth / 10)
   else if begun then _put(buf, at, "<1")
   else _put(buf, at, "0")
+
+(* How far into the book, in the one wording the footer, the scrubber's
+   label and its tip all use (#383): "32% of book", never "<1" before
+   reading has begun *)
+fn _put_book_percent {l:agz}{n:pos}{at:nat | at <= 5; at + 20 <= n}{thousandth:nat | thousandth <= 1000}
+  (buf: !$A.arr(byte, l, n), at: int at, n: int n, thousandth: int thousandth, begun: bool): [end_at:nat | end_at <= at + 20] int end_at = let
+  val offset = _put_percent(buf, at, n, thousandth, begun)
+in _put(buf, offset, "% of book") end
 
 (* The running footer, shown while the bars are hidden, on one line: the
    chapter's title in footer-title; in footer-readout the readout, which a tap on it turns
@@ -595,8 +600,7 @@ fn _show_footer {current_page,total,chapter,chapter_count:nat} (current_page: in
   (* " · ", the percentage (at most 11) and "% of book" *)
   val buf = $A.alloc<byte>(32)
   val offset = _put_separator(buf, 0)
-  val offset = _put_percent(buf, offset, thousandth, chapter_index > 0 || current_page > 0)
-  val offset = _put(buf, offset, "% of book")
+  val offset = _put_book_percent(buf, offset, 32, thousandth, chapter_index > 0 || current_page > 0)
 in _set_text_of("footer-book", buf, offset) end
 
 (* The page indicator: the chapter's title (its contents entry's label,
@@ -1747,12 +1751,11 @@ end
 
 
 (* The scrubber at thousandth: its thumb, its fill and the percentage *)
-fn _scrub_at {thousandth:nat | thousandth <= 1000} (thousandth: int thousandth): void = let
+fn _scrub_at {thousandth:nat | thousandth <= 1000} (thousandth: int thousandth, begun: bool): void = let
   val () = ui_place("scrubber-thumb", PLeft, _drawn_at(thousandth))
   val () = ui_place("scrubber-fill", PWidth, thousandth)
-  val buf = $A.alloc<byte>(16)
-  val offset = $S.int_to_str(buf, 0, 16, thousandth / 10)
-  val offset = _put(buf, offset, "%")
+  val buf = $A.alloc<byte>(32)
+  val offset = _put_book_percent(buf, 0, 32, thousandth, begun)
   val () = ui_text_buf("scrubber-percent", buf, offset)
   val buf = $A.alloc<byte>(16)
   val offset = $S.int_to_str(buf, 0, 16, thousandth / 10)
@@ -1767,7 +1770,7 @@ fn _scrub_show (): void =
   | @(page, page_count, chapter, _) => let
       val chapter_index = (if chapter > 0 then chapter - 1 else 0): Int
       val thousandth = _permille(chapter_index, page, page_count)
-      val () = _scrub_at(thousandth)
+      val () = _scrub_at(thousandth, chapter_index > 0 || page > 0)
       val left = (if page + 1 < page_count then page_count - page - 1 else 0): Int
       val rest = _rest_pages(chapter_index, page_count)
       val minutes = (if rest < 0 then ~1 else _minutes_for_pages(left + rest)): Int
@@ -1775,8 +1778,8 @@ fn _scrub_show (): void =
       if minutes < 0 then ()
       else let
         val buf = $A.alloc<byte>(64)
-        val offset = $S.int_to_str(buf, 0, 64, thousandth / 10)
-        val offset = _put(buf, offset, "% \xC2\xB7 ")
+        val offset = _put_book_percent(buf, 0, 64, thousandth, chapter_index > 0 || page > 0)
+        val offset = _put(buf, offset, " \xC2\xB7 ")
         val offset = _put_duration(buf, offset, 64, minutes)
         val offset = _put(buf, offset, " left")
       in ui_text_buf("scrubber-percent", buf, offset) end
@@ -5899,7 +5902,7 @@ in !_speed_last_minute := ~1 end
 #pub fun reader_scrub_preview (x: Int): void
 implement reader_scrub_preview (x) = let
   val thousandth = _track_at(x)
-  val () = _scrub_at(thousandth)
+  val () = _scrub_at(thousandth, thousandth > 0)
   val () = ui_place("scrubber-tip", PLeft, _drawn_at(thousandth))
   val () = (case+ reading_get() of
     | @(_, _, _, chapter_count) => let

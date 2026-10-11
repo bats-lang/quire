@@ -235,23 +235,26 @@ in _hide("stats-panel") end
    name and language with Remove, and the import of another (its
    language chosen first, then its files) *)
 fn _dictionaries (): void = let
-  val () = ui_el("bats-root", "dictionaries-panel", TDiv, "ovl")
-  val () = ui_el("dictionaries-panel", "dictionaries-box", TDiv, "menu")
-  val () = ui_labelled("dictionaries-box", NDialog, "dictionaries-title")
+  (* a screen like Sync's and Settings' (#389): a row that ends in a
+     chevron opens a screen, never a dialog *)
+  val () = ui_el("bats-root", "dictionaries-panel", TDiv, "info")
+  val () = ui_labelled("dictionaries-panel", NDialog, "dictionaries-title")
+  val () = ui_el("dictionaries-panel", "dictionaries-box", TDiv, "info-in")
   val () = ui_el("dictionaries-box", "dictionaries-title", TDiv, "mtitle")
   val () = ui_text("dictionaries-title", "Dictionaries")
   val () = ui_el("dictionaries-box", "dictionaries-none", TDiv, "cnone")
   val () = ui_text("dictionaries-none", "No dictionaries yet")
-  val () = ui_add("dictionaries-box", "dictionaries-list", TDiv)
+  val () = ui_el("dictionaries-box", "dictionaries-list", TDiv, "sgroup")
   val () = ui_el("dictionaries-box", "dictionary-language-row", TDiv, "srow")
   val () = ui_el("dictionary-language-row", "dictionary-language-label", TSpan, "slabel")
   val () = ui_text("dictionary-language-label", "Language")
   val () = ui_field("dictionary-language-row", "dictionary-language", FChoice, "ssel", "Dictionary language")
-  val () = ui_el("dictionaries-box", "dictionary-import", TDiv, "mi btn")
+  val () = ui_el("dictionaries-box", "dictionary-import", TDiv, "btn")
   val () = app_dictionary_input()
   val () = ui_el("dictionaries-box", "dictionaries-status", TDiv, "cnone")
   val () = ui_role("dictionaries-status", RStatus)
-  val () = ui_text_btn("dictionaries-box", "dictionaries-done", "btn btn-p", "Done")
+  val () = ui_el("dictionaries-box", "dictionaries-buttons", TDiv, "mbtns")
+  val () = ui_text_btn("dictionaries-buttons", "dictionaries-done", "btn btn-p", "Done")
 in _hide("dictionaries-panel") end
 
 (* A word looked up in a dictionary, over the page: the headword, its
@@ -949,11 +952,17 @@ fn _settings (): void = let
   (* Read aloud: its speed and voice (the voices of the book's
      language), offered and kept by read_aloud.bats, where the platform
      speaks *)
-  val () = ui_el("typography-aloud", "speech-row", TDiv, "srow")
-  val () = ui_el("speech-row", "speech-label", TSpan, "slabel")
-  val () = ui_text("speech-label", "Speed and voice")
-  val () = ui_field("speech-row", "speech-rate", FChoice, "ssel", "Reading speed")
-  val () = ui_field("speech-row", "speech-voice", FChoice, "ssel", "Voice")
+  (* two rows, each with its own label and select, so each is named by
+     the words it shows (WCAG 2.5.3, #389) *)
+  val () = ui_el("typography-aloud", "speech-row", TDiv, "sgroup")
+  val () = ui_el("speech-row", "speech-rate-row", TDiv, "srow")
+  val () = ui_el("speech-rate-row", "speech-rate-label", TSpan, "slabel")
+  val () = ui_text("speech-rate-label", "Reading speed")
+  val () = ui_field("speech-rate-row", "speech-rate", FChoice, "ssel", "Reading speed")
+  val () = ui_el("speech-row", "speech-voice-row", TDiv, "srow")
+  val () = ui_el("speech-voice-row", "speech-voice-label", TSpan, "slabel")
+  val () = ui_text("speech-voice-label", "Voice")
+  val () = ui_field("speech-voice-row", "speech-voice", FChoice, "ssel", "Voice")
   val () = _hide("speech-row")
   (* a book's narration: its speed (its slider is made at the settings'
      value, set_sliders) and whether page numbers and notes are read,
@@ -1014,6 +1023,11 @@ fn _annotations (): void = let
   val () = ui_text_btn("annotations-filter", "filter-yellow", "sbtn", style_label(Yellow()))
   val () = ui_text_btn("annotations-filter", "filter-orange", "sbtn", style_label(Orange()))
   val () = ui_text_btn("annotations-filter", "filter-underlined", "sbtn", style_label(Underlined()))
+  (* each style's swatch, after its name (the name says it; the swatch is
+     the colour it is drawn in) *)
+  val () = ui_el("filter-yellow", "filter-yellow-swatch", TSpan, "sw sw-yellow")
+  val () = ui_el("filter-orange", "filter-orange-swatch", TSpan, "sw sw-orange")
+  val () = ui_el("filter-underlined", "filter-underlined-swatch", TSpan, "sw sw-under")
   val () = ui_el("annotations-panel", "annotations-list", TDiv, "plist")
 in _hide("annotations-panel") end
 

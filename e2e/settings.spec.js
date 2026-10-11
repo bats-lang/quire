@@ -700,3 +700,21 @@ test.describe('auto at night, while the page stays', () => {
     await expect.poll(theme).toContain('th-light');
   });
 });
+
+test('each slider says its unit, and the read aloud tab names its two selects (#389)', async ({ page }) => {
+  await start(page);
+  await readBook(page, { title: 'Units', author: 'L', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Look');
+  const sheet = readingSettings(page);
+  await expect(sheet.locator('#size-value')).toHaveText(/\d+\u00a0px/);
+  await expect(sheet.locator('#line-height-value')).toHaveText(/\d\.\d\u00d7/);
+  for (const id of ['paragraph', 'letter', 'word']) await expect(sheet.locator(`#${id}-value`)).toHaveText(/^\d\.\d+\u00a0em$/);
+  await expect(sheet.locator('#margins-value')).toHaveText(/\d of 5/);
+  // a label for each of the read aloud tab's selects, the words of its name
+  await openReadingSettings(page, 'Read aloud');
+  for (const name of ['Reading speed', 'Voice']) {
+    const select = sheet.getByRole('combobox', { name });
+    if (await select.count() === 0) continue;
+    await expect(sheet.locator('.slabel', { hasText: name })).toHaveCount(1);
+  }
+});

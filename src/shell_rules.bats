@@ -98,7 +98,7 @@ fn shell_rules_library_page {left:nat | left >= 1831} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 1387} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1387] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -171,6 +171,16 @@ fn shell_rules_fields_and_banners {left:nat | left >= 1387} (sheet: sheet(left, 
   val sheet = lay(sheet, Position(), "relative")
   val sheet = lay(sheet, Top(), "auto")
   val sheet = lay(sheet, Margin(), "max(8px,var(--safe-top)) 0 0")
+  val sheet = close(sheet)
+  (* While a menu opened from the library is up, the banner is under it
+     (#507): the menus hang from the top of the screen, where the banner
+     now is, and with Copy details and Report wrapped under its message on
+     a phone it took the Settings row of the library menu, which no click
+     could reach. A screen (Settings, Sync, About) is not a menu: the
+     banner stays over it, where its Dismiss, Copy details and Report are
+     pressed *)
+  val sheet = rule(sheet, "#bats-root:has(:is(#library-menu,#card-menu,#collections-menu):not([data-hide='1'])) .banner.in-library")
+  val sheet = lay(sheet, ZIndex(), "1")
   val sheet = close(sheet)
   (* While the reader's bars are up the banner sits under the top bar
      (#374): the bar is the top app bar, and Material 3 puts a banner
@@ -276,7 +286,7 @@ fn shell_rules_import_and_book_lists {left:nat | left >= 1354} (sheet: sheet(lef
 in sheet end
 
 (* The book cards, from .conth on *)
-fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1479] sheet(after, false, false) = let
+fn shell_rules_book_cards {left:nat | left >= 1503} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1503] sheet(after, false, false) = let
   val sheet = rule(sheet, ".conth")
   val sheet = lay(sheet, FontWeight(), "600")
   val sheet = lay(sheet, MarginTop(), "8px")
@@ -335,7 +345,11 @@ fn shell_rules_book_cards {left:nat | left >= 1479} (sheet: sheet(left, false, f
   val sheet = rule(sheet, ".card *")
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
+  (* the same box in the list and the grid (quire#495): in the list the
+     card row stretches its children, which made this button as tall as
+     the card; centred, it is its own 48px square, as in the grid *)
   val sheet = rule(sheet, ".cmore")
+  val sheet = lay(sheet, AlignSelf(), "center")
   val sheet = lay(sheet, FontSize(), "22px")
   val sheet = lay(sheet, BorderRadius(), "8px")
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())

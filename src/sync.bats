@@ -966,6 +966,16 @@ fn service_title (service: sync_service): [name_len:pos | name_len < 64] string 
   | ServiceNextcloud() => "Nextcloud"
   | ServiceWebDav() => "WebDAV"
 
+(* What sets a service apart from the others, a line under its name
+   (Android's settings: supporting text says what a setting is, #389) *)
+fn service_summary (service: sync_service): [text_len:pos | text_len < 128] string text_len =
+  case+ service of
+  | ServiceGoogle() => "A private folder in your Google Drive"
+  | ServiceDropbox() => "A folder named Quire in Dropbox"
+  | ServiceFastmail() => "A folder named quire in Fastmail Files"
+  | ServiceNextcloud() => "A folder on your Nextcloud server"
+  | ServiceWebDav() => "Any WebDAV folder, with an app password"
+
 (* The one verb of a service's step button, whichever the service: the
    name says where to (quire#361; the app's Google account is Google
    Drive's sign-in too) *)
@@ -3454,11 +3464,13 @@ in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-passwor
 
 (* A service's row: its name, a button that opens its step, and its
    state beside it *)
-fn _row_make {row_len,button_len,state_len,label_len:pos | row_len < 256; button_len < 256; state_len < 256; label_len < 256}
-  (row: string row_len, button: string button_len, state: string state_len, label: string label_len): void = let
+fn _row_make {row_len,button_len,state_len,hint_len:pos | row_len < 256; button_len < 256; state_len < 256; hint_len < 256}
+  (row: string row_len, button: string button_len, state: string state_len, hint: string hint_len, service: sync_service): void = let
   val () = ui_el("sync-services", row, TDiv, "srow")
-  val () = ui_text_btn(row, button, "btn rowbtn chev", label)
+  val () = ui_text_btn(row, button, "btn rowbtn chev", service_title(service))
   val () = ui_add(row, state, TSpan)
+  val () = ui_el(row, hint, TSpan, "sabout")
+  val () = ui_text(hint, service_summary(service))
 in ui_show(state, false) end
 
 (* The sync screen (#331, from Material's settings and Android's own
@@ -3548,11 +3560,11 @@ implement sync_screen_make () = let
   val () = ui_text("sync-services-title", "Sync with")
   val () = ui_el("sync-box", "sync-services", TDiv, "sgroup")
   val () = ui_named("sync-services", NGroup, "Sync with")
-  val () = _row_make("sync-google-row", "sync-row-google", "sync-google-state", service_title(ServiceGoogle()))
-  val () = _row_make("sync-dropbox-row", "sync-row-dropbox", "sync-dropbox-state", service_title(ServiceDropbox()))
-  val () = _row_make("sync-fastmail-row", "sync-row-fastmail", "sync-fastmail-state", service_title(ServiceFastmail()))
-  val () = _row_make("sync-nextcloud-row", "sync-row-nextcloud", "sync-nextcloud-state", service_title(ServiceNextcloud()))
-  val () = _row_make("sync-webdav-row", "sync-row-webdav", "sync-webdav-state", service_title(ServiceWebDav()))
+  val () = _row_make("sync-google-row", "sync-row-google", "sync-google-state", "sync-google-hint", ServiceGoogle())
+  val () = _row_make("sync-dropbox-row", "sync-row-dropbox", "sync-dropbox-state", "sync-dropbox-hint", ServiceDropbox())
+  val () = _row_make("sync-fastmail-row", "sync-row-fastmail", "sync-fastmail-state", "sync-fastmail-hint", ServiceFastmail())
+  val () = _row_make("sync-nextcloud-row", "sync-row-nextcloud", "sync-nextcloud-state", "sync-nextcloud-hint", ServiceNextcloud())
+  val () = _row_make("sync-webdav-row", "sync-row-webdav", "sync-webdav-state", "sync-webdav-hint", ServiceWebDav())
   val () = ui_show("sync-google-row", false)
   val () = ui_show("sync-dropbox-row", false)
   val () = ui_show("sync-fastmail-row", false)
@@ -3641,7 +3653,12 @@ implement sync_screen_open () = let
   val () = _status_show()
   val () = _actions_show(_store_on())
   val () = layer_open(LSync())
-in ui_focus("sync-done") end
+in let
+  (* focus goes to Done at the screen's foot, which scrolls it flush to the
+     window's edge, under the bars (#389: the rows grew taller); the
+     screen is shown from its top *)
+  val () = ui_focus("sync-done")
+in ui_scroll_to_top("sync-screen") end end
 
 (* A service's own sign-in step, opened from its row over the list:
    only its part, its button and Cancel shown, its fields as kept *)
@@ -3694,7 +3711,12 @@ end
 implement sync_step_cancel () = let
   val () = !_sign_in_generation := !_sign_in_generation + 1
   val () = _step_close()
-in ui_focus("sync-done") end
+in let
+  (* focus goes to Done at the screen's foot, which scrolls it flush to the
+     window's edge, under the bars (#389: the rows grew taller); the
+     screen is shown from its top *)
+  val () = ui_focus("sync-done")
+in ui_scroll_to_top("sync-screen") end end
 
 (* What the step says: a field left empty *)
 fn _step_says {text_len:pos | text_len < 65536} (text: string text_len): void = ui_text_long("sync-step-status", text)
@@ -4293,7 +4315,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff(FileInGoogleDrive())), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4324,7 +4346,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff(FileInDropbox())), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4347,7 +4369,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff(FileInFastmail())), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))
@@ -4367,7 +4389,7 @@ in
       val () = _status_show()
       val () = _actions_show(false)
     in
-      $P.finish<settled>(undo_offer(SyncTurnedOff()), llam(how) =>
+      $P.finish<settled>(undo_offer(SyncTurnedOff(FileOnServer())), llam(how) =>
         case+ how of
         | Undone() => let
             val () = _store_free(_store_swap(_store, _store_swap(_store_off, NoStore())))

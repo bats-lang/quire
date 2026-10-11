@@ -921,6 +921,26 @@ under epubcheck 2.0 rules except those invalid on purpose.
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
 
+* Where a place is (#383): the footer, the bar's label (`scrubber-percent`)
+  and its tip say how far into the book in one wording, "6% of book"
+  (`_put_book_percent`, over `_put_percent`; "<1%" once reading has begun),
+  where the label said "6%" beside the footer's "6% of book". A Contents
+  row and an annotation's chapter (its heading in the list, a bookmark's
+  row) say where the chapter starts, by `toc_place_of` over src/locator.bats
+  (the same `locator_kind` and number as a search hit; `ByPage` in a
+  fixed-layout book, `book_fixed`; `locator_thousandth` is the one rule of
+  the percent, shared with `_thousandth`). The Contents place is a span
+  over the row's right end (`toc-place`, in `toc-line`), not text of the
+  button, so a row's name stays its label. The `place_text` datatype of
+  the issue's "Prevent" is not made: a flat datatype cannot carry the
+  number, and the number's wording is written in one place instead
+  (`_put_book_percent`, `locator_put`). An annotation's row goes to its
+  place by the whole row (`.hgo`, with a chevron at its end), Delete is
+  quiet (`.quiet`: no edge, muted; it has Undo, so it is no equal of Add
+  note), and each style's filter has a swatch. `e2e/places.spec.js`.
+  Not done, filed as a follow-up: a place for each annotation row (the
+  chapter's is shown, not the annotation's own page).
+
 * A search result row (#381) shows the hit in its snippet, the match in
   bold (`.mk`; no new colour pair), and where it is in the book. The
   snippet is cut into three spans (`search-hit-lead`, `-mark`, `-trail`)
@@ -1372,9 +1392,12 @@ its high 16 bits, little endian, over the tag and the data; the last
 chunk is `IEND`. A record is a set of groups, one chunk each, written
 in ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
 SIZE TIME TITL`, the index's `LEGA NAMS`) and read by tag, in any order
-(#510, below); each group is required (its
-loss makes the record `Undecodable`) or optional (its loss gives its
-defaults and `DecodedWithLoss`). A chunk of a tag this version does not
+(#510, below); a group the record needs or that every version has
+written (`req`, `opt`), when it is lost (absent, its CRC bad or its fields
+not parsing), is read with its substitute (`SUBSTITUTES` in
+`scripts/record_tables.py`, else 0 and empty) and said to be lost, and the
+record is used (`rr_loss`); nothing about a group makes a record unusable.
+A chunk of a tag this version does not
 know is kept as it is, at the end, when its first letter is lower case
 (ancillary, as in PNG), so a newer Quire's addition survives this one's
 save; a capital one (critical), or a least version over `READER`, makes
@@ -1421,6 +1444,26 @@ order is the writer's, not the format's.
   it: `EXV_cons(ANC, NOTKNOWN | ...)`), so `senc_canon` shows that the
   chunks written are their own canonical ones (`tests/static/reject/
   codec-group-twice-earlier-wins`, `codec-group-twice-not-said`).
+* **A group the record needs, lost, is substituted (stage 2b).** The
+  `LOSES(requirement)` constructors of `SDEC` (`SD_garbled_lost`,
+  `SD_bad_lost`, `SD_absent_lost_end`, `_good`, `_bad`) are one set for
+  `req` and `opt`, a group absent, with a bad CRC or fields that do not
+  parse; `added` keeps its own, for which absent is silent. A book whose
+  TITL is lost is "Untitled" (the contents panel's word for a label with
+  none), whose AUTH is lost has no author, whose BOOK is lost has ids 0
+  in the record and the ids of its key in the library. **The key wins**
+  (`_read_book`, `_keyed_book` in `src/libstore.bats`): a record found
+  under `library/book/<id>` is the book `<id>` whatever ids it holds, and
+  its save writes the key's ids. Such a save (`_repaired`) writes the
+  library's image whole, every group, and keeps the bytes the record had
+  under `library/damaged/<id>/<crc>`, in the same transaction. Research
+  (on #510): SQLite's `.recover` keeps what it cannot place in a
+  `lost_and_found` table and calls the result a salvage, and Calibre
+  rebuilds a lost `metadata.db` from the book folders, so the record
+  is salvaged and the book files stay the source of truth (the next
+  stage reads the title and author from the file again).
+  `tests/codec` and `e2e/library-records.spec.js` lose each of AUTH, BOOK
+  and TITL, absent and damaged.
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with
@@ -1806,7 +1849,8 @@ read of storage changed: each still folds, as #174 says.
   made beside it could not be seen while the read keeps failing.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
-  record, or the collections', that is damaged or not Quire's: it is shown
+  record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
+  the end, no end chunk; every other damage is used, #510): it is shown
   nowhere and never written over, so the book cannot be imported again and
   no collection can be made. Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
@@ -2156,6 +2200,33 @@ got here" (or Readium LCP) in place of Get and the licence is never
 fetched; an entry that also has an EPUB is got as ever
 (`e2e/drm-catalogue.spec.js`).
 
+**Copy details and Report on every read failure (#507).** A failure
+whose banner is about stored data or a book that could not be read
+offers Copy details and a Report link, as `notice_unexpected` does, and
+keeps the details for About's Copy last error details. The details are
+data built in one place (`_report_make` in `src/notice.bats`): Quire's
+version, the platform, the failure's name (`_failure_name`, a total
+match), a chapter's number or the length of a file's name, a line saying
+what the details hold ("no book text, titles or passwords") so the
+reader sees it before sending (Firefox's about:support and Signal's
+debug log both say what they hold, and hold none of the user's content),
+and, for a failure of records, how many the last read could not use and a
+line for each of the first 16 (`record_note`: the record's id, which is
+the hash of a file and not a title, why it cannot be used, its size and
+its first 12 bytes, which are the format's magic, kind and versions, as
+a crash report keeps a file's header and not its content). The library's
+read notes them (`libstore_read`) and the failure that says so takes
+them. Which failures have details is `detail_source_of`, a total match
+(`FromFailureAlone`, `FromRecordNotes`, `NothingToReport`, the last for a
+platform's refusal of a copy, a selection, a rotation lock, a grant or a
+narration, which leaves the details of the failure before it in
+place), so a failure added without saying does not type-check
+(`tests/static/reject/notice-without-details`). A later field (the groups
+lost, each one's CRC: #510) is one more field of `record_note` and one
+more line of `_put_note`. `e2e/notice-details.spec.js` checks each kind
+of record, annotations and settings: the buttons, the fields, no book
+text, and About.
+
 ## Every outcome is said, and the unexpected as such
 
 After #334, where a Google error that ended the consent screen reached
@@ -2419,6 +2490,14 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
   Trash holds something. Nothing is purged by itself: that would be an
   irreversible action the reader did not take. A book in the Trash has
   Restore first in its menu.
+  Restore all books (`trash-restore-all`, quire#494; Windows' Recycle Bin
+  has "Restore all items" beside its empty button, Drive and Gmail only
+  select-all then restore) comes before Empty Trash, plain since nothing is
+  lost: `lib_restore_all` puts every book of the Trash on the shelf, as a
+  single Restore does, and returns the Trashed books' shelves, so the offer
+  `BooksRestored` (Undo) puts exactly those books back in the Trash
+  (`lib_untrash_all`) and its end lets them go (`lib_shelved_free`). It
+  says "books": the dictionaries in the Trash have their own Restore.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
@@ -2457,8 +2536,9 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it, and the screen says why and offers what fits (#374, below); a book's record that is damaged, newer or not Quire's is
-shown nowhere, said once and never written over. A backup that could not
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer, not Quire's or broken in its framing is
+shown nowhere, said once and never written over; one that lost a group, or
+that is under other ids than its key, is used (#510). A backup that could not
 read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
@@ -2614,6 +2694,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and
@@ -3080,6 +3168,19 @@ length, in the same page, so a slower machine slows both. What it found:
   keeps no copy made ahead either (`_copy_stale`): the clone of its whole DOM
   was 3 s of script for 30,000 nodes, in which the page did not answer; a
   drag, which does lay a copy, makes one then.
+* **Close does not wait for the layout, and the layout can outlast a check
+  (#522).** Choosing Two on the megabyte word and pressing Escape: the
+  dialog's `data-hide` flips within milliseconds of the key (measured with a
+  MutationObserver and a longtask observer, then with Chrome's CPU throttled
+  25 times: the flip came 6 ms before a single 15.7 s task, the columns' layout,
+  which the click made dirty and Chrome does in the next frame). Playwright's
+  `toBeHidden` needs the page laid out to say so, so on a loaded runner it
+  waited behind that task and failed at 15 s twice (#518, #533). So the
+  app's part is asserted by its attribute (`arrange`), the dialog gone from the
+  screen waits as long as the layout it follows (`slow`), and a test dispatches
+  the click on Two and the Escape in one script, so no frame lies between them,
+  and finds the dialog already hidden. The 15 s is not raised: the hide is
+  checked with no layout in the way.
 * **The anchor is found by search, not by hit test.** `_anchor_now` took the
   element at a point (`elementFromPoint`, then stepping 40 px at a time),
   and then the first of the next 40 nodes to start on the page. A hit test
