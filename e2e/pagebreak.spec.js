@@ -22,7 +22,7 @@ async function search(page, text, count) {
   await page.keyboard.press('/');
   await expect(searchPanel(page)).toBeVisible();
   await searchBox(page).fill(text);
-  await expect(searchSummary(page)).toHaveText(count === 1 ? '1 result' : `${count} results`);
+  await expect(searchSummary(page)).toHaveText(count === 0 ? 'No results' : count === 1 ? '1 result' : `${count} results`);
 }
 
 async function selectWord(page, word) {
