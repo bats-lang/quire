@@ -615,7 +615,7 @@ export async function rowIsTarget(page) {
   });
 }
 
-/** Each visible control that a visible toast is drawn over */
+/** Each visible control of a full screen (`.info`) that a visible toast is drawn over */
 export async function toastClear(page) {
   return page.evaluate(() => {
     const toasts = [...document.querySelectorAll('.toast')].filter(t => t.checkVisibility({ visibilityProperty: true }) && t.getClientRects().length > 0);
@@ -623,6 +623,8 @@ export async function toastClear(page) {
     for (const toast of toasts) {
       const t = toast.getBoundingClientRect();
       for (const control of document.querySelectorAll('button, a[href], select, input:not([type=hidden]), [role=button], [role=menuitem], [role=tab], [role=switch]')) {
+        // a screen's own controls: the toast is over the library's list or a page of text by design (Material's snackbar), but never over a screen's rows (#380)
+        if (!control.closest('.info')) continue;
         if (toast.contains(control) || !control.checkVisibility({ visibilityProperty: true })) continue;
         const r = control.getBoundingClientRect();
         if (r.width === 0 || r.height === 0 || r.bottom < t.top || r.top > t.bottom || r.right < t.left || r.left > t.right) continue;
