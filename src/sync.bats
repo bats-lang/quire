@@ -3466,11 +3466,10 @@ in ui_form_field("fastmail-fields", "fastmail-password-label", "fastmail-passwor
    state beside it *)
 fn _row_make {row_len,button_len,state_len,hint_len:pos | row_len < 256; button_len < 256; state_len < 256; hint_len < 256}
   (row: string row_len, button: string button_len, state: string state_len, hint: string hint_len, service: sync_service): void = let
-  val () = ui_el("sync-services", row, TDiv, "srow")
-  val () = ui_text_btn(row, button, "btn rowbtn chev", service_title(service))
-  val () = ui_add(row, state, TSpan)
-  val () = ui_el(row, hint, TSpan, "sabout")
-  val () = ui_text(hint, service_summary(service))
+  (* the whole row is the button (#380); the state is a word on its
+     right, taking no tap of its own *)
+  val () = ui_nav_row("sync-services", row, button, hint, service_title(service), service_summary(service))
+  val () = ui_el(row, state, TSpan, "navstate")
 in ui_show(state, false) end
 
 (* The sync screen (#331, from Material's settings and Android's own

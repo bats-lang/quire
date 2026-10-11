@@ -122,7 +122,7 @@ in sheet end
    the forward zone the accent (no text: their font size is 0); a book
    read right to left has it mirrored (.taps.rtl). The drawing and the
    line take no taps, so a tap on them is the button's *)
-#pub fn reading_settings_rules {left:nat | left >= 5600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5600] sheet(after, false, false)
+#pub fn reading_settings_rules {left:nat | left >= 6200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6200] sheet(after, false, false)
 
 implement reading_settings_rules (sheet) = let
   val sheet = rule(sheet, ".shead")
@@ -204,6 +204,16 @@ implement reading_settings_rules (sheet) = let
   val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
   val sheet = no_line(sheet)
   val sheet = surf(S_fg_card | sheet, RoleText(), RoleCard())
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".navrow>.navstate")
+  val sheet = lay(sheet, GridArea(), "1/1")
+  val sheet = lay(sheet, MarginLeft(), "auto")
+  val sheet = lay(sheet, AlignSelf(), "start")
+  val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = lay(sheet, ZIndex(), "1")
+  val sheet = lay(sheet, FontSize(), "14px")
+  val sheet = surf(S_muted_card | sheet, RoleMuted(), RoleCard())
+  val sheet = lay(sheet, Padding(), "14px 40px 0 0")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".navrow>.navsum")
   val sheet = lay(sheet, GridArea(), "2/1")
