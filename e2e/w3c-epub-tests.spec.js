@@ -9,7 +9,7 @@
 import { test, expect } from './fixtures.js';
 import { w3cBooks, W3C_TEXT } from './w3c-books.js';
 import {
-  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog,
+  start, rawFile, importFiles, importInput, openBook, bookPage, cards, visibleText, expectBannerSaysWhatToDo, clickControl, dialog, openReadingSettings, readingSettings, card,
 } from './helpers.js';
 
 /** Imports the book of that name from w3c-books.js (what makes it the
@@ -27,6 +27,14 @@ async function tryW3cBook(page, name) {
   await page.waitForTimeout(2000);
   if (await cards(page).count() > 0) await cards(page).first().click();
   await page.waitForTimeout(2000);
+}
+
+/** As readW3cBook, for a book that may be scrolled (the page indicator then says a percentage, not pages) */
+async function readW3cBookScrolled(page, name, title) {
+  const before = await cards(page).count();
+  await importFiles(page, [rawFile(`${name}.epub`, w3cBooks[name].bytes())], before + 1);
+  await card(page, title).click();
+  await expect(bookPage(page)).toBeVisible();
 }
 
 /** The images of the page shown: each is loaded (a picture), or not */
@@ -184,6 +192,96 @@ test('nav-spine_in-spine-hidden-toc-html (must): a navigation document in the sp
   expect(rows.map(row => row.trim())).toEqual(['The first link', 'The second link']);
 });
 
+// ---- Links out of the book, scrolled flow, roll layout, fonts ----
+
+test('pub-external-links (should): a link to the web asks the reader first, and opens in a new tab on their word', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'external-links', 'Links out of the book');
+  await bookPage(page).getByRole('link', { name: 'link to the web' }).click();
+  const asked = dialog(page, 'Footnote');
+  await expect(asked).toContainText('It goes to https://example.com/page.');
+  const open = asked.getByRole('link', { name: 'Open link' });
+  await expect(open).toHaveAttribute('href', 'https://example.com/page');
+  await expect(open).toHaveAttribute('target', '_blank');
+  // nothing opened before the word was given: the page is the reader's and no tab came
+  expect(page.context().pages()).toHaveLength(1);
+});
+
+test('pub-external-links_consent (should): a mail link asks the reader first', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'external-links', 'Links out of the book');
+  await bookPage(page).getByRole('link', { name: 'link to mail' }).click();
+  const asked = dialog(page, 'Footnote');
+  await expect(asked).toContainText('It goes to mailto:reader@example.com.');
+  await expect(asked.getByRole('link', { name: 'Open link' })).toHaveAttribute('href', 'mailto:reader@example.com');
+});
+
+/** Whether the page scrolls down (a chapter in a column flow does not) */
+const scrollsDown = page => bookPage(page).evaluate(e => getComputedStyle(e).overflowY !== 'hidden' && e.scrollHeight > e.clientHeight + 10);
+
+test('lay-pkg-flow-scrolled-doc, lay-pkg-flow-scrolled-continuous (should): a book that asks for scrolled flow is scrolled, until the reader chooses Pages', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'flow-scrolled', 'Scrolled flow');
+  await expect.poll(() => scrollsDown(page)).toBe(true);
+  // the reader's own choice outranks the book's
+  await openReadingSettings(page, 'Page');
+  await readingSettings(page).getByRole('button', { name: 'Pages', exact: true }).click();
+  await expect.poll(() => scrollsDown(page)).toBe(false);
+});
+
+test('lay-pkg-flow-paginated: a book that says nothing of its flow is in pages', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'flow-paginated', 'Paginated flow');
+  expect(await scrollsDown(page)).toBe(false);
+});
+
+test('lay-roll-embedded-images, lay-roll-embedded-images-svg (must): a roll layout is read scrolled down, its pictures one after another', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'roll-layout', 'A roll of pictures');
+  await expect.poll(() => scrollsDown(page)).toBe(true);
+});
+
+test('cnt-css-fonts_ot, cnt-css-fonts_tt, cnt-css-fonts_woff, cnt-css-fonts_woff2 (must): a font the package carries is the reader\'s Book font', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'book-font', 'A book with a font');
+  await openReadingSettings(page, 'Look');
+  await readingSettings(page).getByRole('button', { name: 'Book', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => document.fonts.check('16px QuireBook'))).toBe(true);
+  expect(await bookPage(page).locator('p').first().evaluate(e => getComputedStyle(e).fontFamily)).toContain('QuireBook');
+});
+
+test('mol-tts_single, mol-tts_multi (should): a SMIL with no audio is read by speech synthesis', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.spoken = [];
+    window.SpeechSynthesisUtterance = class { constructor(text) { this.text = text; } };
+    const voices = [{ name: 'Reader', lang: 'en-US', voiceURI: 'reader-en', default: true }];
+    const synth = {
+      current: null,
+      getVoices: () => voices,
+      speak(u) { window.spoken.push(u.text); this.current = u; },
+      cancel() { this.current = null; },
+      addEventListener() {},
+    };
+    Object.defineProperty(window, 'speechSynthesis', { value: synth });
+  });
+  await start(page);
+  await readW3cBook(page, 'smil-no-audio', 'A SMIL with no audio');
+  // the narration has no clip to play: its controls are not offered, reading aloud by speech is
+  await expect(page.getByRole('button', { name: 'Next phrase' })).toBeHidden();
+  const readAloud = page.getByRole('button', { name: 'Read aloud', exact: true });
+  await expect(readAloud).toBeVisible();
+  await readAloud.click();
+  await expect.poll(() => page.evaluate(() => window.spoken.join(' '))).toContain('read by speech synthesis');
+});
+
+test('pss-support_ignore-title (must): a title marked as a footnote is no note: its link opens no popup', async ({ page }) => {
+  await start(page);
+  await readW3cBook(page, 'title-as-note', 'A title marked as a note');
+  await bookPage(page).getByRole('link', { name: 'this link' }).click();
+  await page.waitForTimeout(1500);
+  await expect(dialog(page, 'Footnote')).toBeHidden();
+});
+
 // ---- Publication Resources: XML that is not well formed ----
 
 test('pub-xml-non-validating_unclosed (must): a content document with an unclosed element is reported as an error', async ({ page }, testInfo) => {
@@ -221,4 +319,48 @@ test('ocf-zip-mult (must): an archive split into segments is refused', async ({ 
   await expectBannerSaysWhatToDo(page, testInfo);
   await expect(page.getByRole('alert')).toContainText('split');
   await expect(cards(page)).toHaveCount(0);
+});
+
+// ---- SVG ----
+
+/** The red of the picture drawn in the page's first image: the colour of its centre pixel, once it is loaded */
+async function pictureColour(page) {
+  const image = bookPage(page).locator('img').first();
+  await expect(image).toBeVisible();
+  await expect.poll(() => image.evaluate(i => i.complete && i.naturalWidth > 0)).toBe(true);
+  return image.evaluate(i => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 20; canvas.height = 20;
+    const context = canvas.getContext('2d');
+    context.drawImage(i, 0, 0, 20, 20);
+    return Array.from(context.getImageData(10, 10, 1, 1).data);
+  });
+}
+
+test('cnt-svg-embedded, cnt-svg-support (must): an svg in a page and an svg as a page are drawn', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-inline', 'Inline SVG');
+  const [red, green, blue] = await pictureColour(page);
+  expect([red, green, blue]).toEqual([255, 0, 0]);
+});
+
+test('cnt-svg-support (must): an svg content document is drawn, its own style applied', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-document', 'SVG as a content document');
+  const [red, green, blue] = await pictureColour(page);
+  expect([red, green, blue]).toEqual([255, 0, 0]);
+});
+
+test('cnt-svg-css (must): the svg is a picture of its own, its style neither reaching the page nor reached by it', async ({ page }) => {
+  await start(page);
+  await readW3cBookScrolled(page, 'svg-inline', 'Inline SVG');
+  await pictureColour(page);
+  // the page holds no svg element and no style of the book's: nothing the svg says reaches the text
+  await expect(bookPage(page).locator('svg')).toHaveCount(0);
+  await expect(bookPage(page).locator('style')).toHaveCount(0);
+  const colour = await bookPage(page).locator('p').first().evaluate(p => getComputedStyle(p).color);
+  expect(colour).not.toBe('rgb(255, 0, 0)');
+  // and it is a picture: an image whose source is a blob of its own
+  const source = await bookPage(page).locator('img').first().getAttribute('src');
+  expect(source).toMatch(/^blob:/);
 });
