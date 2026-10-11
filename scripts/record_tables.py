@@ -9,7 +9,8 @@
 #   added  a group added to the format after records were written: one without it was written before
 #          the group existed, which is no loss and no damage (it reads with the group's defaults, as an
 #          absent PNG ancillary chunk, a protobuf field or an SQLite column added with a default does),
-#          and one with it damaged is lost as an "opt" one is. Every group added from now on is "added".
+#          and one with it damaged is lost as an "opt" one is. Every group added from now on is "added"
+#          (quire#515: tests/static/groups.py), and is named in RELEASES with a library of the table before it.
 BOOK_GROUPS = [
   ("AUTH", "req", [("author", "s")]),
   ("BOOK", "req", [("id_high", "i"), ("id_low", "i")]),
@@ -32,6 +33,11 @@ BOOK_GROUPS = [
   ("tdir", "added", [("text_directions", "i")]),
 ]
 BOOK_KIND = 1
+# The "added" groups in the order they were added, each with the commit that added it (quire#515). Every
+# table that ever shipped is a prefix of this list on top of the first table's groups (the req and opt ones),
+# and e2e/old-library.spec.js opens a library of each: tests/static/groups.py fails a group that is not
+# here, one added as "req" or "opt", and a table with no such library.
+RELEASES = [("prog", "bb473e5"), ("tdir", "04dcf63"), ("snum", "6002bcf")]
 INDEX_GROUPS = [
   ("LEGA", "opt", [("legacy_size", "i"), ("legacy_sum", "i")]),
   ("NAMS", "req", [("name_count", "i")] + [(f"name{k}", "s") for k in range(8)]),

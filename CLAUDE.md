@@ -1177,6 +1177,24 @@ book's, and a dark theme does not recolour its black text (an image is not theme
 image dimming setting applies to it). Its text is kept in the page, hidden, so a search hit can
 still be counted.
 
+## MathML is the browser's (#419, #408)
+
+A `math` element of a chapter is made element for element in the MathML namespace
+(`_math_add`, `_math_attrs` in `src/reader.bats`: dom's `add_math_element` and
+`set_math_attr`, which write bridge's `math:` tag, `createElementNS`), so the browser sets the
+equation and its accessibility tree has the MathML (no `role`, no text copy), the
+one rendering both #419's `cnt-mathml-support` and #408 need. The elements are
+MathML Core's presentation ones; `maction` and `annotation-xml` (they can carry behaviour
+or foreign content) are refused, as are any colour or background attribute (the page's colours are the
+theme's: the text's own colour, so each equation reaches the contrast the proofs hold for text) and any link or handler. A
+refused element makes none and its children go to its parent; elements and texts take
+their content-node numbers as everywhere, so search and read aloud count the same tree.
+A token's (`mi`, `mn`, `mo`, `ms`, `mtext`) text is its own; text anywhere else in a math element is not shown. A
+display equation wider than the column scrolls along it (`math[display=block]`).
+By research: every reader that shows a content document in a browser engine (Thorium,
+Readium Mobile on Android, Calibre's viewer, Foliate) leaves MathML to the engine, and Chromium
+has set MathML Core since 109; Apple Books' WebKit too. Where an engine has no math font the text falls back.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
@@ -1367,6 +1385,34 @@ with and without the group. The app only ever writes records with every
 group (`record_write` has `ab_nil()`), so the first save of an old
 record writes the groups it lacked; opening writes nothing and keeps no
 copy (`e2e/library-records.spec.js`, "written before ... existed").
+
+**The rule cannot be forgotten, and every table that shipped opens**
+(#515). A group of a record is added only as `added`, never `req` or
+`opt` (those are the first table's twelve groups and the index's two),
+and a group added is named in `RELEASES` in `scripts/record_tables.py`
+with its commit. `tests/static/groups.py` (in `tests/static/run.sh`'s
+`checkers`) fails a group of the other modes after the first table, a
+group not in `RELEASES`, and a change that does not add the library of
+the table before it: `e2e/old-library.spec.js` has one library for each
+table that shipped (`SHAPES`: the first table, then each prefix of
+`RELEASES`; the real build's library cut of the groups a build before it
+did not write, which is byte for byte what that build wrote, since a
+chunk's CRC covers its own tag and data), and each opens with every
+book, nothing said, nothing to set aside, no record changed or copied on
+open, and a save writes the current groups. The QLB1 to QLB6 formats of
+the old whole-library record are in `e2e/library-records.spec.js`. The
+Settings row "Set aside unreadable records" is absent for every record
+that reads (even with loss), in each of those specs.
+The flake of the set aside spec (#515) was the specs', not the app's:
+on the android project the app syncs as it opens (Auto Backup's file is
+merged), and the records it writes (`library/index`, and the books'
+`ORDR` renumbered by the save after a merge once a record is missing)
+land when that sync ends, not when the books show, so they landed over a
+spec's change to the store or after the snapshot it compared with.
+`syncEnded` / `reloadSettled` (`e2e/legacy-library.js`) take
+"sync-state" away before a reload and wait for the sync's end to write
+it (`_end`, after the saves), so a spec changes and snapshots the store
+only when the app has stopped writing it.
 
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and

@@ -3153,6 +3153,78 @@ fn _overlay_finish (chapter: int, generation: int): void =
     end
   | ~NoOverlayPending() => _clips_ready_put(ChapterSilent(chapter))
 
+(* ============================================================
+   MathML: a math element of a chapter is made in the MathML namespace, one
+   element for one, through dom's add_math_element and set_math_attr, which
+   refuse what is not MathML Core's presentation markup (maction,
+   annotation-xml, colours, links, handlers). The page has no style of the
+   book's, so the text colour is the page's. A refused element makes none,
+   its children go to its parent; each element and each text takes the
+   number it takes anywhere (quire#419, #408)
+   ============================================================ *)
+
+(* 0 outside a math element, 1 inside one, 2 inside a token (mi, mn, mo, ms,
+   mtext), whose text is its own *)
+val _math_inside = ref<int>(0)
+
+(* Content node node, an element of the MathML name data[name_offset, name_offset + name_len), the
+   last child of parent: whether dom made it *)
+fn _math_add {doc_location,l:agz}{n:pos}{parent:int | parent >= ~1}{node:nat}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), data_len: int n, parent: int parent, node: int node,
+   name_offset: int name_offset, name_len: int name_len): bool =
+  if name_len <= 0 then false
+  else if name_len >= 32 then false
+  else let
+    val name = $A.alloc<byte>(name_len)
+    val () = $S.copy_from_borrow(data, name_offset, data_len, name, 0, name_len, name_len)
+    val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+    val @(parent_id, parent_id_len) = _node_id(parent)
+    val @(node_id, node_id_len) = _node_id(node)
+    val @(parent_frozen, parent_bytes) = $A.freeze<byte>(parent_id)
+    val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+    val made = $D.add_math_element(doc, parent_bytes, parent_id_len, node_bytes, node_id_len, name_bytes, name_len)
+    val () = release_bytes(node_frozen, node_bytes)
+    val () = release_bytes(parent_frozen, parent_bytes)
+  in
+    let val () = release_bytes(name_frozen, name_bytes) in made end
+  end
+
+(* The attributes of a math element that dom takes (it refuses the others) *)
+fun _math_attrs {doc_location,l:agz}{n:pos}{attr_count:nat}{node:nat} .<attr_count>.
+  (doc: !$D.document(doc_location), data: !$A.borrow(byte, l, n), data_len: int n, attrs: !$X.xml_attr_list(n, attr_count), node: int node): void =
+  case+ attrs of
+  | $X.xml_attrs_nil() => ()
+  | $X.xml_attrs_cons(name_offset, name_len, value_offset, value_len, rest) => let
+      val () = (if name_len <= 0 then ()
+        else if name_len >= 32 then ()
+        else if value_len >= 65536 then ()
+        else let
+          val name = $A.alloc<byte>(name_len)
+          val () = $S.copy_from_borrow(data, name_offset, data_len, name, 0, name_len, name_len)
+          val @(name_frozen, name_bytes) = $A.freeze<byte>(name)
+          val @(node_id, node_id_len) = _node_id(node)
+          val @(node_frozen, node_bytes) = $A.freeze<byte>(node_id)
+          val _ = $D.set_math_attr(doc, node_bytes, node_id_len, name_bytes, name_len, data, value_offset, value_len)
+          val () = release_bytes(node_frozen, node_bytes)
+        in release_bytes(name_frozen, name_bytes) end)
+    in _math_attrs(doc, data, data_len, rest, node) end
+
+(* Whether the name is a MathML token element: its text is its own *)
+fn _math_token {l:agz}{n:pos}{name_offset,name_len:nat | name_offset + name_len <= n}
+  (data: !$A.borrow(byte, l, n), name_offset: int name_offset, name_len: int name_len): bool = let
+  var _mi = @[char][2]('m', 'i')
+  var _mn = @[char][2]('m', 'n')
+  var _mo = @[char][2]('m', 'o')
+  var _ms = @[char][2]('m', 's')
+  var _mtext = @[char][5]('m', 't', 'e', 'x', 't')
+in
+  if xml_name_eq(data, name_offset, name_len, _mi, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _mn, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _mo, 2) then true
+  else if xml_name_eq(data, name_offset, name_len, _ms, 2) then true
+  else xml_name_eq(data, name_offset, name_len, _mtext, 5)
+end
+
 (* Walk xml_node_list, rendering each node into parent (through doc's
    borrow operations: nothing is allocated for the page); the <img>
    elements met are added to found *)
@@ -3173,8 +3245,12 @@ and _render_node
   case+ node of
   | $X.xml_text(offset, text_len) => let
       (* white space between the page's blocks takes its numbers but
-         makes no element: it would be a line of its own *)
-      val () = (if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
+         makes no element: it would be a line of its own; inside a math
+         element the text of a token is the token's, any other is not shown *)
+      val () = (if !_math_inside > 0 then let
+          val () = _skip_spans(offset, text_len)
+        in (if !_math_inside = 2 then (if parent >= 0 then (if text_len > 0 then (if text_len < 65536 then _node_text(doc, parent, data, offset, text_len) else ()) else ()) else ()) else ()) end
+        else if parent < 0 then (if _blank(data, offset, text_len, 0) then _skip_spans(offset, text_len)
           else _text_spans(doc, data, parent, offset, text_len, false))
         else _text_spans(doc, data, parent, offset, text_len, false))
     in found end
@@ -3191,6 +3267,7 @@ and _render_node
     var _tag_hr = @[char][2]('h', 'r')
     var _tag_img = @[char][3]('i', 'm', 'g')
     var _tag_image = @[char][5]('i', 'm', 'a', 'g', 'e')
+    var _tag_math = @[char][4]('m', 'a', 't', 'h')
   in
     (* Skipped: head, title, meta, link, style, script *)
     if xml_name_eq(data, name_offset, name_len, _tag_head, 4) then found
@@ -3248,6 +3325,16 @@ and _render_node
         | ~xspan_at(src_start, src_len) => images_cons(content_node, src_start, src_len, found)
         | ~xspan_none() => found)
     end
+    else if !_math_inside > 0 || xml_name_eq(data, name_offset, name_len, _tag_math, 4) then let
+      val content_node = _next_content_node()
+      val made = _math_add(doc, data, data_len, parent, content_node, name_offset, name_len)
+      val () = (if made then _math_attrs(doc, data, data_len, attrs, content_node) else ())
+      val saved = !_math_inside
+      val () = !_math_inside := (if made then (if _math_token(data, name_offset, name_len) then 2 else 1) else 1)
+      val child_parent = (if made then content_node else parent): [child:int | child >= ~1] int child
+      val found = _render_nodes(doc, data, data_len, child_parent, children, found, fragment)
+      val () = !_math_inside := saved
+    in found end
     else let
       (* an inline svg is drawn as a picture of its own bytes (an <img> whose
          source is a blob: no script, no outside load, its own style scope),
