@@ -1004,6 +1004,11 @@ fn _annotations (): void = let
   val () = ui_text_btn("annotations-filter", "filter-yellow", "sbtn", style_label(Yellow()))
   val () = ui_text_btn("annotations-filter", "filter-orange", "sbtn", style_label(Orange()))
   val () = ui_text_btn("annotations-filter", "filter-underlined", "sbtn", style_label(Underlined()))
+  (* each style's swatch, after its name (the name says it; the swatch is
+     the colour it is drawn in) *)
+  val () = ui_el("filter-yellow", "filter-yellow-swatch", TSpan, "sw sw-yellow")
+  val () = ui_el("filter-orange", "filter-orange-swatch", TSpan, "sw sw-orange")
+  val () = ui_el("filter-underlined", "filter-underlined-swatch", TSpan, "sw sw-under")
   val () = ui_el("annotations-panel", "annotations-list", TDiv, "plist")
 in _hide("annotations-panel") end
 
