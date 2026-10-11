@@ -122,7 +122,7 @@ in sheet end
    the forward zone the accent (no text: their font size is 0); a book
    read right to left has it mirrored (.taps.rtl). The drawing and the
    line take no taps, so a tap on them is the button's *)
-#pub fn reading_settings_rules {left:nat | left >= 6200} (sheet: sheet(left, false, false)): [after:nat | after >= left - 6200] sheet(after, false, false)
+#pub fn reading_settings_rules {left:nat | left >= 5900} (sheet: sheet(left, false, false)): [after:nat | after >= left - 5900] sheet(after, false, false)
 
 implement reading_settings_rules (sheet) = let
   val sheet = rule(sheet, ".shead")

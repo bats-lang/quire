@@ -17,7 +17,7 @@ staload "declarations.sats"
    its content. And the Sync screen's parts: its status card (where,
    how it went, its actions), its footer note, and its sign-in step,
    which hides the screen's list while it is shown *)
-#pub fn spacing_rules {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1700] sheet(after, false, false)
+#pub fn spacing_rules {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false)
 
 implement spacing_rules (sheet) = let
   val sheet = rule(sheet, ":root")

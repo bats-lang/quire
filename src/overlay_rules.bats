@@ -220,7 +220,7 @@ fn overlay_rules_menus {left:nat | left >= 2100} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2500} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2500] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2300} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2300] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
