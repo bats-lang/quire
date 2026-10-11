@@ -229,6 +229,33 @@ implement space_length (step) =
   | SpaceLarge() => "16px"
   | SpaceExtraLarge() => "24px"
 
+(* A sheet over the page is a standard sheet (Material 3): the page stays
+   in view while its controls are used. How much of the window it may
+   cover is a share in dvh; SHEET_SHARE_MOST leaves the page at least
+   40% (#379) *)
+#pub stadef SHEET_SHARE_MOST = 60
+
+#pub datatype sheet_share(int) =
+  | ShareNote(45) of ()
+  | ShareHalf(50) of ()
+  | ShareMost(55) of ()
+
+fn _share_length {share:int} (share: sheet_share(share)): [text_len:pos | text_len <= 5] string text_len =
+  case+ share of
+  | ShareNote() => "45dvh"
+  | ShareHalf() => "50dvh"
+  | ShareMost() => "55dvh"
+
+(* max-height:<share>dvh;overflow:auto; the cap and the scrolling are
+   written together, and a share over SHEET_SHARE_MOST does not
+   type-check *)
+#pub fn scrolls {left:nat | left >= 45}{media:bool}{share:int | share <= SHEET_SHARE_MOST}
+  (sheet: sheet(left, media, true), share: sheet_share(share)): [after:nat | after >= left - 45] sheet(after, media, true)
+
+implement scrolls (sheet, share) = let
+  val sheet = lay(sheet, MaxHeight(), _share_length(share))
+in lay(sheet, Overflow(), "auto") end
+
 (* prop:<step>; *)
 #pub fn spaced {left:nat | left >= 22}{media:bool}{length:int}
   (sheet: sheet(left, media, true), property: prop, step: space(length)): [after:nat | after >= left - 22] sheet(after, media, true)

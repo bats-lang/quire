@@ -114,8 +114,9 @@ commit), and save theirs once the job passed. What was found:
   readable only by that pull request: same repository, no cross-fork
   writes). The required check on a pull request is incremental, main's is
   cold, so a stale hit would show on main at the latest.
-* Paths. patsopt names C symbols by the absolute path of the files, so a
-  cache is valid at the path it was made at. `build` is at the checkout,
+* Paths. patsopt named C symbols by the absolute path of the files, so a
+  cache was valid only at the path it was made at (bats now takes the
+  checkout's path out of the C, bats-lang/bats#250). `build` is at the checkout,
   `/home/runner/work/quire/quire` in every job. The static jobs checked in
   `mktemp -d`, a different path each time; `tests/static/run.sh` now takes
   `QUIRE_STATIC_WORK`, a fixed directory (CI: `$RUNNER_TEMP/quire-static`),
@@ -139,6 +140,20 @@ commit), and save theirs once the job passed. What was found:
   the inputs: they are right where the key holds every input. bats's
   own rule for C is a time, which is why the toolchain is in the key, only
   passed builds are saved, and main is checked cold.
+* `BATS_CACHE_DIR` (bats-lang/bats#250) is not used in CI, by measurement
+  (#499). A pull request's job restores the `build/` of its base or its
+  earlier push, and what it compiles again is what changed (a few modules;
+  the adoption experiment's one comment changed, 106 s, a `#pub`
+  added to one `.sats`, 325 s). A cache of patsopt's C instead still runs
+  cc for every module and looks each one up (about 0.4 s a module,
+  bats-lang/bats#253): a copy of a checked tree at another path, every
+  module a hit, took 229 s against a cold 355 s here, so on a pull request
+  it is slower than `build/`, and it would only speed up main, which is
+  checked cold on purpose. Kept beside `build/`, it hits only a module
+  whose every input was compiled before, which the restored `build/`
+  already holds. Paths no longer matter (bats strips the checkout's path
+  from the C), but the static jobs keep their fixed directory, which costs
+  nothing.
 
 ## Check locally before every push
 
@@ -149,13 +164,42 @@ reaches CI (#350's first push failed on a comparison and a free that
 what `.github/actions/setup-bats` does: ATS2 (`patsopt` from the
 tarball it names), `lld`, the compiler built from the commit in
 `.github/bats-version` (its `bootstrap/c`, `make release/bats`), and a
-clone of bats-lang/repository-prototype; then `scripts/version.sh` and
-`bats check --repository <the clone>`. A check takes about 10 minutes
-on a cold build: run it in the background and wait for it, never push on
-the hope that it passes. A change to a spec or a static fixture runs
-that group too where the machine can (`tests/static/run.sh`, `npx
-playwright test <spec>`), and what it cannot run is left to CI and said
-in the PR. A fix pushed after a red CI is checked the same way first.
+clone of bats-lang/repository-prototype; then `bats check --repository
+<the clone>`, or with `BATS_REPOSITORY=<the clone>` in the environment
+and no flag (the flag wins). Nothing is written first: bats writes the
+version's facts from HEAD (above). A check takes 6 to 10 minutes on a
+cold build: run it in the background and wait for it, never push on the
+hope that it passes. Two bats in one checkout take turns (bats holds a
+lock on `bats.toml` and says it waits); two checkouts or worktrees do not
+lock each other (bats-lang/bats#252), so a machine shared by sessions
+runs one heavy build at a time by a lock of its own, `flock
+/tmp/quire-build.lock bats check ...` (and the same lock around `gen-pwa
+test`), until bats has a machine-wide limit.
+
+`BATS_CACHE_DIR=<dir>` keeps patsopt's C in that directory, keyed by
+what patsopt reads (the toolchain, its arguments and every file a
+module's staloads reach, by SHA-256), and the C names no checkout's
+path, so every checkout and worktree of the machine shares it, and a hit
+is checked as a run is. Measured on 4 cores (#499): a cold check 355 s, a
+copy of the checkout at another path 229 s (every module a hit; cc still
+runs), no change in place 80 s. Set it in the shell's profile.
+
+The e2e suite runs through the app's generator, `./dist/debug/gen-pwa
+test [--timings <dir>] [-- <playwright args> <spec>...]` (pwa's
+`test_run`, bats-lang/pwa#82), after `bats build`, `./dist/debug/gen-pwa`,
+`scripts/sync-clients.sh dist/pwa` and `cp -R homepage dist/pwa/homepage`
+(`e2e/about.spec.js` reads the home page): it serves `dist/pwa` at a port
+the kernel picks, takes one of the machine's slots (`PWA_TEST_SLOTS`,
+default 1, in `PWA_TEST_LOCK_DIR`), checks that `PLAYWRIGHT_BROWSERS_PATH`
+holds the headless Chromium this Playwright expects (it never downloads
+one), runs the `@serial` tests alone on one worker and then the others,
+and stops Playwright's processes however it ends. A `--grep` or
+`--workers` of the caller's makes it one run, as given. A bare `npx
+playwright test` still serves the app itself (at `QUIRE_PORT`). A change
+to a spec or a static fixture runs that group too where the machine can
+(`tests/static/run.sh`, `gen-pwa test -- <spec>`), and what it cannot
+run is left to CI and said in the PR. A fix pushed after a red CI is
+checked the same way first.
 
 The e2e suite needs Playwright 1.58 or later (`package.json` says so,
 `package-lock.json` pins 1.58.2): before 1.58 its fake clock can set the
@@ -176,18 +220,27 @@ Quire's version is the date of the commit it is built from, never of the
 build, so the same commit always gives the same version (#219): the
 committer date in UTC as bats packages are versioned,
 `YEAR.MONTH.DAY.SECONDS` (seconds since midnight), and the short SHA,
-`2026.10.2.61373 (f95ce82)`. `scripts/version.sh` writes it into
-`src/version.bats` (not in git; run it before `bats check` or `build`),
-which the app and gen-pwa compile in: About shows it, a backup records
-it (`appVersion`), and gen-pwa appends it to the Android project's
+`2026.10.2.61373 (f95ce82)`. bats writes the commit's facts as a module
+(`build/src/_bats_facts`, bats-lang/bats#250: its time, its date so
+worded and its short SHA, from the commit `BATS_COMMIT` names, else
+HEAD), and `src/version.bats` (tracked, #499) words them:
+`quire_version` (the date), `quire_commit_short`, `quire_version_text`
+(the two as one text, "VERSION (SHA)", in an array: a `string n` cannot
+be joined at run time) and `quire_version_code`. The app and gen-pwa
+compile them in: About shows the text, a backup records it
+(`appVersion`), and gen-pwa appends it to the Android project's
 `android-release.gradle` as `versionName`, with `versionCode` the same
 time in minutes since 2025 (so it grows from release to release, and
-pwa's run-number code is overridden). CI writes it for a pull request's
-own head (`QUIRE_COMMIT`, the merge's second parent, hence
-`fetch-depth: 2`), and for a run of a merge queue's group (`merge_group`
-in `check.yml`, should a queue be switched on) from the group's own
-commit (`github.sha`). `tests/version/same.sh` checks that it is the
-same in other time zones and that the Android project carries it.
+pwa's run-number code is overridden). CI names a pull request's own
+head (`BATS_COMMIT`, set by `setup-bats` for every later step: the
+merge's second parent, hence `fetch-depth: 2`), and for a run of a merge
+queue's group (`merge_group` in `check.yml`, should a queue be switched
+on) the group's own commit (`github.sha`). Outside a git repository a
+build fails and says so; `tests/static/run.sh`, which checks a copy of
+the checkout, points git at the checkout's repository (`GIT_DIR`).
+`tests/version/same.sh` checks that the facts are the same written in
+other time zones, that they name the commit, and that the Android
+project carries the version and its code.
 
 ## Main goes to Play's internal testing (#308)
 
@@ -734,8 +787,9 @@ multimedia mode: the DuRoBo Moodi sends previous and next track there, its
 reading mode the volume keys; the others in the field send the arrows or Page
 Up and Down). Enter follows the focused link and is no page key. Keys are not
 the page's while a text field or a panel has the focus, and a volume key is
-the system's while a panel is open. `QUIRE_PORT` in `playwright.config.js` is
-the port the app is served on, so two runs of the suite from two checkouts
+the system's while a panel is open. `gen-pwa test` serves the app at a port
+the kernel picks, and a bare `npx playwright test` at `QUIRE_PORT`
+(`playwright.config.js`), so two runs of the suite from two checkouts
 do not serve each other's build.
 ### Where a book opens the first time (#409)
 A book never read opens where it says reading starts, as Apple Books
@@ -841,6 +895,24 @@ under epubcheck 2.0 rules except those invalid on purpose.
   `style-type`. Search (`_scan_node`) does not match inside `rt`, `rtc`
   or `rp`, but counts their content nodes as render makes them, so a
   hit or an annotation after a ruby keeps its node number.
+
+* A search result row (#381) shows the hit in its snippet, the match in
+  bold (`.mk`; no new colour pair), and where it is in the book. The
+  snippet is cut into three spans (`search-hit-lead`, `-mark`, `-trail`)
+  by `hit_at` and `hit_len`, which `hits_cons` carries with the proof
+  `hit_at + hit_len <= snippet_len` (`_snippet`, `_hit_in`), so a row
+  cannot take a span outside its snippet. The place is a `locator_kind`
+  and a number (`src/locator.bats`, shared with Contents in #383):
+  `ByPercent`, the thousandths of the book at the hit by the chapters'
+  sizes and the hit's content node among the chapter's (`_hit_locator`,
+  the footer's scale and `book_weights`), or `ByPage`, the spine item,
+  for a fixed-layout book. A page of the current layout is not used: it
+  is unknown for a chapter that is not laid out and changes with the
+  font (Kindle's Location is fixed for the same reason). Each chapter's
+  heading counts its hits ("3 results"). Decided by research (comment on
+  #381): Material 3's list item has a trailing supporting text for a
+  position; no help page of Apple Books, Kindle or Play Books documents
+  the layout of its results.
 
 * Search finds a phrase across inline elements (#437): un<span/>believable,
   a drop cap, `<em>emph</em>asis`, a phrase running out of a page-break
@@ -995,6 +1067,22 @@ shown as text and the fallback its manifest names was never followed.
 * `nav-spine_in-spine-hidden-toc-html` passes: the navigation document in the spine hides an
   entry marked `hidden` (the attribute is kept, #411) and the contents panel, made from the
   nav, lists all.
+
+## Audio and video play (#424, #419)
+
+An `audio` or `video` element of a chapter is made as such with the browser's own
+controls (dom's `Controls`) and never autoplay; its `src`, or the first `<source>`'s,
+is the book's entry, given as the picture's bytes are (`images_cons` on the element:
+bridge's `set_image_src` makes a blob and sets the element's `src`, which is generic,
+not an image's). A `<source>`'s file goes to the media element itself, since a
+`<source>` given its src after insertion is not looked at again (the last of several
+sources given, the first in the document, wins: no `type` selection). By research: Apple
+Books plays embedded audio and video, Kobo's apps do (its e-ink devices show the
+fallback), Thorium, Foliate and Calibre's viewer are browser engines that play them. The
+file passes through wasm memory (a piece of the chapter's arena); a long video is
+heavy there (a stored entry could instead be a range blob on the JS side, as narration's
+audio is: not done). Leaving the chapter removes the element, which stops it.
+`e2e/media.spec.js` plays a real mp3.
 
 ## Links out, scrolled books, fonts and speech for the W3C suite (#419)
 
@@ -1250,6 +1338,35 @@ the record `Newer`, and a first four bytes that are not `QREC` make it
 `NotQuire`. What a record is decoded to is one of those five outcomes
 (`recres`: `rr_ok`, `rr_loss`, `rr_notquire`, `rr_newer`, `rr_damaged`);
 a decode never fails to say which.
+
+**A group added later is not loss when it is absent** (#497).
+A group is one of three modes in `scripts/record_tables.py`: `req`
+(the record needs it), `opt` (every version of the format has written
+it: absent is damage, present and damaged is loss, the defaults), and
+`added` (added to the format after records were written: absent is
+nothing, the record reads whole and the group has its defaults; present
+and damaged is loss as for `opt`). `prog`, `snum` and `tdir` are `added`,
+and every group added from now on is. Before this an absent group of
+either mode was `Damaged`, so a Quire that added a group made every
+record written before it unreadable: the book was shown nowhere, the
+banner said it could not be read, and Settings offered to set it aside
+(which would have moved it out of the library). By research: a PNG
+decoder must not require an ancillary chunk, protobuf reads an absent
+field as its default, and SQLite's `ADD COLUMN ... DEFAULT` leaves old
+rows unrewritten and valid; none counts a record written before the
+addition as damaged. The format version cannot tell them apart (the
+records in the wild are all version 1, with any prefix of the groups),
+so it is the group's own mode. A chunk cleanly cut out of a record is
+the same as one that was never there, as in PNG. The decoded record
+says which groups were absent (`rx_mk(format, least, vals, extras,
+absent)`, `vals` holding the group's defaults), reading is a proof
+about it and writing an absent group writes nothing, with the proof
+that the next chunk is not the group's (`SENC_absent_*`, `TAGDIFF`), so
+`decodes_encodes` and `encodes_decodes` hold byte for byte for a record
+with and without the group. The app only ever writes records with every
+group (`record_write` has `ab_nil()`), so the first save of an old
+record writes the groups it lacked; opening writes nothing and keeps no
+copy (`e2e/library-records.spec.js`, "written before ... existed").
 
 **The codec is proven** (`src/bytes.bats`, `crc.bats`, `chunk.bats`,
 `seq.bats`, `fields.bats`, `schema.bats`, `record.bats`; the book's and
@@ -1699,7 +1816,8 @@ ancillary group `snum` (`series_position`), written only when SERI's whole numbe
 does not already say it; SERI keeps the **whole number** (`_series_whole`: 2 for
 2.5, 0 for none or below 1), so an older Quire reads 2 and keeps `snum` as it
 keeps `prog`, and a record with no `snum` reads as SERI's whole number
-(`_series_read`), as the records written before it do. Neither the backup nor the
+(`_series_read`), as the records written before it do (they read whole: a
+group that is absent from a record written before it existed is not loss, #497). Neither the backup nor the
 sync file holds a book's series (it is the book's own, read from its file, so a
 second device or a restore shows what the file says). `e2e/series.spec.js`,
 `e2e/series-books.js` and `e2e/library-records.spec.js` test it.
@@ -2669,11 +2787,21 @@ job). Every spec and every static fixture is in exactly one group, or
 area and balanced by time. The `check` job, which main's branch
 protection requires, passes only when every group did.
 
-The specs that measure time (`pathological.spec.js`, `page-turn.spec.js`)
-are the `perf` group alone, run with one worker (`--workers=1`), and no
-spec that loads the machine joins it (`stall-capture.spec.js` spins a
-page on purpose): a budget that is measured beside another worker's load
-is flaky, and a flaky budget is relaxed until it stops catching anything.
+The tests that measure time (the describes of `pathological.spec.js` and
+`page-turn.spec.js` with a budget) are tagged `@serial`, and `gen-pwa
+test` runs them alone on one worker before the rest of the group, which
+then run on half the cores (#499): a budget that is measured beside
+another worker's load is flaky, and a flaky budget is relaxed until it
+stops catching anything. The two specs are still the `perf` group alone,
+and no spec that loads the machine joins it (`stall-capture.spec.js`
+spins a page on purpose), for balance: measured on 4 cores (CI's), their
+`@serial` tests take 11.0 minutes alone and the rest 1.9 on two workers
+(about 3 on one, as the group ran before), so the serial part would
+lengthen any group it joined by 11 minutes. Running the rest on two
+workers found a test that clicked a bar's control after `showChrome` by
+itself, which the bars' 5 s timeout can hide on a loaded machine: a
+control is clicked with `clickControl`, which shows the bars and clicks
+together until the click lands.
 A budget keeps headroom over what a loaded runner has been seen to give
 (a turn's animated time against its instant time was 1.27 times once, on
 CI, against a quarter's slack), and still fails a turn that costs twice

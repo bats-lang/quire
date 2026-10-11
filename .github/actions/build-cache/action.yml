@@ -22,14 +22,15 @@ runs:
     # objects) do not see: the compiler and ATS2 pins, the lock, the
     # runner image (its C compiler). The sources are in the key's last
     # part, so an exact hit is the same sources, and a prefix hit the
-    # newest earlier build under the same toolchain. src/version.bats is
-    # written per commit and changes only its own module.
+    # newest earlier build under the same toolchain. The commit's facts
+    # (build/src/_bats_facts, which src/version.bats words) are written
+    # again per commit and change only their own module.
     - name: Name the cache
       id: key
       shell: bash
       run: |
         echo "prefix=quire-${{ inputs.name }}-v1-${{ runner.os }}-${{ runner.arch }}-${ImageVersion:-image}-${{ hashFiles('.github/bats-version', '.github/actions/setup-bats/action.yml', 'bats.lock', 'bats.toml') }}-" >> "$GITHUB_OUTPUT"
-        echo "sources=${{ hashFiles('src/**', '!src/version.bats') }}" >> "$GITHUB_OUTPUT"
+        echo "sources=${{ hashFiles('src/**') }}" >> "$GITHUB_OUTPUT"
 
     - name: Restore the compiler cache
       if: inputs.mode == 'restore'

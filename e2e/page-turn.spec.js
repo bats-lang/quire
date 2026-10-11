@@ -7,6 +7,9 @@
 // The page being left is a copy of the page, shown only while the page
 // turns: so while it turns, the page's text is there twice (the copy is
 // hidden from assistive technology, and found here by its text alone).
+//
+// The turn on a long chapter is timed: it is tagged @serial, which
+// `gen-pwa test` runs alone on one worker before the rest (#499).
 
 import { test, expect } from './fixtures.js';
 import { start, readBook, place, bookPage, chapters, clickControl } from './helpers.js';
@@ -188,7 +191,7 @@ const watchFirstFrame = (page) => page.evaluate(() => {
 });
 const firstFrame = (page) => page.evaluate(() => window.firstFrame);
 
-test.describe('a page turn on a long chapter', () => {
+test.describe('a page turn on a long chapter', { tag: '@serial' }, () => {
   // The copy is kept between turns, so a turn only scrolls it and shows
   // it: its first frame comes about as soon as an instant turn's (with
   // less motion: no copy at all). The two are measured in the same page,
