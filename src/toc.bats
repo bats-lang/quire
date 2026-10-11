@@ -127,35 +127,15 @@ end
    Finding the document, in the OPF
    ============================================================ *)
 
-(* The entry of book serial (file_size bytes) named name[0, name_len);
-   frees name *)
-fn _find_entry {file_size:pos}{name_loc:agz}{name_size:pos | name_size <= 1048576}{name_len:nat | name_len <= name_size}
-  (serial: int, file_size: int file_size, name: $A.arr(byte, name_loc, name_size), name_size: int name_size, name_len: int name_len): entry_hit(file_size) =
-  if name_len <= 0 then let val () = $A.free<byte>(name) in EntryMiss() end
-  else let
-    val exact = $A.alloc<byte>(name_len)
-    val name = $S.copy_arr_region(name, 0, name_size, exact, name_len, name_len)
-    val () = $A.free<byte>(name)
-    val @(exact_frozen, exact_bytes) = $A.freeze<byte>(exact)
-    val hit = book_find_entry(serial, file_size, exact_bytes, name_len)
-    val () = release_bytes(exact_frozen, exact_bytes)
-  in hit end
-
 (* The entry of book serial (file_size bytes) that href
    opf_bytes[href_offset, href_offset + href_len) names, after the OPF's
-   directory (opf_dir_len bytes of the name at opf_name_offset) *)
+   directory (opf_dir_len bytes of the name at opf_name_offset): a URL, so
+   "./", "../" and percent-escapes are resolved and a path-absolute one is
+   the container's own *)
 fn _opf_entry {file_size:pos}{opf_name_offset:nat}{opf_dir_len:nat | opf_name_offset + opf_dir_len <= file_size; opf_dir_len < 65536}{opf_loc:agz}{opf_size:pos}{href_offset,href_len:nat | href_offset + href_len <= opf_size}
   (serial: int, file_size: int file_size, opf_name_offset: int opf_name_offset, opf_dir_len: int opf_dir_len, opf_bytes: !$A.borrow(byte, opf_loc, opf_size), opf_size: int opf_size,
    href_offset: int href_offset, href_len: int href_len): entry_hit(file_size) =
-  if href_len <= 0 then EntryMiss()
-  else if opf_dir_len + href_len > 1048576 then EntryMiss()
-  else let
-    val path_size = opf_dir_len + href_len
-    val path = $A.alloc<byte>(path_size)
-    val _ = book_read(serial, file_size, opf_name_offset, path, opf_dir_len)
-    val () = $S.copy_from_borrow(opf_bytes, href_offset, opf_size, path, opf_dir_len, path_size, href_len)
-    val path_len = path_norm(path, path_size)
-  in _find_entry(serial, file_size, path, path_size, path_len) end
+  book_find_relative(serial, file_size, opf_name_offset, opf_dir_len, opf_bytes, opf_size, href_offset, href_len)
 
 (* The length of the href data[offset, offset + href_len) before its '#' *)
 fn _path_part {l:agz}{n:pos}{offset,href_len:nat | offset + href_len <= n}
@@ -494,17 +474,10 @@ fn _chapter_of {file_size:pos}{name_offset,dir_len:nat | name_offset + dir_len <
   (* an href of 64 KiB or more names no zip entry: the book's data,
      checked here *)
   else if path_len >= 65536 then ~1
-  else let
-    val path_size = dir_len + path_len
-    val path = $A.alloc<byte>(path_size)
-    val _ = book_read(serial, file_size, name_offset, path, dir_len)
-    val () = $S.copy_from_borrow(data, href_offset, data_size, path, dir_len, path_size, path_len)
-    val normal_len = path_norm(path, path_size)
-  in
-    case+ _find_entry(serial, file_size, path, path_size, normal_len) of
+  else
+    case+ book_find_relative(serial, file_size, name_offset, dir_len, data, data_size, href_offset, path_len) of
     | ~EntryHit(_, _, _, entry_name_offset, _) => book_chapter_of(serial, entry_name_offset)
     | ~EntryMiss() => ~1
-  end
 
 (* The length of the href data[href_offset, href_offset + href_len)
    before its '#' *)
