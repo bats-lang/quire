@@ -1339,6 +1339,18 @@ in
     | Final() => lib_shelved_free(shelved))
 end
 
+(* The Trash's Restore all books (quire#494): every book in it goes back on
+   the shelf, and Undo puts exactly those books back in the Trash *)
+fn _restore_all (): void = let
+  val moved = lib_restore_all()
+  val () = ui_focus("shelf-back")
+in
+  $P.finish<settled>(undo_offer(BooksRestored()), llam(settling) =>
+    case+ settling of
+    | Undone() => lib_untrash_all(moved)
+    | Final() => lib_shelved_free(moved))
+end
+
 (* The collections panel for the book, its toggles pressed as the book's
    collections are *)
 fn _collections_open {book:int} (book: int book): void = let
@@ -1632,6 +1644,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   val listeners = RCons(listeners, OnEl("trash-panel"), "click", llam(h) => let
       val clicked = _target(h)
       val restored = _row_of(clicked, "restore-dict")
+      val () = (if _is(clicked, "trash-restore-all") then _restore_all() else ())
       val () = (case+ _harm_clicked(clicked) of
         | ~Some_vt(the_harm) =>
           $P.finish<reply>(lib_ask_harm(the_harm, dict_trash_count()), llam(answer) =>

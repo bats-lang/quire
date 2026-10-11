@@ -483,6 +483,46 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await expect(cards(page)).toHaveCount(2);
 });
 
+// quire#494: after a factory reset whose Undo is gone, the Trash restores
+// every book at once (Windows' Recycle Bin has "Restore all items"), offered
+// back by Undo, and not red since nothing is lost
+test('the Trash restores every book at once after a factory reset, and that can be undone', async ({ page }) => {
+  await start(page);
+  await importFiles(page, [epubFile({ title: 'Restore One', author: 'A' }), epubFile({ title: 'Restore Two', author: 'B' })], 2);
+  await librarySettings(page);
+  await settingsButton(page, 'Factory reset').click();
+  await expect(cards(page)).toHaveCount(0);
+  // the offer to undo the reset goes away; the books wait in the Trash
+  await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
+  await expect(undo(page)).toBeHidden();
+  await openShelf(page, 'Trash');
+  await expect(cards(page)).toHaveCount(2);
+  const restoreAll = page.getByRole('button', { name: 'Restore all books' });
+  const emptyButton = page.getByRole('button', { name: 'Empty Trash' });
+  // Restore comes first, and only Empty is red
+  const colour = l => l.evaluate(e => getComputedStyle(e).color);
+  expect(await colour(restoreAll)).not.toBe(await colour(emptyButton));
+  const restoreBox = await restoreAll.boundingBox();
+  const emptyBox = await emptyButton.boundingBox();
+  expect(restoreBox.x < emptyBox.x || restoreBox.y < emptyBox.y).toBe(true);
+  await restoreAll.click();
+  await expect(page.getByText('The Trash is empty')).toBeVisible();
+  await expect(page.locator('#undo-text')).toHaveText('Books restored from the Trash');
+  // Undo puts exactly those books back in the Trash
+  await undo(page).click();
+  await expect(cards(page)).toHaveCount(2);
+  await restoreAll.click();
+  await leaveShelf(page);
+  await expect(card(page, 'Restore One')).toHaveCount(1);
+  await expect(card(page, 'Restore Two')).toHaveCount(1);
+  // restored for good: it survives a reload
+  await reload(page);
+  await expect(cards(page)).toHaveCount(2);
+  await openShelf(page, 'Trash');
+  await expect(page.getByText('The Trash is empty')).toBeVisible();
+  await expect(restoreAll).toHaveCount(0);
+});
+
 test('dropping a file on the library imports it', async ({ page }) => {
   await start(page);
   const data = [...(await import('node:fs')).readFileSync(epubFile({ title: 'Dropped In', author: 'Gravity' }))];

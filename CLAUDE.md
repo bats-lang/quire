@@ -2466,6 +2466,14 @@ deleted when the Undo offer is made final (#396 moves them to the Trash).
   Trash holds something. Nothing is purged by itself: that would be an
   irreversible action the reader did not take. A book in the Trash has
   Restore first in its menu.
+  Restore all books (`trash-restore-all`, quire#494; Windows' Recycle Bin
+  has "Restore all items" beside its empty button, Drive and Gmail only
+  select-all then restore) comes before Empty Trash, plain since nothing is
+  lost: `lib_restore_all` puts every book of the Trash on the shelf, as a
+  single Restore does, and returns the Trashed books' shelves, so the offer
+  `BooksRestored` (Undo) puts exactly those books back in the Trash
+  (`lib_untrash_all`) and its end lets them go (`lib_shelved_free`). It
+  says "books": the dictionaries in the Trash have their own Restore.
 
 What deletes is private to the module that owns it: deleting a book
 and emptying the Trash (`src/library.bats`), and dropping an
