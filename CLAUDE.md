@@ -3135,6 +3135,19 @@ length, in the same page, so a slower machine slows both. What it found:
   keeps no copy made ahead either (`_copy_stale`): the clone of its whole DOM
   was 3 s of script for 30,000 nodes, in which the page did not answer; a
   drag, which does lay a copy, makes one then.
+* **Close does not wait for the layout, and the layout can outlast a check
+  (#522).** Choosing Two on the megabyte word and pressing Escape: the
+  dialog's `data-hide` flips within milliseconds of the key (measured with a
+  MutationObserver and a longtask observer, then with Chrome's CPU throttled
+  25 times: the flip came 6 ms before a single 15.7 s task, the columns' layout,
+  which the click made dirty and Chrome does in the next frame). Playwright's
+  `toBeHidden` needs the page laid out to say so, so on a loaded runner it
+  waited behind that task and failed at 15 s twice (#518, #533). So the
+  app's part is asserted by its attribute (`arrange`), the dialog gone from the
+  screen waits as long as the layout it follows (`slow`), and a test dispatches
+  the click on Two and the Escape in one script, so no frame lies between them,
+  and finds the dialog already hidden. The 15 s is not raised: the hide is
+  checked with no layout in the way.
 * **The anchor is found by search, not by hit test.** `_anchor_now` took the
   element at a point (`elementFromPoint`, then stepping 40 px at a time),
   and then the first of the next 40 nodes to start on the page. A hit test
