@@ -155,7 +155,7 @@ test('Back answers a dialog No: the Trash is not emptied', async ({ page }, test
 test('after a screen is closed by its own button, Back at the library leaves at once', async ({ page }, testInfo) => {
   const errors = await start(page);
   await librarySettings(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
   await readBook(page, { title: 'Closed By Its Button', author: 'B', rawChapters: chapters(1) });
   await page.keyboard.press('Escape');

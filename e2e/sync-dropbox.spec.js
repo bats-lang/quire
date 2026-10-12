@@ -48,9 +48,9 @@ async function openSync(page) {
 }
 
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -154,7 +154,7 @@ test('a Dropbox sign-in the reader refuses changes nothing, and a code it did no
   await closeSync(a.page);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText('Off');
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
 
   // a code with a state this page did not send is refused
   server.answer = 'allow';

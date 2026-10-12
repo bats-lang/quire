@@ -3487,6 +3487,7 @@ in ui_show(state, false) end
 implement sync_screen_make () = let
   val () = ui_el("bats-root", "sync-screen", TDiv, "info")
   val () = ui_labelled("sync-screen", NDialog, "sync-title")
+  val () = ui_screen_bar("sync-screen", "sync-bar", "sync-back", "sync-title", "Sync")
   val () = ui_el("sync-screen", "sync-box", TDiv, "info-in")
   (* the sign-in step, one service's part of it shown at a time *)
   val () = ui_el("sync-box", "sync-step", TDiv, "sstep")
@@ -3541,8 +3542,6 @@ implement sync_screen_make () = let
   val () = ui_text_btn("sync-step-buttons", "sync-webdav", "btn btn-p", sign_in_label(ServiceWebDav()))
   val () = ui_show("sync-step", false)
   (* the screen *)
-  val () = ui_el("sync-box", "sync-title", TDiv, "mtitle")
-  val () = ui_text("sync-title", "Sync")
   (* its status: where, how it went, and the actions while it is on *)
   val () = ui_el("sync-box", "sync-card", TDiv, "scard")
   val () = ui_el("sync-card", "sync-where", TDiv, "swhere")
@@ -3570,8 +3569,6 @@ implement sync_screen_make () = let
   (* what sync keeps, in a line (the services' own steps say the rest) *)
   val () = ui_el("sync-box", "sync-about", TDiv, "snote")
   val () = ui_text_long("sync-about", "Keeps places, shelves, collections, highlights, notes and reading time the same on your devices. Books' files are not synced, and sign-ins stay on this device.")
-  val () = ui_el("sync-box", "sync-done-row", TDiv, "mbtns")
-  val () = ui_text_btn("sync-done-row", "sync-done", "btn", dismiss_label(DismissScreen()))
   val () = ui_show("sync-screen", false)
   (* the offer of the place another device read: a row of the reader's
      bottom bar, over its progress, so it covers no text the bars do
@@ -3653,10 +3650,9 @@ implement sync_screen_open () = let
   val () = _actions_show(_store_on())
   val () = layer_open(LSync())
 in let
-  (* focus goes to Done at the screen's foot, which scrolls it flush to the
-     window's edge, under the bars (#389: the rows grew taller); the
-     screen is shown from its top *)
-  val () = ui_focus("sync-done")
+  (* focus goes to Back in the screen's top bar, and the screen is shown
+     from its top *)
+  val () = ui_focus("sync-back")
 in ui_scroll_to_top("sync-box") end end
 
 (* A service's own sign-in step, opened from its row over the list:
@@ -3711,10 +3707,9 @@ implement sync_step_cancel () = let
   val () = !_sign_in_generation := !_sign_in_generation + 1
   val () = _step_close()
 in let
-  (* focus goes to Done at the screen's foot, which scrolls it flush to the
-     window's edge, under the bars (#389: the rows grew taller); the
-     screen is shown from its top *)
-  val () = ui_focus("sync-done")
+  (* focus goes to Back in the screen's top bar, and the screen is shown
+     from its top *)
+  val () = ui_focus("sync-back")
 in ui_scroll_to_top("sync-box") end end
 
 (* What the step says: a field left empty *)

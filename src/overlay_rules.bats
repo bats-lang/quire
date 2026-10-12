@@ -18,7 +18,7 @@ staload "declarations.sats"
 
 implement image_zoom_axes () = $GT.AxNone()
 
-#pub fn overlay_rules {left:nat | left >= 7929} (sheet: sheet(left, false, false)): [after:nat | after >= left - 7929] sheet(after, false, false)
+#pub fn overlay_rules {left:nat | left >= 8269} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8269] sheet(after, false, false)
 
 (* The image viewer and toasts, from .imview on *)
 fn overlay_rules_image_viewer_and_toasts {left:nat | left >= 2600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2600] sheet(after, false, false) = let
@@ -226,7 +226,7 @@ fn overlay_rules_menus {left:nat | left >= 2293} (sheet: sheet(left, false, fals
 in sheet end
 
 (* The dialog fields and book info, from .sfields on *)
-fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2431} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2431] sheet(after, false, false) = let
+fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2771} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2771] sheet(after, false, false) = let
   val sheet = rule(sheet, ".sfields")
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, FlexDirection(), "column")
@@ -307,6 +307,26 @@ fn overlay_rules_dialog_fields_and_book_info {left:nat | left >= 2431} (sheet: s
   val sheet = spaced(sheet, Gap(), SpaceSmall())
   val sheet = close(sheet)
   (* a column that scrolls keeps each child its height, none shrinks *)
+  (* a pushed screen's top bar (#502): its Back and its title, outside
+     what scrolls, as wide as the content under it *)
+  val sheet = rule(sheet, ".tbar")
+  val sheet = lay(sheet, Display(), "flex")
+  val sheet = lay(sheet, AlignItems(), "center")
+  val sheet = spaced(sheet, Gap(), SpaceSmall())
+  val sheet = lay(sheet, Flex(), "none")
+  val sheet = lay(sheet, Width(), "100%")
+  val sheet = lay(sheet, MaxWidth(), "600px")
+  val sheet = centred(sheet)
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".tbar-title")
+  val sheet = lay(sheet, Flex(), "1 1 auto")
+  val sheet = lay(sheet, MinWidth(), "0")
+  val sheet = lay(sheet, FontWeight(), "bold")
+  val sheet = lay(sheet, FontSize(), "20px")
+  val sheet = clips(sheet)
+  val sheet = lay(sheet, TextOverflow(), "ellipsis")
+  val sheet = lay(sheet, WhiteSpace(), "nowrap")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>*")
   val sheet = lay(sheet, Flex(), "none")
   val sheet = close(sheet)

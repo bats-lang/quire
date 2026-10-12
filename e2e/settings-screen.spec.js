@@ -33,7 +33,7 @@ test('Settings opens from the library menu, which no longer holds what it took',
   await menuItem(page, 'Settings').click();
   await expect(settingsScreen(page)).toBeVisible();
   await expect(page.getByRole('menu')).toBeHidden();
-  for (const row of ['Sync', 'Dictionaries', 'Export backup', 'Reset reading settings', 'Remove all books', 'Done']) {
+  for (const row of ['Sync', 'Dictionaries', 'Export backup', 'Reset reading settings', 'Remove all books', 'Back']) {
     await expect(settingsButton(page, row)).toBeVisible();
   }
   // the reading settings are the book's own sheet's, not a row here
@@ -41,7 +41,7 @@ test('Settings opens from the library menu, which no longer holds what it took',
   await expect(settingsScreen(page).getByRole('button', { name: 'Turn pages with volume keys' })).toHaveCount(0);
   await expect(settingsScreen(page).getByRole('group', { name: 'Tap to turn pages' })).toHaveCount(0);
   await expect(restoreInput(page)).toHaveCount(1);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
@@ -89,6 +89,50 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await expect(libraryShown(page)).toBeVisible();
 });
 
+// quire#502: a pushed screen has a top bar with a Back arrow and its
+// title, kept at the top as the screen scrolls, and no Done at its foot;
+// Back does what Escape does
+test('Settings, Sync, Dictionaries and About each have a top bar with Back, and no Done', async ({ page }) => {
+  const errors = await start(page);
+  await librarySettings(page);
+  const bar = screen => screen.locator('.tbar');
+  // the screens opened from Settings first, Settings itself last
+  const screens = [
+    ['Sync', dialog(page, 'Sync')],
+    ['Dictionaries', dialog(page, 'Dictionaries')],
+    ['About Quire', dialog(page, 'About Quire')],
+    ['Settings', settingsScreen(page)],
+  ];
+  const opened = {
+    Settings: async () => {},
+    Sync: () => settingsButton(page, 'Sync').click(),
+    Dictionaries: () => settingsButton(page, 'Dictionaries').click(),
+    'About Quire': () => settingsButton(page, 'About Quire').click(),
+  };
+  for (const [title, screen] of screens) {
+    await opened[title]();
+    await expect(screen).toBeVisible();
+    // the bar: Back first, then the title, at the top of the screen
+    await expect(bar(screen).getByRole('button', { name: 'Back', exact: true })).toBeVisible();
+    await expect(bar(screen)).toContainText(title);
+    await expect(screen.getByRole('button', { name: 'Done' })).toHaveCount(0);
+    const back = await bar(screen).getByRole('button', { name: 'Back', exact: true }).boundingBox();
+    expect(back.width).toBeGreaterThanOrEqual(48);
+    expect(back.height).toBeGreaterThanOrEqual(48);
+    // it stays at the top as the screen scrolls
+    const before = await bar(screen).boundingBox();
+    await screen.locator('.info-in').evaluate(e => { e.scrollTop = e.scrollHeight; });
+    const after = await bar(screen).boundingBox();
+    expect(after.y, `${title}: the bar moved as the screen scrolled`).toBe(before.y);
+    // Back closes the screen, as Escape does: to the screen under it
+    await bar(screen).getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(screen).toBeHidden();
+    if (title !== 'Settings') await expect(settingsScreen(page)).toBeVisible();
+  }
+  await expect(libraryShown(page)).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('a row that ends in a chevron opens a screen, never a dialog, and a service\'s row says what it is (#389)', async ({ page }) => {
   await start(page);
   await librarySettings(page);
@@ -133,7 +177,7 @@ test('the daily goal is chosen in Settings, and the statistics panel shows it', 
   await goal(page).getByRole('button', { name: '30 min' }).click();
   await expect(goal(page).getByRole('button', { name: '30 min' })).toHaveAttribute('aria-pressed', 'true');
   await expect(goal(page).getByRole('button', { name: 'Off' })).toHaveAttribute('aria-pressed', 'false');
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await libraryMenu(page);
   await menuItem(page, 'Reading statistics').click();
   const stats = dialog(page, 'Reading statistics').getByRole('group', { name: 'Daily goal' });
@@ -156,11 +200,11 @@ test('Reset reading settings and Remove all books, from Settings, each with its 
   await settingsButton(page, 'Reset reading settings').click();
   await expect(page.getByRole('status').filter({ hasText: 'Settings reset' })).toBeVisible();
   await undo(page).click();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect.poll(() => bg(page)).toBe(sepia);
   await librarySettings(page);
   await settingsButton(page, 'Reset reading settings').click();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect.poll(() => bg(page)).toBe(plain);
   await undo(page).click();
   await expect.poll(() => bg(page)).toBe(sepia);

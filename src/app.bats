@@ -239,9 +239,8 @@ fn _dictionaries (): void = let
      chevron opens a screen, never a dialog *)
   val () = ui_el("bats-root", "dictionaries-panel", TDiv, "info")
   val () = ui_labelled("dictionaries-panel", NDialog, "dictionaries-title")
+  val () = ui_screen_bar("dictionaries-panel", "dictionaries-bar", "dictionaries-back", "dictionaries-title", "Dictionaries")
   val () = ui_el("dictionaries-panel", "dictionaries-box", TDiv, "info-in")
-  val () = ui_el("dictionaries-box", "dictionaries-title", TDiv, "mtitle")
-  val () = ui_text("dictionaries-title", "Dictionaries")
   val () = ui_el("dictionaries-box", "dictionaries-none", TDiv, "cnone")
   val () = ui_text("dictionaries-none", "No dictionaries yet")
   val () = ui_el("dictionaries-box", "dictionaries-list", TDiv, "sgroup")
@@ -253,8 +252,6 @@ fn _dictionaries (): void = let
   val () = app_dictionary_input()
   val () = ui_el("dictionaries-box", "dictionaries-status", TDiv, "cnone")
   val () = ui_role("dictionaries-status", RStatus)
-  val () = ui_el("dictionaries-box", "dictionaries-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("dictionaries-buttons", "dictionaries-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("dictionaries-panel") end
 
 (* A word looked up in a dictionary, over the page: the headword, its
@@ -371,9 +368,8 @@ in _hide("sort-menu") end
 fn _settings_screen (): void = let
   val () = ui_el("bats-root", "settings-screen", TDiv, "info")
   val () = ui_labelled("settings-screen", NDialog, "settings-title")
+  val () = ui_screen_bar("settings-screen", "settings-bar", "settings-back", "settings-title", "Settings")
   val () = ui_el("settings-screen", "settings-box", TDiv, "info-in")
-  val () = ui_el("settings-box", "settings-title", TDiv, "mtitle")
-  val () = ui_text("settings-title", "Settings")
   (* the groups (#380; Android's settings): a heading and one card, each
      row of a card the whole width of it, its name, a line of what it is
      or its state, and a chevron *)
@@ -440,8 +436,6 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-factory-reset-row", "settings-factory-reset", "btn", "Remove all books")
   val () = ui_el("settings-factory-reset-row", "settings-factory-reset-about", TSpan, "sabout")
   val () = ui_text_long("settings-factory-reset-about", "Moves every book to the Trash and resets the settings. Undo brings them back.")
-  val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("settings-screen") end
 
 (* A link of the About screen to one of the pages published beside the
@@ -465,9 +459,8 @@ fn _about_page {id_len,label_len:pos | id_len < 256; label_len < 256}{path_len,a
 fn _about_screen (): void = let
   val () = ui_el("bats-root", "about-screen", TDiv, "info")
   val () = ui_labelled("about-screen", NDialog, "about-title")
+  val () = ui_screen_bar("about-screen", "about-bar", "about-back", "about-title", "About Quire")
   val () = ui_el("about-screen", "about-box", TDiv, "info-in")
-  val () = ui_el("about-box", "about-title", TDiv, "mtitle")
-  val () = ui_text("about-title", "About Quire")
   val () = ui_el("about-box", "about-text", TDiv, "sabout")
   val () = ui_text_long("about-text", "Quire, an EPUB reader. Your books and reading data are kept on this device.")
   (* the version, as a bug report should give it (#219) *)
@@ -486,8 +479,6 @@ fn _about_screen (): void = let
   val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
   val () = _about_page("about-privacy", "Privacy policy", "homepage/privacy.html", "bats-lang.github.io/quire/homepage/privacy.html")
   val () = _about_page("about-terms", "Terms of service", "homepage/terms.html", "bats-lang.github.io/quire/homepage/terms.html")
-  val () = ui_el("about-box", "about-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("about-buttons", "about-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("about-screen") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)

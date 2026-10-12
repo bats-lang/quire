@@ -1402,7 +1402,7 @@ end
 fn _about_open (): void = let
   val () = ui_show("about-error-copy", notice_details_kept())
   val () = layer_open(LAbout())
-in ui_focus("about-done") end
+in ui_focus("about-back") end
 
 (* Opens the Settings screen, its Sync row and goal as they are now *)
 fn _settings_open (): void = let
@@ -1446,14 +1446,14 @@ fn _wire_settings_screen {count:nat} (listeners: regs(count)): regs(count + 3) =
           val () = (if _in_reader() then _show_library() else ())
         in _factory_reset() end
         | ~$R.some(SettingsAbout()) => _about_open()
-        | ~$R.some(SettingsDone()) => layer_close(LSettings()))
+        | ~$R.some(SettingsBack()) => layer_close(LSettings()))
     in 0 end)
   (* the About screen: its links leave the app by themselves; Done
      goes back to Settings *)
   val listeners = RCons(listeners, OnEl("about-screen"), "click", llam(h) => let
       val clicked = _target(h)
       val () = (case+ _about_control(clicked) of
-        | ~$R.some(AboutDone()) => let
+        | ~$R.some(AboutBack()) => let
             val () = layer_close(LAbout())
             (* back where it was opened: Settings' row, or the library menu's button *)
           in (if layer_is_open(LSettings()) then ui_focus("settings-about") else ui_focus("library-menu-button")) end
@@ -1747,7 +1747,7 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
       val () = _target_free(clicked)
       val () = (case+ control of
         | ~$R.none() => (if removed >= 0 then dict_remove(removed) else ())
-        | ~$R.some(DictionariesDone()) => layer_close(LDictionaries())
+        | ~$R.some(DictionariesBack()) => layer_close(LDictionaries())
         (* a screen has no outside to click (#389) *)
         | ~$R.some(DictionariesPanel()) => ())
     in 0 end)
@@ -1776,7 +1776,13 @@ fn _wire_sync {count:nat} (listeners: regs(count)): regs(count + 3) = let
         | ~$R.some(NextcloudSignIn()) => sync_nextcloud_sign_in()
         | ~$R.some(SyncDropbox()) => sync_dropbox()
         | ~$R.some(SyncOff()) => sync_off()
-        | ~$R.some(SyncDone()) => layer_close(LSync())
+        (* Back as Escape is: with a service's sign-in step open it ends
+           the step and shows the list; else the screen closes *)
+        | ~$R.some(SyncBack()) =>
+          if layer_is_open(LSyncStep()) then let
+            val () = layer_close(LSyncStep())
+          in sync_step_cancel() end
+          else layer_close(LSync())
         (* a service's row: its own sign-in step (#331) *)
         | ~$R.some(SyncRowGoogle()) => sync_step_open(ServiceGoogle())
         | ~$R.some(SyncRowDropbox()) => sync_step_open(ServiceDropbox())

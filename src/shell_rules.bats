@@ -9,7 +9,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 
-#pub fn shell_rules {left:nat | left >= 8920} (sheet: sheet(left, false, false)): [after:nat | after >= left - 8920] sheet(after, false, false)
+#pub fn shell_rules {left:nat | left >= 9103} (sheet: sheet(left, false, false)): [after:nat | after >= left - 9103] sheet(after, false, false)
 
 (* The library page, from body on *)
 fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1919] sheet(after, false, false) = let
@@ -104,7 +104,7 @@ fn shell_rules_library_page {left:nat | left >= 1919} (sheet: sheet(left, false,
 in sheet end
 
 (* The fields and banners, from .btn input[type=file] on *)
-fn shell_rules_fields_and_banners {left:nat | left >= 1677} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1677] sheet(after, false, false) = let
+fn shell_rules_fields_and_banners {left:nat | left >= 1860} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1860] sheet(after, false, false) = let
   val sheet = rule(sheet, ".btn input[type=file],.ibtn input[type=file]")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Top(), "0")
@@ -180,6 +180,15 @@ fn shell_rules_fields_and_banners {left:nat | left >= 1677} (sheet: sheet(left, 
   val sheet = spaced(sheet, MarginRight(), SpaceNone())
   val sheet = spaced(sheet, MarginBottom(), SpaceNone())
   val sheet = spaced(sheet, MarginLeft(), SpaceNone())
+  val sheet = close(sheet)
+  (* Over a pushed screen (Settings, Sync, Dictionaries, About) the banner
+     sits under the screen's top bar, so it never covers the bar's Back
+     (#502): the bar is the screen's safe inset (at least 12px) and 48px,
+     the banner 8px under it. layer.bats sets data-below *)
+  val sheet = rule(sheet, ".banner[data-below='1'],.banner.in-library[data-below='1']")
+  val sheet = lay(sheet, Position(), "fixed")
+  val sheet = lay(sheet, Top(), "calc(max(12px,var(--safe-top)) + 56px)")
+  val sheet = spaced(sheet, Margin(), SpaceNone())
   val sheet = close(sheet)
   (* While a menu opened from the library is up, the banner is under it
      (#507): the menus hang from the top of the screen, where the banner

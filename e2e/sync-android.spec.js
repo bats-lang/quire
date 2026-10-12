@@ -51,9 +51,9 @@ async function openSync(page) {
 }
 
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -102,7 +102,7 @@ test('Use Android syncs through the app data folder of the device\'s Google acco
   expect(server.json().books[0]).toMatchObject({ chapter: 2, title: 'Shared Book' });
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText(/^Android · synced (just now|1 min ago)$/);
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   // B joins: A's place is taken; its write replaces the file's bytes
   await importFiles(b.page, [file], 1);
   await joinAndroid(b.page);
@@ -141,7 +141,7 @@ test('opened again, the app syncs with the token it kept, and once its hour is u
   await expect.poll(() => server.requests.length).toBeGreaterThan(asked);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText(/^Android · synced (just now|1 min ago)$/);
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   expect(a.google.calls.map(c => c.method)).toEqual(['authorizeScopes']);
   // the token's hour is up: Drive refuses it as the app opens again; the
   // refused token is taken out of Play services' cache, and another is
@@ -171,7 +171,7 @@ test('access taken back in the Google account pauses sync until Sync now asks fo
   await reopened(a.page);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText('Android · paused, tap Sync now');
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   expect(a.google.asked('authorizeScopes')).toHaveLength(1);
   // opened again while paused: the app asks Google with nothing shown,
   // and with no token reaches no Drive, and stays paused
@@ -438,14 +438,14 @@ test('in a browser opened again, Google Drive syncs with the token it kept; once
   await expect.poll(() => server.requests.length).toBeGreaterThan(asked);
   await librarySettings(web.page);
   await expect(row(web.page)).toHaveText(/^Google Drive · synced (just now|1 min ago)$/);
-  await settingsButton(web.page, 'Done').click();
+  await settingsButton(web.page, 'Back').click();
   expect(await web.page.evaluate(() => window.__gis.requests)).toBe(0);
   // the hour is up: paused, said in the Sync row and on its screen
   server.token = 'token-2';
   await reopened(web.page);
   await librarySettings(web.page);
   await expect(row(web.page)).toHaveText('Google Drive · paused, tap Sync now');
-  await settingsButton(web.page, 'Done').click();
+  await settingsButton(web.page, 'Back').click();
   // opened again while paused: nothing is tried, nothing changes
   asked = server.requests.length;
   await reopened(web.page);
