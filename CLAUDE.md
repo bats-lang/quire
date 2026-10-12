@@ -1392,9 +1392,12 @@ its high 16 bits, little endian, over the tag and the data; the last
 chunk is `IEND`. A record is a set of groups, one chunk each, written
 in ascending tag order (a book's: `AUTH BOOK COLL ELSE FNSH ORDR PLCE SERI SHLF
 SIZE TIME TITL`, the index's `LEGA NAMS`) and read by tag, in any order
-(#510, below); each group is required (its
-loss makes the record `Undecodable`) or optional (its loss gives its
-defaults and `DecodedWithLoss`). A chunk of a tag this version does not
+(#510, below); a group the record needs or that every version has
+written (`req`, `opt`), when it is lost (absent, its CRC bad or its fields
+not parsing), is read with its substitute (`SUBSTITUTES` in
+`scripts/record_tables.py`, else 0 and empty) and said to be lost, and the
+record is used (`rr_loss`); nothing about a group makes a record unusable.
+A chunk of a tag this version does not
 know is kept as it is, at the end, when its first letter is lower case
 (ancillary, as in PNG), so a newer Quire's addition survives this one's
 save; a capital one (critical), or a least version over `READER`, makes
@@ -1441,6 +1444,64 @@ order is the writer's, not the format's.
   it: `EXV_cons(ANC, NOTKNOWN | ...)`), so `senc_canon` shows that the
   chunks written are their own canonical ones (`tests/static/reject/
   codec-group-twice-earlier-wins`, `codec-group-twice-not-said`).
+* **A group the record needs, lost, is substituted (stage 2b).** The
+  `LOSES(requirement)` constructors of `SDEC` (`SD_garbled_lost`,
+  `SD_bad_lost`, `SD_absent_lost_end`, `_good`, `_bad`) are one set for
+  `req` and `opt`, a group absent, with a bad CRC or fields that do not
+  parse; `added` keeps its own, for which absent is silent. A book whose
+  TITL is lost is "Untitled" (the contents panel's word for a label with
+  none), whose AUTH is lost has no author, whose BOOK is lost has ids 0
+  in the record and the ids of its key in the library. **The key wins**
+  (`_read_book`, `_keyed_book` in `src/libstore.bats`): a record found
+  under `library/book/<id>` is the book `<id>` whatever ids it holds, and
+  its save writes the key's ids. Such a save (`_repaired`) writes the
+  library's image whole, every group, and keeps the bytes the record had
+  under `library/damaged/<id>/<crc>`, in the same transaction. Research
+  (on #510): SQLite's `.recover` keeps what it cannot place in a
+  `lost_and_found` table and calls the result a salvage, and Calibre
+  rebuilds a lost `metadata.db` from the book folders, so the record
+  is salvaged and the book files stay the source of truth (stage 2c, below,
+  reads the title and author from the file again).
+  `tests/codec` and `e2e/library-records.spec.js` lose each of AUTH, BOOK
+  and TITL, absent and damaged.
+* **What a record lost and the book's file can say is read again from
+  the file (stage 2c).** As a book is reopened from storage (`Reopen` in
+  `_opf_store`, `src/import.bats`), where its OPF is parsed anyway,
+  `lib_rebuild` (`src/library.bats`) takes from it what a field holds only
+  as a placeholder: the title "Untitled", the author "Unknown", a series
+  with no name or no position, no direction of the text, no file size. A
+  field holding any other value is never changed (the file is the source
+  of what a record lost, not of what it holds), and what the reader made
+  (place, shelf, collections, finished, minutes, order, notes) is never
+  read from a file. Not rebuilt: the cover, the progress weights (the
+  reader works them out as the chapters are laid out), the accessibility
+  summary. A rebuild that changes something saves the library at once (the
+  record is repaired and the old bytes kept); one that changes nothing
+  writes nothing. `e2e/old-library.spec.js` removes a real book's title
+  and author groups and opens it.
+* **The version before (stage 2d).** `library/previous/<id>` holds a
+  book's record as it was before a save, and `library/stamp/<id>` when
+  the record was last written (4 bytes, seconds since 2025; read once at
+  the library's load into memory, `_stamps` in `src/libstore.bats`). A
+  save keeps the record it replaces as the previous version only when
+  that record was last written 60 seconds ago or more (an unknown stamp
+  counts as old) and decodes whole, and writes the stamp on every save,
+  in one batch with the record: KOReader's rule (its `.old` is not
+  rotated until 60 seconds old, so a crash loop cannot overwrite the good
+  copy with a bad one), on the age of the file replaced, so saves a few
+  seconds apart never rotate and a bug that damages a record at each save
+  leaves the version from before the first. A book whose record is broken
+  beyond recovery (`UnusableDamaged`, the framing) and that has a
+  previous version is read from it (`_recover`, a `LossyBook`); the save
+  of a book whose stored record is not whole writes the library's image
+  as a new record and keeps the bytes under `library/damaged` (it used to
+  be refused; `NotQuire` and `Newer` still are). Emptying the Trash
+  deletes the record, its previous version and its stamp together. The
+  stamp is a key of its own, not a group: a group would be a field of
+  every image and record, and it is the library's bookkeeping, not the
+  book's. Not done: salvaging the chunks before a cut in a record's
+  framing, and offering the sync file or Auto Backup copy for a record
+  whose reader state is lost (a notice action: #507's).
 * By the principle for any record that does not decode cleanly (the user's
   rule for #510): recover fanatically; if a bug in Quire damages a record
   the reader must still read the book. In order: (1) usable with
@@ -1826,9 +1887,14 @@ read of storage changed: each still folds, as #174 says.
   made beside it could not be seen while the read keeps failing.
 * **Records that cannot be used are set aside, not replaced** (the
   follow-up of #374). A library whose read worked can still hold a book's
-  record, or the collections', that is damaged or not Quire's: it is shown
-  nowhere and never written over, so the book cannot be imported again and
-  no collection can be made. Settings shows a row then (`settings-aside`,
+  record, or the collections', that is not Quire's or whose framing is broken (cut short, a length past
+  the end, no end chunk; every other damage is used, #510, and a book with
+  a version before it is read from it, 2d) is shown nowhere and not
+  written over by a read; the collections' record, and a book's of a newer
+  Quire or not Quire's, are never written over, so no collection can be made
+  while the collections' is one of them, and a book of those cannot be
+  imported again (a book whose framing is broken can: its import writes the
+  library's image over the record, the bytes kept, 2d). Settings shows a row then (`settings-aside`,
   `lib_aside_show`: "Set aside unreadable records",
   `settings-set-aside`), and only then. Pressing it
   (`lib_aside_run`, `lib_set_aside`) reads the library again and, for each
@@ -2327,6 +2393,23 @@ more than line positions change in it (bats-lang/bats#243):
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`spacing_rules`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* Only the spacing forms write a gap, padding or margin, and only
+  `scrolls`, `scrolling`, `clips` and `capped` write an overflow or a
+  max-height (#500): those properties are not in `lay`'s `prop` (they are
+  `spacing_prop`, which only the forms take), so `lay(sheet, Gap(), "10px")`
+  does not type-check (`tests/static/reject/lay-writes-gap`, `-padding`,
+  `-overflow`, `-max-height`). A value is a step of the scale (`SpaceNone`
+  to `SpaceExtraLarge`: `spaced`, `spaced_pair`), or a form named for what
+  it is: a safe-area inset (`spaced_safe`, `reserve_safe`), a margin pulled
+  out (`pulled`), automatic (`auto_margin`, `centred`), the book's em
+  (`prose_margin`), room kept for something drawn in the padding
+  (`reserve`: a chevron, a page number, an outline's indent, the Undo
+  toast), the reader's own variables (`page_padding`, `safe_area_margin`).
+  Values that were off the scale moved to the nearest step (2 to 4, 6 to
+  8, 10 to 12, 14 to 16), a few pixels. `offScale` in `e2e/controls-shown.js`
+  holds every visible element's gaps to the scale on every screen the walk
+  reaches. The sheet's budget is 64000 bytes (it was 60000): the costs the
+  forms declare are upper bounds, and the sheet stays under 65536.
 * The page's width and height are a whole number of pixels (`page_extent`,
   indexed by whether it is whole; `page_width_rule` and `page_height_rule`
   (`src/page_size.bats`, a module of its own so its fixtures check in a
@@ -2512,8 +2595,10 @@ saved this session (`src/storage.bats`: its save checks
 `storage_savable`), and an unread book's annotations cannot be made;
 the banner says so. The library is read as its records are (below): one
 that could not be read at all is not saved this session and books are not
-added to it, and the screen says why and offers what fits (#374, below); a book's record that is damaged, newer or not Quire's is
-shown nowhere, said once and never written over. A backup that could not
+added to it, and the screen says why and offers what fits (#374, below); a book's record that is newer or not Quire's is
+shown nowhere, said once and never written over; one that lost a group, or
+that is under other ids than its key, is used, and one broken in its framing
+is read from the version before it when there is one, else shown nowhere (#510). A backup that could not
 read a book's notes is not made.
 
 The overlays (the menus, book info, the reader's panels and the full
@@ -2669,6 +2754,14 @@ research (what comparable library apps do) and written here:
   the Catalogues). Every other reason for an empty view is said and offers
   nothing, since importing would not change it. The unreadable library
   (#374) keeps the bar's inert Import and no offer.
+* **The book menu button is one box in both views** (#495): a 48 by 48
+  square, `align-self: center` in the list (the card row stretches its
+  children, which made it as tall as the card) and over the cover's corner
+  in the grid; Material 3's trailing icon button is a 48dp target round a
+  24dp glyph, centred in a one- or two-line list item and in the corner of a
+  media card, never stretched. `cardMoreBoxes` (`e2e/controls-shown.js`)
+  measures it, and `e2e/layout.spec.js` fails if the list's and the grid's
+  boxes differ.
 * **One word for a book's state** (`reading_state`: `StateUnread |
   StateReading | StateFinished`, `_reading_state_of`): the filter and the
   card use it, so the card says Unread and Finished where it said New and
@@ -3142,6 +3235,19 @@ length, in the same page, so a slower machine slows both. What it found:
   keeps no copy made ahead either (`_copy_stale`): the clone of its whole DOM
   was 3 s of script for 30,000 nodes, in which the page did not answer; a
   drag, which does lay a copy, makes one then.
+* **Close does not wait for the layout, and the layout can outlast a check
+  (#522).** Choosing Two on the megabyte word and pressing Escape: the
+  dialog's `data-hide` flips within milliseconds of the key (measured with a
+  MutationObserver and a longtask observer, then with Chrome's CPU throttled
+  25 times: the flip came 6 ms before a single 15.7 s task, the columns' layout,
+  which the click made dirty and Chrome does in the next frame). Playwright's
+  `toBeHidden` needs the page laid out to say so, so on a loaded runner it
+  waited behind that task and failed at 15 s twice (#518, #533). So the
+  app's part is asserted by its attribute (`arrange`), the dialog gone from the
+  screen waits as long as the layout it follows (`slow`), and a test dispatches
+  the click on Two and the Escape in one script, so no frame lies between them,
+  and finds the dialog already hidden. The 15 s is not raised: the hide is
+  checked with no layout in the way.
 * **The anchor is found by search, not by hit test.** `_anchor_now` took the
   element at a point (`elementFromPoint`, then stepping 40 px at a time),
   and then the first of the next 40 nodes to start on the page. A hit test

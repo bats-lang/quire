@@ -687,6 +687,96 @@ implement lib_series_set (index, data, data_len, start, span_len) = let
   val+ ~LibCell(books, count) = cell
 in lib_put(LibCell(_series_set_at(books, index, data, data_len, start, span_len), count)) end
 
+(* Whether the text is exactly "Untitled", the substitute of a lost title *)
+fn _is_untitled {l:agz}{n:pos} (text: !$A.arr(byte, l, n), n: int n): bool =
+  if n = 8 then
+    (if byte2int0($A.get<byte>(text, 0)) = 85 then
+       (if byte2int0($A.get<byte>(text, 1)) = 110 then
+          (if byte2int0($A.get<byte>(text, 2)) = 116 then
+             (if byte2int0($A.get<byte>(text, 3)) = 105 then
+                (if byte2int0($A.get<byte>(text, 4)) = 116 then
+                   (if byte2int0($A.get<byte>(text, 5)) = 108 then
+                      (if byte2int0($A.get<byte>(text, 6)) = 101 then byte2int0($A.get<byte>(text, 7)) = 100 else false)
+                    else false)
+                 else false)
+              else false)
+           else false)
+        else false)
+     else false)
+  else false
+
+(* Whether the text is exactly "Unknown", the substitute of a lost author *)
+fn _is_unknown {l:agz}{n:pos} (text: !$A.arr(byte, l, n), n: int n): bool =
+  if n = 7 then
+    (if byte2int0($A.get<byte>(text, 0)) = 85 then
+       (if byte2int0($A.get<byte>(text, 1)) = 110 then
+          (if byte2int0($A.get<byte>(text, 2)) = 107 then
+             (if byte2int0($A.get<byte>(text, 3)) = 110 then
+                (if byte2int0($A.get<byte>(text, 4)) = 111 then
+                   (if byte2int0($A.get<byte>(text, 5)) = 119 then byte2int0($A.get<byte>(text, 6)) = 110 else false)
+                 else false)
+              else false)
+           else false)
+        else false)
+     else false)
+  else false
+
+(* The book at index, rebuilt from its package where a field holds what stands in for a lost one (quire#510): a title
+   that is "Untitled", an author that is "Unknown", a series with no name or no position, no direction of the text, no
+   file size are taken from the package the book was read from when the package has them. A field holding a value
+   is never changed: the book's own file is the source of what a record lost, not of what it holds *)
+fun _rebuild_at {count:nat}{data_loc:agz}{data_len:pos}{title_start,title_span,author_start,author_span,series_start,series_span:nat |
+  title_start + title_span <= data_len; author_start + author_span <= data_len; series_start + series_span <= data_len} .<count>.
+  (books: books(count), index: int, data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len,
+   title_start: int title_start, title_span: int title_span, author_start: int author_start, author_span: int author_span,
+   series_start: int series_start, series_span: int series_span, series_position: Int, file_size: Int, text_directions: Int)
+  : @(books(count), bool) =
+  case+ books of
+  | ~books_nil() => @(books_nil(), false)
+  | ~books_cons(book, rest) =>
+    if index = 0 then let
+      val+ ~Book(title, title_len, author, author_len, series, series_len, nums) = book
+      val title_lost = (if title_span > 0 then _is_untitled(title, title_len) else false)
+      val author_lost = (if author_span > 0 then _is_unknown(author, author_len) else false)
+      val series_lost = (if series_len = 0 then series_span > 0 else false)
+      val position_lost = (if nums.series_position = 0 then series_position <> 0 else false)
+      val directions_lost = (if nums.text_directions = 0 then text_directions <> 0 else false)
+      val size_lost = (if nums.file_size <= 0 then file_size > 0 else false)
+      val @(new_title, new_title_len) = (if title_lost then let
+          val @(text, text_len) = _span_arr(data, data_len, title_start, title_span, "Imported Book")
+          val () = $A.free<byte>(title)
+        in @(text, text_len) end else @(title, title_len)): [l:agz][k:pos | k < 256] @($A.arr(byte, l, k), int k)
+      val @(new_author, new_author_len) = (if author_lost then let
+          val @(text, text_len) = _span_arr(data, data_len, author_start, author_span, "Unknown Author")
+          val () = $A.free<byte>(author)
+        in @(text, text_len) end else @(author, author_len)): [l:agz][k:pos | k < 256] @($A.arr(byte, l, k), int k)
+      val @(new_series, new_series_len) = (if series_lost then let
+          val @(text, text_len) = _series_arr(data, data_len, series_start, series_span)
+          val () = $A.free<byte>(series)
+        in @(text, text_len) end else @(series, series_len)): [l:agz][k:nat | k < 256] @($A.arr(byte, l, k + 1), int k)
+      var rebuilt: bnums = nums
+      val () = (if series_lost || position_lost then rebuilt.series_position := series_position else ())
+      val () = (if directions_lost then rebuilt.text_directions := text_directions else ())
+      val () = (if size_lost then rebuilt.file_size := file_size else ())
+      val changed = (title_lost || author_lost || series_lost || position_lost || directions_lost || size_lost)
+    in @(books_cons(Book(new_title, new_title_len, new_author, new_author_len, new_series, new_series_len, rebuilt), rest), changed) end
+    else let
+      val @(others, changed) = _rebuild_at(rest, index - 1, data, data_len, title_start, title_span, author_start, author_span, series_start, series_span, series_position, file_size, text_directions)
+    in @(books_cons(book, others), changed) end
+
+#pub fn lib_rebuild {data_loc:agz}{data_len:pos}{title_start,title_span,author_start,author_span,series_start,series_span:nat |
+  title_start + title_span <= data_len; author_start + author_span <= data_len; series_start + series_span <= data_len}
+  (index: int, data: !$A.borrow(byte, data_loc, data_len), data_len: int data_len,
+   title_start: int title_start, title_span: int title_span, author_start: int author_start, author_span: int author_span,
+   series_start: int series_start, series_span: int series_span, series_position: Int, file_size: Int, text_directions: Int): bool
+
+implement lib_rebuild (index, data, data_len, title_start, title_span, author_start, author_span, series_start, series_span, series_position, file_size, text_directions) = let
+  val cell = lib_take()
+  val+ ~LibCell(books, count) = cell
+  val @(rebuilt, changed) = _rebuild_at(books, index, data, data_len, title_start, title_span, author_start, author_span, series_start, series_span, series_position, file_size, text_directions)
+  val () = lib_put(LibCell(rebuilt, count))
+in changed end
+
 (* Moves the book at index to the front of the library: the sort is
    stable, so of the books opened in the same minute, the one opened
    last comes first *)

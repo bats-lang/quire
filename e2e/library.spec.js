@@ -279,7 +279,7 @@ test('an archived book keeps its record, and is read again by importing it', asy
   await card(page, 'Old Volume').click();
   const said = dialog(page, 'Archived');
   await expect(said).toBeVisible();
-  await said.getByRole('button', { name: 'OK' }).click();
+  await said.getByRole('button', { name: 'Done' }).click();
   await expect(bookPage(page)).toBeHidden();
   // importing it again restores it to the shelf
   await importInput(page).setInputFiles([f]);
@@ -460,7 +460,7 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   const sepia = await bg(page);
   // it asks nothing, and offers Undo
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(cards(page)).toHaveCount(0);
   await expect(page.getByText(empty)).toBeVisible();
@@ -475,7 +475,7 @@ test('a factory reset moves the library to the Trash and resets the settings, an
   await leaveShelf(page);
   // without Undo, the books wait in the Trash
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   await reload(page);
   await expect(cards(page)).toHaveCount(0);
@@ -490,7 +490,7 @@ test('the Trash restores every book at once after a factory reset, and that can 
   await start(page);
   await importFiles(page, [epubFile({ title: 'Restore One', author: 'A' }), epubFile({ title: 'Restore Two', author: 'B' })], 2);
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(cards(page)).toHaveCount(0);
   // the offer to undo the reset goes away; the books wait in the Trash
   await page.getByRole('status').getByRole('button', { name: 'Dismiss' }).click();
@@ -615,7 +615,7 @@ test('restoring an archived book from its menu says to import it again', async (
   await menuItem(page, 'Unarchive').click();
   const said = dialog(page, 'Unarchive');
   await expect(said).toContainText('import its file again');
-  await said.getByRole('button', { name: 'OK' }).click();
+  await said.getByRole('button', { name: 'Done' }).click();
   await expect(said).toBeHidden();
 });
 

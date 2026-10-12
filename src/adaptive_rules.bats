@@ -17,7 +17,7 @@ staload "declarations.sats"
    its content. And the Sync screen's parts: its status card (where,
    how it went, its actions), its footer note, and its sign-in step,
    which hides the screen's list while it is shown *)
-#pub fn spacing_rules {left:nat | left >= 1700} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1700] sheet(after, false, false)
+#pub fn spacing_rules {left:nat | left >= 1600} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1600] sheet(after, false, false)
 
 implement spacing_rules (sheet) = let
   val sheet = rule(sheet, ":root")
@@ -42,14 +42,6 @@ implement spacing_rules (sheet) = let
   val sheet = lay(sheet, BorderRadius(), "12px")
   val sheet = lay(sheet, FlexWrap(), "wrap")
   val sheet = lay(sheet, AlignItems(), "center")
-  val sheet = close(sheet)
-  (* a row's supporting line (a sync service's summary) under its name,
-     the whole width of the row *)
-  val sheet = rule(sheet, ".info .srow>.sabout")
-  val sheet = lay(sheet, Flex(), "1 1 100%")
-  (* under the name, closer than the row's gap: five rows with a line each
-     must not outgrow a phone's window (the Sync screen, #389) *)
-  val sheet = lay(sheet, MarginTop(), "-8px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".info-in>.sabout,.info-in>.cnone,.scard")
   val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
@@ -83,13 +75,13 @@ implement spacing_rules (sheet) = let
   val sheet = close(sheet)
 in sheet end
 
-#pub fn under_480px_rules {left:nat | left >= 480} (sheet: sheet(left, false, false)): [after:nat | after >= left - 480] sheet(after, false, false)
+#pub fn under_480px_rules {left:nat | left >= 504} (sheet: sheet(left, false, false)): [after:nat | after >= left - 504] sheet(after, false, false)
 
 implement under_480px_rules (sheet) = let
   val sheet = media(sheet, "(max-width:480px)")
   val sheet = rule(sheet, ".lib")
-  val sheet = lay(sheet, PaddingLeft(), "max(10px,var(--safe-left))")
-  val sheet = lay(sheet, PaddingRight(), "max(10px,var(--safe-right))")
+  val sheet = spaced_safe(sheet, PaddingLeft(), SpaceMedium(), SafeLeft())
+  val sheet = spaced_safe(sheet, PaddingRight(), SpaceMedium(), SafeRight())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".ttl")
   val sheet = lay(sheet, FontSize(), "20px")
@@ -101,7 +93,7 @@ implement under_480px_rules (sheet) = let
   val sheet = close(sheet)
   val sheet = rule(sheet, ".bar>.btn")
   val sheet = lay(sheet, Order(), "2")
-  val sheet = lay(sheet, Padding(), "8px 9px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceSmall(), SpaceSmall())
   val sheet = lay(sheet, FontSize(), "14px")
   val sheet = close(sheet)
   val sheet = rule(sheet, ".bar>.sfield")
@@ -114,8 +106,7 @@ implement under_480px_rules (sheet) = let
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Width(), "1px")
   val sheet = lay(sheet, Height(), "1px")
-  val sheet = lay(sheet, Margin(), "-1px")
-  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = read_out_only(sheet)
   val sheet = close(sheet)
   val sheet = media_end(sheet)
 in sheet end
@@ -138,15 +129,20 @@ in sheet end
    is 360 to 412 px high). It becomes a side sheet: the
    right half of the window, the whole of its height, scrolling
    inside, and the page stays in view beside it *)
-#pub fn short_screen_rules {left:nat | left >= 400} (sheet: sheet(left, false, false)): [after:nat | after >= left - 400] sheet(after, false, false)
+#pub fn short_screen_rules {left:nat | left >= 533} (sheet: sheet(left, false, false)): [after:nat | after >= left - 533] sheet(after, false, false)
 
 implement short_screen_rules (sheet) = let
   val sheet = media(sheet, "(max-height:500px) and (orientation:landscape)")
+  (* the Undo toast sits at the foot, over the least of the page: a short
+     window has no room to lift it 112 px clear of the bars *)
+  val sheet = rule(sheet, ".toast")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 8px)")
+  val sheet = close(sheet)
   val sheet = rule(sheet, ".sheet:not([data-side])")
   val sheet = lay(sheet, Left(), "auto")
-  val sheet = lay(sheet, Margin(), "0")
+  val sheet = spaced(sheet, Margin(), SpaceNone())
   val sheet = lay(sheet, Width(), "min(420px,50vw)")
-  val sheet = lay(sheet, MaxHeight(), "100dvh")
+  val sheet = capped(sheet, CapWindow())
   val sheet = lay(sheet, BorderRadius(), "12px 0 0 12px")
   val sheet = lay(sheet, Top(), "0")
   val sheet = close(sheet)

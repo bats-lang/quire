@@ -6,6 +6,7 @@
 // (#342).
 
 import { test, expect, onAndroid } from './fixtures.js';
+import { toastClear, rowIsTarget } from './controls-shown.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   start, epubFile, importFiles, cards, card, openBook, readBook, toLibrary, chapters, dialog, menuItem, libraryMenu,
@@ -21,7 +22,7 @@ const goal = page => settingsScreen(page).getByRole('group', { name: 'Daily read
 test('Settings opens from the library menu, which no longer holds what it took', async ({ page }) => {
   const errors = await start(page);
   await libraryMenu(page);
-  for (const gone of ['Sync', 'Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset settings', 'Factory reset']) {
+  for (const gone of ['Sync', 'Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset reading settings', 'Remove all books']) {
     await expect(menuItem(page, gone)).toHaveCount(0);
   }
   await expect(page.getByRole('menu').getByLabel('Restore backup')).toHaveCount(0);
@@ -32,7 +33,7 @@ test('Settings opens from the library menu, which no longer holds what it took',
   await menuItem(page, 'Settings').click();
   await expect(settingsScreen(page)).toBeVisible();
   await expect(page.getByRole('menu')).toBeHidden();
-  for (const row of ['Sync', 'Dictionaries', 'Export backup', 'Reset settings', 'Factory reset', 'Done']) {
+  for (const row of ['Sync', 'Dictionaries', 'Export backup', 'Reset reading settings', 'Remove all books', 'Done']) {
     await expect(settingsButton(page, row)).toBeVisible();
   }
   // the reading settings are the book's own sheet's, not a row here
@@ -139,7 +140,7 @@ test('the daily goal is chosen in Settings, and the statistics panel shows it', 
   await expect(stats.getByRole('button', { name: '30 min' })).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('Reset settings and Factory reset, from Settings, each with its Undo', async ({ page }) => {
+test('Reset reading settings and Remove all books, from Settings, each with its Undo', async ({ page }) => {
   await start(page);
   await importFiles(page, [epubFile({ title: 'Reset Book', author: 'R' })], 1);
   const plain = await bg(page);
@@ -152,24 +153,39 @@ test('Reset settings and Factory reset, from Settings, each with its Undo', asyn
   const sepia = await bg(page);
   // the settings reset, and back with Undo
   await librarySettings(page);
-  await settingsButton(page, 'Reset settings').click();
+  await settingsButton(page, 'Reset reading settings').click();
   await expect(page.getByRole('status').filter({ hasText: 'Settings reset' })).toBeVisible();
   await undo(page).click();
   await settingsButton(page, 'Done').click();
   await expect.poll(() => bg(page)).toBe(sepia);
   await librarySettings(page);
-  await settingsButton(page, 'Reset settings').click();
+  await settingsButton(page, 'Reset reading settings').click();
   await settingsButton(page, 'Done').click();
   await expect.poll(() => bg(page)).toBe(plain);
   await undo(page).click();
   await expect.poll(() => bg(page)).toBe(sepia);
   // the factory reset: Settings closes on the library, emptied
   await librarySettings(page);
-  await settingsButton(page, 'Factory reset').click();
+  await settingsButton(page, 'Remove all books').click();
   await expect(settingsScreen(page)).toBeHidden();
   await expect(cards(page)).toHaveCount(0);
   await expect.poll(() => bg(page)).toBe(plain);
   await undo(page).click();
   await expect(card(page, 'Reset Book')).toHaveCount(1);
   await expect.poll(() => bg(page)).toBe(sepia);
+});
+
+test('a row that opens a screen is one target, and the Undo toast is over nothing of the screen (#380)', async ({ page }) => {
+  await start(page);
+  await librarySettings(page);
+  expect(await rowIsTarget(page)).toEqual([]);
+  // the groups have headings, and About comes before the resets
+  const screen = settingsScreen(page);
+  const order = await screen.locator('.a11yg').allTextContents();
+  expect(order.indexOf('About')).toBeGreaterThanOrEqual(0);
+  expect(order.indexOf('About')).toBeLessThan(order.indexOf('Reset'));
+  await settingsButton(page, 'Reset reading settings').click();
+  await expect(undo(page)).toBeVisible();
+  await screen.locator('.info-in').evaluate(element => { element.scrollTop = element.scrollHeight; });
+  expect(await toastClear(page)).toEqual([]);
 });
