@@ -104,7 +104,7 @@ test('in a browser, Fastmail is not listed, and nothing is sent to it', async ({
   // not named anywhere on the screen
   await expect(panel(page)).not.toContainText('Fastmail', { useInnerText: true });
   // opened again, from Settings: still no request
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await settingsButton(page, 'Sync').click();
   await expect(panel(page)).toBeVisible();
   await page.waitForTimeout(500);
@@ -136,7 +136,7 @@ test("in the app, the first sync makes Fastmail's folder, then syncs there; the 
   expect(JSON.parse(server.body).devices.length).toBe(1);
   await expect(panel(page).getByRole('button', { name: 'Turn off' })).toBeVisible();
   // the Settings screen's row names Fastmail
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(syncRow(page)).toContainText('Fastmail · synced');
   // kept across a reload: the next sync reads the file, and makes no folder
   await page.reload();
@@ -171,7 +171,7 @@ test('in the app, an address or app password Fastmail refuses is said so, and em
   await fastmailButton(page).click();
   await expect(status(page)).toHaveText(/^The Fastmail address or app password is wrong\. \(Sync tried on /);
   expect(server.puts).toBe(0);
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(syncRow(page)).toContainText('Wrong Fastmail address or app password');
   await context.close();
 });

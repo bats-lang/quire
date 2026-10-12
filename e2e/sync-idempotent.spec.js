@@ -202,7 +202,7 @@ async function backupFile(device, testInfo) {
   await librarySettings(device.page);
   const path = testInfo.outputPath('backup.json');
   writeFileSync(path, await exportedBackup(device.page));
-  await settingsButton(device.page, 'Done').click();
+  await settingsButton(device.page, 'Back').click();
   return path;
 }
 

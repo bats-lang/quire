@@ -18,7 +18,7 @@ const bg = async page => (await colours(page)).bg.join(',');
 async function exportBackup(page) {
   await librarySettings(page);
   const text = await exportedBackup(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   return text;
 }
 
@@ -289,13 +289,13 @@ test('a backup holds reading aloud\'s speed and voices, the brightness, the rota
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect.poll(() => page.evaluate(() => window.hidden)).toBe(false);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   const undone = JSON.parse(await exportBackup(page));
   expect(undone.settings).toMatchObject({ rotationLocked: true, fullScreen: true });
   // reset, then restored
   await librarySettings(page);
   await settingsButton(page, 'Reset reading settings').click();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(page.getByRole('button', { name: 'Undo' })).toBeVisible();
   const reset = JSON.parse(await exportBackup(page));
   expect(reset.settings).toMatchObject({ readingSpeed: 100, brightness: 'system', rotationLocked: false, fullScreen: false, voices: {} });

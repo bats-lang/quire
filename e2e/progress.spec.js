@@ -248,7 +248,7 @@ test('a backup keeps how far into the book the place is, weighted by the chapter
   // the thousandth plus one
   expect(backup.books[0].progressWeighted).toBeGreaterThan(read * 10);
   expect(backup.books[0].progressWeighted).toBeLessThanOrEqual(read * 10 + 10);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await librarySettings(page);
   const path = rawFile('quire-backup.json', JSON.stringify(backup));
   // a reset with its Trash emptied, the book imported again: new, until the backup is restored

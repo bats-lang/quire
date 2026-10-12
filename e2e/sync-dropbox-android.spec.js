@@ -83,9 +83,9 @@ async function openSync(page) {
 }
 
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -156,7 +156,7 @@ test('in the app, Dropbox signs in through the system browser and comes back at 
   expect(server.json().books).toHaveLength(1);
   await librarySettings(a.page);
   await expect(row(a.page)).toHaveText(/^Dropbox · synced (just now|1 min ago)$/);
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
 
   // another device running the app joins, and gets the place
   const b = await device(browser, server);

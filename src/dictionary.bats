@@ -1305,9 +1305,9 @@ implement dict_panel_open (code, code_len) = let
   val () = ui_text_buf("dictionaries-status", $A.alloc<byte>(1), 0)
   val () = layer_open(LDictionaries())
 in let
-  (* focus goes to Done at the screen's foot, which scrolls it flush to the
-     window's edge, under the bars; the screen is shown from its top *)
-  val () = ui_focus("dictionaries-done")
+  (* focus goes to Back in the screen's top bar, and the screen is shown
+     from its top *)
+  val () = ui_focus("dictionaries-back")
 in ui_scroll_to_top("dictionaries-box") end end
 
 (* ============================================================
