@@ -623,6 +623,26 @@ export async function rowIsTarget(page) {
   });
 }
 
+/** A row that ends in a chevron must be drawn as one, and the chevron
+    belongs to a control (#501, after #389 checked that chevron rows open
+    screens): each visible `.chev` is a button or a link and draws its
+    chevron, and the pointer says it is a control */
+export async function looksActionable(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const shown = e => e.checkVisibility({ visibilityProperty: true }) && e.getClientRects().length > 0;
+    for (const element of document.querySelectorAll('.chev')) {
+      if (!shown(element)) continue;
+      const name = (element.textContent || element.id || element.tagName).trim().slice(0, 40);
+      if (!['BUTTON', 'A'].includes(element.tagName)) bad.push(`${name}: a chevron on a ${element.tagName.toLowerCase()}, which is not a control`);
+      const after = getComputedStyle(element, '::after').content;
+      if (after === 'none' || after === 'normal' || after === '""') bad.push(`${name}: ends in a chevron that is not drawn`);
+      if (getComputedStyle(element).cursor !== 'pointer') bad.push(`${name}: a chevron row whose pointer is not a control's`);
+    }
+    return bad;
+  });
+}
+
 /** Each visible control that a visible toast is drawn over */
 export async function toastClear(page) {
   return page.evaluate(() => {

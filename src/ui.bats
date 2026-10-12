@@ -1931,6 +1931,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
 (* The library menu's items, and its backdrop, each by its element's id (library_menu_control_id) *)
 #pub datatype library_menu_control =
   | MenuSettings
+  | MenuSync
   | MenuAbout
   | MenuInstall
   | MenuStats
@@ -1945,6 +1946,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
 implement library_menu_control_id (control) =
   case+ control of
   | MenuSettings() => "menu-settings"
+  | MenuSync() => "menu-sync"
   | MenuAbout() => "menu-about"
   | MenuInstall() => "menu-install"
   | MenuStats() => "menu-stats"
@@ -1958,7 +1960,8 @@ implement library_menu_control_id (control) =
 (* The control after control, in the order the decoder tries them *)
 fn _library_menu_control_after (control: library_menu_control): $R.option(library_menu_control) =
   case+ control of
-  | MenuSettings() => $R.some(MenuAbout())
+  | MenuSettings() => $R.some(MenuSync())
+  | MenuSync() => $R.some(MenuAbout())
   | MenuAbout() => $R.some(MenuInstall())
   | MenuInstall() => $R.some(MenuStats())
   | MenuStats() => $R.some(MenuCatalogues())
@@ -1983,7 +1986,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 10)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 11)
 
 (* The sort and view menu's choices, done, and its backdrop, each by its element's id (sort_menu_control_id) *)
 #pub datatype sort_menu_control =

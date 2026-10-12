@@ -89,6 +89,35 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await expect(libraryShown(page)).toBeVisible();
 });
 
+// quire#501: where sync and backup are. Sync is how a new phone gets
+// places, shelves and notes, so it is two taps from the library (the
+// menu, then Sync) and an empty library offers it; the backup is in
+// Settings, three taps from the library at most, with a line saying what
+// each holds. (Play Books syncs through the Google account with no setting
+// to find; Moon+ Reader keeps its backup in Settings, so the pair is a
+// menu item for the common task and Settings for the file.)
+test('Sync is two taps from the library and the backup three, and an empty library offers sync', async ({ page }) => {
+  const errors = await start(page);
+  // the empty library offers it
+  await page.getByRole('button', { name: 'Sync with another device' }).click();
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await dialog(page, 'Sync').getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(dialog(page, 'Sync')).toBeHidden();
+  // tap 1: the library menu; tap 2: Sync
+  await libraryMenu(page);
+  await menuItem(page, 'Sync').click();
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page, 'Sync')).toBeHidden();
+  await expect(libraryShown(page)).toBeVisible();
+  // taps 1 and 2: the menu, Settings, where the backup is, with its line
+  await librarySettings(page);
+  await expect(settingsButton(page, 'Export backup')).toBeVisible();
+  await expect(settingsScreen(page)).toContainText('Moving to a new phone?');
+  await settingsButton(page, 'Back').click();
+  expect(errors).toEqual([]);
+});
+
 test('a row that ends in a chevron opens a screen, never a dialog, and a service\'s row says what it is (#389)', async ({ page }) => {
   await start(page);
   await librarySettings(page);

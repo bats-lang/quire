@@ -156,6 +156,9 @@ fn _library (): void = let
   val () = ui_el("library", "library-empty-actions", TDiv, "eacts")
   val () = ui_el("library-empty-actions", "empty-import", TDiv, "btn btn-p")
   val () = ui_text_btn("library-empty-actions", "empty-catalogues", "btn", "Get free books")
+  (* a reader who has Quire on another device is told how books and
+     places come over: sync (quire#501) *)
+  val () = ui_text_btn("library-empty-actions", "empty-sync", "btn", "Sync with another device")
   val () = _hide("library-empty-actions")
   (* when the library could not be read for a reason a second read could
      change (the failure's HOPE, ui_try_again_show) *)
@@ -321,6 +324,9 @@ fn _library_menu (): void = let
   val () = ui_el("library-menu", "library-menu-box", TDiv, "menu")
   val () = ui_named("library-menu-box", NMenu, "Library menu")
   val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
+  (* sync is the way to a new phone, so it is two taps from the library
+     (the menu, then Sync), not three through Settings (quire#501) *)
+  val () = ui_menuitem("library-menu-box", "menu-sync", "Sync")
   (* next to Settings, as About is under Settings' own *)
   val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
@@ -387,6 +393,8 @@ fn _settings_screen (): void = let
   val () = ui_nav_row("settings-data", "settings-dictionaries-row", "settings-dictionaries", "settings-dictionaries-about",
     "Dictionaries", "Offline lookup for the words you select")
   (* the backup *)
+  val () = ui_el("settings-box", "settings-data-about", TDiv, "sabout")
+  val () = ui_text_long("settings-data-about", "Moving to a new phone? Sync keeps your places, shelves and notes the same on your devices; a backup below holds them in a file. Neither holds the books' files: keep your EPUB files.")
   val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
   val () = ui_text("settings-backup-title", "Backup")
   val () = ui_el("settings-box", "settings-backup", TDiv, "srow")
@@ -857,12 +865,14 @@ fn _settings (): void = let
   val () = ui_text("theme-label", "Theme")
   val () = ui_el("theme-row", "theme-choice", TDiv, "seg")
   val () = ui_named("theme-choice", NGroup, "Theme")
+  (* Auto follows the clock, so it has no palette of its own to draw; each
+     fixed theme is a swatch of its palette (quire#501), named by its word *)
   val () = ui_text_btn("theme-choice", "theme-auto", "sbtn", "Auto")
-  val () = ui_text_btn("theme-choice", "theme-light", "sbtn", "Light")
-  val () = ui_text_btn("theme-choice", "theme-sepia", "sbtn", "Sepia")
-  val () = ui_text_btn("theme-choice", "theme-dark", "sbtn", "Dark")
-  val () = ui_text_btn("theme-choice", "theme-night", "sbtn", "Night")
-  val () = ui_text_btn("theme-choice", "theme-grey", "sbtn", "Grey")
+  val () = ui_swatch_btn("theme-choice", "theme-light", "themesw th-light", "Light")
+  val () = ui_swatch_btn("theme-choice", "theme-sepia", "themesw th-sepia", "Sepia")
+  val () = ui_swatch_btn("theme-choice", "theme-dark", "themesw th-dark", "Dark")
+  val () = ui_swatch_btn("theme-choice", "theme-night", "themesw th-night", "Night")
+  val () = ui_swatch_btn("theme-choice", "theme-grey", "themesw th-grey", "Grey")
   val () = ui_el("typography-look", "font-row", TDiv, "srow")
   val () = ui_el("font-row", "font-label", TSpan, "slabel")
   val () = ui_text("font-label", "Font")

@@ -246,6 +246,49 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   await expect.poll(bg).toBe(dark.bg.join(','));
 });
 
+// quire#501: the themes are swatches of their palettes, not six wrapping
+// words: each button wears its theme's classes, so its sample and ground are
+// that theme's own pair, whatever theme is on the page
+test('each theme is a swatch of its own palette, named by its word, the chosen one ringed', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Swatches', author: 'Settings Tests', rawChapters: chapters(1, 3) });
+  await openSettings(page);
+  const group = sheet(page).getByRole('group', { name: 'Theme' });
+  const names = ['Light', 'Sepia', 'Dark', 'Night', 'Grey'];
+  const rgb = text => (text.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
+  const luminance = ([r, g, b]) => {
+    const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const looks = {};
+  for (const name of names) {
+    const button = group.getByRole('button', { name, exact: true });
+    await expect(button).toBeVisible();
+    // no words: its name is its aria-label, its sample a drawn "Aa"
+    await expect(button).toHaveText('');
+    looks[name] = await button.evaluate(e => {
+      const own = getComputedStyle(e);
+      const box = e.getBoundingClientRect();
+      return { ground: own.backgroundColor, text: own.color, sample: getComputedStyle(e, '::before').content, width: box.width, height: box.height };
+    });
+    expect(looks[name].sample, `${name} shows a sample of the type`).toBe('"Aa"');
+    expect(looks[name].width).toBeGreaterThanOrEqual(48);
+    expect(looks[name].height).toBeGreaterThanOrEqual(48);
+    const [a, b] = [luminance(rgb(looks[name].ground)), luminance(rgb(looks[name].text))];
+    const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    expect(ratio, `${name}'s sample is legible on its swatch`).toBeGreaterThanOrEqual(4.5);
+  }
+  // five palettes: five different grounds
+  expect(new Set(names.map(name => looks[name].ground)).size).toBe(5);
+  // the chosen one is ringed in its accent, the others are not
+  await choose(page, 'Sepia');
+  const ring = name => group.getByRole('button', { name, exact: true }).evaluate(e => getComputedStyle(e).borderTopWidth);
+  await expect(group.getByRole('button', { name: 'Sepia', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await ring('Sepia')).toBe('3px');
+  expect(await ring('Dark')).toBe('1px');
+  expect(errors).toEqual([]);
+});
+
 test('the night theme is warm and dim, the grey one between dark and light, and both are kept', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Evening', author: 'Settings Tests', rawChapters: chapters(1, 5) });
