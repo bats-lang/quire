@@ -2393,6 +2393,23 @@ more than line positions change in it (bats-lang/bats#243):
   container's padding box than that. A full screen's rows and notes
   are cards inset 8 / 16 px (`spacing_rules`), a panel opened as a dialog
   16 px, a dialog 24 px. #332 is to prove the insets statically.
+* Only the spacing forms write a gap, padding or margin, and only
+  `scrolls`, `scrolling`, `clips` and `capped` write an overflow or a
+  max-height (#500): those properties are not in `lay`'s `prop` (they are
+  `spacing_prop`, which only the forms take), so `lay(sheet, Gap(), "10px")`
+  does not type-check (`tests/static/reject/lay-writes-gap`, `-padding`,
+  `-overflow`, `-max-height`). A value is a step of the scale (`SpaceNone`
+  to `SpaceExtraLarge`: `spaced`, `spaced_pair`), or a form named for what
+  it is: a safe-area inset (`spaced_safe`, `reserve_safe`), a margin pulled
+  out (`pulled`), automatic (`auto_margin`, `centred`), the book's em
+  (`prose_margin`), room kept for something drawn in the padding
+  (`reserve`: a chevron, a page number, an outline's indent, the Undo
+  toast), the reader's own variables (`page_padding`, `safe_area_margin`).
+  Values that were off the scale moved to the nearest step (2 to 4, 6 to
+  8, 10 to 12, 14 to 16), a few pixels. `offScale` in `e2e/controls-shown.js`
+  holds every visible element's gaps to the scale on every screen the walk
+  reaches. The sheet's budget is 64000 bytes (it was 60000): the costs the
+  forms declare are upper bounds, and the sheet stays under 65536.
 * The page's width and height are a whole number of pixels (`page_extent`,
   indexed by whether it is whole; `page_width_rule` and `page_height_rule`
   (`src/page_size.bats`, a module of its own so its fixtures check in a

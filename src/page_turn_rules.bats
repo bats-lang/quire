@@ -63,7 +63,7 @@ implement page_turn_rules (sheet) = let
   val sheet = lay(sheet, Inset(), "0")
   val sheet = lay(sheet, ZIndex(), "2")
   val sheet = lay(sheet, Display(), "flex")
-  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = clips(sheet)
   val sheet = lay(sheet, PointerEvents(), "none")
   val sheet = close(sheet)
   (* idle, between turns: laid out (its copy ready) but not seen. Hidden
@@ -81,7 +81,7 @@ implement page_turn_rules (sheet) = let
   val sheet = lay(sheet, Display(), "flex")
   val sheet = lay(sheet, MinWidth(), "0")
   val sheet = lay(sheet, MinHeight(), "0")
-  val sheet = lay(sheet, Overflow(), "hidden")
+  val sheet = clips(sheet)
   val sheet = surf(S_fg_bg | sheet, RoleText(), RoleGround())
   val sheet = lay(sheet, BoxShadow(), "0 0 24px rgba(0,0,0,.4)")
   val sheet = close(sheet)

@@ -66,15 +66,28 @@ fun _match_chars {l:agz}{n:pos}{offset:nat}{pattern_len:pos | offset + pattern_l
   else if byte2int0($A.read<byte>(data, offset + position)) <> char2int0(pattern.[position]) then false
   else _match_chars(data, offset, pattern, pattern_len, position + 1)
 
-(* Whether the name at [offset, offset + name_len) is pattern *)
+(* Whether the name at [offset, offset + name_len) is pattern exactly *)
+fn _exact_name_eq
+  {l:agz}{n:pos}{offset,name_len:nat | offset + name_len <= n}{pattern_len:pos}
+  (data: !$A.borrow(byte, l, n), offset: int offset, name_len: int name_len,
+   pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool =
+  if name_len <> pattern_len then false
+  else _match_chars(data, offset, pattern, pattern_len, 0)
+
+(* Whether the name at [offset, offset + name_len) is pattern, or a
+   prefix, a colon and pattern: an element's name is its local name
+   whatever prefix the document binds to its namespace (#433: a package
+   document with every element as opf:package, opf:item, ...) *)
 #pub fn xml_name_eq
   {l:agz}{n:pos}{offset,name_len:nat | offset + name_len <= n}{pattern_len:pos}
   (data: !$A.borrow(byte, l, n), offset: int offset, name_len: int name_len,
    pattern: &(@[char][pattern_len]), pattern_len: int pattern_len): bool
 
 implement xml_name_eq(data, offset, name_len, pattern, pattern_len) =
-  if name_len <> pattern_len then false
-  else _match_chars(data, offset, pattern, pattern_len, 0)
+  if name_len = pattern_len then _match_chars(data, offset, pattern, pattern_len, 0)
+  else if name_len < pattern_len + 2 then false
+  else if byte2int0($A.read<byte>(data, offset + (name_len - pattern_len - 1))) <> 58 then false
+  else _match_chars(data, offset + (name_len - pattern_len), pattern, pattern_len, 0)
 
 (* ============================================================
    XML attribute lookup (internal)
@@ -87,7 +100,7 @@ fun _find_attr_value
    attr_name: &(@[char][attr_name_len]), attr_name_len: int attr_name_len): xspan(n) =
   case+ attrs of
   | $X.xml_attrs_cons(each_name_offset, each_name_len, value_offset, value_len, rest) =>
-    if xml_name_eq(data, each_name_offset, each_name_len, attr_name, attr_name_len) then xspan_at(value_offset, value_len)
+    if _exact_name_eq(data, each_name_offset, each_name_len, attr_name, attr_name_len) then xspan_at(value_offset, value_len)
     else _find_attr_value(data, rest, attr_name, attr_name_len)
   | $X.xml_attrs_nil() => xspan_none()
 

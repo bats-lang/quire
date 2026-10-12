@@ -70,6 +70,7 @@
       "sync-nextcloud.spec.js"
     ],
     "extras": [
+      "containers.spec.js",
       "back.spec.js",
       "catalogue.spec.js",
       "epub2.spec.js",
@@ -161,6 +162,10 @@
       "reject/back-other-timeout",
       "reject/clip-past-end",
       "reject/fixed-box-zoom-zero",
+      "reject/lay-writes-gap",
+      "reject/lay-writes-max-height",
+      "reject/lay-writes-overflow",
+      "reject/lay-writes-padding",
       "reject/nav-row-without-summary",
       "reject/page-height-fraction",
       "reject/sheet-scrolls-over-share",

@@ -482,13 +482,72 @@ fun book_find {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_o
       prval () = fold@(entries)
     in hit end
 
+(* name[0, name_size) with "./" before it: the name of an entry written
+   by a tool that writes its paths relative to the current directory *)
+fn _find_dot_slash {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) =
+  (* a zip name is shorter than 65536 bytes: a longer one names no entry *)
+  if name_size >= 65536 then BookMiss() else let
+  val joined_size = name_size + 2
+  val joined = $A.alloc<byte>(joined_size)
+  val () = $A.set<byte>(joined, 0, $A.int2byte(46))
+  val () = $A.set<byte>(joined, 1, $A.int2byte(47))
+  val () = $S.copy_from_borrow(name, 0, name_size, joined, 2, joined_size, name_size)
+  val @(joined_frozen, joined_bytes) = $A.freeze<byte>(joined)
+  val hit = book_find(directory, directory_offset, entries, joined_bytes, joined_size)
+  val () = release_bytes(joined_frozen, joined_bytes)
+in hit end
+
+(* buf[i, size) := name[i, size) with each '/' a backslash *)
+fun _backslashed {name_loc,buffer_loc:agz}{size:pos}{i:nat | i <= size} .<size - i>.
+  (name: !$A.borrow(byte, name_loc, size), buffer: !$A.arr(byte, buffer_loc, size), size: int size, i: int i): void =
+  if i >= size then ()
+  else let
+    val letter = $A.read<byte>(name, i)
+    val () = $A.set<byte>(buffer, i, (if byte2int0(letter) = 47 then $A.int2byte(92) else letter))
+  in _backslashed(name, buffer, size, i + 1) end
+
+(* name[0, name_size) with backslashes for its slashes: the name of an
+   entry written by a tool for Windows *)
+fn _find_backslashed {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) =
+  if name_size >= 65536 then BookMiss() else let
+  val swapped = $A.alloc<byte>(name_size)
+  val () = _backslashed(name, swapped, name_size, 0)
+  val @(swapped_frozen, swapped_bytes) = $A.freeze<byte>(swapped)
+  val hit = book_find(directory, directory_offset, entries, swapped_bytes, name_size)
+  val () = release_bytes(swapped_frozen, swapped_bytes)
+in hit end
+
+(* The entry named name[0, name_size), else the one the same name written
+   with "./" before it, else with backslashes: the archives of tools that
+   write paths so are read by their paths (quire#433; epubcheck takes the
+   first, and Calibre and Thorium open such books) *)
+fn book_find_tolerant {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) = let
+  val exact = book_find(directory, directory_offset, entries, name, name_size)
+in
+  case+ exact of
+  | BookHit(_, _, _, _, _) => exact
+  | ~BookMiss() => let
+      val dotted = _find_dot_slash(directory, directory_offset, entries, name, name_size)
+    in
+      case+ dotted of
+      | BookHit(_, _, _, _, _) => dotted
+      | ~BookMiss() => _find_backslashed(directory, directory_offset, entries, name, name_size)
+    end
+end
+
 (* The entry named name[0, name_size) of book_file, found in its
    index, its data read into a piece; missing when there is none, or
    when no piece can be had for the data *)
 fn index_read {file_size:pos}{name_loc:agz}{name_size:pos}
   (book_file: !$BF.infile(file_size), index: !book_index(file_size), file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size) = let
   val+ @BookIndex(directory, _, directory_offset, entries) = index
-  val hit = book_find(directory, directory_offset, entries, name, name_size)
+  val hit = book_find_tolerant(directory, directory_offset, entries, name, name_size)
   prval () = fold@(index)
 in
   case+ hit of
@@ -797,7 +856,7 @@ in
     if serial = !_book_serial then
       (if open_size = file_size then let
          val+ @BookIndex(directory, _, directory_offset, entries) = index
-         val hit = book_find(directory, directory_offset, entries, name, name_size)
+         val hit = book_find_tolerant(directory, directory_offset, entries, name, name_size)
          prval () = fold@(index)
          prval () = fold@(book)
          val () = book_put(book)

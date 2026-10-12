@@ -1,0 +1,6 @@
+function _static_lay_writes_gap
+line 3
+the dynamic expression cannot be assigned the type [S2Ecst(prop)].
+mismatch of static terms (tyleq):
+The actual term is: S2Ecst(spacing_prop)
+The needed term is: S2Ecst(prop)
