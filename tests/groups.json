@@ -70,6 +70,7 @@
       "sync-nextcloud.spec.js"
     ],
     "extras": [
+      "containers.spec.js",
       "back.spec.js",
       "catalogue.spec.js",
       "epub2.spec.js",
