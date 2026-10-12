@@ -928,6 +928,13 @@ in ui_text(summary_id, summary) end
 
 implement ui_swatch_btn(parent, id, class_name, name) = _control_literal(parent, id, CSwatch(class_name, name))
 
+(* The error banner sits under a pushed screen's top bar while the screen
+   is open (quire#502), so it never covers the bar's Back: its Dismiss,
+   Copy details and Report are still pressed there *)
+#pub fn ui_banner_below_bar (below: bool): void
+
+implement ui_banner_below_bar (below) = _set_attr("error-banner", $D.Data("below"), (if below then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
 (* A pushed screen's top bar (quire#502; Android's settings and Material
    3's small top app bar: a navigation icon and the title; iOS pushes a
    screen with a back item, and keeps Done for a sheet): a Back icon

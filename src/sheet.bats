@@ -17,7 +17,7 @@ staload CT = "css/src/contrast.sats"
    whether a rule or an @media block is open
    ============================================================ *)
 
-#pub stadef BUDGET = 60000
+#pub stadef BUDGET = 64000
 
 (* sheet(left, media, open): left bytes left; whether an @media block is
    open, and whether a rule is *)

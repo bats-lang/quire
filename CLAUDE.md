@@ -2644,7 +2644,11 @@ named "Back", the `SettingsBack`, `SyncBack`, `DictionariesBack` and
 `AboutBack` controls) and the screen's title, outside what scrolls
 (`.tbar`), so it stays at the top. Back does what Escape does (with a
 service's sign-in step open on Sync it ends the step), and the first focus
-of a screen is its Back. Statistics, Catalogues and Collections are
+of a screen is its Back. The error banner (z-index over the screens, so its
+Dismiss, Copy details and Report are pressed) sits under the bar while one is
+open (`ui_banner_below_bar`, `data-below`, set where the stack of overlays
+changes, `_open_set` in `src/layer.bats`): over the top of the screen it had
+covered Back (found by sync-dropbox-android.spec on #544). Statistics, Catalogues and Collections are
 centred dialogs and keep their Done (`dismiss_label(DismissScreen)`).
 `e2e/settings-screen.spec.js` checks the four bars, that none has a Done, that
 the bar stays put as the screen scrolls, and that Back closes it.
