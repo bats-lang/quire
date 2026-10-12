@@ -663,29 +663,32 @@ export async function peekAbove(page) {
   });
 }
 
-/** In each visible sheet: a gap (row or column) that is not a step of
-    the spacing scale, and a tab whose padding is not one, or is under
-    the least inset at a side (#379) */
+/** On the screen shown: every visible element's gap (row or column) that
+    is not a step of the spacing scale (#500: the stylesheet writes gaps
+    only from the scale, and this holds the browser to it on every screen
+    the walk reaches, not only sheets; the book's own page is left out),
+    and, in a sheet, a tab whose padding is not one, or is under the least
+    inset at a side (#379) */
 export async function offScale(page) {
   return page.evaluate(() => {
     const scale = [0, 4, 8, 12, 16, 24];
     const least = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-inset'));
     const bad = [];
+    const book = document.querySelector('[role=document]');
     const named = e => (e.getAttribute('aria-label') || e.id || e.className || e.tagName).toString().trim().slice(0, 40);
-    for (const sheet of document.querySelectorAll('.sheet')) {
-      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
-      for (const element of [sheet, ...sheet.querySelectorAll('*')]) {
-        const style = getComputedStyle(element);
-        for (const property of ['rowGap', 'columnGap']) {
-          const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
-          if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
-        }
-        if (element.getAttribute('role') === 'tab') {
-          for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
-            const value = parseFloat(style[`padding${side}`]);
-            if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
-            if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
-          }
+    for (const element of document.querySelectorAll('body *')) {
+      if (book && book.contains(element)) continue;
+      if (!element.checkVisibility({ visibilityProperty: true }) || element.getClientRects().length === 0) continue;
+      const style = getComputedStyle(element);
+      for (const property of ['rowGap', 'columnGap']) {
+        const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
+        if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
+      }
+      if (element.getAttribute('role') === 'tab' && element.closest('.sheet')) {
+        for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+          const value = parseFloat(style[`padding${side}`]);
+          if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
+          if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
         }
       }
     }
