@@ -22,12 +22,14 @@ const goal = page => settingsScreen(page).getByRole('group', { name: 'Daily read
 test('Settings opens from the library menu, which no longer holds what it took', async ({ page }) => {
   const errors = await start(page);
   await libraryMenu(page);
-  for (const gone of ['Sync', 'Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset reading settings', 'Remove all books']) {
+  for (const gone of ['Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset reading settings', 'Remove all books']) {
     await expect(menuItem(page, gone)).toHaveCount(0);
   }
   await expect(page.getByRole('menu').getByLabel('Restore backup')).toHaveCount(0);
   // Empty Trash is on the Trash's own screen, not here (quire#385)
   await expect(menuItem(page, 'Empty Trash')).toHaveCount(0);
+  // Sync is two taps from the library (#501); the rest of what Settings holds is not in the menu
+  await expect(menuItem(page, 'Sync')).toBeVisible();
   await expect(menuItem(page, 'Reading statistics')).toBeVisible();
   await expect(menuItem(page, 'Catalogues')).toBeVisible();
   await menuItem(page, 'Settings').click();
@@ -101,7 +103,7 @@ test('Sync is two taps from the library and the backup three, and an empty libra
   // the empty library offers it
   await page.getByRole('button', { name: 'Sync with another device' }).click();
   await expect(dialog(page, 'Sync')).toBeVisible();
-  await dialog(page, 'Sync').getByRole('button', { name: 'Back', exact: true }).click();
+  await page.keyboard.press('Escape');
   await expect(dialog(page, 'Sync')).toBeHidden();
   // tap 1: the library menu; tap 2: Sync
   await libraryMenu(page);
@@ -114,7 +116,8 @@ test('Sync is two taps from the library and the backup three, and an empty libra
   await librarySettings(page);
   await expect(settingsButton(page, 'Export backup')).toBeVisible();
   await expect(settingsScreen(page)).toContainText('Moving to a new phone?');
-  await settingsButton(page, 'Back').click();
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
   expect(errors).toEqual([]);
 });
 
