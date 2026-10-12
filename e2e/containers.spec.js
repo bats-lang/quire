@@ -46,7 +46,7 @@
 import { test, expect } from './fixtures.js';
 import {
   start, rawFile, importInput, importFiles, cards, card, pageShown, showChrome, control, dialog, visibleText,
-  chapterTitle, expectBannerSaysWhatToDo,
+  chapterTitle, expectBannerSaysWhatToDo, toLibrary,
 } from './helpers.js';
 import { containerBooks } from './container-books.js';
 
@@ -161,11 +161,13 @@ test('two rootfiles are one book: the first rendition, not a second book and not
   const errors = await start(page);
   await openContainer(page, 'twoRootfiles');
   await expect(page.getByRole('alert')).toBeHidden();
-  await expect(cards(page)).toHaveCount(1);
   await showChrome(page);
   await control(page, 'Contents').click();
   await expect(rows(page)).toHaveText(['Chapter 1', 'Chapter 2', 'Chapter 3']);
   expect(await visibleText(page)).not.toContain('Other');
+  await page.keyboard.press('Escape');
+  await toLibrary(page);
+  await expect(cards(page)).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 
