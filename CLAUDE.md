@@ -2652,6 +2652,24 @@ sets) to the home page, privacy policy and terms (no link to the
 source: nothing in the app or its pages points to the repository but
 the GitHub issues the pages give for contact).
 
+A pushed screen (Settings, Sync, Dictionaries, About: class `info`, opened
+from a row that ends in a chevron) has a top bar, not a Done at its foot
+(#502; Android's settings and Material 3's small top app bar have a
+navigation icon and the title, iOS pushes a screen with a back item and
+keeps Done for a sheet): `ui_screen_bar` makes a Back icon button (48 px,
+named "Back", the `SettingsBack`, `SyncBack`, `DictionariesBack` and
+`AboutBack` controls) and the screen's title, outside what scrolls
+(`.tbar`), so it stays at the top. Back does what Escape does (with a
+service's sign-in step open on Sync it ends the step), and the first focus
+of a screen is its Back. The error banner (z-index over the screens, so its
+Dismiss, Copy details and Report are pressed) sits under the bar while one is
+open (`ui_banner_below_bar`, `data-below`, set where the stack of overlays
+changes, `_open_set` in `src/layer.bats`): over the top of the screen it had
+covered Back (found by sync-dropbox-android.spec on #544). Statistics, Catalogues and Collections are
+centred dialogs and keep their Done (`dismiss_label(DismissScreen)`).
+`e2e/settings-screen.spec.js` checks the four bars, that none has a Done, that
+the bar stays put as the screen scrolls, and that Back closes it.
+
 The home page, privacy policy and terms are plain static HTML in
 `homepage/` (#216), published by `deploy.yml` beside the app at
 `https://bats-lang.github.io/quire/homepage/` (`privacy.html`,

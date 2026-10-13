@@ -142,7 +142,7 @@ test('a backup made before a replace restores onto the same book', async ({ page
   await toLibrary(page);
   await librarySettings(page);
   const text = await exportedBackup(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   const backup = JSON.parse(text);
   expect(backup.books).toHaveLength(1);
   // after the backup: a note more, and the book replaced
@@ -155,7 +155,7 @@ test('a backup made before a replace restores onto the same book', async ({ page
   await replaceWith(page, file);
   await librarySettings(page);
   const replaced = JSON.parse(await exportedBackup(page));
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   expect(replaced.books).toHaveLength(1);
   expect(replaced.books[0].id).toBe(backup.books[0].id);
   // the backup restores onto it: one book, the notes it had
@@ -168,7 +168,7 @@ test('a backup made before a replace restores onto the same book', async ({ page
   await expect(cards(page)).toHaveCount(1);
   await librarySettings(page);
   const restored = JSON.parse(await exportedBackup(page));
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   expect(restored.books).toHaveLength(1);
   // everything of the backup's, but the place: a restore takes the file's place only when it is
   // later than the library's, and the library's is (it was moved on after the backup)

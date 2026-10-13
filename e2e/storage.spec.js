@@ -332,8 +332,8 @@ test('a sync and the stored view wait for Try again, and happen once the library
   await panel.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await panel.getByRole('button', { name: 'Sign in to WebDAV' }).click();
   await expect(panel.getByRole('status')).toHaveText(/^Last synced on /);
-  await panel.getByRole('button', { name: 'Done' }).click();
-  await settingsButton(page, 'Done').click();
+  await panel.getByRole('button', { name: 'Back' }).click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
   // a book open, so the view kept is that book
   await openBook(page, 'Kept Safe');

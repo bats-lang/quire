@@ -32,9 +32,9 @@ async function openSync(page) {
 }
 
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 

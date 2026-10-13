@@ -143,7 +143,7 @@ test('a backup keeps the reading log, the goal and each book\'s time, and a rest
 
   await librarySettings(page);
   const json = await exportedBackup(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   const b = JSON.parse(json);
   expect(b.settings.dailyGoal).toBe(30);
   const today = Math.floor(Date.parse('2026-06-01T10:00:00Z') / 86400000);

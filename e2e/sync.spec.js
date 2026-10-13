@@ -40,9 +40,9 @@ async function openSync(page) {
 
 /** Closes the sync panel with its Done, then Settings with its own */
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -522,7 +522,7 @@ test('annotations from before ids, restored on two devices from one backup, sync
   await toLibrary(a.page);
   await librarySettings(a.page);
   const backup = JSON.parse(await exportedBackup(a.page));
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   // as a version before ids wrote it
   for (const kept of backup.books) for (const n of kept.annotations) { delete n.id; delete n.modified; }
   const path = testInfo.outputPath('old-backup.json');
@@ -555,11 +555,11 @@ test('the Settings screen\'s Sync row says whether sync is on, and when it last 
   const row = settingsScreen(a.page).getByRole('group', { name: 'Sync' }).getByRole('status');
   await librarySettings(a.page);
   await expect(row).toHaveText('Off');
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   await joinSync(a.page);
   await librarySettings(a.page);
   await expect(row).toHaveText(/^WebDAV · synced (just now|1 min ago)$/);
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   await a.page.clock.fastForward('02:00');
   await librarySettings(a.page);
   await expect(row).toHaveText(/^WebDAV · synced [23] min ago$/);
