@@ -68,3 +68,30 @@ test('annotations say where their chapter starts, go to it by the whole row, and
   await expect(panel).toBeHidden();
   expect(errors).toEqual([]);
 });
+
+test('a highlight says where in the book it is, not only where its chapter starts (#525)', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, book);
+  // a highlight deep in the first chapter (its 25th paragraph of 30)
+  await bookPage(page).locator('p').nth(24).evaluate(el => {
+    const text = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+    const range = document.createRange();
+    range.setStart(text, 0);
+    range.setEnd(text, 8);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await selectionButton(page, 'Highlight').click();
+  await showChrome(page);
+  await control(page, 'Annotations').click();
+  const panel = dialog(page, 'Annotations');
+  await expect(panel).toBeVisible();
+  const own = panel.locator('[id^=highlight-place]');
+  await expect(own).toHaveText(/^ · (0|<1|\d+)%$/);
+  const heading = percentOf(await panel.locator('[id^=annot-place]').innerText());
+  const within = percentOf(await own.innerText());
+  // past the chapter's start, and still inside the first of three chapters
+  expect(within).toBeGreaterThan(heading);
+  expect(within).toBeLessThan(34);
+  expect(errors).toEqual([]);
+});

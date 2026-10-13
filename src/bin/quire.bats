@@ -2312,6 +2312,7 @@ in ui_focus("contents-close") end
 (* The contents panel, open on its bookmarks tab *)
 fn _bookmarks_open (): void = let
   val () = annot_render_bookmarks()
+  val () = reader_annotation_places()
   val () = ui_attr("contents-tab", ASelected, "false")
   val () = ui_attr("bookmarks-tab", ASelected, "true")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -2696,6 +2697,7 @@ fn _wire_annotations {count:nat} (listeners: regs(count)): regs(count + 7) = let
     end)
   val listeners = RCons(listeners, OnEl("annotations-button"), "click", llam(_) => let
       val () = annot_render()
+      val () = reader_annotation_places()
       val () = layer_open(LAnnotations())
     in let val () = ui_focus("annotations-close") in 0 end end)
   val listeners = RCons(listeners, OnEl("annotations-panel"), "click", llam(h) => let

@@ -5693,6 +5693,76 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            in _search_chapters(serial, chapter + 1, chapter_count, generation) end)
          end))
 
+(* The pass that counts the content nodes of the chapters that hold
+   annotations (#525), so an annotation row says where in the book its
+   node is, as a search hit does. A new pass makes the one before it stop *)
+val _places_generation = ref<int>(0)
+
+(* Counts the content nodes of the chapter data[0, n), as render and a search number them *)
+fn _count_nodes {data_location:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, data_location, n), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
+  val query = $A.alloc<byte>(1)
+  val () = _tail_begin()
+  val @(total, found, _) = _scan_nodes(data, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
+  val () = _tail_end()
+  val () = hits_free(found)
+  val () = $A.free<byte>(query)
+in total end
+
+(* Counts the chapters that hold an annotation after chapter after (from 0; -1 to start), one after another *)
+fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0)>.
+  (serial: int, after: int after, bound: int bound, generation: int): void =
+  if generation <> !_places_generation then ()
+  else let
+    val chapter = annot_chapter_after(after)
+  in
+    (* a chapter at or past the count (an annotation of a lost one) ends the pass *)
+    if chapter < 0 then ()
+    else if chapter <= after then ()
+    else if chapter >= bound then ()
+    else (case+ book_chapter_get(serial, chapter) of
+      | ~ChaptersUnknown() => ()
+      | ~ChapterNone(_) => _places_chapters(serial, chapter, bound, generation)
+      | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
+        (case+ piece_new(compressed_size) of
+         | ~NoPiece() => _places_chapters(serial, chapter, bound, generation)
+         | ~Piece(compressed_owner, compressed) => let
+             val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+             val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+             val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
+             val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+             val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+           in
+             $P.finish<decompressed>(decompressing, llam(inflated) => let
+               val () = (case+ take_text(inflated) of
+                 | ~NoContentBytes() => ()
+                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
+                     val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                     val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                     val total = _count_nodes(xhtml_bytes, nodes)
+                     val () = (if generation = !_places_generation then annot_total_set(serial, chapter, total) else ())
+                     val () = $X.free_nodes(nodes)
+                     val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+                   in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
+             in _places_chapters(serial, chapter, bound, generation) end)
+           end))
+  end
+
+(* The annotations list was drawn: each annotation's place in the book is
+   found by counting the nodes of its chapter. A fixed-layout book needs
+   none (a spine item is a page, which the chapter's heading says) *)
+#pub fn reader_annotation_places (): void
+
+implement reader_annotation_places () = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then ()
+  else let
+    val () = !_places_generation := !_places_generation + 1
+    val @(_, _, _, chapter_count) = reading_get()
+  in _places_chapters(serial, ~1, chapter_count, !_places_generation) end
+end
+
 (* query[0, query_len) in lower case, in a new array *)
 fun _lower_into {query_location,lower_location:agz}{query_size,lower_size:pos}{query_len:nat | query_len <= query_size; query_len <= lower_size}{i:nat | i <= query_len} .<query_len - i>.
   (query: !$A.arr(byte, query_location, query_size), lower: !$A.arr(byte, lower_location, lower_size), query_len: int query_len, i: int i): void =
