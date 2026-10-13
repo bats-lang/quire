@@ -22,6 +22,7 @@
     ],
     "reading-tools": [
       "annotations.spec.js",
+      "giant-text-highlights.spec.js",
       "drm-catalogue.spec.js",
       "languages.spec.js",
       "places.spec.js",

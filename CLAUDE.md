@@ -3381,9 +3381,30 @@ length, in the same page, so a slower machine slows both. What it found:
   390 px phone went from 17 s (Two) to 1.5 s, and the opening to 1 s. A
   text node over 64 KiB in mixed content breaks its line at each piece (a
   paragraph break appearing in a 64 KiB run is the price; search counts
-  pieces with the same `_text_cut`, so its node numbers agree; a note or
-  highlight stored in a text node of 64 KiB or more may find its offset
-  moved by up to 512 bytes into the next piece). The open budget the spec
+  pieces with the same `_text_cut`, so its node numbers agree). A stored
+  note or highlight in such a text is a piece's content node and a UTF-16
+  offset in that piece's text (bridge's `get_selection_range` gives offsets
+  into the text of the element with the id, which is the piece), and the cut
+  is a function of the text alone, so a place stored by this build is found
+  exactly by it again, after a reload, a restored backup and a sync
+  (`e2e/giant-text-highlights.spec.js`: highlights at the end of a piece, at
+  the start of the next, across a cut and inside a third, paged, scrolled and
+  in two columns, with accents and an emoji in the words; a last test restores
+  places stored by this build and they must paint the same words, so a
+  changed cut fails there). The cut is part of the format of a stored place:
+  changing `_text_cut` moves the places stored in the pieces after the first
+  of a text over 64 KiB (the first starts where the text does) and needs a
+  version of the annotations' record to translate by. A place stored by a
+  build before #423 (pieces cut at a character, not at white space) is read
+  against these pieces and may land up to 512 bytes per piece from where it
+  was made, in the second and later pieces of such a text; no version of the
+  record says which cut a place was stored with. Making places independent
+  of the cut (the pieces as `data-part` parts of one content node, as the
+  digits of vertical text are) was weighed and not taken: one content node
+  per text would make the reading place, a content node and the page that
+  holds it, as coarse as the whole text (a megabyte paragraph one place), and
+  search and read aloud would need the UTF-16 length of the pieces before
+  one for their offsets (#470). The open budget the spec
   asserts (`expectOpenBudget`): the time from the card's tap to the
   chapter's indicator, and from the choice of Two, Scroll or One to its
   page indicator, is at most 3 times Chrome's own time to lay out and
