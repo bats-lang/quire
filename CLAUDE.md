@@ -3293,6 +3293,14 @@ page, so the paragraph the reader was at stays on the page shown
 whichever way the area changes (`e2e/layout.spec.js`, "the place stays
 when the reading area changes"); where the page breaks fall is the
 layout's, as in Kindle and Books.
+Scrolled, a hand scroll within one screenful is a move too (#485): the
+place is the node now at the top of what is seen (`reader_scrolled`
+clears the node a restore keeps and records the position, when the page
+is not where `_show_page_down` last put it: `_scroll_set`), and a layout
+made anew shows that node at the top, snapping to the old screen's top
+only for the first drawn node to start at or below it (`_show_target`).
+`e2e/stability.spec.js` scrolls a part of a screenful, swaps the window
+twice and expects the same paragraph on top.
 
 ## Nothing of one book shows in the next (#435)
 
