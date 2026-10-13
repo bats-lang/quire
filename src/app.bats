@@ -10,6 +10,27 @@ staload "style.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "version.sats"
 
+(* The gestures the first book teaches (#384): each has its words, so a
+   gesture added without them does not type-check *)
+datatype gesture = TapSides | TapMiddle
+
+fn gesture_hint (gesture: gesture): [text_len:pos | text_len < 256] string text_len =
+  case+ gesture of
+  | TapSides() => "Tap the sides to turn pages. "
+  | TapMiddle() => "Tap the middle for the menu."
+
+(* Where the hint lies: in a band the page's text keeps clear of, the top
+   one (above the first line, the status bar's inset away) or the bottom
+   one (the footer's); there is no case for the page's middle *)
+datatype hint_band = TopBand | BottomBand
+
+fn hint_band (): hint_band = TopBand()
+
+fn hint_class (band: hint_band): [class_len:pos | class_len < 256] string class_len =
+  case+ band of
+  | TopBand() => "hint hint-top"
+  | BottomBand() => "hint hint-bottom"
+
 fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
 (* Each element made again to reset it is made only here, so each id is
@@ -637,9 +658,12 @@ fn _reader (): void = let
   val () = _hide("jump-back")
   (* the first book's hint on turning pages: read out as it shows, and
      taps go through it to the page *)
-  val () = ui_el("reader", "turn-hint", TDiv, "hint")
+  val () = ui_el("reader", "turn-hint", TDiv, hint_class(hint_band()))
   val () = ui_role("turn-hint", RStatus)
-  val () = ui_text("turn-hint", "Swipe or tap the sides to turn the page")
+  val () = ui_el("turn-hint", "turn-hint-sides", TSpan, "hint-part")
+  val () = ui_text("turn-hint-sides", gesture_hint(TapSides()))
+  val () = ui_el("turn-hint", "turn-hint-middle", TSpan, "hint-part")
+  val () = ui_text("turn-hint-middle", gesture_hint(TapMiddle()))
   val () = _hide("turn-hint")
   (* scrolled, the chapter's last screen goes on to the next *)
   val () = ui_text_btn("reader", "next-chapter", "pback nextch", "Next chapter \xE2\x86\x92")
@@ -759,6 +783,10 @@ fn _toc (): void = let
   val () = _hide("pages-tab")
   val () = ui_el("contents-header", "contents-spacer", TSpan, "grow")
   val () = ui_icon_btn("contents-header", "contents-close", "ibtn", IcClose, "Close")
+  (* the way back from a jump, kept past the button's 10 s while there is
+     a position to go back to (reader_back_row) *)
+  val () = ui_text_btn("contents-panel", "contents-back", "pi", "Back to where you were")
+  val () = _hide("contents-back")
   val () = ui_el("contents-panel", "contents-list", TDiv, "plist")
   val () = ui_labelled("contents-list", NTabpanel, "contents-tab")
   val () = ui_el("contents-panel", "bookmarks-list", TDiv, "plist")

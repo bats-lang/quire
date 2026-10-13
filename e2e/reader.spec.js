@@ -1226,7 +1226,7 @@ test('back to pages, the chapter is turned across again', async ({ page }) => {
 test('the first book opened says once how to turn the page', async ({ page }) => {
   await start(page);
   await readBook(page, book('First Book', 2));
-  const hint = page.getByRole('status').filter({ hasText: 'Swipe or tap the sides to turn the page' });
+  const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
   await expect(hint).toBeVisible();
   // taps go through it: the page still turns, and it goes
   await page.keyboard.press('ArrowRight');
@@ -1240,6 +1240,71 @@ test('the first book opened says once how to turn the page', async ({ page }) =>
   await reload(page);
   await expect(bookPage(page)).toBeVisible();
   await expect(hint).toBeHidden();
+});
+
+// #384: the hint lies in the band above the text, not over the page's middle,
+// and says both gestures in one line of words
+test('the hint on turning pages lies clear of the text, and says both gestures', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Hint Book', 2));
+  const hint = page.getByRole('status').filter({ hasText: 'Tap the sides to turn pages. Tap the middle for the menu.' });
+  await expect(hint).toBeVisible();
+  // under the bars it is not seen: take them down, as the middle tap does
+  await page.keyboard.press('t');
+  await expect(page.getByRole('toolbar', { name: 'Page controls' })).toBeHidden();
+  const box = await hint.boundingBox();
+  const geometry = await bookPage(page).evaluate((element, hintBox) => {
+    const band = parseFloat(getComputedStyle(element).paddingTop);
+    // every line of the page's text, as the ranges of its text nodes report them
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const lines = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      for (const rect of range.getClientRects()) if (rect.width > 0 && rect.height > 0) lines.push(rect);
+    }
+    const hits = lines.filter(rect => rect.left < hintBox.x + hintBox.width && rect.right > hintBox.x && rect.top < hintBox.y + hintBox.height && rect.bottom > hintBox.y);
+    return { band, lines: lines.length, hits: hits.length };
+  }, box);
+  expect(geometry.lines).toBeGreaterThan(0);
+  expect(geometry.hits, 'text lines the hint lies over').toBe(0);
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(geometry.band + 0.5);
+  // it fits the window's width
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize().width);
+});
+
+// #384: the button to go back from a jump goes after 10 s; the way back stays in Contents
+test('the way back from a jump stays in Contents after the button is gone', async ({ page }) => {
+  await start(page);
+  await readBook(page, book('Way Back', 3));
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(async () => (await place(page)).p).toBe(2);
+  const from = await place(page);
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  const contents = dialog(page, 'Contents');
+  // nothing to go back to before a jump
+  await expect(contents.getByRole('button', { name: /^Back to / })).toBeHidden();
+  await contents.getByRole('tabpanel', { name: 'Contents' }).getByRole('button', { name: 'Chapter 3' }).click();
+  await expect.poll(async () => (await place(page)).ch).toBe(3);
+  await expect(page.getByRole('button', { name: '↩ Back' })).toBeVisible();
+  // the button goes, as it always did
+  await expect(page.getByRole('button', { name: '↩ Back' })).toBeHidden({ timeout: 15000 });
+  // the way back does not
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  const back = dialog(page, 'Contents').getByRole('button', { name: /^Back to / });
+  await expect(back).toHaveText(`Back to Chapter ${from.ch} \u00B7 page ${from.p}`);
+  await back.click();
+  await expect(dialog(page, 'Contents')).toBeHidden();
+  await expect.poll(async () => JSON.stringify(await place(page))).toMatch(new RegExp(`"ch":${from.ch},"p":${from.p},`));
+  // used: nothing more to go back to
+  await showChrome(page);
+  await control(page, 'Contents').click();
+  await expect(dialog(page, 'Contents').getByRole('button', { name: /^Back to / })).toBeHidden();
 });
 
 // Columns: a spread of two pages a screen, as a book lies open

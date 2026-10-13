@@ -577,7 +577,7 @@ in screen_immersive_set(_in_reader()) end
 fn _chrome_set (shown: bool): void = let
   (* bringing the bars up leaves the place a jump landed on: the back
      button goes *)
-  val () = (if shown && ~(!_chrome) then reader_stack_clear() else ())
+  val () = (if shown && ~(!_chrome) then reader_back_rest() else ())
   val () = !_chrome := shown
   val () = (if shown then ui_attr("reader", AClass, "rv") else ui_attr("reader", AClass, "rv chrome-off"))
   val () = (if _in_reader() then banner_place_set(if shown then BannerUnderBars() else BannerAtTop()) else ())
@@ -635,7 +635,9 @@ fn _hint_offer (): void =
     val () = release_bytes(value_frozen, value_bytes)
     val () = ui_show("turn-hint", true)
   in
-    $P.finish<Int>($P.vow($TM.timer_set(8000)), llam(_) => _hint_hide())
+    (* the bars are up for the first 5 s, over the hint; it is seen for 8 s
+       after they hide *)
+    $P.finish<Int>($P.vow($TM.timer_set(13000)), llam(_) => _hint_hide())
   end
 
 (* What opened a book: the reader (a card, a key), whose focus goes to
@@ -2295,6 +2297,7 @@ fn _search_key (pressed: key, held: modifiers): void =
 fn _toc_open (): void = let
   val () = (case+ reading_get() of
     | @(_, _, chapter, chapter_count) => toc_render((if chapter > 0 then chapter - 1 else 0), chapter_count))
+  val () = reader_back_row()
   val () = ui_attr("contents-tab", ASelected, "true")
   val () = ui_attr("bookmarks-tab", ASelected, "false")
   val () = ui_attr("pages-tab", ASelected, "false")
@@ -2540,6 +2543,9 @@ fn _wire_toc {count:nat} (listeners: regs(count)): regs(count + 9) = let
         | ~$R.some(ContentsTab()) => _toc_open()
         | ~$R.some(BookmarksTab()) => _bookmarks_open()
         | ~$R.some(PagesTab()) => _pages_open()
+        | ~$R.some(ContentsBack()) => let
+            val () = layer_close(LContents())
+          in reader_back() end
         | ~$R.none() =>
         if print_page >= 0 then
           (* a row that leads nowhere keeps the panel up: nothing moved *)

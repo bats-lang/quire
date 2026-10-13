@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 13440} (sheet: sheet(left, false, false)): [after:nat | after >= left - 13440] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 14160} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14160] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
@@ -520,7 +520,7 @@ fn reader_rules_marks_and_bottom_bar {left:nat | left >= 1612} (sheet: sheet(lef
 in sheet end
 
 (* The scrubber, from .trk-f on *)
-fn reader_rules_scrubber {left:nat | left >= 2224} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2224] sheet(after, false, false) = let
+fn reader_rules_scrubber {left:nat | left >= 2950} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2950] sheet(after, false, false) = let
   val sheet = rule(sheet, ".trk-f")
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "0")
@@ -580,15 +580,30 @@ fn reader_rules_scrubber {left:nat | left >= 2224} (sheet: sheet(left, false, fa
   val sheet = lay(sheet, Position(), "absolute")
   val sheet = lay(sheet, Left(), "max(16px,var(--safe-left))")
   val sheet = lay(sheet, Right(), "max(16px,var(--safe-right))")
-  val sheet = lay(sheet, Top(), "45%")
   val sheet = lay(sheet, Width(), "fit-content")
   val sheet = centred(sheet)
-  val sheet = lay(sheet, ZIndex(), "4")
+  (* under the bars: it is seen once they hide *)
+  val sheet = lay(sheet, ZIndex(), "2")
   val sheet = surf(S_accentfg_accent | sheet, RoleAccentText(), RoleAccent())
-  val sheet = lay(sheet, BorderRadius(), "22px")
-  val sheet = spaced_pair(sheet, Padding(), SpaceMedium(), SpaceLarge())
+  val sheet = lay(sheet, BorderRadius(), "12px")
+  val sheet = spaced_pair(sheet, Padding(), SpaceTight(), SpaceMedium())
+  val sheet = lay(sheet, FontSize(), "13px")
+  val sheet = lay(sheet, LineHeight(), "1.25")
+  val sheet = lay(sheet, TextAlign(), "center")
   val sheet = lay(sheet, BoxShadow(), "0 2px 8px rgba(0,0,0,.3)")
   val sheet = lay(sheet, PointerEvents(), "none")
+  val sheet = close(sheet)
+  (* in the band above the first line of text, below the status bar's inset *)
+  val sheet = rule(sheet, ".hint-top")
+  val sheet = lay(sheet, Top(), "env(safe-area-inset-top)")
+  val sheet = close(sheet)
+  (* in the footer's line, below the last line of text *)
+  val sheet = rule(sheet, ".hint-bottom")
+  val sheet = lay(sheet, Bottom(), "calc(env(safe-area-inset-bottom) + 4px)")
+  val sheet = close(sheet)
+  val sheet = rule(sheet, ".hint-part")
+  val sheet = lay(sheet, Display(), "inline-block")
+  val sheet = spaced(sheet, Margin(), SpaceNone())
   val sheet = close(sheet)
   val sheet = rule(sheet, ".nextch")
   val sheet = lay(sheet, Left(), "auto")
