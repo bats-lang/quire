@@ -29,9 +29,10 @@ import { replaceBooks } from './replace-books.js';
 import { folderBooks } from './folder-books.js';
 import { containerBooks } from './container-books.js';
 import { fontBooks } from './font-books.js';
+import { twoBooks } from './two-books-books.js';
 
 const jar = process.env.EPUBCHECK_JAR;
-const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks, 'w3c epub-tests': w3cBooks, notes: noteBooks, sync: syncBooks, media: mediaBooks, publisher: publisherBooks, drm: drmBooks, selection: selectionBooks, progress: progressBooks, pathological: pathologicalBooks, replace: replaceBooks, series: seriesBooks , encodings: encodingBooks, languages: languageBooks, folders: folderBooks, containers: containerBooks, fonts: fontBooks };
+const registries = { landmarks: landmarkBooks, pagelist: pagelistBooks, epub2: epub2Books, wide: wideBooks, 'w3c epub-tests': w3cBooks, notes: noteBooks, sync: syncBooks, media: mediaBooks, publisher: publisherBooks, drm: drmBooks, selection: selectionBooks, progress: progressBooks, pathological: pathologicalBooks, replace: replaceBooks, series: seriesBooks , encodings: encodingBooks, languages: languageBooks, folders: folderBooks, containers: containerBooks, fonts: fontBooks, 'two books': twoBooks };
 
 test.skip(!jar && !process.env.CI, 'EPUBCHECK_JAR names the epubcheck jar');
 // the books do not depend on the browser: checked once

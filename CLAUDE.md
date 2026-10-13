@@ -766,6 +766,21 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+A chapter's data is checked against its CRC-32 (#529): the central
+directory record the index keeps states it (offset 16), `book_entry_sum`
+reads it by the chapter's name offset, and `take_text_sum` (in place of
+`take_text`) computes the CRC-32 of the inflated bytes, before they are
+made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
+byte step, tested against the proven fold in `tests/codec`, not proved
+equal), and answers no content for a mismatch or an unknown sum, so the
+chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
+and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
+(`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
+end of the entry. The chapter shown and the facing page of a spread are
+checked; the OPF, the container, images and the chapter reads for
+search, notes and read aloud are not (yet). `e2e/containers.spec.js`
+("a chapter whose CRC is not its data's").
+
 ### Note popups (#414)
 
 A note opens as its text, in one popup (`footnote`): an element's text
@@ -3255,6 +3270,33 @@ page, so the paragraph the reader was at stays on the page shown
 whichever way the area changes (`e2e/layout.spec.js`, "the place stays
 when the reading area changes"); where the page breaks fall is the
 layout's, as in Kindle and Books.
+
+## Nothing of one book shows in the next (#435)
+
+`e2e/two-books.spec.js` opens a book that has every per-book feature (Alpha:
+five chapters, a nested contents, a page list, a note, a ruby, a Media Overlays
+narration, left to right, Japanese; bookmarks, a highlight, a search gone to, a
+jump with the back button up, Columns Two, the narration playing) and then one
+that has none (Beta: two chapters, no page list, no ruby, no narration, Hebrew
+read right to left), and checks each of Beta's panels, rows, bars and records
+is Beta's; a vertical book (Gamma) and a fixed-layout one (Delta) are opened
+before Beta to check the writing mode and the page box are not carried. The
+books are in `e2e/two-books-books.js` and checked by epubcheck. Beta is opened
+from the library, from an OPDS catalogue's Get, and after a reload that kept the
+view; Alpha is opened again after Beta; and the records kept for Beta after
+Alpha equal those kept for Beta opened first in a profile of its own (the record
+without its position in the library's order, the reader's settings, the same
+file so the same id; the sync the android project makes as the app opens is
+waited out by `reloadSettled`). It found one leak, fixed: the in-book search
+field kept what was typed in the last book (`_library_shown` makes it afresh,
+`app_book_search`).
+
+By decision, the narration's clip table is not probed (no hook for a test in the
+shipped build; Playwright's guidance is to test what a user sees): the table's
+release is checked by what it is for, Beta offers no narration controls and the
+audio element is paused and holds only a blob URL the app revoked (the page's
+`URL.revokeObjectURL` is noted by the spec). The fixed-layout box and the
+writing mode are checked in the page, not in the cells.
 
 ## Pathological structure (#423)
 
