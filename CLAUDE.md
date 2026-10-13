@@ -766,6 +766,21 @@ proven, or missing) are kept in the book (`book_spine_set`), so loading
 chapter i only walks to it (`book_chapter_get`); the OPF is not read
 again.
 
+A chapter's data is checked against its CRC-32 (#529): the central
+directory record the index keeps states it (offset 16), `book_entry_sum`
+reads it by the chapter's name offset, and `take_text_sum` (in place of
+`take_text`) computes the CRC-32 of the inflated bytes, before they are
+made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
+byte step, tested against the proven fold in `tests/codec`, not proved
+equal), and answers no content for a mismatch or an unknown sum, so the
+chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
+and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
+(`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
+end of the entry. The chapter shown and the facing page of a spread are
+checked; the OPF, the container, images and the chapter reads for
+search, notes and read aloud are not (yet). `e2e/containers.spec.js`
+("a chapter whose CRC is not its data's").
+
 ### Note popups (#414)
 
 A note opens as its text, in one popup (`footnote`): an element's text
