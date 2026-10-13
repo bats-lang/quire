@@ -196,8 +196,9 @@ fn shell_rules_fields_and_banners {left:nat | left >= 1860} (sheet: sheet(left, 
      a phone it took the Settings row of the library menu, which no click
      could reach. A screen (Settings, Sync, About) is not a menu: the
      banner stays over it, where its Dismiss, Copy details and Report are
-     pressed *)
-  val sheet = rule(sheet, "#bats-root:has(:is(#library-menu,#card-menu,#collections-menu):not([data-hide='1'])) .banner.in-library")
+     pressed. layer.bats sets data-menu, so no :has() is asked of the root
+     that holds the chapter (#538) *)
+  val sheet = rule(sheet, ".banner.in-library[data-menu='1']")
   val sheet = lay(sheet, ZIndex(), "1")
   val sheet = close(sheet)
   (* While the reader's bars are up the banner sits under the top bar

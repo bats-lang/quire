@@ -157,11 +157,21 @@ fun _screen_open {count:nat} .<count>. (overlays: !layers(count)): bool =
      | LSettings() => true | LSync() => true | LAbout() => true | LDictionaries() => true
      | _ => _screen_open(rest))
 
+(* Whether a menu opened from the library is among the open overlays *)
+fun _menu_open {count:nat} .<count>. (overlays: !layers(count)): bool =
+  case+ overlays of
+  | LNil() => false
+  | LCons(first, _, rest) =>
+    (case+ first of
+     | LBookMenu() => true | LLibraryMenu() => true | LCollections() => true
+     | _ => _menu_open(rest))
+
 (* The open overlays changed: the scrim and the reader follow, and what
    Back has to go back from (back.bats) *)
 fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = _modality_show(overlays)
   val () = ui_banner_below_bar(_screen_open(overlays))
+  val () = ui_banner_under_menu(_menu_open(overlays))
   val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
   val () = _open_put(overlays)
 in back_overlays_set(any) end

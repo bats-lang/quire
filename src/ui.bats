@@ -935,6 +935,14 @@ implement ui_swatch_btn(parent, id, class_name, name) = _control_literal(parent,
 
 implement ui_banner_below_bar (below) = _set_attr("error-banner", $D.Data("below"), (if below then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
 
+(* Whether a menu opened from the library is up (#507, #538): the layer
+   module says it as the menus open and close, so the stylesheet keys the
+   banner's place on this attribute of the banner itself and not on a :has()
+   over #bats-root, which Blink re-evaluates over the whole chapter (#423) *)
+#pub fn ui_banner_under_menu (under: bool): void
+
+implement ui_banner_under_menu (under) = _set_attr("error-banner", $D.Data("menu"), (if under then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
 (* A pushed screen's top bar (quire#502; Android's settings and Material
    3's small top app bar: a navigation icon and the title; iOS pushes a
    screen with a back item, and keeps Done for a sheet): a Back icon
