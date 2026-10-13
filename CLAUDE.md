@@ -2108,6 +2108,29 @@ sync file holds a book's series (it is the book's own, read from its file, so a
 second device or a restore shows what the file says). `e2e/series.spec.js`,
 `e2e/series-books.js` and `e2e/library-records.spec.js` test it.
 
+## The sizes a book's CSS gives (#431, stage 1)
+
+`src/css_size.bats` reads a book's `font-size` rules as the format alone
+(nothing of it reaches the page yet; stages 2 and 3 of #431 measure a book's
+dominant size and apply the proportions). Only `font-size` is read: rules
+selected by element names, classes, ids and descendant chains of them
+(`sheet_rules_read`, at most 4096 rules, each with its selector's span in the
+sheet, specificity and order), an inline `style` and `<font size>`
+(`declarations_size_read`, `font_size_attribute_read`), in px, pt, pc, in, cm,
+mm, em, ex, rem, % and keywords; `calc()`, `clamp()`, `var()`, `vw`, a
+negative size and `!important` are `SizeIgnored` with their reason, and a
+selector with a combinator, pseudo, attribute or `*` is skipped and counted.
+Every answer is a `datavtype` matched with `case+` (`size_read`,
+`selector_read`, `sheet_read`). What the types prove: a size is at most a
+thousand pixels or times (`size_declared`), a computed one is a pixel to a
+thousand of them (`size_computed`), a proportion to the dominant size is from
+10 to 60 twentieths (`proportion`, so `font-size:1px` and `font-size:400%` are
+held to half and three times, as Readium clamps), a rule's selector lies inside
+its sheet, and its order is below the most. What is tested, not proved
+(`tests/css-size/run.sh`, a CI step beside the codec's, on bytes, with a fuzz):
+that the grammar read is CSS's. The `rem` trick of the fixtures is on `html`
+(`e2e/size-books.js`).
+
 ## What allocates is linear
 
 wasm has no garbage collector, so outside `$UNSAFE` nothing that

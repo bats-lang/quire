@@ -129,6 +129,11 @@ jobs:
       - name: Codec tests
         run: tests/codec/run.sh $HOME/repository
 
+      # The CSS font-size reader, natively: values and units, declaration
+      # blocks, selectors, whole style sheets and fuzz (#431)
+      - name: CSS size tests
+        run: tests/css-size/run.sh $HOME/repository
+
       # Only after everything above passed: a cache holds no failed build
       - name: Save the compiler cache
         if: github.event_name == 'pull_request' || github.event_name == 'push'
