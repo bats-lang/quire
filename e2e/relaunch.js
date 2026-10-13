@@ -159,7 +159,18 @@ export async function capture(page) {
   // and the focus let go
   const ringed = await page.evaluate(() => document.querySelector(':focus-visible') !== null);
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
-  const screen = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  // and the screen is still: a scroll's last frames and an overlay
+  // scrollbar's fade leave stray pixels in the first capture (#546: two
+  // isolated pixels in the margin, in the before capture only), so it is
+  // taken again until two in a row are the same
+  let screen = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  for (let tries = 0; tries < 40; tries++) {
+    await page.waitForTimeout(50);
+    const again = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+    const same = again.equals(screen);
+    screen = again;
+    if (same) break;
+  }
   return {
     bars: await page.evaluate(() => (window.__android ? window.__android.hidden : null)),
     fullScreen: await page.evaluate(() => document.getElementById('screen-fullscreen')?.getAttribute('aria-pressed') ?? null),
