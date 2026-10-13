@@ -162,14 +162,19 @@ test('scrolled, a hand scroll within one screenful is the place a window swap ke
   await importFiles(page, [epubFile(paged)], 1);
   await openBook(page, paged.title);
   await change(page, 'Page', sheet => group(sheet, 'Layout', 'Scroll'));
-  // one whole screenful down, by the keyboard, so the screenful's first paragraph is known
-  const before = await place(page);
-  await page.keyboard.press('ArrowRight');
-  await placeChanged(page, before);
+  // one whole screenful down, so the screenful's first paragraph is known
+  await bookPage(page).evaluate(doc => { doc.scrollTop = doc.clientHeight; });
   await page.waitForTimeout(1500);
   const first = await topParagraph(page);
-  // a hand scroll of a quarter of the screen: the screenful is the same
-  const moved = await bookPage(page).evaluate(doc => { doc.scrollTop += doc.clientHeight / 4; return doc.scrollTop; });
+  // a hand scroll of less than half a screen, so the screenful is the same,
+  // far enough that another paragraph is at the top
+  const moved = await bookPage(page).evaluate(doc => {
+    const start = doc.scrollTop;
+    const firstTop = () => { const c = doc.getBoundingClientRect(); for (const e of doc.querySelectorAll('p')) { const r = e.getClientRects()[0]; if (r && r.top >= c.top - 2 && r.top < c.bottom) return e; } return null; };
+    const was = firstTop();
+    while (doc.scrollTop - start < doc.clientHeight * 0.45 && firstTop() === was) doc.scrollTop += 10;
+    return doc.scrollTop - start;
+  });
   expect(moved).toBeGreaterThan(0);
   await page.waitForTimeout(1500);
   const top = await topParagraph(page);
