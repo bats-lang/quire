@@ -40,6 +40,12 @@
  *   shadow of its own), so a class proven on the card's ground, reused on
  *   the page's, does not leave a strip of the card's colour behind its text
  *   (quire#386: Book info's author).
+ * - rowIsTarget: a row that opens a screen (its button ends in a
+ *   chevron) is one target: its button spans at least 90% of the row's
+ *   width, not a small button in a wide card (#380).
+ * - toastClear: while a toast is up, no control of the screen under it
+ *   is beneath the toast (the Sync-off toast covered the About card,
+ *   #380).
  * - peekAbove: a sheet over the page leaves at least 40% of the window
  *   to the page, so a setting that changes the page can be judged on
  *   it (Material 3's standard sheet; #379).
@@ -555,6 +561,14 @@ export async function targetsShort(page) {
   }, TARGET_PX);
 }
 
+/** The box of each visible book menu button (the card's ⋮) as "w x h",
+    to the pixel: the list and the grid give the same one (quire#495) */
+export async function cardMoreBoxes(page) {
+  return page.evaluate(() => [...document.querySelectorAll('.cmore')]
+    .filter(e => e.checkVisibility() && e.getClientRects().length > 0)
+    .map(e => { const b = e.getBoundingClientRect(); return `${Math.round(b.width)} x ${Math.round(b.height)}`; }));
+}
+
 /** The visible elements with text of their own whose background is a
     ground other than the one behind them, and that are neither a control
     nor a card (a box with a border, a radius or a shadow): a strip of one
@@ -590,6 +604,69 @@ export async function strayGrounds(page) {
 }
 
 
+/** Each visible row with a button that opens a screen (a chevron) whose
+    button covers under 90% of the row's width or height (#380) */
+export async function rowIsTarget(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    for (const row of document.querySelectorAll('.srow')) {
+      if (!row.checkVisibility({ visibilityProperty: true }) || row.getClientRects().length === 0) continue;
+      for (const button of row.querySelectorAll(':scope > button.chev')) {
+        const r = row.getBoundingClientRect();
+        const b = button.getBoundingClientRect();
+        if (b.width < 0.9 * r.width || b.height < 0.9 * r.height) {
+          bad.push(`${button.textContent.trim()}: ${Math.round(100 * b.width / r.width)}% of the row's width, ${Math.round(100 * b.height / r.height)}% of its height`);
+        }
+      }
+    }
+    return bad;
+  });
+}
+
+/** A row that ends in a chevron must be drawn as one, and the chevron
+    belongs to a control (#501, after #389 checked that chevron rows open
+    screens): each visible `.chev` is a button or a link and draws its
+    chevron, and the pointer says it is a control */
+export async function looksActionable(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const shown = e => e.checkVisibility({ visibilityProperty: true }) && e.getClientRects().length > 0;
+    for (const element of document.querySelectorAll('.chev')) {
+      if (!shown(element)) continue;
+      const name = (element.textContent || element.id || element.tagName).trim().slice(0, 40);
+      if (!['BUTTON', 'A'].includes(element.tagName)) bad.push(`${name}: a chevron on a ${element.tagName.toLowerCase()}, which is not a control`);
+      const after = getComputedStyle(element, '::after').content;
+      if (after === 'none' || after === 'normal' || after === '""') bad.push(`${name}: ends in a chevron that is not drawn`);
+      if (getComputedStyle(element).cursor !== 'pointer') bad.push(`${name}: a chevron row whose pointer is not a control's`);
+    }
+    return bad;
+  });
+}
+
+/** Each visible control that a visible toast is drawn over */
+export async function toastClear(page) {
+  return page.evaluate(() => {
+    const toasts = [...document.querySelectorAll('.toast')].filter(t => t.checkVisibility({ visibilityProperty: true }) && t.getClientRects().length > 0);
+    const bad = [];
+    for (const toast of toasts) {
+      const t = toast.getBoundingClientRect();
+      for (const control of document.querySelectorAll('button, a[href], select, input:not([type=hidden]), [role=button], [role=menuitem], [role=tab], [role=switch]')) {
+        if (toast.contains(control) || !control.checkVisibility({ visibilityProperty: true })) continue;
+        const r = control.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0 || r.bottom < t.top || r.top > t.bottom || r.right < t.left || r.left > t.right) continue;
+        const x = Math.min(Math.max(r.left + r.width / 2, t.left + 1), t.right - 1);
+        const y = Math.min(Math.max(r.top + r.height / 2, t.top + 1), t.bottom - 1);
+        if (x < r.left || x > r.right || y < r.top || y > r.bottom) continue;
+        const stack = document.elementsFromPoint(x, y);
+        if (stack.length > 0 && toast.contains(stack[0]) && stack.includes(control)) {
+          bad.push(`${(control.getAttribute('aria-label') || control.textContent || control.id).trim().slice(0, 40)} is under the toast`);
+        }
+      }
+    }
+    return bad;
+  });
+}
+
 /** Each visible fixed sheet that covers more than 60% of the window's
     area (a side sheet in a short window covers half of it) (the page keeps at least 40%; #379). Named with the share it
     covers */
@@ -606,29 +683,32 @@ export async function peekAbove(page) {
   });
 }
 
-/** In each visible sheet: a gap (row or column) that is not a step of
-    the spacing scale, and a tab whose padding is not one, or is under
-    the least inset at a side (#379) */
+/** On the screen shown: every visible element's gap (row or column) that
+    is not a step of the spacing scale (#500: the stylesheet writes gaps
+    only from the scale, and this holds the browser to it on every screen
+    the walk reaches, not only sheets; the book's own page is left out),
+    and, in a sheet, a tab whose padding is not one, or is under the least
+    inset at a side (#379) */
 export async function offScale(page) {
   return page.evaluate(() => {
     const scale = [0, 4, 8, 12, 16, 24];
     const least = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-inset'));
     const bad = [];
+    const book = document.querySelector('[role=document]');
     const named = e => (e.getAttribute('aria-label') || e.id || e.className || e.tagName).toString().trim().slice(0, 40);
-    for (const sheet of document.querySelectorAll('.sheet')) {
-      if (!sheet.checkVisibility({ visibilityProperty: true }) || sheet.getClientRects().length === 0) continue;
-      for (const element of [sheet, ...sheet.querySelectorAll('*')]) {
-        const style = getComputedStyle(element);
-        for (const property of ['rowGap', 'columnGap']) {
-          const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
-          if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
-        }
-        if (element.getAttribute('role') === 'tab') {
-          for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
-            const value = parseFloat(style[`padding${side}`]);
-            if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
-            if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
-          }
+    for (const element of document.querySelectorAll('body *')) {
+      if (book && book.contains(element)) continue;
+      if (!element.checkVisibility({ visibilityProperty: true }) || element.getClientRects().length === 0) continue;
+      const style = getComputedStyle(element);
+      for (const property of ['rowGap', 'columnGap']) {
+        const value = style[property] === 'normal' ? 0 : parseFloat(style[property]);
+        if (!scale.includes(value)) bad.push(`${named(element)}: ${property} ${style[property]}`);
+      }
+      if (element.getAttribute('role') === 'tab' && element.closest('.sheet')) {
+        for (const side of ['Top', 'Right', 'Bottom', 'Left']) {
+          const value = parseFloat(style[`padding${side}`]);
+          if (!scale.includes(value)) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px`);
+          if ((side === 'Left' || side === 'Right') && value < least) bad.push(`${named(element)}: padding-${side.toLowerCase()} ${value}px under the least inset`);
         }
       }
     }

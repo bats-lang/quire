@@ -39,6 +39,10 @@ MAKERS = {name: (1,) for name in (
 MAKERS['ui_range'] = (1, 3, 6)
 # a sign-in form's field: its label (position 1) and its input (position 2)
 MAKERS['ui_form_field'] = (1, 2)
+# a row that opens a screen: the row (position 1), its button (2) and its line (3)
+MAKERS['ui_nav_row'] = (1, 2, 3)
+# a pushed screen's top bar: the bar (position 1), its Back button (2) and its title (3)
+MAKERS['ui_screen_bar'] = (1, 2, 3)
 # function -> the positions of its arguments that name an element
 NAMERS = {name: (0,) for name in (
     'ui_clear', 'ui_attr', 'ui_attr_buf', 'ui_place', 'ui_class', 'ui_show',

@@ -10,6 +10,27 @@ staload "style.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload "version.sats"
 
+(* The gestures the first book teaches (#384): each has its words, so a
+   gesture added without them does not type-check *)
+datatype gesture = TapSides | TapMiddle
+
+fn gesture_hint (gesture: gesture): [text_len:pos | text_len < 256] string text_len =
+  case+ gesture of
+  | TapSides() => "Tap the sides to turn pages. "
+  | TapMiddle() => "Tap the middle for the menu."
+
+(* Where the hint lies: in a band the page's text keeps clear of, the top
+   one (above the first line, the status bar's inset away) or the bottom
+   one (the footer's); there is no case for the page's middle *)
+datatype hint_band = TopBand | BottomBand
+
+fn hint_band (): hint_band = TopBand()
+
+fn hint_class (band: hint_band): [class_len:pos | class_len < 256] string class_len =
+  case+ band of
+  | TopBand() => "hint hint-top"
+  | BottomBand() => "hint hint-bottom"
+
 fn _hide {id_len:pos | id_len < 256} (id: string id_len): void = ui_show(id, false)
 
 (* Each element made again to reset it is made only here, so each id is
@@ -156,6 +177,9 @@ fn _library (): void = let
   val () = ui_el("library", "library-empty-actions", TDiv, "eacts")
   val () = ui_el("library-empty-actions", "empty-import", TDiv, "btn btn-p")
   val () = ui_text_btn("library-empty-actions", "empty-catalogues", "btn", "Get free books")
+  (* a reader who has Quire on another device is told how books and
+     places come over: sync (quire#501) *)
+  val () = ui_text_btn("library-empty-actions", "empty-sync", "btn", "Sync with another device")
   val () = _hide("library-empty-actions")
   (* when the library could not be read for a reason a second read could
      change (the failure's HOPE, ui_try_again_show) *)
@@ -196,7 +220,7 @@ fn _collections (): void = let
   val () = ui_text("collections-none", "No collections yet")
   val () = ui_el("collections-box", "collections-list", TDiv, "seg cseg")
   val () = ui_text_btn("collections-box", "collections-new", "btn", "New collection")
-  val () = ui_text_btn("collections-box", "collections-done", "btn btn-p", "Done")
+  val () = ui_text_btn("collections-box", "collections-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("collections-menu") end
 
 (* A labelled number of the reading statistics *)
@@ -228,7 +252,7 @@ fn _stats (): void = let
   val () = ui_text_btn("stats-goal", "stats-goal-20", "sbtn", "20 min")
   val () = ui_text_btn("stats-goal", "stats-goal-30", "sbtn", "30 min")
   val () = ui_text_btn("stats-goal", "stats-goal-60", "sbtn", "1 h")
-  val () = ui_text_btn("stats-box", "stats-done", "btn btn-p", "Done")
+  val () = ui_text_btn("stats-box", "stats-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("stats-panel") end
 
 (* The dictionaries Look up reads without a connection: each one's
@@ -239,9 +263,8 @@ fn _dictionaries (): void = let
      chevron opens a screen, never a dialog *)
   val () = ui_el("bats-root", "dictionaries-panel", TDiv, "info")
   val () = ui_labelled("dictionaries-panel", NDialog, "dictionaries-title")
+  val () = ui_screen_bar("dictionaries-panel", "dictionaries-bar", "dictionaries-back", "dictionaries-title", "Dictionaries")
   val () = ui_el("dictionaries-panel", "dictionaries-box", TDiv, "info-in")
-  val () = ui_el("dictionaries-box", "dictionaries-title", TDiv, "mtitle")
-  val () = ui_text("dictionaries-title", "Dictionaries")
   val () = ui_el("dictionaries-box", "dictionaries-none", TDiv, "cnone")
   val () = ui_text("dictionaries-none", "No dictionaries yet")
   val () = ui_el("dictionaries-box", "dictionaries-list", TDiv, "sgroup")
@@ -253,8 +276,6 @@ fn _dictionaries (): void = let
   val () = app_dictionary_input()
   val () = ui_el("dictionaries-box", "dictionaries-status", TDiv, "cnone")
   val () = ui_role("dictionaries-status", RStatus)
-  val () = ui_el("dictionaries-box", "dictionaries-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("dictionaries-buttons", "dictionaries-done", "btn btn-p", "Done")
 in _hide("dictionaries-panel") end
 
 (* A word looked up in a dictionary, over the page: the headword, its
@@ -269,7 +290,7 @@ fn _dictionary (): void = let
   val () = ui_el("dictionary-panel", "dictionary-bar", TDiv, "srow sfoot")
   val () = ui_link_out("dictionary-bar", "dictionary-online", "btn linkout", "Look up online")
   val () = ui_el("dictionary-bar", "dictionary-spacer", TSpan, "grow")
-  val () = ui_text_btn("dictionary-bar", "dictionary-close", "btn", "Close")
+  val () = ui_text_btn("dictionary-bar", "dictionary-close", "btn", dismiss_label(DismissSheet()))
 in _hide("dictionary-panel") end
 
 (* The OPDS catalogues books are got from: each one's name, opening
@@ -289,7 +310,7 @@ fn _catalogues (): void = let
   val () = ui_text_btn("catalogues-box", "catalogue-add", "btn", "Add catalogue")
   val () = ui_el("catalogues-box", "catalogues-status", TDiv, "cnone")
   val () = ui_role("catalogues-status", RStatus)
-  val () = ui_text_btn("catalogues-box", "catalogues-done", "btn btn-p", "Done")
+  val () = ui_text_btn("catalogues-box", "catalogues-done", "btn btn-p", dismiss_label(DismissScreen()))
 in _hide("catalogues-panel") end
 
 (* A catalogue, browsed: Back to the page before, the page's title and
@@ -321,6 +342,9 @@ fn _library_menu (): void = let
   val () = ui_el("library-menu", "library-menu-box", TDiv, "menu")
   val () = ui_named("library-menu-box", NMenu, "Library menu")
   val () = ui_menuitem("library-menu-box", "menu-settings", "Settings")
+  (* sync is the way to a new phone, so it is two taps from the library
+     (the menu, then Sync), not three through Settings (quire#501) *)
+  val () = ui_menuitem("library-menu-box", "menu-sync", "Sync")
   (* next to Settings, as About is under Settings' own *)
   val () = ui_menuitem("library-menu-box", "menu-about", "About Quire")
   val () = ui_menuitem("library-menu-box", "menu-catalogues", "Catalogues")
@@ -371,19 +395,23 @@ in _hide("sort-menu") end
 fn _settings_screen (): void = let
   val () = ui_el("bats-root", "settings-screen", TDiv, "info")
   val () = ui_labelled("settings-screen", NDialog, "settings-title")
+  val () = ui_screen_bar("settings-screen", "settings-bar", "settings-back", "settings-title", "Settings")
   val () = ui_el("settings-screen", "settings-box", TDiv, "info-in")
-  val () = ui_el("settings-box", "settings-title", TDiv, "mtitle")
-  val () = ui_text("settings-title", "Settings")
+  (* the groups (#380; Android's settings): a heading and one card, each
+     row of a card the whole width of it, its name, a line of what it is
+     or its state, and a chevron *)
+  val () = ui_el("settings-box", "settings-data-title", TDiv, "a11yg")
+  val () = ui_text("settings-data-title", "Sync and dictionaries")
+  val () = ui_el("settings-box", "settings-data", TDiv, "cardgroup")
   (* sync: its screen, and its state *)
-  val () = ui_el("settings-box", "settings-sync-row", TDiv, "srow")
-  val () = ui_named("settings-sync-row", NGroup, "Sync")
-  val () = ui_text_btn("settings-sync-row", "settings-sync", "btn rowbtn chev", "Sync")
-  val () = ui_add("settings-sync-row", "settings-sync-state", TSpan)
+  val () = ui_nav_row("settings-data", "settings-sync-row", "settings-sync", "settings-sync-state", "Sync", "Off")
   val () = ui_role("settings-sync-state", RStatus)
-  (* the dictionaries' panel *)
-  val () = ui_el("settings-box", "settings-dictionaries-row", TDiv, "srow")
-  val () = ui_text_btn("settings-dictionaries-row", "settings-dictionaries", "btn chev", "Dictionaries")
+  (* the dictionaries' screen *)
+  val () = ui_nav_row("settings-data", "settings-dictionaries-row", "settings-dictionaries", "settings-dictionaries-about",
+    "Dictionaries", "Offline lookup for the words you select")
   (* the backup *)
+  val () = ui_el("settings-box", "settings-data-about", TDiv, "sabout")
+  val () = ui_text_long("settings-data-about", "Moving to a new phone? Sync keeps your places, shelves and notes the same on your devices; a backup below holds them in a file. Neither holds the books' files: keep your EPUB files.")
   val () = ui_el("settings-box", "settings-backup-title", TDiv, "a11yg")
   val () = ui_text("settings-backup-title", "Backup")
   val () = ui_el("settings-box", "settings-backup", TDiv, "srow")
@@ -416,18 +444,27 @@ fn _settings_screen (): void = let
   val () = ui_text_btn("settings-goal", "settings-goal-20", "sbtn", "20 min")
   val () = ui_text_btn("settings-goal", "settings-goal-30", "sbtn", "30 min")
   val () = ui_text_btn("settings-goal", "settings-goal-60", "sbtn", "1 h")
-  (* the resets, each offered back by the Undo toast *)
+  (* the About screen, above the resets (they are the last thing, and
+     the Undo toast that follows one is over nothing else) *)
+  val () = ui_el("settings-box", "settings-about-title", TDiv, "a11yg")
+  val () = ui_text("settings-about-title", "About")
+  val () = ui_el("settings-box", "settings-about-group", TDiv, "cardgroup")
+  val () = ui_nav_row("settings-about-group", "settings-about-row", "settings-about", "settings-about-summary",
+    "About Quire", "Version, home page, privacy policy and terms")
+  (* the resets, named by what they reset, each with a line, each
+     offered back by the Undo toast *)
   val () = ui_el("settings-box", "settings-reset-title", TDiv, "a11yg")
   val () = ui_text("settings-reset-title", "Reset")
-  val () = ui_el("settings-box", "settings-reset", TDiv, "srow")
+  val () = ui_el("settings-box", "settings-reset", TDiv, "cardgroup")
   val () = ui_named("settings-reset", NGroup, "Reset")
-  val () = ui_text_btn("settings-reset", "settings-reset-settings", "btn", "Reset settings")
-  val () = ui_text_btn("settings-reset", "settings-factory-reset", "btn", "Factory reset")
-  (* the About screen *)
-  val () = ui_el("settings-box", "settings-about-row", TDiv, "srow")
-  val () = ui_text_btn("settings-about-row", "settings-about", "btn chev", "About Quire")
-  val () = ui_el("settings-box", "settings-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("settings-buttons", "settings-done", "btn btn-p", "Done")
+  val () = ui_el("settings-reset", "settings-reset-settings-row", TDiv, "srow stack")
+  val () = ui_text_btn("settings-reset-settings-row", "settings-reset-settings", "btn", "Reset reading settings")
+  val () = ui_el("settings-reset-settings-row", "settings-reset-settings-about", TSpan, "sabout")
+  val () = ui_text_long("settings-reset-settings-about", "Puts every setting of the reading settings sheet (theme, text, page, turning, screen, reading aloud) back to what it was at first. Your books stay.")
+  val () = ui_el("settings-reset", "settings-factory-reset-row", TDiv, "srow stack")
+  val () = ui_text_btn("settings-factory-reset-row", "settings-factory-reset", "btn", "Remove all books")
+  val () = ui_el("settings-factory-reset-row", "settings-factory-reset-about", TSpan, "sabout")
+  val () = ui_text_long("settings-factory-reset-about", "Moves every book to the Trash and resets the settings. Undo brings them back.")
 in _hide("settings-screen") end
 
 (* A link of the About screen to one of the pages published beside the
@@ -451,9 +488,8 @@ fn _about_page {id_len,label_len:pos | id_len < 256; label_len < 256}{path_len,a
 fn _about_screen (): void = let
   val () = ui_el("bats-root", "about-screen", TDiv, "info")
   val () = ui_labelled("about-screen", NDialog, "about-title")
+  val () = ui_screen_bar("about-screen", "about-bar", "about-back", "about-title", "About Quire")
   val () = ui_el("about-screen", "about-box", TDiv, "info-in")
-  val () = ui_el("about-box", "about-title", TDiv, "mtitle")
-  val () = ui_text("about-title", "About Quire")
   val () = ui_el("about-box", "about-text", TDiv, "sabout")
   val () = ui_text_long("about-text", "Quire, an EPUB reader. Your books and reading data are kept on this device.")
   (* the version, as a bug report should give it (#219) *)
@@ -472,8 +508,6 @@ fn _about_screen (): void = let
   val () = _about_page("about-home", "Home page", "homepage/", "bats-lang.github.io/quire/homepage/")
   val () = _about_page("about-privacy", "Privacy policy", "homepage/privacy.html", "bats-lang.github.io/quire/homepage/privacy.html")
   val () = _about_page("about-terms", "Terms of service", "homepage/terms.html", "bats-lang.github.io/quire/homepage/terms.html")
-  val () = ui_el("about-box", "about-buttons", TDiv, "mbtns")
-  val () = ui_text_btn("about-buttons", "about-done", "btn btn-p", "Done")
 in _hide("about-screen") end
 
 (* The dialog: its buttons' labels and tones are set when it opens *)
@@ -624,9 +658,12 @@ fn _reader (): void = let
   val () = _hide("jump-back")
   (* the first book's hint on turning pages: read out as it shows, and
      taps go through it to the page *)
-  val () = ui_el("reader", "turn-hint", TDiv, "hint")
+  val () = ui_el("reader", "turn-hint", TDiv, hint_class(hint_band()))
   val () = ui_role("turn-hint", RStatus)
-  val () = ui_text("turn-hint", "Swipe or tap the sides to turn the page")
+  val () = ui_el("turn-hint", "turn-hint-sides", TSpan, "hint-part")
+  val () = ui_text("turn-hint-sides", gesture_hint(TapSides()))
+  val () = ui_el("turn-hint", "turn-hint-middle", TSpan, "hint-part")
+  val () = ui_text("turn-hint-middle", gesture_hint(TapMiddle()))
   val () = _hide("turn-hint")
   (* scrolled, the chapter's last screen goes on to the next *)
   val () = ui_text_btn("reader", "next-chapter", "pback nextch", "Next chapter \xE2\x86\x92")
@@ -746,6 +783,10 @@ fn _toc (): void = let
   val () = _hide("pages-tab")
   val () = ui_el("contents-header", "contents-spacer", TSpan, "grow")
   val () = ui_icon_btn("contents-header", "contents-close", "ibtn", IcClose, "Close")
+  (* the way back from a jump, kept past the button's 10 s while there is
+     a position to go back to (reader_back_row) *)
+  val () = ui_text_btn("contents-panel", "contents-back", "pi", "Back to where you were")
+  val () = _hide("contents-back")
   val () = ui_el("contents-panel", "contents-list", TDiv, "plist")
   val () = ui_labelled("contents-list", NTabpanel, "contents-tab")
   val () = ui_el("contents-panel", "bookmarks-list", TDiv, "plist")
@@ -826,7 +867,7 @@ fn _settings (): void = let
   val () = ui_el("typography-panel", "typography-head", TDiv, "shead")
   val () = ui_el("typography-head", "typography-title", TSpan, "grow")
   val () = ui_text("typography-title", "Reading settings")
-  val () = ui_text_btn("typography-head", "typography-close", "btn", "Close")
+  val () = ui_text_btn("typography-head", "typography-close", "btn", dismiss_label(DismissSheet()))
   val () = ui_el("typography-head", "typography-tabs", TDiv, "tabs")
   val () = ui_named("typography-tabs", NTablist, "Reading settings")
   (* the tabs' panels, in one cell *)
@@ -843,12 +884,14 @@ fn _settings (): void = let
   val () = ui_text("theme-label", "Theme")
   val () = ui_el("theme-row", "theme-choice", TDiv, "seg")
   val () = ui_named("theme-choice", NGroup, "Theme")
+  (* Auto follows the clock, so it has no palette of its own to draw; each
+     fixed theme is a swatch of its palette (quire#501), named by its word *)
   val () = ui_text_btn("theme-choice", "theme-auto", "sbtn", "Auto")
-  val () = ui_text_btn("theme-choice", "theme-light", "sbtn", "Light")
-  val () = ui_text_btn("theme-choice", "theme-sepia", "sbtn", "Sepia")
-  val () = ui_text_btn("theme-choice", "theme-dark", "sbtn", "Dark")
-  val () = ui_text_btn("theme-choice", "theme-night", "sbtn", "Night")
-  val () = ui_text_btn("theme-choice", "theme-grey", "sbtn", "Grey")
+  val () = ui_swatch_btn("theme-choice", "theme-light", "themesw th-light", "Light")
+  val () = ui_swatch_btn("theme-choice", "theme-sepia", "themesw th-sepia", "Sepia")
+  val () = ui_swatch_btn("theme-choice", "theme-dark", "themesw th-dark", "Dark")
+  val () = ui_swatch_btn("theme-choice", "theme-night", "themesw th-night", "Night")
+  val () = ui_swatch_btn("theme-choice", "theme-grey", "themesw th-grey", "Grey")
   val () = ui_el("typography-look", "font-row", TDiv, "srow")
   val () = ui_el("font-row", "font-label", TSpan, "slabel")
   val () = ui_text("font-label", "Font")
@@ -979,7 +1022,7 @@ fn _settings (): void = let
   val () = _hide("narration-skip-row")
   (* reset, away from Close and asked first: every tab's settings *)
   val () = ui_el("typography-panel", "typography-foot", TDiv, "srow sfoot")
-  val () = ui_text_btn("typography-foot", "typography-reset", "link", "Reset to defaults")
+  val () = ui_text_btn("typography-foot", "typography-reset", "link", "Reset reading settings")
 in _hide("typography-panel") end
 
 (* The search panel *)
@@ -1042,7 +1085,7 @@ fn _note (): void = let
   (* a link out of the book asks first: this opens it, in another tab *)
   val () = ui_link_out("footnote-bar", "footnote-open", "btn linkout", "Open link")
   val () = ui_el("footnote-bar", "footnote-spacer", TSpan, "grow")
-  val () = ui_text_btn("footnote-bar", "footnote-close", "btn", "Close")
+  val () = ui_text_btn("footnote-bar", "footnote-close", "btn", dismiss_label(DismissSheet()))
 in _hide("footnote") end
 
 (* A book's image, full screen: fitted, zoomed with the fingers or the

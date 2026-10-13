@@ -28,8 +28,10 @@ staload "library.sats"
 staload "import.sats"
 staload "toc.sats"
 staload "locator.sats"
+staload "titles.sats"
 staload "wellformed.sats"
 staload "dataurl.sats"
+staload "font_obfuscation.sats"
 staload "settings.sats"
 staload "stats.sats"
 staload "annot.sats"
@@ -3921,9 +3923,19 @@ in
     in _book_lang_put(BookLang($A.thaw<byte>(lang_frozen), lang_len)) end
 end
 
+(* The unique identifier of the package, copied: the key of a font masked by either obfuscation (quire#410) *)
+datavtype font_identifier =
+  | {l:agz}{n:pos | n <= 4096} FontIdentifier of ($A.arr(byte, l, n), int n)
+  | NoFontIdentifier of ()
+
+fn _font_identifier_free (identifier: font_identifier): void =
+  case+ identifier of
+  | ~FontIdentifier(bytes, _) => $A.free<byte>(bytes)
+  | ~NoFontIdentifier() => ()
+
 datavtype font_source =
   | {file_size:pos}{data_start:nat}{compressed_size:pos | data_start + compressed_size <= file_size; compressed_size <= 268435456}
-    FontSource of (int file_size, int data_start, int compressed_size, $Z.compression)
+    FontSource of (int file_size, int data_start, int compressed_size, $Z.compression, font_identifier)
   | FontNone of ()
 
 val _font = ref<font_source>(FontNone())
@@ -3931,12 +3943,35 @@ val _font = ref<font_source>(FontNone())
 fn _font_put (font: font_source): void = let
   var cell: font_source = font
   val () = ref_exch_elt<font_source>(_font, cell)
-in case+ cell of ~FontSource(_, _, _, _) => () | ~FontNone() => () end
+in case+ cell of
+   | ~FontSource(_, _, _, _, identifier) => _font_identifier_free(identifier)
+   | ~FontNone() => () end
 
 fn _font_take (): font_source = let
   var cell: font_source = FontNone()
   val () = ref_exch_elt<font_source>(_font, cell)
 in cell end
+
+(* target[i, len) := source[offset + i, offset + len) *)
+fun _copy_identifier {l,lt:agz}{n,m:pos}{offset,len:nat | offset + len <= n; len <= m}{i:nat | i <= len} .<len - i>.
+  (source: !$A.borrow(byte, l, n), offset: int offset, len: int len, target: !$A.arr(byte, lt, m), i: int i): void =
+  if i >= len then ()
+  else let
+    val () = $A.set<byte>(target, i, $A.read<byte>(source, offset + i))
+  in _copy_identifier(source, offset, len, target, i + 1) end
+
+(* The package's unique identifier of the OPF opf_bytes, when it has one of up to 4096 bytes *)
+fn _identifier_copy {l:agz}{n:pos}{tree_size:nat}
+  (opf_bytes: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): font_identifier =
+  case+ opf_unique_identifier(opf_bytes, nodes) of
+  | ~xspan_none() => NoFontIdentifier()
+  | ~xspan_at(identifier_offset, identifier_len) =>
+    if identifier_len <= 0 then NoFontIdentifier()
+    else if identifier_len > 4096 then NoFontIdentifier()
+    else let
+      val copy = $A.alloc<byte>(identifier_len)
+      val () = _copy_identifier(opf_bytes, identifier_offset, identifier_len, copy, 0)
+    in FontIdentifier(copy, identifier_len) end
 
 (* The book's first embedded font, named in the OPF opf_bytes[0, n) (whose
    directory is the first dir_len bytes of the name at opf_name_offset) *)
@@ -3947,7 +3982,8 @@ fn _font_locate {file_size:pos}{opf_name_offset:nat}{dir_len:nat | opf_name_offs
   | ~xspan_none() => _font_put(FontNone())
   | ~xspan_at(href_start, href_len) =>
     (case+ book_find_relative(serial, file_size, opf_name_offset, dir_len, opf_bytes, n, href_start, href_len) of
-     | ~EntryHit(data_start, compressed_size, method, _, _) => _font_put(FontSource(file_size, data_start, compressed_size, method))
+     | ~EntryHit(data_start, compressed_size, method, _, _) =>
+       _font_put(FontSource(file_size, data_start, compressed_size, method, _identifier_copy(opf_bytes, nodes)))
      | ~EntryMiss() => _font_put(FontNone()))
 
 (* target[at + j, at + source_len) := source[j, source_len) *)
@@ -3968,51 +4004,200 @@ fn _font_style {url_len:pos | url_len < 2000}{l:agz}{url_size:pos | url_len <= u
   val offset = _put(style, offset + url_len, ")}.caf{--bookfont:QuireBook}")
 in ui_text_buf("style-fonts", style, offset) end
 
+(* How the font is unmasked, once it is read: not at all (a plain font), by a key
+   (which of the first bytes), or it cannot be (an algorithm Quire has no client
+   for, an identifier that is no key): then no font is made of it, locally (the
+   text is set in the fallback face, and no banner is raised for the book) *)
+datavtype font_mask =
+  | {lk:agz}{k:pos} FontMasked of ($A.arr(byte, lk, k), int k, int)
+  | FontUnmasked of ()
+  | FontUnusable of ()
+
+val _font_mask = ref<font_mask>(FontUnmasked())
+
+fn _font_mask_free (mask: font_mask): void =
+  case+ mask of
+  | ~FontMasked(key, _, _) => $A.free<byte>(key)
+  | ~FontUnmasked() => ()
+  | ~FontUnusable() => ()
+
+fn _font_mask_put (mask: font_mask): void = let
+  var cell: font_mask = mask
+  val () = ref_exch_elt<font_mask>(_font_mask, cell)
+in _font_mask_free(cell) end
+
+fn _font_mask_take (): font_mask = let
+  var cell: font_mask = FontUnmasked()
+  val () = ref_exch_elt<font_mask>(_font_mask, cell)
+in cell end
+
+(* The mask of the identifier's IDPF key, the identifier consumed *)
+fn _mask_idpf (identifier: font_identifier): font_mask =
+  case+ identifier of
+  | ~NoFontIdentifier() => FontUnusable()
+  | ~FontIdentifier(bytes, bytes_len) => let
+      val key = $A.alloc<byte>(20)
+      val @(bytes_frozen, bytes_borrowed) = $A.freeze<byte>(bytes)
+      val made = idpf_key(bytes_borrowed, bytes_len, key)
+      val () = $A.drop<byte>(bytes_frozen, bytes_borrowed)
+      val () = $A.free<byte>($A.thaw<byte>(bytes_frozen))
+    in
+      if made then FontMasked(key, 20, idpf_masked_bytes())
+      else let val () = $A.free<byte>(key) in FontUnusable() end
+    end
+
+(* The mask of the identifier's Adobe key, the identifier consumed *)
+fn _mask_adobe (identifier: font_identifier): font_mask =
+  case+ identifier of
+  | ~NoFontIdentifier() => FontUnusable()
+  | ~FontIdentifier(bytes, bytes_len) => let
+      val key = $A.alloc<byte>(16)
+      val @(bytes_frozen, bytes_borrowed) = $A.freeze<byte>(bytes)
+      val made = adobe_key(bytes_borrowed, bytes_len, key)
+      val () = $A.drop<byte>(bytes_frozen, bytes_borrowed)
+      val () = $A.free<byte>($A.thaw<byte>(bytes_frozen))
+    in
+      if made then FontMasked(key, 16, adobe_masked_bytes())
+      else let val () = $A.free<byte>(key) in FontUnusable() end
+    end
+
+implement $P.dispose<font_cipher>(_) = ()
+
+(* Which font_cipher the resource of encryption.xml (parsed as nodes) that is the entry at
+   font_data_start names, going through the k-th resource on (at most 256 of them) *)
+fun _font_cipher_among {file_size:pos}{l:agz}{n:pos}{tree_size:nat}{k:nat | k <= 256} .<256 - k>.
+  (serial: int, file_size: int file_size, font_data_start: int,
+   data: !$A.borrow(byte, l, n), n: int n, nodes: !$X.xml_node_list(n, tree_size), k: int k): font_cipher =
+  if k >= 256 then FontNotListed()
+  else
+    (case+ encrypted_nth(data, nodes, k) of
+     | ~encrypted_end() => FontNotListed()
+     | ~encrypted_unlinked() => _font_cipher_among(serial, file_size, font_data_start, data, n, nodes, k + 1)
+     | ~encrypted_at(cipher, uri_offset, uri_len) =>
+       (case+ book_find_relative(serial, file_size, 0, 0, data, n, uri_offset, uri_len) of
+        | ~EntryHit(data_start, _, _, _, _) =>
+          if data_start = font_data_start then cipher
+          else _font_cipher_among(serial, file_size, font_data_start, data, n, nodes, k + 1)
+        | ~EntryMiss() => _font_cipher_among(serial, file_size, font_data_start, data, n, nodes, k + 1)))
+
+(* How the font whose data is at font_data_start is encrypted, from the book's
+   encryption.xml (not listed: a plain font) *)
+fn _font_cipher_find {file_size:pos} (serial: int, file_size: int file_size, font_data_start: int): $P.promise(font_cipher, $P.Chained) = let
+  var encryption_chars = @[char][23]('M', 'E', 'T', 'A', '-', 'I', 'N', 'F', '/', 'e', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', '.', 'x', 'm', 'l')
+  val encryption_name = $S.from_char_array(encryption_chars, 23)
+  val @(name_frozen, name_bytes) = $A.freeze<byte>(encryption_name)
+  val encryption = book_zip_read(serial, file_size, name_bytes, 23)
+  val () = release_bytes(name_frozen, name_bytes)
+in
+  case+ encryption of
+  | ~ZipMissing() => $P.ret<font_cipher>(FontNotListed())
+  | ~ZipGot(encryption_owner, encryption_data, encryption_size, encryption_method, _, _, _) => let
+      val @(data_frozen, data_bytes) = $A.freeze<byte>(encryption_data)
+      val decompressing = decompress(data_bytes, encryption_size, zip_compression(encryption_method))
+      val () = $A.drop<byte>(data_frozen, data_bytes)
+      val () = piece_free(encryption_owner, $A.thaw<byte>(data_frozen))
+    in
+      $P.and_then<decompressed><font_cipher>(decompressing, llam(inflated) =>
+        case+ take_text(inflated) of
+        (* an encryption.xml that cannot be read lists nothing *)
+        | ~NoContentBytes() => $P.ret<font_cipher>(FontNotListed())
+        | ~ContentBytes(xml_owner, xml_buffer, xml_size) => let
+            val @(xml_frozen, xml_bytes) = $A.freeze<byte>(xml_buffer)
+            val nodes = $X.parse_document(xml_bytes, xml_size)
+            val cipher = _font_cipher_among(serial, file_size, font_data_start, xml_bytes, xml_size, nodes, 0)
+            val () = $X.free_nodes(nodes)
+            val () = $A.drop<byte>(xml_frozen, xml_bytes)
+            val () = piece_free(xml_owner, $A.thaw<byte>(xml_frozen))
+          in $P.ret<font_cipher>(cipher) end)
+    end
+end
+
+(* The font bytes font[0, font_len), unmasked as the mask says, made the book font: a
+   blob URL named QuireBook in the style that the "Book" setting uses *)
+fn _font_blob {arena_loc,piece_loc:agz}{content_size:pos}
+  (font_owner: piece_owner(content_size, arena_loc), font: $A.arrx(byte, piece_loc, content_size, arena_loc), font_len: int content_size): void = let
+  val usable = (case+ _font_mask_take() of
+    | ~FontUnusable() => false
+    | ~FontUnmasked() => true
+    | ~FontMasked(key, key_len, masked) => let
+        val () = font_unmask(font, font_len, key, key_len, masked)
+        val () = $A.free<byte>(key)
+      in true end): bool
+in
+  if ~usable then piece_free(font_owner, font)
+  else let
+    val mime_buf = $A.alloc<byte>(8)
+    val _ = _put(mime_buf, 0, "font/otf")
+    val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime_buf)
+    val @(font_frozen, font_bytes) = $A.freeze<byte>(font)
+    val url_made = $BL.create_blob_url(font_bytes, font_len, mime_bytes, 8)
+    val () = $A.drop<byte>(font_frozen, font_bytes)
+    val () = piece_free(font_owner, $A.thaw<byte>(font_frozen))
+    val () = release_bytes(mime_frozen, mime_bytes)
+  in
+    case+ url_made of
+    | ~$R.none() => ()
+    | ~$R.some(url_blob) => let
+        val url_len = $BD.blob_len(url_blob)
+      in
+        (* the host's URL, checked here *)
+        if url_len <= 0 then $BD.blob_free(url_blob)
+        else if url_len >= 2000 then $BD.blob_free(url_blob)
+        else let
+          val url = $A.alloc<byte>(url_len)
+          val () = $BD.blob_read(url_blob, 0, url, url_len)
+          val () = $BD.blob_free(url_blob)
+          val () = _font_style(url, url_len)
+        in $A.free<byte>(url) end
+      end
+  end
+end
+
+(* Reads the font found by _font_locate, undoes the obfuscation encryption.xml lists it
+   with (the same each time the book is opened, the file is stored as it was made), and
+   makes it the book font (or none: no font, a font in an algorithm Quire has no client
+   for, or one the browser cannot use fall back to the reader's own faces) *)
+fn _font_read (serial: int, cipher: font_cipher): $P.promise(int, $P.Chained) =
+  case+ _font_take() of
+  | ~FontNone() => $P.ret<int>(0)
+  | ~FontSource(file_size, data_start, compressed_size, method, identifier) => let
+      val () = _font_mask_put(
+        (case+ cipher of
+         | FontNotListed() => let val () = _font_identifier_free(identifier) in FontUnmasked() end
+         | FontCipherOther() => let val () = _font_identifier_free(identifier) in FontUnusable() end
+         | FontObfuscatedIdpf() => _mask_idpf(identifier)
+         | FontObfuscatedAdobe() => _mask_adobe(identifier)): font_mask)
+    in
+      case+ piece_new(compressed_size) of
+      | ~NoPiece() => let val () = _font_mask_put(FontUnmasked()) in $P.ret<int>(0) end
+      | ~Piece(compressed_owner, compressed) => let
+          val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
+          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+          val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
+          val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+        in
+          $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
+            case+ take_decompressed(inflated) of
+            | ~NoContentBytes() => let val () = _font_mask_put(FontUnmasked()) in $P.ret<int>(0) end
+            | ~ContentBytes(font_owner, font, font_len) => let
+                val () = _font_blob(font_owner, font, font_len)
+              in $P.ret<int>(0) end)
+        end
+    end
+
 (* Makes the font found by _font_locate the book font (or none) *)
 fn _font_load (serial: int): $P.promise(int, $P.Chained) = let
   val () = ui_clear("style-fonts")
 in
   case+ _font_take() of
   | ~FontNone() => $P.ret<int>(0)
-  | ~FontSource(file_size, data_start, compressed_size, method) =>
-    (case+ piece_new(compressed_size) of
-     | ~NoPiece() => $P.ret<int>(0)
-     | ~Piece(compressed_owner, compressed) => let
-         val _ = book_read(serial, file_size, data_start, compressed, compressed_size)
-         val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
-         val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
-         val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
-         val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
-       in
-         $P.and_then<decompressed><int>(decompressing, llam(inflated) =>
-           case+ take_decompressed(inflated) of
-           | ~NoContentBytes() => $P.ret<int>(0)
-           | ~ContentBytes(font_owner, font, font_len) => let
-               val mime_buf = $A.alloc<byte>(8)
-               val _ = _put(mime_buf, 0, "font/otf")
-               val @(mime_frozen, mime_bytes) = $A.freeze<byte>(mime_buf)
-               val @(font_frozen, font_bytes) = $A.freeze<byte>(font)
-               val url_made = $BL.create_blob_url(font_bytes, font_len, mime_bytes, 8)
-               val () = $A.drop<byte>(font_frozen, font_bytes)
-               val () = piece_free(font_owner, $A.thaw<byte>(font_frozen))
-               val () = release_bytes(mime_frozen, mime_bytes)
-               val () = (case+ url_made of
-                 | ~$R.none() => ()
-                 | ~$R.some(url_blob) => let
-                     val url_len = $BD.blob_len(url_blob)
-                   in
-                     (* the host's URL, checked here *)
-                     if url_len <= 0 then $BD.blob_free(url_blob)
-                     else if url_len >= 2000 then $BD.blob_free(url_blob)
-                     else let
-                       val url = $A.alloc<byte>(url_len)
-                       val () = $BD.blob_read(url_blob, 0, url, url_len)
-                       val () = $BD.blob_free(url_blob)
-                       val () = _font_style(url, url_len)
-                     in $A.free<byte>(url) end
-                   end)
-             in $P.ret<int>(0) end)
-       end)
+  | ~FontSource(file_size, data_start, compressed_size, method, identifier) => let
+      (* how the font is encrypted is asked first, from the book's encryption.xml; the font waits in its cell *)
+      val () = _font_put(FontSource(file_size, data_start, compressed_size, method, identifier))
+    in
+      $P.and_then<font_cipher><int>(_font_cipher_find(serial, file_size, data_start), llam(cipher) => _font_read(serial, cipher))
+    end
 end
 
 (* The typography's rows the chapter shown takes. Set vertically, it is
@@ -4266,6 +4451,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
     (case+ piece_new(compressed_size) of
      | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
      | ~Piece(compressed_owner, compressed) => let
+         val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
          val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
@@ -4273,7 +4459,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) =>
-           case+ take_text(inflated) of
+           case+ take_text_sum(inflated, facing_sum) of
            | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
@@ -4319,6 +4505,8 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
           val () = _overlay_pending_put(NoOverlayPending())
         in $P.ret<load_outcome>(NoRoomForChapter()) end
       | ~Piece(compressed_owner, compressed) => let
+              (* the CRC-32 the archive states for the chapter (quire#529) *)
+              val chapter_sum = book_entry_sum(serial, chapter_name_offset)
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
               val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
@@ -4327,7 +4515,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
             in
               (* Stage 3: parse HTML and render *)
               $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) => let
-                val content = take_text(inflated)
+                val content = take_text_sum(inflated, chapter_sum)
               in
                 case+ content of
                 | ~NoContentBytes() => let
@@ -4797,6 +4985,11 @@ end
    never shown without a pending timeout that takes it away *)
 datavtype ps_cell =
   | PsHidden of ()
+  (* the button gone (its 10 s are over, a page was turned, the bars came
+     up), the positions kept: Contents offers the way back (#384). Never
+     made of no position, and the timeout moves PsShown here, not to
+     PsHidden *)
+  | {count:pos} PsKept of (pstack(count))
   | {count:pos}{timeout:int} PsShown of (TIMED(timeout) | int timeout, pstack(count))
 
 val _ps = ref<ps_cell>(PsHidden())
@@ -4807,6 +5000,7 @@ val _ps_timed = ref<Int>(0)
 fn _ps_free (cell: ps_cell): void =
   case+ cell of
   | ~PsHidden() => ()
+  | ~PsKept(positions) => ps_free(positions)
   | ~PsShown(_ | _, positions) => ps_free(positions)
 
 fn _ps_take (): ps_cell = let
@@ -4817,22 +5011,23 @@ in cell end
 (* Keeps the cell, and shows the button or hides it as the cell says: the only place
    that shows or hides it *)
 fn _ps_put (cell: ps_cell): void = let
-  val shown = (case+ cell of PsHidden() => false | PsShown(_ | _, _) => true): bool
+  val shown = (case+ cell of PsHidden() => false | PsKept(_) => false | PsShown(_ | _, _) => true): bool
   var old: ps_cell = cell
   val () = ref_exch_elt<ps_cell>(_ps, old)
   val () = _ps_free(old)
 in ui_show("jump-back", shown) end
 
-(* A timeout has run: the button goes, with the positions it offered,
-   when it is still the one timeout that was armed for *)
+(* A timeout has run: the button goes, when it is still the one timeout
+   that was armed for, and the positions it offered are kept for Contents *)
 fn _back_timeout (timeout: Int): void = let
   val cell = _ps_take()
-  val due = (case+ cell of PsHidden() => false | PsShown(_ | armed, _) => armed = timeout): bool
 in
-  if due then let
-    val () = _ps_free(cell)
-  in _ps_put(PsHidden()) end
-  else _ps_put(cell)
+  case+ cell of
+  | ~PsHidden() => _ps_put(PsHidden())
+  | ~PsKept(positions) => _ps_put(PsKept(positions))
+  | ~PsShown(armed_proof | armed, positions) =>
+    if armed = timeout then _ps_put(PsKept(positions))
+    else _ps_put(PsShown(armed_proof | armed, positions))
 end
 
 (* Arms a new timeout for the button, which takes it away *)
@@ -4855,24 +5050,29 @@ fn _push_position (): void = let
   val cell = _ps_take()
   val positions = (case+ cell of
     | ~PsHidden() => ps_nil()
+    | ~PsKept(positions) => positions
     | ~PsShown(_ | _, positions) => positions): [count:nat] pstack(count)
   val positions = (case+ reading_get() of
     | @(page, _, chapter, _) => ps_cons((if chapter > 0 then chapter - 1 else 0), page, anchor, ps_keep(positions, 29))): [count:pos] pstack(count)
 in _back_offer(positions) end
 
-(* Returns to the position last jumped away from; the button stays, with
+(* Returns to the position last of positions; the button comes back, with
    a new timeout, while there are more *)
+fn _pop_from {count:pos} (positions: pstack(count)): void = let
+  val+ ~ps_cons(chapter, page, anchor, rest) = positions
+  val () = (case+ rest of
+    | ~ps_nil() => _ps_put(PsHidden())
+    | ps_cons(_, _, _, _) => _back_offer(rest))
+in _jump_checked(_goto(chapter, page, anchor)) end
+
+(* Returns to the position last jumped away from *)
 fn _pop_position (): void = let
   val cell = _ps_take()
 in
   case+ cell of
   | ~PsHidden() => _ps_put(PsHidden())
-  | ~PsShown(_ | _, positions) => let
-      val+ ~ps_cons(chapter, page, anchor, rest) = positions
-      val () = (case+ rest of
-        | ~ps_nil() => _ps_put(PsHidden())
-        | ps_cons(_, _, _, _) => _back_offer(rest))
-    in _jump_checked(_goto(chapter, page, anchor)) end
+  | ~PsKept(positions) => _pop_from(positions)
+  | ~PsShown(_ | _, positions) => _pop_from(positions)
 end
 
 (* Loads a chapter and shows its page at a thousandth of it *)
@@ -5680,6 +5880,76 @@ fun _search_chapters {chapter,chapter_count:nat} .<max(chapter_count - chapter, 
            in _search_chapters(serial, chapter + 1, chapter_count, generation) end)
          end))
 
+(* The pass that counts the content nodes of the chapters that hold
+   annotations (#525), so an annotation row says where in the book its
+   node is, as a search hit does. A new pass makes the one before it stop *)
+val _places_generation = ref<int>(0)
+
+(* Counts the content nodes of the chapter data[0, n), as render and a search number them *)
+fn _count_nodes {data_location:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, data_location, n), nodes: !$X.xml_node_list(n, tree_size)): Nat = let
+  val query = $A.alloc<byte>(1)
+  val () = _tail_begin()
+  val @(total, found, _) = _scan_nodes(data, nodes, true, false, query, 1, 0, 0, hits_nil(), 0)
+  val () = _tail_end()
+  val () = hits_free(found)
+  val () = $A.free<byte>(query)
+in total end
+
+(* Counts the chapters that hold an annotation after chapter after (from 0; -1 to start), one after another *)
+fun _places_chapters {after:int | after >= ~1}{bound:nat} .<max(bound - after, 0)>.
+  (serial: int, after: int after, bound: int bound, generation: int): void =
+  if generation <> !_places_generation then ()
+  else let
+    val chapter = annot_chapter_after(after)
+  in
+    (* a chapter at or past the count (an annotation of a lost one) ends the pass *)
+    if chapter < 0 then ()
+    else if chapter <= after then ()
+    else if chapter >= bound then ()
+    else (case+ book_chapter_get(serial, chapter) of
+      | ~ChaptersUnknown() => ()
+      | ~ChapterNone(_) => _places_chapters(serial, chapter, bound, generation)
+      | ~ChapterGot(file_size, chapter_start, compressed_size, method, _, _, _, _, _) =>
+        (case+ piece_new(compressed_size) of
+         | ~NoPiece() => _places_chapters(serial, chapter, bound, generation)
+         | ~Piece(compressed_owner, compressed) => let
+             val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
+             val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
+             val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
+             val () = $A.drop<byte>(compressed_frozen, compressed_bytes)
+             val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
+           in
+             $P.finish<decompressed>(decompressing, llam(inflated) => let
+               val () = (case+ take_text(inflated) of
+                 | ~NoContentBytes() => ()
+                 | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) => let
+                     val @(xhtml_frozen, xhtml_bytes) = $A.freeze<byte>(xhtml)
+                     val nodes = xhtml_parse(xhtml_bytes, xhtml_size)
+                     val total = _count_nodes(xhtml_bytes, nodes)
+                     val () = (if generation = !_places_generation then annot_total_set(serial, chapter, total) else ())
+                     val () = $X.free_nodes(nodes)
+                     val () = $A.drop<byte>(xhtml_frozen, xhtml_bytes)
+                   in piece_free(xhtml_owner, $A.thaw<byte>(xhtml_frozen)) end)
+             in _places_chapters(serial, chapter, bound, generation) end)
+           end))
+  end
+
+(* The annotations list was drawn: each annotation's place in the book is
+   found by counting the nodes of its chapter. A fixed-layout book needs
+   none (a spine item is a page, which the chapter's heading says) *)
+#pub fn reader_annotation_places (): void
+
+implement reader_annotation_places () = let
+  val serial = book_serial()
+in
+  if book_fixed(serial) then ()
+  else let
+    val () = !_places_generation := !_places_generation + 1
+    val @(_, _, _, chapter_count) = reading_get()
+  in _places_chapters(serial, ~1, chapter_count, !_places_generation) end
+end
+
 (* query[0, query_len) in lower case, in a new array *)
 fun _lower_into {query_location,lower_location:agz}{query_size,lower_size:pos}{query_len:nat | query_len <= query_size; query_len <= lower_size}{i:nat | i <= query_len} .<query_len - i>.
   (query: !$A.arr(byte, query_location, query_size), lower: !$A.arr(byte, lower_location, lower_size), query_len: int query_len, i: int i): void =
@@ -5754,19 +6024,19 @@ implement reader_scrolled () =
    the back button goes *)
 #pub fun page_next(): void
 implement page_next() = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in _page_next() end
 
 #pub fun page_prev(): void
 implement page_prev() = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in _page_previous() end
 
 (* The chapter before (direction -1) or after (1) the one shown, from its
    first page; nothing when there is none *)
 #pub fun reader_chapter_step (direction: Int): void
 implement reader_chapter_step (direction) = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
 in
   case+ reading_get() of
   | @(_, _, chapter, chapter_count) => let
@@ -5876,12 +6146,64 @@ in _jump_checked(_goto(chapter, page, anchor)) end
 implement reader_back () = _pop_position()
 
 (* Forgets the positions jumped from, and the back button goes: a book
-   is opened or closed, a page turned, or the bars brought up *)
+   is opened or closed *)
 #pub fun reader_stack_clear (): void
 implement reader_stack_clear () = let
-  (* the reader acted (a turn, the bars brought up): its moves are dated *)
+  (* the reader acted: its moves are dated *)
   val () = !_dating := true
 in _ps_put(PsHidden()) end
+
+(* The back button goes (a page was turned, the bars came up), the
+   positions jumped from are kept: Contents offers the way back (#384) *)
+#pub fun reader_back_rest (): void
+implement reader_back_rest () = let
+  val () = !_dating := true
+  val cell = _ps_take()
+in
+  case+ cell of
+  | ~PsHidden() => _ps_put(PsHidden())
+  | ~PsKept(positions) => _ps_put(PsKept(positions))
+  | ~PsShown(_ | _, positions) => _ps_put(PsKept(positions))
+end
+
+(* The Contents row for the position last jumped from, "Back to <chapter>
+   · page N"; hidden when there is none *)
+fun _back_row_set {count:nat} .<count>. (positions: !pstack(count)): void =
+  case+ positions of
+  | ps_nil() => ui_show("contents-back", false)
+  | @ps_cons(chapter, page, _, _) =>
+    if chapter < 0 then let
+      prval () = fold@(positions)
+    in ui_show("contents-back", false) end
+    else let
+      val @(label, label_len) = toc_label_of(chapter)
+      val buf = $A.alloc<byte>(256)
+      val offset = _put(buf, 0, "Back to ")
+      val offset = bytes_put(label, label_len, buf, offset)
+      val offset = _put(buf, offset, " \xC2\xB7 page ")
+      val offset = $S.int_to_str(buf, offset, 256, (if page >= 0 then page + 1 else 1): Nat)
+      val () = $A.free<byte>(label)
+      val () = ui_text_buf("contents-back", buf, offset)
+      prval () = fold@(positions)
+    in ui_show("contents-back", true) end
+
+(* Contents opened: the way back from the jumps, while there is a position
+   to go back to, past the button's seconds *)
+#pub fun reader_back_row (): void
+implement reader_back_row () = let
+  val cell = _ps_take()
+in
+  case+ cell of
+  | ~PsHidden() => let
+      val () = ui_show("contents-back", false)
+    in _ps_put(PsHidden()) end
+  | ~PsKept(positions) => let
+      val () = _back_row_set(positions)
+    in _ps_put(PsKept(positions)) end
+  | ~PsShown(armed | timeout, positions) => let
+      val () = _back_row_set(positions)
+    in _ps_put(PsShown(armed | timeout, positions)) end
+end
 
 (* A book opened: its first page is read from now, so the first turn
    counts the minutes since. Back in the library, nothing is being read
@@ -6583,7 +6905,7 @@ implement $P.dispose<turned>(_) = ()
 #pub fun reader_turn_on (): $P.promise(turned, $P.Chained)
 
 implement reader_turn_on () = let
-  val () = reader_stack_clear()
+  val () = reader_back_rest()
   val () = !_anchor_kept := ~1
 in
   case+ reading_get() of

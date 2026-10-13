@@ -133,9 +133,9 @@ test('Tab keeps to an open panel, round from its last element to its first and b
   const sheet = await open(page, panels[0]);
   const focusedId = () => page.evaluate(() => document.activeElement && document.activeElement.id);
   const inside = () => sheet.evaluate(el => el.contains(document.activeElement));
-  // forward, past the panel's last element (Reset to defaults): round
+  // forward, past the panel's last element (Reset reading settings): round
   // to its first, Close in its head
-  await sheet.getByRole('button', { name: 'Reset to defaults', exact: true }).focus();
+  await sheet.getByRole('button', { name: 'Reset reading settings', exact: true }).focus();
   await page.keyboard.press('Tab');
   expect(await inside()).toBe(true);
   expect(await focusedId()).toBe('typography-close');

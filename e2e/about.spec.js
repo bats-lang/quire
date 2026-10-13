@@ -53,9 +53,9 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   // these three and no other: no link to the source
   await expect(group.getByRole('link')).toHaveCount(Object.keys(links).length);
   await expect(about(page).getByRole('link', { name: /source/i })).toHaveCount(0);
-  await expect(about(page).getByRole('button', { name: 'Done' })).toBeFocused();
-  // Done goes back to Settings, at its About row
-  await about(page).getByRole('button', { name: 'Done' }).click();
+  await expect(about(page).getByRole('button', { name: 'Back' })).toBeFocused();
+  // Back goes back to Settings, at its About row
+  await about(page).getByRole('button', { name: 'Back' }).click();
   await expect(about(page)).toBeHidden();
   await expect(settingsScreen(page)).toBeVisible();
   await expect(settingsButton(page, 'About Quire')).toBeFocused();
@@ -70,11 +70,13 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   expect(errors).toEqual([]);
 });
 
-test('the library menu opens About, next to Settings, and Escape goes back to the library', async ({ page, baseURL }, testInfo) => {
+test('the library menu opens About, after Settings and Sync, and Escape goes back to the library', async ({ page, baseURL }, testInfo) => {
   const errors = await start(page);
   await libraryMenu(page);
   const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
-  expect(items.indexOf('About Quire')).toBe(items.indexOf('Settings') + 1);
+  // Settings, Sync (#501), then About
+  expect(items.indexOf('Sync')).toBe(items.indexOf('Settings') + 1);
+  expect(items.indexOf('About Quire')).toBe(items.indexOf('Sync') + 1);
   await menuItem(page, 'About Quire').click();
   await expect(about(page)).toBeVisible();
   await expect(page.getByRole('menu')).toBeHidden();
@@ -88,10 +90,10 @@ test('the library menu opens About, next to Settings, and Escape goes back to th
   await page.keyboard.press('Escape');
   await expect(about(page)).toBeHidden();
   await expect(libraryShown(page)).toBeVisible();
-  // and Done, back at the library menu's button (More options)
+  // and Back, back at the library menu's button (More options)
   await libraryMenu(page);
   await menuItem(page, 'About Quire').click();
-  await about(page).getByRole('button', { name: 'Done' }).click();
+  await about(page).getByRole('button', { name: 'Back' }).click();
   await expect(about(page)).toBeHidden();
   await expect(page.getByRole('button', { name: 'More options' })).toBeFocused();
   expect(errors).toEqual([]);

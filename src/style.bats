@@ -64,6 +64,7 @@ staload "palette_proofs.sats"
 staload "sheet.sats"
 staload "declarations.sats"
 staload "theme_rules.sats"
+staload "theme_swatch_rules.sats"
 staload "shell_rules.sats"
 staload "overlay_rules.sats"
 staload "reader_rules.sats"
@@ -150,6 +151,7 @@ implement app_style () = let
   val sheet = reader_rules(sheet)
   val sheet = page_turn_rules(sheet)
   val sheet = panel_rules(sheet)
+  val sheet = theme_swatch_rules(sheet)
   val sheet = reading_settings_rules(sheet)
   val sheet = switch_rules(sheet)
   val sheet = spacing_rules(sheet)

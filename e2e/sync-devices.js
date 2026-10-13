@@ -51,9 +51,9 @@ export async function openSync(page) {
 }
 
 export async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -316,7 +316,7 @@ export async function shown(page) {
   const list = annotationsDialog(page);
   await expect(list).toBeVisible();
   const lines = (await list.innerText()).split('\n').map(line => line.trim()).filter(Boolean);
-  const quotes = lines.filter(line => /\w/.test(line) && !LABELS.has(line) && !/^CHAPTER /i.test(line) && !/^No /.test(line)).sort();
+  const quotes = lines.filter(line => /\w/.test(line) && !LABELS.has(line) && !/^CHAPTER /i.test(line) && !/^No /.test(line) && !/^· (0|<1|\d+)%$/.test(line)).sort();
   const deletes = await list.getByRole('button', { name: 'Delete' }).count();
   await list.getByRole('button', { name: 'Close' }).click();
   await expect(list).toBeHidden();

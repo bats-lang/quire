@@ -103,8 +103,8 @@ test('a consent screen that never answers is said, and Stop waiting ends it; an 
 
   // the screen closed and opened again meanwhile: still awaited, still
   // with its way out
-  await panel(a.page).getByRole('button', { name: 'Done' }).click();
-  await settingsButton(a.page, 'Done').click();
+  await panel(a.page).getByRole('button', { name: 'Back' }).click();
+  await settingsButton(a.page, 'Back').click();
   await openSync(a.page);
   await expect(status(a.page)).toHaveText(WAITING);
   await expect(stop(a.page)).toBeVisible();
@@ -166,8 +166,8 @@ test('a consent screen answered while it is awaited ends the wait', async ({ bro
 test('a call that shows nothing and never answers is ended after 30 s and said', async ({ browser }) => {
   const server = drive();
   const a = await joined(browser, server);
-  await panel(a.page).getByRole('button', { name: 'Done' }).click();
-  await settingsButton(a.page, 'Done').click();
+  await panel(a.page).getByRole('button', { name: 'Back' }).click();
+  await settingsButton(a.page, 'Back').click();
 
   // the token's hour is up and Google's silent answer never comes: Drive
   // refuses the token, which is cleared, and another is asked for
@@ -204,8 +204,8 @@ test('a call that shows nothing and never answers is ended after 30 s and said',
 test('a token clear that never answers is ended after 30 s, and the answer after it asks nothing more', async ({ browser }) => {
   const server = drive();
   const a = await joined(browser, server);
-  await panel(a.page).getByRole('button', { name: 'Done' }).click();
-  await settingsButton(a.page, 'Done').click();
+  await panel(a.page).getByRole('button', { name: 'Back' }).click();
+  await settingsButton(a.page, 'Back').click();
 
   server.token = a.google.token = 'token-2';
   a.google.outcomes.clearAuthorizationToken = [{ hold: true }];

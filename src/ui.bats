@@ -880,11 +880,46 @@ implement ui_el(parent, id, element_tag, class_name) = let
   val () = ui_add(parent, id, element_tag)
 in _set_attr(id, $D.Class, class_name) end
 
+(* ============================================================
+   The words of leaving (#380): one place says what a button that
+   dismisses is called, by what it dismisses, so a layer is not left
+   with a word of its own. A screen is left with Done, a sheet, a panel
+   or a menu with Close, a question that can be turned down with Cancel,
+   a notice whose one button only acknowledges it with Done
+   ============================================================ *)
+
+#pub datatype dismiss_kind = DismissScreen | DismissSheet | DismissQuestion | DismissNotice
+
+#pub fn dismiss_label (kind: dismiss_kind): [label_len:pos | label_len < 64] string label_len
+
+implement dismiss_label (kind) =
+  case+ kind of
+  | DismissScreen() => "Done"
+  | DismissSheet() => "Close"
+  | DismissQuestion() => "Cancel"
+  | DismissNotice() => "Done"
+
 (* A button named by the text it shows *)
 #pub fn ui_text_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{label_len:pos | label_len < 256}
   (parent: string parent_len, id: string id_len, class_name: string class_len, label: string label_len): void
 
 implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, id, CText(class_name, label))
+
+(* A row that opens a screen (#380; Android's settings: the whole row is
+   the target, its name, a line that says what it is or its state, and a
+   chevron the stylesheet draws). The row is a group named title; its
+   button is named title alone (the chevron is drawn, not a character,
+   and the line is not part of the name), and the line is the element
+   summary_id, which is never empty: an empty one does not type-check *)
+#pub fn ui_nav_row {parent_len,row_len,button_len,summary_id_len,title_len,summary_len:pos | parent_len < 256; row_len < 256; button_len < 256; summary_id_len < 256; title_len < 256; summary_len < 256}
+  (parent: string parent_len, row: string row_len, button: string button_len, summary_id: string summary_id_len, title: string title_len, summary: string summary_len): void
+
+implement ui_nav_row(parent, row, button, summary_id, title, summary) = let
+  val () = ui_el(parent, row, TDiv, "srow navrow")
+  val () = ui_named(row, NGroup, title)
+  val () = ui_text_btn(row, button, "btn navbtn chev", title)
+  val () = ui_el(row, summary_id, TSpan, "sabout navsum")
+in ui_text(summary_id, summary) end
 
 (* A button that is a swatch of a colour (the stylesheet draws it by its
    class) and shows no words: named name *)
@@ -892,6 +927,28 @@ implement ui_text_btn(parent, id, class_name, label) = _control_literal(parent, 
   (parent: string parent_len, id: string id_len, class_name: string class_len, name: string name_len): void
 
 implement ui_swatch_btn(parent, id, class_name, name) = _control_literal(parent, id, CSwatch(class_name, name))
+
+(* The error banner sits under a pushed screen's top bar while the screen
+   is open (quire#502), so it never covers the bar's Back: its Dismiss,
+   Copy details and Report are still pressed there *)
+#pub fn ui_banner_below_bar (below: bool): void
+
+implement ui_banner_below_bar (below) = _set_attr("error-banner", $D.Data("below"), (if below then "1" else "0"): [value_len:pos | value_len < 256] string value_len)
+
+(* A pushed screen's top bar (quire#502; Android's settings and Material
+   3's small top app bar: a navigation icon and the title; iOS pushes a
+   screen with a back item, and keeps Done for a sheet): a Back icon
+   button and the screen's title, kept at the top as the screen scrolls
+   (the bar is outside what scrolls). The title is a value of its own:
+   the screen is labelled by it *)
+#pub fn ui_screen_bar {screen_len,bar_len,back_len,title_len:pos | screen_len < 256; bar_len < 256; back_len < 256; title_len < 256}{text_len:pos | text_len < 256}
+  (screen: string screen_len, bar: string bar_len, back: string back_len, title: string title_len, words: string text_len): void
+
+implement ui_screen_bar(screen, bar, back, title, words) = let
+  val () = ui_el(screen, bar, TDiv, "tbar")
+  val () = ui_icon_btn(bar, back, "ibtn", IcBack(), "Back")
+  val () = ui_el(bar, title, TDiv, "tbar-title")
+in ui_text(title, words) end
 
 (* A button showing icon the_icon, named name *)
 #pub fn ui_icon_btn {parent_len,id_len:pos | parent_len < 256; id_len < 256}{class_len:pos | class_len < 256}{name_len:pos | name_len < 256}
@@ -1609,7 +1666,7 @@ fun _id_is {l:agz}{n:nat}{at:nat}{text_len:nat}{i:nat | i <= text_len} .<text_le
   | SettingsResetSettings
   | SettingsFactoryReset
   | SettingsAbout
-  | SettingsDone
+  | SettingsBack
 
 #pub fn settings_control_id (control: settings_control): [id_len:pos | id_len < 256] string id_len
 implement settings_control_id (control) =
@@ -1626,7 +1683,7 @@ implement settings_control_id (control) =
   | SettingsResetSettings() => "settings-reset-settings"
   | SettingsFactoryReset() => "settings-factory-reset"
   | SettingsAbout() => "settings-about"
-  | SettingsDone() => "settings-done"
+  | SettingsBack() => "settings-back"
 
 (* The control after control, in the order the decoder tries them *)
 fn _settings_control_after (control: settings_control): $R.option(settings_control) =
@@ -1642,8 +1699,8 @@ fn _settings_control_after (control: settings_control): $R.option(settings_contr
   | SettingsSetAside() => $R.some(SettingsResetSettings())
   | SettingsResetSettings() => $R.some(SettingsFactoryReset())
   | SettingsFactoryReset() => $R.some(SettingsAbout())
-  | SettingsAbout() => $R.some(SettingsDone())
-  | SettingsDone() => $R.none()
+  | SettingsAbout() => $R.some(SettingsBack())
+  | SettingsBack() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -1896,6 +1953,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
 (* The library menu's items, and its backdrop, each by its element's id (library_menu_control_id) *)
 #pub datatype library_menu_control =
   | MenuSettings
+  | MenuSync
   | MenuAbout
   | MenuInstall
   | MenuStats
@@ -1910,6 +1968,7 @@ implement ui_library_search_control (bytes, n, at) = _library_search_control_fro
 implement library_menu_control_id (control) =
   case+ control of
   | MenuSettings() => "menu-settings"
+  | MenuSync() => "menu-sync"
   | MenuAbout() => "menu-about"
   | MenuInstall() => "menu-install"
   | MenuStats() => "menu-stats"
@@ -1923,7 +1982,8 @@ implement library_menu_control_id (control) =
 (* The control after control, in the order the decoder tries them *)
 fn _library_menu_control_after (control: library_menu_control): $R.option(library_menu_control) =
   case+ control of
-  | MenuSettings() => $R.some(MenuAbout())
+  | MenuSettings() => $R.some(MenuSync())
+  | MenuSync() => $R.some(MenuAbout())
   | MenuAbout() => $R.some(MenuInstall())
   | MenuInstall() => $R.some(MenuStats())
   | MenuStats() => $R.some(MenuCatalogues())
@@ -1948,7 +2008,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_library_menu_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(library_menu_control)
-implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 10)
+implement ui_library_menu_control (bytes, n, at) = _library_menu_control_from(bytes, n, at, MenuSettings(), 11)
 
 (* The sort and view menu's choices, done, and its backdrop, each by its element's id (sort_menu_control_id) *)
 #pub datatype sort_menu_control =
@@ -2054,19 +2114,19 @@ implement ui_stats_control (bytes, n, at) = _stats_control_from(bytes, n, at, St
 
 (* The dictionaries' done, and its backdrop, each by its element's id (dictionaries_control_id) *)
 #pub datatype dictionaries_control =
-  | DictionariesDone
+  | DictionariesBack
   | DictionariesPanel
 
 #pub fn dictionaries_control_id (control: dictionaries_control): [id_len:pos | id_len < 256] string id_len
 implement dictionaries_control_id (control) =
   case+ control of
-  | DictionariesDone() => "dictionaries-done"
+  | DictionariesBack() => "dictionaries-back"
   | DictionariesPanel() => "dictionaries-panel"
 
 (* The control after control, in the order the decoder tries them *)
 fn _dictionaries_control_after (control: dictionaries_control): $R.option(dictionaries_control) =
   case+ control of
-  | DictionariesDone() => $R.some(DictionariesPanel())
+  | DictionariesBack() => $R.some(DictionariesPanel())
   | DictionariesPanel() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
@@ -2083,7 +2143,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_dictionaries_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(dictionaries_control)
-implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(bytes, n, at, DictionariesDone(), 2)
+implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(bytes, n, at, DictionariesBack(), 2)
 
 (* The sync screen's buttons, each by its element's id (sync_screen_control_id) *)
 #pub datatype sync_screen_control =
@@ -2094,7 +2154,7 @@ implement ui_dictionaries_control (bytes, n, at) = _dictionaries_control_from(by
   | NextcloudSignIn
   | SyncDropbox
   | SyncOff
-  | SyncDone
+  | SyncBack
   (* the services' rows (#331), each opening its own sign-in step *)
   | SyncRowGoogle
   | SyncRowDropbox
@@ -2117,7 +2177,7 @@ implement sync_screen_control_id (control) =
   | NextcloudSignIn() => "nextcloud-sign-in"
   | SyncDropbox() => "sync-dropbox"
   | SyncOff() => "sync-off"
-  | SyncDone() => "sync-done"
+  | SyncBack() => "sync-back"
   | SyncRowGoogle() => "sync-row-google"
   | SyncRowDropbox() => "sync-row-dropbox"
   | SyncRowFastmail() => "sync-row-fastmail"
@@ -2136,8 +2196,8 @@ fn _sync_screen_control_after (control: sync_screen_control): $R.option(sync_scr
   | SyncFastmail() => $R.some(NextcloudSignIn())
   | NextcloudSignIn() => $R.some(SyncDropbox())
   | SyncDropbox() => $R.some(SyncOff())
-  | SyncOff() => $R.some(SyncDone())
-  | SyncDone() => $R.some(SyncRowGoogle())
+  | SyncOff() => $R.some(SyncBack())
+  | SyncBack() => $R.some(SyncRowGoogle())
   | SyncRowGoogle() => $R.some(SyncRowDropbox())
   | SyncRowDropbox() => $R.some(SyncRowFastmail())
   | SyncRowFastmail() => $R.some(SyncRowNextcloud())
@@ -2435,6 +2495,7 @@ implement ui_catalogue_control (bytes, n, at) = _catalogue_control_from(bytes, n
   | ContentsTab
   | BookmarksTab
   | PagesTab
+  | ContentsBack
 
 #pub fn contents_control_id (control: contents_control): [id_len:pos | id_len < 256] string id_len
 implement contents_control_id (control) =
@@ -2443,6 +2504,7 @@ implement contents_control_id (control) =
   | ContentsTab() => "contents-tab"
   | BookmarksTab() => "bookmarks-tab"
   | PagesTab() => "pages-tab"
+  | ContentsBack() => "contents-back"
 
 (* The control after control, in the order the decoder tries them *)
 fn _contents_control_after (control: contents_control): $R.option(contents_control) =
@@ -2450,7 +2512,8 @@ fn _contents_control_after (control: contents_control): $R.option(contents_contr
   | ContentsClose() => $R.some(ContentsTab())
   | ContentsTab() => $R.some(BookmarksTab())
   | BookmarksTab() => $R.some(PagesTab())
-  | PagesTab() => $R.none()
+  | PagesTab() => $R.some(ContentsBack())
+  | ContentsBack() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
    most) whose id is bytes[at, n) *)
@@ -2466,7 +2529,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_contents_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(contents_control)
-implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 4)
+implement ui_contents_control (bytes, n, at) = _contents_control_from(bytes, n, at, ContentsClose(), 5)
 
 (* The selection toolbar's buttons, each by its element's id
    (selection_control_id). A colour is a control for each style, flat:
@@ -2791,19 +2854,19 @@ implement ui_image_viewer_control (bytes, n, at) = _image_viewer_control_from(by
 
 (* The About screen's buttons, each by its element's id (about_control_id) *)
 #pub datatype about_control =
-  | AboutDone
+  | AboutBack
   | AboutCopyErrorDetails
 
 #pub fn about_control_id (control: about_control): [id_len:pos | id_len < 256] string id_len
 implement about_control_id (control) =
   case+ control of
-  | AboutDone() => "about-done"
+  | AboutBack() => "about-back"
   | AboutCopyErrorDetails() => "about-error-copy"
 
 (* The control after control, in the order the decoder tries them *)
 fn _about_control_after (control: about_control): $R.option(about_control) =
   case+ control of
-  | AboutDone() => $R.some(AboutCopyErrorDetails())
+  | AboutBack() => $R.some(AboutCopyErrorDetails())
   | AboutCopyErrorDetails() => $R.none()
 
 (* The first of control and the controls after it (fuel of them at
@@ -2820,7 +2883,7 @@ end
 
 (* The control whose id is bytes[at, n), if it is one *)
 #pub fn ui_about_control {l:agz}{n:nat}{at:nat} (bytes: !$A.arr(byte, l, n), n: int n, at: int at): $R.option(about_control)
-implement ui_about_control (bytes, n, at) = _about_control_from(bytes, n, at, AboutDone(), 2)
+implement ui_about_control (bytes, n, at) = _about_control_from(bytes, n, at, AboutBack(), 2)
 
 (* The update toast's buttons, each by its element's id (update_control_id) *)
 #pub datatype update_control =

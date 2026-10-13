@@ -8,6 +8,7 @@
 #use promise as P
 #use result as R
 #use zip as Z
+#use arith as AR
 #use str as S
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BF = "wasm.bats-packages.dev/bridge/src/file.sats"
@@ -17,6 +18,8 @@ staload "text_encoding.sats"
 staload "pages.sats"
 staload "paths.sats"
 staload "zipcheck.sats"
+staload "bytes.sats"
+staload "crc.sats"
 staload "mem.sats"
 staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload EV = "wasm.bats-packages.dev/bridge/src/event.sats"
@@ -314,6 +317,24 @@ implement $P.dispose<$IDB.stored>(_) = ()
    overlay; not for an image, a font or audio *)
 #pub fn take_text (inflated: decompressed): content_bytes
 
+(* The CRC-32 an entry's central directory record states for its data
+   (high and low 16 bits), or why none is known: the book is not open,
+   or its record is not in the kept directory (quire#529) *)
+#pub datavtype entry_sum =
+  | SumKnown of (int, int)
+  | SumUnknown of ()
+
+(* The sum of the entry whose name is at name_offset in the file of the
+   open book `serial` *)
+#pub fn book_entry_sum (serial: int, name_offset: int): entry_sum
+
+(* take_text, but only when the CRC-32 of the decompressed bytes, before
+   they are made UTF-8, is the sum the archive states for the entry: an
+   entry whose data is not what its sum says (ZIP's check; Python's
+   zipfile raises BadZipFile, libzip ZIP_ER_CRC) is none, as one that
+   could not be decompressed, and so is one whose sum is not known *)
+#pub fn take_text_sum (inflated: decompressed, sum: entry_sum): content_bytes
+
 (* What a read of storage found, as content (in a piece): it, nothing
    stored there, or a read that failed (or no piece could be had) *)
 #pub datavtype stored_content =
@@ -418,7 +439,7 @@ implement book_refusal () = !_refusal
    every entry's local header, checked once; none when it is not an
    archive or its directory is over 1 MiB *)
 fn book_index_make {file_size:pos} (book_file: !$BF.infile(file_size), file_size: int file_size): $R.option(book_index(file_size)) = let
-  val tail_len = (if file_size < 65557 then file_size else 65557): [tail_len:pos | tail_len <= file_size; tail_len <= 65557] int tail_len
+  val tail_len = (if file_size < 65633 then file_size else 65633): [tail_len:pos | tail_len <= file_size; tail_len <= 65633] int tail_len
   val tail = $A.alloc<byte>(tail_len)
   val () = $BF.file_read(book_file, file_size - tail_len, tail, tail_len)
   val found = $Z.find_cd(tail, tail_len, file_size)
@@ -482,13 +503,72 @@ fun book_find {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_o
       prval () = fold@(entries)
     in hit end
 
+(* name[0, name_size) with "./" before it: the name of an entry written
+   by a tool that writes its paths relative to the current directory *)
+fn _find_dot_slash {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) =
+  (* a zip name is shorter than 65536 bytes: a longer one names no entry *)
+  if name_size >= 65536 then BookMiss() else let
+  val joined_size = name_size + 2
+  val joined = $A.alloc<byte>(joined_size)
+  val () = $A.set<byte>(joined, 0, $A.int2byte(46))
+  val () = $A.set<byte>(joined, 1, $A.int2byte(47))
+  val () = $S.copy_from_borrow(name, 0, name_size, joined, 2, joined_size, name_size)
+  val @(joined_frozen, joined_bytes) = $A.freeze<byte>(joined)
+  val hit = book_find(directory, directory_offset, entries, joined_bytes, joined_size)
+  val () = release_bytes(joined_frozen, joined_bytes)
+in hit end
+
+(* buf[i, size) := name[i, size) with each '/' a backslash *)
+fun _backslashed {name_loc,buffer_loc:agz}{size:pos}{i:nat | i <= size} .<size - i>.
+  (name: !$A.borrow(byte, name_loc, size), buffer: !$A.arr(byte, buffer_loc, size), size: int size, i: int i): void =
+  if i >= size then ()
+  else let
+    val letter = $A.read<byte>(name, i)
+    val () = $A.set<byte>(buffer, i, (if byte2int0(letter) = 47 then $A.int2byte(92) else letter))
+  in _backslashed(name, buffer, size, i + 1) end
+
+(* name[0, name_size) with backslashes for its slashes: the name of an
+   entry written by a tool for Windows *)
+fn _find_backslashed {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) =
+  if name_size >= 65536 then BookMiss() else let
+  val swapped = $A.alloc<byte>(name_size)
+  val () = _backslashed(name, swapped, name_size, 0)
+  val @(swapped_frozen, swapped_bytes) = $A.freeze<byte>(swapped)
+  val hit = book_find(directory, directory_offset, entries, swapped_bytes, name_size)
+  val () = release_bytes(swapped_frozen, swapped_bytes)
+in hit end
+
+(* The entry named name[0, name_size), else the one the same name written
+   with "./" before it, else with backslashes: the archives of tools that
+   write paths so are read by their paths (quire#433; epubcheck takes the
+   first, and Calibre and Thorium open such books) *)
+fn book_find_tolerant {file_size:int}{directory_loc:agz}{directory_size:pos}{directory_offset:nat | directory_offset + directory_size <= file_size}{count:nat}{name_loc:agz}{name_size:pos}
+  (directory: !$A.arr(byte, directory_loc, directory_size), directory_offset: int directory_offset, entries: !book_entries(file_size, directory_size, count),
+   name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): book_hit(file_size) = let
+  val exact = book_find(directory, directory_offset, entries, name, name_size)
+in
+  case+ exact of
+  | BookHit(_, _, _, _, _) => exact
+  | ~BookMiss() => let
+      val dotted = _find_dot_slash(directory, directory_offset, entries, name, name_size)
+    in
+      case+ dotted of
+      | BookHit(_, _, _, _, _) => dotted
+      | ~BookMiss() => _find_backslashed(directory, directory_offset, entries, name, name_size)
+    end
+end
+
 (* The entry named name[0, name_size) of book_file, found in its
    index, its data read into a piece; missing when there is none, or
    when no piece can be had for the data *)
 fn index_read {file_size:pos}{name_loc:agz}{name_size:pos}
   (book_file: !$BF.infile(file_size), index: !book_index(file_size), file_size: int file_size, name: !$A.borrow(byte, name_loc, name_size), name_size: int name_size): zip_got(file_size) = let
   val+ @BookIndex(directory, _, directory_offset, entries) = index
-  val hit = book_find(directory, directory_offset, entries, name, name_size)
+  val hit = book_find_tolerant(directory, directory_offset, entries, name, name_size)
   prval () = fold@(index)
 in
   case+ hit of
@@ -682,10 +762,8 @@ implement take_decompressed (inflated) =
   | ~$BD.DecompressFailed() => NoContentBytes()
   | ~$BD.Decompressed(blob) => _blob_content(blob)
 
-implement take_text (inflated) =
-  case+ take_decompressed(inflated) of
-  | ~NoContentBytes() => NoContentBytes()
-  | ~ContentBytes(owner, piece, size) => let
+fn _text_of_content {arena_loc,piece_loc:agz}{content_size:pos}
+  (owner: piece_owner(content_size, arena_loc), piece: $A.arrx(byte, piece_loc, content_size, arena_loc), size: int content_size): content_bytes = let
       val @(frozen, bytes) = $A.freeze<byte>(piece)
     in
       case+ text_plan_of(bytes, size) of
@@ -718,6 +796,36 @@ implement take_text (inflated) =
                 val () = piece_free(owner, $A.thaw<byte>(frozen))
               in ContentBytes(converted_owner, converted_piece, converted) end)
         end
+    end
+
+implement take_text (inflated) =
+  case+ take_decompressed(inflated) of
+  | ~NoContentBytes() => NoContentBytes()
+  | ~ContentBytes(owner, piece, size) => _text_of_content(owner, piece, size)
+
+fn _sum_free (sum: entry_sum): void =
+  case+ sum of
+  | ~SumUnknown() => ()
+  | ~SumKnown(_, _) => ()
+
+(* Whether the CRC-32 of bytes[0, n) is the sum, which it consumes *)
+fn _sum_matches {lb:agz}{n:pos} (bytes: !$A.borrow(byte, lb, n), n: int n, sum: entry_sum): bool =
+  case+ sum of
+  | ~SumUnknown() => false
+  | ~SumKnown(want_high, want_low) => let
+      val @(sum_high, sum_low) = crc_of_borrow(bytes, n)
+    in sum_high = want_high && sum_low = want_low end
+
+implement take_text_sum (inflated, sum) =
+  case+ take_decompressed(inflated) of
+  | ~NoContentBytes() => let val () = _sum_free(sum) in NoContentBytes() end
+  | ~ContentBytes(owner, piece, size) => let
+      val @(frozen, bytes) = $A.freeze<byte>(piece)
+      val matches = _sum_matches(bytes, size, sum)
+      val () = $A.drop<byte>(frozen, bytes)
+    in
+      if matches then _text_of_content(owner, $A.thaw<byte>(frozen), size)
+      else let val () = piece_free(owner, $A.thaw<byte>(frozen)) in NoContentBytes() end
     end
 
 implement lookup_content (found) =
@@ -775,6 +883,37 @@ in
   | NoBook() => let val () = book_put(book) in ZipMissing() end
 end
 
+(* The byte at i of data, or -1 outside it *)
+fn _directory_byte {l:agz}{n:pos}{i:int} (data: !$A.arr(byte, l, n), n: int n, i: int i): int =
+  if i < 0 then ~1
+  else if i >= n then ~1
+  else $AR.low_byte(byte2int0($A.get<byte>(data, i)))
+
+(* The central directory record of an entry holds its CRC-32 at 16 (the
+   name follows the 46-byte record) *)
+implement book_entry_sum (serial, name_offset) = let
+  val book = book_take()
+in
+  case+ book of
+  | @OpenBook(_, _, index, _, _, _, _, _, _) =>
+    if serial = !_book_serial then let
+      val+ @BookIndex(directory, directory_size, directory_offset, _) = index
+      val record = g1ofg0(name_offset - directory_offset - 46)
+      val low_low = _directory_byte(directory, directory_size, record + 16)
+      val low_high = _directory_byte(directory, directory_size, record + 17)
+      val high_low = _directory_byte(directory, directory_size, record + 18)
+      val high_high = _directory_byte(directory, directory_size, record + 19)
+      prval () = fold@(index)
+      prval () = fold@(book)
+      val () = book_put(book)
+    in
+      if low_low < 0 || low_high < 0 || high_low < 0 || high_high < 0 then SumUnknown()
+      else SumKnown(high_low + 256 * high_high, low_low + 256 * low_high)
+    end
+    else let prval () = fold@(book); val () = book_put(book) in SumUnknown() end
+  | _ => let val () = book_put(book) in SumUnknown() end
+end
+
 implement book_finish (serial, file_size, data_offset, data_size, method, name_offset, name_len) = let
   val book = book_take()
 in
@@ -797,7 +936,7 @@ in
     if serial = !_book_serial then
       (if open_size = file_size then let
          val+ @BookIndex(directory, _, directory_offset, entries) = index
-         val hit = book_find(directory, directory_offset, entries, name, name_size)
+         val hit = book_find_tolerant(directory, directory_offset, entries, name, name_size)
          prval () = fold@(index)
          prval () = fold@(book)
          val () = book_put(book)

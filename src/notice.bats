@@ -15,6 +15,7 @@
 staload "ui.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload "version.sats"
@@ -101,12 +102,16 @@ fn _reopen_show (shown: bool): void = ui_show("error-reopen", shown)
 (* The error banner, saying text[0, text_len), and Reopen Quire when
    reopen. Private: what the banner says is a failure, in words made here
    (notice_say), so a message cannot go without a next step (#360) *)
-fn _error_buf {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
-  (text: $A.arr(byte, l, n), text_len: int text_len, reopen: bool): void = let
-  val () = _details_buttons(false)
+fn _error_buf_with {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+  (text: $A.arr(byte, l, n), text_len: int text_len, reopen: bool, reported: bool): void = let
+  val () = _details_buttons(reported)
   val () = _reopen_show(reopen)
   val () = ui_text_buf("error-text", text, text_len)
 in _banner_show() end
+
+fn _error_buf {l:agz}{n:pos}{text_len:nat | text_len <= n; text_len < 65536}
+  (text: $A.arr(byte, l, n), text_len: int text_len, reopen: bool): void =
+  _error_buf_with(text, text_len, reopen, false)
 
 implement notice_sync_said (text, text_len) = _error_buf(text, text_len, false)
 
@@ -336,6 +341,153 @@ implement notice_unexpected (doing, call, which, answer) = let
   val at = _put_text(said, 512, at, ". Copy the details and post them in a report.")
 in _failure_said(said, at, doing, call, $R.some(which), $R.none(), answer) end
 
+fn _plugin_error_length {n:nat} (n: int n): [size:nat | size <= n; size <= 4096] int size =
+  if n <= 4096 then n else 4096
+
+fn _plugin_error_room {size:nat | size <= 4096} (size: int size): [room:pos | size <= room; room <= 4096] int room =
+  if size > 0 then size else 1
+
+(* The rotation lock was refused by the app's plugin: said with what to
+   do (the lock is no longer offered, the details go in a report) and the
+   plugin's error as it wrote it, kept in the details (none when it could
+   not be written down). A refusal is not "the device cannot lock": the
+   plugin said no, and what it said is the report's. *)
+#pub fn notice_rotation_refused (error: $R.option([n:nat] $BD.dblob(n))): void
+
+fn _plugin_error_shown {n:nat} (blob: $BD.dblob(n)): answer_shown = let
+  val n = $BD.blob_len(blob)
+  val size = _plugin_error_length(n)
+  val out = $A.alloc<byte>(_plugin_error_room(size))
+  val () = $BD.blob_read(blob, 0, out, size)
+  val () = $BD.blob_free(blob)
+in
+  if size < n then AnswerCut("as the plugin wrote it", out, size, n)
+  else AnswerShown("as the plugin wrote it", out, size)
+end
+
+implement notice_rotation_refused (error) = let
+  val answer = (case+ error of
+    | ~$R.some(blob) => _plugin_error_shown(blob)
+    | ~$R.none() => NoAnswer()): answer_shown
+  val said = $A.alloc<byte>(512)
+  val at = _put_text(said, 512, 0, "The device refused to lock the rotation, so Lock rotation is no longer offered. Copy the details and post them in a report.")
+in _failure_said(said, at, "locking the rotation", "orientation_lock_current", $R.none(), $R.some("LockRefused"), answer) end
+
+(* A hex digit's character for 0 to 15 *)
+fn _hex_char (digit: int): int =
+  if digit < 10 then 48 + digit else 87 + digit
+
+(* value divided by 16, j times *)
+fun _shift_down {j:nat} .<j>. (value: int, j: int j): int =
+  if j <= 0 then value else _shift_down(value / 16, j - 1)
+
+(* value (not negative) as k hex digits, most significant first *)
+fun _put_hex {l:agz}{at:nat | at <= DETAILS_MAX}{k:nat} .<k>.
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, value: int, k: int k)
+  : [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  if k <= 0 then at
+  else if at >= DETAILS_MAX then at
+  else let
+    val shifted = _shift_down(value, k - 1)
+    val rest = shifted - (shifted / 16) * 16
+    val digit = (if rest < 0 then 0 - rest else rest): int
+    val () = $A.set<byte>(out, at, int2byte0(_hex_char(digit)))
+  in _put_hex(out, at + 1, value, k - 1) end
+
+(* What is known of a stored record that could not be used. The details
+   are data built here, in one place (quire#507): a field a later change
+   learns (the groups lost or substituted, each one's CRC: quire#510) is
+   one more field of the note and one more line of _put_note, not a
+   string made where the record is read.
+   No book text and no title is in a note: a book's id is a hash of its
+   file, and the head is the record's first 12 bytes, which are its
+   format (the magic, the kind and the versions), as a crash report
+   keeps a file's header and not its content. *)
+#pub datatype record_which =
+  | NoteBook
+  | NoteIndex
+
+#pub datatype record_fault =
+  | FaultDamaged
+  | FaultNewer
+  | FaultNotQuire
+
+#pub datavtype record_note =
+  | RecordNote of (record_which, int, int, record_fault, int, int, int, int, int)
+
+(* The notes of the records the last read of the library could not use,
+   as text, how many there are and how many are written (the first 16) *)
+#define NOTES_KEPT 16
+val _notes = ref<details>(NoDetails())
+val _notes_seen = ref<int>(0)
+
+(* Starts the notes of a read over *)
+#pub fn notice_notes_clear (): void
+
+fn _notes_swap (held: details): details = let
+  var previous: details = held
+  val () = ref_exch_elt<details>(_notes, previous)
+in previous end
+
+implement notice_notes_clear () = let
+  val () = _details_free(_notes_swap(NoDetails()))
+in !_notes_seen := 0 end
+
+fn _put_which {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, which: record_which, id_high: int, id_low: int)
+  : [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  case+ which of
+  | NoteBook() => let
+      val at = _put_detail(out, at, "\nBook record ")
+    in _put_hex(out, _put_hex(out, at, id_high, 7), id_low, 7) end
+  | NoteIndex() => _put_detail(out, at, "\nCollections record")
+
+fn _put_fault {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, fault: record_fault)
+  : [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  case+ fault of
+  | FaultDamaged() => _put_detail(out, at, ": damaged")
+  | FaultNewer() => _put_detail(out, at, ": written by a newer Quire")
+  | FaultNotQuire() => _put_detail(out, at, ": not a Quire record")
+
+fn _put_note {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, note: record_note)
+  : [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  case+ note of
+  | ~RecordNote(which, id_high, id_low, fault, length, head0, head1, head2, head3) => let
+      val at = _put_which(out, at, which, id_high, id_low)
+      val at = _put_fault(out, at, fault)
+      val at = _put_detail(out, at, ", ")
+      val at = _put_number(out, at, length)
+      val at = _put_detail(out, at, " bytes, first bytes ")
+      val at = _put_hex(out, at, head0, 6)
+      val at = _put_hex(out, at, head1, 6)
+      val at = _put_hex(out, at, head2, 6)
+    in _put_hex(out, at, head3, 6) end
+
+(* The note written after text[0, at), the notes so far *)
+fn _note_appended {l:agz}{at:nat | at <= DETAILS_MAX}
+  (text: $A.arr(byte, l, DETAILS_MAX), at: int at, note: record_note): details = let
+  val stop = _put_note(text, at, note)
+in
+  if stop > 0 then Details(text, stop)
+  else let val () = $A.free<byte>(text) in NoDetails() end
+end
+
+#pub fn notice_record_note (note: record_note): void
+
+implement notice_record_note (note) = let
+  val seen = !_notes_seen
+  val () = !_notes_seen := seen + 1
+in
+  if seen >= NOTES_KEPT then (case+ note of ~RecordNote(_, _, _, _, _, _, _, _, _) => ())
+  else let
+    val kept = (case+ _notes_swap(NoDetails()) of
+      | ~NoDetails() => _note_appended($A.alloc<byte>(DETAILS_MAX), 0, note)
+      | ~Details(text, text_len) => _note_appended(text, text_len, note)): details
+  in _details_free(_notes_swap(kept)) end
+end
+
 (* Where Quire runs: its words say "the browser" only in one *)
 #pub datatype host =
   | InBrowser
@@ -468,6 +620,104 @@ fn named_remedy_of (failed: named_failure): remedy =
   | ProtectedByFairPlay() => ReadWhereItCameFrom()
   | ProtectedByKobo() => ReadWhereItCameFrom()
   | ProtectedUnknown() => ReadWhereItCameFrom()
+
+(* What a failure's Copy details holds, besides Quire's version and the
+   platform and the failure's name (quire#507). Total, so a failure added
+   without saying what its details are does not type-check
+   (tests/static/reject/notice-without-details): a failure that is a
+   stored thing or a book that could not be read has details; the few that
+   are the platform's refusal of a request (a copy, a selection, a rotation
+   lock, a grant, a narration) say they have none, and leave the details
+   of the failure before them in place *)
+datatype detail_source =
+  | FromFailureAlone
+  | FromRecordNotes
+  | NothingToReport
+
+fn detail_source_of (failed: failure): detail_source =
+  case+ failed of
+  | LibraryNotAdded() => FromFailureAlone()
+  | HandedBookNotAdded() => FromFailureAlone()
+  | SettingsNotRead() => FromFailureAlone()
+  | CataloguesNotRead() => FromFailureAlone()
+  | DictionariesNotRead() => FromFailureAlone()
+  | AnnotationsNotRead() => FromFailureAlone()
+  | BookFileLost() => FromFailureAlone()
+  | BookStorageFailed() => FromFailureAlone()
+  | BookReplacedElsewhere() => FromFailureAlone()
+  | PartNotRead() => FromFailureAlone()
+  | StorageFull() => FromFailureAlone()
+  | RecordFromNewerQuire() => FromRecordNotes()
+  | RecordDamaged() => FromRecordNotes()
+  | RecordNotQuires() => FromRecordNotes()
+  | BooksNotRead() => FromRecordNotes()
+  | BooksNotReadCanSetAside() => FromRecordNotes()
+  | AsideNotRead() => FromRecordNotes()
+  | AsideIncomplete() => FromRecordNotes()
+  | DetailsDamaged() => FromRecordNotes()
+  | CollectionsNotRead() => FromRecordNotes()
+  | CollectionsNotReadCanSetAside() => FromRecordNotes()
+  | NarrationNotPlayable() => NothingToReport()
+  | RotationNotLockable() => NothingToReport()
+  | GrantNotTaken() => NothingToReport()
+  | GrantNoAnswer() => NothingToReport()
+  | TextNotCopied() => NothingToReport()
+  | DetailsNotCopied() => NothingToReport()
+  | HighlightNotSelected() => NothingToReport()
+  | SelectionNotEnded() => NothingToReport()
+
+(* The failure's name in the details: the constructor's, as an issue can
+   search it *)
+fn _failure_name (failed: failure): [n:pos | n < 64] string n =
+  case+ failed of
+  | LibraryNotAdded() => "LibraryNotAdded"
+  | HandedBookNotAdded() => "HandedBookNotAdded"
+  | SettingsNotRead() => "SettingsNotRead"
+  | CataloguesNotRead() => "CataloguesNotRead"
+  | DictionariesNotRead() => "DictionariesNotRead"
+  | AnnotationsNotRead() => "AnnotationsNotRead"
+  | BookFileLost() => "BookFileLost"
+  | BookStorageFailed() => "BookStorageFailed"
+  | BookReplacedElsewhere() => "BookReplacedElsewhere"
+  | PartNotRead() => "PartNotRead"
+  | StorageFull() => "StorageFull"
+  | RecordFromNewerQuire() => "RecordFromNewerQuire"
+  | RecordDamaged() => "RecordDamaged"
+  | RecordNotQuires() => "RecordNotQuires"
+  | BooksNotRead() => "BooksNotRead"
+  | BooksNotReadCanSetAside() => "BooksNotReadCanSetAside"
+  | AsideNotRead() => "AsideNotRead"
+  | AsideIncomplete() => "AsideIncomplete"
+  | DetailsDamaged() => "DetailsDamaged"
+  | CollectionsNotRead() => "CollectionsNotRead"
+  | CollectionsNotReadCanSetAside() => "CollectionsNotReadCanSetAside"
+  | NarrationNotPlayable() => "NarrationNotPlayable"
+  | RotationNotLockable() => "RotationNotLockable"
+  | GrantNotTaken() => "GrantNotTaken"
+  | GrantNoAnswer() => "GrantNoAnswer"
+  | TextNotCopied() => "TextNotCopied"
+  | DetailsNotCopied() => "DetailsNotCopied"
+  | HighlightNotSelected() => "HighlightNotSelected"
+  | SelectionNotEnded() => "SelectionNotEnded"
+
+fn _named_failure_name (failed: named_failure): [n:pos | n < 64] string n =
+  case+ failed of
+  | NotAnEpub() => "NotAnEpub"
+  | ArchiveSplit() => "ArchiveSplit"
+  | CompressionNotAllowed() => "CompressionNotAllowed"
+  | ContainerDamaged() => "ContainerDamaged"
+  | PackageMissing() => "PackageMissing"
+  | PackageDamaged() => "PackageDamaged"
+  | ReadingNotFinished() => "ReadingNotFinished"
+  | NotKeptInLibrary() => "NotKeptInLibrary"
+  | FileEmpty() => "FileEmpty"
+  | FileNotRead() => "FileNotRead"
+  | BookFileNotStored() => "BookFileNotStored"
+  | ProtectedByAdept() => "ProtectedByAdept"
+  | ProtectedByLcp() => "ProtectedByLcp"
+  | ProtectedByFairPlay() => "ProtectedByFairPlay"
+  | ProtectedByKobo() => "ProtectedByKobo"
+  | ProtectedUnknown() => "ProtectedUnknown"
 
 fn _put_number_at {l:agz}{cap:pos}{at:nat | at <= cap}
   (out: !$A.arr(byte, l, cap), cap: int cap, at: int at, v: int): [stop:nat | at <= stop; stop <= cap] int stop = let
@@ -614,6 +864,76 @@ fn _reopens (next: remedy): bool =
   | TapToEndSelection() => false
   | ReadWhereItCameFrom() => false
 
+fn _put_counted {l:agz}{at:nat | at <= DETAILS_MAX}{n:nat}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, label: string n, count: int, shown: bool): [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  if shown then _put_number(out, _put_detail(out, at, label), count) else at
+
+fn _put_seen {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, seen: int): [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  if seen > 0 then _put_number(out, _put_detail(out, at, "\nRecords that could not be used in the last read:"), seen)
+  else at
+
+fn _put_unlisted {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, seen: int): [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  if seen > NOTES_KEPT then _put_number(out, _put_detail(out, at, "\nand more, not listed:"), seen - NOTES_KEPT)
+  else at
+
+fn _put_listed {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, held: details): [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  case+ held of
+  | ~NoDetails() => at
+  | ~Details(text, text_len) => let
+      val stop = _put_bytes(out, at, text, text_len, 0)
+      val () = $A.free<byte>(text)
+    in stop end
+
+fn _put_records {l:agz}{at:nat | at <= DETAILS_MAX}
+  (out: !$A.arr(byte, l, DETAILS_MAX), at: int at, source: detail_source)
+  : [stop:nat | at <= stop; stop <= DETAILS_MAX] int stop =
+  case+ source of
+  | FromRecordNotes() => let
+      val seen = !_notes_seen
+      val held = _notes_swap(NoDetails())
+      val at = _put_seen(out, at, seen)
+      val at = _put_listed(out, at, held)
+      val at = _put_unlisted(out, at, seen)
+      val () = !_notes_seen := 0
+    in at end
+  | FromFailureAlone() => at
+  | NothingToReport() => at
+
+(* The details of a failure, kept for Copy details and About (quire#507):
+   Quire's version, the platform, the failure's name, the chapter or the
+   length of the file's name when it has one, and, for a failure of
+   records, how many the last read could not use and a line for each of
+   the first 16. Nothing else: no book text, no title or file name, no
+   credential. It says so in its own words, so the reader sees what they
+   are sending before they send it (Firefox's about:support and Signal's
+   debug log both say what a report holds; neither holds the user's
+   content) *)
+fn _report_make {name_len:pos | name_len < 64}
+  (name: string name_len, part: int, file_name_len: int, source: detail_source): bool =
+  if (case+ source of
+    | NothingToReport() => true
+    | FromFailureAlone() => false
+    | FromRecordNotes() => false): bool then false
+  else let
+      val out = $A.alloc<byte>(DETAILS_MAX)
+      val at = _put_detail(out, 0, "Quire ")
+      val at = _put_detail(out, at, quire_version())
+      val at = _put_detail(out, at, "\nPlatform: ")
+      val at = _put_detail(out, at, (if $BAPP.is_native_platform() then "Android app" else "web browser"))
+      val at = _put_detail(out, at, "\nFailure: ")
+      val at = _put_detail(out, at, name)
+      val at = _put_counted(out, at, "\nChapter:", part, part > 0)
+      val at = _put_counted(out, at, "\nFile name length:", file_name_len, file_name_len >= 0)
+      val at = _put_detail(out, at, "\nThis holds only the above and, for records, their ids, sizes and first bytes: no book text, titles or passwords.")
+      val at = _put_records(out, at, source)
+      val at = _details_end(out, at)
+      val () = (if at > 0 then _details_set(Details(out, at))
+        else let val () = $A.free<byte>(out) in _details_set(NoDetails()) end)
+    in true end
+
 (* The error banner, saying what failed and what to do next (the one
    place the reader's words for a failure are made, #360) *)
 #pub fn notice_say (failed: failure): void
@@ -625,10 +945,12 @@ fn _reopens (next: remedy): bool =
 fn _say (failed: failure, part: int): void = let
   val where_ = _host()
   val next = remedy_of(failed)
+  val name = _failure_name(failed)
+  val reported = _report_make(name, part, ~1, detail_source_of(failed))
   val out = $A.alloc<byte>(512)
   val at = _what_put(out, 0, failed, where_, part)
   val at = _remedy_put(out, at, next, where_)
-in _error_buf(out, at, _reopens(next)) end
+in _error_buf_with(out, at, _reopens(next), reported) end
 
 implement notice_say (failed) = _say(failed, 0)
 
@@ -641,11 +963,12 @@ implement notice_say_part (chapter) = _say(PartNotRead(), chapter)
 implement notice_say_named (name, name_len, failed) = let
   val where_ = _host()
   val next = named_remedy_of(failed)
+  val reported = _report_make(_named_failure_name(failed), 0, name_len, FromFailureAlone())
   val out = $A.alloc<byte>(512)
   val at = _copy_name(name, name_len, out, 0, 0)
   val at = _named_what_put(out, at, failed)
   val at = _remedy_put(out, at, next, where_)
-in _error_buf(out, at, _reopens(next)) end
+in _error_buf_with(out, at, _reopens(next), reported) end
 
 (* The error banner goes (its Dismiss button, or a new import) *)
 #pub fn notice_dismiss (): void

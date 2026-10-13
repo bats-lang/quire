@@ -143,7 +143,7 @@ test('alignment, hyphenation and the spacings change the page, and are kept', as
   expect(parseFloat(await style(page, 'wordSpacing'))).toBeCloseTo(18 * 0.16, 1);
   // the sheet scrolls on a short window to its last row
   await openReadingSettings(page, 'Look');
-  const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
+  const reset = more(page).getByRole('button', { name: 'Reset reading settings', exact: true });
   await reset.scrollIntoViewIfNeeded();
   await expect(reset).toBeInViewport();
   expect(errors).toEqual([]);
@@ -246,6 +246,49 @@ test('the themes change the colours, the choice is kept, and auto follows the sy
   await expect.poll(bg).toBe(dark.bg.join(','));
 });
 
+// quire#501: the themes are swatches of their palettes, not six wrapping
+// words: each button wears its theme's classes, so its sample and ground are
+// that theme's own pair, whatever theme is on the page
+test('each theme is a swatch of its own palette, named by its word, the chosen one ringed', async ({ page }) => {
+  const errors = await start(page);
+  await readBook(page, { title: 'Swatches', author: 'Settings Tests', rawChapters: chapters(1, 3) });
+  await openSettings(page);
+  const group = sheet(page).getByRole('group', { name: 'Theme' });
+  const names = ['Light', 'Sepia', 'Dark', 'Night', 'Grey'];
+  const rgb = text => (text.match(/[\d.]+/g) || []).map(Number).slice(0, 3);
+  const luminance = ([r, g, b]) => {
+    const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const looks = {};
+  for (const name of names) {
+    const button = group.getByRole('button', { name, exact: true });
+    await expect(button).toBeVisible();
+    // no words: its name is its aria-label, its sample a drawn "Aa"
+    await expect(button).toHaveText('');
+    looks[name] = await button.evaluate(e => {
+      const own = getComputedStyle(e);
+      const box = e.getBoundingClientRect();
+      return { ground: own.backgroundColor, text: own.color, sample: getComputedStyle(e, '::before').content, width: box.width, height: box.height };
+    });
+    expect(looks[name].sample, `${name} shows a sample of the type`).toBe('"Aa"');
+    expect(looks[name].width).toBeGreaterThanOrEqual(48);
+    expect(looks[name].height).toBeGreaterThanOrEqual(48);
+    const [a, b] = [luminance(rgb(looks[name].ground)), luminance(rgb(looks[name].text))];
+    const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    expect(ratio, `${name}'s sample is legible on its swatch`).toBeGreaterThanOrEqual(4.5);
+  }
+  // five palettes: five different grounds
+  expect(new Set(names.map(name => looks[name].ground)).size).toBe(5);
+  // the chosen one is ringed in its accent, the others are not
+  await choose(page, 'Sepia');
+  const ring = name => group.getByRole('button', { name, exact: true }).evaluate(e => getComputedStyle(e).borderTopWidth);
+  await expect(group.getByRole('button', { name: 'Sepia', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  expect(await ring('Sepia')).toBe('3px');
+  expect(await ring('Dark')).toBe('1px');
+  expect(errors).toEqual([]);
+});
+
 test('the night theme is warm and dim, the grey one between dark and light, and both are kept', async ({ page }) => {
   await start(page);
   await readBook(page, { title: 'Evening', author: 'Settings Tests', rawChapters: chapters(1, 5) });
@@ -288,7 +331,7 @@ test('reset puts the defaults back', async ({ page }) => {
   // resetting (at the end of the sheet, under every tab) asks nothing,
   // and can be undone
   await openReadingSettings(page, 'Page');
-  const reset = more(page).getByRole('button', { name: 'Reset to defaults', exact: true });
+  const reset = more(page).getByRole('button', { name: 'Reset reading settings', exact: true });
   await reset.click();
   await expect.poll(() => style(page, 'fontSize')).toBe(before);
   await page.getByRole('button', { name: 'Undo' }).click();
@@ -545,15 +588,17 @@ test('in the Android app, bars the system brought back stay until the next page,
   expect(await switchOn(full)).toBe('on');
 });
 
-// quire#355: a control that cannot work is not shown. Where the device
-// refuses the lock, the switch does not stay on the screen springing
-// back: it goes, and the banner says why
-test('a rotation lock the device refuses takes Lock rotation away and says so', async ({ page }) => {
+// quire#355: the app asks the Capacitor plugin (never the web API), with
+// the screen's orientation; a plugin that refuses is a case of its own,
+// the error it gave kept in the details, and the switch does not stay on
+// the screen springing back: it goes, and the banner says what to do
+test('a rotation lock the plugin refuses takes Lock rotation away and keeps its error', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.addInitScript(() => {
     window.calls = [];
     window.Capacitor = { isNativePlatform: () => true, Plugins: {
       SystemBars: { hide: () => Promise.resolve(), show: () => Promise.resolve() },
-      ScreenOrientation: { lock: () => { window.calls.push('lock'); return Promise.reject(new Error('not allowed')); }, unlock: () => Promise.resolve() },
+      ScreenOrientation: { lock: a => { window.calls.push('lock ' + JSON.stringify(a)); const e = new Error('Plugin refused: orientation not allowed'); e.code = 'UNIMPLEMENTED'; return Promise.reject(e); }, unlock: () => Promise.resolve() },
       ScreenBrightness: { setBrightness: () => Promise.resolve() },
     } };
   });
@@ -563,9 +608,41 @@ test('a rotation lock the device refuses takes Lock rotation away and says so', 
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   await expect(lock).toBeVisible();
   await lock.click();
-  await expect.poll(() => page.evaluate(() => window.calls)).toEqual(['lock']);
+  await expect.poll(() => page.evaluate(() => window.calls.length)).toBe(1);
+  expect(await page.evaluate(() => window.calls[0])).toMatch(/^lock \{"orientation":"(portrait|landscape)-primary"\}$/);
   await expect(lock).toBeHidden();
-  await expect(page.getByRole('alert')).toContainText('does not let Quire lock the rotation');
+  const banner = page.getByRole('alert');
+  await expect(banner).toContainText('Lock rotation is no longer offered');
+  await expect(banner).toContainText('post them in a report');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  await banner.getByRole('button', { name: 'Copy details' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('Plugin refused: orientation not allowed');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('LockRefused');
+});
+
+// quire#355: inside the app the plugin is used, not the web API: a web
+// lock that rejects (Chromium's WebView has none) changes nothing
+test('in the Android app a rejecting web lock does not stop the plugin locking the rotation', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.calls = [];
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      SystemBars: { hide: () => Promise.resolve(), show: () => Promise.resolve() },
+      ScreenOrientation: { lock: a => { window.calls.push('lock ' + JSON.stringify(a)); return Promise.resolve(); }, unlock: () => Promise.resolve() },
+      ScreenBrightness: { setBrightness: () => Promise.resolve() },
+    } };
+    try { screen.orientation.lock = () => { window.calls.push('web lock'); return Promise.reject(new DOMException('no', 'NotSupportedError')); }; } catch (e) { /* kept as it is */ }
+  });
+  await start(page);
+  await readBook(page, { title: 'Plugin', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Page');
+  const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  await expect(lock).toBeVisible();
+  await lock.click();
+  await expect.poll(() => switchOn(lock)).toBe('on');
+  const calls = await page.evaluate(() => window.calls);
+  expect(calls.filter(c => c.startsWith('lock '))).toHaveLength(1);
+  expect(calls).not.toContain('web lock');
+  await expect(page.getByRole('alert')).toBeHidden();
 });
 
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {
@@ -663,7 +740,7 @@ test('reset puts reading aloud\'s speed and voice, the brightness and the rotati
   await brightness.fill('25');
   await lock.click();
   await expect(lock).toHaveAttribute('aria-pressed', 'true');
-  await more(page).getByRole('button', { name: 'Reset to defaults', exact: true }).click();
+  await more(page).getByRole('button', { name: 'Reset reading settings', exact: true }).click();
   await expect(device).toHaveAttribute('aria-pressed', 'true');
   await expect(brightness).toHaveValue('50');
   await expect(lock).toHaveAttribute('aria-pressed', 'false');

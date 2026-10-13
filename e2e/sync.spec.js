@@ -40,9 +40,9 @@ async function openSync(page) {
 
 /** Closes the sync panel with its Done, then Settings with its own */
 async function closeSync(page) {
-  await panel(page).getByRole('button', { name: 'Done' }).click();
+  await panel(page).getByRole('button', { name: 'Back' }).click();
   await expect(panel(page)).toBeHidden();
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   await expect(settingsScreen(page)).toBeHidden();
 }
 
@@ -110,6 +110,18 @@ const book = { title: 'Shared Book', author: 'Sync Tests', chapters: 4, rawChapt
 const offer = (page, chapter) =>
   page.getByRole('button', { name: `Go to where you were on another device (chapter ${chapter})` });
 
+/** The offer of chapter's place, clicked (or its Dismiss, when dismiss): the bars it lives in hide
+    themselves 5 s after they are shown, so on a loaded machine a slow step can see them up and then
+    lose them. Bringing them up, seeing the button and pressing it are tried again together until the
+    press lands (quire#520; clickControl's way) */
+async function offerPressed(page, chapter, dismiss = false) {
+  await expect(async () => {
+    await showChrome(page);
+    await expect(offer(page, chapter)).toBeVisible({ timeout: 2000 });
+    await (dismiss ? page.getByRole('button', { name: 'Dismiss' }) : offer(page, chapter)).click({ timeout: 2000 });
+  }).toPass({ timeout: 30000 });
+}
+
 /** Whether any place is offered: the offer's button there, its row not
     hidden */
 const offered = page => page.evaluate(() => [...document.querySelectorAll('button')]
@@ -149,9 +161,7 @@ test('the latest place is taken, and offered for a book that is open', async ({ 
   await syncNow(a.page);
   await hiddenSynced(b, server);
   expect((await place(b.page)).ch).toBe(3);
-  await showChrome(b.page);
-  await expect(offer(b.page, 4)).toBeVisible();
-  await offer(b.page, 4).click();
+  await offerPressed(b.page, 4);
   await expect.poll(async () => (await place(b.page)).ch).toBe(4);
   expect(await offered(b.page)).toBe(false);
   expect(unexpected(a)).toEqual([]);
@@ -177,9 +187,7 @@ test('another device\'s place is offered once; dismissed, only a later one of it
   await hiddenSynced(b, server);
   // A, reading, is offered B's place, and dismisses it
   await hiddenSynced(a, server);
-  await showChrome(a.page);
-  await expect(offer(a.page, 3)).toBeVisible();
-  await a.page.getByRole('button', { name: 'Dismiss' }).click();
+  await offerPressed(a.page, 3, true);
   expect(await offered(a.page)).toBe(false);
   expect((await place(a.page)).ch).toBe(1);
   // not offered again: by a sync, by the book closed and opened (its
@@ -201,16 +209,12 @@ test('another device\'s place is offered once; dismissed, only a later one of it
   await nextChapter(b.page, 4);
   await hiddenSynced(b, server);
   await hiddenSynced(a, server);
-  await showChrome(a.page);
-  await expect(offer(a.page, 4)).toBeVisible();
-  await a.page.getByRole('button', { name: 'Dismiss' }).click();
+  await offerPressed(a.page, 4, true);
   // B goes back to chapter 2, later than anything A did: offered too
   await jumpTo(b.page, 'Chapter 2');
   await hiddenSynced(b, server);
   await hiddenSynced(a, server);
-  await showChrome(a.page);
-  await expect(offer(a.page, 2)).toBeVisible();
-  await offer(a.page, 2).click();
+  await offerPressed(a.page, 2);
   await expect.poll(async () => (await place(a.page)).ch).toBe(2);
   expect(unexpected(a)).toEqual([]);
   expect(unexpected(b)).toEqual([]);
@@ -522,7 +526,7 @@ test('annotations from before ids, restored on two devices from one backup, sync
   await toLibrary(a.page);
   await librarySettings(a.page);
   const backup = JSON.parse(await exportedBackup(a.page));
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   // as a version before ids wrote it
   for (const kept of backup.books) for (const n of kept.annotations) { delete n.id; delete n.modified; }
   const path = testInfo.outputPath('old-backup.json');
@@ -555,11 +559,11 @@ test('the Settings screen\'s Sync row says whether sync is on, and when it last 
   const row = settingsScreen(a.page).getByRole('group', { name: 'Sync' }).getByRole('status');
   await librarySettings(a.page);
   await expect(row).toHaveText('Off');
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   await joinSync(a.page);
   await librarySettings(a.page);
   await expect(row).toHaveText(/^WebDAV · synced (just now|1 min ago)$/);
-  await settingsButton(a.page, 'Done').click();
+  await settingsButton(a.page, 'Back').click();
   await a.page.clock.fastForward('02:00');
   await librarySettings(a.page);
   await expect(row).toHaveText(/^WebDAV · synced [23] min ago$/);
