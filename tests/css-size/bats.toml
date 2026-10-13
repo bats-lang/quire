@@ -1,0 +1,8 @@
+[package]
+name = "css-size-test"
+kind = "bin"
+unsafe = false
+
+[dependencies]
+"array" = ""
+"arith" = ""
