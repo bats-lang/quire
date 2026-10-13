@@ -123,8 +123,6 @@ test('names flagged UTF-8 and names not flagged but in UTF-8 are both found by t
 });
 
 test('a small archive in ZIP64 form opens (EPUB 3.3 allows ZIP64) and its chapters read', async ({ page }) => {
-  // quire#528: the zip package reads no ZIP64 record, so the book is refused as "not an EPUB"
-  test.fail(true, 'quire#528: ZIP64 archives are refused');
   const errors = await start(page);
   await openContainer(page, 'zip64');
   await expect(page.getByRole('alert')).toBeHidden();

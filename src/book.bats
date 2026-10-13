@@ -418,7 +418,7 @@ implement book_refusal () = !_refusal
    every entry's local header, checked once; none when it is not an
    archive or its directory is over 1 MiB *)
 fn book_index_make {file_size:pos} (book_file: !$BF.infile(file_size), file_size: int file_size): $R.option(book_index(file_size)) = let
-  val tail_len = (if file_size < 65557 then file_size else 65557): [tail_len:pos | tail_len <= file_size; tail_len <= 65557] int tail_len
+  val tail_len = (if file_size < 65633 then file_size else 65633): [tail_len:pos | tail_len <= file_size; tail_len <= 65633] int tail_len
   val tail = $A.alloc<byte>(tail_len)
   val () = $BF.file_read(book_file, file_size - tail_len, tail, tail_len)
   val found = $Z.find_cd(tail, tail_len, file_size)
