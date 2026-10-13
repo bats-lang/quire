@@ -2063,6 +2063,68 @@ in
   else xml_name_eq(data, offset, name_len, adobe_chars, 30)
 end
 
+(* Whether data[offset + (len - suffix_len), offset + len) is suffix, whatever the case of
+   the bytes (a font file's extension) *)
+fun _suffix_from {l:agz}{n:pos}{offset,len:nat | offset + len <= n}{suffix_len:pos | suffix_len <= len}{i:nat | i <= suffix_len} .<suffix_len - i>.
+  (data: !$A.borrow(byte, l, n), offset: int offset, len: int len,
+   suffix: &(@[char][suffix_len]), suffix_len: int suffix_len, i: int i): bool =
+  if i >= suffix_len then true
+  else let
+    val b = byte2int0($A.read<byte>(data, offset + (len - suffix_len) + i))
+    val lowered = (if b >= 65 && b <= 90 then b + 32 else b): int
+  in
+    if lowered <> char2int0(suffix.[i]) then false
+    else _suffix_from(data, offset, len, suffix, suffix_len, i + 1)
+  end
+
+fn _ends_with {l:agz}{n:pos}{offset,len:nat | offset + len <= n}{suffix_len:pos}
+  (data: !$A.borrow(byte, l, n), offset: int offset, len: int len,
+   suffix: &(@[char][suffix_len]), suffix_len: int suffix_len): bool =
+  if len < suffix_len then false
+  else _suffix_from(data, offset, len, suffix, suffix_len, 0)
+
+(* Whether the path data[offset, offset + len) is a font file, by its extension: a font, even
+   one encrypted by an algorithm Quire does not know, is no reason to refuse a book whose text
+   is plain (the book reads, in the reader's own font) *)
+fn _is_font_path {l:agz}{n:pos}{offset,len:nat | offset + len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, len: int len): bool = let
+  var otf_chars = @[char][4]('.', 'o', 't', 'f')
+  var ttf_chars = @[char][4]('.', 't', 't', 'f')
+  var ttc_chars = @[char][4]('.', 't', 't', 'c')
+  var woff_chars = @[char][5]('.', 'w', 'o', 'f', 'f')
+  var woff2_chars = @[char][6]('.', 'w', 'o', 'f', 'f', '2')
+in
+  if _ends_with(data, offset, len, otf_chars, 4) then true
+  else if _ends_with(data, offset, len, ttf_chars, 4) then true
+  else if _ends_with(data, offset, len, ttc_chars, 4) then true
+  else if _ends_with(data, offset, len, woff_chars, 5) then true
+  else _ends_with(data, offset, len, woff2_chars, 6)
+end
+
+(* The value of the attribute attr of the first element named element in nodes, depth first *)
+fun _attr_of_first_nodes
+  {l:agz}{n:pos}{tree_size:nat}{element_len,attr_len:pos} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size),
+   element: &(@[char][element_len]), element_len: int element_len,
+   attr: &(@[char][attr_len]), attr_len: int attr_len): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _attr_of_first_node(data, node, element, element_len, attr, attr_len) of
+     | ~xspan_none() => _attr_of_first_nodes(data, rest, element, element_len, attr, attr_len)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _attr_of_first_node
+  {l:agz}{n:pos}{tree_size:pos}{element_len,attr_len:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size),
+   element: &(@[char][element_len]), element_len: int element_len,
+   attr: &(@[char][attr_len]), attr_len: int attr_len): xspan(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) =>
+    if xml_name_eq(data, tag_offset, tag_len, element, element_len) then _find_attr_value(data, attrs, attr, attr_len)
+    else _attr_of_first_nodes(data, children, element, element_len, attr, attr_len)
+  | $X.xml_text(_, _) => xspan_none()
+
 (* Whether an EncryptionMethod anywhere in nodes names an algorithm
    that is not a font obfuscation (or names none) *)
 fun _unknown_algorithm_nodes
@@ -2080,8 +2142,10 @@ and _unknown_algorithm_node
   case+ node of
   | $X.xml_element(tag_offset, tag_len, attrs, children) => let
     var method_chars = @[char][16]('E', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', 'M', 'e', 't', 'h', 'o', 'd')
+    var data_chars = @[char][13]('E', 'n', 'c', 'r', 'y', 'p', 't', 'e', 'd', 'D', 'a', 't', 'a')
   in
-    if _span_has(data, tag_offset, tag_len, method_chars, 16, 0) then let
+    if xml_name_eq(data, tag_offset, tag_len, data_chars, 13) then _encrypted_data_unknown(data, children)
+    else if _span_has(data, tag_offset, tag_len, method_chars, 16, 0) then let
       var algorithm_chars = @[char][9]('A', 'l', 'g', 'o', 'r', 'i', 't', 'h', 'm')
     in
       case+ _find_attr_value(data, attrs, algorithm_chars, 9) of
@@ -2091,6 +2155,20 @@ and _unknown_algorithm_node
     else _unknown_algorithm_nodes(data, children)
   end
   | $X.xml_text(_, _) => false
+
+(* Whether an EncryptedData, whose content is nodes, is encrypted by an algorithm that is not a
+   font obfuscation, unless it is a font file's (a font can only fall back) *)
+and _encrypted_data_unknown
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 2>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): bool = let
+  var reference_chars = @[char][15]('C', 'i', 'p', 'h', 'e', 'r', 'R', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e')
+  var uri_chars = @[char][3]('U', 'R', 'I')
+in
+  case+ _attr_of_first_nodes(data, nodes, reference_chars, 15, uri_chars, 3) of
+  | ~xspan_at(uri_offset, uri_len) =>
+    if _is_font_path(data, uri_offset, uri_len) then false else _unknown_algorithm_nodes(data, nodes)
+  | ~xspan_none() => _unknown_algorithm_nodes(data, nodes)
+end
 
 (* What the encryption.xml data[0, n), parsed as nodes, declares *)
 #pub fn encryption_of
@@ -2109,4 +2187,142 @@ in
   else if _span_has(data, 0, n, kobobooks_chars, 13, 0) then EncryptionKobo()
   else if _unknown_algorithm_nodes(data, nodes) then EncryptionUnknownAlgorithm()
   else EncryptionNone()
+end
+
+(* ============================================================
+   The fonts of encryption.xml, and the key a font is masked with
+   (quire#410)
+   ============================================================ *)
+
+(* How a font is encrypted: FontNotListed (encryption.xml does not
+   list it, or the book has none), masked by IDPF's obfuscation or by
+   Adobe's (a reading system undoes both, EPUB OCF 3.3 section 4.1.2),
+   or by an algorithm Quire has no client for *)
+#pub datatype font_cipher =
+  | FontNotListed
+  | FontObfuscatedIdpf
+  | FontObfuscatedAdobe
+  | FontCipherOther
+
+fn _cipher_of_algorithm {l:agz}{n:pos}{offset,algorithm_len:nat | offset + algorithm_len <= n}
+  (data: !$A.borrow(byte, l, n), offset: int offset, algorithm_len: int algorithm_len): font_cipher = let
+  var idpf_chars = @[char][34]('h', 't', 't', 'p', ':', '/', '/', 'w', 'w', 'w', '.', 'i', 'd', 'p', 'f', '.', 'o', 'r', 'g', '/', '2', '0', '0', '8', '/', 'e', 'm', 'b', 'e', 'd', 'd', 'i', 'n', 'g')
+  var adobe_chars = @[char][30]('h', 't', 't', 'p', ':', '/', '/', 'n', 's', '.', 'a', 'd', 'o', 'b', 'e', '.', 'c', 'o', 'm', '/', 'p', 'd', 'f', '/', 'e', 'n', 'c', '#', 'R', 'C')
+in
+  if _exact_name_eq(data, offset, algorithm_len, idpf_chars, 34) then FontObfuscatedIdpf()
+  else if _exact_name_eq(data, offset, algorithm_len, adobe_chars, 30) then FontObfuscatedAdobe()
+  else FontCipherOther()
+end
+
+(* One resource of encryption.xml, an EncryptedData: the algorithm that
+   encrypts it and the URI of what it encrypts (a path from the
+   container's root, at data[offset, offset + uri_len)); one without a
+   URI; or no more of them *)
+#pub datavtype encrypted_item(n:int) =
+  | {offset,uri_len:nat | offset + uri_len <= n} encrypted_at(n) of (font_cipher, int offset, int uri_len)
+  | encrypted_unlinked(n) of ()
+  | encrypted_end(n) of ()
+
+fn _encrypted_item_of {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), children: !$X.xml_node_list(n, tree_size)): encrypted_item(n) = let
+  var method_chars = @[char][16]('E', 'n', 'c', 'r', 'y', 'p', 't', 'i', 'o', 'n', 'M', 'e', 't', 'h', 'o', 'd')
+  var algorithm_chars = @[char][9]('A', 'l', 'g', 'o', 'r', 'i', 't', 'h', 'm')
+  var reference_chars = @[char][15]('C', 'i', 'p', 'h', 'e', 'r', 'R', 'e', 'f', 'e', 'r', 'e', 'n', 'c', 'e')
+  var uri_chars = @[char][3]('U', 'R', 'I')
+  val cipher = (case+ _attr_of_first_nodes(data, children, method_chars, 16, algorithm_chars, 9) of
+    | ~xspan_none() => FontCipherOther()
+    | ~xspan_at(algorithm_offset, algorithm_len) => _cipher_of_algorithm(data, algorithm_offset, algorithm_len)): font_cipher
+in
+  case+ _attr_of_first_nodes(data, children, reference_chars, 15, uri_chars, 3) of
+  | ~xspan_none() => encrypted_unlinked()
+  | ~xspan_at(uri_offset, uri_len) => encrypted_at(cipher, uri_offset, uri_len)
+end
+
+(* The k-th EncryptedData in nodes, in document order, and how many are left to count past when it is not there *)
+fun _nth_encrypted_nodes
+  {l:agz}{n:pos}{tree_size:nat} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), k: int): @(encrypted_item(n), int) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) => let
+      val @(found, left) = _nth_encrypted_node(data, node, k)
+    in
+      case+ found of
+      | ~encrypted_end() => _nth_encrypted_nodes(data, rest, left)
+      | other => @(other, 0)
+    end
+  | $X.xml_nodes_nil() => @(encrypted_end(), k)
+
+and _nth_encrypted_node
+  {l:agz}{n:pos}{tree_size:pos} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), k: int): @(encrypted_item(n), int) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, _, children) => let
+      var data_chars = @[char][13]('E', 'n', 'c', 'r', 'y', 'p', 't', 'e', 'd', 'D', 'a', 't', 'a')
+    in
+      if xml_name_eq(data, tag_offset, tag_len, data_chars, 13) then
+        (if k <= 0 then @(_encrypted_item_of(data, children), 0) else @(encrypted_end(), k - 1))
+      else _nth_encrypted_nodes(data, children, k)
+    end
+  | $X.xml_text(_, _) => @(encrypted_end(), k)
+
+(* The k-th resource (from 0) encryption.xml lists, or the end of them *)
+#pub fn encrypted_nth
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), k: int): encrypted_item(n)
+
+implement encrypted_nth (data, nodes, k) = let
+  val @(found, _) = _nth_encrypted_nodes(data, nodes, k)
+in found end
+
+fun _spans_equal {l:agz}{n:pos}{a,b,len:nat | a + len <= n; b + len <= n}{i:nat | i <= len} .<len - i>.
+  (data: !$A.borrow(byte, l, n), a: int a, b: int b, len: int len, i: int i): bool =
+  if i >= len then true
+  else if byte2int0($A.read<byte>(data, a + i)) <> byte2int0($A.read<byte>(data, b + i)) then false
+  else _spans_equal(data, a, b, len, i + 1)
+
+(* The text of the first dc:identifier whose id is data[id_offset, id_offset + id_len) *)
+fun _identifier_nodes
+  {l:agz}{n:pos}{tree_size:nat}{id_offset,id_len:nat | id_offset + id_len <= n} .<tree_size, 1>.
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size), id_offset: int id_offset, id_len: int id_len): xspan(n) =
+  case+ nodes of
+  | $X.xml_nodes_cons(node, rest) =>
+    (case+ _identifier_node(data, node, id_offset, id_len) of
+     | ~xspan_none() => _identifier_nodes(data, rest, id_offset, id_len)
+     | found => found)
+  | $X.xml_nodes_nil() => xspan_none()
+
+and _identifier_node
+  {l:agz}{n:pos}{tree_size:pos}{id_offset,id_len:nat | id_offset + id_len <= n} .<tree_size, 0>.
+  (data: !$A.borrow(byte, l, n), node: !$X.xml_node(n, tree_size), id_offset: int id_offset, id_len: int id_len): xspan(n) =
+  case+ node of
+  | $X.xml_element(tag_offset, tag_len, attrs, children) => let
+      var identifier_chars = @[char][10]('i', 'd', 'e', 'n', 't', 'i', 'f', 'i', 'e', 'r')
+      var id_chars = @[char][2]('i', 'd')
+    in
+      if xml_name_eq(data, tag_offset, tag_len, identifier_chars, 10) then
+        (case+ _find_attr_value(data, attrs, id_chars, 2) of
+         | ~xspan_at(own_offset, own_len) =>
+           if own_len = id_len then
+             (if _spans_equal(data, own_offset, id_offset, id_len, 0) then _get_first_text(children)
+              else _identifier_nodes(data, children, id_offset, id_len))
+           else _identifier_nodes(data, children, id_offset, id_len)
+         | ~xspan_none() => _identifier_nodes(data, children, id_offset, id_len))
+      else _identifier_nodes(data, children, id_offset, id_len)
+    end
+  | $X.xml_text(_, _) => xspan_none()
+
+(* The package's unique identifier: the text of the dc:identifier that
+   the package element's unique-identifier names (EPUB 3.3 section 5.5),
+   which both font obfuscations make their key of *)
+#pub fn opf_unique_identifier
+  {l:agz}{n:pos}{tree_size:nat}
+  (data: !$A.borrow(byte, l, n), nodes: !$X.xml_node_list(n, tree_size)): xspan(n)
+
+implement opf_unique_identifier (data, nodes) = let
+  var package_chars = @[char][7]('p', 'a', 'c', 'k', 'a', 'g', 'e')
+  var unique_chars = @[char][17]('u', 'n', 'i', 'q', 'u', 'e', '-', 'i', 'd', 'e', 'n', 't', 'i', 'f', 'i', 'e', 'r')
+in
+  case+ _attr_of_first_nodes(data, nodes, package_chars, 7, unique_chars, 17) of
+  | ~xspan_none() => xspan_none()
+  | ~xspan_at(id_offset, id_len) => _identifier_nodes(data, nodes, id_offset, id_len)
 end
