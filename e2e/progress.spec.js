@@ -227,6 +227,32 @@ test('a fixed-layout book counts its spine items as the indicator does, and is f
   expect(errors).toEqual([]);
 });
 
+test('a fixed-layout book\'s replaced picture is revoked only once no image still loading holds it (#532)', async ({ page }) => {
+  // the page-turn copy of the page holds the picture's blob URL in an image that may not have
+  // loaded yet when the next page replaces the picture: revoking it then makes that load fail
+  // (net::ERR_FILE_NOT_FOUND). Every revoke is checked at the moment it is made.
+  await page.addInitScript(() => {
+    const revoke = URL.revokeObjectURL.bind(URL);
+    window.revokedWhileLoading = [];
+    URL.revokeObjectURL = url => {
+      for (const image of document.querySelectorAll('img')) {
+        if (image.getAttribute('src') === url && !image.complete) window.revokedWhileLoading.push(url);
+      }
+      revoke(url);
+    };
+  });
+  const errors = await start(page);
+  await readFixed(page, progressBooks.fixedUnequal.opts);
+  for (const p of [1, 2, 3, 4]) {
+    await expect.poll(async () => (await fixedPlace(page)).p).toBe(p);
+    await page.keyboard.press('ArrowRight');
+  }
+  await expect.poll(async () => (await fixedPlace(page)).p).toBe(5);
+  await toLibrary(page);
+  expect(await page.evaluate(() => window.revokedWhileLoading)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('a backup keeps how far into the book the place is, weighted by the chapters, and a restore shows it on the card', async ({ page }) => {
   const errors = await start(page);
   const { title } = progressBooks.unequal.opts;

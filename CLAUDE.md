@@ -2845,7 +2845,9 @@ aloud and a drag. A copy of the page is kept in an overlay
 removed, `inert` set, its scroll set: quire's policy, not bridge's),
 again a moment (`COPY_SETTLE_MS`) after the page last changed (a
 chapter shown, laid out anew, an image come in), so a turn only
-scrolls the copy to the place and shows it: on a 300 KB chapter its
+scrolls the copy to the place and shows it (the copy's images share the page's
+blob URLs, which bridge revokes only once no image still loading holds them,
+quire#532, `e2e/progress.spec.js`): on a 300 KB chapter its
 first frame comes in 20 to 30 ms, where making the copy at the turn
 took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
 instant turn's, in the same page). A turn shows only a `fresh_copy`,
