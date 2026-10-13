@@ -149,7 +149,7 @@ test('the position survives a reload, a backup and its restore, as 2.5 and not 2
   // a backup holds no series (it is the book's own, read from its file), and a restore leaves the position as it is
   await librarySettings(page);
   const backup = await exportedBackup(page);
-  await settingsButton(page, 'Done').click();
+  await settingsButton(page, 'Back').click();
   expect(backup).not.toContain('"Foundation"');
   expect(backup).not.toMatch(/"(series|number|position)"/i);
   const path = rawFile('quire-backup.json', backup);

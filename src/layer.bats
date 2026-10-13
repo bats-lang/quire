@@ -148,10 +148,20 @@ fn _open_put {count:nat} (overlays: layers(count)): void = let
   val () = ref_exch_elt<[count:nat] layers(count)>(_open, previous)
 in _layers_free(previous) end
 
+(* Whether a pushed screen (one with a top bar) is among the open overlays *)
+fun _screen_open {count:nat} .<count>. (overlays: !layers(count)): bool =
+  case+ overlays of
+  | LNil() => false
+  | LCons(first, _, rest) =>
+    (case+ first of
+     | LSettings() => true | LSync() => true | LAbout() => true | LDictionaries() => true
+     | _ => _screen_open(rest))
+
 (* The open overlays changed: the scrim and the reader follow, and what
    Back has to go back from (back.bats) *)
 fn _open_set {count:nat} (overlays: layers(count)): void = let
   val () = _modality_show(overlays)
+  val () = ui_banner_below_bar(_screen_open(overlays))
   val any = (case+ overlays of LNil() => NotShown() | LCons(_, _, _) => Shown()): shown
   val () = _open_put(overlays)
 in back_overlays_set(any) end

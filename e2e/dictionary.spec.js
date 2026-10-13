@@ -85,7 +85,7 @@ async function importDictionary(page, dict, language, options) {
   if (options && options.refused) return;
   await expect(dictionaries(page).getByRole('group', { name: new RegExp(dict.name) })).toBeVisible({ timeout: 30000 });
   await expect(dictionaries(page).getByRole('status')).toHaveText('Dictionary added.');
-  await dictionaries(page).getByRole('button', { name: 'Done' }).click();
+  await dictionaries(page).getByRole('button', { name: 'Back' }).click();
   await expect(dictionaries(page)).toBeHidden();
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
