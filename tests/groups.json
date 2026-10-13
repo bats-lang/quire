@@ -68,6 +68,7 @@
       "reader.spec.js",
       "storage.spec.js",
       "sync-nextcloud.spec.js",
+      "fonts.spec.js",
       "two-books.spec.js"
     ],
     "extras": [
