@@ -1315,9 +1315,16 @@ only where its platform has it, by its own `data-hide`.
   a page opened again starts out of it, its switch off, and a click
   there does not change what is kept, and the page is in full screen or
   not as that click left it.
-  Where the device refuses the rotation lock (bridge's `LockRefused`),
-  Lock rotation is not offered again that session (`_lock_refused` in
-  `src/screen_controls.bats`) and the banner says so (quire#355): a
+  The rotation lock is the Capacitor plugin's alone in the app (bridge
+  never takes the web API there, where Chromium's WebView has none; quire#355).
+  `_lock` matches every `lock_outcome` with `case+`: `Locked`;
+  `LockRefused(text)`, the plugin's rejection, which removes the row for
+  the session and says in the banner what happened and what to do, the
+  plugin's error kept as written in the Copy details (`notice_rotation_refused`,
+  not a claim that the device cannot lock); `LockUnavailable`, nothing to
+  lock with, which removes the row with no banner (availability is also
+  decided before the tab is drawn, `screen_controls_show`); and
+  `LockUnexpected(code)`, through `notice_unexpected`. A
   control that cannot work is not shown. While the reader is immersive and full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge, the reader's own way out of

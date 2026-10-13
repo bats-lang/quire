@@ -588,15 +588,17 @@ test('in the Android app, bars the system brought back stay until the next page,
   expect(await switchOn(full)).toBe('on');
 });
 
-// quire#355: a control that cannot work is not shown. Where the device
-// refuses the lock, the switch does not stay on the screen springing
-// back: it goes, and the banner says why
-test('a rotation lock the device refuses takes Lock rotation away and says so', async ({ page }) => {
+// quire#355: the app asks the Capacitor plugin (never the web API), with
+// the screen's orientation; a plugin that refuses is a case of its own,
+// the error it gave kept in the details, and the switch does not stay on
+// the screen springing back: it goes, and the banner says what to do
+test('a rotation lock the plugin refuses takes Lock rotation away and keeps its error', async ({ page, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.addInitScript(() => {
     window.calls = [];
     window.Capacitor = { isNativePlatform: () => true, Plugins: {
       SystemBars: { hide: () => Promise.resolve(), show: () => Promise.resolve() },
-      ScreenOrientation: { lock: () => { window.calls.push('lock'); return Promise.reject(new Error('not allowed')); }, unlock: () => Promise.resolve() },
+      ScreenOrientation: { lock: a => { window.calls.push('lock ' + JSON.stringify(a)); const e = new Error('Plugin refused: orientation not allowed'); e.code = 'UNIMPLEMENTED'; return Promise.reject(e); }, unlock: () => Promise.resolve() },
       ScreenBrightness: { setBrightness: () => Promise.resolve() },
     } };
   });
@@ -606,9 +608,41 @@ test('a rotation lock the device refuses takes Lock rotation away and says so', 
   const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
   await expect(lock).toBeVisible();
   await lock.click();
-  await expect.poll(() => page.evaluate(() => window.calls)).toEqual(['lock']);
+  await expect.poll(() => page.evaluate(() => window.calls.length)).toBe(1);
+  expect(await page.evaluate(() => window.calls[0])).toMatch(/^lock \{"orientation":"(portrait|landscape)-primary"\}$/);
   await expect(lock).toBeHidden();
-  await expect(page.getByRole('alert')).toContainText('does not let Quire lock the rotation');
+  const banner = page.getByRole('alert');
+  await expect(banner).toContainText('Lock rotation is no longer offered');
+  await expect(banner).toContainText('post them in a report');
+  await page.evaluate(() => navigator.clipboard.writeText(''));
+  await banner.getByRole('button', { name: 'Copy details' }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('Plugin refused: orientation not allowed');
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('LockRefused');
+});
+
+// quire#355: inside the app the plugin is used, not the web API: a web
+// lock that rejects (Chromium's WebView has none) changes nothing
+test('in the Android app a rejecting web lock does not stop the plugin locking the rotation', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.calls = [];
+    window.Capacitor = { isNativePlatform: () => true, Plugins: {
+      SystemBars: { hide: () => Promise.resolve(), show: () => Promise.resolve() },
+      ScreenOrientation: { lock: a => { window.calls.push('lock ' + JSON.stringify(a)); return Promise.resolve(); }, unlock: () => Promise.resolve() },
+      ScreenBrightness: { setBrightness: () => Promise.resolve() },
+    } };
+    try { screen.orientation.lock = () => { window.calls.push('web lock'); return Promise.reject(new DOMException('no', 'NotSupportedError')); }; } catch (e) { /* kept as it is */ }
+  });
+  await start(page);
+  await readBook(page, { title: 'Plugin', author: 'Settings Tests', rawChapters: chapters(1) });
+  await openReadingSettings(page, 'Page');
+  const lock = more(page).getByRole('button', { name: 'Lock rotation', exact: true });
+  await expect(lock).toBeVisible();
+  await lock.click();
+  await expect.poll(() => switchOn(lock)).toBe('on');
+  const calls = await page.evaluate(() => window.calls);
+  expect(calls.filter(c => c.startsWith('lock '))).toHaveLength(1);
+  expect(calls).not.toContain('web lock');
+  await expect(page.getByRole('alert')).toBeHidden();
 });
 
 test('in a browser tab, the screen offers only what it can: no rotation lock or brightness', async ({ page }, testInfo) => {

@@ -15,6 +15,7 @@
 staload "ui.sats"
 staload TM = "wasm.bats-packages.dev/bridge/src/timer.sats"
 staload IDB = "wasm.bats-packages.dev/bridge/src/idb.sats"
+staload BD = "wasm.bats-packages.dev/bridge/src/decompress.sats"
 staload BAPP = "wasm.bats-packages.dev/bridge/src/app.sats"
 staload CB = "wasm.bats-packages.dev/bridge/src/clipboard.sats"
 staload "version.sats"
@@ -339,6 +340,38 @@ implement notice_unexpected (doing, call, which, answer) = let
   val at = _put_text(said, 512, at, doing)
   val at = _put_text(said, 512, at, ". Copy the details and post them in a report.")
 in _failure_said(said, at, doing, call, $R.some(which), $R.none(), answer) end
+
+fn _plugin_error_length {n:nat} (n: int n): [size:nat | size <= n; size <= 4096] int size =
+  if n <= 4096 then n else 4096
+
+fn _plugin_error_room {size:nat | size <= 4096} (size: int size): [room:pos | size <= room; room <= 4096] int room =
+  if size > 0 then size else 1
+
+(* The rotation lock was refused by the app's plugin: said with what to
+   do (the lock is no longer offered, the details go in a report) and the
+   plugin's error as it wrote it, kept in the details (none when it could
+   not be written down). A refusal is not "the device cannot lock": the
+   plugin said no, and what it said is the report's. *)
+#pub fn notice_rotation_refused (error: $R.option([n:nat] $BD.dblob(n))): void
+
+fn _plugin_error_shown {n:nat} (blob: $BD.dblob(n)): answer_shown = let
+  val n = $BD.blob_len(blob)
+  val size = _plugin_error_length(n)
+  val out = $A.alloc<byte>(_plugin_error_room(size))
+  val () = $BD.blob_read(blob, 0, out, size)
+  val () = $BD.blob_free(blob)
+in
+  if size < n then AnswerCut("as the plugin wrote it", out, size, n)
+  else AnswerShown("as the plugin wrote it", out, size)
+end
+
+implement notice_rotation_refused (error) = let
+  val answer = (case+ error of
+    | ~$R.some(blob) => _plugin_error_shown(blob)
+    | ~$R.none() => NoAnswer()): answer_shown
+  val said = $A.alloc<byte>(512)
+  val at = _put_text(said, 512, 0, "The device refused to lock the rotation, so Lock rotation is no longer offered. Copy the details and post them in a report.")
+in _failure_said(said, at, "locking the rotation", "orientation_lock_current", $R.none(), $R.some("LockRefused"), answer) end
 
 (* A hex digit's character for 0 to 15 *)
 fn _hex_char (digit: int): int =

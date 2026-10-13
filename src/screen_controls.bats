@@ -190,19 +190,38 @@ in _follow() end
 fn _lock (): void =
   $P.finish<$SCR.lock_outcome>($SCR.orientation_lock_current(), llam(outcome) =>
     case+ outcome of
-    | $SCR.Locked() => let
+    | ~$SCR.Locked() => let
         val () = !_locked := true
         val () = set_rotation_set(RotationLocked())
         val () = set_save(lib_state_get())
       in _pressed("screen-lock", true) end
-    | $SCR.LockRefused() => let
+    | ~$SCR.LockRefused(error) => let
         val () = !_locked := false
         val () = !_lock_refused := true
         val () = set_rotation_set(RotationFree())
         val () = set_save(lib_state_get())
         val () = _pressed("screen-lock", false)
         val () = screen_controls_show()
-      in notice_say(RotationNotLockable()) end)
+      in notice_rotation_refused(error) end
+    | ~$SCR.LockUnavailable() => let
+        (* nothing to lock with here: the row goes, with no banner, as
+           screen_controls_show would not have drawn it *)
+        val () = !_locked := false
+        val () = !_lock_refused := true
+        val () = set_rotation_set(RotationFree())
+        val () = set_save(lib_state_get())
+        val () = _pressed("screen-lock", false)
+      in screen_controls_show() end
+    | ~$SCR.LockUnexpected(code) =>
+        (* a code bridge's JS never gives: the unexpected, as such *)
+        let
+          val () = !_locked := false
+          val () = !_lock_refused := true
+          val () = set_rotation_set(RotationFree())
+          val () = set_save(lib_state_get())
+          val () = _pressed("screen-lock", false)
+          val () = screen_controls_show()
+        in notice_unexpected("locking the rotation", "orientation_lock_current", CaseNumbered("LockUnexpected", code), NoAnswer()) end)
 
 (* Lock rotation clicked: locked, or let go, and kept *)
 #pub fn screen_lock_toggle (): void
