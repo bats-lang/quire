@@ -139,7 +139,12 @@ test('a chapter whose CRC is not its data\'s is reported as unreadable, and the 
   await showChrome(page);
   await control(page, 'Contents').click();
   await rows(page).nth(1).click();
-  await expect(page.getByRole('alert')).toContainText(/Chapter 2 of this book could not be read/);
+  const banner = page.getByRole('alert');
+  await expect(banner).toContainText(/Chapter 2 of this book could not be read/);
+  // the banner stays until it is dismissed, and on a phone it lies over the
+  // rows of the contents: the reader dismisses it before choosing the next chapter
+  await banner.getByRole('button', { name: 'Dismiss' }).click();
+  await expect(banner).toBeHidden();
   await readRow(page, 2);
   expect(errors).toEqual([]);
 });
