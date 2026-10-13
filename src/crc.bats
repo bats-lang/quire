@@ -6,6 +6,7 @@
 #include "share/atspre_staload.hats"
 
 #use arith as AR
+#use array as A
 
 staload "bytes.sats"
 
@@ -177,5 +178,54 @@ implement crcfrom {high,low}{octets}{byte_count} (high, low, octet_list) = let
         val (rest_proof | end_high, end_low) = register_after(mid_high, mid_low, rest)
       in (CRCFROM_cons(step_proof, rest_proof) | end_high, end_low) end
 in register_after(high, low, octet_list) end
+
+(* The CRC-32 (high and low 16 bits) of the n bytes of an array, by the
+   table of the 256 registers the byte step above makes from zero (entry i
+   is the register after the byte i; 4 bytes an entry, low half first):
+   the register after a byte is the register shifted right by 8 bits,
+   xored with the entry of its low byte xored with the byte, as the usual
+   table algorithm has it, and the result is xored with 0xFFFFFFFF. A
+   chapter can be megabytes, and the bit by bit fold crcfrom makes of a
+   list costs a list cell a byte. What is tested, not proved, is that it
+   is the same CRC: tests/codec checks the check value of "123456789",
+   the fold crcfrom makes, and a few thousand bytes of fuzz both ways; the
+   array's content is not in its type. *)
+#pub fun crc_of_borrow {lb:agz}{n:pos} (bytes: !$A.borrow(byte, lb, n), n: int n)
+  : [high,low:nat | high < 65536; low < 65536] @(int high, int low)
+
+(* The 16 bits at at, at + 1 of the table, low byte first *)
+fn _table_half {l:agz}{at:nat | at + 2 <= 1024} (table: !$A.arr(byte, l, 1024), at: int at): [half:nat | half < 65536] int half =
+  $AR.low_byte(byte2int0($A.get<byte>(table, at))) + 256 * $AR.low_byte(byte2int0($A.get<byte>(table, at + 1)))
+
+fn _table_put {l:agz}{at:nat | at + 2 <= 1024}{half:nat | half < 65536}
+  (table: !$A.arr(byte, l, 1024), at: int at, half: int half): void = let
+  val () = $A.set<byte>(table, at, $A.int2byte($AR.low_byte(half)))
+in $A.set<byte>(table, at + 1, $A.int2byte($AR.low_byte(half / 256))) end
+
+implement crc_of_borrow {lb}{n} (bytes, n) = let
+  val table = $A.alloc<byte>(1024)
+  fun build {l:agz}{i:nat | i <= 256} .<256 - i>. (table: !$A.arr(byte, l, 1024), i: int i): void =
+    if i >= 256 then ()
+    else let
+      val (_ | entry_high, entry_low) = bstep(0, 0, i)
+      val () = _table_put(table, 4 * i, entry_low)
+      val () = _table_put(table, 4 * i + 2, entry_high)
+    in build(table, i + 1) end
+  val () = build(table, 0)
+  fun register_after {l:agz}{i:nat | i <= n}{high,low:nat | high < 65536; low < 65536} .<n - i>.
+    (bytes: !$A.borrow(byte, lb, n), table: !$A.arr(byte, l, 1024), i: int i, high: int high, low: int low)
+    : [end_high,end_low:nat | end_high < 65536; end_low < 65536] @(int end_high, int end_low) =
+    if i >= n then @(high, low)
+    else let
+      val octet = $AR.low_byte(byte2int0($A.read<byte>(bytes, i)))
+      val (_ | mixed) = xor16(low, octet)
+      val index = $AR.low_byte(mixed)
+      val shifted_low = low / 256 + 256 * $AR.low_byte(high)
+      val (_ | next_low) = xor16(shifted_low, _table_half(table, 4 * index))
+      val (_ | next_high) = xor16(high / 256, _table_half(table, 4 * index + 2))
+    in register_after(bytes, table, i + 1, next_high, next_low) end
+  val @(end_high, end_low) = register_after(bytes, table, 0, 65535, 65535)
+  val () = $A.free<byte>(table)
+in @(65535 - end_high, 65535 - end_low) end
 
 end

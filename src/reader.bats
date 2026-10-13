@@ -4267,6 +4267,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
     (case+ piece_new(compressed_size) of
      | ~NoPiece() => $P.ret<load_outcome>(NoRoomForChapter())
      | ~Piece(compressed_owner, compressed) => let
+         val facing_sum = book_entry_sum(serial, chapter_name_offset)
          val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
          val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
          val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
@@ -4274,7 +4275,7 @@ fn _facing_open {facing_index:nat} (serial: int, facing_index: int facing_index,
          val () = piece_free(compressed_owner, $A.thaw<byte>(compressed_frozen))
        in
          $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) =>
-           case+ take_text(inflated) of
+           case+ take_text_sum(inflated, facing_sum) of
            | ~NoContentBytes() => $P.ret<load_outcome>(ChapterNotRead())
            | ~ContentBytes(xhtml_owner, xhtml, xhtml_size) =>
              if generation <> !_load_generation then let
@@ -4320,6 +4321,8 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
           val () = _overlay_pending_put(NoOverlayPending())
         in $P.ret<load_outcome>(NoRoomForChapter()) end
       | ~Piece(compressed_owner, compressed) => let
+              (* the CRC-32 the archive states for the chapter (quire#529) *)
+              val chapter_sum = book_entry_sum(serial, chapter_name_offset)
               val _ = book_read(serial, file_size, chapter_start, compressed, compressed_size)
               val @(compressed_frozen, compressed_bytes) = $A.freeze<byte>(compressed)
               val decompressing = decompress(compressed_bytes, compressed_size, zip_compression(method))
@@ -4328,7 +4331,7 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
             in
               (* Stage 3: parse HTML and render *)
               $P.and_then<decompressed><load_outcome>(decompressing, llam(inflated) => let
-                val content = take_text(inflated)
+                val content = take_text_sum(inflated, chapter_sum)
               in
                 case+ content of
                 | ~NoContentBytes() => let

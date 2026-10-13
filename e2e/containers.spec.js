@@ -133,8 +133,6 @@ test('a small archive in ZIP64 form opens (EPUB 3.3 allows ZIP64) and its chapte
 });
 
 test('a chapter whose CRC is not its data\'s is reported as unreadable, and the others read', async ({ page }) => {
-  // quire#529: no CRC is checked, so the damaged chapter is shown as if it were whole
-  test.fail(true, 'quire#529: a CRC is never checked');
   const errors = await start(page);
   await openContainer(page, 'wrongCrc');
   await readRow(page, 0);
