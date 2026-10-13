@@ -3925,7 +3925,7 @@ end
 
 (* The unique identifier of the package, copied: the key of a font masked by either obfuscation (quire#410) *)
 datavtype font_identifier =
-  | {l:agz}{n:pos} FontIdentifier of ($A.arr(byte, l, n), int n)
+  | {l:agz}{n:pos | n <= 4096} FontIdentifier of ($A.arr(byte, l, n), int n)
   | NoFontIdentifier of ()
 
 fn _font_identifier_free (identifier: font_identifier): void =

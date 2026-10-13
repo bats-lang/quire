@@ -67,7 +67,8 @@
       "pagebreak.spec.js",
       "reader.spec.js",
       "storage.spec.js",
-      "sync-nextcloud.spec.js"
+      "sync-nextcloud.spec.js",
+      "fonts.spec.js"
     ],
     "extras": [
       "containers.spec.js",

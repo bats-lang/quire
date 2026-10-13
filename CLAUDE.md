@@ -1162,8 +1162,52 @@ audio is: not done). Leaving the chapter removes the element, which stops it.
 * **The package's fonts are the Book font** (`cnt-css-fonts_ot`, `_tt`, `_woff`,
   `_woff2`): the book's CSS is dropped (#411), so which text uses a font is the
   reader's: Font: Book loads the first font of the manifest (`font/otf`, `font/ttf`,
-  `font/woff`, `font/woff2`) for the text. An obfuscated font (`ocf-font_obfuscation`,
-  a should) is not undone: IDPF's obfuscation needs SHA-1, which Quire has no package for.
+  `font/woff`, `font/woff2`) for the text. An obfuscated font is undone (#410, below).
+
+## Obfuscated fonts are undone (#410)
+
+EPUB OCF 3.3 section 4.1.2 requires a reading system with a viewport to undo
+the two font obfuscations, and a reader that skips them falls back to a default
+face without a word. `src/font_obfuscation.bats` undoes both (xor is its own
+inverse, `font_unmask`): IDPF's (`http://www.idpf.org/2008/embedding`: the
+key is the SHA-1 of the package's unique identifier with its white space,
+U+0020, U+0009, U+000D and U+000A, taken out, 20 bytes, xored with the font's
+first 1040 bytes going round; `idpf_key`) and Adobe's
+(`http://ns.adobe.com/pdf/enc#RC`: the 16 bytes of the identifier's UUID, after its
+last colon and without its dashes, xored with the first 1024; `adobe_key`).
+SHA-1 is `src/sha1.bats` (pure Bats, as the sha256 package is written; it is
+used for nothing but this key, and belongs in a package of its own when one is
+made). The unique identifier is the `dc:identifier` the package's
+`unique-identifier` names (`opf_unique_identifier`, copied by `_font_locate`).
+Which algorithm a font has comes from `META-INF/encryption.xml`, read as the font
+is loaded (`_font_cipher_find`): each `EncryptedData`
+(`encrypted_nth`) names a `CipherReference` URI, found with `book_find_relative`
+from the container's root, and it is the font's when its entry is the font's
+(`font_cipher`: `FontNotListed`, `FontObfuscatedIdpf`, `FontObfuscatedAdobe`,
+`FontCipherOther`). The font is unmasked in its piece before its blob URL is made
+(`_font_blob`), every time the book is opened, so a reload works as an import does.
+It degrades where it is (no banner for the book; the text is set in the reader's
+own face, `var(--bookfont,Georgia),serif`): an algorithm Quire has no client for
+(`FontCipherOther`), an identifier that makes no key (an Adobe one that is no UUID,
+none, over 4096 bytes), a font the archive lacks, noise, and one shorter than the masked
+bytes (the browser's decoder refuses it). By research: the OCF specification
+gives both algorithms and requires them of a reading system; Readium's streamer
+(`FontDecoder`), Calibre (`oeb/polish` font deobfuscation) and foliate-js
+(`epub.js` deobfuscators) each undo both the same way, and a resource they cannot
+decode is not drawn, not a failure of the book.
+
+**A font encrypted in an unknown algorithm does not make the book DRM** (#410
+against #427): `_encrypted_data_unknown` (`src/epub_xml.bats`) passes an
+`EncryptedData` whose `CipherReference` is a font file (`.otf`, `.ttf`, `.ttc`,
+`.woff`, `.woff2`) even when its algorithm is none of the two, since the text
+of such a book reads and only the face cannot be had. Anything else under an
+unknown algorithm is refused as before (`e2e/drm.spec.js`), and a namespace of
+ADEPT, LCP or Kobo anywhere in the file still is. `e2e/fonts.spec.js` plays
+`e2e/font-books.js` (checked by epubcheck, the font `e2e/marker-font.ttf` has one
+glyph no system has, U+E000, 1.7 em wide, so the page's face is told by measuring
+it; `create-epub.js` has `obfuscatedFonts`, `identifier` and `manifestOnly`, and
+`obfuscateFont`, written apart from the app's): masked each way, an identifier with
+white space, a reload, no Book chosen, and each degrading case.
 
 ### Settled by research, kept failing (#419)
 

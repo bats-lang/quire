@@ -38,11 +38,14 @@ fn _mix {t:nat | t < 80} (t: int t, b: uint, c: uint, d: uint): uint =
   else if t < 60 then (b land c) lor (b land d) lor (c land d)
   else b lxor c lxor d
 
-(* Processes the block data[block_at, block_at + 64) into h, with w as the
+(* The five words of the hash state *)
+typedef state = @(uint, uint, uint, uint, uint)
+
+(* Processes the block data[block_at, block_at + 64) into the state, with w as the
    message schedule (section 6.1.2) *)
-fn _compress {ld:agz}{nd:pos}{block_at:nat | block_at + 64 <= nd}{lw:agz}{lh:agz}
+fn _compress {ld:agz}{nd:pos}{block_at:nat | block_at + 64 <= nd}{lw:agz}
   (data: !$A.arr(byte, ld, nd), block_at: int block_at,
-   w: !$A.arr(uint, lw, 80), h: !$A.arr(uint, lh, 5)): void = let
+   w: !$A.arr(uint, lw, 80), h: state): state = let
   fun load {t:nat | t <= 16} .<16 - t>.
     (data: !$A.arr(byte, ld, nd), w: !$A.arr(uint, lw, 80), t: int t): void =
     if t >= 16 then ()
@@ -62,33 +65,29 @@ fn _compress {ld:agz}{nd:pos}{block_at:nat | block_at + 64 <= nd}{lw:agz}{lh:agz
       val () = $A.set<uint>(w, t, _rotl(mixed, 1))
     in expand(w, t + 1) end
   fun rounds {t:nat | t <= 80} .<80 - t>.
-    (w: !$A.arr(uint, lw, 80), t: int t, a: uint, b: uint, c: uint, d: uint, e: uint): @(uint, uint, uint, uint, uint) =
+    (w: !$A.arr(uint, lw, 80), t: int t, a: uint, b: uint, c: uint, d: uint, e: uint): state =
     if t >= 80 then @(a, b, c, d, e)
     else let
       val temporary = _rotl(a, 5) + _mix(t, b, c, d) + e + _constant(t) + $A.get<uint>(w, t)
     in rounds(w, t + 1, temporary, a, _rotl(b, 30), c, d) end
   val () = load(data, w, 0)
   val () = expand(w, 16)
-  val h0 = $A.get<uint>(h, 0) val h1 = $A.get<uint>(h, 1) val h2 = $A.get<uint>(h, 2)
-  val h3 = $A.get<uint>(h, 3) val h4 = $A.get<uint>(h, 4)
+  val @(h0, h1, h2, h3, h4) = h
   val @(a, b, c, d, e) = rounds(w, 0, h0, h1, h2, h3, h4)
-  val () = $A.set<uint>(h, 0, h0 + a) val () = $A.set<uint>(h, 1, h1 + b)
-  val () = $A.set<uint>(h, 2, h2 + c) val () = $A.set<uint>(h, 3, h3 + d)
-  val () = $A.set<uint>(h, 4, h4 + e)
-in end
+in @(h0 + a, h1 + b, h2 + c, h3 + d, h4 + e) end
 
 (* data[from, stop) appended to the block in block[0, filled), each block
-   compressed as it fills; the bytes left in the block *)
-fun _fill {lh,lw,lb,ld:agz}{n:pos}{stop:nat | stop <= n}{from:nat | from <= stop}{filled:nat | filled < 64} .<stop - from>.
-  (h: !$A.arr(uint, lh, 5), w: !$A.arr(uint, lw, 80), block: !$A.arr(byte, lb, 64),
-   data: !$A.borrow(byte, ld, n), stop: int stop, from: int from, filled: int filled): [left:nat | left < 64] int left =
-  if from >= stop then filled
+   compressed as it fills; the bytes left in the block, and the state *)
+fun _fill {lw,lb,ld:agz}{n:pos}{stop:nat | stop <= n}{from:nat | from <= stop}{filled:nat | filled < 64} .<stop - from>.
+  (h: state, w: !$A.arr(uint, lw, 80), block: !$A.arr(byte, lb, 64),
+   data: !$A.borrow(byte, ld, n), stop: int stop, from: int from, filled: int filled): @([left:nat | left < 64] int left, state) =
+  if from >= stop then @(filled, h)
   else let
     val () = $A.set<byte>(block, filled, $A.read<byte>(data, from))
   in
     if filled + 1 >= 64 then let
-      val () = _compress(block, 0, w, h)
-    in _fill(h, w, block, data, stop, from + 1, 0) end
+      val next = _compress(block, 0, w, h)
+    in _fill(next, w, block, data, stop, from + 1, 0) end
     else _fill(h, w, block, data, stop, from + 1, filled + 1)
   end
 
@@ -99,19 +98,27 @@ fn _put_word {lo:agz}{at:nat | at + 4 <= 20} (out: !$A.arr(byte, lo, 20), at: in
   val () = $A.set<byte>(out, at + 2, $A.int2byte(_byte(x >> 8)))
 in $A.set<byte>(out, at + 3, $A.int2byte(_byte(x))) end
 
-implement sha1_digest {l}{n}{data_len}{lo} (data, data_len, out) = let
-  val h = $A.alloc<uint>(5)
-  val () = $A.set<uint>(h, 0, 0x67452301u)
-  val () = $A.set<uint>(h, 1, 0xefcdab89u)
-  val () = $A.set<uint>(h, 2, 0x98badcfeu)
-  val () = $A.set<uint>(h, 3, 0x10325476u)
-  val () = $A.set<uint>(h, 4, 0xc3d2e1f0u)
-  val w = $A.alloc<uint>(80)
-  val block = $A.alloc<byte>(64)
-  val tail = _fill(h, w, block, data, data_len, 0, 0)
+(* The one or two blocks of padding in padding[0, last), compressed into the state *)
+fn _compress_padding {lp,lw:agz}{last:int | last == 64 || last == 128}
+  (padding: !$A.arr(byte, lp, 128), last: int last, w: !$A.arr(uint, lw, 80), h: state): state = let
+  val first = _compress(padding, 0, w, h)
+in if last = 128 then _compress(padding, 64, w, first) else first end
+
+(* The buffers of a digest given back *)
+fn _release {lp,lb,lw:agz} (padding: $A.arr(byte, lp, 128), block: $A.arr(byte, lb, 64), w: $A.arr(uint, lw, 80)): void = let
+  val () = $A.free<byte>(padding)
+  val () = $A.free<byte>(block)
+in $A.free<uint>(w) end
+
+fn _digest {l:agz}{n:pos}{data_len:pos | data_len <= n}{lo:agz}
+  (data: !$A.borrow(byte, l, n), data_len: int data_len, out: !$A.arr(byte, lo, 20)): void = let
+  val w = $A.alloc<uint>(80): [lw:agz] $A.arr(uint, lw, 80)
+  val block = $A.alloc<byte>(64): [lb:agz] $A.arr(byte, lb, 64)
+  val initial = @(0x67452301u, 0xefcdab89u, 0x98badcfeu, 0x10325476u, 0xc3d2e1f0u): state
+  val @(tail, filled_state) = _fill(initial, w, block, data, data_len, 0, 0)
   (* the tail, 0x80, zeros and the length in bits as 64 bits, big endian,
      in one block or two (alloc zeroes what it gives) *)
-  val padding = $A.alloc<byte>(128)
+  val padding = $A.alloc<byte>(128): [lp:agz] $A.arr(byte, lp, 128)
   fun copy {lp,lb:agz}{tail:nat | tail < 64}{i:nat | i <= tail} .<tail - i>.
     (block: !$A.arr(byte, lb, 64), padding: !$A.arr(byte, lp, 128), tail: int tail, i: int i): void =
     if i >= tail then ()
@@ -132,15 +139,12 @@ implement sha1_digest {l}{n}{data_len}{lo} (data, data_len, out) = let
   val () = $A.set<byte>(padding, last - 3, $A.int2byte(_byte(bits_low >> 16)))
   val () = $A.set<byte>(padding, last - 2, $A.int2byte(_byte(bits_low >> 8)))
   val () = $A.set<byte>(padding, last - 1, $A.int2byte(_byte(bits_low)))
-  val () = _compress(padding, 0, w, h)
-  val () = (if last = 128 then _compress(padding, 64, w, h) else ())
-  val () = _put_word(out, 0, $A.get<uint>(h, 0))
-  val () = _put_word(out, 4, $A.get<uint>(h, 1))
-  val () = _put_word(out, 8, $A.get<uint>(h, 2))
-  val () = _put_word(out, 12, $A.get<uint>(h, 3))
-  val () = _put_word(out, 16, $A.get<uint>(h, 4))
-  val () = $A.free<byte>(padding)
-  val () = $A.free<byte>(block)
-  val () = $A.free<uint>(w)
-  val () = $A.free<uint>(h)
-in end
+  val @(h0, h1, h2, h3, h4) = _compress_padding(padding, last, w, filled_state)
+  val () = _put_word(out, 0, h0)
+  val () = _put_word(out, 4, h1)
+  val () = _put_word(out, 8, h2)
+  val () = _put_word(out, 12, h3)
+  val () = _put_word(out, 16, h4)
+in _release(padding, block, w) end
+
+implement sha1_digest (data, data_len, out) = _digest(data, data_len, out)

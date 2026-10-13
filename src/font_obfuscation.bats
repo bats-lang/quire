@@ -37,7 +37,7 @@ fn _byte (x: uint): [v:nat | v < 256] int v =
 fn _is_space (b: int): bool = b = 32 || b = 9 || b = 13 || b = 10
 
 (* clean[0, kept) := the bytes of identifier[0, n) that are not white space; how many *)
-fun _strip {l,lc:agz}{n:pos}{i:nat | i <= n}{kept:nat | kept <= i} .<n - i>.
+fun _strip {l,lc:agz}{n:pos | n <= 4096}{i:nat | i <= n}{kept:nat | kept <= i} .<n - i>.
   (identifier: !$A.borrow(byte, l, n), n: int n, clean: !$A.arr(byte, lc, n), i: int i, kept: int kept): [count:nat | count <= n] int count =
   if i >= n then kept
   else let
@@ -51,7 +51,7 @@ fun _strip {l,lc:agz}{n:pos}{i:nat | i <= n}{kept:nat | kept <= i} .<n - i>.
 
 (* The IDPF key of the unique identifier identifier[0, n): key[0, 20) := the
    SHA-1 of it without its white space; false when nothing is left of it *)
-#pub fn idpf_key {l:agz}{n:pos}{lk:agz}
+#pub fn idpf_key {l:agz}{n:pos | n <= 4096}{lk:agz}
   (identifier: !$A.borrow(byte, l, n), n: int n, key: !$A.arr(byte, lk, 20)): bool
 
 implement idpf_key (identifier, n, key) = let
@@ -69,9 +69,12 @@ end
 
 (* The value of the hex digit c, or -1 *)
 fn _hex_value {c:int} (c: int c): [d:int | ~1 <= d; d < 16] int d =
-  if c >= 48 && c <= 57 then c - 48
-  else if c >= 97 && c <= 102 then c - 87
-  else if c >= 65 && c <= 70 then c - 55
+  if c < 48 then ~1
+  else if c <= 57 then c - 48
+  else if c < 65 then ~1
+  else if c <= 70 then c - 55
+  else if c < 97 then ~1
+  else if c <= 102 then c - 87
   else ~1
 
 (* Where the UUID begins in the identifier: after its last colon (urn:uuid:), else at its start *)
@@ -118,7 +121,8 @@ fun _unmask {l,lk:agz}{o:addr}{n:pos}{k:pos}{stop:nat | stop <= n}{at:nat | at <
     val masked = _word(byte2int0($A.get<byte>(font, at)))
     val mask = _word(byte2int0($A.get<byte>(key, j)))
     val () = $A.set<byte>(font, at, $A.int2byte(_byte(masked lxor mask)))
-  in _unmask(font, key, key_len, stop, at + 1, if j + 1 >= key_len then 0 else j + 1) end
+    val next = (if j + 1 >= key_len then 0 else j + 1): [next:nat | next < k] int next
+  in _unmask(font, key, key_len, stop, at + 1, next) end
 
 (* The first masked bytes of font[0, font_len) xored with key[0, key_len), which goes
    round (a font shorter than that has all of its bytes xored) *)

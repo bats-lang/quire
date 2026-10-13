@@ -5,6 +5,7 @@
  * using Node.js zlib for deflate compression. No external dependencies.
  */
 
+import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { deflateRawSync, deflateSync, inflateRawSync } from 'node:zlib';
 
@@ -305,6 +306,26 @@ export function solidPng(width, height, [r, g, b] = [40, 90, 160], { noise = fal
   ]);
 }
 
+export const IDPF_ALGORITHM = 'http://www.idpf.org/2008/embedding';
+export const ADOBE_ALGORITHM = 'http://ns.adobe.com/pdf/enc#RC';
+
+/**
+ * A font masked as the EPUB OCF names (section 4.1.2), written here
+ * independently of the app's: IDPF xors the first 1040 bytes with the
+ * SHA-1 of the identifier without white space (20 bytes, going round),
+ * Adobe the first 1024 with the 16 bytes of the identifier's UUID.
+ * The same call unmasks.
+ */
+export function obfuscateFont(data, algorithm, identifier) {
+  const key = algorithm === 'idpf'
+    ? createHash('sha1').update(identifier.replace(/[ \t\r\n]/g, ''), 'utf8').digest()
+    : Buffer.from(identifier.replace(/^urn:uuid:/, '').replace(/-/g, ''), 'hex');
+  const masked = Buffer.from(data);
+  const count = Math.min(masked.length, algorithm === 'idpf' ? 1040 : 1024);
+  for (let i = 0; i < count; i++) masked[i] ^= key[i % key.length];
+  return masked;
+}
+
 /**
  * META-INF/encryption.xml (OCF 3.3 section 4.1) for the resources
  * items names, each {uri, algorithm}; more is inside the first
@@ -355,6 +376,8 @@ export function createEpub(opts = {}) {
     ? '<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">'
     : '<!DOCTYPE html>';
   const uid = crypto.randomUUID();
+  // opts.identifier: the package's unique identifier as written (default a urn:uuid)
+  const identifier = opts.identifier !== undefined ? opts.identifier : `urn:uuid:${uid}`;
   // opts.opfDir / opts.opfName: where the package document is (default
   // OEBPS/content.opf); every href of the manifest is relative to it, and
   // opts.navHref is the nav document's (default nav.xhtml). The zip entry of
@@ -364,6 +387,16 @@ export function createEpub(opts = {}) {
   const opfName = opts.opfName || 'content.opf';
   const navHref = opts.navHref || 'nav.xhtml';
   const inBook = href => posix.join(opfDir, decodeURIComponent(href));
+  // opts.obfuscatedFonts: [{ name, data, algorithm, mediaType }] fonts the package masks (OCF 3.3 section
+  // 4.1.2): algorithm 'idpf' or 'adobe' masks data with the key of the identifier, any other string is
+  // the algorithm's URI and leaves data as it is (an encryption Quire cannot undo); listed in encryption.xml
+  const fonts = (opts.obfuscatedFonts || []).map(f => ({
+    ...f,
+    data: f.algorithm === 'idpf' || f.algorithm === 'adobe' ? obfuscateFont(f.data, f.algorithm, identifier) : f.data,
+    uri: f.algorithm === 'idpf' ? IDPF_ALGORITHM : f.algorithm === 'adobe' ? ADOBE_ALGORITHM : f.algorithm,
+  }));
+  const extraFiles = [...(opts.extraFiles || []), ...fonts.map(f => ({ name: f.name, data: f.data, mediaType: f.mediaType || 'font/otf', store: true }))];
+  const metaInf = [...(opts.metaInf || []), ...(fonts.length ? [{ name: 'encryption.xml', data: encryptionXml(fonts.map(f => ({ uri: inBook(f.name), algorithm: f.uri }))) }] : [])];
 
   // mimetype must be first entry, stored uncompressed
   const mimetype = 'application/epub+zip';
@@ -485,7 +518,7 @@ ${doctype}
     (e.children ? ncxPoints(e.children) : '') + '</navPoint>\n').join('');
   const tocNcx = `<?xml version="1.0" encoding="UTF-8"?>
 <ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
-<head><meta name="dtb:uid" content="urn:uuid:${uid}"/></head><docTitle><text>${title}</text></docTitle>
+<head><meta name="dtb:uid" content="${identifier}"/></head><docTitle><text>${title}</text></docTitle>
 <navMap>
 ${opts.ncxNavMap !== undefined ? opts.ncxNavMap : ncxPoints(tocTree)}</navMap>
 ${pageList.length ? `<pageList>${pageList.map((e, k) => `<pageTarget id="pt${k}" type="normal" value="${k + 1}">` +
@@ -505,8 +538,12 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
 
   // opts.extraFiles: [{ name, data, mediaType, store }] more manifest
   // items, deflated unless store
-  for (const [k, f] of (opts.extraFiles || []).entries()) {
+  for (const [k, f] of extraFiles.entries()) {
     manifestItems += `    <item id="x${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
+  }
+  // opts.manifestOnly: [{ name, mediaType }] manifest items the archive has no entry for (a book that lost a file)
+  for (const [k, f] of (opts.manifestOnly || []).entries()) {
+    manifestItems += `    <item id="y${k}" href="${f.name}" media-type="${f.mediaType}"/>\n`;
   }
   // opts.ncx: an EPUB 2 table of contents (toc.ncx, named by the spine)
   if (useNcx) {
@@ -523,7 +560,7 @@ ${pageList.length ? `  <nav epub:type="page-list" hidden="">\n    <ol>\n${navLis
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
     <dc:title>${title}</dc:title>
     ${opts.creatorXml || `<dc:creator>${author}</dc:creator>`}
-${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">urn:uuid:${uid}</dc:identifier>
+${language ? `    <dc:language>${language}</dc:language>\n` : ''}    <dc:identifier id="uid">${identifier}</dc:identifier>
 ${epub2 ? '' : '    <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>\n'}${epub2 && coverImage ? '    <meta name="cover" content="cover-img"/>\n' : ''}${opts.metadata || ''}  </metadata>
   <manifest>
 ${manifestItems}  </manifest>
@@ -540,9 +577,9 @@ ${guide.length ? `  <guide>\n${guide.map(g => `    <reference type="${g.type}" t
     { name: posix.join(opfDir, opfName), data: contentOpf, store: true, damaged: !!opts.damagedPackage },
     useNcx ? { name: inBook('toc.ncx'), data: tocNcx } : { name: inBook(navHref), data: navXhtml },
   ];
-  for (const f of (opts.metaInf || [])) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
+  for (const f of metaInf) zipEntries.push({ name: 'META-INF/' + f.name, data: f.data, store: true });
   if (opts.alsoNav) zipEntries.push({ name: inBook(navHref), data: navXhtml });
-  for (const f of (opts.extraFiles || [])) zipEntries.push({ name: inBook(f.name), data: f.data, store: !!f.store });
+  for (const f of extraFiles) zipEntries.push({ name: inBook(f.name), data: f.data, store: !!f.store });
   zipEntries.push(...overlays);
 
   // SVG cover wrap page (emulates real-world pattern: <svg><image xlink:href="...">)
