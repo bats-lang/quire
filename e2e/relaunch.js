@@ -337,7 +337,8 @@ async function strayPixels(page, shot) {
 /** When the screen has a stray pixel, say what clears it: a second screenshot, a nudge of the page's scroll, the page-turn copy taken out */
 async function strayForensics(page, screen) {
   const found = await strayPixels(page, screen);
-  if (found.length === 0) return;
+  // a few pixels are a stray; a screen with content there (a bar, a list) has hundreds
+  if (found.length === 0 || found.length > 12) return;
   const info = test.info();
   const report = { first: found };
   await info.attach('stray-first.png', { body: screen, contentType: 'image/png' });
