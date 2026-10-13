@@ -180,8 +180,13 @@ export async function walkEveryScreen(page, { look, back }) {
   }
   await check('Reading settings, Page, its switches on');
   await back();
-  await showChrome(page);
-  await topBar(page).getByRole('button', { name: 'Search in book' }).click();
+  // with Full screen on, closing the sheet leaves browser full screen, the window is resized and the
+  // chapter laid out again, and a page shown hides the bars once more (quire#314): bringing them up
+  // and pressing Search are tried again together until the press lands (quire#536; clickControl's way)
+  await expect(async () => {
+    await showChrome(page);
+    await topBar(page).getByRole('button', { name: 'Search in book' }).click({ timeout: 2000 });
+  }).toPass({ timeout: 20000 });
   await expect(dialog(page, 'Search in book')).toBeVisible();
   await check('Search in book');
   await back();
