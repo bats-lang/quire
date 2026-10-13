@@ -547,6 +547,8 @@ fn _library_shown (save_view: bool): void = let
   (* a reload now comes back here *)
   val () = (if save_view then _view_save(~1, 0, 0) else ())
   val () = reader_search_stop()
+  (* what was typed in the book's search is the book's: the next book's field is empty (#435) *)
+  val () = app_book_search()
   val () = reader_stack_clear()
   (* a page turn under way ends with the book *)
   val () = reader_turn_settle()
