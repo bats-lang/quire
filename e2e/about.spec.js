@@ -70,11 +70,13 @@ test('Settings opens About, which shows the app and links out of it', async ({ p
   expect(errors).toEqual([]);
 });
 
-test('the library menu opens About, next to Settings, and Escape goes back to the library', async ({ page, baseURL }, testInfo) => {
+test('the library menu opens About, after Settings and Sync, and Escape goes back to the library', async ({ page, baseURL }, testInfo) => {
   const errors = await start(page);
   await libraryMenu(page);
   const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
-  expect(items.indexOf('About Quire')).toBe(items.indexOf('Settings') + 1);
+  // Settings, Sync (#501), then About
+  expect(items.indexOf('Sync')).toBe(items.indexOf('Settings') + 1);
+  expect(items.indexOf('About Quire')).toBe(items.indexOf('Sync') + 1);
   await menuItem(page, 'About Quire').click();
   await expect(about(page)).toBeVisible();
   await expect(page.getByRole('menu')).toBeHidden();

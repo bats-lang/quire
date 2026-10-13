@@ -2652,6 +2652,28 @@ sets) to the home page, privacy policy and terms (no link to the
 source: nothing in the app or its pages points to the repository but
 the GitHub issues the pages give for contact).
 
+Where sync and the backup are (#501): sync is how a new phone gets places,
+shelves and notes, so the library menu has a Sync item (two taps from the
+library, `MenuSync`, opening the Sync screen over the library, whose Escape
+or Back returns to it) and an empty library offers "Sync with another
+device" (`empty-sync`) beside Import and Get free books; the backup stays
+in Settings (three taps), with a line under the first group saying that sync
+keeps places, shelves and notes the same on the devices, that a backup holds
+them in a file, and that neither holds the books' files. By research: Play
+Books syncs through the Google account with no setting to find, Moon+ Reader
+keeps its backup in Settings; a prompt after the first book is not used (a
+nag before the reader has anything to lose). `e2e/settings-screen.spec.js`
+checks both depths and the empty library's offer.
+
+The reading settings' themes are swatches (#501, `theme_swatch_rules`): each
+fixed theme is a button that wears its theme's class (`th-sepia`), so its
+variables are that palette's and its sample "Aa" on its card is the theme's
+own pair, proven in every theme (`S_fg_card`), the chosen one ringed in its
+accent and underlined (`E_accent_card`); its name is its `aria-label`. Auto
+(the clock's) is a word. `looksActionable` (`e2e/controls-shown.js`, in
+`fits`) fails a chevron on something that is not a control, one that is
+not drawn, or one without a control's pointer.
+
 A pushed screen (Settings, Sync, Dictionaries, About: class `info`, opened
 from a row that ends in a chevron) has a top bar, not a Done at its foot
 (#502; Android's settings and Material 3's small top app bar have a

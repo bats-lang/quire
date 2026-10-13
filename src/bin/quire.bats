@@ -1498,7 +1498,13 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
   (* import: from the bar, or from the empty library's message *)
   val listeners = RCons(listeners, OnEl("import-button"), "change", llam(_) => let val () = import_picked() in 0 end)
   val listeners = RCons(listeners, OnEl("empty-import"), "change", llam(_) => let val () = import_picked_empty() in 0 end)
-  val listeners = RCons(listeners, OnEl("empty-catalogues"), "click", llam(_) => let val () = catalogue_panel_open() in 0 end)
+  (* the empty library's offers: free books, or sync from another device *)
+  val listeners = RCons(listeners, OnEl("library-empty-actions"), "click", llam(h) => let
+      val clicked = _target(h)
+      val () = (if _is(clicked, "empty-catalogues") then catalogue_panel_open()
+        else if _is(clicked, "empty-sync") then sync_screen_open() else ())
+      val () = _target_free(clicked)
+    in 0 end)
   (* drag and drop *)
   val listeners = RCons(listeners, OnEl("library"), "dragover", llam(_) => let
       val () = $EV.prevent_default()
@@ -1700,6 +1706,9 @@ fn _wire_library {count:nat} (listeners: regs(count)): regs(count + 30) = let
         | ~$R.some(MenuSettings()) => let
           val () = layer_close(LLibraryMenu())
         in _settings_open() end
+        | ~$R.some(MenuSync()) => let
+          val () = layer_close(LLibraryMenu())
+        in sync_screen_open() end
         | ~$R.some(MenuAbout()) => let
           val () = layer_close(LLibraryMenu())
         in _about_open() end

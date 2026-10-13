@@ -140,6 +140,8 @@ test('Back answers a dialog No: the Trash is not emptied', async ({ page }, test
   await importFiles(page, [epubFile({ title: 'Kept From The Trash', author: 'B' })], 1);
   await bookMenu(page, 'Kept From The Trash');
   await menuItem(page, 'Move to Trash').click();
+  // the Undo offer sits over the library menu's foot on a phone: end it
+  await page.getByRole('status').filter({ hasText: 'Undo' }).getByRole('button', { name: 'Dismiss' }).click();
   // the Trash is a screen of its own, from the library menu, with its Empty
   await askEmptyTrash(page);
   const asked = emptyTrashDialog(page);

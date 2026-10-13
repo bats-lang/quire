@@ -22,12 +22,14 @@ const goal = page => settingsScreen(page).getByRole('group', { name: 'Daily read
 test('Settings opens from the library menu, which no longer holds what it took', async ({ page }) => {
   const errors = await start(page);
   await libraryMenu(page);
-  for (const gone of ['Sync', 'Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset reading settings', 'Remove all books']) {
+  for (const gone of ['Dictionaries', 'Export backup', 'Import backup', 'Restore backup', 'Reset reading settings', 'Remove all books']) {
     await expect(menuItem(page, gone)).toHaveCount(0);
   }
   await expect(page.getByRole('menu').getByLabel('Restore backup')).toHaveCount(0);
   // Empty Trash is on the Trash's own screen, not here (quire#385)
   await expect(menuItem(page, 'Empty Trash')).toHaveCount(0);
+  // Sync is two taps from the library (#501); the rest of what Settings holds is not in the menu
+  await expect(menuItem(page, 'Sync')).toBeVisible();
   await expect(menuItem(page, 'Reading statistics')).toBeVisible();
   await expect(menuItem(page, 'Catalogues')).toBeVisible();
   await menuItem(page, 'Settings').click();
@@ -87,6 +89,36 @@ test('Sync opens from its row, a service\'s step from its own, and Escape closes
   await page.keyboard.press('Escape');
   await expect(settingsScreen(page)).toBeHidden();
   await expect(libraryShown(page)).toBeVisible();
+});
+
+// quire#501: where sync and backup are. Sync is how a new phone gets
+// places, shelves and notes, so it is two taps from the library (the
+// menu, then Sync) and an empty library offers it; the backup is in
+// Settings, three taps from the library at most, with a line saying what
+// each holds. (Play Books syncs through the Google account with no setting
+// to find; Moon+ Reader keeps its backup in Settings, so the pair is a
+// menu item for the common task and Settings for the file.)
+test('Sync is two taps from the library and the backup three, and an empty library offers sync', async ({ page }) => {
+  const errors = await start(page);
+  // the empty library offers it
+  await page.getByRole('button', { name: 'Sync with another device' }).click();
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page, 'Sync')).toBeHidden();
+  // tap 1: the library menu; tap 2: Sync
+  await libraryMenu(page);
+  await menuItem(page, 'Sync').click();
+  await expect(dialog(page, 'Sync')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page, 'Sync')).toBeHidden();
+  await expect(libraryShown(page)).toBeVisible();
+  // taps 1 and 2: the menu, Settings, where the backup is, with its line
+  await librarySettings(page);
+  await expect(settingsButton(page, 'Export backup')).toBeVisible();
+  await expect(settingsScreen(page)).toContainText('Moving to a new phone?');
+  await page.keyboard.press('Escape');
+  await expect(settingsScreen(page)).toBeHidden();
+  expect(errors).toEqual([]);
 });
 
 // quire#502: a pushed screen has a top bar with a Back arrow and its
