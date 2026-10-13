@@ -82,6 +82,7 @@ const opensAndReads = {
   descriptors: 'entries with data descriptors (bit 3)',
   descriptorsBare: 'entries with data descriptors that have no signature',
   extras: 'an archive comment and the timestamp, unix and ZIP64 extra fields',
+  localNameDiffers: 'a local header whose name is not the central directory\'s',
   localExtraDiffers: 'a local header whose extra field is longer than the central directory\'s',
   mimetypeDeflated: 'a mimetype entry that is deflated',
   mimetypeNotFirst: 'a mimetype entry that is not the first',
