@@ -1330,9 +1330,16 @@ only where its platform has it, by its own `data-hide`.
   a page opened again starts out of it, its switch off, and a click
   there does not change what is kept, and the page is in full screen or
   not as that click left it.
-  Where the device refuses the rotation lock (bridge's `LockRefused`),
-  Lock rotation is not offered again that session (`_lock_refused` in
-  `src/screen_controls.bats`) and the banner says so (quire#355): a
+  The rotation lock is the Capacitor plugin's alone in the app (bridge
+  never takes the web API there, where Chromium's WebView has none; quire#355).
+  `_lock` matches every `lock_outcome` with `case+`: `Locked`;
+  `LockRefused(text)`, the plugin's rejection, which removes the row for
+  the session and says in the banner what happened and what to do, the
+  plugin's error kept as written in the Copy details (`notice_rotation_refused`,
+  not a claim that the device cannot lock); `LockUnavailable`, nothing to
+  lock with, which removes the row with no banner (availability is also
+  decided before the tab is drawn, `screen_controls_show`); and
+  `LockUnexpected(code)`, through `notice_unexpected`. A
   control that cannot work is not shown. While the reader is immersive and full screen is on, a page shown hides the
   bars again (`_bars_hidden_again` in `src/reader.bats`), since Android
   brings them back at a swipe from the edge, the reader's own way out of
@@ -2853,7 +2860,9 @@ aloud and a drag. A copy of the page is kept in an overlay
 removed, `inert` set, its scroll set: quire's policy, not bridge's),
 again a moment (`COPY_SETTLE_MS`) after the page last changed (a
 chapter shown, laid out anew, an image come in), so a turn only
-scrolls the copy to the place and shows it: on a 300 KB chapter its
+scrolls the copy to the place and shows it (the copy's images share the page's
+blob URLs, which bridge revokes only once no image still loading holds them,
+quire#532, `e2e/progress.spec.js`): on a 300 KB chapter its
 first frame comes in 20 to 30 ms, where making the copy at the turn
 took 110 to 200 (`e2e/page-turn.spec.js` holds it within 30 ms of an
 instant turn's, in the same page). A turn shows only a `fresh_copy`,
