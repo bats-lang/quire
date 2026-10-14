@@ -2686,6 +2686,21 @@ fun _fragment_keep {l,lu:agz}{n:pos}{start,len:nat | start + len <= n}{k:nat | k
     val () = $A.set<byte>(url, k, $A.read<byte>(data, start + k))
   in _fragment_keep(data, start, len, url, k + 1) end
 
+(* An element the publisher gave a size: its step, from 10 to 60 twentieths of
+   the base size, is its data-fs, which the stylesheet (style-sizes) gives
+   the size of; none when step is 0 *)
+fn _size_mark {doc_location:agz}{node:nat} (doc: !$D.document(doc_location), node: int node, step: int): void =
+  if step < 10 then ()
+  else if step > 60 then ()
+  else let
+    val value = $A.alloc<byte>(2)
+    val () = $A.set<byte>(value, 0, $A.int2byte($AR.low_byte(48 + step / 10)))
+    val () = $A.set<byte>(value, 1, $A.int2byte($AR.low_byte(48 + step % 10)))
+    val @(frozen, view) = $A.freeze<byte>(value)
+    val () = _node_attr(doc, node, $D.Data("fs"), view, 0, 2)
+    val () = $A.drop<byte>(frozen, view)
+  in $A.free<byte>($A.thaw<byte>(frozen)) end
+
 (* The attributes of an XHTML element that are kept on its content node:
    dir, lang (and xml:lang), title, colspan and rowspan, and hidden (as a
    class the stylesheet hides) *)
@@ -3398,6 +3413,7 @@ and _render_node
              | ~xspan_none() => found)
            else found)
         else found): [new_count:nat] images(n, new_count)
+      val () = _size_mark(doc, content_node, publisher_sizes_step(name_offset))
       val () = (if _note_text(data, attrs) then _node_attr_literal(doc, content_node, $D.Class, "note-text") else ())
       val () = _break_check(data, attrs, content_node)
       var _tag_ruby = @[char][4]('r', 'u', 'b', 'y')
@@ -4277,6 +4293,8 @@ datatype spine_built = SpineBuilt | SpineNotBuilt
 
 implement $P.dispose<spine_built>(_) = ()
 
+implement $P.dispose<measured>(_) = ()
+
 (* Finds book s's chapters from its OPF and keeps them in the book;
    SpineNotBuilt when the OPF cannot be read *)
 fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
@@ -4594,7 +4612,10 @@ fn _chapter_render {chapter_index:nat} (serial: int, chapter_index: int chapter_
                   val () = _rows_set()
                   val () = _page_book_lang(doc)
                   val fragment = _fragment_take()
+                  (* the sizes the publisher gave its elements, loaded with the chapter *)
+                  val () = publisher_sizes_begin(chapter_index, generation)
                   val found = _render_nodes(doc, xhtml_bytes, xhtml_size, ~1, nodes, images_nil(), fragment)
+                  val () = publisher_sizes_end()
                   val () = !_render_into := IntoPage()
                   val () = _fragment_put(fragment)
                   val () = $D.destroy(doc)
@@ -4752,13 +4773,30 @@ in
        end)
 end
 
+(* The sizes the publisher gave the elements of chapter chapter_index of
+   book serial, made ready for its render (quire#431): a reflowed chapter's
+   alone (a fixed page is not restyled), against the book's dominant size or as the
+   publisher set them with the reader's size for the root, as the setting says *)
+fn _sizes_load {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(measured, $P.Chained) =
+  case+ book_chapter_get(serial, chapter_index) of
+  | ~ChapterGot(_, _, _, _, _, _, _, layout, _) =>
+    (case+ layout of
+     | PrePaginated() => $P.ret<measured>(Measured())
+     | Reflowable() =>
+       (case+ set_sizes_get() of
+        | SizesInProportion() => publisher_sizes_load(serial, chapter_index, generation, SizesNormalised(), set_size_get())
+        | SizesAsPublished() => publisher_sizes_load(serial, chapter_index, generation, SizesRespected(), set_size_get())))
+  | ~ChapterNone(_) => $P.ret<measured>(Measured())
+  | ~ChaptersUnknown() => $P.ret<measured>(Measured())
+
 (* Shows chapter chapter_index of book serial: its overlay first, then
    the chapter *)
 fn _chapter_open {chapter_index:nat} (serial: int, chapter_index: int chapter_index, generation: int): $P.promise(load_outcome, $P.Chained) =
   (* the overlay's outcome carries nothing: a chapter without one is
      shown as any is *)
   $P.and_then<int><load_outcome>(_overlay_load(serial, chapter_index, generation), llam(_) =>
-    _chapter_render(serial, chapter_index, generation))
+    $P.and_then<measured><load_outcome>(_sizes_load(serial, chapter_index, generation), llam(_) =>
+      _chapter_render(serial, chapter_index, generation)))
 
 (* Loads chapter chapter_index: first the book's chapters, from its OPF,
    when they are not found yet *)
@@ -6887,6 +6925,18 @@ in if jumped then _pop_position() else () end
    the event that says it came *)
 #pub fun reader_tcy_refit (): void
 implement reader_tcy_refit () = _tcy_refit()
+
+(* The chapter shown again where the reader is, so that its sizes are given
+   to the page as the setting now says (quire#431): the place is kept by
+   its anchor, and the move is none of the reader's *)
+#pub fun reader_sizes_reload (): void
+
+implement reader_sizes_reload () = let
+  val anchor = _anchor_now()
+in
+  case+ reading_get() of
+  | @(page, _, chapter, _) => _jump_checked(_goto(chapter - 1, page, anchor))
+end
 
 #pub fun reader_relayout (): void
 implement reader_relayout () = _relayout()

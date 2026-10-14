@@ -97,7 +97,7 @@ fn _rotation_json {l:agz}{owner:addr}{n:nat}{position:nat | position + 5 <= n}
    among them), and
    the books' opening bracket *)
 fn _settings_chunk (): jchunk =
-  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24) of
+  case+ piece_new(576 + 64 + 100 + 24866 + 96 + 24 + 32) of
   | ~NoPiece() => JNone()
   | ~Piece(owner, out) => let
       (* the version of Quire that wrote it (#219) *)
@@ -142,6 +142,8 @@ fn _settings_chunk (): jchunk =
       val next = jw_int(out, next, cols_code(set_cols_get()))
       val next = jw_lit(out, next, ",\"ruby\":")
       val next = jw_int(out, next, ruby_code(set_ruby_get()))
+      val next = jw_lit(out, next, ",\"publisherSizes\":")
+      val next = jw_int(out, next, sizes_code(set_sizes_get()))
       val next = jw_lit(out, next, ",\"readingSpeed\":")
       val next = jw_int(out, next, speech_rate_hundredths(set_speech_rate_get()))
       (* a level in percent, or the system's own *)
@@ -1401,6 +1403,9 @@ in
       else if jr_key_is(key, key_len, "narrationSpeed") then let
         val quarters = value / 25
         val () = (if quarters * 25 = value then (if quarters >= 2 then (if quarters <= 8 then set_narration_speed_set(quarters) else ()) else ()) else ())
+      in _settings_members(buf, n, stop, key, sort) end
+      else if jr_key_is(key, key_len, "publisherSizes") then let
+        val () = (if value >= 0 then (if value <= 1 then set_sizes_set(sizes_of_code(value)) else ()) else ())
       in _settings_members(buf, n, stop, key, sort) end
       else if jr_key_is(key, key_len, "ruby") then let
         val () = (if value >= 0 then (if value <= 1 then set_ruby_set(ruby_of_code(value)) else ()) else ())

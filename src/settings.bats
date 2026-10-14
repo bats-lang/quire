@@ -334,6 +334,29 @@ fn _fullscreen_code (choice: fullscreen_choice): [code:nat | code <= 1] int code
 fn _fullscreen_of_code (code: int): fullscreen_choice =
   if code = 1 then FullscreenOn() else FullscreenOff()
 
+(* How a book's own sizes reach the page (quire#431): kept in proportion to
+   the reader's text size, whatever size the book set its text in, or as
+   the publisher set them, the reader's size being the root they are
+   relative to ("Respect the publisher's sizes"). The device's own *)
+#pub datatype publisher_sizes = SizesInProportion | SizesAsPublished
+
+fn _sizes_code (choice: publisher_sizes): [code:nat | code <= 1] int code =
+  case+ choice of SizesInProportion() => 0 | SizesAsPublished() => 1
+
+fn _sizes_of_code (code: int): publisher_sizes =
+  if code = 1 then SizesAsPublished() else SizesInProportion()
+
+val _sizes = ref<publisher_sizes>(SizesInProportion())
+
+#pub fn set_sizes_get (): publisher_sizes
+implement set_sizes_get () = !_sizes
+#pub fn set_sizes_set (choice: publisher_sizes): void
+implement set_sizes_set (choice) = !_sizes := choice
+#pub fn sizes_code (choice: publisher_sizes): [code:nat | code <= 1] int code
+implement sizes_code (choice) = _sizes_code(choice)
+#pub fn sizes_of_code (code: int): publisher_sizes
+implement sizes_of_code (code) = _sizes_of_code(code)
+
 val _speech_rate = ref<speech_rate>(RateNormal())
 val _brightness = ref<brightness_choice>(BrightnessSystem())
 val _brightness_level = ref<int>(50)
@@ -670,6 +693,20 @@ fn _fullscreen_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int 
   else if byte2int0($A.get<byte>(record, at)) <> 70 then !_fullscreen := FullscreenOff()
   else !_fullscreen := _fullscreen_of_code(byte2int0($A.get<byte>(record, at + 1)))
 
+(* "P" and the sizes' byte at record[at, at + 2) *)
+fn _sizes_write {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then ()
+  else let
+    val () = $A.write_byte(record, at, 80)
+  in $A.write_byte(record, at + 1, _sizes_code(!_sizes)) end
+
+(* The sizes' byte after "P" at record[at]: checked here, once; in
+   proportion when there is none (a record written before it) *)
+fn _sizes_read {l:agz}{n:nat}{at:nat} (record: !$A.arr(byte, l, n), n: int n, at: int at): void =
+  if at + 2 > n then !_sizes := SizesInProportion()
+  else if byte2int0($A.get<byte>(record, at)) <> 80 then !_sizes := SizesInProportion()
+  else !_sizes := _sizes_of_code(byte2int0($A.get<byte>(record, at + 1)))
+
 (* ============================================================
    Applying
    ============================================================ *)
@@ -804,6 +841,9 @@ fn _apply_type (): void = let
   val next = _put_thousandths(buf, next, 1280, (current.size * 1000) / 18)
   val next = _put_text(buf, next, ";font-size:")
   val next = $S.int_to_str(buf, next, 1280, current.size)
+  (* the size the book's sizes (data-fs, style-sizes) are twentieths of *)
+  val next = _put_text(buf, next, "px;--reading-size:")
+  val next = $S.int_to_str(buf, next, 1280, current.size)
   val next = _put_text(buf, next, "px;line-height:")
   val next = _put_tenths(buf, next, 1280, current.line_height)
   val next = _put_text(buf, next, ";font-family:")
@@ -929,6 +969,7 @@ fn _show_controls (): void = let
   val () = _pressed("justify-switch", align_code(current.align) = align_code(Justified()))
   val () = _pressed("hyphenation-switch", hyph_code(current.hyphens) = hyph_code(Hyphenated()))
   val () = _pressed("dim-images-switch", dim_code(current.dim_images) = dim_code(ImagesDimmed()))
+  val () = _pressed("publisher-sizes-switch", _sizes_code(!_sizes) = _sizes_code(SizesAsPublished()))
   val taps = taps_code(current.tap_zones)
   val () = _pressed("taps-sides", taps = taps_code(SideZones()))
   val () = _pressed("taps-forward", taps = taps_code(ForwardZones()))
@@ -964,7 +1005,8 @@ in ui_text_buf("word-value", buf, next) end
    brightness and the rotation lock, a byte each, and the voices kept
    (their count, then each one's code and name, each after its length),
    then "N" (78) and a book narration's speed and skipping, a byte each,
-   then "F" (70) and full screen's byte.
+   then "F" (70) and full screen's byte, then "P" (80) and the byte of
+   whether a book's sizes are the publisher's (quire#431).
    ("S1" was the first 8; a record of "S2" without the last bytes has
    their defaults.) *)
 fn _save (sort: int): void = let
@@ -972,12 +1014,13 @@ fn _save (sort: int): void = let
   val voices = _voices_take()
   val+ @VoicesCell(choices, voice_count) = voices
   val voices_size = _voices_size(choices)
-  val record_size = 24 + voices_size + 3 + 2
+  val record_size = 24 + voices_size + 3 + 2 + 2
   val record = $A.alloc<byte>(record_size)
   val () = _voices_write(choices, record, record_size, 24)
   val () = $A.write_byte(record, 23, voice_count)
   val () = _narration_write(record, record_size, 24 + voices_size)
   val () = _fullscreen_write(record, record_size, 24 + voices_size + 3)
+  val () = _sizes_write(record, record_size, 24 + voices_size + 5)
   prval () = fold@(voices)
   val () = _voices_put(voices)
   val () = $A.write_byte(record, 20, _rate_code(!_speech_rate))
@@ -1230,6 +1273,7 @@ fn _reset (): void = let
   val () = !_brightness_level := 50
   val () = !_rotation := RotationFree()
   val () = !_fullscreen := FullscreenOff()
+  val () = !_sizes := SizesInProportion()
   val () = !_narration_speed := 4
   val () = !_narration_notes := NotesSkipped()
   var aside: voices_cell = _voices_take()
@@ -1251,6 +1295,7 @@ implement set_reset_undoable (how) = let
   val brightness_level_before = !_brightness_level
   val rotation_before = !_rotation
   val fullscreen_before = !_fullscreen
+  val sizes_before = !_sizes
   val speed_before = !_narration_speed
   val notes_before = !_narration_notes
   val () = _reset()
@@ -1266,6 +1311,7 @@ in
         val () = !_brightness_level := brightness_level_before
         val () = !_rotation := rotation_before
         val () = !_fullscreen := fullscreen_before
+        val () = !_sizes := sizes_before
         val () = !_narration_speed := speed_before
         val () = !_narration_notes := notes_before
         var aside: voices_cell = VoicesCell(VoiceChoicesEnd(), 0)
@@ -1386,6 +1432,7 @@ in
         val voices_end = 24 + _voices_size(voices_read)
         val () = _narration_read(record, n, voices_end)
         val () = _fullscreen_read(record, n, voices_end + 3)
+        val () = _sizes_read(record, n, voices_end + 5)
         val () = _voices_put(VoicesCell(voices_read, voices_read_count))
         val () = $A.free<byte>(record)
         val () = !_set := @{ size = size, line_height = line_height, margin = margin, font = font,

@@ -209,6 +209,18 @@ fn reader_rules_page_indicator_and_footer {left:nat | left >= 2400} (sheet: shee
   val sheet = rule(sheet, ".caf")
   val sheet = lay(sheet, Flex(), "1")
   val sheet = clips(sheet)
+  (* a layer of its own (quire#546): the page's old paint is dropped with
+     the layer's tiles when a layout takes its text away (Auto's two
+     columns at 1024 px, then Scroll). On the page's own tiles Chrome
+     invalidated a line end's rectangle without the last pixel of the
+     glyph's LCD anti-aliasing, and that pixel of the layout before stayed
+     on the screen, until the page was painted whole again (a scroll does
+     not); 3 runs in 100 of relaunch.spec.js on Chrome for Testing 145
+     with LCD text, none in 100 with the layer. will-change:scroll-position
+     is the hint for a box that scrolls, and unlike contain:paint, a
+     transform or a will-change:transform it does not make the page the
+     containing block of the fixed bands in Scroll (_put_scrolled) *)
+  val sheet = lay(sheet, WillChange(), "scroll-position")
   val sheet = lay(sheet, BoxSizing(), "border-box")
   (* the page's width and height, whole pixels: only a page_extent(1) gives their text (page_size.bats) *)
   val () = raw(sheet, page_width_rule(RoundedDown()))

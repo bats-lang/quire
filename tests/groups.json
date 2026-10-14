@@ -65,6 +65,7 @@
       "library.spec.js",
       "math-layout.spec.js",
       "old-library.spec.js",
+      "publisher-sizes.spec.js",
       "search.spec.js",
       "sync-idempotent.spec.js",
       "vertical.spec.js"
