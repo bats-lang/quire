@@ -204,10 +204,18 @@ def mutate(result, sorts):
     """(operator name, mutated statement) for each mutant of a statement."""
     out = []
     text = result
+    if re.fullmatch(r'\[[^\]]*\]\s*void', text):
+        out.append(('probe 1==2', '[1 == 2] void'))
     # a guard or existential: [..] rest: each `==` has its right side shifted
     if text.startswith('['):
         close = balanced(text, 0, '[', ']')
         inside = text[1:close - 1]
+        for cmp_ in re.finditer(r'(?<![=<>!-])(<=|<)(?![=<>])', inside):
+            # a bound A < B: the mutant A + 1 < B is false where A can reach B - 1
+            lhs = re.split(r';|&&|\|', inside[:cmp_.start()])[-1].strip()
+            if lhs and re.fullmatch(r"[\w' +*-]+", lhs):
+                at = inside[:cmp_.start()].rfind(lhs)
+                out.append((f'bound+1 #{len(out) + 1}', '[' + inside[:at] + f'({lhs}) + 1 ' + inside[at + len(lhs):] + ']' + text[close:]))
         for m in re.finditer(r'(?<![=<>!])==(?!=)', inside):
             start = m.end()
             end = start
@@ -226,6 +234,10 @@ def mutate(result, sorts):
             mutated = inside[:start] + ' (' + inside[start:end].strip() + ') + 1 ' + inside[end:]
             out.append((f'guard== #{len(out) + 1}', '[' + mutated + ']' + text[close:]))
     # the arguments of the statement's proposition: P(a, b, c)
+    if text.startswith('['):
+        prefix, text = text[:balanced(text, 0, '[', ']')], text[balanced(text, 0, '[', ']'):]
+    else:
+        prefix = ''
     m = re.match(r"\s*([A-Za-z_][\w']*)\((.*)\)\s*$", text, re.S)
     if m:
         args = split_top(m.group(2))
@@ -234,11 +246,11 @@ def mutate(result, sorts):
             if int_like(arg, sorts):
                 new = list(args)
                 new[index] = f'({arg}) + 1'
-                out.append((f'arg{index + 1}+1', f'{m.group(1)}({", ".join(new)})'))
+                out.append((f'arg{index + 1}+1', f'{prefix} {m.group(1)}({", ".join(new)})'))
             elif bytes_like(arg, sorts):
                 new = list(args)
                 new[index] = f'bcons(0, {arg})'
-                out.append((f'arg{index + 1}:bcons', f'{m.group(1)}({", ".join(new)})'))
+                out.append((f'arg{index + 1}:bcons', f'{prefix} {m.group(1)}({", ".join(new)})'))
     return out
 
 
@@ -277,7 +289,7 @@ class Lemma:
         if d.binders() != i.binders():
             self.skipped = 'binder names differ'
             return None
-        args = ', '.join(f'{n}: {t}' for n, t in zip(impl_args, decl_args))
+        args = ', '.join(f'{n}: {t}' for n, t in zip(impl_args, decl_args)) if any(decl_args) else ''
         if re.search(rf"(?<![\w']){re.escape(self.name)}(?![\w'])", i.body or ''):
             self.inplace = True
         return 'prfn', ''.join(d.quantifiers), '', args, d.result, i.body
