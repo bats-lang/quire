@@ -279,6 +279,10 @@ fn _scrolled (): bool =
 (* The page's height, as it was last measured *)
 val _page_height = ref<int>(0)
 
+(* The scroll top the page was last put at, scrolled: a scroll event that
+   finds the page elsewhere is the reader's hand (#485) *)
+val _scroll_set = ref<int>(0)
+
 (* The way the book reads, from its spine (spine_rtl): taps, keys and
    drags take the next page of a book read right to left to be on the
    left, its pages go on to the left too (unless it is set vertically,
@@ -2015,7 +2019,10 @@ fn _show_page_down {page_count:pos}{page:nat | page < page_count}{chapter,chapte
   val () = !_page_width := page_width
   val () = !_page_height := $DR.get_measure_h()
   val () = (case+ _page_axis() of
-    | Down() => $SC.set_scroll_top(page_id_bytes, 4, (if top >= 0 then top else page * _step()))
+    | Down() => let
+        val scrolled_to = (if top >= 0 then top else page * _step()): Int
+        val () = !_scroll_set := scrolled_to
+      in $SC.set_scroll_top(page_id_bytes, 4, scrolled_to) end
     (* right to left, the pages go on to the left: a scroll below 0 *)
     | AcrossBack() => $SC.set_scroll_left(page_id_bytes, 4, ~(page * page_width))
     | Across() => $SC.set_scroll_left(page_id_bytes, 4, page * page_width))
@@ -4827,7 +4834,15 @@ fn _show_target (page: Int, anchor: Int): void =
         val @(offset, bottom) = _node_down_by(anchor, current)
         val step = _step()
         val height = g1ofg0(!_page_height)
-        val top = (if page >= 0 then (if page * step <= offset then (if offset < page * step + height then page * step else offset) else offset) else offset): Int
+        (* the screen's top only when the node is the first drawn one to start
+           at or below it: a node the reader scrolled to, partway down a
+           screen, is shown at the top, not under the screen's first (#485) *)
+        val inside = (page >= 0 && page * step <= offset && offset < page * step + height): bool
+        val anchor_nat = (if anchor > 0 then anchor else 0): [n:nat] int n
+        val before = (if inside then _last_drawn_before(anchor_nat, SEARCH_REACH) else ~1): Int
+        val before_offset = (if before >= 0 then (let val @(above, _) = _node_down_by(before, current) in above end) else ~1): Int
+        val first_below = (inside && (before < 0 || before_offset < page * step)): bool
+        val top = (if first_below then page * step else offset): Int
       in
         if offset < 0 then _show_page(current, page_count, chapter, chapter_count)
         else _show_page_down(_screen_at(top, bottom, page_count), page_count, chapter, chapter_count, (if top < bottom then top else bottom))
@@ -6053,11 +6068,20 @@ implement reader_scrolled () =
       val bottom = $DR.get_measure_scroll_h() - $DR.get_measure_h()
       val screen = _screen_at(top, bottom, page_count)
     in
-      if screen = page then ()
+      if screen = page then
+        (* a hand scroll within the screenful: the place is the node now at
+           the top of what is seen, not the screenful's first (#485); a
+           scroll the page itself made is where it put it *)
+        (if top - !_scroll_set <= 2 && !_scroll_set - top <= 2 then ()
+        else let
+          val () = !_scroll_set := top
+          val () = !_anchor_kept := ~1
+        in _record_position() end)
       (* the reader moved: a restored place no longer holds them *)
       else let
         val () = !_anchor_kept := ~1
         val () = !_dating := true
+        val () = !_scroll_set := top
       in _place_shown(screen, page_count, chapter, chapter_count) end
     end
 

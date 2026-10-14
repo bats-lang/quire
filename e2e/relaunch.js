@@ -160,6 +160,7 @@ export async function capture(page) {
   const ringed = await page.evaluate(() => document.querySelector(':focus-visible') !== null);
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   const screen = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  await strayForensics(page, screen);
   return {
     bars: await page.evaluate(() => (window.__android ? window.__android.hidden : null)),
     fullScreen: await page.evaluate(() => document.getElementById('screen-fullscreen')?.getAttribute('aria-pressed') ?? null),
@@ -307,4 +308,53 @@ export async function unchanged(page, how = 'quit') {
   const after = await capture(next);
   await sameState(next, before, after);
   return next;
+}
+
+// ---- #546 forensics (temporary): what a stray pixel right of the text column is ----
+
+/** The pixels right of the text column that are not the page's ground */
+async function strayPixels(page, shot) {
+  return page.evaluate(async base64 => {
+    const img = new Image();
+    img.src = `data:image/png;base64,${base64}`;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const drawn = canvas.getContext('2d');
+    drawn.drawImage(img, 0, 0);
+    const data = drawn.getImageData(0, 0, canvas.width, canvas.height).data;
+    const ground = data.slice((400 * canvas.width + 5) * 4, (400 * canvas.width + 5) * 4 + 3);
+    const out = [];
+    for (let y = 60; y < canvas.height - 40; y++) for (let x = 800; x < Math.min(1000, canvas.width); x++) {
+      const i = (y * canvas.width + x) * 4;
+      if (data[i] !== ground[0] || data[i + 1] !== ground[1] || data[i + 2] !== ground[2]) out.push(`${x},${y}:${data[i]}.${data[i + 1]}.${data[i + 2]}`);
+    }
+    return out;
+  }, shot.toString('base64'));
+}
+
+/** When the screen has a stray pixel, say what clears it: a second screenshot, a nudge of the page's scroll, the page-turn copy taken out */
+async function strayForensics(page, screen) {
+  const found = await strayPixels(page, screen);
+  // a few pixels are a stray; a screen with content there (a bar, a list) has hundreds
+  if (found.length === 0 || found.length > 12) return;
+  const info = test.info();
+  const report = { first: found };
+  await info.attach('stray-first.png', { body: screen, contentType: 'image/png' });
+  const again = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  report.again = await strayPixels(page, again);
+  await page.evaluate(() => { document.getElementById('page-turn').style.display = 'none'; });
+  await page.waitForTimeout(300);
+  const without = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  report.turnRemoved = await strayPixels(page, without);
+  await info.attach('stray-turn-removed.png', { body: without, contentType: 'image/png' });
+  await page.evaluate(() => { document.getElementById('page-turn').style.display = ''; });
+  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) { caf.scrollTop += 1; caf.scrollTop -= 1; } });
+  await page.waitForTimeout(300);
+  const nudged = await page.screenshot({ animations: 'disabled', caret: 'hide' });
+  report.nudged = await strayPixels(page, nudged);
+  await info.attach('stray-nudged.png', { body: nudged, contentType: 'image/png' });
+  await info.attach('stray-report.json', { body: JSON.stringify(report, null, 1), contentType: 'application/json' });
+  console.log('STRAY546', JSON.stringify(report));
 }
