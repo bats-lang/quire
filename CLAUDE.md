@@ -2007,7 +2007,19 @@ read of storage changed: each still folds, as #174 says.
   44px control and 2px, and 8px), as material.io's, Flutter's and
   Zeta's banners sit under the app bar and none draws over it;
   `e2e/storage.spec.js` raises one over the reader with its bars up and
-  runs `coveredByBanner` on both bars. The details of an unexpected
+  runs `coveredByBanner` on both bars.
+  A modal layer is over the status (#556), as an Android dialog or drawer
+  is over its activity's Snackbar, and the library's menus were already
+  over the banner (#507): while a library menu is open the Undo toast is
+  drawn under its veil, and while a veiled reader panel is open (Contents,
+  highlights) the banner is under the scrim; both are still up, and back
+  when the layer closes (an Undo offer lasts until dismissed, #364). A
+  panel with no veil and the screens leave them where they are (a screen
+  offers an Undo of its own). `coveredByBanner` also checks every control
+  of an open menu, panel, sheet or dialog, and `toastClear` every control
+  under a toast; `e2e/containers.spec.js` (a failed chapter's banner, then
+  Contents) and `e2e/back.spec.js` (the Trash's Undo, then the library
+  menu) use them instead of dismissing first. The details of an unexpected
   failure outlive its banner: they are kept in memory (`_details` in
   `src/notice.bats`, replaced by the next such failure, never stored)
   and About shows "Copy last error details" (`about-error-copy`, an

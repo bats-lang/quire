@@ -14,6 +14,7 @@ import {
   readingSettings, card, libraryShown, askEmptyTrash, emptyTrashDialog,
 } from './helpers.js';
 import { walkEveryScreen, appPlayed } from './walk.js';
+import { toastClear } from './controls-shown.js';
 
 /** The overlays shown: each dialog and menu (by id, else name) */
 const overlaysShown = page => page.evaluate(() => [...document.querySelectorAll('[role=dialog],[role=alertdialog],[role=menu],#shelf-header')]
@@ -140,8 +141,12 @@ test('Back answers a dialog No: the Trash is not emptied', async ({ page }, test
   await importFiles(page, [epubFile({ title: 'Kept From The Trash', author: 'B' })], 1);
   await bookMenu(page, 'Kept From The Trash');
   await menuItem(page, 'Move to Trash').click();
-  // the Undo offer sits over the library menu's foot on a phone: end it
-  await page.getByRole('status').filter({ hasText: 'Undo' }).getByRole('button', { name: 'Dismiss' }).click();
+  // the Undo offer stays up; the library menu is over it, so no item of the
+  // menu is under it (#556)
+  await expect(page.getByRole('status').filter({ hasText: 'Undo' })).toBeVisible();
+  await libraryMenu(page);
+  expect(await toastClear(page), 'items of the library menu under the toast').toEqual([]);
+  await page.keyboard.press('Escape');
   // the Trash is a screen of its own, from the library menu, with its Empty
   await askEmptyTrash(page);
   const asked = emptyTrashDialog(page);
