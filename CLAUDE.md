@@ -1305,6 +1305,64 @@ By research: every reader that shows a content document in a browser engine (Tho
 Readium Mobile on Android, Calibre's viewer, Foliate) leaves MathML to the engine, and Chromium
 has set MathML Core since 109; Apple Books' WebKit too. Where an engine has no math font the text falls back.
 
+What #408's tests (`e2e/math-native.spec.js`, `math-fallbacks.spec.js`, `math-layout.spec.js`,
+books in `e2e/math-books.js`, each checked by epubcheck) hold, and what they found:
+
+* **A display equation scrolls along its width only.** `math[display=block]` was `overflow: auto`
+  on both axes, and Chromium counts a glyph's font box (ascent and descent) in the scrollable
+  overflow, a few pixels beyond the equation's own box, so a display equation had a vertical
+  scroll of 4px. It is `overflow: auto hidden` with .3em above and below, so what the font
+  box adds is room inside the equation's box and a page boundary neither splits nor clips it.
+* **`dir` is the page's own attribute** (`_math_attrs`): dom's allow-list of MathML attributes
+  has none, MathML Core takes `dir` on any math element, so it is set as an HTML `dir` is
+  (`$D.Dir`): an equation is set left to right even in a Hebrew book (`math` has `direction:
+  ltr`) unless it says `dir="rtl"`.
+* **`alttext` and `altimg` are not shown when MathML is drawn**, by research: EPUB 3.3 and the
+  MathML specification make them the fallback for a system that cannot draw the math (the
+  W3C EPUB group's thread on MathML: "fallback images via the altimg attribute" for the many
+  readers that cannot render it; the DAISY knowledge base: support "depends heavily on the age
+  of the reading system", fallbacks for the old ones); no reading system researched shows the
+  fallback beside a drawn equation, and none documents that it should. The engine draws MathML
+  Core, so the picture would show every equation twice, and the text is the equation's name
+  for assistive technology, which the browser exposes. `altimg` is not an allowed attribute
+  of dom's, so no image is ever made of it.
+* **Unsupported and broken MathML degrades where it stands.** An element dom does not make
+  (`maction`, `annotation-xml`, `mstack`, `mglyph`, ...) makes none and its children go to its
+  parent; a token's text stays. A broken tree (a fraction of one child, an unknown element) is
+  drawn by the browser as it can: the words around it are not lost. (The broken book is not
+  valid MathML, so epubcheck refuses it by `RSC-005`, which its entry lists.)
+* **Accessibility.** Chromium's tree has a `MathMLMath` node for each `math`, and
+  `MathMLFraction`, `MathMLIdentifier`... for its parts (the name CDP gives the role ARIA calls
+  `math`); Quire sets no `role`, `aria-hidden` or `aria-label` on MathML.
+
+## Equations as pictures (#408)
+
+A picture of an equation (a PNG, an inline `<svg>`, an `<img src="x.svg">`) is a picture of
+text. Two decisions, by research (also in the issue):
+
+* **A picture grows with the reader's text size.** Quire drops the book's CSS (#411), so the
+  `em` heights publishers give such pictures are not there, and a picture was always its own
+  pixels. Amazon's guidelines say inline images "should be sized in em units so that they scale
+  in relation to the text around them when users adjust the font size" (quoted by Jutoh's
+  manual; a block picture is sized in px or % there), Readium CSS has no setting that scales
+  pictures (its `invert`, `darken` and `blend` flags only recolour), and a MobileRead report
+  has em-height pictures overlapping text in Readium. So a picture is its own size at the
+  default text size (18px) and is scaled by the reader's size from there (`--image-zoom`, in
+  thousandths, written by `_apply_type` in `src/settings.bats`; CSS `zoom` in `.caf:not(.fixed)
+  img`, a fixed page being fitted by its own box), kept to the column's width and the page's
+  height as before (the height is divided by the zoom, which multiplies lengths). It is the
+  same for any picture, not only equations: Quire cannot tell an equation from a diagram or a
+  photograph, and a photograph is kept to the column anyway.
+* **Black ink on no ground is drawn on paper in the dark themes.** Black on the Dark, Night and
+  Grey grounds was 1.1 to 1.8 to one (WCAG asks 3:1 for graphics). Readium CSS (Thorium) offers
+  the reader an `invert` flag for night mode that inverts every picture; Quire has no setting
+  for it and cannot tell a picture with no ground from one with colours that inversion would
+  ruin (a photograph), so a picture is drawn on white in those themes (`tint`, no new colour
+  role): a picture with a ground of its own covers it, and black ink has 21:1. The cost is a
+  white rectangle behind a transparent picture of white ink, which is rare next to the
+  typeset equation, the diagram and the line drawing; the image dimming setting dims it as
+  it dims every picture.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading

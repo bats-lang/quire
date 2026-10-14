@@ -729,8 +729,8 @@ fn _put_text {l:agz}{n:pos}{text_len:nat}{position:nat | position + text_len <= 
 fn _margin_px (margin: set_margin): [px:nat | px <= 64] int px =
   if margin = 0 then 8 else if margin = 1 then 16 else if margin = 2 then 24 else if margin = 3 then 40 else 64
 
-fn _put_font {l:agz}{position:nat | position + 34 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, font: set_font)
+fn _put_font {l:agz}{position:nat | position + 34 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, font: set_font)
   : [stop:nat | stop <= position + 34] int stop =
   case+ font of
   | Literata() => _put_text(buf, position, "Literata,Georgia,serif")
@@ -755,18 +755,32 @@ fn _put_hundredths {l:agz}{n:pos}{position:nat | position + 15 <= n}{hundredths:
     : [padded:nat | padded <= position + 3] int padded
 in $S.int_to_str(buf, next, n, hundredths) end
 
-fn _put_align {l:agz}{position:nat | position + 7 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, align: set_align)
+(* thousandths as a decimal at buf[position, stop): 1778 -> "1.778" *)
+fn _put_thousandths {l:agz}{n:pos}{position:nat | position + 25 <= n}{thousandths:nat}
+  (buf: !$A.arr(byte, l, n), position: int position, n: int n, thousandths: int thousandths)
+  : [stop:nat | stop <= position + 25] int stop = let
+  val whole = thousandths / 1000
+  val rest = thousandths - whole * 1000
+  val next = $S.int_to_str(buf, position, n, whole)
+  val next = _put_text(buf, next, ".")
+  val next = (if rest < 100 then _put_text(buf, next, "0") else next)
+    : [padded:nat | padded <= position + 13] int padded
+  val next = (if rest < 10 then _put_text(buf, next, "0") else next)
+    : [padded:nat | padded <= position + 14] int padded
+in $S.int_to_str(buf, next, n, rest) end
+
+fn _put_align {l:agz}{position:nat | position + 7 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, align: set_align)
   : [stop:nat | stop <= position + 7] int stop =
   case+ align of Justified() => _put_text(buf, position, "justify") | Ragged() => _put_text(buf, position, "start")
 
-fn _put_hyphens {l:agz}{position:nat | position + 6 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, hyphens: set_hyph)
+fn _put_hyphens {l:agz}{position:nat | position + 6 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, hyphens: set_hyph)
   : [stop:nat | stop <= position + 6] int stop =
   case+ hyphens of Hyphenated() => _put_text(buf, position, "auto") | NoHyphens() => _put_text(buf, position, "manual")
 
-fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, dim_images: set_dim)
+fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, dim_images: set_dim)
   : [stop:nat | stop <= position + 80] int stop =
   case+ dim_images of
   | ImagesDimmed() =>
@@ -780,8 +794,8 @@ fn _put_dim_images {l:agz}{position:nat | position + 80 <= 1024}
    area's sides (style.bats), so two of 50vw would not fit beside a
    cutout, and two of 40vw fit while the sides take under a fifth of
    it; three never fit (#275) *)
-fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, columns: set_cols)
+fn _put_columns {l:agz}{position:nat | position + 120 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, columns: set_cols)
   : [stop:nat | stop <= position + 120] int stop =
   case+ columns of
   | TwoColumns() => _put_text(buf, position, ".caf{column-width:40vw}.sprobe{display:block}")
@@ -799,8 +813,8 @@ fn _put_columns {l:agz}{position:nat | position + 120 <= 1024}
    are the page's own (two transparent bands, fixed over them), so a
    tap or a drag there is still the page's. A vertical book and a fixed
    page are never scrolled, and keep their own boxes *)
-fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, scrolled: set_flow)
+fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, scrolled: set_flow)
   : [stop:nat | stop <= position + 440] int stop =
   if flow_scrolled(scrolled) then _put_text(buf, position,
     ".caf{overflow:hidden auto;column-width:auto}.sprobe{display:none}.caf:not(.vertical,.vertical-lr,.fixed){padding-block:0;margin-block:var(--page-top) var(--page-bottom)}.caf:not(.vertical,.vertical-lr,.fixed)::before,.caf:not(.vertical,.vertical-lr,.fixed)::after{content:'';position:fixed;left:0;right:0;top:0;height:var(--page-top)}.caf:not(.vertical,.vertical-lr,.fixed)::after{top:auto;bottom:0;height:var(--page-bottom)}")
@@ -808,8 +822,8 @@ fn _put_scrolled {l:agz}{position:nat | position + 440 <= 1024}
 
 (* A ruby's annotations hidden: its rt and rtc (an rp is not shown
    where ruby is, by the browser's own sheet). Layout, not colour *)
-fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
-  (buf: !$A.arr(byte, l, 1024), position: int position, ruby: set_ruby)
+fn _put_ruby {l:agz}{position:nat | position + 30 <= 1280}
+  (buf: !$A.arr(byte, l, 1280), position: int position, ruby: set_ruby)
   : [stop:nat | stop <= position + 30] int stop =
   case+ ruby of
   | RubyHidden() => _put_text(buf, position, ".caf rt,.caf rtc{display:none}")
@@ -819,31 +833,36 @@ fn _put_ruby {l:agz}{position:nat | position + 30 <= 1024}
 fn _apply_type (): void = let
   val current = !_set
   val ruby = set_ruby_get()
-  val buf = $A.alloc<byte>(1024)
-  val next = _put_text(buf, 0, ".caf{font-size:")
-  val next = $S.int_to_str(buf, next, 1024, current.size)
+  val buf = $A.alloc<byte>(1280)
+  (* the pictures grow with the text: 1 at the default size of 18px, so a
+     picture is its own size there and scales as the size does (reader_rules'
+     `.caf:not(.fixed) img`) *)
+  val next = _put_text(buf, 0, ".caf{--image-zoom:")
+  val next = _put_thousandths(buf, next, 1280, (current.size * 1000) / 18)
+  val next = _put_text(buf, next, ";font-size:")
+  val next = $S.int_to_str(buf, next, 1280, current.size)
   (* the size the book's sizes (data-fs, style-sizes) are twentieths of *)
   val next = _put_text(buf, next, "px;--reading-size:")
-  val next = $S.int_to_str(buf, next, 1024, current.size)
+  val next = $S.int_to_str(buf, next, 1280, current.size)
   val next = _put_text(buf, next, "px;line-height:")
-  val next = _put_tenths(buf, next, 1024, current.line_height)
+  val next = _put_tenths(buf, next, 1280, current.line_height)
   val next = _put_text(buf, next, ";font-family:")
   val next = _put_font(buf, next, current.font)
   val next = _put_text(buf, next, ";letter-spacing:")
-  val next = _put_hundredths(buf, next, 1024, current.letter_spacing)
+  val next = _put_hundredths(buf, next, 1280, current.letter_spacing)
   val next = _put_text(buf, next, "em;word-spacing:")
-  val next = _put_hundredths(buf, next, 1024, current.word_spacing)
+  val next = _put_hundredths(buf, next, 1280, current.word_spacing)
   val next = _put_text(buf, next, "em}.caf>*{padding-left:")
-  val next = $S.int_to_str(buf, next, 1024, _margin_px(current.margin))
+  val next = $S.int_to_str(buf, next, 1280, _margin_px(current.margin))
   val next = _put_text(buf, next, "px;padding-right:")
-  val next = $S.int_to_str(buf, next, 1024, _margin_px(current.margin))
+  val next = $S.int_to_str(buf, next, 1280, _margin_px(current.margin))
   val next = _put_text(buf, next, "px}.caf p{text-align:")
   val next = _put_align(buf, next, current.align)
   val next = _put_text(buf, next, ";hyphens:")
   val next = _put_hyphens(buf, next, current.hyphens)
   (* logical, so in vertical text it is the space beside a paragraph *)
   val next = _put_text(buf, next, ";margin-block-end:")
-  val next = _put_tenths(buf, next, 1024, current.paragraph_spacing)
+  val next = _put_tenths(buf, next, 1280, current.paragraph_spacing)
   val next = _put_text(buf, next, "em}")
   (* a bright picture glares on the dark theme's ground *)
   val next = _put_dim_images(buf, next, current.dim_images)
