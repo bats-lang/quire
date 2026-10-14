@@ -27,8 +27,12 @@ usage:
       checkout, already checked (its build/ kept), `bats check` is run in it
       with env BATS_CHECK (default "bats check"); each <file.bats> is relative
       to it (src/bytes.bats).
+  --root DIR    the pristine package the files are read from (default: this checkout); <work dir> is a
+                copy of it (a package of another repository: css, arith, sha256 ...)
   --only NAME   only the lemma NAME (repeatable)
   --report FILE write the results (one line a mutant) to FILE
+  --ats-home DIR  run the compiler with DIR as its ATS home (~/.bats/ats2): another patsopt
+                (the infinite-precision solver) with the same checks
   --known FILE  lemmas whose accepted mutants are explained (`file lemma reason`): an equivalent
                 mutant, e.g. a lemma proved from FALSEP(), for which every statement is true
 """
@@ -48,7 +52,7 @@ KEYWORDS = ('prfun', 'prfn', 'primplement')
 INT_SORTS = {'int', 'nat', 'pos', 'intGte', 'intGt'}
 HEADER = re.compile(
     r'^(?P<path>\S+\.bats): \d+\(line=(?P<line>\d+), offs=\d+\) -- '
-    r'\d+\(line=\d+, offs=\d+\): error\(\d+\): (?P<message>.*)$')
+    r'\d+\(line=\d+, offs=\d+\): error\((?:\d+|parsing|lexing)\): (?P<message>.*)$')
 
 
 def balanced(text, start, opening, closing):
@@ -257,6 +261,7 @@ class Lemma:
     def __init__(self, name, decl, impl, kind):
         self.name, self.decl, self.impl, self.kind = name, decl, impl, kind
         self.skipped = ''
+        self.inplace = False
 
     def parts(self):
         """(keyword, quantifiers, metric, args, result, body) of the statement."""
@@ -274,8 +279,7 @@ class Lemma:
             return None
         args = ', '.join(f'{n}: {t}' for n, t in zip(impl_args, decl_args))
         if re.search(rf"(?<![\w']){re.escape(self.name)}(?![\w'])", i.body or ''):
-            self.skipped = 'recursive primplement with no metric of its own'
-            return None
+            self.inplace = True
         return 'prfn', ''.join(d.quantifiers), '', args, d.result, i.body
 
 
@@ -349,9 +353,21 @@ def insert(original_lines, mutants):
     return out
 
 
+BATS_ERROR = re.compile(r'^\s*--> (?P<path>\S+):(?P<line>\d+):\d+')
+
+
 def errors(log):
     found, current = [], None
-    for line in log.splitlines():
+    lines = log.splitlines()
+    for index, line in enumerate(lines):
+        # bats's own errors (before patsopt): "error: <message>" then " --> file:line:col"
+        b = BATS_ERROR.match(line)
+        if b and index and lines[index - 1].startswith(('error:', 'error: ')):
+            found.append((b['path'], int(b['line']), lines[index - 1]))
+            continue
+        if b and index > 1 and lines[index - 2].startswith('error:'):
+            found.append((b['path'], int(b['line']), lines[index - 2]))
+            continue
         h = HEADER.match(line)
         if h:
             current = (h['path'], int(h['line']), h['message'])
@@ -365,6 +381,10 @@ def run_check(work, file, lines, mutants, check_command):
     (work / file).write_text('\n'.join(lines))
     done = subprocess.run(check_command, cwd=work, shell=True, capture_output=True, text=True)
     log = done.stdout + done.stderr
+    if os.environ.get('MUTATION_LOGS'):
+        Path(os.environ['MUTATION_LOGS']).mkdir(parents=True, exist_ok=True)
+        n = len(list(Path(os.environ['MUTATION_LOGS']).glob('*.log')))
+        Path(os.environ['MUTATION_LOGS'], f'{n:03d}-{Path(file).name}.log').write_text(f'rc={done.returncode}\n' + log)
     return done.returncode, log, [e for e in errors(log) if e[0].endswith(file)]
 
 
@@ -381,7 +401,8 @@ def classify(mutants, errs):
 
 
 def main(argv):
-    only, report, mode, work, files, known_file = set(), None, None, None, [], None
+    global ROOT
+    only, report, mode, work, files, known_file, ats_home = set(), None, None, None, [], None, None
     it = iter(argv)
     for a in it:
         if a == '--list':
@@ -392,6 +413,10 @@ def main(argv):
             only.add(next(it))
         elif a == '--report':
             report = next(it)
+        elif a == '--root':
+            ROOT = Path(next(it)).resolve()
+        elif a == '--ats-home':
+            ats_home = next(it)
         elif a == '--known':
             known_file = next(it)
         else:
@@ -405,8 +430,20 @@ def main(argv):
             if entry.strip() and not entry.startswith('#'):
                 file_, lemma_, reason = entry.split(None, 2)
                 known[(file_, lemma_)] = reason
+    if ats_home:
+        # a HOME whose ~/.bats is the real one except ats2, which is ats_home: the
+        # compiler finds patsopt there (a solver build chosen per run, #594)
+        fake = Path(os.environ.get('TMPDIR', '/tmp')) / f'mutation-home-{os.getpid()}'
+        (fake / '.bats').mkdir(parents=True, exist_ok=True)
+        real = Path(os.environ.get('HOME', '/root')) / '.bats'
+        for entry in real.iterdir():
+            if entry.name != 'ats2' and not (fake / '.bats' / entry.name).exists():
+                (fake / '.bats' / entry.name).symlink_to(entry)
+        if not (fake / '.bats' / 'ats2').exists():
+            (fake / '.bats' / 'ats2').symlink_to(Path(ats_home).resolve())
+        os.environ['HOME'] = str(fake)
     check_command = os.environ.get('BATS_CHECK', 'bats check')
-    lines_out, accepted = [], 0
+    lines_out, accepted, broken = [], 0, 0
     for file in files:
         # the pristine text is the checkout's, not a previous run's
         original = (ROOT / file).read_text() if (ROOT / file).exists() else Path(file).read_text()
@@ -422,6 +459,8 @@ def main(argv):
             for m in mutants:
                 lines_out.append(f'{"control" if m.control else "mutant ":7} {file} {m.lemma.name} {m.operator}: {m.statement}')
             continue
+        inplace = [m for m in mutants if m.lemma.inplace]
+        mutants = [m for m in mutants if not m.lemma.inplace]
         controls = [m for m in mutants if m.control]
         try:
             lines = insert(original_lines, controls)
@@ -431,6 +470,31 @@ def main(argv):
             for m in controls:
                 if m.status:
                     lines_out.append(f'HARNESS  {file} {m.lemma.name}: control {m.status}: {m.message}')
+            # a recursive #pub prfun with no metric of its own cannot be copied (bats
+            # allows no extern): its statement is changed where it is declared, which
+            # checks the dependents of the module again, one mutant a run
+            for m in inplace:
+                if m.control:
+                    continue
+                d = m.lemma.decl
+                chunk = original_lines[d.first:d.last]
+                text = '\n'.join(chunk)
+                at = text.rfind(m.lemma.decl.result)
+                changed = (text[:at] + m.statement + text[at + len(m.lemma.decl.result):]).split('\n')
+                lines = original_lines[:d.first] + changed + original_lines[d.last:]
+                span = (d.first + 1, (m.lemma.impl.last) + len(changed) - len(chunk))
+                code, log, errs = run_check(work, file, lines, [], check_command)
+                inside = [e for e in errs if span[0] <= e[1] <= span[1]]
+                if inside:
+                    m.status, m.message = 'REJECTED', inside[0][2]
+                elif code == 0:
+                    reason = known.get((file, m.lemma.name))
+                    m.status = 'KNOWN' if reason else 'ACCEPTED'
+                    accepted += 0 if reason else 1
+                else:
+                    m.status, m.message = 'BROKEN', (errs[0][2] if errs else 'check failed')
+                    broken += 1
+                lines_out.append(f'{m.status:9} {file} {m.lemma.name} {m.operator} (in place): {m.message[:90] or m.statement}')
             pending = [m for m in mutants if not m.control and m.lemma in usable]
             while pending:
                 lines = insert(original_lines, pending)
@@ -438,6 +502,12 @@ def main(argv):
                 for m in pending:
                     m.status = ''
                 got = classify(pending, errs)
+                if not got and code != 0:
+                    first = next((e for e in errs), None)
+                    broken += len(pending)
+                    for m in pending:
+                        lines_out.append(f'BROKEN    {file} {m.lemma.name} {m.operator}: check failed outside the mutants: ' + (f'{first[1]}: {first[2][:80]}' if first else log.strip().splitlines()[-1][:100]))
+                    break
                 if not got:
                     for m in pending:
                         reason = known.get((file, m.lemma.name))
@@ -455,8 +525,9 @@ def main(argv):
     if report:
         Path(report).write_text('\n'.join(lines_out) + '\n')
     if mode == 'run':
-        print(f'{accepted} mutant(s) accepted')
-    return 1 if accepted else 0
+        harness = sum(1 for l in lines_out if l.startswith('HARNESS'))
+        print(f'{accepted} mutant(s) accepted, {broken} broken, {harness} controls failed')
+    return 1 if (accepted or broken) else 0
 
 
 if __name__ == '__main__':
