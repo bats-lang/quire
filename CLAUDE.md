@@ -2065,7 +2065,19 @@ read of storage changed: each still folds, as #174 says.
   44px control and 2px, and 8px), as material.io's, Flutter's and
   Zeta's banners sit under the app bar and none draws over it;
   `e2e/storage.spec.js` raises one over the reader with its bars up and
-  runs `coveredByBanner` on both bars. The details of an unexpected
+  runs `coveredByBanner` on both bars.
+  A modal layer is over the status (#556), as an Android dialog or drawer
+  is over its activity's Snackbar, and the library's menus were already
+  over the banner (#507): while a library menu is open the Undo toast is
+  drawn under its veil, and while a veiled reader panel is open (Contents,
+  highlights) the banner is under the scrim; both are still up, and back
+  when the layer closes (an Undo offer lasts until dismissed, #364). A
+  panel with no veil and the screens leave them where they are (a screen
+  offers an Undo of its own). `coveredByBanner` also checks every control
+  of an open menu, panel, sheet or dialog, and `toastClear` every control
+  under a toast; `e2e/containers.spec.js` (a failed chapter's banner, then
+  Contents) and `e2e/back.spec.js` (the Trash's Undo, then the library
+  menu) use them instead of dismissing first. The details of an unexpected
   failure outlive its banner: they are kept in memory (`_details` in
   `src/notice.bats`, replaced by the next such failure, never stored)
   and About shows "Copy last error details" (`about-error-copy`, an
@@ -2188,6 +2200,47 @@ its sheet, and its order is below the most. What is tested, not proved
 (`tests/css-size/run.sh`, a CI step beside the codec's, on bytes, with a fuzz):
 that the grammar read is CSS's. The `rem` trick of the fixtures is on `html`
 (`e2e/size-books.js`).
+
+### The size most of a book's text is set in (#431, stage 2)
+
+`src/css_cascade.bats` matches those rules against a chapter's elements
+and counts its characters by the size they are set in; `src/publisher_size.bats`
+reads a sample of the open book's chapters and keeps the size with the most
+characters (`publisher_dominant_size`, thousandths of a pixel, 0 when none).
+`_spine_build` runs the measure before the first chapter is shown. Nothing
+reaches the page yet (stage 3).
+
+* The cascade (`chapter_tally`): an element's size is its inline `style`, else
+  the rule of the highest specificity (the later one at the same), else
+  `<font size>` (a presentational hint, below every rule), else its parent's;
+  em, % and keywords resolve against the parent, rem against the html
+  element's computed size (html itself against the initial 16px). The
+  browser's own sizes (h1 at 2em) are not counted, only what the publisher
+  declared. A rule's chain of compounds is matched right to left, the nearest
+  ancestor first (`_match_up`); an element name is matched exactly, as in XML.
+  Text of `head`, `style`, `script`, `title`, `rt` and `rp` is not counted; a
+  character is a non-white-space UTF-8 character.
+* The tally (`size_tally`) holds at most 64 sizes, each rounded to a quarter
+  of a pixel; the dominant size is the one with the most characters, the
+  smaller on a tie, 16px when nothing is counted. By research (on the issue):
+  Calibre's base font size is the most common font size in the document.
+* The sample: at most 16 chapters at an even stride through the spine, 1 MiB of
+  decompressed chapters in all, none compressed over 512 KiB (so the open of
+  a book of one huge chapter is not made to wait: it is not measured). A
+  chapter's `<link rel=stylesheet>` sheets (not alternate, media all or
+  screen), read by `book_find_relative`, and its `<style>` texts are joined,
+  links first, into one sheet of at most 512 KiB (`sheet_acc`), so one rule
+  order serves them; a chapter that links to sheets is read twice (the sheets
+  are awaited between). A sheet with an unclosed comment or block takes the
+  ones joined after it with it.
+* Kept in memory per open, not as a record group: derived from the file by an
+  algorithm that will widen, so a stored number would go stale at every change.
+* Tested: `tests/css-size/run.sh` natively (`css_cascade_test.bats`: the
+  cascade, inheritance, the book A and B fixtures' rules, the tally, a fuzz).
+  The wiring (links read stored and deflated, the three size books measured
+  16px, 12px and 12px, a plain book 16px) was checked by hand with a
+  temporary attribute and is not a permanent e2e: nothing of it is visible
+  until stage 3, which tests it by what the page shows.
 
 ## What allocates is linear
 

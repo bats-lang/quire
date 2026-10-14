@@ -614,6 +614,11 @@ test('a rotation lock the plugin refuses takes Lock rotation away and keeps its 
   const banner = page.getByRole('alert');
   await expect(banner).toContainText('Lock rotation is no longer offered');
   await expect(banner).toContainText('post them in a report');
+  // the reading settings sheet is a modal layer, which the banner is under
+  // (#556): it is back, still up, when the sheet closes
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#panel-scrim')).toBeHidden();
+  await expect(banner).toBeVisible();
   await page.evaluate(() => navigator.clipboard.writeText(''));
   await banner.getByRole('button', { name: 'Copy details' }).click();
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toContain('Plugin refused: orientation not allowed');

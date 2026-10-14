@@ -20,7 +20,9 @@
       "smoke.spec.js",
       "sync-dropbox.spec.js",
       "w3c-epub-tests.spec.js",
-      "wide.spec.js"
+      "wide.spec.js",
+      "back.spec.js",
+      "sync-android.spec.js"
     ],
     "reading-tools": [
       "annotations.spec.js",
@@ -35,7 +37,8 @@
       "settings.spec.js",
       "stall-capture.spec.js",
       "stats.spec.js",
-      "sync-android-hang.spec.js"
+      "sync-android-hang.spec.js",
+      "stability.spec.js"
     ],
     "sync": [
       "footnotes.spec.js",
@@ -47,7 +50,10 @@
       "sync-android-outcomes.spec.js",
       "sync-dropbox-android.spec.js",
       "sync.spec.js",
-      "touch-selection.spec.js"
+      "touch-selection.spec.js",
+      "containers.spec.js",
+      "replace.spec.js",
+      "replace-corrected.spec.js"
     ],
     "settings": [
       "a11y.spec.js",
@@ -74,21 +80,15 @@
       "storage.spec.js",
       "sync-nextcloud.spec.js",
       "fonts.spec.js",
-      "two-books.spec.js"
+      "two-books.spec.js",
+      "catalogue.spec.js",
+      "narration.spec.js",
+      "ruby.spec.js"
     ],
     "extras": [
-      "containers.spec.js",
-      "back.spec.js",
-      "catalogue.spec.js",
       "epub2.spec.js",
       "epubcheck.spec.js",
-      "narration.spec.js",
-      "ruby.spec.js",
-      "settings-screen.spec.js",
-      "stability.spec.js",
-      "sync-android.spec.js",
-      "replace.spec.js",
-      "replace-corrected.spec.js"
+      "settings-screen.spec.js"
     ],
     "perf": [
       "pathological.spec.js",
@@ -148,28 +148,16 @@
       "accept/aloud-placement-matched",
       "accept/back-offer",
       "accept/clip-last",
-      "accept/codec-absent-added-group",
-      "accept/codec-any-order",
-      "accept/codec-length-ok",
-      "accept/codec-required-group-lost",
-      "accept/codec-roundtrip",
-      "accept/fixed-box-fits",
-      "accept/harm-empty-some",
-      "accept/image-roundtrip",
       "accept/page-height-whole",
       "accept/page-turn-ended",
       "accept/page-turn-fresh-copy",
       "accept/page-width-whole",
       "accept/nav-row-with-summary",
       "accept/sheet-scrolls-most",
-      "accept/try-again-transient",
-      "reject/aloud-placement-unmatched",
       "reject/back-forged-proof",
       "reject/back-kept-nothing",
       "reject/back-nothing-to-offer",
       "reject/back-other-timeout",
-      "reject/clip-past-end",
-      "reject/fixed-box-zoom-zero",
       "reject/lay-writes-gap",
       "reject/lay-writes-max-height",
       "reject/lay-writes-overflow",
@@ -178,6 +166,20 @@
       "reject/page-height-fraction",
       "reject/page-width-fraction",
       "reject/sheet-scrolls-over-share"
+    ],
+    "accepts-data": [
+      "accept/codec-absent-added-group",
+      "accept/codec-any-order",
+      "accept/codec-length-ok",
+      "accept/codec-required-group-lost",
+      "accept/codec-roundtrip",
+      "accept/image-roundtrip",
+      "accept/fixed-box-fits",
+      "accept/harm-empty-some",
+      "accept/try-again-transient",
+      "reject/clip-past-end",
+      "reject/aloud-placement-unmatched",
+      "reject/fixed-box-zoom-zero"
     ]
   }
 }

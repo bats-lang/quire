@@ -36,6 +36,7 @@ staload "settings.sats"
 staload "stats.sats"
 staload "annot.sats"
 staload "chapter_hrefs.sats"
+staload "publisher_size.sats"
 staload "entity.sats"
 staload "mem.sats"
 staload "clock.sats"
@@ -4325,7 +4326,10 @@ fn _spine_build (serial: int): $P.promise(spine_built, $P.Chained) =
                val () = $X.free_nodes(opf_nodes)
                val () = $A.drop<byte>(opf_frozen, opf_bytes)
                val () = piece_free(opf_owner, $A.thaw<byte>(opf_frozen))
-             in $P.ret<spine_built>(SpineBuilt()) end)
+             in
+               (* the size most of the book's text is set in, measured before the first chapter is shown (quire#431) *)
+               $P.and_then<measured><spine_built>(publisher_size_measure(serial, chapter_total), llam(_) => $P.ret<spine_built>(SpineBuilt()))
+             end)
        end)
 
 (* Box which, a child of the page (styled as .caf.fixed>* is): a
