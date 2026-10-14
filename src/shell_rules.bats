@@ -196,8 +196,9 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, 
      a phone it took the Settings row of the library menu, which no click
      could reach. A screen (Settings, Sync, About) is not a menu: the
      banner stays over it, where its Dismiss, Copy details and Report are
-     pressed *)
-  val sheet = rule(sheet, "#bats-root:has(:is(#library-menu,#card-menu,#collections-menu):not([data-hide='1'])) .banner.in-library")
+     pressed. layer.bats sets data-menu, so no :has() is asked of the root
+     that holds the chapter (#538) *)
+  val sheet = rule(sheet, ".banner.in-library[data-menu='1']")
   val sheet = lay(sheet, ZIndex(), "1")
   val sheet = close(sheet)
   (* A modal layer is over the status, as an Android dialog or drawer is
@@ -209,11 +210,13 @@ fn shell_rules_fields_and_banners {left:nat | left >= 2200} (sheet: sheet(left, 
      (Contents, highlights, ...) take the banner. A panel with no veil (a
      note, a word looked up) is not modal and leaves both where they are,
      and so do the screens (Settings...), which offer an Undo of their
-     own (#380) *)
-  val sheet = rule(sheet, "#bats-root:has(:is(#library-menu,#card-menu,#collections-menu):not([data-hide='1'])) .toast")
+     own (#380). layer.bats says both as attributes of the element
+     (data-menu on the toast, data-veil on the banner), so no :has() is
+     asked of the root that holds the chapter (#538) *)
+  val sheet = rule(sheet, "#undo-toast[data-menu='1']")
   val sheet = lay(sheet, ZIndex(), "19")
   val sheet = close(sheet)
-  val sheet = rule(sheet, "#bats-root:has(#panel-scrim:not([data-hide='1'])) .banner")
+  val sheet = rule(sheet, "#error-banner[data-veil='1']")
   val sheet = lay(sheet, ZIndex(), "10")
   val sheet = close(sheet)
   (* While the reader's bars are up the banner sits under the top bar
