@@ -29,6 +29,8 @@ usage:
       to it (src/bytes.bats).
   --root DIR    the pristine package the files are read from (default: this checkout); <work dir> is a
                 copy of it (a package of another repository: css, arith, sha256 ...)
+  --inplace     also the recursive #pub lemmas (append_functional, len_functional): each mutant
+                changes a #pub declaration, so a check of the dependents of the module: minutes each
   --only NAME   only the lemma NAME (repeatable)
   --report FILE write the results (one line a mutant) to FILE
   --ats-home DIR  run the compiler with DIR as its ATS home (~/.bats/ats2): another patsopt
@@ -414,6 +416,7 @@ def classify(mutants, errs):
 
 def main(argv):
     global ROOT
+    do_inplace = False
     only, report, mode, work, files, known_file, ats_home = set(), None, None, None, [], None, None
     it = iter(argv)
     for a in it:
@@ -425,6 +428,8 @@ def main(argv):
             only.add(next(it))
         elif a == '--report':
             report = next(it)
+        elif a == '--inplace':
+            do_inplace = True
         elif a == '--root':
             ROOT = Path(next(it)).resolve()
         elif a == '--ats-home':
@@ -473,6 +478,10 @@ def main(argv):
             continue
         inplace = [m for m in mutants if m.lemma.inplace]
         mutants = [m for m in mutants if not m.lemma.inplace]
+        if inplace and not do_inplace:
+            for name in sorted({m.lemma.name for m in inplace}):
+                lines_out.append(f'SKIPPED  {file} {name}: recursive with no metric (--inplace checks the module\'s dependents again for each of its mutants)')
+            inplace = []
         controls = [m for m in mutants if m.control]
         try:
             lines = insert(original_lines, controls)
