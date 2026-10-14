@@ -498,15 +498,16 @@ fn check_crc (): void = let
   (* the CRC-32 of "123456789" is 0xCBF43926 *)
   val () = expect(65535 - high = 52212, "the CRC-32 of 123456789, high half")
   val () = expect(65535 - low = 14630, "the CRC-32 of 123456789, low half")
-  (* the same, taken over an array's bytes (crc_of_borrow) *)
-  val @(frozen, borrowed) = $A.freeze<byte>(digits)
-  val @(array_high, array_low) = crc_of_borrow(borrowed, 9)
-  val () = $A.drop<byte>(frozen, borrowed)
-  val () = $A.free<byte>($A.thaw<byte>(frozen))
-  val () = expect(array_high = 52212, "the CRC-32 of 123456789 over an array, high half")
-in expect(array_low = 14630, "the CRC-32 of 123456789 over an array, low half") end
+  (* and over an array whose cells are in its type (crc_of_cborrow, proved) *)
+  val (cells_len | cells_array) = $A.barr_of_arr(digits)
+  val @(cells_frozen, cells_borrowed) = $A.barr_freeze(cells_array)
+  val (_, _ | @(proved_high, proved_low)) = crc_of_cborrow(cells_len | cells_borrowed, 9)
+  val () = $A.cborrow_drop(cells_frozen, cells_borrowed)
+  val () = $A.free<byte>($A.barr_to_arr($A.barr_thaw(cells_frozen)))
+  val () = expect(proved_high = 52212, "the CRC-32 of 123456789 over an array of cells, high half")
+in expect(proved_low = 14630, "the CRC-32 of 123456789 over an array of cells, low half") end
 
-(* crc_of_borrow is the fold crcfrom makes: arrays of every length from 1 to
+(* crc_of_cborrow, which is proved to be the fold crcfrom makes, is checked against it here too, as a check of the boundaries: arrays of every length from 1 to
    300, with every byte value among them, and one of 4000 bytes *)
 fn check_crc_array_length (length: int): void =
   if length <= 0 then ()
@@ -526,11 +527,12 @@ fn check_crc_array_length (length: int): void =
       val list = blist_of_array(data, 0, count)
       val (_ | list_high, list_low) = crcfrom(65535, 65535, list)
       val () = blist_free(list)
-      val @(frozen, borrowed) = $A.freeze<byte>(data)
-      val @(array_high, array_low) = crc_of_borrow(borrowed, count)
-      val () = $A.drop<byte>(frozen, borrowed)
-      val () = $A.free<byte>($A.thaw<byte>(frozen))
-      val () = expect(array_high = 65535 - list_high && array_low = 65535 - list_low, "crc_of_borrow is the fold of crcfrom")
+      val (cells_len | cells_array) = $A.barr_of_arr(data)
+      val @(cells_frozen, cells_borrowed) = $A.barr_freeze(cells_array)
+      val (_, _ | @(proved_high, proved_low)) = crc_of_cborrow(cells_len | cells_borrowed, count)
+      val () = $A.cborrow_drop(cells_frozen, cells_borrowed)
+      val () = $A.free<byte>($A.barr_to_arr($A.barr_thaw(cells_frozen)))
+      val () = expect(proved_high = 65535 - list_high && proved_low = 65535 - list_low, "crc_of_cborrow is the fold of crcfrom")
     in () end
   end
 

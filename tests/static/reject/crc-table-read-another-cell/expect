@@ -1,0 +1,3 @@
+function _static_read_another_cell
+line 4
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eapp(S2Ecst(add_int_int); S2Eapp(S2Ecst(mul_int_int); S2Eintinf(4), S2Evar(index(_))), S2Eintinf(2)); S2Eapp(S2Ecst(mul_int_int); S2Eintinf(4), S2Evar(index(_)))))
