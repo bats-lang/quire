@@ -1,0 +1,3 @@
+function _static_step_by_another_entry
+line 8
+unsolved constraint: C3NSTRprop(C3TKmain(); S2Eeqeq(S2Eapp(S2Ecst(add_int_int); S2Evar(index(_)), S2Eintinf(1)); S2Evar(index(_))))

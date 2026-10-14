@@ -778,7 +778,8 @@ reads it by the chapter's name offset, and `take_text_sum` (in place of
 `take_text`) computes the CRC-32 of the inflated bytes, before they are
 made UTF-8 (`crc_of_borrow`, `src/crc.bats`: a table made by the proven
 byte step, tested against the proven fold in `tests/codec`, not proved
-equal), and answers no content for a mismatch or an unknown sum, so the
+equal: see "The CRC-32 table method is proved" below for what is proved
+and why this call is not yet that one), and answers no content for a mismatch or an unknown sum, so the
 chapter is `ChapterNotRead` ("Chapter N of this book could not be read")
 and the others read. libzip (`ZIP_ER_CRC`), Python's `zipfile`
 (`BadZipFile: Bad CRC-32`) and Java's `ZipFile` check the same sum at the
@@ -786,6 +787,59 @@ end of the entry. The chapter shown and the facing page of a spread are
 checked; the OPF, the container, images and the chapter reads for
 search, notes and read aloud are not (yet). `e2e/containers.spec.js`
 ("a chapter whose CRC is not its data's").
+
+### The CRC-32 table method is proved (#553), its call site is not yet
+
+`crc_of_cborrow` (`src/crc.bats`) is `crc_of_borrow`'s table method over
+an array whose cells are in its type (array's `barr`, borrowed as
+`cborrow(l, n, cs)`, its `cborrow_get` giving `NTH(cs, i, v)`), and its
+type is the statement: for the cells `cs` (`CLEN(cs, n)` of them, nothing
+else known) the bytes read are a list `octets` that the cells hold
+(`HOLDS(cs, 0, octets, n)`, bytesarr's), and the register after them is
+the proven fold's (`CRCFROM(65535, 65535, octets, 65535 - high, 65535 -
+low)`, the CRC being its complement), so it cannot disagree with the
+codec; a caller that knows what the cells hold has it from
+`holds_functional`. No `praxi`, `assume` or `$UNSAFE`: the compiler checks
+
+* the table: entry i is the register `bstep` makes from zero
+  (`TABLED(cells, count)`, an `ENTRY` of four `NTH`s and the `BSTEP(0, 0,
+  i, ...)` for each i < count, kept as the cells are set, `tabled_set`,
+  by array's `setc_nth_other`; `tabled_get` finds entry k of a full
+  table);
+* the byte step (`bstep_by_table`): `BSTEP(high, low, octet, ...)` is
+  the register shifted right by 8 bits xored with the entry of the byte
+  `(low mod 256) xor octet`. It is built from arith's XOR algebra
+  (`xor_comm`, `xor_assoc`, `xor_half`, `xor_double`, #553), `xor_cat`
+  (the xor of numbers with numbers above them is the xor of both, by
+  induction on the bits, linear in the solver) and `xor_cancel`; the
+  step is linear in xor (`step1_xor`, `stepn_xor`, by cases on the
+  parities of the three low halves, the polynomial xored into none or two
+  of the three); a register whose low byte is zero shifts without the
+  polynomial (`shift8`, eight `step_even`); every register has a next one
+  (`stepn_exists`, with `xor_exists`), so the step of the whole is
+  compared with the table's entry and the pure shift;
+* the loop (`crc_of_cborrow`): the invariant is `HOLDS` of the bytes read
+  so far (`holds_snoc`, by induction on the list) and `CRCFROM` of them
+  (`crcfrom_snoc`), with `table_step` giving each `BSTEP` from the table
+  read through `barr_get`.
+
+`tests/codec` still runs it on the check value of "123456789" and arrays
+of every length 1 to 300 and 4000 against `crc_of_borrow` (the arena
+piece's), as a check of the boundaries, not as the proof
+(`tests/static/accept/crc-*` and `reject/crc-*`: a table entry of another
+byte, the step by another byte's entry, a high half not shifted, a loop
+step of another byte, the register not complemented and a cell read for
+another all fail to type-check).
+
+What is left: the call (`take_text_sum`, `_sum_matches`) still uses
+`crc_of_borrow`, whose array is a plain `borrow` of an arena piece
+(`arrx(byte, l, n, arena)`) that knows nothing of its cells: array's
+`barr_of_arr` takes only an `arr` (origin null) and `barr_to_arr` gives
+an `arr`, so a piece cannot be lent as a `cborrow` and given back to its
+arena. The proof is therefore owed at the call until array has a `barr`
+of an `arrx` that keeps its origin (a token returned with the `barr`
+and needed to get the `arrx` back); then `crc_of_borrow` is replaced by
+`crc_of_cborrow` and removed.
 
 ### Note popups (#414)
 
