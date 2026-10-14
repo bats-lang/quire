@@ -350,11 +350,31 @@ async function strayForensics(page, screen) {
   report.turnRemoved = await strayPixels(page, without);
   await info.attach('stray-turn-removed.png', { body: without, contentType: 'image/png' });
   await page.evaluate(() => { document.getElementById('page-turn').style.display = ''; });
-  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) { caf.scrollTop += 1; caf.scrollTop -= 1; } });
-  await page.waitForTimeout(300);
+  // what the DOM has there: any element or text whose box reaches the pixel
+  report.dom = await page.evaluate(points => points.map(([x, y]) => ({
+    at: [x, y],
+    stack: document.elementsFromPoint(x, y).map(e => `${e.tagName.toLowerCase()}#${e.id}.${e.className}`).slice(0, 6),
+    text: (() => { const hits = []; const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let n = walker.nextNode(); n && hits.length < 3; n = walker.nextNode()) {
+        const range = document.createRange(); range.selectNodeContents(n);
+        for (const r of range.getClientRects()) if (r.left - 2 <= x && x <= r.right + 2 && r.top - 2 <= y && y <= r.bottom + 2) { hits.push(`${n.data.slice(0, 20)}@${r.left | 0},${r.top | 0},${r.right | 0},${r.bottom | 0}`); break; }
+      } return hits; })(),
+  })), found.slice(0, 4).map(p => p.split(':')[0].split(',').map(Number)));
+  // a real invalidation: the page scrolled away and back with a frame painted at each
+  const frames = () => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) caf.scrollTop += 40; });
+  await frames();
+  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) caf.scrollTop -= 40; });
+  await frames();
   const nudged = await page.screenshot({ animations: 'disabled', caret: 'hide' });
   report.nudged = await strayPixels(page, nudged);
   await info.attach('stray-nudged.png', { body: nudged, contentType: 'image/png' });
+  // a whole repaint: the page hidden for a painted frame
+  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) caf.style.visibility = 'hidden'; });
+  await frames();
+  await page.evaluate(() => { for (const caf of document.querySelectorAll('.caf')) caf.style.visibility = ''; });
+  await frames();
+  report.repainted = await strayPixels(page, await page.screenshot({ animations: 'disabled', caret: 'hide' }));
   await info.attach('stray-report.json', { body: JSON.stringify(report, null, 1), contentType: 'application/json' });
   console.log('STRAY546', JSON.stringify(report));
 }

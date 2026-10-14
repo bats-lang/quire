@@ -1305,6 +1305,64 @@ By research: every reader that shows a content document in a browser engine (Tho
 Readium Mobile on Android, Calibre's viewer, Foliate) leaves MathML to the engine, and Chromium
 has set MathML Core since 109; Apple Books' WebKit too. Where an engine has no math font the text falls back.
 
+What #408's tests (`e2e/math-native.spec.js`, `math-fallbacks.spec.js`, `math-layout.spec.js`,
+books in `e2e/math-books.js`, each checked by epubcheck) hold, and what they found:
+
+* **A display equation scrolls along its width only.** `math[display=block]` was `overflow: auto`
+  on both axes, and Chromium counts a glyph's font box (ascent and descent) in the scrollable
+  overflow, a few pixels beyond the equation's own box, so a display equation had a vertical
+  scroll of 4px. It is `overflow: auto hidden` with .3em above and below, so what the font
+  box adds is room inside the equation's box and a page boundary neither splits nor clips it.
+* **`dir` is the page's own attribute** (`_math_attrs`): dom's allow-list of MathML attributes
+  has none, MathML Core takes `dir` on any math element, so it is set as an HTML `dir` is
+  (`$D.Dir`): an equation is set left to right even in a Hebrew book (`math` has `direction:
+  ltr`) unless it says `dir="rtl"`.
+* **`alttext` and `altimg` are not shown when MathML is drawn**, by research: EPUB 3.3 and the
+  MathML specification make them the fallback for a system that cannot draw the math (the
+  W3C EPUB group's thread on MathML: "fallback images via the altimg attribute" for the many
+  readers that cannot render it; the DAISY knowledge base: support "depends heavily on the age
+  of the reading system", fallbacks for the old ones); no reading system researched shows the
+  fallback beside a drawn equation, and none documents that it should. The engine draws MathML
+  Core, so the picture would show every equation twice, and the text is the equation's name
+  for assistive technology, which the browser exposes. `altimg` is not an allowed attribute
+  of dom's, so no image is ever made of it.
+* **Unsupported and broken MathML degrades where it stands.** An element dom does not make
+  (`maction`, `annotation-xml`, `mstack`, `mglyph`, ...) makes none and its children go to its
+  parent; a token's text stays. A broken tree (a fraction of one child, an unknown element) is
+  drawn by the browser as it can: the words around it are not lost. (The broken book is not
+  valid MathML, so epubcheck refuses it by `RSC-005`, which its entry lists.)
+* **Accessibility.** Chromium's tree has a `MathMLMath` node for each `math`, and
+  `MathMLFraction`, `MathMLIdentifier`... for its parts (the name CDP gives the role ARIA calls
+  `math`); Quire sets no `role`, `aria-hidden` or `aria-label` on MathML.
+
+## Equations as pictures (#408)
+
+A picture of an equation (a PNG, an inline `<svg>`, an `<img src="x.svg">`) is a picture of
+text. Two decisions, by research (also in the issue):
+
+* **A picture grows with the reader's text size.** Quire drops the book's CSS (#411), so the
+  `em` heights publishers give such pictures are not there, and a picture was always its own
+  pixels. Amazon's guidelines say inline images "should be sized in em units so that they scale
+  in relation to the text around them when users adjust the font size" (quoted by Jutoh's
+  manual; a block picture is sized in px or % there), Readium CSS has no setting that scales
+  pictures (its `invert`, `darken` and `blend` flags only recolour), and a MobileRead report
+  has em-height pictures overlapping text in Readium. So a picture is its own size at the
+  default text size (18px) and is scaled by the reader's size from there (`--image-zoom`, in
+  thousandths, written by `_apply_type` in `src/settings.bats`; CSS `zoom` in `.caf:not(.fixed)
+  img`, a fixed page being fitted by its own box), kept to the column's width and the page's
+  height as before (the height is divided by the zoom, which multiplies lengths). It is the
+  same for any picture, not only equations: Quire cannot tell an equation from a diagram or a
+  photograph, and a photograph is kept to the column anyway.
+* **Black ink on no ground is drawn on paper in the dark themes.** Black on the Dark, Night and
+  Grey grounds was 1.1 to 1.8 to one (WCAG asks 3:1 for graphics). Readium CSS (Thorium) offers
+  the reader an `invert` flag for night mode that inverts every picture; Quire has no setting
+  for it and cannot tell a picture with no ground from one with colours that inversion would
+  ruin (a photograph), so a picture is drawn on white in those themes (`tint`, no new colour
+  role): a picture with a ground of its own covers it, and black ink has 21:1. The cost is a
+  white rectangle behind a transparent picture of white ink, which is rare next to the
+  typeset equation, the diagram and the line drawing; the image dimming setting dims it as
+  it dims every picture.
+
 ## The platform, in Bats
 
 What the browser and the Android app offer beyond the page (reading
@@ -2009,7 +2067,7 @@ read of storage changed: each still folds, as #174 says.
   banner wraps its buttons under its message on a narrow window instead
   of squeezing Report. Over the reader it is fixed at the top while the
   reader's bars are away, and under the top bar while they are up
-  (`#bats-root:has(.rv:not(.chrome-off)) .banner`: the bar's safe inset,
+  (`.banner.under-bars`: the bar's safe inset,
   44px control and 2px, and 8px), as material.io's, Flutter's and
   Zeta's banners sit under the app bar and none draws over it;
   `e2e/storage.spec.js` raises one over the reader with its bars up and
@@ -2019,7 +2077,16 @@ read of storage changed: each still folds, as #174 says.
   over the banner (#507): while a library menu is open the Undo toast is
   drawn under its veil, and while a veiled reader panel is open (Contents,
   highlights) the banner is under the scrim; both are still up, and back
-  when the layer closes (an Undo offer lasts until dismissed, #364). A
+  when the layer closes (an Undo offer lasts until dismissed, #364). The
+  layer module says it as attributes of the element it places, as it opens
+  and closes (`_open_set`, `_modality_show` in `src/layer.bats`:
+  `data-menu` on `undo-toast`, `ui_undo_under_menu`, and `data-veil` on
+  `error-banner`, `ui_banner_under_veil`; `data-menu` on the banner is the
+  same for #507), and the rules are `#undo-toast[data-menu='1']` and
+  `#error-banner[data-veil='1']`: the first version of #556 asked
+  `#bats-root:has(...)` of both, which `tests/static/has_root.py` (#538)
+  rejects, since a `:has()` on the root that holds the chapter is
+  re-evaluated over all of it (#423). A
   panel with no veil and the screens leave them where they are (a screen
   offers an Undo of its own). `coveredByBanner` also checks every control
   of an open menu, panel, sheet or dialog, and `toastClear` every control
@@ -3497,6 +3564,10 @@ length, in the same page, so a slower machine slows both. What it found:
   `src/notice.bats`: `BannerAtTop`, `BannerInLibrary`, `BannerUnderBars`,
   set by `_library_shown`, `_show_reader`, `_chrome_set`, `_chrome_set_off`),
   and the stylesheet keys on `.banner.in-library` and `.banner.under-bars`.
+  Every later state of the same kind is an attribute set by the layer
+  (`data-below`, `data-menu`, `data-veil`), never a `:has()` on the root:
+  `tests/static/has_root.py` fails one (#538; #556's two rules were found
+  by it when its queue run met them).
   The two remaining `:has()` rules have small subjects (a button, a
   settings row). A key on the 5 MB chapter went from 206 to 276 ms to 21 to
   31 ms of script. What is left of a turn on a chapter of thousands of

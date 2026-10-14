@@ -556,6 +556,18 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       const bigOpen = await opened(page, 'Single File', 'Novel chapter');
       await settled(page);
       const big = await operations(page);
+      // the same turns with the error banner up (#538): a selector that asks
+      // :has() of the root re-evaluates over the chapter at each change of
+      // the page's chrome, and turns are where it was found (#423)
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+      await page.keyboard.press('Home');
+      await page.waitForFunction(atStartOfChapter, null, { polling: 10, timeout: 30000 });
+      await page.evaluate(() => {
+        const banner = document.getElementById('error-banner');
+        banner.removeAttribute('data-hide');
+        banner.setAttribute('role', 'alert');
+      });
+      const bannered = await turnTimes(page);
       const log = `${mode}: import ${importMs} ms; open ${smallOpen} -> ${bigOpen}; end ${small.end} -> ${big.end}; ` +
         `search ${small.summary} -> ${big.summary}, go ${small.found} -> ${big.found}; highlight ${small.highlight} -> ${big.highlight}; ` +
         `turns animated ${ms(small.turns.animated)} -> ${ms(big.turns.animated)}, instant ${ms(small.turns.instant)} -> ${ms(big.turns.instant)}`;
@@ -595,6 +607,9 @@ test.describe('a single-file book of 5 MB', { tag: '@serial' }, () => {
       // the 30 ms of the script's and the same again for the browser's)
       if (mode === 'scrolled') expect.soft(big.turns.instant[2], log).toBeLessThanOrEqual(small.turns.instant[2] + 60);
       else expect.soft(big.turns.instant.scripts[2], log).toBeLessThanOrEqual(small.turns.instant.scripts[2] + 30);
+      console.log(`${mode}: with the banner up, instant turns ${ms(bannered)}, scripts ${ms(bannered.scripts)}`);
+      if (mode === 'scrolled') expect.soft(bannered[2], log).toBeLessThanOrEqual(small.turns.instant[2] + 60);
+      else expect.soft(bannered.scripts[2], log).toBeLessThanOrEqual(small.turns.instant.scripts[2] + 30);
       expect(errors).toEqual([]);
     });
   }
