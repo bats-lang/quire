@@ -270,9 +270,12 @@ test('math scales with the reading size and is the same size again when the size
   await expect.poll(async () => (await heights())[0]).toBeLessThan(first[0]);
   const small = await heights();
   for (const k of [0, 1]) {
-    // proportional to the size, within the rounding of a font's metrics
-    expect(large[k] / first[k], `equation ${k} at ${bigger}px against ${range.value}px`).toBeCloseTo(bigger / range.value, 1);
-    expect(small[k] / first[k], `equation ${k} at ${smaller}px against ${range.value}px`).toBeCloseTo(smaller / range.value, 1);
+    // proportional to the size, within the rounding of a font's metrics: a font's ascent, descent and a
+    // fraction's bar are whole pixels, so a machine whose math font differs (CI's, 1.44 for 1.5) is off
+    // by a few pixels at 18px; unscaled math (1.0) or half-scaled math is far beyond 8%
+    const near = (got, want, name) => expect(Math.abs(got / want - 1), `equation ${k} ${name}: ${got}px against ${want}px`).toBeLessThan(0.08);
+    near(large[k], first[k] * bigger / range.value, `at ${bigger}px against ${range.value}px`);
+    near(small[k], first[k] * smaller / range.value, `at ${smaller}px against ${range.value}px`);
   }
   // and the size again is the size it was
   await setSize(page, range.value);
