@@ -10,7 +10,7 @@ staload "sheet.sats"
 staload "declarations.sats"
 staload "page_size.sats"
 
-#pub fn reader_rules {left:nat | left >= 14760} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14760] sheet(after, false, false)
+#pub fn reader_rules {left:nat | left >= 14800} (sheet: sheet(left, false, false)): [after:nat | after >= left - 14800] sheet(after, false, false)
 
 (* The bars and title, from .rv on *)
 fn reader_rules_bars_and_title {left:nat | left >= 1730} (sheet: sheet(left, false, false)): [after:nat | after >= left - 1730] sheet(after, false, false) = let
@@ -323,7 +323,7 @@ fn reader_rules_book_text {left:nat | left >= 1298} (sheet: sheet(left, false, f
 in sheet end
 
 (* The vertical fixed and notes, from .caf.rtl on *)
-fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 2202} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2202] sheet(after, false, false) = let
+fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 2242} (sheet: sheet(left, false, false)): [after:nat | after >= left - 2242] sheet(after, false, false) = let
   (* right to left, the page itself: its columns go on to the left, and
      a spread's first page is the right one *)
   val sheet = rule(sheet, ".caf.rtl")
@@ -416,7 +416,7 @@ fn reader_rules_vertical_fixed_and_notes {left:nat | left >= 2202} (sheet: sheet
      fitted by its box's own zoom *)
   val sheet = rule(sheet, ".caf:not(.fixed) img")
   val sheet = lay(sheet, Zoom(), "var(--image-zoom,1)")
-  val sheet = lay(sheet, MaxHeight(), "calc((100dvh - var(--page-top) - var(--page-bottom)) / var(--image-zoom,1))")
+  val sheet = capped_zoomed(sheet)
   val sheet = close(sheet)
   (* a picture of black ink on no ground (a typeset equation, a diagram) is
      drawn on paper in the themes with a dark ground, where black would be

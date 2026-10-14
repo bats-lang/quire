@@ -316,6 +316,15 @@ implement capped (sheet, cap) = let
   val () = raw(sheet, ";")
 in sheet end
 
+(* max-height:calc(<the reading area> / var(--image-zoom,1)); a picture's
+   largest height, divided by its zoom, which multiplies lengths *)
+#pub fn capped_zoomed {left:nat | left >= 96}{media:bool}
+  (sheet: sheet(left, media, true)): [after:nat | after >= left - 96] sheet(after, media, true)
+
+implement capped_zoomed (sheet) = let
+  val () = raw(sheet, "max-height:calc((100dvh - var(--page-top) - var(--page-bottom)) / var(--image-zoom,1));")
+in sheet end
+
 (* prop:<step>; *)
 #pub fn spaced {left:nat | left >= 22}{media:bool}{length:int}
   (sheet: sheet(left, media, true), property: spacing_prop, step: space(length)): [after:nat | after >= left - 22] sheet(after, media, true)

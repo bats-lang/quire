@@ -230,7 +230,12 @@ test('a display equation wider than the column scrolls inside itself: the page h
   if (testInfo.project.use.hasTouch) {
     const scrolled = await bookPage(page).evaluate(doc => window.found(doc, 'wide-equation').scrollLeft);
     const devtools = await page.context().newCDPSession(page);
-    await devtools.send('Input.synthesizeScrollGesture', { x: at.x, y: at.y, xDistance: -200, gestureSourceType: 'touch', speed: 800 });
+    await devtools.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: at.x + 100, y: at.y }] });
+    for (let step = 1; step <= 12; step++) {
+      await devtools.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: at.x + 100 - step * 17, y: at.y }] });
+      await page.waitForTimeout(16);
+    }
+    await devtools.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await devtools.detach();
     await expect.poll(() => bookPage(page).evaluate(doc => window.found(doc, 'wide-equation').scrollLeft)).toBeGreaterThan(scrolled + 50);
   }
