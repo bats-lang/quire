@@ -360,26 +360,35 @@ prfun stepn_exists {count:nat}{high,low:nat | high < 65536; low < 65536} .<count
     prval rest = stepn_exists{count-1}{mid_high,mid_low}()
   in STEPN_succ(step, rest) end
 
-(* A register whose low half is even shifts without the polynomial *)
-prfn step_even {high,low:nat | high < 65536; low < 65536; low == 2*(low/2)} ()
-  : [next_high,next_low:nat | next_high == high/2; next_low == low/2 + 32768*(high - 2*(high/2)); next_high < 65536; next_low < 65536]
-    STEP1(high, low, next_high, next_low) =
-  STEP1_even{high/2, high - 2*(high/2), low/2}()
+(* Shifting bits out of a register whose low half is a multiple of 2 to the bits
+   never xors the polynomial in. Each statement is in digits (the register's
+   high half is h * 2 to the bits + r, its low half l * 2 to the bits) and
+   is built from the smaller one, so no index nests a division and the
+   solver is given little at a time *)
 
-(* 8 bits shifted out of a register whose low byte is zero: the polynomial is never xored in *)
-prfn shift8 {high:nat | high < 65536}{upper:nat | upper < 256} ()
-  : STEPN(8, high, 256*upper, high/256, upper + 256*(high - 256*(high/256))) = let
-  prval [high1:int, low1:int] step1 = step_even{high, 256*upper}()
-  prval [high2:int, low2:int] step2 = step_even{high1, low1}()
-  prval [high3:int, low3:int] step3 = step_even{high2, low2}()
-  prval [high4:int, low4:int] step4 = step_even{high3, low3}()
-  prval [high5:int, low5:int] step5 = step_even{high4, low4}()
-  prval [high6:int, low6:int] step6 = step_even{high5, low5}()
-  prval [high7:int, low7:int] step7 = step_even{high6, low6}()
-  prval [high8:int, low8:int] step8 = step_even{high7, low7}()
-in
-  STEPN_succ(step1, STEPN_succ(step2, STEPN_succ(step3, STEPN_succ(step4, STEPN_succ(step5, STEPN_succ(step6, STEPN_succ(step7, STEPN_succ(step8, STEPN_zero()))))))))
-end
+(* Bits shifted in turn make one run of the steps *)
+prfun stepn_append {first,second:nat}{high,low,mid_high,mid_low,end_high,end_low:nat} .<first>.
+  (first_steps: STEPN(first, high, low, mid_high, mid_low), second_steps: STEPN(second, mid_high, mid_low, end_high, end_low))
+  : STEPN(first + second, high, low, end_high, end_low) =
+  case+ first_steps of
+  | STEPN_zero() => second_steps
+  | STEPN_succ(step, rest) => STEPN_succ(step, stepn_append(rest, second_steps))
+
+(* 2 bits shifted out of a register whose low 2 bits are zero *)
+prfn shift2 {h,r,l:nat | r < 4; 4*h + r < 65536; 4*l < 65536} ()
+  : STEPN(2, 4*h + r, 4*l, h, l + 16384*r) =
+  STEPN_succ(STEP1_even{2*h + r/2, r - 2*(r/2), 2*l}(),
+    STEPN_succ(STEP1_even{h, r/2, l + 16384*(r - 2*(r/2))}(), STEPN_zero()))
+
+(* 4 bits *)
+prfn shift4 {h,r,l:nat | r < 16; 16*h + r < 65536; 16*l < 65536} ()
+  : STEPN(4, 16*h + r, 16*l, h, l + 4096*r) =
+  stepn_append(shift2{4*h + r/4, r - 4*(r/4), 4*l}(), shift2{h, r/4, l + 4096*(r - 4*(r/4))}())
+
+(* 8 bits: the polynomial is never xored in *)
+prfn shift8 {h,r,l:nat | r < 256; 256*h + r < 65536; 256*l < 65536} ()
+  : STEPN(8, 256*h + r, 256*l, h, l + 256*r) =
+  stepn_append(shift4{16*h + r/16, r - 16*(r/16), 16*l}(), shift4{h, r/16, l + 256*(r - 16*(r/16))}())
 
 prfn pow2_8(): $AR.POW2(8, 256) =
   $AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ($AR.POW2_succ(
@@ -404,7 +413,7 @@ prfn bstep_by_table {high,low,octet:nat | high < 65536; low < 65536; octet < 256
   prval () = $AR.xor_functional(zero_xor, $AR.xor_zero_left{index}())
   prval whole_index_xor = xor_cat(pow2_8(), shift_8{0}(), shift_8{low_upper}(), shift_8{low_upper}(), $AR.xor_zero_right{index}(), $AR.xor_zero_left{low_upper}())
   prval [full_high:int, full_low:int] full_steps = stepn_exists{8}{high, index + 256*low_upper}()
-  prval (full_high_xor, full_low_xor) = stepn_xor(table_steps, shift8{high}{low_upper}(), full_steps, $AR.xor_zero_left{high}(), whole_index_xor)
+  prval (full_high_xor, full_low_xor) = stepn_xor(table_steps, shift8{high_upper, high_lower, low_upper}(), full_steps, $AR.xor_zero_left{high}(), whole_index_xor)
   prval () = $AR.xor_functional(full_high_xor, $AR.xor_comm(high_xor))
   prval () = $AR.xor_functional(full_low_xor, $AR.xor_comm(low_xor))
 in BSTEP_mk(whole_xor, full_steps) end

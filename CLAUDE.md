@@ -842,9 +842,21 @@ the cells are those of `barr_of_arrx`, so nothing relates them to what the
 decompressor wrote into the piece (that is outside quire's types, as the
 platform's atoms are). `crc_of_borrow` and its helpers are gone;
 `tests/codec` checks `crc_of_cborrow` against the proven fold on the check
-value of "123456789" and arrays of every length 1 to 300 and 4000.
-Needs array with `barr_of_arrx` (bats-lang/array, not yet published when
-this was written).
+value of "123456789" and arrays of every length 1 to 300 and 4000, as a
+check of the boundaries. This needs array 2026.10.14.60158 or later (the
+one `bats.lock` names).
+
+What is proved, then, is that the CRC-32 compared with the entry's sum is
+`crcfrom`'s fold over the bytes the arena piece holds, as the production
+call computes it. What is trusted, not proved: array's one unsafe core
+(`barr_of_arrx` and `barr_to_arrx` are casts that keep the owner,
+`cborrow_get` reads the byte it says, tested in array's
+`tests/dynamic`), arith's C operators behind `xor_g1` and the prelude's
+`/` (tested in arith), the stored sum `book_entry_sum` reads from the
+central directory, and that the fold itself is CRC-32 (its polynomial
+0xEDB88320 and the check value of "123456789", the latter tested in
+`tests/codec`). Nothing in quire uses `praxi`, `assume` or `$UNSAFE` for
+it.
 
 ### Note popups (#414)
 
